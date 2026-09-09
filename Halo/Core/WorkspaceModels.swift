@@ -96,7 +96,7 @@ struct ThemeArchive: Codable {
         appearance.saturation = min(2, max(0, appearance.saturation))
         appearance.brightness = min(0.5, max(-0.5, appearance.brightness))
         appearance.expandedHeight = min(800, max(280, appearance.expandedHeight))
-        appearance.compactWidth = min(640, max(120, appearance.compactWidth))
+        appearance.compactWidth = min(640, max(16, appearance.compactWidth))
         appearance.surface = try appearance.surface.validated()
         appearance.spacing = min(28, max(4, appearance.spacing))
         // Imports must not implicitly read arbitrary local file paths supplied by another person.

@@ -13,9 +13,12 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(geometry(requested: 400).frame(expanded: false).width, 400)
         XCTAssertEqual(geometry(requested: 500).frame(expanded: false).width, 500)
     }
-    func testPhysicalNotchOnlyEnforcesHardwareMinimum() {
-        XCTAssertEqual(geometry(requested: 120).frame(expanded: false).width, 212)
-        XCTAssertEqual(geometry(style: .pill, requested: 120).frame(expanded: false).width, 120)
+    func testAllPlacementsAllowSixteenPointClosedSize() {
+        for style in SurfaceStyle.allCases {
+            var model = geometry(style: style, requested: 16)
+            model.appearance.surface.compactHeight = 16
+            XCTAssertEqual(model.frame(expanded: false).size, CGSize(width: 16, height: 16))
+        }
     }
     func testSimulatedNotchHasNoHardcodedWidth() {
         XCTAssertEqual(geometry(style: .simulated, requested: 370).frame(expanded: false).width, 370)
@@ -53,7 +56,7 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(decoded, appearance)
         var options = SurfaceOptions(); options.duration = 9; options.compactHeight = 0
         XCTAssertEqual(try options.validated().duration, 1.2)
-        XCTAssertEqual(try options.validated().compactHeight, 24)
+        XCTAssertEqual(try options.validated().compactHeight, 16)
         options.damping = .infinity
         XCTAssertThrowsError(try options.validated())
     }
@@ -75,6 +78,34 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(layout.order.count, ModuleID.allCases.count)
         layout.move(.notes, before: .notes)
         XCTAssertEqual(layout.order.first, .notes)
+    }
+    func testOpenAndClosedOffsetsAreIndependentAndPositiveYMovesDown() {
+        for style in SurfaceStyle.allCases {
+            var model = geometry(style: style)
+            let closed = model.frame(expanded: false), opened = model.frame(expanded: true)
+            model.appearance.surface.offsets = SurfaceOffsets(openedX: 70, openedY: 45, closedX: -25, closedY: 12)
+            XCTAssertEqual(model.frame(expanded: false).minX, closed.minX - 25)
+            XCTAssertEqual(model.frame(expanded: false).minY, closed.minY - 12)
+            XCTAssertEqual(model.frame(expanded: true).minX, opened.minX + 70)
+            XCTAssertEqual(model.frame(expanded: true).minY, opened.minY - 45)
+        }
+    }
+    func testOlderSurfaceOptionsDecodeWithZeroOffsets() throws {
+        let data = try JSONEncoder().encode(SurfaceOptions())
+        let decoded = try JSONDecoder().decode(SurfaceOptions.self, from: data)
+        XCTAssertNil(decoded.offsets)
+        var model = geometry(); model.appearance.surface = decoded
+        XCTAssertEqual(model.offset(expanded: true), .zero)
+        XCTAssertEqual(model.offset(expanded: false), .zero)
+    }
+    func testOffsetsValidateAndPersist() throws {
+        var options = SurfaceOptions(); options.offsets = SurfaceOffsets(openedX: 1001, openedY: -1001, closedX: 16, closedY: -16)
+        let validated = try options.validated()
+        XCTAssertEqual(validated.offsets?.openedX, 1000)
+        XCTAssertEqual(validated.offsets?.openedY, -1000)
+        XCTAssertEqual(try JSONDecoder().decode(SurfaceOptions.self, from: JSONEncoder().encode(validated)), validated)
+        options.offsets?.closedX = .infinity
+        XCTAssertThrowsError(try options.validated())
     }
     func testThemeRoundTrip() throws {
         let theme = Theme()

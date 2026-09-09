@@ -7,7 +7,7 @@ struct SettingsView: View {
     @ObservedObject var store: AppStore
     var body: some View { WorkspaceSettingsView(store: store, workspace: store.workspace) }
 }
-struct WorkspaceSettingsView: View {
+@MainActor struct WorkspaceSettingsView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
     @AppStorage("onboarded") private var onboarded = false
@@ -19,13 +19,21 @@ struct WorkspaceSettingsView: View {
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
     private let sections = ["General", "Appearance", "Modules", "Media & Files", "Profiles", "Automation", "Displays", "Plugins", "Privacy", "Advanced"]
     var body: some View {
-        NavigationSplitView {
-            List(selection: $section) {
-                ForEach(sections.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \.self) { Text($0).tag($0) }
-            }.searchable(text: $search, prompt: "Find a section").navigationSplitViewColumnWidth(170)
-        } detail: {
-            Form { content }.formStyle(.grouped).navigationTitle(section ?? "General")
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                TextField("Find a section", text: $search).textFieldStyle(.roundedBorder).padding(12)
+                List(selection: $section) {
+                    ForEach(sections.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \.self) { Text($0).tag($0) }
+                }.listStyle(.sidebar)
+            }.frame(width: 190)
+            Divider()
+            VStack(alignment: .leading, spacing: 0) {
+                Text(section ?? "General").font(.title2.bold()).padding(.horizontal, 20).padding(.vertical, 16)
+                Divider()
+                Form { content }.formStyle(.grouped).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }.frame(minWidth: 700, minHeight: 560)
+        .onDisappear { GeometryPreview.update(expanded: false, editing: false) }
         .alert("Halo", isPresented: Binding(get: { store.error != nil || workspace.error != nil }, set: { if !$0 { store.error = nil; workspace.error = nil } })) {
             Button("OK") { store.error = nil; workspace.error = nil }
         } message: { Text(store.error ?? workspace.error ?? "") }
@@ -59,8 +67,8 @@ struct WorkspaceSettingsView: View {
             }
         case "Appearance":
             Picker("Surface", selection: $store.configuration.theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
-            Slider(value: $store.configuration.theme.width, in: 340...640) { Text("Expanded width") }
-            Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 280...800) { Text("Expanded height") }
+            Slider(value: $store.configuration.theme.width, in: 340...640, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Expanded width") }
+            Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 280...800, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Expanded height") }
             SurfaceAppearanceControls(appearance: $workspace.settings.layout.appearance, theme: store.configuration.theme, screen: NSScreen.screens.first)
             Slider(value: $store.configuration.theme.cornerRadius, in: 0...48) { Text("Corner radius") }
             Slider(value: $workspace.settings.layout.appearance.spacing, in: 4...28) { Text("Module spacing") }
@@ -158,7 +166,7 @@ struct WorkspaceSettingsView: View {
                     if let index = workspace.settings.displays.firstIndex(where: { $0.id == id }) {
                         Toggle("Show Halo here", isOn: $workspace.settings.displays[index].enabled)
                         Picker("Style", selection: $workspace.settings.displays[index].theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
-                        Slider(value: $workspace.settings.displays[index].theme.width, in: 340...640) { Text("Width") }
+                        Slider(value: $workspace.settings.displays[index].theme.width, in: 340...640, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0, display: screen) }) { Text("Width") }
                         Slider(value: $workspace.settings.displays[index].theme.tint, in: 0...1) { Text("Accent") }
                         Menu("Use a profile on this display") {
                             ForEach(workspace.settings.profiles) { profile in

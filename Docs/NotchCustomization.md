@@ -2,9 +2,15 @@
 
 ## Closed width fix
 
-Previously WindowManager replaced compactWidth with a hardware-derived width for physical notches and with 220 for simulated notches. Full menu-bar mode also ignored closed width. All placements now use the requested closed width. An attached physical notch applies a lower bound of measured notch width plus 32 points; the effective size and lower bound are shown in Appearance. Floating placements permit narrower values. Width is clamped to the available display area.
+Previously WindowManager replaced compactWidth with a hardware-derived width for physical notches and with 220 for simulated notches. Full menu-bar mode also ignored closed width. All placements now use the requested closed width with a 16 pt minimum, including physical-notch mode. The actual hardware camera cutout does not shrink; use a positive closed Y offset to move a tiny surface below it. Width is clamped to the available display area.
 
-Appearance → Closed size controls width (120–640 pt) and height (24–100 pt). Physical-notch height cannot be shorter than the safe-area height plus 8 pt. Open width cannot be smaller than closed width. Full menu-bar and wide-shelf modes widen only when opened.
+Appearance → Closed size controls width (16–640 pt) and height (16–100 pt). These are minimum selectable values, not a reset of existing preferences. A tiny closed surface shows a single indicator. Open width cannot be smaller than closed width. Full menu-bar and wide-shelf modes widen only when opened.
+
+Size and offset sliders automatically preview the relevant state during dragging and temporarily suspend hover collapse. Appearance updates are dispatched on the main queue without debounce, allowing continuous updates during mouse tracking. Preview ends when the slider is released; the chosen state stays visible until the next interaction.
+
+Position offsets have separate opened X/Y and closed X/Y controls, each from −1000 to +1000 pt. Positive X moves right and positive Y moves down. Offsets are saved in themes/profiles, work per display, and are not clamped back onto the screen. Reset offsets restores zero. Older settings decode with no offsets.
+
+Settings now uses an explicit sidebar, search field and content heading inside the window content area. Forms scroll below the heading rather than underneath a navigation toolbar. The window enforces a minimum content size.
 
 Displays → Customize closed size, shape and transitions creates an independent layout snapshot. Controls there apply to that display. Use Follow global modules and background to restore global appearance inheritance.
 

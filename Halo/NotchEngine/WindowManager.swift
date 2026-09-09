@@ -13,14 +13,15 @@ final class SurfaceState: ObservableObject {
     @Published var theme = Theme()
     @Published var layoutOverride: WorkspaceLayout?
     var collapseTask: Task<Void, Never>?
+    var editingGeometry = false
     func hover(_ inside: Bool, enabled: Bool) {
         collapseTask?.cancel()
-        guard enabled else { return }
+        guard enabled, !editingGeometry else { return }
         if inside { expanded = true }
         else if !pinned {
             collapseTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 450_000_000)
-                guard !Task.isCancelled, let self, !self.pinned else { return }
+                guard !Task.isCancelled, let self, !self.pinned, !self.editingGeometry else { return }
                 self.expanded = false
             }
         }
@@ -113,14 +114,25 @@ final class WindowManager {
     func start() {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
-        store.$configuration.dropFirst().receive(on: RunLoop.main)
+        store.$configuration.dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.$settings.map { settings -> Data in
             var key = (try? JSONEncoder().encode(settings.layout.appearance)) ?? Data()
             key.append((try? JSONEncoder().encode(settings.displays)) ?? Data())
             return key
-        }.removeDuplicates().dropFirst().debounce(for: .milliseconds(50), scheduler: RunLoop.main)
+        }.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: .init("HaloGeometryPreview"))
+            .receive(on: DispatchQueue.main).sink { [weak self] note in
+                let editing = (note.userInfo?["editing"] as? Bool) ?? false
+                let expanded = (note.userInfo?["expanded"] as? Bool) ?? false
+                let display = note.userInfo?["display"] as? String
+                self?.hosts.forEach { id, host in
+                    guard display == nil || display == id else { return }
+                    host.state.editingGeometry = editing
+                    if editing { host.state.collapseTask?.cancel(); host.state.expanded = expanded }
+                }
+            }.store(in: &subscriptions)
         reconcile()
     }
     func stop() { hosts.values.forEach { $0.stop() }; hosts.removeAll(); subscriptions.removeAll() }
@@ -142,6 +154,7 @@ final class WindowManager {
             if store.configuration.simulateNotch && theme.style == .notch { theme.style = .simulated }
             var appearance = override?.layout?.appearance ?? store.workspace.settings.layout.appearance
             appearance.surface = (try? appearance.surface.validated()) ?? SurfaceOptions()
+            let previousOffset = host.geometry?.offset(expanded: host.state.expanded) ?? .zero
             host.geometry = Self.geometry(screen: screen, theme: theme, appearance: appearance)
             host.animator.cancel()
             host.state.theme = theme
@@ -150,8 +163,9 @@ final class WindowManager {
             host.panel.isMovableByWindowBackground = theme.style == .detached
             var target = host.geometry!.frame(expanded: host.state.expanded)
             if existing != nil && theme.style == .detached {
-                target.origin.x = min(max(host.panel.frame.midX - target.width / 2, screen.visibleFrame.minX), screen.visibleFrame.maxX - target.width)
-                target.origin.y = min(max(host.panel.frame.maxY - target.height, screen.visibleFrame.minY), screen.visibleFrame.maxY - target.height)
+                let delta = host.geometry!.offset(expanded: host.state.expanded)
+                target.origin.x = host.panel.frame.midX - target.width / 2 + delta.width - previousOffset.width
+                target.origin.y = host.panel.frame.maxY - target.height + delta.height - previousOffset.height
             }
             host.state.renderSize = target.size
             host.panel.alphaValue = 1
@@ -160,15 +174,16 @@ final class WindowManager {
                 let view = NSHostingView(rootView: SurfaceView(store: store, state: host.state, workspace: store.workspace))
                 view.sizingOptions = []
                 host.panel.contentView = view
-                host.subscription = host.state.$expanded.dropFirst().removeDuplicates().receive(on: RunLoop.main).sink { [weak host] expanded in
+                host.subscription = host.state.$expanded.dropFirst().removeDuplicates().receive(on: DispatchQueue.main).sink { [weak host] expanded in
                     guard let host, let geometry = host.geometry else { return }
                     var target = geometry.frame(expanded: expanded)
                     if geometry.style == .detached {
-                        target.origin.x = min(max(host.panel.frame.midX - target.width / 2, geometry.visible.minX), geometry.visible.maxX - target.width)
-                        target.origin.y = min(max(host.panel.frame.maxY - target.height, geometry.visible.minY), geometry.visible.maxY - target.height)
+                        let oldOffset = geometry.offset(expanded: !expanded), newOffset = geometry.offset(expanded: expanded)
+                        target.origin.x = host.panel.frame.midX - target.width / 2 + newOffset.width - oldOffset.width
+                        target.origin.y = host.panel.frame.maxY - target.height + newOffset.height - oldOffset.height
                     }
                     host.animator.move(panel: host.panel, state: host.state, target: target, options: geometry.appearance.surface,
-                                       preset: geometry.appearance.animation, animations: host.state.theme.animations, opening: expanded, style: geometry.style)
+                                       preset: geometry.appearance.animation, animations: host.state.theme.animations && !host.state.editingGeometry, opening: expanded, style: geometry.style)
                 }
                 host.panel.orderFrontRegardless()
                 hosts[id] = host

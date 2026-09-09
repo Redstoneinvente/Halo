@@ -40,6 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settings == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 640), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = "Halo · Settings"
+            window.titlebarAppearsTransparent = false
+            window.contentMinSize = NSSize(width: 700, height: 560)
             window.contentView = NSHostingView(rootView: SettingsView(store: store))
             window.isReleasedWhenClosed = false
             window.center()

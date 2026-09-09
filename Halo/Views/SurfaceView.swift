@@ -17,12 +17,18 @@ struct SurfaceView: View {
     private var accent: Color { Color(hue: theme.tint, saturation: 0.65, brightness: 1) }
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            Group {
+              if !state.expanded && (state.renderSize.width < 100 || state.compactHeight < 28) {
+                Circle().fill(store.deadline == nil ? accent : .green).frame(width: 6, height: 6)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+              } else { HStack {
                 Circle().fill(store.deadline == nil ? accent : .green).frame(width: 7, height: 7)
                 Spacer()
                 Image(systemName: state.expanded ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold))
+              } }
             }
-            .padding(.horizontal, max(16, layout.appearance.surface.shoulder + 8)).frame(height: state.compactHeight)
+            .padding(.horizontal, state.renderSize.width < 100 ? 0 : max(16, layout.appearance.surface.shoulder + 8))
+            .frame(height: state.expanded ? max(40, state.compactHeight) : state.compactHeight)
             .contentShape(Rectangle())
             .onTapGesture { state.expanded.toggle() }
             .accessibilityLabel("Toggle Halo dashboard")

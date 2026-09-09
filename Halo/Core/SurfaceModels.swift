@@ -12,6 +12,8 @@ enum SurfaceTransition: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 struct SurfaceOptions: Codable, Equatable {
+    // Optional for compatibility with themes/preferences saved before offsets existed.
+    var offsets: SurfaceOffsets?
     var shape: SurfaceShapeKind = .rounded
     var compactHeight = 40.0
     var opening: SurfaceTransition = .spring
@@ -24,12 +26,26 @@ struct SurfaceOptions: Codable, Equatable {
     func validated() throws -> SurfaceOptions {
         guard [compactHeight, duration, damping, topRadius, bottomRadius, shoulder].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var result = self
-        result.compactHeight = min(100, max(24, compactHeight))
+        result.compactHeight = min(100, max(16, compactHeight))
+        result.offsets = try offsets?.validated()
         result.duration = min(1.2, max(0.1, duration))
         result.damping = min(1, max(0.4, damping))
         result.topRadius = min(64, max(0, topRadius))
         result.bottomRadius = min(64, max(0, bottomRadius))
         result.shoulder = min(48, max(0, shoulder))
+        return result
+    }
+}
+struct SurfaceOffsets: Codable, Equatable {
+    var openedX = 0.0
+    var openedY = 0.0
+    var closedX = 0.0
+    var closedY = 0.0
+    func validated() throws -> SurfaceOffsets {
+        guard [openedX, openedY, closedX, closedY].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        var result = self
+        result.openedX = min(1000, max(-1000, openedX)); result.openedY = min(1000, max(-1000, openedY))
+        result.closedX = min(1000, max(-1000, closedX)); result.closedY = min(1000, max(-1000, closedY))
         return result
     }
 }
@@ -44,18 +60,23 @@ struct SurfaceGeometry {
     var appearance: Appearance
     var expandedWidth: Double
     var attachedToNotch: Bool { style == .notch && safeAreaTop > 0 }
-    var minimumWidth: Double { attachedToNotch ? max(120, physicalNotchWidth + 32) : 120 }
+    var minimumWidth: Double { 16 }
     var compactWidth: Double {
         Geometry.width(screenWidth: visible.width, requested: max(minimumWidth, appearance.compactWidth))
     }
-    var compactHeight: Double { max(appearance.surface.compactHeight, attachedToNotch ? safeAreaTop + 8 : 24) }
+    var compactHeight: Double { max(16, appearance.surface.compactHeight) }
+    func offset(expanded: Bool) -> CGSize {
+        let offsets = appearance.surface.offsets ?? SurfaceOffsets()
+        // UI uses positive Y = down; AppKit screen coordinates use positive Y = up.
+        return CGSize(width: expanded ? offsets.openedX : offsets.closedX, height: -(expanded ? offsets.openedY : offsets.closedY))
+    }
     func frame(expanded: Bool) -> CGRect {
         var width = compactWidth
         if expanded {
             let requested = style == .menuBar ? visible.width - 24 : style == .shelf ? max(expandedWidth, 720) : expandedWidth
             width = Geometry.width(screenWidth: visible.width, requested: max(compactWidth, requested))
         }
-        let height = max(1, min(visible.height - 16, expanded ? appearance.expandedHeight + compactHeight : compactHeight))
+        let height = max(1, min(visible.height - 16, expanded ? appearance.expandedHeight + max(40, compactHeight) : compactHeight))
         var x = visible.midX - width / 2
         var y = (attachedToNotch ? screen.maxY : visible.maxY - 8) - height
         switch style {
@@ -65,7 +86,8 @@ struct SurfaceGeometry {
         case .detached: y = visible.midY - height / 2
         default: break
         }
-        return CGRect(x: x, y: y, width: width, height: height)
+        let delta = offset(expanded: expanded)
+        return CGRect(x: x + delta.width, y: y + delta.height, width: width, height: height)
     }
 }
 enum SurfaceMotion {
