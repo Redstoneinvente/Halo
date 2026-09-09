@@ -79,7 +79,11 @@ struct ClosedNotchSettingsView: View {
             Text("Increase closed width in Appearance to fit both slots. Space behind the camera is reserved. A tiny notch shows a status dot instead.").font(.caption)
         }
         Section("Music animation") {
-            Picker("Style", selection: options.animation) {
+            // Binding.animation(_:) shadows the model's animation property.
+            Picker("Style", selection: Binding<PlaybackAnimation>(
+                get: { options.wrappedValue.animation },
+                set: { options.wrappedValue.animation = $0 }
+            )) {
                 ForEach(PlaybackAnimation.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
             }
             Toggle("Animate while music plays", isOn: options.animate)
