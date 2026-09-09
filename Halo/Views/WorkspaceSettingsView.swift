@@ -59,7 +59,14 @@ struct WorkspaceSettingsView: View {
             Slider(value: $store.configuration.theme.tint, in: 0...1) { Text("Accent hue") }
             Slider(value: $store.configuration.theme.opacity, in: 0.5...1) { Text("Opacity") }
             Section("Background") {
-                Picker("Type", selection: $workspace.settings.layout.appearance.background) { ForEach(BackgroundKind.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+                Picker("Type", selection: Binding(
+                    get: { workspace.settings.layout.appearance.background.rawValue },
+                    set: { if let v = BackgroundKind(rawValue: $0) { workspace.settings.layout.appearance.background = v } }
+                )) {
+                    ForEach(BackgroundKind.allCases, id: \.self) {
+                        Text($0.rawValue.capitalized).tag($0.rawValue)
+                    }
+                }
                 Button("Choose image or video…") { workspace.chooseBackground() }
                 Text(workspace.settings.layout.appearance.assetPath.isEmpty ? "No background file selected" : URL(fileURLWithPath: workspace.settings.layout.appearance.assetPath).lastPathComponent).font(.caption)
                 Slider(value: $workspace.settings.layout.appearance.blur, in: 0...20) { Text("Blur") }
@@ -69,7 +76,14 @@ struct WorkspaceSettingsView: View {
                 Text("Video is muted, loops, and pauses when collapsed. Large videos and blur increase GPU use. Background files are referenced in place.").font(.caption)
             }
             Toggle("Animate expansion", isOn: $store.configuration.theme.animations)
-            Picker("Animation timing", selection: $workspace.settings.layout.appearance.animation) { ForEach(AnimationPreset.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+            Picker("Animation timing", selection: Binding(
+                get: { workspace.settings.layout.appearance.animation.rawValue },
+                set: { if let v = AnimationPreset(rawValue: $0) { workspace.settings.layout.appearance.animation = v } }
+            )) {
+                ForEach(AnimationPreset.allCases, id: \.self) {
+                    Text($0.rawValue.capitalized).tag($0.rawValue)
+                }
+            }
             HStack { Button("Import theme…") { store.importTheme() }; Button("Export theme…") { store.exportTheme() }; Button("Reset") { store.configuration.theme = Theme(); workspace.settings.layout.appearance = Appearance() } }
         case "Modules":
             Text("Enable modules and change their dashboard order.")
