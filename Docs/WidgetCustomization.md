@@ -1,5 +1,7 @@
 # Widget customization and closed content
 
+The closed notch now widens automatically during music playback, a running focus timer or stopwatch, or a live activity. Settings → Closed notch → Automatic width controls the feature and its target width (400 pt by default). Active width never makes the notch narrower than its configured idle width. Height and offsets stay unchanged; opening the dashboard still uses its normal dimensions. Completed/status activities hold the wider width for eight seconds after creation, while progress activities remain active until completed or dismissed. Music requires connection to the selected player. Geometry editing temporarily suspends automatic width so sliders preview the actual idle size.
+
 Open Settings → Widgets and select any of the fourteen widgets. Changes apply live to global layouts. Pick system, rounded, serif, monospaced or an installed custom font; set weight, text size, text/accent/card colors, background opacity, padding, corners, maximum card width and minimum height. Cards remain constrained by the dashboard width. Reset affects only the selected widget. System controls may retain platform-specific sizing.
 
 Clock also supports seconds, date, 12/24-hour time and a time zone. The closed clock follows these clock options and font family, with its own closed-content size and color. Save current settings as a profile to reuse them; profiles and theme export include widget settings. For display-specific layouts, apply a saved profile in Displays.

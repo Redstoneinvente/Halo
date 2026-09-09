@@ -4,6 +4,7 @@ import Foundation
 struct SurfaceRenderConfiguration: Equatable {
     var appearance: Appearance
     var displays: [DisplayOverride]
+    var closedNotch: ClosedNotchOptions? = nil
 }
 enum GlassRendering {
     /// The material supplies its own background. Tint must never hide the backdrop.
@@ -72,10 +73,11 @@ struct SurfaceGeometry {
     var style: SurfaceStyle
     var appearance: Appearance
     var expandedWidth: Double
+    var activeCompactWidth: Double? = nil
     var attachedToNotch: Bool { style == .notch && safeAreaTop > 0 }
     var minimumWidth: Double { 16 }
     var compactWidth: Double {
-        Geometry.width(screenWidth: visible.width, requested: max(minimumWidth, appearance.compactWidth))
+        Geometry.width(screenWidth: visible.width, requested: max(minimumWidth, max(appearance.compactWidth, activeCompactWidth ?? 0)))
     }
     var compactHeight: Double { max(16, appearance.surface.compactHeight) }
     var closedCameraOcclusion: CGRect? {
@@ -96,7 +98,7 @@ struct SurfaceGeometry {
         var width = compactWidth
         if expanded {
             let requested = style == .menuBar ? visible.width - 24 : style == .shelf ? max(expandedWidth, 720) : expandedWidth
-            width = Geometry.width(screenWidth: visible.width, requested: max(compactWidth, requested))
+            width = Geometry.width(screenWidth: visible.width, requested: max(appearance.compactWidth, requested))
         }
         let height = max(1, min(visible.height - 16, expanded ? appearance.expandedHeight + max(40, compactHeight) : compactHeight))
         var x = visible.midX - width / 2

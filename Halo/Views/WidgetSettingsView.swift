@@ -70,7 +70,16 @@ struct ClosedNotchSettingsView: View {
     private var options: Binding<ClosedNotchOptions> {
         Binding(get: { layout.closedNotch ?? ClosedNotchOptions() }, set: { layout.closedNotch = $0 })
     }
+    private var expansion: Binding<ClosedExpansionOptions> {
+        Binding(get: { options.wrappedValue.expansion ?? ClosedExpansionOptions() },
+                set: { options.wrappedValue.expansion = $0 })
+    }
     var body: some View {
+        Section("Automatic width") {
+            Toggle("Widen for music and live activity", isOn: expansion.enabled)
+            Slider(value: expansion.width, in: 120...640, step: 1) { Text("Active width · \(Int(expansion.wrappedValue.width)) pt") }
+            Text("Music playback, a running timer or stopwatch, and live activities widen the closed notch without opening the dashboard. Completed activities stay visible for eight seconds. Idle width and height remain as set in Appearance.").font(.caption)
+        }
         Section("Content") {
             itemPicker("Left slot", options.left)
             itemPicker("Right slot", options.right)

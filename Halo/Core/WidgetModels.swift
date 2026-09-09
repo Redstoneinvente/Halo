@@ -52,7 +52,12 @@ enum ClosedNotchItem: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 enum PlaybackAnimation: String, Codable, CaseIterable { case bars, wave, pulse }
+struct ClosedExpansionOptions: Codable, Equatable {
+    var enabled = true
+    var width = 400.0
+}
 struct ClosedNotchOptions: Codable, Equatable {
+    var expansion: ClosedExpansionOptions?
     var left: ClosedNotchItem = .clock
     var right: ClosedNotchItem = .visualizer
     var fontSize = 12.0
@@ -61,6 +66,11 @@ struct ClosedNotchOptions: Codable, Equatable {
     var animate = true
     func validated() throws -> ClosedNotchOptions {
         guard fontSize.isFinite else { throw CocoaError(.fileReadCorruptFile) }
-        var v = self; v.fontSize = min(24, max(8, fontSize)); v.color = try color.validated(); return v
+        var v = self; v.fontSize = min(24, max(8, fontSize)); v.color = try color.validated()
+        if var expansion {
+            guard expansion.width.isFinite else { throw CocoaError(.fileReadCorruptFile) }
+            expansion.width = min(640, max(120, expansion.width)); v.expansion = expansion
+        }
+        return v
     }
 }

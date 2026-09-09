@@ -4,6 +4,26 @@ import XCTest
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    func testLiveWidthOnlyChangesClosedHorizontalGeometry() {
+        var model = geometry(requested: 190)
+        model.appearance.surface.offsets = SurfaceOffsets(closedX: 30, closedY: 10)
+        let idle = model.frame(expanded: false)
+        let dashboard = model.frame(expanded: true)
+        model.activeCompactWidth = 500
+        let live = model.frame(expanded: false)
+        XCTAssertEqual(live.width, 500)
+        XCTAssertEqual(live.height, idle.height)
+        XCTAssertEqual(live.midX, idle.midX)
+        XCTAssertEqual(live.maxY, idle.maxY)
+        XCTAssertEqual(model.frame(expanded: true), dashboard)
+        model.activeCompactWidth = nil
+        XCTAssertEqual(model.frame(expanded: false), idle)
+    }
+    func testActiveWidthNeverShrinksConfiguredWidth() {
+        var model = geometry(requested: 500)
+        model.activeCompactWidth = 300
+        XCTAssertEqual(model.compactWidth, 500)
+    }
     func testOldLayoutsDecodeWithoutWidgetPreferences() throws {
         let original = WorkspaceLayout()
         let encoded = try JSONEncoder().encode(original)

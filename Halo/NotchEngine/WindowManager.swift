@@ -102,6 +102,7 @@ final class WindowManager {
             animator.cancel(); state.collapseTask?.cancel(); subscription?.cancel(); panel.close()
         }
     }
+    private var activityExpiry: DispatchWorkItem?
     private let store: AppStore
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
@@ -123,7 +124,7 @@ final class WindowManager {
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.$configuration.dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
-        store.workspace.$settings.map { SurfaceRenderConfiguration(appearance: $0.layout.appearance, displays: $0.displays) }
+        store.workspace.$settings.map { SurfaceRenderConfiguration(appearance: $0.layout.appearance, displays: $0.displays, closedNotch: $0.layout.closedNotch) }
             .removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloGeometryPreview"))
@@ -136,10 +137,54 @@ final class WindowManager {
                     host.state.editingGeometry = editing
                     if editing { host.state.collapseTask?.cancel(); host.state.expanded = expanded }
                 }
+                self?.refreshDynamicWidths()
             }.store(in: &subscriptions)
+        store.workspace.media.$isPlaying.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+        store.$deadline.map { $0 != nil }.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+        store.workspace.$stopwatchStart.map { $0 != nil }.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+        store.workspace.$activities.receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         reconcile()
     }
-    func stop() { hosts.values.forEach { $0.stop() }; hosts.removeAll(); subscriptions.removeAll() }
+    private var hasLiveContent: Bool {
+        store.workspace.media.isPlaying || store.deadline != nil || store.workspace.stopwatchStart != nil ||
+        store.workspace.activities.contains { ($0.progress.map { $0 < 1 } ?? false) || $0.created.addingTimeInterval(8) > Date() }
+    }
+    private func configureDynamicWidth(_ host: Host) {
+        let layout = host.state.layoutOverride ?? store.workspace.settings.layout
+        let options = layout.closedNotch?.expansion ?? ClosedExpansionOptions()
+        host.geometry?.activeCompactWidth = options.enabled && hasLiveContent && !host.state.editingGeometry ? options.width : nil
+    }
+    private func refreshDynamicWidths() {
+        activityExpiry?.cancel()
+        if let next = store.workspace.activities.map({ $0.created.addingTimeInterval(8) }).filter({ $0 > Date() }).min() {
+            let work = DispatchWorkItem { [weak self] in self?.refreshDynamicWidths() }
+            activityExpiry = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, next.timeIntervalSinceNow), execute: work)
+        }
+        for host in hosts.values {
+            let oldWidth = host.geometry?.compactWidth
+            configureDynamicWidth(host)
+            guard let geometry = host.geometry, oldWidth != geometry.compactWidth else { continue }
+            host.state.compactWidth = geometry.compactWidth
+            host.state.closedOcclusion = geometry.closedCameraOcclusion
+            guard !host.state.expanded else { continue }
+            var target = geometry.frame(expanded: false)
+            if geometry.style == .detached {
+                target.origin.x = host.panel.frame.midX - target.width / 2
+                target.origin.y = host.panel.frame.maxY - target.height
+            }
+            var motion = geometry.appearance.surface
+            motion.opening = .resize; motion.closing = .resize; motion.duration = 0.25
+            host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
+                               preset: .snappy, animations: host.state.theme.animations && !host.state.editingGeometry,
+                               opening: true, style: geometry.style)
+        }
+    }
+    func stop() { activityExpiry?.cancel(); hosts.values.forEach { $0.stop() }; hosts.removeAll(); subscriptions.removeAll() }
     func toggleAll() {
         let expand = !hosts.values.contains { $0.state.expanded }
         hosts.values.forEach { $0.state.collapseTask?.cancel(); $0.state.expanded = expand }
@@ -163,6 +208,7 @@ final class WindowManager {
             host.animator.cancel()
             if host.state.theme != theme { host.state.theme = theme }
             if host.state.layoutOverride != override?.layout { host.state.layoutOverride = override?.layout }
+            configureDynamicWidth(host)
             if host.state.compactHeight != host.geometry!.compactHeight { host.state.compactHeight = host.geometry!.compactHeight }
             if host.state.compactWidth != host.geometry!.compactWidth { host.state.compactWidth = host.geometry!.compactWidth }
             if host.state.closedOcclusion != host.geometry!.closedCameraOcclusion { host.state.closedOcclusion = host.geometry!.closedCameraOcclusion }
