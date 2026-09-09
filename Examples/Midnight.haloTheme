@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "name": "Midnight",
+  "width": 420,
+  "cornerRadius": 24,
+  "tint": 0.58,
+  "opacity": 0.95,
+  "animations": true,
+  "style": "Notch"
+}

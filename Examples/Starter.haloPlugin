@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "id": "dev.halo.starter",
+  "name": "Developer Links",
+  "permissions": ["openURL"],
+  "commands": [
+    {"id": "swift", "title": "Open Swift documentation", "url": "https://www.swift.org/documentation/"},
+    {"id": "shortcuts", "title": "Open Shortcuts", "url": "shortcuts://"}
+  ]
+}
