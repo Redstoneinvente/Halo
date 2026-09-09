@@ -6,9 +6,13 @@ struct SurfaceView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var state: SurfaceState
     @ObservedObject var workspace: WorkspaceStore
-    var theme: Theme
-    var layoutOverride: WorkspaceLayout?
-    private var layout: WorkspaceLayout { layoutOverride ?? workspace.settings.layout }
+    private var theme: Theme { state.theme }
+    private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.settings.layout }
+    private var contour: HaloContour {
+        HaloContour(kind: layout.appearance.surface.shape, radius: theme.cornerRadius,
+                    topRadius: layout.appearance.surface.topRadius, bottomRadius: layout.appearance.surface.bottomRadius,
+                    shoulder: layout.appearance.surface.shoulder)
+    }
     @State private var targeted = false
     private var accent: Color { Color(hue: theme.tint, saturation: 0.65, brightness: 1) }
     var body: some View {
@@ -18,7 +22,7 @@ struct SurfaceView: View {
                 Spacer()
                 Image(systemName: state.expanded ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold))
             }
-            .padding(.horizontal, 16).frame(height: state.topClearance + 8)
+            .padding(.horizontal, max(16, layout.appearance.surface.shoulder + 8)).frame(height: state.compactHeight)
             .contentShape(Rectangle())
             .onTapGesture { state.expanded.toggle() }
             .accessibilityLabel("Toggle Halo dashboard")
@@ -51,15 +55,16 @@ struct SurfaceView: View {
                         Spacer()
                         Button("Settings") { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) }
                     }
-                }.padding(20).transition(.opacity)
+                }.padding(.horizontal, max(20, layout.appearance.surface.shoulder + 12)).padding(.vertical, 20).transition(.opacity)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(width: state.renderSize.width, height: state.renderSize.height, alignment: .top)
         .background {
             SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
         }
-        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius).stroke(targeted ? accent : .white.opacity(0.12), lineWidth: 1))
+        .clipShape(contour)
+        .contentShape(contour)
+        .overlay(contour.stroke(targeted ? accent : .white.opacity(0.12), lineWidth: 1))
         .foregroundStyle(.white).preferredColorScheme(.dark)
         .buttonStyle(.borderless)
         .contextMenu {
@@ -68,6 +73,9 @@ struct SurfaceView: View {
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }
         .onHover { state.hover($0, enabled: store.configuration.hoverToExpand) }
+        .onChange(of: targeted) { active in
+            if active { state.collapseTask?.cancel(); state.expanded = true }
+        }
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $targeted) { providers in
             state.expanded = true
             for provider in providers {
@@ -125,14 +133,24 @@ struct SurfaceView: View {
             ForEach(store.files, id: \.self) { url in
                 HStack {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 24, height: 24)
-                    Text(url.lastPathComponent).font(.caption).lineLimit(1)
+                    VStack(alignment: .leading) {
+                        Text(url.lastPathComponent).font(.caption).lineLimit(1)
+                        Text(fileDetail(url)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
                     Spacer()
+                    Button { store.toggleFilePin(url) } label: { Image(systemName: store.pinnedFiles.contains(url) ? "pin.fill" : "pin") }.help("Keep this file on the shelf")
+                    Button { store.shelfPreview.show(url) } label: { Image(systemName: "eye") }.help("Quick Look")
                     Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: { Image(systemName: "folder") }.help("Reveal in Finder")
                     Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.forward.app") }.help("Open file")
                     ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
-                    Button { store.files.removeAll { $0 == url } } label: { Image(systemName: "xmark") }.help("Remove reference from shelf")
+                    Button { store.removeFile(url) } label: { Image(systemName: "xmark") }.help("Remove reference from shelf")
                 }.onDrag { NSItemProvider(object: url as NSURL) }
             }
         }.padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
+    }
+    private func fileDetail(_ url: URL) -> String {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]) else { return "Original unavailable" }
+        if values.isDirectory == true { return "Folder" }
+        return url.pathExtension.uppercased() + " · " + ByteCountFormatter.string(fromByteCount: Int64(values.fileSize ?? 0), countStyle: .file)
     }
 }

@@ -4,6 +4,78 @@ import XCTest
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    private func geometry(style: SurfaceStyle = .notch, safeArea: Double = 32, requested: Double = 400) -> SurfaceGeometry {
+        var appearance = Appearance(); appearance.compactWidth = requested
+        return SurfaceGeometry(screen: CGRect(x: 0, y: 0, width: 1512, height: 982), visible: CGRect(x: 0, y: 40, width: 1512, height: 910),
+                               safeAreaTop: safeArea, physicalNotchWidth: 180, style: style, appearance: appearance, expandedWidth: 420)
+    }
+    func testPhysicalNotchHonorsRequestedClosedWidth() {
+        XCTAssertEqual(geometry(requested: 400).frame(expanded: false).width, 400)
+        XCTAssertEqual(geometry(requested: 500).frame(expanded: false).width, 500)
+    }
+    func testPhysicalNotchOnlyEnforcesHardwareMinimum() {
+        XCTAssertEqual(geometry(requested: 120).frame(expanded: false).width, 212)
+        XCTAssertEqual(geometry(style: .pill, requested: 120).frame(expanded: false).width, 120)
+    }
+    func testSimulatedNotchHasNoHardcodedWidth() {
+        XCTAssertEqual(geometry(style: .simulated, requested: 370).frame(expanded: false).width, 370)
+    }
+    func testMenuBarOnlyUsesFullWidthWhenOpen() {
+        let model = geometry(style: .menuBar, requested: 280)
+        XCTAssertEqual(model.frame(expanded: false).width, 280)
+        XCTAssertEqual(model.frame(expanded: true).width, 1488)
+    }
+    func testClosedHeightAndOpenWidthNeverShrinkUnexpectedly() {
+        var model = geometry(requested: 600); model.appearance.surface.compactHeight = 72
+        XCTAssertEqual(model.frame(expanded: false).height, 72)
+        XCTAssertGreaterThanOrEqual(model.frame(expanded: true).width, model.frame(expanded: false).width)
+    }
+    func testFramesRespectNegativeScreenOriginsAndEdgeAnchors() {
+        var model = geometry(style: .bottom)
+        model.screen.origin.x = -1512; model.visible.origin.x = -1512
+        for expanded in [false, true] {
+            XCTAssertEqual(model.frame(expanded: expanded).minY, 48)
+            XCTAssertTrue(model.visible.contains(model.frame(expanded: expanded)))
+        }
+        model.style = .right
+        XCTAssertEqual(model.frame(expanded: false).maxX, model.visible.maxX - 8)
+    }
+    func testLegacyAppearanceDecodesWithoutResettingSettings() throws {
+        let legacy = Data(#"{"compactWidth":301,"background":"solid","animation":"elastic"}"#.utf8)
+        let appearance = try JSONDecoder().decode(Appearance.self, from: legacy)
+        XCTAssertEqual(appearance.compactWidth, 301)
+        XCTAssertEqual(appearance.background, .solid)
+        XCTAssertEqual(appearance.surface, SurfaceOptions())
+    }
+    func testSurfaceOptionsRoundTripAndValidation() throws {
+        var appearance = Appearance(); appearance.surface.shape = .scoop; appearance.surface.closing = .slide
+        let decoded = try JSONDecoder().decode(Appearance.self, from: JSONEncoder().encode(appearance))
+        XCTAssertEqual(decoded, appearance)
+        var options = SurfaceOptions(); options.duration = 9; options.compactHeight = 0
+        XCTAssertEqual(try options.validated().duration, 1.2)
+        XCTAssertEqual(try options.validated().compactHeight, 24)
+        options.damping = .infinity
+        XCTAssertThrowsError(try options.validated())
+    }
+    func testTransitionEndpointsAndFiniteSamples() {
+        for transition in SurfaceTransition.allCases {
+            XCTAssertEqual(SurfaceMotion.progress(0, transition: transition, preset: .smooth, damping: 0.8), 0)
+            XCTAssertEqual(SurfaceMotion.progress(1, transition: transition, preset: .smooth, damping: 0.8), 1)
+            for step in 0...100 {
+                let progress = SurfaceMotion.progress(Double(step) / 100, transition: transition, preset: .smooth, damping: 0.4)
+                XCTAssertTrue(progress.isFinite); XCTAssertGreaterThanOrEqual(progress, 0); XCTAssertLessThan(progress, 1.4)
+            }
+        }
+        XCTAssertGreaterThan(SurfaceMotion.progress(0.3, transition: .spring, preset: .smooth, damping: 0.4), 1)
+    }
+    func testModuleDragPreservesEveryModuleOnce() {
+        var layout = WorkspaceLayout(); layout.move(.notes, before: .clock)
+        XCTAssertEqual(layout.order.first, .notes)
+        XCTAssertEqual(Set(layout.order), Set(ModuleID.allCases))
+        XCTAssertEqual(layout.order.count, ModuleID.allCases.count)
+        layout.move(.notes, before: .notes)
+        XCTAssertEqual(layout.order.first, .notes)
+    }
     func testThemeRoundTrip() throws {
         let theme = Theme()
         XCTAssertEqual(theme, try JSONDecoder().decode(Theme.self, from: JSONEncoder().encode(theme)))

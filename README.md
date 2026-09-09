@@ -6,6 +6,8 @@ This is a substantial implementation expansion, **not completion of every featur
 
 ## Included
 
+Latest update: closed-width handling fixed, eight contours, independent opening/closing transitions, closed-height controls, module drag ordering, profile renaming, shelf pins and Quick Look. See Docs/NotchCustomization.md for controls and regression coverage.
+
 - Fourteen dashboard modules: clock, focus timer, shelf, media, audio, calendar, clipboard, system, launcher, live activities, Git status, notes, capture/OCR, stopwatch.
 - Ten surface placement choices; per-display theme and optional profile-layout snapshots.
 - Module enable/disable and ordering; eight preset profiles and custom profile snapshots.
@@ -49,7 +51,7 @@ Settings opens on first launch. Enable modules under Modules and optional data a
 
 Media access is requested by Connect / Refresh. Open the selected music player first. Refresh is explicit, not continuous Now Playing observation. Audio devices without writable master volume show an explanation.
 
-Choose a display override in Displays; applying a profile there snapshots that display's modules/background separately. Global profile changes do not replace independent display snapshots. Detached panels can be dragged but positions are not persisted.
+Choose a display override in Displays; applying a profile there snapshots that display's modules/background separately. Global profile changes do not replace independent display snapshots. Detached panels retain their position through appearance edits; positions are not persisted across launches.
 
 ## Privacy and storage
 

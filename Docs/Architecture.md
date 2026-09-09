@@ -4,7 +4,7 @@
 
 AppDelegate owns AppStore, WindowManager, status item and Settings. AppStore owns base configuration, deadline timer, file references and WorkspaceStore. WorkspaceStore owns profiles, module layout, automation rules and integration services.
 
-WindowManager owns one NSPanel / SurfaceState pair per selected display. Screen UUIDs identify overrides. Global configuration changes rebuild windows while retaining expanded/pinned state. Workspace changes rebuild windows only when appearance or display overrides change; typing notes and editing module state do not rebuild panels.
+WindowManager reconciles a dictionary of persistent panel/state hosts keyed by screen UUID. Appearance edits update the existing host rather than closing/recreating windows. SurfaceGeometry is a pure model with explicit closed dimensions and physical-notch minimums. SurfaceAnimator retargets from the current frame using monotonic time and a short-lived timer; Reduce Motion bypasses it. SwiftUI receives explicit render dimensions with hosting-view automatic sizing disabled. Typing notes and editing module state do not recreate panels.
 
 SurfaceView renders enabled modules in normalized order. Existing clock/timer/shelf views retain their focused implementations. ModuleRegistry / HaloModule / ModuleContext dispatch integration module views; service state is observed by each module view. A future refactor can move the three original views behind the same factory.
 
@@ -15,7 +15,7 @@ SurfaceView renders enabled modules in normalized order. Existing clock/timer/sh
 - ThemeArchive v2: theme plus module/background layout, with v1 Theme import compatibility.
 - PluginManifest v1: declarative command descriptors, no native code.
 - Timer uses wall-clock deadline across sleep and relaunch; paused duration is session-only.
-- Shelf paths are persisted only on opt-in. Retention ages restart when restored.
+- Shelf paths, pins and original retention timestamps are persisted only on opt-in. Existing older path-only records receive an initial timestamp during migration. Pinned references never expire.
 - Notes/preferences use UserDefaults. This is appropriate for the present small bounded payloads, not a future binary clipboard/media database.
 
 Theme import clamps finite numeric ranges, normalizes module order, strips asset paths, and rejects unsupported formats. Plugin import limits file size and commands, validates permissions/schemes, and asks before installation. No eval, shell interpolation, dylib loading or external script execution is present in the plugin path.

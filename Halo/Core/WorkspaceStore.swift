@@ -79,6 +79,11 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     func deleteProfile(_ id: UUID) {
         settings.profiles.removeAll { $0.id == id }; settings.rules.removeAll { $0.profileID == id }
     }
+    func renameProfile(_ id: UUID, to name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let index = settings.profiles.firstIndex(where: { $0.id == id }) else { return }
+        settings.profiles[index].name = String(name.prefix(80))
+    }
     func moveModule(_ module: ModuleID, by delta: Int) {
         var order = settings.layout.normalizedOrder()
         guard let index = order.firstIndex(of: module), order.indices.contains(index + delta) else { return }

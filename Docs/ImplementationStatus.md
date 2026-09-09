@@ -2,13 +2,15 @@
 
 “Implemented” below means source is wired into the project, not macOS-tested. No Apple SDK compilation or runtime checks were possible in the build environment.
 
+Updated after commit 0e24329: closed sizing bug fixed; eight contours, separate opening/closing transitions, adjustable duration and spring damping, persistent panel hosts, module drag ordering, profile rename, shelf pins, metadata and Quick Look are now implemented. See NotchCustomization.md.
+
 | Area | Present in this package | Remaining from the original brief |
 | --- | --- | --- |
-| Notch/windows | Safe-area measurement, ten placement choices, multi-display rebuild, pinned/open-state preservation, per-display theme/layout snapshots | Hardware validation, independent freeform positioning persistence, precise custom notch contours |
+| Notch/windows | Safe-area measurement, ten placements, persistent panel hosts, working closed size controls, eight contours, per-display snapshots | Hardware validation, freeform position persistence across launches, user-authored contours |
 | Interaction | Hover, click toggle, context menu, pin, drag/drop, configurable modifier/key preset hotkey | Full gesture binding editor, wheel volume, swipe/long-press actions, arbitrary key recording |
-| Modules | Fourteen selectable views, ordered layout, integration registry | Drag reorder, compact variants per module, priorities/minimum widths/per-module styling; original three views still hosted directly |
+| Modules | Fourteen selectable views, drag ordering plus arrow controls, integration registry | Compact variants per module, priorities/minimum widths/per-module styling; original three views still hosted directly |
 | Focus | Deadline timer, pause/resume/reset, completion activity/sound, authorized notification, stopwatch | Pomodoro cycles, task history, world clocks, reminders and productivity analytics |
-| Shelf | File references, drag in/out, open, reveal, share, count limit, retention, opt-in restart persistence | Quick Look, pinning, file metadata/previews, controlled move/copy workflows, reliable bookmark tracking |
+| Shelf | References, drag in/out, Quick Look, file metadata, pins, open/reveal/share, expiry timestamps and opt-in persistence | Controlled move/copy workflows, reliable bookmark tracking, thumbnail caching |
 | Media | Apple Music/Spotify title/artist, play/pause, previous/next, explicit refresh | Artwork, progress/seek, shuffle/repeat, automatic updates, browser/universal media, lyrics/visualizer |
 | Audio | Output enumeration/selection, supported master-volume control | Input selection, microphone mute, per-channel fallback, accessory battery |
 | Calendar | Today's remaining events and recognized meeting links, optional EventKit access | Reminders, broader schedule navigation, richer countdown presentations |
@@ -18,8 +20,8 @@
 | Launcher | Running apps, choose app, Downloads, fuzzy timer/plugin commands | Indexed app catalog, favorites/recents persistence, full command-palette window |
 | Developer | Read-only Git status in a selected folder | Build/run/test commands, server/Docker integrations, branch/commit widgets |
 | Live activities | Internal model/API and timer completion list | External progress ingestion, compact prioritization, downloads/build/render tracking |
-| Appearance | Image/video/solid/gradient/glass; muted loop/pause; blur/saturation/brightness; dimensions and timing presets | Shader graph/editor, broad effect stacks, audio reaction, artwork/wallpaper integration, true spring presets, typography/icon editor |
-| Themes/profiles | v1 import; v2 theme/layout export/import; eight presets; custom save/duplicate/delete; display snapshots | Rename/editor polish, share UI, marketplace; portable bundled image/video assets |
+| Appearance | Image/video/solid/gradient/glass; blur/saturation/brightness; eight shapes, six transitions, duration and spring damping | Shader editor, broad effect stacks, audio reaction, artwork/wallpaper integration, typography/icon editor |
+| Themes/profiles | v1/v2 theme import/export; backward-compatible appearance decoding; presets; save/rename/duplicate/delete; display snapshots | Editor polish, share UI, marketplace; portable bundled image/video assets |
 | Automation | Five condition types, profile switching, edge triggering | App-open/close, audio/Focus/Wi-Fi triggers; generalized action UI, approved scripts/shortcuts |
 | Plugins | Validated declarative URL commands, installation/revocation, per-run confirmation | Native module loading and secure process isolation, third-party trigger/activity providers |
 | Weather and AI | Provider contracts only | Provider implementation, key management, disclosure/consent UX, feature views |

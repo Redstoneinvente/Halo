@@ -32,6 +32,7 @@ enum AnimationPreset: String, Codable, CaseIterable {
     }
 }
 struct Appearance: Codable, Equatable {
+    var surface = SurfaceOptions()
     var background: BackgroundKind = .gradient
     var assetPath = ""
     var blur = 0.0
@@ -42,6 +43,24 @@ struct Appearance: Codable, Equatable {
     var spacing = 12.0
     var animation: AnimationPreset = .smooth
     var pauseVideoOnBattery = true
+    init() {}
+    private enum CodingKeys: String, CodingKey {
+        case surface, background, assetPath, blur, saturation, brightness, expandedHeight, compactWidth, spacing, animation, pauseVideoOnBattery
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        surface = try c.decodeIfPresent(SurfaceOptions.self, forKey: .surface) ?? SurfaceOptions()
+        background = try c.decodeIfPresent(BackgroundKind.self, forKey: .background) ?? .gradient
+        assetPath = try c.decodeIfPresent(String.self, forKey: .assetPath) ?? ""
+        blur = try c.decodeIfPresent(Double.self, forKey: .blur) ?? 0
+        saturation = try c.decodeIfPresent(Double.self, forKey: .saturation) ?? 1
+        brightness = try c.decodeIfPresent(Double.self, forKey: .brightness) ?? 0
+        expandedHeight = try c.decodeIfPresent(Double.self, forKey: .expandedHeight) ?? 500
+        compactWidth = try c.decodeIfPresent(Double.self, forKey: .compactWidth) ?? 190
+        spacing = try c.decodeIfPresent(Double.self, forKey: .spacing) ?? 12
+        animation = try c.decodeIfPresent(AnimationPreset.self, forKey: .animation) ?? .smooth
+        pauseVideoOnBattery = try c.decodeIfPresent(Bool.self, forKey: .pauseVideoOnBattery) ?? true
+    }
 }
 struct DisplayOverride: Codable, Identifiable {
     var id: String
@@ -57,6 +76,12 @@ struct WorkspaceLayout: Codable {
         var seen = Set<ModuleID>()
         return (order + ModuleID.allCases).filter { seen.insert($0).inserted }
     }
+    mutating func move(_ module: ModuleID, before target: ModuleID) {
+        guard module != target else { return }
+        var updated = normalizedOrder(); updated.removeAll { $0 == module }
+        guard let index = updated.firstIndex(of: target) else { return }
+        updated.insert(module, at: index); order = updated
+    }
 }
 struct ThemeArchive: Codable {
     var version = 2
@@ -71,7 +96,8 @@ struct ThemeArchive: Codable {
         appearance.saturation = min(2, max(0, appearance.saturation))
         appearance.brightness = min(0.5, max(-0.5, appearance.brightness))
         appearance.expandedHeight = min(800, max(280, appearance.expandedHeight))
-        appearance.compactWidth = min(320, max(120, appearance.compactWidth))
+        appearance.compactWidth = min(640, max(120, appearance.compactWidth))
+        appearance.surface = try appearance.surface.validated()
         appearance.spacing = min(28, max(4, appearance.spacing))
         // Imports must not implicitly read arbitrary local file paths supplied by another person.
         appearance.assetPath = ""

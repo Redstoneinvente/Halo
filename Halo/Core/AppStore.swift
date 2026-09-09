@@ -9,6 +9,8 @@ final class AppStore: ObservableObject {
     @Published var error: String?
     @Published var files: [URL] = [] { didSet { persistFiles() } }
     private var addedAt: [URL: Date] = [:]
+    @Published var pinnedFiles = Set<URL>()
+    let shelfPreview = ShelfPreview()
     @Published var deadline: Date?
     @Published var pausedSeconds: TimeInterval = 0
     @Published var finished = false
@@ -26,7 +28,9 @@ final class AppStore: ObservableObject {
         workspace.applyTheme = { [weak self] theme in self?.configuration.theme = theme }
         if workspace.settings.persistShelf {
             files = (defaults.stringArray(forKey: "shelf.paths") ?? []).map { URL(fileURLWithPath: $0) }.filter { FileManager.default.fileExists(atPath: $0.path) }
-            addedAt = Dictionary(uniqueKeysWithValues: files.map { ($0, Date()) })
+            let savedDates = (defaults.dictionary(forKey: "shelf.addedAt") as? [String: Date]) ?? [:]
+            addedAt = Dictionary(uniqueKeysWithValues: files.map { ($0, savedDates[$0.path] ?? Date()) })
+            pinnedFiles = Set((defaults.stringArray(forKey: "shelf.pinned") ?? []).map { URL(fileURLWithPath: $0) }).intersection(files)
         }
         if let end = defaults.object(forKey: "timer.deadline") as? Date {
             if end > Date() { deadline = end; monitorTimer() }
@@ -73,11 +77,24 @@ final class AppStore: ObservableObject {
     func resetTimer() { deadline = nil; pausedSeconds = 0; finished = false; ticker?.cancel(); defaults.removeObject(forKey: "timer.deadline") }
     func persistFiles() {
         defaults.set(workspace.settings.persistShelf ? files.map(\.path) : [], forKey: "shelf.paths")
+        defaults.set(workspace.settings.persistShelf ? pinnedFiles.map(\.path) : [], forKey: "shelf.pinned")
+        let dates = addedAt.filter { files.contains($0.key) }
+        defaults.set(workspace.settings.persistShelf ? Dictionary(uniqueKeysWithValues: dates.map { ($0.key.path, $0.value) }) : [:], forKey: "shelf.addedAt")
     }
+    func toggleFilePin(_ url: URL) {
+        if pinnedFiles.contains(url) { pinnedFiles.remove(url) } else { pinnedFiles.insert(url) }
+        persistFiles()
+    }
+    func removeFile(_ url: URL) {
+        pinnedFiles.remove(url); addedAt.removeValue(forKey: url); files.removeAll { $0 == url }
+    }
+    func clearShelf() { pinnedFiles = []; addedAt = [:]; files = [] }
     func expireFiles() {
         let retention = workspace.settings.shelfRetentionMinutes
         guard retention > 0 else { return }
-        files.removeAll { Date().timeIntervalSince(addedAt[$0] ?? Date()) > Double(retention * 60) }
+        let expired = files.filter { !pinnedFiles.contains($0) && Date().timeIntervalSince(addedAt[$0] ?? Date()) > Double(retention * 60) }
+        guard !expired.isEmpty else { return }
+        files.removeAll { expired.contains($0) }
         addedAt = addedAt.filter { files.contains($0.key) }
     }
     func addFiles(_ urls: [URL]) {

@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ServiceManagement
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @ObservedObject var store: AppStore
@@ -13,6 +14,8 @@ struct WorkspaceSettingsView: View {
     @State private var section: String? = "General"
     @State private var search = ""
     @State private var profileName = "My profile"
+    @State private var renamingProfile: UUID?
+    @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
     private let sections = ["General", "Appearance", "Modules", "Media & Files", "Profiles", "Automation", "Displays", "Plugins", "Privacy", "Advanced"]
     var body: some View {
@@ -26,6 +29,11 @@ struct WorkspaceSettingsView: View {
         .alert("Halo", isPresented: Binding(get: { store.error != nil || workspace.error != nil }, set: { if !$0 { store.error = nil; workspace.error = nil } })) {
             Button("OK") { store.error = nil; workspace.error = nil }
         } message: { Text(store.error ?? workspace.error ?? "") }
+        .alert("Rename profile", isPresented: Binding(get: { renamingProfile != nil }, set: { if !$0 { renamingProfile = nil } })) {
+            TextField("Name", text: $renamedProfile)
+            Button("Save") { if let id = renamingProfile { workspace.renameProfile(id, to: renamedProfile) }; renamingProfile = nil }
+            Button("Cancel", role: .cancel) { renamingProfile = nil }
+        }
     }
     @ViewBuilder private var content: some View {
         switch section ?? "General" {
@@ -53,7 +61,7 @@ struct WorkspaceSettingsView: View {
             Picker("Surface", selection: $store.configuration.theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
             Slider(value: $store.configuration.theme.width, in: 340...640) { Text("Expanded width") }
             Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 280...800) { Text("Expanded height") }
-            Slider(value: $workspace.settings.layout.appearance.compactWidth, in: 120...320) { Text("Compact width") }
+            SurfaceAppearanceControls(appearance: $workspace.settings.layout.appearance, theme: store.configuration.theme, screen: NSScreen.screens.first)
             Slider(value: $store.configuration.theme.cornerRadius, in: 0...48) { Text("Corner radius") }
             Slider(value: $workspace.settings.layout.appearance.spacing, in: 4...28) { Text("Module spacing") }
             Slider(value: $store.configuration.theme.tint, in: 0...1) { Text("Accent hue") }
@@ -86,7 +94,7 @@ struct WorkspaceSettingsView: View {
             }
             HStack { Button("Import theme…") { store.importTheme() }; Button("Export theme…") { store.exportTheme() }; Button("Reset") { store.configuration.theme = Theme(); workspace.settings.layout.appearance = Appearance() } }
         case "Modules":
-            Text("Enable modules and change their dashboard order.")
+            Text("Drag a module row to reorder it, or use the arrow buttons.")
             ForEach(workspace.settings.layout.normalizedOrder()) { module in
                 HStack {
                     Toggle(isOn: Binding(get: { workspace.settings.layout.enabled.contains(module) }, set: { value in
@@ -95,19 +103,35 @@ struct WorkspaceSettingsView: View {
                     Button { workspace.moveModule(module, by: -1) } label: { Image(systemName: "arrow.up") }.accessibilityLabel("Move \(module.title) up")
                     Button { workspace.moveModule(module, by: 1) } label: { Image(systemName: "arrow.down") }.accessibilityLabel("Move \(module.title) down")
                 }
+                .onDrag {
+                    let provider = NSItemProvider()
+                    provider.registerDataRepresentation(forTypeIdentifier: "com.redstoneinvente.halo.module", visibility: .ownProcess) { completion in
+                        completion(Data(module.rawValue.utf8), nil); return nil
+                    }
+                    return provider
+                }
+                .onDrop(of: ["com.redstoneinvente.halo.module"], isTargeted: nil) { providers in
+                    guard let provider = providers.first else { return false }
+                    provider.loadDataRepresentation(forTypeIdentifier: "com.redstoneinvente.halo.module") { data, _ in
+                        guard let data, let value = String(data: data, encoding: .utf8), let source = ModuleID(rawValue: value) else { return }
+                        Task { @MainActor in workspace.settings.layout.move(source, before: module) }
+                    }
+                    return true
+                }
             }
         case "Media & Files":
             Picker("Music player", selection: $workspace.settings.mediaApp) { Text("Apple Music").tag("com.apple.Music"); Text("Spotify").tag("com.spotify.client") }
             Text("Press Connect in the media module to request Automation access. Halo controls only the selected running player. Browser playback is not supported.")
             Toggle("Keep shelf references between launches", isOn: $workspace.settings.persistShelf).onChange(of: workspace.settings.persistShelf) { _ in store.persistFiles() }
             Picker("Remove shelf references after", selection: $workspace.settings.shelfRetentionMinutes) { Text("Manually").tag(0); Text("5 minutes").tag(5); Text("30 minutes").tag(30); Text("1 hour").tag(60) }
-            Text("Up to 100 references. Removing a shelf item never deletes its original. Retention age restarts at launch for restored references.")
-            Button("Clear shelf references") { store.files = [] }
+            Text("Up to 100 references. Pinned items do not expire. Saved references keep their original retention age after relaunch. Removing a shelf item never deletes its original.")
+            Button("Clear shelf references") { store.clearShelf() }
         case "Profiles":
             HStack { TextField("Profile name", text: $profileName); Button("Save current") { workspace.saveProfile(name: profileName, theme: store.configuration.theme) } }
             ForEach(workspace.settings.profiles) { profile in
                 HStack {
                     Text(profile.name); Spacer(); Button("Apply") { workspace.apply(profile) }
+                    Button("Rename") { renamedProfile = profile.name; renamingProfile = profile.id }
                     Button("Duplicate") { var copy = profile; copy.id = UUID(); copy.name += " copy"; workspace.settings.profiles.append(copy) }
                     Button("Delete") { workspace.deleteProfile(profile.id) }
                 }
@@ -142,6 +166,14 @@ struct WorkspaceSettingsView: View {
                             }
                         }
                         Button("Follow global modules and background") { workspace.settings.displays[index].layout = nil }
+                        if workspace.settings.displays[index].layout != nil {
+                            SurfaceAppearanceControls(appearance: Binding(
+                                get: { workspace.settings.displays[index].layout?.appearance ?? workspace.settings.layout.appearance },
+                                set: { workspace.settings.displays[index].layout?.appearance = $0 }
+                            ), theme: workspace.settings.displays[index].theme, screen: screen)
+                        } else {
+                            Button("Customize closed size, shape and transitions here") { workspace.settings.displays[index].layout = workspace.settings.layout }
+                        }
                         Button("Use global theme") { workspace.settings.displays.removeAll { $0.id == id } }
                     } else { Button("Customize this display") { workspace.settings.displays.append(DisplayOverride(id: id, theme: store.configuration.theme)) } }
                 }
