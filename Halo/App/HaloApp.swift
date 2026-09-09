@@ -50,5 +50,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         settings?.makeKeyAndOrderFront(nil)
     }
-    func applicationWillTerminate(_ notification: Notification) { engine?.stop(); store.workspace.stop() }
+    func applicationWillTerminate(_ notification: Notification) { engine?.stop(); store.flushConfiguration(); store.workspace.stop() }
 }

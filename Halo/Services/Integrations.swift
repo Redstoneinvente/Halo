@@ -160,21 +160,34 @@ final class MediaService: ObservableObject {
     @Published var artist = "Apple Music or Spotify"
     @Published var error: String?
     @Published var busy = false
+    @Published var isPlaying = false
+    private var connectedApp: String?
+    private var generation = 0
+    func disconnect() {
+        generation += 1; connectedApp = nil; isPlaying = false
+        title = "Connect a player"; artist = "Apple Music or Spotify"
+    }
+    func poll(app: String) {
+        guard connectedApp == app else { return }
+        perform("refresh", app: app)
+    }
     private let queue = DispatchQueue(label: "Halo.Media.AppleEvents")
     func perform(_ command: String, app: String) {
         guard ["com.apple.Music", "com.spotify.client"].contains(app),
               ["refresh", "playpause", "next track", "previous track"].contains(command), !busy else { return }
         guard NSRunningApplication.runningApplications(withBundleIdentifier: app).first != nil else {
-            error = "Open the selected music player first."; return
+            error = "Open the selected music player first."; isPlaying = false; connectedApp = nil; return
         }
         busy = true
+        let requestGeneration = generation
         queue.async { [weak self] in
             let action = command == "refresh" ? "" : command
             let source = """
             with timeout of 5 seconds
                 tell application id "\(app)"
                     \(action)
-                    return {name of current track, artist of current track}
+                    if player state is stopped then return {"Nothing playing", "", false}
+                    return {name of current track, artist of current track, (player state is playing)}
                 end tell
             end timeout
             """
@@ -182,10 +195,19 @@ final class MediaService: ObservableObject {
             let result = NSAppleScript(source: source)?.executeAndReturnError(&failure)
             let title = result?.atIndex(1)?.stringValue
             let artist = result?.atIndex(2)?.stringValue
+            let playing = result?.atIndex(3)?.booleanValue ?? false
             let message = failure?[NSAppleScript.errorMessage] as? String
             Task { @MainActor in
-                self?.busy = false; self?.error = message
-                if let title { self?.title = title; self?.artist = artist ?? "" }
+                guard let self else { return }
+                self.busy = false
+                guard self.generation == requestGeneration else { return }
+                self.error = message
+                if let title, message == nil {
+                    if self.title != title { self.title = title }
+                    if self.artist != (artist ?? "") { self.artist = artist ?? "" }
+                    if self.isPlaying != playing { self.isPlaying = playing }
+                    self.connectedApp = app
+                } else { self.connectedApp = nil; self.isPlaying = false }
             }
         }
     }

@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVKit
+import ImageIO
 
 @MainActor
 protocol HaloModule {
@@ -22,15 +23,15 @@ struct ModuleRegistry {
     }
 }
 struct IntegrationModuleView: View {
+    @Environment(\.widgetStyle) private var style
     let id: ModuleID
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(id.title, systemImage: id.symbol).font(.subheadline.bold())
+            if style.showTitle { Label(id.title, systemImage: id.symbol).font(style.font()) }
             content
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
-            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
     @ViewBuilder private var content: some View {
         switch id {
@@ -41,11 +42,11 @@ struct IntegrationModuleView: View {
         case .system: SystemModuleView(service: workspace.system)
         case .launcher: LauncherModuleView(store: store, workspace: workspace)
         case .activities:
-            if workspace.activities.isEmpty { Text("Timer completions appear here.").font(.caption).foregroundStyle(.secondary) }
+            if workspace.activities.isEmpty { Text("Timer completions appear here.").font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
             ForEach(workspace.activities) { activity in
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(activity.title); Text(activity.detail).font(.caption).foregroundStyle(.secondary)
+                        Text(activity.title); Text(activity.detail).font(style.font(scale: 0.85)).foregroundStyle(.secondary)
                         if let progress = activity.progress { ProgressView(value: progress) }
                     }
                     Spacer()
@@ -53,7 +54,7 @@ struct IntegrationModuleView: View {
                 }
             }
         case .developer:
-            Text(workspace.gitSummary).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+            Text(workspace.gitSummary).font(style.font()).textSelection(.enabled)
             HStack {
                 Button("Choose repository…") { workspace.chooseRepository() }
                 Button(workspace.gitBusy ? "Refreshing…" : "Refresh") { workspace.refreshGit() }.disabled(workspace.gitBusy)
@@ -63,7 +64,7 @@ struct IntegrationModuleView: View {
         case .stopwatch:
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let elapsed = Int(workspace.stopwatchElapsed + (workspace.stopwatchStart.map { context.date.timeIntervalSince($0) } ?? 0))
-                Text(String(format: "%02d:%02d:%02d", elapsed / 3600, elapsed / 60 % 60, elapsed % 60)).font(.title.monospacedDigit())
+                Text(String(format: "%02d:%02d:%02d", elapsed / 3600, elapsed / 60 % 60, elapsed % 60)).font(style.font(scale: 2)).monospacedDigit()
             }
             HStack {
                 Button(workspace.stopwatchStart == nil ? "Start" : "Pause") { workspace.toggleStopwatch() }
@@ -74,32 +75,34 @@ struct IntegrationModuleView: View {
     }
 }
 struct CaptureModuleView: View {
+    @Environment(\.widgetStyle) private var style
     @ObservedObject var service: CaptureService
     @ObservedObject var store: AppStore
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Capture asks for Screen Recording access. OCR runs on-device.").font(.caption)
+            Text("Capture asks for Screen Recording access. OCR runs on-device.").font(style.font(scale: 0.85))
             HStack {
                 Button("Capture region…") { service.capture { store.addFiles([$0]) } }
                 Button("Extract text from image…") { service.chooseImage() }
             }.disabled(service.busy)
             if service.busy { ProgressView() }
             if !service.recognizedText.isEmpty {
-                Text(service.recognizedText).font(.caption).textSelection(.enabled).lineLimit(12)
+                Text(service.recognizedText).font(style.font(scale: 0.85)).textSelection(.enabled).lineLimit(12)
                 Button("Copy extracted text") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(service.recognizedText, forType: .string) }
                 Button("Clear extracted text") { service.recognizedText = "" }
             }
-            if let error = service.error { Text(error).font(.caption).foregroundStyle(.orange) }
+            if let error = service.error { Text(error).font(style.font(scale: 0.85)).foregroundStyle(.orange) }
         }
     }
 }
 struct MediaModuleView: View {
+    @Environment(\.widgetStyle) private var style
     @ObservedObject var service: MediaService
     let app: String
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(service.title).lineLimit(2)
-            Text(service.artist).font(.caption).foregroundStyle(.secondary)
+            Text(service.artist).font(style.font(scale: 0.85)).foregroundStyle(.secondary)
             HStack {
                 Button { service.perform("previous track", app: app) } label: { Image(systemName: "backward.end.fill") }.accessibilityLabel("Previous track")
                 Button { service.perform("playpause", app: app) } label: { Image(systemName: "playpause.fill") }.accessibilityLabel("Play or pause")
@@ -107,11 +110,12 @@ struct MediaModuleView: View {
                 Spacer()
                 Button("Connect / Refresh") { service.perform("refresh", app: app) }
             }.disabled(service.busy)
-            if let error = service.error { Text(error).font(.caption).foregroundStyle(.orange) }
+            if let error = service.error { Text(error).font(style.font(scale: 0.85)).foregroundStyle(.orange) }
         }
     }
 }
 struct AudioModuleView: View {
+    @Environment(\.widgetStyle) private var style
     @ObservedObject var service: AudioService
     var body: some View {
         VStack(alignment: .leading) {
@@ -120,22 +124,23 @@ struct AudioModuleView: View {
             }
             if service.canSetVolume {
                 Slider(value: Binding(get: { Double(service.volume) }, set: { service.setVolume(Float($0)) }), in: 0...1) { Text("Volume") }
-            } else { Text("Use this device's hardware volume controls.").font(.caption).foregroundStyle(.secondary) }
+            } else { Text("Use this device's hardware volume controls.").font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
             Button("Refresh devices") { service.refresh() }
-            if let error = service.error { Text(error).font(.caption).foregroundStyle(.orange) }
+            if let error = service.error { Text(error).font(style.font(scale: 0.85)).foregroundStyle(.orange) }
         }.onAppear { service.refresh() }
     }
 }
 struct CalendarModuleView: View {
+    @Environment(\.widgetStyle) private var style
     @ObservedObject var service: CalendarService
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(service.status).font(.caption).foregroundStyle(.secondary)
+            Text(service.status).font(style.font(scale: 0.85)).foregroundStyle(.secondary)
             ForEach(service.events, id: \.eventIdentifier) { event in
                 HStack {
                     VStack(alignment: .leading) {
                         Text(event.title ?? "Untitled event").lineLimit(1)
-                        Text(event.startDate, style: .time).font(.caption)
+                        Text(event.startDate, style: .time).font(style.font(scale: 0.85))
                     }
                     Spacer()
                     if let url = service.meetingURL(for: event) { Link("Join", destination: url) }
@@ -146,29 +151,31 @@ struct CalendarModuleView: View {
     }
 }
 struct ClipboardModuleView: View {
+    @Environment(\.widgetStyle) private var style
     @ObservedObject var service: ClipboardService
     let enabled: Bool
     @State private var search = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !enabled { Text("Off. Enable text history in Privacy settings.").font(.caption) }
+            if !enabled { Text("Off. Enable text history in Privacy settings.").font(style.font(scale: 0.85)) }
             else {
                 TextField("Search clipboard", text: $search)
                 ForEach(service.entries.filter { search.isEmpty || $0.text.localizedCaseInsensitiveContains(search) }) { entry in
                     HStack {
-                        Text(entry.text).font(.caption).lineLimit(2)
+                        Text(entry.text).font(style.font(scale: 0.85)).lineLimit(2)
                         Spacer()
                         Button("Copy") { service.copy(entry) }
                         Button { service.entries.removeAll { $0.id == entry.id } } label: { Image(systemName: "xmark") }.accessibilityLabel("Remove clipboard item")
                     }
                 }
                 Button("Clear history") { service.reset() }
-                Text("Text only · 50 items · memory only · copying does not paste into another app").font(.caption2).foregroundStyle(.secondary)
+                Text("Text only · 50 items · memory only · copying does not paste into another app").font(style.font(scale: 0.75)).foregroundStyle(.secondary)
             }
         }
     }
 }
 struct SystemModuleView: View {
+    @Environment(\.widgetStyle) private var style
     @ObservedObject var service: SystemService
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -178,10 +185,11 @@ struct SystemModuleView: View {
             }
             Text(service.memory); Text(service.storage)
             Text(service.uptime + (service.lowPower ? " · Low Power Mode" : ""))
-        }.font(.caption)
+        }.font(style.font(scale: 0.85))
     }
 }
 struct LauncherModuleView: View {
+    @Environment(\.widgetStyle) private var style
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
     @State private var query = ""
@@ -220,20 +228,71 @@ struct SurfaceBackground: View {
     let expanded: Bool
     @ObservedObject var system: SystemService
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @ViewBuilder
     var body: some View {
+        if appearance.background == .glass {
+            if reduceTransparency {
+                Color.black
+            } else {
+                DesktopGlass()
+                    .overlay(Color.black.opacity(GlassRendering.tintOpacity(themeOpacity: theme.opacity)))
+            }
+        } else { decoratedBackground }
+    }
+    private var decoratedBackground: some View {
         ZStack {
             Color.black.opacity(reduceTransparency ? 1 : theme.opacity)
             switch appearance.background {
             case .solid: EmptyView()
-            case .glass: Rectangle().fill(.ultraThinMaterial)
+            case .glass: EmptyView()
             case .gradient:
                 LinearGradient(colors: [Color(hue: theme.tint, saturation: 0.7, brightness: 0.35), .black], startPoint: .bottomLeading, endPoint: .topTrailing)
             case .image:
-                if let image = NSImage(contentsOfFile: appearance.assetPath) { Image(nsImage: image).resizable().scaledToFill() }
+                CachedBackgroundImage(path: appearance.assetPath)
             case .video:
                 LoopingVideo(path: appearance.assetPath, playing: expanded && !(appearance.pauseVideoOnBattery && system.onBattery))
             }
         }.blur(radius: reduceTransparency ? 0 : appearance.blur).saturation(appearance.saturation).brightness(appearance.brightness)
+    }
+}
+/// Native backdrop sampling must stay out of SwiftUI blur/offscreen filter groups.
+struct DesktopGlass: NSViewRepresentable {
+    final class EffectView: NSVisualEffectView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+    func makeNSView(context: Context) -> EffectView {
+        let view = EffectView()
+        view.blendingMode = .behindWindow
+        view.material = .hudWindow
+        view.state = .active
+        view.appearance = NSAppearance(named: .darkAqua)
+        return view
+    }
+    func updateNSView(_ view: EffectView, context: Context) {}
+}
+struct CachedBackgroundImage: View {
+    let path: String
+    @State private var image: NSImage?
+    var body: some View {
+        Group {
+            if let image { Image(nsImage: image).resizable().scaledToFill() }
+            else { Color.clear }
+        }.task(id: path) {
+            image = nil
+            let currentPath = path
+            let decoded = await Task.detached(priority: .utility) { () -> CGImage? in
+                guard !currentPath.isEmpty,
+                      let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: currentPath) as CFURL, nil) else { return nil }
+                return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 2048,
+                    kCGImageSourceShouldCacheImmediately: true
+                ] as CFDictionary)
+            }.value
+            guard !Task.isCancelled else { return }
+            if let decoded { image = NSImage(cgImage: decoded, size: .zero) }
+        }
     }
 }
 struct LoopingVideo: NSViewRepresentable {
@@ -243,6 +302,7 @@ struct LoopingVideo: NSViewRepresentable {
         var path = ""
         var player = AVQueuePlayer()
         var looper: AVPlayerLooper?
+        var playing = false
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
     func makeNSView(context: Context) -> AVPlayerView {
@@ -253,10 +313,13 @@ struct LoopingVideo: NSViewRepresentable {
     func updateNSView(_ view: AVPlayerView, context: Context) {
         let state = context.coordinator
         if state.path != path {
-            state.player.pause(); state.looper = nil; state.player.removeAllItems(); state.path = path
+            state.player.pause(); state.playing = false; state.looper = nil; state.player.removeAllItems(); state.path = path
             if FileManager.default.fileExists(atPath: path) { state.looper = AVPlayerLooper(player: state.player, templateItem: AVPlayerItem(url: URL(fileURLWithPath: path))) }
         }
-        if playing { state.player.play() } else { state.player.pause() }
+        if state.playing != playing {
+            state.playing = playing
+            if playing { state.player.play() } else { state.player.pause() }
+        }
     }
     static func dismantleNSView(_ view: AVPlayerView, coordinator: Coordinator) { coordinator.player.pause(); coordinator.looper = nil; coordinator.player.removeAllItems() }
 }

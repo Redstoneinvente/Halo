@@ -4,6 +4,50 @@ import XCTest
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    func testOldLayoutsDecodeWithoutWidgetPreferences() throws {
+        let original = WorkspaceLayout()
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(WorkspaceLayout.self, from: encoded)
+        XCTAssertNil(decoded.widgets)
+        XCTAssertNil(decoded.closedNotch)
+        XCTAssertEqual(decoded.widgetStyle(for: .clock).fontSize, 30)
+    }
+    func testWidgetPreferencesSurviveThemeRoundTrip() throws {
+        var layout = WorkspaceLayout()
+        var clock = WidgetStyle(); clock.fontFamily = .serif; clock.fontSize = 42
+        clock.clock.twentyFourHour = true; clock.clock.timeZone = "Asia/Tokyo"
+        layout.setWidgetStyle(clock, for: .clock)
+        layout.closedNotch = ClosedNotchOptions(left: .battery, right: .visualizer)
+        let archive = ThemeArchive(theme: Theme(), layout: layout)
+        let decoded = try JSONDecoder().decode(ThemeArchive.self, from: JSONEncoder().encode(archive)).validated()
+        XCTAssertEqual(decoded.layout.widgetStyle(for: .clock), clock)
+        XCTAssertEqual(decoded.layout.closedNotch, layout.closedNotch)
+        XCTAssertEqual(decoded.layout.widgetStyle(for: .notes).fontSize, 14)
+    }
+    func testWidgetImportValidation() throws {
+        var style = WidgetStyle(); style.fontSize = 100; style.width = 900; style.backgroundOpacity = -2
+        let safe = try style.validated()
+        XCTAssertEqual(safe.fontSize, 48); XCTAssertEqual(safe.width, 640); XCTAssertEqual(safe.backgroundOpacity, 0)
+        style.clock.timeZone = "Not/AZone"
+        XCTAssertThrowsError(try style.validated())
+        var closed = ClosedNotchOptions(); closed.fontSize = .infinity
+        XCTAssertThrowsError(try closed.validated())
+    }
+    func testClosedCameraReservationTracksOffsets() {
+        var model = geometry(requested: 400)
+        XCTAssertEqual(model.closedCameraOcclusion?.minX, 110)
+        XCTAssertEqual(model.closedCameraOcclusion?.width, 180)
+        model.appearance.surface.offsets = SurfaceOffsets(closedX: 50, closedY: 0)
+        XCTAssertEqual(model.closedCameraOcclusion?.minX, 60)
+        model.appearance.surface.offsets?.closedY = 100
+        XCTAssertNil(model.closedCameraOcclusion)
+        XCTAssertNil(geometry(safeArea: 0).closedCameraOcclusion)
+    }
+    func testGlassTintNeverObscuresMaterial() {
+        XCTAssertEqual(GlassRendering.tintOpacity(themeOpacity: 0.5), 0)
+        XCTAssertLessThan(GlassRendering.tintOpacity(themeOpacity: 1), 0.2)
+        XCTAssertTrue(GlassRendering.tintOpacity(themeOpacity: .nan).isFinite)
+    }
     private func geometry(style: SurfaceStyle = .notch, safeArea: Double = 32, requested: Double = 400) -> SurfaceGeometry {
         var appearance = Appearance(); appearance.compactWidth = requested
         return SurfaceGeometry(screen: CGRect(x: 0, y: 0, width: 1512, height: 982), visible: CGRect(x: 0, y: 40, width: 1512, height: 910),

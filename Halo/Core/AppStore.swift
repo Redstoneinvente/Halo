@@ -5,7 +5,7 @@ import Combine
 @MainActor
 final class AppStore: ObservableObject {
     let workspace = WorkspaceStore()
-    @Published var configuration: Configuration { didSet { save() } }
+    @Published var configuration: Configuration { didSet { scheduleSave() } }
     @Published var error: String?
     @Published var files: [URL] = [] { didSet { persistFiles() } }
     private var addedAt: [URL: Date] = [:]
@@ -16,6 +16,7 @@ final class AppStore: ObservableObject {
     @Published var finished = false
     private var ticker: AnyCancellable?
     private let defaults: UserDefaults
+    private var pendingSave: DispatchWorkItem?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -37,7 +38,14 @@ final class AppStore: ObservableObject {
             else { finished = true; defaults.removeObject(forKey: "timer.deadline") }
         }
     }
-    private func save() {
+    private func scheduleSave() {
+        pendingSave?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.flushConfiguration() }
+        pendingSave = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+    func flushConfiguration() {
+        pendingSave?.cancel()
         do { defaults.set(try JSONEncoder().encode(configuration), forKey: "configuration") }
         catch { self.error = error.localizedDescription }
     }

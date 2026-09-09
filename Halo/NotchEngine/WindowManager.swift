@@ -3,12 +3,19 @@ import SwiftUI
 import Combine
 
 @MainActor
+final class SurfaceViewport: ObservableObject {
+    @Published var size = CGSize(width: 190, height: 40)
+}
+
+@MainActor
 final class SurfaceState: ObservableObject {
     @Published var expanded = false
     @Published var pinned = false {
         didSet { if pinned { collapseTask?.cancel(); expanded = true } }
     }
-    @Published var renderSize = CGSize(width: 190, height: 40)
+    let viewport = SurfaceViewport()
+    @Published var compactWidth: CGFloat = 190
+    @Published var closedOcclusion: CGRect?
     @Published var compactHeight: CGFloat = 40
     @Published var theme = Theme()
     @Published var layoutOverride: WorkspaceLayout?
@@ -44,7 +51,7 @@ final class SurfaceAnimator {
         let transition = opening ? options.opening : options.closing
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard animations, !reduceMotion, preset != .none, transition != .instant else {
-            panel.alphaValue = 1; state.renderSize = target.size; panel.setFrame(target, display: true); return
+            panel.alphaValue = 1; state.viewport.size = target.size; panel.setFrame(target, display: false); return
         }
         let initial = panel.frame
         let initialAlpha = panel.alphaValue
@@ -70,8 +77,8 @@ final class SurfaceAnimator {
             if transition == .slide { frame.origin.y += (style == .bottom ? -1 : 1) * 18 * sin(.pi * t) }
             panel.alphaValue = transition == .fade ? initialAlpha + (1 - initialAlpha) * t - 0.3 * sin(.pi * t) : 1
             if t >= 1 { frame = target; panel.alphaValue = 1; self.cancel() }
-            state.renderSize = frame.size
-            panel.setFrame(frame, display: true)
+            if state.viewport.size != frame.size { state.viewport.size = frame.size }
+            panel.setFrame(frame, display: false)
         }
     }
 }
@@ -116,11 +123,8 @@ final class WindowManager {
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.$configuration.dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
-        store.workspace.$settings.map { settings -> Data in
-            var key = (try? JSONEncoder().encode(settings.layout.appearance)) ?? Data()
-            key.append((try? JSONEncoder().encode(settings.displays)) ?? Data())
-            return key
-        }.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
+        store.workspace.$settings.map { SurfaceRenderConfiguration(appearance: $0.layout.appearance, displays: $0.displays) }
+            .removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloGeometryPreview"))
             .receive(on: DispatchQueue.main).sink { [weak self] note in
@@ -157,9 +161,11 @@ final class WindowManager {
             let previousOffset = host.geometry?.offset(expanded: host.state.expanded) ?? .zero
             host.geometry = Self.geometry(screen: screen, theme: theme, appearance: appearance)
             host.animator.cancel()
-            host.state.theme = theme
-            host.state.layoutOverride = override?.layout
-            host.state.compactHeight = host.geometry!.compactHeight
+            if host.state.theme != theme { host.state.theme = theme }
+            if host.state.layoutOverride != override?.layout { host.state.layoutOverride = override?.layout }
+            if host.state.compactHeight != host.geometry!.compactHeight { host.state.compactHeight = host.geometry!.compactHeight }
+            if host.state.compactWidth != host.geometry!.compactWidth { host.state.compactWidth = host.geometry!.compactWidth }
+            if host.state.closedOcclusion != host.geometry!.closedCameraOcclusion { host.state.closedOcclusion = host.geometry!.closedCameraOcclusion }
             host.panel.isMovableByWindowBackground = theme.style == .detached
             var target = host.geometry!.frame(expanded: host.state.expanded)
             if existing != nil && theme.style == .detached {
@@ -167,11 +173,11 @@ final class WindowManager {
                 target.origin.x = host.panel.frame.midX - target.width / 2 + delta.width - previousOffset.width
                 target.origin.y = host.panel.frame.maxY - target.height + delta.height - previousOffset.height
             }
-            host.state.renderSize = target.size
+            if host.state.viewport.size != target.size { host.state.viewport.size = target.size }
             host.panel.alphaValue = 1
-            host.panel.setFrame(target, display: true)
+            if host.panel.frame != target { host.panel.setFrame(target, display: false) }
             if existing == nil {
-                let view = NSHostingView(rootView: SurfaceView(store: store, state: host.state, workspace: store.workspace))
+                let view = NSHostingView(rootView: SurfaceViewportView(viewport: host.state.viewport, content: SurfaceView(store: store, state: host.state, workspace: store.workspace)))
                 view.sizingOptions = []
                 host.panel.contentView = view
                 host.subscription = host.state.$expanded.dropFirst().removeDuplicates().receive(on: DispatchQueue.main).sink { [weak host] expanded in

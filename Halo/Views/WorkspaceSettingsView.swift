@@ -17,7 +17,7 @@ struct SettingsView: View {
     @State private var renamingProfile: UUID?
     @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
-    private let sections = ["General", "Appearance", "Modules", "Media & Files", "Profiles", "Automation", "Displays", "Plugins", "Privacy", "Advanced"]
+    private let sections = ["General", "Appearance", "Modules", "Widgets", "Closed notch", "Media & Files", "Profiles", "Automation", "Displays", "Plugins", "Privacy", "Advanced"]
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -85,9 +85,13 @@ struct SettingsView: View {
                 }
                 Button("Choose image or video…") { workspace.chooseBackground() }
                 Text(workspace.settings.layout.appearance.assetPath.isEmpty ? "No background file selected" : URL(fileURLWithPath: workspace.settings.layout.appearance.assetPath).lastPathComponent).font(.caption)
-                Slider(value: $workspace.settings.layout.appearance.blur, in: 0...20) { Text("Blur") }
-                Slider(value: $workspace.settings.layout.appearance.saturation, in: 0...2) { Text("Saturation") }
-                Slider(value: $workspace.settings.layout.appearance.brightness, in: -0.5...0.5) { Text("Brightness") }
+                if workspace.settings.layout.appearance.background == .glass {
+                    Text("Glass blurs the desktop behind Halo. Opacity adjusts its tint; macOS controls the backdrop blur. Reduce Transparency replaces glass with a solid background.").font(.caption)
+                } else {
+                    Slider(value: $workspace.settings.layout.appearance.blur, in: 0...20) { Text("Blur") }
+                    Slider(value: $workspace.settings.layout.appearance.saturation, in: 0...2) { Text("Saturation") }
+                    Slider(value: $workspace.settings.layout.appearance.brightness, in: -0.5...0.5) { Text("Brightness") }
+                }
                 Toggle("Pause video on battery", isOn: $workspace.settings.layout.appearance.pauseVideoOnBattery)
                 Text("Video is muted, loops, and pauses when collapsed. Large videos and blur increase GPU use. Background files are referenced in place.").font(.caption)
             }
@@ -101,6 +105,10 @@ struct SettingsView: View {
                 }
             }
             HStack { Button("Import theme…") { store.importTheme() }; Button("Export theme…") { store.exportTheme() }; Button("Reset") { store.configuration.theme = Theme(); workspace.settings.layout.appearance = Appearance() } }
+        case "Widgets":
+            WidgetSettingsView(layout: $workspace.settings.layout)
+        case "Closed notch":
+            ClosedNotchSettingsView(layout: $workspace.settings.layout, media: workspace.media, app: workspace.settings.mediaApp)
         case "Modules":
             Text("Drag a module row to reorder it, or use the arrow buttons.")
             ForEach(workspace.settings.layout.normalizedOrder()) { module in

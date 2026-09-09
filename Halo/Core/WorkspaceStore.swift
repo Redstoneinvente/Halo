@@ -4,7 +4,7 @@ import UserNotifications
 
 @MainActor
 final class WorkspaceStore: ObservableObject, LiveActivityProvider {
-    @Published var settings: WorkspaceSettings { didSet { persist(); updateHotkey() } }
+    @Published var settings: WorkspaceSettings { didSet { schedulePersistence(); updateHotkey(); if oldValue.mediaApp != settings.mediaApp { media.disconnect() } } }
     @Published var activities: [LiveActivity] = []
     @Published var plugins: [PluginManifest] = []
     @Published var error: String?
@@ -30,6 +30,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     private var matchedRules = Set<UUID>()
     private var tick = 0
     private var installedHotkey = ""
+    private var pendingSave: DispatchWorkItem?
     var applyTheme: ((Theme) -> Void)?
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -45,6 +46,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         ticker = Timer.publish(every: 2, on: .main, in: .common).autoconnect().sink { [weak self] _ in
             guard let self else { return }
             self.tick += 1
+            self.media.poll(app: self.settings.mediaApp)
             self.clipboard.poll(enabled: self.settings.clipboardEnabled, excluded: self.settings.clipboardExcludedApps)
             if self.tick % 5 == 0 { self.system.refresh(); self.evaluateRules() }
             if self.tick % 30 == 0, self.settings.layout.enabled.contains(.calendar) { self.calendar.refresh() }
@@ -57,7 +59,13 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.evaluateRules() }.store(in: &subscriptions)
     }
-    func stop() { ticker?.cancel(); subscriptions.removeAll(); hotkey.stop(); clipboard.reset() }
+    func stop() { pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); hotkey.stop(); clipboard.reset() }
+    private func schedulePersistence() {
+        pendingSave?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.persist() }
+        pendingSave = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
     private func persist() {
         do { defaults.set(try JSONEncoder().encode(settings), forKey: "workspace.v1") }
         catch { self.error = error.localizedDescription }

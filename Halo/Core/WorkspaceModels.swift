@@ -62,13 +62,24 @@ struct Appearance: Codable, Equatable {
         pauseVideoOnBattery = try c.decodeIfPresent(Bool.self, forKey: .pauseVideoOnBattery) ?? true
     }
 }
-struct DisplayOverride: Codable, Identifiable {
+struct DisplayOverride: Codable, Identifiable, Equatable {
     var id: String
     var enabled = true
     var theme = Theme()
     var layout: WorkspaceLayout?
 }
-struct WorkspaceLayout: Codable {
+struct WorkspaceLayout: Codable, Equatable {
+    var widgets: [String: WidgetStyle]?
+    var closedNotch: ClosedNotchOptions?
+    func widgetStyle(for id: ModuleID) -> WidgetStyle {
+        if let saved = widgets?[id.rawValue] { return saved }
+        var style = WidgetStyle()
+        if id == .clock { style.fontSize = 30; style.fontFamily = .rounded; style.weight = .light; style.showTitle = false }
+        return style
+    }
+    mutating func setWidgetStyle(_ style: WidgetStyle, for id: ModuleID) {
+        if widgets == nil { widgets = [:] }; widgets?[id.rawValue] = style
+    }
     var order = ModuleID.allCases
     var enabled: Set<ModuleID> = [.clock, .timer, .shelf, .system, .launcher]
     var appearance = Appearance()
@@ -104,6 +115,8 @@ struct ThemeArchive: Codable {
         if appearance.background == .video || appearance.background == .image { appearance.background = .gradient }
         archive.layout.appearance = appearance
         archive.layout.order = layout.normalizedOrder()
+        archive.layout.widgets = try layout.widgets?.mapValues { try $0.validated() }
+        archive.layout.closedNotch = try layout.closedNotch?.validated()
         return archive
     }
 }

@@ -1,5 +1,18 @@
 import Foundation
 
+/// Compare only render-affecting preferences; no JSON work on the slider hot path.
+struct SurfaceRenderConfiguration: Equatable {
+    var appearance: Appearance
+    var displays: [DisplayOverride]
+}
+enum GlassRendering {
+    /// The material supplies its own background. Tint must never hide the backdrop.
+    static func tintOpacity(themeOpacity: Double) -> Double {
+        guard themeOpacity.isFinite else { return 0.1 }
+        return min(0.18, max(0, (themeOpacity - 0.5) * 0.36))
+    }
+}
+
 enum SurfaceShapeKind: String, Codable, CaseIterable, Identifiable {
     case rounded = "Rounded rectangle", capsule = "Capsule", squircle = "Squircle"
     case notch = "Soft notch", scoop = "Shouldered notch", chamfer = "Cut corners"
@@ -65,6 +78,15 @@ struct SurfaceGeometry {
         Geometry.width(screenWidth: visible.width, requested: max(minimumWidth, appearance.compactWidth))
     }
     var compactHeight: Double { max(16, appearance.surface.compactHeight) }
+    var closedCameraOcclusion: CGRect? {
+        guard safeAreaTop > 0, physicalNotchWidth > 0 else { return nil }
+        let camera = CGRect(x: screen.midX - physicalNotchWidth / 2, y: screen.maxY - safeAreaTop,
+                            width: physicalNotchWidth, height: safeAreaTop)
+        let surface = frame(expanded: false)
+        let overlap = camera.intersection(surface)
+        guard !overlap.isNull, !overlap.isEmpty else { return nil }
+        return CGRect(x: overlap.minX - surface.minX, y: 0, width: overlap.width, height: overlap.height)
+    }
     func offset(expanded: Bool) -> CGSize {
         let offsets = appearance.surface.offsets ?? SurfaceOffsets()
         // UI uses positive Y = down; AppKit screen coordinates use positive Y = up.

@@ -2,7 +2,18 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-struct SurfaceView: View {
+struct SurfaceViewportView: View {
+    @ObservedObject var viewport: SurfaceViewport
+    let content: SurfaceView
+    var body: some View {
+        content.equatable().frame(width: viewport.size.width, height: viewport.size.height, alignment: .top).clipped()
+    }
+}
+
+struct SurfaceView: View, Equatable {
+    static func == (lhs: SurfaceView, rhs: SurfaceView) -> Bool {
+        lhs.store === rhs.store && lhs.state === rhs.state && lhs.workspace === rhs.workspace
+    }
     @ObservedObject var store: AppStore
     @ObservedObject var state: SurfaceState
     @ObservedObject var workspace: WorkspaceStore
@@ -18,16 +29,18 @@ struct SurfaceView: View {
     var body: some View {
         VStack(spacing: 0) {
             Group {
-              if !state.expanded && (state.renderSize.width < 100 || state.compactHeight < 28) {
+              if !state.expanded && (state.compactWidth < 48 || state.compactHeight < 16) {
                 Circle().fill(store.deadline == nil ? accent : .green).frame(width: 6, height: 6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+              } else if !state.expanded {
+                ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion)
               } else { HStack {
                 Circle().fill(store.deadline == nil ? accent : .green).frame(width: 7, height: 7)
                 Spacer()
                 Image(systemName: state.expanded ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold))
               } }
             }
-            .padding(.horizontal, state.renderSize.width < 100 ? 0 : max(16, layout.appearance.surface.shoulder + 8))
+            .padding(.horizontal, !state.expanded ? 0 : max(16, layout.appearance.surface.shoulder + 8))
             .frame(height: state.expanded ? max(40, state.compactHeight) : state.compactHeight)
             .contentShape(Rectangle())
             .onTapGesture { state.expanded.toggle() }
@@ -47,11 +60,8 @@ struct SurfaceView: View {
                     ScrollView {
                         VStack(spacing: layout.appearance.spacing) {
                             ForEach(layout.normalizedOrder().filter { layout.enabled.contains($0) }) { module in
-                                switch module {
-                                case .clock: clock
-                                case .timer: timer
-                                case .shelf: shelf
-                                default: ModuleRegistry().view(for: module, store: store)
+                                WidgetCard(style: layout.widgetStyle(for: module)) {
+                                    BuiltinOrIntegrationWidget(module: module, store: store)
                                 }
                             }
                         }
@@ -64,7 +74,7 @@ struct SurfaceView: View {
                 }.padding(.horizontal, max(20, layout.appearance.surface.shoulder + 12)).padding(.vertical, 20).transition(.opacity)
             }
         }
-        .frame(width: state.renderSize.width, height: state.renderSize.height, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
             SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
         }
@@ -93,26 +103,31 @@ struct SurfaceView: View {
             return !providers.isEmpty
         }
     }
-    private var clock: some View {
-        HStack {
-            TimelineView(.periodic(from: .now, by: 60)) { context in
-                Text(context.date, format: .dateTime.hour().minute()).font(.system(size: 30, weight: .light, design: .rounded))
-                Spacer()
-                Text(context.date, format: .dateTime.weekday(.wide).month().day()).font(.caption).foregroundStyle(.secondary)
-            }
-        }.padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
+}
+
+struct BuiltinOrIntegrationWidget: View {
+    let module: ModuleID
+    @ObservedObject var store: AppStore
+    @Environment(\.widgetStyle) private var style
+    @ViewBuilder var body: some View {
+        switch module {
+        case .clock: WidgetClock(style: style)
+        case .timer: timer
+        case .shelf: shelf
+        default: ModuleRegistry().view(for: module, store: store)
+        }
     }
     private var timer: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Focus", systemImage: "timer").font(.subheadline.bold())
+                if style.showTitle { Label("Focus", systemImage: "timer").font(style.font()) }
                 Spacer()
                 if let deadline = store.deadline {
                     Text(deadline, style: .timer).monospacedDigit()
                 } else if store.pausedSeconds > 0 {
-                    Text("Paused · \(Int(store.pausedSeconds))s").font(.caption)
+                    Text("Paused · \(Int(store.pausedSeconds))s").font(style.font(scale: 0.85))
                 } else if store.finished { Text("Session complete").foregroundStyle(.green) }
-                else { Text("Make room for deep work").font(.caption).foregroundStyle(.secondary) }
+                else { Text("Make room for deep work").font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
             }
             HStack {
                 if store.deadline != nil || store.pausedSeconds > 0 {
@@ -124,25 +139,21 @@ struct SurfaceView: View {
                     }
                 }
             }.buttonStyle(.bordered)
-        }.padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
+        }
     }
     private var shelf: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("File shelf", systemImage: "tray").font(.subheadline.bold())
+                if style.showTitle { Label("File shelf", systemImage: "tray").font(style.font()) }
                 Spacer()
                 Button { store.chooseFiles() } label: { Image(systemName: "plus") }.accessibilityLabel("Add files")
             }
             if store.files.isEmpty {
-                Text("Drop files here. Originals stay untouched.").font(.caption).foregroundStyle(.secondary).padding(.vertical, 8)
+                Text("Drop files here. Originals stay untouched.").font(style.font(scale: 0.85)).foregroundStyle(.secondary).padding(.vertical, 8)
             }
             ForEach(store.files, id: \.self) { url in
                 HStack {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 24, height: 24)
-                    VStack(alignment: .leading) {
-                        Text(url.lastPathComponent).font(.caption).lineLimit(1)
-                        Text(fileDetail(url)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    }
+                    ShelfFileInfo(url: url)
                     Spacer()
                     Button { store.toggleFilePin(url) } label: { Image(systemName: store.pinnedFiles.contains(url) ? "pin.fill" : "pin") }.help("Keep this file on the shelf")
                     Button { store.shelfPreview.show(url) } label: { Image(systemName: "eye") }.help("Quick Look")
@@ -152,7 +163,27 @@ struct SurfaceView: View {
                     Button { store.removeFile(url) } label: { Image(systemName: "xmark") }.help("Remove reference from shelf")
                 }.onDrag { NSItemProvider(object: url as NSURL) }
             }
-        }.padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
+        }
+    }
+}
+
+struct ShelfFileInfo: View {
+    let url: URL
+    @Environment(\.widgetStyle) private var style
+    @State private var icon: NSImage?
+    @State private var detail = ""
+    var body: some View {
+        HStack {
+            if let icon { Image(nsImage: icon).resizable().frame(width: 24, height: 24) }
+            VStack(alignment: .leading) {
+                Text(url.lastPathComponent).font(style.font(scale: 0.85)).lineLimit(1)
+                Text(detail).font(style.font(scale: 0.75)).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }.onAppear {
+            guard icon == nil else { return }
+            icon = NSWorkspace.shared.icon(forFile: url.path)
+            detail = fileDetail(url)
+        }
     }
     private func fileDetail(_ url: URL) -> String {
         guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]) else { return "Original unavailable" }
