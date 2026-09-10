@@ -11,6 +11,7 @@ final class HaloHUDRuntimeState: ObservableObject {
     @Published var configuration = HaloHUDConfiguration()
     @Published var palette: [WidgetColor] = []
     @Published var visible = false
+    @Published var isExiting = false
     @Published var sequence = 0
 }
 
@@ -353,7 +354,7 @@ final class HaloHUDEngine {
         workspace.audio.$selected.removeDuplicates().receive(on: RunLoop.main).dropFirst().sink { [weak self] id in
             guard let self else { return }
             let name = self.workspace.audio.devices.first(where: { $0.id == id })?.name ?? "Audio Output"
-            self.emit(HaloHUDEvent(kind: .audioOutputChanged, icon: "speaker.wave.2.fill", primaryText: "Audio Output", secondaryText: name))
+            self.emit(HaloHUDEvent(kind: .audioOutputChanged, icon: "speaker.wave.2.fill", primaryText: "Audio Output", secondaryText: name, metadata: ["deviceName": name]))
         }.store(in: &subscriptions)
         workspace.audio.$devices.map { $0.map(\.id) }.removeDuplicates().receive(on: RunLoop.main).dropFirst().sink { [weak self] ids in
             guard let self else { return }
@@ -367,7 +368,7 @@ final class HaloHUDEngine {
         let persistent = note.userInfo?["persistent"] as? Bool ?? false
         let kind: HaloHUDEventKind
         switch raw { case "brightness": kind = .displayBrightness; case "keyboard": kind = .keyboardBrightness; default: kind = HaloHUDEventKind(rawValue: raw) ?? .volume }
-        let event = HaloHUDEvent(kind: kind, value: value)
+        let event = HaloHUDEvent.preview(kind: kind, value: value)
         editorPreviewPinned = persistent
 
         if let suppliedConfiguration = note.userInfo?["configuration"] as? HaloHUDConfiguration {
@@ -421,38 +422,104 @@ final class HaloHUDEngine {
         guard let panel else { return }
         removeMenuPresentation()
         if model.visible, model.event.kind != event.kind, configuration.behavior.collision == .queue, !editorPreviewPinned {
-            if queue.count < 12 { queue.append((event, configuration)) }; return
+            if queue.count < 12 { queue.append((event, configuration)) }
+            return
         }
+
         let repeated = model.visible && model.event.kind == event.kind
-        model.event = event; model.configuration = configuration; model.palette = workspace.media.artworkColors; model.sequence += 1
-        position(panel, configuration: configuration); hideWork?.cancel(); panel.orderFrontRegardless()
-        if !repeated { model.visible = false; DispatchQueue.main.async { [weak self] in self?.model.visible = true } }
-        else { model.visible = true }
-        if !editorPreviewPinned { scheduleHide(configuration.behavior.displayDuration) }
+        let previousHideWork = hideWork
+        model.event = event
+        model.configuration = configuration
+        model.palette = workspace.media.artworkColors
+        model.sequence += 1
+        position(panel, configuration: configuration)
+        panel.orderFrontRegardless()
+
+        if repeated && !editorPreviewPinned {
+            switch configuration.behavior.interrupt {
+            case .restart:
+                hideWork?.cancel()
+                model.isExiting = false
+                model.visible = false
+                DispatchQueue.main.async { [weak self] in
+                    self?.model.isExiting = false
+                    self?.model.visible = true
+                }
+            case .continue:
+                model.isExiting = false
+                model.visible = true
+            case .blend:
+                hideWork?.cancel()
+                model.isExiting = false
+                model.visible = true
+            }
+        } else if !repeated {
+            hideWork?.cancel()
+            model.isExiting = false
+            model.visible = false
+            DispatchQueue.main.async { [weak self] in
+                self?.model.isExiting = false
+                self?.model.visible = true
+            }
+        } else {
+            model.isExiting = false
+            model.visible = true
+        }
+
+        guard !editorPreviewPinned else { hideWork?.cancel(); return }
+        if repeated && configuration.behavior.interrupt == .continue, previousHideWork != nil {
+            // Continue means update the currently visible HUD without extending its lifetime.
+            return
+        }
+        scheduleHide(configuration.behavior.displayDuration)
     }
+
     private func scheduleHide(_ delay: Double) {
+        hideWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.hide(immediate: false) }
-        hideWork = work; DispatchQueue.main.asyncAfter(deadline: .now() + min(10, max(0.2, delay)), execute: work)
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + min(10, max(0.2, delay)), execute: work)
     }
+
     private func hide(immediate: Bool) {
-        hideWork?.cancel(); guard let panel else { return }
-        if immediate { model.visible = false; panel.orderOut(nil); presentNext(); return }
+        hideWork?.cancel(); hideWork = nil
+        guard let panel else { return }
+        if immediate {
+            model.isExiting = false
+            model.visible = false
+            panel.orderOut(nil)
+            presentNext()
+            return
+        }
+        model.isExiting = true
         model.visible = false
         let delay = min(2, max(0, model.configuration.animation.exitDuration))
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak panel] in
-            guard let self, let panel, !self.model.visible else { return }; panel.orderOut(nil); self.presentNext()
+            guard let self, let panel, !self.model.visible else { return }
+            panel.orderOut(nil)
+            self.model.isExiting = false
+            self.presentNext()
         }
     }
     private func presentNext() { guard !queue.isEmpty else { return }; let next = queue.removeFirst(); showPanel(next.0, configuration: next.1) }
 
     private func showMenuBar(_ event: HaloHUDEvent, configuration: HaloHUDConfiguration) {
-        hideWork?.cancel()
+        hideWork?.cancel(); hideWork = nil
         model.visible = false
         panel?.orderOut(nil)
         if menuItem == nil { menuItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength) }
         guard let button = menuItem?.button else { return }
-        button.image = NSImage(systemSymbolName: event.icon, accessibilityDescription: event.primaryText)
-        button.title = event.progress.map { " \(Int(($0 * 100).rounded()))%" } ?? " " + event.primaryText
+        button.image = configuration.components.icon ? NSImage(systemSymbolName: event.icon, accessibilityDescription: event.primaryText) : nil
+        let valueText = HaloHUDRenderFormatting.valueText(event: event, configuration: configuration)
+        if configuration.components.label && (configuration.components.value || configuration.components.percentage), !valueText.isEmpty {
+            button.title = " \(event.primaryText) · \(valueText)"
+        } else if configuration.components.label {
+            button.title = " \(event.primaryText)"
+        } else if configuration.components.value || configuration.components.percentage {
+            button.title = valueText.isEmpty ? "" : " \(valueText)"
+        } else {
+            button.title = ""
+        }
         menuHideWork?.cancel()
         guard !editorPreviewPinned else { return }
         let work = DispatchWorkItem { [weak self] in self?.removeMenuPresentation() }
@@ -533,18 +600,108 @@ final class HaloHUDEngine {
     private func brightnessSymbol(_ value: Double) -> String { value <= 0.12 ? "sun.min.fill" : "sun.max.fill" }
 }
 
+extension HaloHUDEvent {
+    /// Studio previews use payloads shaped like their real providers instead of forcing every event
+    /// into a fake 0...1 progress event.
+    static func preview(kind: HaloHUDEventKind, value: Double) -> HaloHUDEvent {
+        let p = min(1, max(0, value))
+        switch kind {
+        case .volume:
+            let icon = p <= 0.005 ? "speaker.slash.fill" : p < 0.34 ? "speaker.wave.1.fill" : p < 0.68 ? "speaker.wave.2.fill" : "speaker.wave.3.fill"
+            return HaloHUDEvent(kind: kind, icon: icon, value: p)
+        case .mute:
+            return HaloHUDEvent(kind: kind, icon: p < 0.5 ? "speaker.slash.fill" : "speaker.wave.2.fill", primaryText: p < 0.5 ? "Muted" : "Volume", value: p)
+        case .displayBrightness:
+            return HaloHUDEvent(kind: kind, icon: p <= 0.12 ? "sun.min.fill" : "sun.max.fill", value: p)
+        case .keyboardBrightness:
+            return HaloHUDEvent(kind: kind, icon: p <= 0.01 ? "keyboard" : "keyboard.fill", value: p)
+        case .batteryStatus:
+            let percent = (p * 100).rounded()
+            return HaloHUDEvent(kind: kind, secondaryText: "Battery", value: percent, minimumValue: 0, maximumValue: 100, progress: p)
+        case .chargingState:
+            return HaloHUDEvent(kind: kind, icon: "bolt.fill", primaryText: "Charging Started", state: "charging")
+        case .powerSourceChanged:
+            return HaloHUDEvent(kind: kind, icon: "powerplug.fill", primaryText: "Using Power Adapter", state: "adapter")
+        case .audioOutputChanged:
+            return HaloHUDEvent(kind: kind, icon: "speaker.wave.2.fill", primaryText: "Audio Output", secondaryText: "MacBook Pro Speakers", metadata: ["deviceName": "MacBook Pro Speakers"])
+        case .audioInputChanged:
+            return HaloHUDEvent(kind: kind, icon: "mic.and.signal.meter.fill", primaryText: "Audio Input", secondaryText: "MacBook Microphone", metadata: ["deviceName": "MacBook Microphone"])
+        case .audioDeviceConnected:
+            return HaloHUDEvent(kind: kind, icon: "hifispeaker.fill", primaryText: "Audio Device Connected", secondaryText: "External Audio Device", metadata: ["deviceName": "External Audio Device"])
+        case .capsLock:
+            return HaloHUDEvent(kind: kind, icon: "capslock.fill", primaryText: "Caps Lock On", state: "on")
+        case .mediaChanged:
+            return HaloHUDEvent(kind: kind, icon: "music.note", primaryText: "Example Song", secondaryText: "Example Artist", artworkKey: "preview")
+        case .microphoneMute:
+            return HaloHUDEvent(kind: kind, icon: "mic.slash.fill", primaryText: "Microphone Muted", state: "muted")
+        case .microphoneState, .microphoneActivity:
+            return HaloHUDEvent(kind: kind, icon: "mic.fill", primaryText: kind.title, state: "active")
+        case .wifiState:
+            return HaloHUDEvent(kind: kind, icon: "wifi", primaryText: "Wi-Fi Connected", secondaryText: "Network")
+        case .bluetoothState:
+            return HaloHUDEvent(kind: kind, icon: "wave.3.right", primaryText: "Bluetooth On", state: "on")
+        case .focusState:
+            return HaloHUDEvent(kind: kind, icon: "moon.fill", primaryText: "Focus Enabled", secondaryText: "Do Not Disturb")
+        case .screenshotCaptured:
+            return HaloHUDEvent(kind: kind, icon: "camera.viewfinder", primaryText: "Screenshot Captured")
+        case .screenRecordingState:
+            return HaloHUDEvent(kind: kind, icon: "record.circle", primaryText: "Screen Recording", state: "active")
+        case .cameraActivity:
+            return HaloHUDEvent(kind: kind, icon: "video.fill", primaryText: "Camera Active", state: "active")
+        }
+    }
+}
+
+enum HaloHUDRenderFormatting {
+    static func valueText(event: HaloHUDEvent, configuration: HaloHUDConfiguration) -> String {
+        guard configuration.components.value || configuration.components.percentage, let value = event.value else { return "" }
+        let progress = min(1, max(0, event.progress ?? 0))
+        let display = event.maximumValue == 100 ? Int(value.rounded()) : Int((progress * 100).rounded())
+        return configuration.components.percentage ? "\(display)%" : "\(display)"
+    }
+}
+
 private struct HaloHUDRuntimeView: View {
     @ObservedObject var model: HaloHUDRuntimeState
+    var body: some View {
+        HaloHUDRenderView(
+            event: model.event,
+            configuration: model.configuration,
+            palette: model.palette,
+            visible: model.visible,
+            isExiting: model.isExiting
+        )
+    }
+}
+
+/// The single visual renderer used by the real HUD and HUD Studio. Keeping this pure means the
+/// editor cannot silently drift away from what is actually drawn on screen.
+struct HaloHUDRenderView: View {
+    let event: HaloHUDEvent
+    let configuration: HaloHUDConfiguration
+    var palette: [WidgetColor] = []
+    var visible = true
+    var isExiting = false
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
-    private var configuration: HaloHUDConfiguration { model.configuration }
-    private var progress: Double { min(1, max(0, model.event.progress ?? 0)) }
+
+    private var progress: Double { min(1, max(0, event.progress ?? 0)) }
     private var accent: Color { resolvedColor(configuration.appearance.primary) }
+    private var secondaryColor: Color { resolvedColor(configuration.appearance.secondary) }
     private var progressColor: Color { resolvedColor(configuration.appearance.progress) }
+    private var borderColor: Color { resolvedColor(configuration.appearance.borderColor) }
+    private var glowColor: Color { resolvedColor(configuration.appearance.glowColor) }
+    private var inactiveColor: Color { secondaryColor.opacity(0.16) }
     private var isVerticalScreenEdge: Bool {
         configuration.presentation.target == .screenEdge &&
             (configuration.presentation.screenEdge == .left || configuration.presentation.screenEdge == .right)
+    }
+    private var deviceText: String? {
+        if let value = event.metadata["deviceName"], !value.isEmpty { return value }
+        if [.audioInputChanged, .audioOutputChanged, .audioDeviceConnected].contains(event.kind) { return event.secondaryText }
+        return nil
     }
 
     var body: some View {
@@ -558,23 +715,61 @@ private struct HaloHUDRuntimeView: View {
         .padding(.vertical, configuration.presentation.target == .screenEdge ? 0 : configuration.layout.verticalPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { background }
-        .clipShape(RoundedRectangle(cornerRadius: configuration.presentation.target == .screenEdge ? min(configuration.layout.cornerRadius, 8) : configuration.layout.cornerRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: configuration.presentation.target == .screenEdge ? min(configuration.layout.cornerRadius, 8) : configuration.layout.cornerRadius, style: .continuous).stroke(resolvedColor(configuration.appearance.borderColor).opacity(configuration.appearance.border ? configuration.appearance.borderOpacity : 0), lineWidth: contrast == .increased ? 1.5 : 1))
+        .overlay { noiseOverlay }
+        .clipShape(RoundedRectangle(cornerRadius: effectiveCornerRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: effectiveCornerRadius, style: .continuous)
+            .stroke(borderColor.opacity(configuration.appearance.border ? configuration.appearance.borderOpacity : 0), lineWidth: contrast == .increased ? 1.5 : 1))
         .shadow(color: configuration.appearance.shadow ? .black.opacity(0.32) : .clear, radius: 16, y: 7)
-        .scaleEffect(model.visible ? 1 : entranceScale).offset(y: model.visible ? 0 : entranceOffset).opacity(model.visible ? 1 : 0)
-        .animation(viewAnimation, value: model.visible).animation(progressAnimation, value: progress)
-        .accessibilityElement(children: .combine).accessibilityLabel(model.event.primaryText)
-        .accessibilityValue(model.event.progress.map { "\(Int($0 * 100)) percent" } ?? (model.event.secondaryText ?? ""))
+        .shadow(color: configuration.appearance.glow ? glowColor.opacity(0.58) : .clear, radius: configuration.appearance.glow ? 14 : 0)
+        .scaleEffect(x: visible ? 1 : hiddenScale.width, y: visible ? 1 : hiddenScale.height)
+        .offset(hiddenOffset)
+        .opacity(visible ? 1 : hiddenOpacity)
+        .animation(visibilityAnimation, value: visible)
+        .animation(progressAnimation, value: progress)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(event.primaryText)
+        .accessibilityValue(event.progress.map { "\(Int($0 * 100)) percent" } ?? (event.secondaryText ?? ""))
     }
-    private var horizontal: some View { HStack(spacing: configuration.layout.spacing) { icon; VStack(alignment: .leading, spacing: max(3, configuration.layout.spacing * 0.45)) { header; progressView } } }
-    private var vertical: some View { VStack(spacing: configuration.layout.spacing) { icon; header; progressView } }
-    private var compact: some View { HStack(spacing: max(5, configuration.layout.spacing * 0.7)) { icon; if configuration.components.label { Text(model.event.primaryText).lineLimit(1) }; valueText; if configuration.components.progress { progressView.frame(maxWidth: 150) } } }
+
+    private var effectiveCornerRadius: Double {
+        configuration.presentation.target == .screenEdge ? min(configuration.layout.cornerRadius, 8) : configuration.layout.cornerRadius
+    }
+
+    private var horizontal: some View {
+        HStack(spacing: configuration.layout.spacing) {
+            icon
+            VStack(alignment: .leading, spacing: max(3, configuration.layout.spacing * 0.45)) {
+                header
+                progressView
+            }
+        }
+    }
+
+    private var vertical: some View {
+        VStack(spacing: configuration.layout.spacing) {
+            icon
+            header
+            progressView
+        }
+    }
+
+    private var compact: some View {
+        HStack(spacing: max(5, configuration.layout.spacing * 0.7)) {
+            icon
+            if configuration.components.label { Text(event.primaryText).lineLimit(1) }
+            if configuration.components.deviceName, let deviceText { Text(deviceText).foregroundStyle(secondaryColor).lineLimit(1) }
+            valueText
+            if configuration.components.progress { progressView.frame(maxWidth: 150) }
+        }
+        .font(.system(size: configuration.textSize, weight: .semibold, design: .rounded))
+    }
+
     private var edgeContent: some View {
         GeometryReader { proxy in
             if isVerticalScreenEdge {
                 progressView
                     .frame(width: proxy.size.height, height: proxy.size.width)
-                    .rotationEffect(.degrees(-90))
+                    .rotationEffect(.degrees(configuration.presentation.screenEdge == .left ? 90 : -90))
                     .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
             } else {
                 progressView
@@ -584,88 +779,257 @@ private struct HaloHUDRuntimeView: View {
         }
         .clipped()
     }
+
     @ViewBuilder private var icon: some View {
-        if configuration.components.icon { Image(systemName: model.event.icon).font(.system(size: configuration.iconSize, weight: .semibold)).foregroundStyle(accent).frame(minWidth: configuration.iconSize * 1.2) }
+        if configuration.components.icon {
+            Image(systemName: event.icon)
+                .font(.system(size: configuration.iconSize, weight: .semibold))
+                .foregroundStyle(accent)
+                .frame(minWidth: configuration.iconSize * 1.2)
+        }
     }
+
     private var header: some View {
         HStack(spacing: 8) {
-            if configuration.components.label {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(model.event.primaryText).font(.system(size: configuration.textSize, weight: .semibold, design: .rounded)).lineLimit(1)
-                    if let secondary = model.event.secondaryText, !secondary.isEmpty { Text(secondary).font(.system(size: max(9, configuration.textSize * 0.72))).foregroundStyle(.secondary).lineLimit(1) }
+            VStack(alignment: .leading, spacing: 1) {
+                if configuration.components.label {
+                    Text(event.primaryText)
+                        .font(.system(size: configuration.textSize, weight: .semibold, design: .rounded))
+                        .foregroundStyle(accent)
+                        .lineLimit(1)
+                }
+                if configuration.components.deviceName, let deviceText {
+                    Text(deviceText)
+                        .font(.system(size: max(9, configuration.textSize * 0.72)))
+                        .foregroundStyle(secondaryColor)
+                        .lineLimit(1)
+                } else if configuration.components.label, let secondary = event.secondaryText, !secondary.isEmpty {
+                    Text(secondary)
+                        .font(.system(size: max(9, configuration.textSize * 0.72)))
+                        .foregroundStyle(secondaryColor)
+                        .lineLimit(1)
                 }
             }
-            Spacer(minLength: 4); valueText
+            Spacer(minLength: 4)
+            valueText
         }
     }
+
     @ViewBuilder private var valueText: some View {
-        if configuration.components.value || configuration.components.percentage, let value = model.event.value {
-            let display = model.event.maximumValue == 100 ? Int(value.rounded()) : Int((progress * 100).rounded())
-            Text(configuration.components.percentage ? "\(display)%" : "\(display)").font(.system(size: configuration.textSize, weight: .bold, design: .rounded)).monospacedDigit()
+        let text = HaloHUDRenderFormatting.valueText(event: event, configuration: configuration)
+        if !text.isEmpty {
+            Text(text)
+                .font(.system(size: configuration.textSize, weight: .bold, design: .rounded))
+                .foregroundStyle(accent)
+                .monospacedDigit()
         }
     }
+
     @ViewBuilder private var progressView: some View {
-        if configuration.components.progress, model.event.progress != nil {
+        if configuration.components.progress, event.progress != nil {
             switch configuration.progressStyle {
+            case .bar:
+                GeometryReader { p in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(inactiveColor)
+                        Capsule().fill(progressColor).frame(width: max(2, p.size.width * progress))
+                    }
+                }.frame(height: configuration.presentation.target == .screenEdge ? nil : 7)
             case .segmentedBar:
-                HStack(spacing: 2) { ForEach(0..<max(2, configuration.segments), id: \.self) { i in Capsule().fill(Double(i + 1) / Double(max(2, configuration.segments)) <= progress ? progressColor : Color.white.opacity(0.13)) } }.frame(height: 7)
+                HStack(spacing: 2) {
+                    ForEach(0..<max(2, configuration.segments), id: \.self) { i in
+                        Capsule().fill(Double(i + 1) / Double(max(2, configuration.segments)) <= progress ? progressColor : inactiveColor)
+                    }
+                }.frame(height: 7)
             case .dots:
-                HStack(spacing: 4) { ForEach(0..<max(2, min(32, configuration.segments)), id: \.self) { i in Circle().fill(Double(i + 1) / Double(max(2, configuration.segments)) <= progress ? progressColor : Color.white.opacity(0.13)).frame(width: 5, height: 5) } }
-            case .ring, .arc, .gauge:
-                ZStack { Circle().stroke(Color.white.opacity(0.13), lineWidth: 5); Circle().trim(from: configuration.progressStyle == .arc ? 0.12 : 0, to: configuration.progressStyle == .arc ? 0.12 + progress * 0.76 : progress).stroke(progressColor, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(-90)) }.frame(width: 36, height: 36)
+                HStack(spacing: 4) {
+                    ForEach(0..<max(2, min(32, configuration.segments)), id: \.self) { i in
+                        Circle().fill(Double(i + 1) / Double(max(2, configuration.segments)) <= progress ? progressColor : inactiveColor).frame(width: 5, height: 5)
+                    }
+                }
+            case .ring:
+                circularProgress(trimStart: 0, trimLength: progress)
+            case .arc:
+                circularProgress(trimStart: 0.12, trimLength: progress * 0.76)
+            case .gauge:
+                ZStack {
+                    Circle().trim(from: 0.12, to: 0.88).stroke(inactiveColor, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(90))
+                    Circle().trim(from: 0.12, to: 0.12 + progress * 0.76).stroke(progressColor, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(90))
+                    Text("\(Int((progress * 100).rounded()))").font(.system(size: 9, weight: .bold, design: .rounded)).foregroundStyle(accent)
+                }.frame(width: 40, height: 40)
             case .numberOnly:
-                Text("\(Int((progress * 100).rounded()))").font(.system(size: configuration.textSize * 1.2, weight: .bold, design: .rounded)).foregroundStyle(progressColor)
+                Text("\(Int((progress * 100).rounded()))")
+                    .font(.system(size: configuration.textSize * 1.2, weight: .bold, design: .rounded))
+                    .foregroundStyle(progressColor)
             case .iconFill:
-                ZStack { Image(systemName: model.event.icon).foregroundStyle(Color.white.opacity(0.14)); Image(systemName: model.event.icon).foregroundStyle(progressColor).mask(alignment: .bottom) { GeometryReader { p in Rectangle().frame(height: p.size.height * progress).frame(maxHeight: .infinity, alignment: .bottom) } } }.font(.system(size: max(24, configuration.iconSize)))
+                ZStack {
+                    Image(systemName: event.icon).foregroundStyle(inactiveColor)
+                    Image(systemName: event.icon).foregroundStyle(progressColor).mask(alignment: .bottom) {
+                        GeometryReader { p in Rectangle().frame(height: p.size.height * progress).frame(maxHeight: .infinity, alignment: .bottom) }
+                    }
+                }.font(.system(size: max(24, configuration.iconSize)))
             case .glow:
-                GeometryReader { p in ZStack(alignment: .leading) { Capsule().fill(Color.white.opacity(0.1)); Capsule().fill(progressColor).frame(width: max(2, p.size.width * progress)).shadow(color: progressColor, radius: 8) } }.frame(height: 7)
+                GeometryReader { p in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(inactiveColor)
+                        Capsule().fill(progressColor).frame(width: max(2, p.size.width * progress)).shadow(color: progressColor, radius: 8)
+                    }
+                }.frame(height: 7)
             case .minimalLine:
-                GeometryReader { p in ZStack(alignment: .leading) { Rectangle().fill(Color.white.opacity(0.12)); Rectangle().fill(progressColor).frame(width: max(1, p.size.width * progress)) } }.frame(height: configuration.presentation.target == .screenEdge ? nil : 2)
+                GeometryReader { p in
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(inactiveColor)
+                        Rectangle().fill(progressColor).frame(width: max(1, p.size.width * progress))
+                    }
+                }.frame(height: configuration.presentation.target == .screenEdge ? nil : 2)
             case .wave:
-                HStack(spacing: 2) { ForEach(0..<18, id: \.self) { i in Capsule().fill(progressColor.opacity(Double(i + 1) / 18 <= progress ? 1 : 0.18)).frame(width: 3, height: 4 + 13 * abs(sin(Double(i) * 0.82))) } }.frame(height: 20)
-            default:
-                GeometryReader { p in ZStack(alignment: .leading) { Capsule().fill(Color.white.opacity(0.13)); Capsule().fill(progressColor).frame(width: max(2, p.size.width * progress)) } }.frame(height: configuration.presentation.target == .screenEdge ? nil : 7)
+                HStack(spacing: 2) {
+                    ForEach(0..<18, id: \.self) { i in
+                        Capsule()
+                            .fill(progressColor.opacity(Double(i + 1) / 18 <= progress ? 1 : 0.18))
+                            .frame(width: 3, height: 4 + 13 * abs(sin(Double(i) * 0.82)))
+                    }
+                }.frame(height: 20)
             }
         }
     }
+
+    private func circularProgress(trimStart: Double, trimLength: Double) -> some View {
+        ZStack {
+            Circle().stroke(inactiveColor, lineWidth: 5)
+            Circle()
+                .trim(from: trimStart, to: min(1, trimStart + trimLength))
+                .stroke(progressColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }.frame(width: 36, height: 36)
+    }
+
     @ViewBuilder private var background: some View {
-        if configuration.presentation.target == .screenEdge { Color.clear }
-        else if reduceTransparency || configuration.appearance.background == .solid { Color.black.opacity(max(0.45, configuration.appearance.backgroundOpacity)) }
-        else {
+        if configuration.presentation.target == .screenEdge {
+            Color.clear
+        } else if reduceTransparency || configuration.appearance.background == .solid {
+            Color.black.opacity(max(0.45, configuration.appearance.backgroundOpacity))
+        } else {
             switch configuration.appearance.background {
-            case .clear: Color.clear
-            case .gradient: LinearGradient(colors: [accent.opacity(0.48), .black.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing)
-            case .glass: Rectangle().fill(.ultraThinMaterial).overlay(Color.black.opacity(max(0, configuration.appearance.backgroundOpacity - 0.45)))
-            case .image, .video: Rectangle().fill(.ultraThinMaterial).overlay(accent.opacity(0.12))
-            case .solid: Color.black.opacity(configuration.appearance.backgroundOpacity)
+            case .clear:
+                Color.clear
+            case .gradient:
+                LinearGradient(colors: [accent.opacity(0.48), secondaryColor.opacity(0.18), .black.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .blur(radius: configuration.appearance.blur * 0.08)
+            case .glass:
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .opacity(0.28 + 0.72 * min(1, max(0, configuration.appearance.glassIntensity)))
+                    .overlay(Color.black.opacity(max(0, configuration.appearance.backgroundOpacity - 0.45)))
+                    .blur(radius: configuration.appearance.blur * 0.025)
+            case .image, .video:
+                // Asset-backed HUD backgrounds are not persisted by the current HUD model yet.
+                // Use an explicit styled fallback rather than pretending an absent asset is loaded.
+                LinearGradient(colors: [accent.opacity(0.32), secondaryColor.opacity(0.18), .black.opacity(0.82)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .blur(radius: configuration.appearance.blur * 0.08)
+            case .solid:
+                Color.black.opacity(configuration.appearance.backgroundOpacity)
             }
         }
     }
+
+    @ViewBuilder private var noiseOverlay: some View {
+        if configuration.appearance.noise && configuration.presentation.target != .screenEdge {
+            Canvas { context, size in
+                for index in 0..<96 {
+                    let x = pseudoRandom(index * 2 + 1) * size.width
+                    let y = pseudoRandom(index * 2 + 2) * size.height
+                    let alpha = 0.018 + pseudoRandom(index + 301) * 0.028
+                    context.fill(Path(CGRect(x: x, y: y, width: 1, height: 1)), with: .color(.white.opacity(alpha)))
+                }
+            }
+            .blendMode(.plusLighter)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private func pseudoRandom(_ seed: Int) -> Double {
+        let raw = sin(Double(seed) * 12.9898 + 78.233) * 43758.5453
+        return raw - floor(raw)
+    }
+
     private func resolvedColor(_ color: HaloHUDColorConfiguration) -> Color {
         switch color.source {
-        case .fixed: return Color(hue: color.hue, saturation: color.saturation, brightness: color.brightness, opacity: color.alpha)
-        case .albumArtwork: if let first = model.palette.first { return first.color.opacity(color.alpha) }; return .accentColor.opacity(color.alpha)
-        case .systemAppearance: return .primary.opacity(color.alpha)
-        case .automaticContrast: return contrast == .increased ? .primary : .white.opacity(color.alpha)
-        case .wallpaper, .systemAccent: return .accentColor.opacity(color.alpha)
+        case .fixed:
+            return Color(hue: color.hue, saturation: color.saturation, brightness: color.brightness, opacity: color.alpha)
+        case .albumArtwork:
+            if let first = palette.first { return first.color.opacity(color.alpha) }
+            return .accentColor.opacity(color.alpha)
+        case .systemAppearance:
+            return .primary.opacity(color.alpha)
+        case .automaticContrast:
+            return contrast == .increased ? .primary : .white.opacity(color.alpha)
+        case .wallpaper, .systemAccent:
+            return .accentColor.opacity(color.alpha)
         }
     }
-    private var entranceScale: CGFloat {
-        guard !reduceMotion else { return 1 }
-        switch configuration.animation.entrance { case .scale, .spring, .morph, .liquid: return 0.92 + 0.06 * (1 - configuration.animation.intensity); default: return 1 }
+
+    private var hiddenScale: CGSize {
+        guard !reduceMotion else { return CGSize(width: 1, height: 1) }
+        if isExiting {
+            switch configuration.animation.exit {
+            case .fade: return CGSize(width: 1, height: 1)
+            case .collapse: return CGSize(width: 0.94, height: 0.25)
+            case .slide: return CGSize(width: 1, height: 1)
+            case .scale: return CGSize(width: 0.86, height: 0.86)
+            case .morphBack: return CGSize(width: 0.92, height: 0.82)
+            }
+        }
+        switch configuration.animation.entrance {
+        case .fade, .slide: return CGSize(width: 1, height: 1)
+        case .scale: return CGSize(width: 0.86, height: 0.86)
+        case .spring: return CGSize(width: 0.92, height: 0.92)
+        case .morph: return CGSize(width: 0.90, height: 0.78)
+        case .notchExpand: return CGSize(width: 0.96, height: 0.32)
+        case .liquid: return CGSize(width: 0.86, height: 0.72)
+        }
     }
-    private var entranceOffset: CGFloat {
-        guard !reduceMotion else { return 0 }
-        switch configuration.animation.entrance { case .slide, .notchExpand: return -12 * configuration.animation.intensity; default: return 0 }
+
+    private var hiddenOffset: CGSize {
+        guard !visible, !reduceMotion else { return .zero }
+        let amount = 18 * max(0.15, configuration.animation.intensity)
+        if isExiting {
+            switch configuration.animation.exit {
+            case .slide: return CGSize(width: 0, height: amount)
+            default: return .zero
+            }
+        }
+        switch configuration.animation.entrance {
+        case .slide, .notchExpand: return CGSize(width: 0, height: -amount)
+        default: return .zero
+        }
     }
-    private var viewAnimation: Animation? {
+
+    private var hiddenOpacity: Double {
+        guard !visible else { return 1 }
+        if reduceMotion { return 0 }
+        return isExiting && configuration.animation.exit == .collapse ? 0.12 : 0
+    }
+
+    private var visibilityAnimation: Animation? {
         guard !reduceMotion else { return nil }
-        let duration = configuration.animation.entranceDuration
-        if configuration.animation.entrance == .spring { return .spring(response: max(0.12, duration), dampingFraction: configuration.animation.springDamping) }
-        return .easeOut(duration: duration)
+        if isExiting {
+            return .easeInOut(duration: max(0.01, configuration.animation.exitDuration))
+        }
+        if configuration.animation.entrance == .spring {
+            let stiffness = max(20, configuration.animation.springStiffness)
+            let damping = max(1, 2 * sqrt(stiffness) * configuration.animation.springDamping)
+            return .interpolatingSpring(stiffness: stiffness, damping: damping)
+        }
+        return .easeOut(duration: max(0.01, configuration.animation.entranceDuration))
     }
+
     private var progressAnimation: Animation? {
         guard !reduceMotion else { return nil }
-        switch configuration.animation.progress { case .instant: return nil; case .spring: return .spring(response: 0.22, dampingFraction: 0.82); case .smooth: return .easeOut(duration: 0.16) }
+        switch configuration.animation.progress {
+        case .instant: return nil
+        case .spring: return .spring(response: 0.22, dampingFraction: 0.82)
+        case .smooth: return .easeOut(duration: 0.16)
+        }
     }
 }
