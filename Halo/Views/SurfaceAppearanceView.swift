@@ -74,10 +74,12 @@ struct HaloContour: Shape {
     var screen: NSScreen?
     var body: some View {
         Section("Closed size") {
-            HStack { Text("Width"); Spacer(); Text("\(Int(appearance.compactWidth)) pt").monospacedDigit() }
-            Slider(value: $appearance.compactWidth, in: 16...640, step: 1, onEditingChanged: { GeometryPreview.update(expanded: false, editing: $0, display: screen) }).accessibilityLabel("Closed width")
-            HStack { Text("Height"); Spacer(); Text("\(Int(appearance.surface.compactHeight)) pt").monospacedDigit() }
-            Slider(value: $appearance.surface.compactHeight, in: 16...100, step: 1, onEditingChanged: { GeometryPreview.update(expanded: false, editing: $0, display: screen) }).accessibilityLabel("Closed height")
+            PreciseSlider(title: "Width", value: $appearance.compactWidth, range: 16...640, step: 1, suffix: "pt", onEditingChanged: {
+                GeometryPreview.update(expanded: false, editing: $0, display: screen)
+            })
+            PreciseSlider(title: "Height", value: $appearance.surface.compactHeight, range: 16...100, step: 1, suffix: "pt", onEditingChanged: {
+                GeometryPreview.update(expanded: false, editing: $0, display: screen)
+            })
             if let screen {
                 let geometry = WindowManager.geometry(screen: screen, theme: theme, appearance: appearance)
                 Text("Effective closed size: \(Int(geometry.compactWidth)) × \(Int(geometry.compactHeight)) pt.").font(.caption)
@@ -97,11 +99,11 @@ struct HaloContour: Shape {
         Section("Shape") {
             Picker("Contour", selection: $appearance.surface.shape) { ForEach(SurfaceShapeKind.allCases) { Text($0.rawValue).tag($0) } }
             if appearance.surface.shape == .asymmetric {
-                Slider(value: $appearance.surface.topRadius, in: 0...64) { Text("Top corners") }
-                Slider(value: $appearance.surface.bottomRadius, in: 0...64) { Text("Bottom corners") }
+                PreciseSlider(title: "Top corners", value: $appearance.surface.topRadius, range: 0...64, step: 1, suffix: "pt")
+                PreciseSlider(title: "Bottom corners", value: $appearance.surface.bottomRadius, range: 0...64, step: 1, suffix: "pt")
             }
             if [.scoop, .chamfer, .tapered].contains(appearance.surface.shape) {
-                Slider(value: $appearance.surface.shoulder, in: 0...48) { Text("Shoulder / cut depth") }
+                PreciseSlider(title: "Shoulder / cut depth", value: $appearance.surface.shoulder, range: 0...48, step: 1, suffix: "pt")
             }
             HaloContour(kind: appearance.surface.shape, radius: theme.cornerRadius, topRadius: appearance.surface.topRadius,
                         bottomRadius: appearance.surface.bottomRadius, shoulder: appearance.surface.shoulder)
@@ -111,10 +113,9 @@ struct HaloContour: Shape {
         Section("Transitions") {
             Picker("Opening", selection: $appearance.surface.opening) { ForEach(SurfaceTransition.allCases) { Text($0.rawValue).tag($0) } }
             Picker("Closing", selection: $appearance.surface.closing) { ForEach(SurfaceTransition.allCases) { Text($0.rawValue).tag($0) } }
-            HStack { Text("Duration"); Spacer(); Text(String(format: "%.2f s", appearance.surface.duration)).monospacedDigit() }
-            Slider(value: $appearance.surface.duration, in: 0.1...1.2, step: 0.05).accessibilityLabel("Transition duration")
+            PreciseSlider(title: "Duration", value: $appearance.surface.duration, range: 0.1...1.2, step: 0.05, suffix: "s", decimals: 2)
             if appearance.surface.opening == .spring || appearance.surface.closing == .spring {
-                Slider(value: $appearance.surface.damping, in: 0.4...1) { Text("Spring damping") }
+                PreciseSlider(title: "Spring damping", value: $appearance.surface.damping, range: 0.4...1, step: 0.05, decimals: 2)
                 Text("Lower damping adds bounce; higher damping settles sooner.").font(.caption)
             }
             Text("Reduce Motion and the animation-off setting make transitions immediate.").font(.caption).foregroundStyle(.secondary)
@@ -124,9 +125,8 @@ struct HaloContour: Shape {
         let value = Binding<Double>(get: { (appearance.surface.offsets ?? SurfaceOffsets())[keyPath: key] }, set: {
             var offsets = appearance.surface.offsets ?? SurfaceOffsets(); offsets[keyPath: key] = $0; appearance.surface.offsets = offsets
         })
-        return VStack(alignment: .leading) {
-            HStack { Text(title); Spacer(); Text("\(Int(value.wrappedValue)) pt").monospacedDigit() }
-            Slider(value: value, in: -1000...1000, step: 1, onEditingChanged: { GeometryPreview.update(expanded: expanded, editing: $0, display: screen) }).accessibilityLabel(title)
-        }
+        return PreciseSlider(title: title, value: value, range: -1000...1000, step: 1, suffix: "pt", onEditingChanged: {
+            GeometryPreview.update(expanded: expanded, editing: $0, display: screen)
+        })
     }
 }
