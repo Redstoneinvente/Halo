@@ -14,6 +14,8 @@ final class HaloHUDRuntimeState: ObservableObject {
     @Published var sequence = 0
 }
 
+/// Callback-visible replacement state is deliberately isolated from MainActor because a CGEventTap
+/// must decide synchronously whether an event is passed through to macOS.
 private final class HaloHUDTapState {
     private let lock = NSLock()
     private var keys = Set<Int>()
@@ -51,21 +53,27 @@ private final class HaloHUDDisplayBrightnessProvider {
 private final class HaloHUDKeyboardBrightnessProvider {
     private let classes = ["AppleHIDKeyboardEventDriverV2", "AppleHIDKeyboardEventDriver", "AppleUserHIDEventDriver"]
     private let keys = ["KeyboardBacklightBrightness", "KeyboardBacklightLevel"]
+    private var registryOptions: IOOptionBits {
+        IOOptionBits(kIORegistryIterateRecursively) | IOOptionBits(kIORegistryIterateParents)
+    }
     func current() -> Double? {
-        for name in classes { if let value = withEntries(name)({ self.read($0) }) { return value } }
+        for name in classes {
+            if let value = withEntries(name, { self.read($0) }) { return value }
+        }
         return nil
     }
     @discardableResult func set(_ value: Double) -> Bool {
         let target = min(1, max(0, value))
-        for name in classes { if withEntries(name)({ self.write($0, target) ? true : nil }) == true { return true } }
+        for name in classes {
+            if withEntries(name, { self.write($0, target) ? true : nil }) == true { return true }
+        }
         return false
     }
     func canSet() -> Bool { guard let value = current() else { return false }; return set(value) }
     private func read(_ entry: io_service_t) -> Double? {
         for keyName in keys {
             let key = keyName as CFString
-            if let value = IORegistryEntrySearchCFProperty(entry, kIOServicePlane, key, kCFAllocatorDefault,
-                                                            IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)),
+            if let value = IORegistryEntrySearchCFProperty(entry, kIOServicePlane, key, kCFAllocatorDefault, registryOptions),
                let number = value as? NSNumber {
                 let raw = number.doubleValue
                 let scale = raw <= 1.0001 ? 1.0 : (raw <= 255 ? 255.0 : 4095.0)
@@ -77,8 +85,7 @@ private final class HaloHUDKeyboardBrightnessProvider {
     private func write(_ entry: io_service_t, _ normalized: Double) -> Bool {
         for keyName in keys {
             let key = keyName as CFString
-            guard let value = IORegistryEntrySearchCFProperty(entry, kIOServicePlane, key, kCFAllocatorDefault,
-                                                               IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)),
+            guard let value = IORegistryEntrySearchCFProperty(entry, kIOServicePlane, key, kCFAllocatorDefault, registryOptions),
                   let existing = value as? NSNumber else { continue }
             let raw = existing.doubleValue
             let scale = raw <= 1.0001 ? 1.0 : (raw <= 255 ? 255.0 : 4095.0)
@@ -113,6 +120,7 @@ final class HaloHUDEngine {
     private var eventSource: CFRunLoopSource?
     private var globalMonitor: Any?
     private var previewObserver: NSObjectProtocol?
+    private var previewExitObserver: NSObjectProtocol?
     private var subscriptions = Set<AnyCancellable>()
     private var hideWork: DispatchWorkItem?
     private var menuHideWork: DispatchWorkItem?
@@ -129,17 +137,19 @@ final class HaloHUDEngine {
     init(workspace: WorkspaceStore) { self.workspace = workspace }
 
     func start() {
-        createPanel()
-        configureInput()
-        installProviders()
+        createPanel(); configureInput(); installProviders()
         previewObserver = NotificationCenter.default.addObserver(forName: .init("HaloHUDPreview"), object: nil, queue: .main) { [weak self] note in
             Task { @MainActor in self?.preview(note) }
+        }
+        previewExitObserver = NotificationCenter.default.addObserver(forName: .init("HaloHUDPreviewExit"), object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.hide(immediate: false) }
         }
     }
 
     func stop() {
         tearDownInput(); hideWork?.cancel(); menuHideWork?.cancel(); subscriptions.removeAll()
         if let previewObserver { NotificationCenter.default.removeObserver(previewObserver) }
+        if let previewExitObserver { NotificationCenter.default.removeObserver(previewExitObserver) }
         panel?.orderOut(nil); panel = nil
         if let menuItem { NSStatusBar.system.removeStatusItem(menuItem); self.menuItem = nil }
     }
@@ -151,7 +161,7 @@ final class HaloHUDEngine {
             guard settings.isEnabled(model.event.kind) else { hide(immediate: true); return }
             model.configuration = resolvedConfiguration(for: model.event, settings: settings)
             model.palette = workspace.media.artworkColors
-            if let panel { position(panel, event: model.event, configuration: model.configuration) }
+            if let panel { position(panel, configuration: model.configuration) }
         }
     }
 
@@ -162,8 +172,7 @@ final class HaloHUDEngine {
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
         panel.level = .statusBar; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.ignoresMouseEvents = true; panel.hidesOnDeactivate = false; panel.isReleasedWhenClosed = false
-        panel.contentView = NSHostingView(rootView: HaloHUDRuntimeView(model: model))
-        panel.orderOut(nil); self.panel = panel
+        panel.contentView = NSHostingView(rootView: HaloHUDRuntimeView(model: model)); panel.orderOut(nil); self.panel = panel
     }
 
     private func configureInput() {
@@ -173,7 +182,7 @@ final class HaloHUDEngine {
         workspace.audio.refresh()
         var replacement = Set<Int>()
         let defaults = UserDefaults.standard
-        // Preserve the user's existing explicit native-suppression choices while the new model migrates.
+        // Native suppression remains explicitly opt-in and is enabled only after a writable backend probe.
         if settings.isEnabled(.volume), defaults.bool(forKey: "HaloHUDReplaceVolume"), workspace.audio.canSetVolume { replacement.formUnion([0, 1]) }
         if settings.isEnabled(.mute), defaults.bool(forKey: "HaloHUDReplaceVolume"), workspace.audio.canSetVolume { replacement.insert(7) }
         if settings.isEnabled(.displayBrightness), defaults.bool(forKey: "HaloHUDReplaceBrightness"), displayBrightness.canSet() { replacement.formUnion([2, 3]) }
@@ -193,18 +202,17 @@ final class HaloHUDEngine {
 
     private func installEventTap() -> Bool {
         let mask = CGEventMask(1) << 14
-        let state = tapState
+        let callbackState = tapState
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                           eventsOfInterest: mask, callback: { _, type, event, refcon in
             guard let refcon else { return Unmanaged.passUnretained(event) }
             let engine = Unmanaged<HaloHUDEngine>.fromOpaque(refcon).takeUnretainedValue()
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-                Task { @MainActor in engine.reenableTap() }
-                return Unmanaged.passUnretained(event)
+                Task { @MainActor in engine.reenableTap() }; return Unmanaged.passUnretained(event)
             }
             guard type.rawValue == 14, let nsEvent = NSEvent(cgEvent: event), nsEvent.subtype.rawValue == 8 else { return Unmanaged.passUnretained(event) }
             let data = nsEvent.data1, key = (data & 0xFFFF0000) >> 16
-            guard state.contains(key) else { return Unmanaged.passUnretained(event) }
+            guard callbackState.contains(key) else { return Unmanaged.passUnretained(event) }
             let keyState = ((data & 0xFFFF) & 0xFF00) >> 8
             if keyState == 0xA { Task { @MainActor in engine.handleReplacementKey(key) } }
             return nil
@@ -213,15 +221,13 @@ final class HaloHUDEngine {
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes); CGEvent.tapEnable(tap: tap, enable: true)
         eventTap = tap; eventSource = source; return true
     }
-
     private func reenableTap() { if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) } }
 
     private func handleObserved(_ event: NSEvent) {
         if event.type == .flagsChanged {
             let caps = event.modifierFlags.contains(.capsLock)
             guard caps != lastCapsLock else { return }; lastCapsLock = caps
-            emit(HaloHUDEvent(kind: .capsLock, primaryText: caps ? "Caps Lock On" : "Caps Lock Off", value: caps ? 1 : 0, state: caps ? "on" : "off"))
-            return
+            emit(HaloHUDEvent(kind: .capsLock, primaryText: caps ? "Caps Lock On" : "Caps Lock Off", value: caps ? 1 : 0, state: caps ? "on" : "off")); return
         }
         guard event.type == .systemDefined, event.subtype.rawValue == 8 else { return }
         let data = event.data1, key = (data & 0xFFFF0000) >> 16
@@ -277,9 +283,8 @@ final class HaloHUDEngine {
 
     private func installProviders() {
         workspace.system.$battery.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] value in
-            guard let self, let value else { return }; defer { self.hasSeenBattery = true }
-            guard self.hasSeenBattery else { return }
-            self.emit(HaloHUDEvent(kind: .batteryStatus, value: Double(value), minimumValue: 0, maximumValue: 100, progress: Double(value) / 100, secondaryText: "Battery"))
+            guard let self, let value else { return }; defer { self.hasSeenBattery = true }; guard self.hasSeenBattery else { return }
+            self.emit(HaloHUDEvent(kind: .batteryStatus, secondaryText: "Battery", value: Double(value), minimumValue: 0, maximumValue: 100, progress: Double(value) / 100))
         }.store(in: &subscriptions)
         workspace.system.$charging.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] charging in
             guard let self else { return }; defer { self.hasSeenCharging = true }; guard self.hasSeenCharging else { return }
@@ -308,18 +313,14 @@ final class HaloHUDEngine {
         let raw = note.userInfo?["kind"] as? String ?? "volume"
         let value = (note.userInfo?["value"] as? Double) ?? 0.68
         let kind: HaloHUDEventKind
-        switch raw {
-        case "brightness": kind = .displayBrightness
-        case "keyboard": kind = .keyboardBrightness
-        default: kind = HaloHUDEventKind(rawValue: raw) ?? .volume
-        }
+        switch raw { case "brightness": kind = .displayBrightness; case "keyboard": kind = .keyboardBrightness; default: kind = HaloHUDEventKind(rawValue: raw) ?? .volume }
         emit(HaloHUDEvent(kind: kind, value: value), force: true)
     }
 
     func emit(_ event: HaloHUDEvent, force: Bool = false) {
         let settings = resolvedSettings
         guard force || settings.isEnabled(event.kind) else { return }
-        var configuration = resolvedConfiguration(for: event, settings: settings)
+        let configuration = resolvedConfiguration(for: event, settings: settings)
         guard configuration.presentation.target != .disabled else { return }
         route(event, configuration: configuration, depth: 0)
     }
@@ -338,21 +339,17 @@ final class HaloHUDEngine {
         case .disabled: return
         case .menuBar: showMenuBar(event, configuration: configuration)
         case .notch:
-            guard let screen = screen(for: configuration), screen.safeAreaInsets.top > 0 else {
-                var fallback = configuration; fallback.presentation.target = configuration.behavior.fallbackTarget
-                if fallback.presentation.target == .notch { fallback.presentation.target = .floating }
-                route(event, configuration: fallback, depth: depth + 1); return
-            }
+            guard let screen = screen(for: configuration), screen.safeAreaInsets.top > 0 else { routeFallback(event, configuration: configuration, depth: depth); return }
             let side = resolvedNotchSide(configuration.presentation.notchSide)
-            if configuration.behavior.collision == .showExternally && notchOccupied(side) {
-                var fallback = configuration; fallback.presentation.target = configuration.behavior.fallbackTarget
-                if fallback.presentation.target == .notch { fallback.presentation.target = .floating }
-                route(event, configuration: fallback, depth: depth + 1); return
-            }
+            if configuration.behavior.collision == .showExternally && notchOccupied(side) { routeFallback(event, configuration: configuration, depth: depth); return }
             showPanel(event, configuration: configuration)
-        case .floating, .nearCursor, .screenEdge:
-            showPanel(event, configuration: configuration)
+        case .floating, .nearCursor, .screenEdge: showPanel(event, configuration: configuration)
         }
+    }
+    private func routeFallback(_ event: HaloHUDEvent, configuration: HaloHUDConfiguration, depth: Int) {
+        var fallback = configuration; fallback.presentation.target = configuration.behavior.fallbackTarget
+        if fallback.presentation.target == .notch || fallback.presentation.target == .disabled { fallback.presentation.target = .floating }
+        route(event, configuration: fallback, depth: depth + 1)
     }
 
     private func showPanel(_ event: HaloHUDEvent, configuration: HaloHUDConfiguration) {
@@ -362,41 +359,31 @@ final class HaloHUDEngine {
         }
         let repeated = model.visible && model.event.kind == event.kind
         model.event = event; model.configuration = configuration; model.palette = workspace.media.artworkColors; model.sequence += 1
-        position(panel, event: event, configuration: configuration)
-        hideWork?.cancel(); panel.orderFrontRegardless()
-        if !repeated {
-            model.visible = false
-            DispatchQueue.main.async { [weak self] in self?.model.visible = true }
-        } else { model.visible = true }
+        position(panel, configuration: configuration); hideWork?.cancel(); panel.orderFrontRegardless()
+        if !repeated { model.visible = false; DispatchQueue.main.async { [weak self] in self?.model.visible = true } }
+        else { model.visible = true }
         scheduleHide(configuration.behavior.displayDuration)
     }
-
     private func scheduleHide(_ delay: Double) {
         let work = DispatchWorkItem { [weak self] in self?.hide(immediate: false) }
         hideWork = work; DispatchQueue.main.asyncAfter(deadline: .now() + min(10, max(0.2, delay)), execute: work)
     }
-
     private func hide(immediate: Bool) {
         hideWork?.cancel(); guard let panel else { return }
         if immediate { model.visible = false; panel.orderOut(nil); presentNext(); return }
         model.visible = false
         let delay = min(2, max(0, model.configuration.animation.exitDuration))
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak panel] in
-            guard let self, let panel, !self.model.visible else { return }
-            panel.orderOut(nil); self.presentNext()
+            guard let self, let panel, !self.model.visible else { return }; panel.orderOut(nil); self.presentNext()
         }
     }
-
-    private func presentNext() {
-        guard !queue.isEmpty else { return }; let next = queue.removeFirst(); showPanel(next.0, configuration: next.1)
-    }
+    private func presentNext() { guard !queue.isEmpty else { return }; let next = queue.removeFirst(); showPanel(next.0, configuration: next.1) }
 
     private func showMenuBar(_ event: HaloHUDEvent, configuration: HaloHUDConfiguration) {
         if menuItem == nil { menuItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength) }
         guard let button = menuItem?.button else { return }
         button.image = NSImage(systemSymbolName: event.icon, accessibilityDescription: event.primaryText)
-        if let progress = event.progress { button.title = " \(Int((progress * 100).rounded()))%" }
-        else { button.title = " " + event.primaryText }
+        button.title = event.progress.map { " \(Int(($0 * 100).rounded()))%" } ?? " " + event.primaryText
         menuHideWork?.cancel()
         let work = DispatchWorkItem { [weak self] in guard let self, let item = self.menuItem else { return }; NSStatusBar.system.removeStatusItem(item); self.menuItem = nil }
         menuHideWork = work; DispatchQueue.main.asyncAfter(deadline: .now() + configuration.behavior.displayDuration, execute: work)
@@ -415,13 +402,12 @@ final class HaloHUDEngine {
         return NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main ?? NSScreen.screens.first
     }
 
-    private func position(_ panel: NSPanel, event: HaloHUDEvent, configuration: HaloHUDConfiguration) {
+    private func position(_ panel: NSPanel, configuration: HaloHUDConfiguration) {
         guard let screen = screen(for: configuration) else { return }
         let visible = screen.visibleFrame, full = screen.frame, margin = CGFloat(max(0, configuration.layout.edgeMargin))
         var width = CGFloat(min(configuration.layout.maximumWidth, max(configuration.layout.minimumWidth, configuration.layout.width)))
         var height = CGFloat(max(24, configuration.layout.height))
         var x = visible.midX - width / 2, y = visible.maxY - height - margin
-
         switch configuration.presentation.target {
         case .screenEdge:
             let length = CGFloat(configuration.presentation.screenEdgeLength), thickness = CGFloat(configuration.presentation.screenEdgeThickness)
@@ -438,13 +424,8 @@ final class HaloHUDEngine {
                 if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea { return max(0, right.minX - left.maxX) }
                 return screen.safeAreaInsets.top > 0 ? 190 : 0
             }()
-            let side = resolvedNotchSide(configuration.presentation.notchSide)
-            y = full.maxY - height
-            switch side {
-            case .left: x = full.midX - physicalWidth / 2 - width
-            case .right: x = full.midX + physicalWidth / 2
-            case .full, .automatic: x = full.midX - width / 2
-            }
+            let side = resolvedNotchSide(configuration.presentation.notchSide); y = full.maxY - height
+            switch side { case .left: x = full.midX - physicalWidth / 2 - width; case .right: x = full.midX + physicalWidth / 2; case .full, .automatic: x = full.midX - width / 2 }
         default:
             switch configuration.presentation.floatingPosition {
             case .topLeft: x = visible.minX + margin; y = visible.maxY - height - margin
@@ -482,7 +463,6 @@ private struct HaloHUDRuntimeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
-
     private var configuration: HaloHUDConfiguration { model.configuration }
     private var progress: Double { min(1, max(0, model.event.progress ?? 0)) }
     private var accent: Color { resolvedColor(configuration.appearance.primary) }
@@ -502,27 +482,15 @@ private struct HaloHUDRuntimeView: View {
         .clipShape(RoundedRectangle(cornerRadius: configuration.presentation.target == .screenEdge ? min(configuration.layout.cornerRadius, 8) : configuration.layout.cornerRadius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: configuration.presentation.target == .screenEdge ? min(configuration.layout.cornerRadius, 8) : configuration.layout.cornerRadius, style: .continuous).stroke(resolvedColor(configuration.appearance.borderColor).opacity(configuration.appearance.border ? configuration.appearance.borderOpacity : 0), lineWidth: contrast == .increased ? 1.5 : 1))
         .shadow(color: configuration.appearance.shadow ? .black.opacity(0.32) : .clear, radius: 16, y: 7)
-        .scaleEffect(model.visible ? 1 : entranceScale)
-        .offset(y: model.visible ? 0 : entranceOffset)
-        .opacity(model.visible ? 1 : 0)
-        .animation(viewAnimation, value: model.visible)
-        .animation(progressAnimation, value: progress)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(model.event.primaryText)
+        .scaleEffect(model.visible ? 1 : entranceScale).offset(y: model.visible ? 0 : entranceOffset).opacity(model.visible ? 1 : 0)
+        .animation(viewAnimation, value: model.visible).animation(progressAnimation, value: progress)
+        .accessibilityElement(children: .combine).accessibilityLabel(model.event.primaryText)
         .accessibilityValue(model.event.progress.map { "\(Int($0 * 100)) percent" } ?? (model.event.secondaryText ?? ""))
     }
-
-    private var horizontal: some View {
-        HStack(spacing: configuration.layout.spacing) { icon; VStack(alignment: .leading, spacing: max(3, configuration.layout.spacing * 0.45)) { header; progressView } }
-    }
-    private var vertical: some View {
-        VStack(spacing: configuration.layout.spacing) { icon; header; progressView }
-    }
-    private var compact: some View {
-        HStack(spacing: max(5, configuration.layout.spacing * 0.7)) { icon; if configuration.components.label { Text(model.event.primaryText).lineLimit(1) }; valueText; if configuration.components.progress { progressView.frame(maxWidth: 150) } }
-    }
+    private var horizontal: some View { HStack(spacing: configuration.layout.spacing) { icon; VStack(alignment: .leading, spacing: max(3, configuration.layout.spacing * 0.45)) { header; progressView } } }
+    private var vertical: some View { VStack(spacing: configuration.layout.spacing) { icon; header; progressView } }
+    private var compact: some View { HStack(spacing: max(5, configuration.layout.spacing * 0.7)) { icon; if configuration.components.label { Text(model.event.primaryText).lineLimit(1) }; valueText; if configuration.components.progress { progressView.frame(maxWidth: 150) } } }
     private var edgeContent: some View { progressView.frame(maxWidth: .infinity, maxHeight: .infinity) }
-
     @ViewBuilder private var icon: some View {
         if configuration.components.icon { Image(systemName: model.event.icon).font(.system(size: configuration.iconSize, weight: .semibold)).foregroundStyle(accent).frame(minWidth: configuration.iconSize * 1.2) }
     }
@@ -543,7 +511,6 @@ private struct HaloHUDRuntimeView: View {
             Text(configuration.components.percentage ? "\(display)%" : "\(display)").font(.system(size: configuration.textSize, weight: .bold, design: .rounded)).monospacedDigit()
         }
     }
-
     @ViewBuilder private var progressView: some View {
         if configuration.components.progress, model.event.progress != nil {
             switch configuration.progressStyle {
@@ -558,9 +525,9 @@ private struct HaloHUDRuntimeView: View {
             case .iconFill:
                 ZStack { Image(systemName: model.event.icon).foregroundStyle(Color.white.opacity(0.14)); Image(systemName: model.event.icon).foregroundStyle(progressColor).mask(alignment: .bottom) { GeometryReader { p in Rectangle().frame(height: p.size.height * progress).frame(maxHeight: .infinity, alignment: .bottom) } } }.font(.system(size: max(24, configuration.iconSize)))
             case .glow:
-                GeometryReader { p in Capsule().fill(Color.white.opacity(0.1)); Capsule().fill(progressColor).frame(width: max(2, p.size.width * progress)).shadow(color: progressColor, radius: 8) }.frame(height: 7)
+                GeometryReader { p in ZStack(alignment: .leading) { Capsule().fill(Color.white.opacity(0.1)); Capsule().fill(progressColor).frame(width: max(2, p.size.width * progress)).shadow(color: progressColor, radius: 8) } }.frame(height: 7)
             case .minimalLine:
-                GeometryReader { p in Rectangle().fill(Color.white.opacity(0.12)); Rectangle().fill(progressColor).frame(width: max(1, p.size.width * progress)) }.frame(height: configuration.presentation.target == .screenEdge ? nil : 2)
+                GeometryReader { p in ZStack(alignment: .leading) { Rectangle().fill(Color.white.opacity(0.12)); Rectangle().fill(progressColor).frame(width: max(1, p.size.width * progress)) } }.frame(height: configuration.presentation.target == .screenEdge ? nil : 2)
             case .wave:
                 HStack(spacing: 2) { ForEach(0..<18, id: \.self) { i in Capsule().fill(progressColor.opacity(Double(i + 1) / 18 <= progress ? 1 : 0.18)).frame(width: 3, height: 4 + 13 * abs(sin(Double(i) * 0.82))) } }.frame(height: 20)
             default:
@@ -568,7 +535,6 @@ private struct HaloHUDRuntimeView: View {
             }
         }
     }
-
     @ViewBuilder private var background: some View {
         if configuration.presentation.target == .screenEdge { Color.clear }
         else if reduceTransparency || configuration.appearance.background == .solid { Color.black.opacity(max(0.45, configuration.appearance.backgroundOpacity)) }
@@ -582,12 +548,10 @@ private struct HaloHUDRuntimeView: View {
             }
         }
     }
-
     private func resolvedColor(_ color: HaloHUDColorConfiguration) -> Color {
         switch color.source {
         case .fixed: return Color(hue: color.hue, saturation: color.saturation, brightness: color.brightness, opacity: color.alpha)
-        case .albumArtwork:
-            if let first = model.palette.first { return first.color.opacity(color.alpha) }; return .accentColor.opacity(color.alpha)
+        case .albumArtwork: if let first = model.palette.first { return first.color.opacity(color.alpha) }; return .accentColor.opacity(color.alpha)
         case .systemAppearance: return .primary.opacity(color.alpha)
         case .automaticContrast: return contrast == .increased ? .primary : .white.opacity(color.alpha)
         case .wallpaper, .systemAccent: return .accentColor.opacity(color.alpha)
