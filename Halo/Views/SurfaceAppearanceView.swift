@@ -72,6 +72,8 @@ struct HaloContour: Shape {
     @Binding var appearance: Appearance
     let theme: Theme
     var screen: NSScreen?
+    @AppStorage("HaloContextOffsetX") private var contextOffsetX = 0.0
+    @AppStorage("HaloContextOffsetY") private var contextOffsetY = 0.0
     var body: some View {
         Section("Closed size") {
             PreciseSlider(title: "Width", value: $appearance.compactWidth, range: 16...640, step: 1, suffix: "pt", onEditingChanged: {
@@ -95,6 +97,12 @@ struct HaloContour: Shape {
             offsetControl("Closed X", key: \.closedX, expanded: false)
             offsetControl("Closed Y", key: \.closedY, expanded: false)
             Button("Reset offsets") { appearance.surface.offsets = SurfaceOffsets() }
+        }
+        Section("Context interface position") {
+            Text("These offsets apply only to the Context Music interface. They do not move the normal opened dashboard. Positive X moves right; positive Y moves down.").font(.caption).foregroundStyle(.secondary)
+            PreciseSlider(title: "Context X", value: $contextOffsetX, range: -1000...1000, step: 1, suffix: "pt")
+            PreciseSlider(title: "Context Y", value: $contextOffsetY, range: -1000...1000, step: 1, suffix: "pt")
+            Button("Reset context position") { contextOffsetX = 0; contextOffsetY = 0 }
         }
         Section("Shape") {
             Toggle("Use surface style contour", isOn: Binding(get: { appearance.surface.useStyleContour ?? true }, set: { appearance.surface.useStyleContour = $0 }))
