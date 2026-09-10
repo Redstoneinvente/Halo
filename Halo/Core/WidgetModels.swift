@@ -111,6 +111,8 @@ struct ClosedArtworkOptions: Codable, Equatable {
     var margin = 7.0
     var vinylRPM = 8.0
     var backgroundOpacity = 0.32
+    var artworkOnly: Bool?
+    var isArtworkOnly: Bool { artworkOnly ?? false }
     func validated() throws -> ClosedArtworkOptions {
         guard [size, padding, margin, vinylRPM, backgroundOpacity].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
