@@ -78,7 +78,9 @@ struct ClosedMediaOptions: Codable, Equatable {
     var textMode: MediaTextMode = .titleArtist
     var overflow: MediaOverflowMode = .truncate
     var lines = 1
-    // Legacy artwork fields are retained so older saved profiles still decode.
+    var onlineLyrics: Bool?
+    var usesOnlineLyrics: Bool { onlineLyrics ?? true }
+    // Legacy artwork fields retained so existing saved profiles decode.
     var artwork: MediaArtworkMode = .none
     var artworkSize = 28.0
     var marqueeSpeed = 28.0
@@ -145,7 +147,6 @@ struct ReactiveBackgroundOptions: Codable, Equatable {
 enum PowerReactionStyle: String, Codable, CaseIterable { case off, icon, percent, iconPercent, label }
 enum ClosedNotchSideChoice: String, Codable, CaseIterable { case automatic, left, right }
 struct PowerReactionOptions: Codable, Equatable {
-    // Optional for backwards compatibility with profiles saved before the master toggle.
     var enabled: Bool?
     var isEnabled: Bool { enabled ?? true }
     var lowThreshold = 20
