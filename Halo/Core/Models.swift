@@ -334,3 +334,18 @@ extension Slider where Label == EmptyView {
         self.init(value: value, in: bounds, step: step) { EmptyView() }
     }
 }
+
+// AppKit's `getHue` writes through its pointer arguments and returns Void on macOS.
+// This Bool-returning overload lets call sites use it as a guard condition without changing
+// the underlying extraction behavior.
+extension NSColor {
+    func getHue(
+        _ hue: UnsafeMutablePointer<CGFloat>?,
+        saturation: UnsafeMutablePointer<CGFloat>?,
+        brightness: UnsafeMutablePointer<CGFloat>?,
+        alpha: UnsafeMutablePointer<CGFloat>?
+    ) -> Bool {
+        let _: Void = self.getHue(hue, saturation: saturation, brightness: brightness, alpha: alpha)
+        return true
+    }
+}
