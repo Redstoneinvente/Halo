@@ -452,6 +452,7 @@ private struct ContextMusicSettings: View {
     @State private var selectedEvent: HaloHUDEventKind = .volume
     @State private var previewValue = 0.72
     @State private var customPresetName = "My HUD"
+    @AppStorage("HaloHUDKeepVisibleWhileEditing") private var keepHUDVisibleWhileEditing = false
 
     private var hud: Binding<HaloHUDSettings> {
         Binding(get: { layout.hud ?? HaloHUDSettings() }, set: { layout.hud = $0 })
@@ -521,8 +522,18 @@ private struct ContextMusicSettings: View {
                 if !enabled && v.useGlobalSettings { v.configuration = hud.wrappedValue.global }
                 v.useGlobalSettings = enabled; eventOverride.wrappedValue = v
             }))
+            Toggle("Always show HUD while editing", isOn: $keepHUDVisibleWhileEditing)
+                .onChange(of: keepHUDVisibleWhileEditing) { enabled in
+                    if enabled { refreshPersistentPreview() } else { stopPersistentPreview() }
+                }
+            Text("Keeps the real HUD visible at its selected target while HUD Studio is open. Changes to target, layout, colors, size and preview value update live.").font(.caption).foregroundStyle(.secondary)
             Text(eventOverride.wrappedValue.useGlobalSettings ? "This HUD inherits the global configuration. Editing below changes the global HUD style." : "This HUD has its own configuration override.").font(.caption).foregroundStyle(.secondary)
         }
+        .onAppear { refreshPersistentPreview() }
+        .onDisappear { stopPersistentPreview() }
+        .onChange(of: selectedEvent) { _ in refreshPersistentPreview() }
+        .onChange(of: previewValue) { _ in refreshPersistentPreview() }
+        .onChange(of: configuration.wrappedValue) { _ in refreshPersistentPreview() }
 
         Section("Preview") {
             HaloHUDStudioPreview(kind: selectedEvent, value: previewValue, configuration: configuration.wrappedValue)
@@ -531,9 +542,9 @@ private struct ContextMusicSettings: View {
             HStack {
                 Text("\(Int(previewValue * 100))%").monospacedDigit()
                 Spacer()
-                Button("Preview HUD") { preview(selectedEvent) }
-                Button("Test Entrance") { preview(selectedEvent) }
-                Button("Test Exit") { NotificationCenter.default.post(name: .init("HaloHUDPreviewExit"), object: nil) }
+                Button("Preview HUD") { preview(selectedEvent, persistent: keepHUDVisibleWhileEditing) }
+                Button("Test Entrance") { preview(selectedEvent, persistent: keepHUDVisibleWhileEditing) }
+                Button("Test Exit") { stopPersistentPreview() }
             }
         }
 
@@ -729,10 +740,26 @@ private struct ContextMusicSettings: View {
         settings.customPresets.append(HaloHUDPreset(id: UUID().uuidString, name: String(name.prefix(80)), builtIn: false, configuration: settings.global))
         hud.wrappedValue = settings
     }
-    private func preview(_ kind: HaloHUDEventKind) {
-        let legacy: String
-        switch kind { case .displayBrightness: legacy = "brightness"; case .keyboardBrightness: legacy = "keyboard"; default: legacy = "volume" }
-        NotificationCenter.default.post(name: .init("HaloHUDPreview"), object: nil, userInfo: ["kind": legacy, "value": previewValue])
+    private func preview(_ kind: HaloHUDEventKind, persistent: Bool = false) {
+        let settings = hud.wrappedValue
+        let previewConfiguration = settings.configuration(for: kind)
+        NotificationCenter.default.post(
+            name: .init("HaloHUDPreview"),
+            object: nil,
+            userInfo: [
+                "kind": kind.rawValue,
+                "value": previewValue,
+                "configuration": previewConfiguration,
+                "persistent": persistent
+            ]
+        )
+    }
+    private func refreshPersistentPreview() {
+        guard keepHUDVisibleWhileEditing, page == "HUD Studio" else { return }
+        preview(selectedEvent, persistent: true)
+    }
+    private func stopPersistentPreview() {
+        NotificationCenter.default.post(name: .init("HaloHUDPreviewExit"), object: nil)
     }
 }
 
