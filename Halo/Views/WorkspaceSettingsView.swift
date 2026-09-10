@@ -21,14 +21,31 @@ struct SettingsView: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Image(systemName: "circle.hexagongrid.fill").font(.title2).foregroundStyle(Color.accentColor)
+                    VStack(alignment: .leading) {
+                        Text("Halo").font(.headline)
+                        Text("Make it yours").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }.padding(16)
                 TextField("Find a section", text: $search).textFieldStyle(.roundedBorder).padding(12)
                 List(selection: $section) {
-                    ForEach(sections.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \.self) { Text($0).tag($0) }
+                    ForEach(sections.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \.self) { Label($0, systemImage: sectionIcon($0)).padding(.vertical, 5).tag($0) }
                 }.listStyle(.sidebar)
-            }.frame(width: 190)
+            }.frame(width: 220)
             Divider()
             VStack(alignment: .leading, spacing: 0) {
-                Text(section ?? "General").font(.title2.bold()).padding(.horizontal, 20).padding(.vertical, 16)
+                HStack(spacing: 12) {
+                    Image(systemName: sectionIcon(section ?? "General"))
+                        .font(.title2).foregroundStyle(Color.accentColor)
+                        .frame(width: 40, height: 40)
+                        .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(section ?? "General").font(.title2.bold())
+                        Text("Changes are saved automatically").font(.caption).foregroundStyle(.secondary)
+                    }
+                }.padding(20)
                 Divider()
                 Form { content }.formStyle(.grouped).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -41,6 +58,23 @@ struct SettingsView: View {
             TextField("Name", text: $renamedProfile)
             Button("Save") { if let id = renamingProfile { workspace.renameProfile(id, to: renamedProfile) }; renamingProfile = nil }
             Button("Cancel", role: .cancel) { renamingProfile = nil }
+        }
+    }
+    private func sectionIcon(_ name: String) -> String {
+        switch name {
+        case "General": return "gearshape"
+        case "Appearance": return "paintpalette"
+        case "Modules": return "square.grid.2x2"
+        case "Widgets": return "slider.horizontal.3"
+        case "Closed notch": return "rectangle.topthird.inset.filled"
+        case "Media & Files": return "play.rectangle"
+        case "Profiles": return "person.crop.rectangle.stack"
+        case "Schedules": return "calendar.badge.clock"
+        case "Automation": return "bolt"
+        case "Displays": return "display.2"
+        case "Plugins": return "puzzlepiece.extension"
+        case "Privacy": return "hand.raised"
+        default: return "wrench.and.screwdriver"
         }
     }
     @ViewBuilder private var content: some View {
@@ -71,6 +105,13 @@ struct SettingsView: View {
         case "Schedules":
             ScheduleSettingsView(workspace: workspace)
         case "Appearance":
+            Section("Expanded dashboard") {
+                Toggle("Horizontal widget layout", isOn: Binding(
+                    get: { workspace.settings.layout.horizontalWidgets ?? false },
+                    set: { workspace.settings.layout.horizontalWidgets = $0 }
+                ))
+                Text("Arrange widgets in a sideways-scrolling row. Turn off for the original vertical layout. Widget order and customizations apply to both.").font(.caption).foregroundStyle(.secondary)
+            }
             Picker("Surface", selection: $store.configuration.theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
             Slider(value: $store.configuration.theme.width, in: 340...640, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Expanded width") }
             Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 280...800, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Expanded height") }

@@ -73,6 +73,7 @@ struct DisplayOverride: Codable, Identifiable, Equatable {
     var layout: WorkspaceLayout?
 }
 struct WorkspaceLayout: Codable, Equatable {
+    var horizontalWidgets: Bool?
     var widgets: [String: WidgetStyle]?
     var closedNotch: ClosedNotchOptions?
     func widgetStyle(for id: ModuleID) -> WidgetStyle {

@@ -370,7 +370,8 @@ private final class MirrorCameraService: ObservableObject {
 
     @Published private(set) var state: State = .idle
     let session = AVCaptureSession()
-    private var configured = false
+    private let sessionQueue = DispatchQueue(label: "Halo.MirrorCamera")
+    private var generation = 0
     private var clients = Set<UUID>()
     private var stopTask: Task<Void, Never>?
 
@@ -378,7 +379,7 @@ private final class MirrorCameraService: ObservableObject {
         let inserted = clients.insert(id).inserted
         stopTask?.cancel()
         stopTask = nil
-        guard inserted || !session.isRunning || state != .ready else { return }
+        guard inserted || state != .ready else { return }
 
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
@@ -406,34 +407,38 @@ private final class MirrorCameraService: ObservableObject {
         stopTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard !Task.isCancelled, let self, self.clients.isEmpty else { return }
-            if self.session.isRunning { self.session.stopRunning() }
-            guard self.clients.isEmpty else {
-                self.configureAndStart()
-                return
-            }
-            self.state = self.configured ? .idle : self.state
+            self.generation += 1
+            let session = self.session
+            self.sessionQueue.async { if session.isRunning { session.stopRunning() } }
+            self.state = .idle
             self.stopTask = nil
         }
     }
 
     private func configureAndStart() {
         guard !clients.isEmpty else { return }
-        if !configured {
-            session.beginConfiguration()
-            session.sessionPreset = .medium
-            guard let device = AVCaptureDevice.default(for: .video),
-                  let input = try? AVCaptureDeviceInput(device: device),
-                  session.canAddInput(input) else {
+        generation += 1
+        let request = generation
+        let session = session
+        state = .requesting
+        // Serialize start/stop/configuration off the UI thread, including rapid toggles.
+        sessionQueue.async {
+            if session.inputs.isEmpty {
+                session.beginConfiguration()
+                session.sessionPreset = .medium
+                if let device = AVCaptureDevice.default(for: .video),
+                   let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) {
+                    session.addInput(input)
+                }
                 session.commitConfiguration()
-                state = .unavailable
-                return
             }
-            session.addInput(input)
-            session.commitConfiguration()
-            configured = true
+            if !session.inputs.isEmpty && !session.isRunning { session.startRunning() }
+            let result: State = session.inputs.isEmpty ? .unavailable : (session.isRunning ? .ready : .failed)
+            Task { @MainActor [weak self] in
+                guard let self, self.generation == request, !self.clients.isEmpty else { return }
+                self.state = result
+            }
         }
-        if !session.isRunning { session.startRunning() }
-        state = session.isRunning ? .ready : .failed
     }
 }
 
@@ -464,6 +469,9 @@ private struct MirrorPreviewRepresentable: NSViewRepresentable {
         view.previewLayer.session = session
         return view
     }
+    static func dismantleNSView(_ nsView: MirrorPreviewNSView, coordinator: ()) {
+        nsView.previewLayer.session = nil
+    }
     func updateNSView(_ nsView: MirrorPreviewNSView, context: Context) {
         if nsView.previewLayer.session !== session { nsView.previewLayer.session = session }
     }
@@ -476,8 +484,10 @@ private struct MirrorWidgetView: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.055))
+            MirrorPreviewRepresentable(session: camera.session)
+                .opacity(camera.state == .ready ? 1 : 0)
             switch camera.state {
-            case .ready: MirrorPreviewRepresentable(session: camera.session)
+            case .ready: EmptyView()
             case .idle, .requesting: ProgressView().controlSize(.mini)
             case .denied: Image(systemName: "video.slash.fill").foregroundStyle(.secondary)
             case .unavailable: Image(systemName: "camera.metering.unknown").foregroundStyle(.secondary)

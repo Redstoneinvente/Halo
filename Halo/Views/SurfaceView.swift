@@ -57,12 +57,16 @@ struct SurfaceView: View, Equatable {
                         Button { state.pinned.toggle() } label: { Image(systemName: state.pinned ? "pin.fill" : "pin") }
                             .help("Keep expanded").accessibilityLabel("Keep expanded")
                     }
-                    ScrollView {
-                        LazyVStack(spacing: layout.appearance.spacing) {
-                            ForEach(layout.normalizedOrder().filter { layout.enabled.contains($0) }) { module in
-                                WidgetCard(style: layout.widgetStyle(for: module)) {
-                                    BuiltinOrIntegrationWidget(module: module, store: store)
-                                }
+                    if layout.horizontalWidgets ?? false {
+                        ScrollView(.horizontal) {
+                            LazyHStack(alignment: .top, spacing: layout.appearance.spacing) {
+                                widgetCards(horizontal: true)
+                            }
+                        }
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: layout.appearance.spacing) {
+                                widgetCards(horizontal: false)
                             }
                         }
                     }
@@ -108,6 +112,22 @@ struct SurfaceView: View, Equatable {
             return !providers.isEmpty
         }
     }
+    @ViewBuilder private func widgetCards(horizontal: Bool) -> some View {
+        ForEach(layout.normalizedOrder().filter { layout.enabled.contains($0) }) { module in
+            if horizontal {
+                ScrollView(.vertical) {
+                    WidgetCard(style: layout.widgetStyle(for: module)) {
+                        BuiltinOrIntegrationWidget(module: module, store: store)
+                    }
+                }.frame(width: max(240, state.dashboardWidth - 64))
+            } else {
+                WidgetCard(style: layout.widgetStyle(for: module)) {
+                    BuiltinOrIntegrationWidget(module: module, store: store)
+                }
+            }
+        }
+    }
+
 }
 
 struct BuiltinOrIntegrationWidget: View {
