@@ -23,6 +23,48 @@ private final class HaloHUDTapState {
     func contains(_ key: Int) -> Bool { lock.lock(); defer { lock.unlock() }; return keys.contains(key) }
 }
 
+private let haloHUDReplacementKeyNotification = Notification.Name("HaloHUDReplacementKey")
+private let haloHUDTapReenableNotification = Notification.Name("HaloHUDTapReenable")
+
+/// `CGEvent.tapCreate` requires a true C-compatible function pointer. Keep this callback completely
+/// capture-free and pass callback-visible state through `refcon` instead.
+private func haloHUDCGEventTapCallback(
+    proxy: CGEventTapProxy,
+    type: CGEventType,
+    event: CGEvent,
+    refcon: UnsafeMutableRawPointer?
+) -> Unmanaged<CGEvent>? {
+    guard let refcon else { return Unmanaged.passUnretained(event) }
+    let state = Unmanaged<HaloHUDTapState>.fromOpaque(refcon).takeUnretainedValue()
+
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        NotificationCenter.default.post(name: haloHUDTapReenableNotification, object: nil)
+        return Unmanaged.passUnretained(event)
+    }
+
+    guard type.rawValue == 14,
+          let nsEvent = NSEvent(cgEvent: event),
+          nsEvent.subtype.rawValue == 8 else {
+        return Unmanaged.passUnretained(event)
+    }
+
+    let data = nsEvent.data1
+    let key = (data & 0xFFFF0000) >> 16
+    guard state.contains(key) else { return Unmanaged.passUnretained(event) }
+
+    let keyState = ((data & 0xFFFF) & 0xFF00) >> 8
+    if keyState == 0xA {
+        NotificationCenter.default.post(
+            name: haloHUDReplacementKeyNotification,
+            object: nil,
+            userInfo: ["key": key]
+        )
+    }
+
+    // Swallow both down and up for keys Halo has explicitly proven it can replace.
+    return nil
+}
+
 private final class HaloHUDDisplayBrightnessProvider {
     private let parameter = kIODisplayBrightnessKey as CFString
     func current() -> Double? {
@@ -121,6 +163,8 @@ final class HaloHUDEngine {
     private var globalMonitor: Any?
     private var previewObserver: NSObjectProtocol?
     private var previewExitObserver: NSObjectProtocol?
+    private var replacementObserver: NSObjectProtocol?
+    private var tapReenableObserver: NSObjectProtocol?
     private var subscriptions = Set<AnyCancellable>()
     private var hideWork: DispatchWorkItem?
     private var menuHideWork: DispatchWorkItem?
@@ -144,12 +188,21 @@ final class HaloHUDEngine {
         previewExitObserver = NotificationCenter.default.addObserver(forName: .init("HaloHUDPreviewExit"), object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.hide(immediate: false) }
         }
+        replacementObserver = NotificationCenter.default.addObserver(forName: haloHUDReplacementKeyNotification, object: nil, queue: .main) { [weak self] note in
+            guard let key = note.userInfo?["key"] as? Int else { return }
+            Task { @MainActor in self?.handleReplacementKey(key) }
+        }
+        tapReenableObserver = NotificationCenter.default.addObserver(forName: haloHUDTapReenableNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.reenableTap() }
+        }
     }
 
     func stop() {
         tearDownInput(); hideWork?.cancel(); menuHideWork?.cancel(); subscriptions.removeAll()
         if let previewObserver { NotificationCenter.default.removeObserver(previewObserver) }
         if let previewExitObserver { NotificationCenter.default.removeObserver(previewExitObserver) }
+        if let replacementObserver { NotificationCenter.default.removeObserver(replacementObserver) }
+        if let tapReenableObserver { NotificationCenter.default.removeObserver(tapReenableObserver) }
         panel?.orderOut(nil); panel = nil
         if let menuItem { NSStatusBar.system.removeStatusItem(menuItem); self.menuItem = nil }
     }
@@ -202,21 +255,14 @@ final class HaloHUDEngine {
 
     private func installEventTap() -> Bool {
         let mask = CGEventMask(1) << 14
-        let callbackState = tapState
-        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
-                                          eventsOfInterest: mask, callback: { _, type, event, refcon in
-            guard let refcon else { return Unmanaged.passUnretained(event) }
-            let engine = Unmanaged<HaloHUDEngine>.fromOpaque(refcon).takeUnretainedValue()
-            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-                Task { @MainActor in engine.reenableTap() }; return Unmanaged.passUnretained(event)
-            }
-            guard type.rawValue == 14, let nsEvent = NSEvent(cgEvent: event), nsEvent.subtype.rawValue == 8 else { return Unmanaged.passUnretained(event) }
-            let data = nsEvent.data1, key = (data & 0xFFFF0000) >> 16
-            guard callbackState.contains(key) else { return Unmanaged.passUnretained(event) }
-            let keyState = ((data & 0xFFFF) & 0xFF00) >> 8
-            if keyState == 0xA { Task { @MainActor in engine.handleReplacementKey(key) } }
-            return nil
-        }, userInfo: Unmanaged.passUnretained(self).toOpaque()) else { return false }
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: mask,
+            callback: haloHUDCGEventTapCallback,
+            userInfo: Unmanaged.passUnretained(tapState).toOpaque()
+        ) else { return false }
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes); CGEvent.tapEnable(tap: tap, enable: true)
         eventTap = tap; eventSource = source; return true
