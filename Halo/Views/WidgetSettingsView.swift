@@ -150,13 +150,14 @@ struct ClosedNotchSettingsView: View {
             Toggle("Auto-size to fit content", isOn: Binding(get: { options.wrappedValue.autoFitContent ?? true }, set: { options.wrappedValue.autoFitContent = $0 }))
             PreciseSlider(title: "Horizontal padding", value: Binding(get: { options.wrappedValue.contentPaddingX }, set: { options.wrappedValue.horizontalPadding = $0 }), range: 0...24, step: 1, suffix: "pt")
             PreciseSlider(title: "Vertical padding", value: Binding(get: { options.wrappedValue.contentPaddingY }, set: { options.wrappedValue.verticalPadding = $0 }), range: 0...12, step: 1, suffix: "pt")
-            PreciseSlider(title: "Widget margin from camera", value: Binding(get: { options.wrappedValue.contentSideMargin }, set: { options.wrappedValue.sideMargin = $0 }), range: 0...48, step: 1, suffix: "pt")
-            Text("Auto-size reserves only the space each active side actually needs. A left-only or right-only widget does not force matching empty space on the other side.").font(.caption)
+            PreciseSlider(title: "Margin from camera", value: Binding(get: { options.wrappedValue.contentSideMargin }, set: { options.wrappedValue.sideMargin = $0 }), range: 0...48, step: 1, suffix: "pt")
+            PreciseSlider(title: "Margin from outer edge", value: Binding(get: { options.wrappedValue.contentOuterMargin }, set: { options.wrappedValue.outerMargin = $0 }), range: 0...48, step: 1, suffix: "pt")
+            Text("Camera and outer-edge margins are independent. Auto-size reserves only the space each active side actually needs.").font(.caption)
         }
         Section("Automatic width") {
             Toggle("Widen for music and live activity", isOn: expansion.enabled)
             PreciseSlider(title: "Active width", value: expansion.width, range: 120...640, step: 1, suffix: "pt")
-            Text("Music playback, pinned files, screen capture/OCR, a running timer or stopwatch, and live activities widen the closed notch without opening the dashboard. When content exists on only one side, the extra width is assigned to that side instead of expanding evenly.").font(.caption)
+            Text("Music, pinned files, timers and live activities can widen the closed notch. Extra width is assigned only to the side that triggered it; if both sides have active reasons, both grow.").font(.caption)
         }
         SideDecorationSettingsView(title: "Left icon / GIF", options: Binding(
             get: { options.wrappedValue.leftDecoration ?? SideDecoration() },
@@ -171,7 +172,7 @@ struct ClosedNotchSettingsView: View {
             itemPicker("Right slot", options.right)
             PreciseSlider(title: "Text size", value: options.fontSize, range: 8...24, step: 1, suffix: "pt")
             ColorPicker("Color", selection: Binding(get: { options.wrappedValue.color.color }, set: { options.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
-            Text("Space behind the camera is reserved; inactive sides do not mirror the active side.").font(.caption)
+            Text("Live activities temporarily use the Activity slot, or take over an available closed-notch side so they are not missed.").font(.caption)
         }
         Section("Album colors") {
             Toggle("Color notch background from album", isOn: Binding(
@@ -186,7 +187,7 @@ struct ClosedNotchSettingsView: View {
                 get: { options.wrappedValue.albumTextColor ?? false },
                 set: { options.wrappedValue.albumTextColor = $0 }
             ))
-            Text("Album colors take precedence only while music is actively playing and artwork colors are available. Pausing or stopping music immediately restores your normal notch background and text color. The optional frequency effect is a lightweight playback-driven visual pulse and does not capture microphone or system audio.").font(.caption)
+            Text("Album colors take precedence only while music is actively playing and artwork colors are available. Pausing or stopping music immediately restores your normal notch background and text color.").font(.caption)
         }
         Section("Music animation") {
             Picker("Style", selection: Binding<PlaybackAnimation>(
@@ -204,11 +205,9 @@ struct ClosedNotchSettingsView: View {
             PlaybackVisualizer(kind: options.wrappedValue.animation, playing: true, enabled: options.wrappedValue.animate,
                                options: visualizer.wrappedValue, palette: media.artworkColors, fallback: options.wrappedValue.color.color)
                 .padding(12).background(.black, in: RoundedRectangle(cornerRadius: 12))
-            Text("Artwork colors apply to the visualizer. Spotify artwork is downloaded from its artwork URL when enabled; Apple Music artwork comes from the player. Missing artwork uses your selected color. Increase closed height in Appearance for taller visualizers.").font(.caption)
             Button("Retry player detection") { media.retryDetection(preferred: app) }.disabled(media.busy)
             Text(media.title)
             if let error = media.error { Text(error).foregroundStyle(.orange) }
-            Text("Halo automatically detects Apple Music and Spotify. Playback notifications are backed by a two-second check. The visualizer is a playback animation, not an audio waveform. It stops when paused and respects Reduce Motion and Low Power Mode.").font(.caption)
         }
         Button("Reset closed content") { layout.closedNotch = ClosedNotchOptions() }
     }
