@@ -34,7 +34,7 @@ struct ClosedNotchView: View {
     private var options: ClosedNotchOptions { layout.closedNotch ?? ClosedNotchOptions() }
     private var activeActivity: LiveActivity? {
         workspace.activities.first { activity in
-            (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(8) > Date()
+            (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(12) > Date()
         }
     }
     private var resolvedItems: (left: ClosedNotchItem, right: ClosedNotchItem) {
@@ -45,6 +45,7 @@ struct ClosedNotchView: View {
         let leftAvailable = left == .none || ((left == .media || left == .visualizer) && !workspace.media.isPlaying)
         if rightAvailable { right = .activity }
         else if leftAvailable { left = .activity }
+        else { right = .activity }
         return (left, right)
     }
     var body: some View {
@@ -91,7 +92,7 @@ struct ClosedNotchSlot: View {
     @ObservedObject var system: SystemService
     private var activeActivity: LiveActivity? {
         workspace.activities.first { activity in
-            (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(8) > Date()
+            (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(12) > Date()
         }
     }
     private var innerHeight: Double { max(1, availableHeight - 2 * options.contentPaddingY) }
@@ -198,9 +199,13 @@ struct ClosedNotchSlot: View {
             if let activity = activeActivity {
                 HStack(spacing: 5) {
                     Image(systemName: "waveform.path")
-                    Text(activity.title)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(activity.title).lineLimit(1)
+                        if !activity.detail.isEmpty { Text(activity.detail).font(.system(size: max(8, textSize * 0.78))).opacity(0.72).lineLimit(1) }
+                    }
                     if let progress = activity.progress { ProgressView(value: progress).frame(width: 36) }
                 }
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
         }
     }
@@ -219,7 +224,19 @@ private struct PowerEventBadge: View {
             case .iconPercent: Label("\(event.battery)%", systemImage: event.symbol).monospacedDigit()
             case .label: Label(event.label, systemImage: event.symbol)
             }
-        }.foregroundStyle(options.color.color)
+        }.foregroundStyle(powerColor)
+    }
+    private var powerColor: Color {
+        guard options.dynamicColor else { return options.color.color }
+        let p = min(1, max(0, Double(event.battery) / 100))
+        if p <= 0.5 { return interpolate(options.lowColor, options.midColor, p / 0.5).color }
+        return interpolate(options.midColor, options.highColor, (p - 0.5) / 0.5).color
+    }
+    private func interpolate(_ a: WidgetColor, _ b: WidgetColor, _ t: Double) -> WidgetColor {
+        let u = min(1, max(0, t))
+        return WidgetColor(red: a.red + (b.red - a.red) * u,
+                           green: a.green + (b.green - a.green) * u,
+                           blue: a.blue + (b.blue - a.blue) * u)
     }
 }
 
@@ -245,17 +262,13 @@ private struct ClosedMediaView: View {
     }
     var body: some View {
         HStack(spacing: 7) {
-            if options.artwork == .cover || options.artwork == .vinyl {
-                artworkView
-            }
+            if options.artwork == .cover || options.artwork == .vinyl { artworkView }
             mediaText
         }
         .task(id: key) {
             artwork = nil; lyrics = ""
-            async let art = MediaAssetReader.artwork(app: media.connectedApp, key: key)
-            async let words = MediaAssetReader.lyrics(app: media.connectedApp, key: key)
-            artwork = await art
-            lyrics = await words
+            if options.artwork != .none { artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key) }
+            if options.textMode == .lyrics { lyrics = await MediaAssetReader.lyrics(app: media.connectedApp, key: key) }
         }
     }
     @ViewBuilder private var artworkView: some View {
@@ -321,10 +334,8 @@ private struct MarqueeText: View {
                 let gap = 28.0
                 let cycle = estimatedTextWidth + gap
                 let x = -(context.date.timeIntervalSinceReferenceDate * speed).truncatingRemainder(dividingBy: cycle)
-                HStack(spacing: gap) {
-                    Text(text).fixedSize()
-                    Text(text).fixedSize()
-                }.offset(x: x).frame(width: width, alignment: .leading).clipped()
+                HStack(spacing: gap) { Text(text).fixedSize(); Text(text).fixedSize() }
+                    .offset(x: x).frame(width: width, alignment: .leading).clipped()
             }.frame(width: width)
         }
     }
