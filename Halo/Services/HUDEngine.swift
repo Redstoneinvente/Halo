@@ -177,6 +177,7 @@ final class HaloHUDEngine {
     private var hasSeenCharging = false
     private var hasSeenPowerSource = false
     private var hasSeenMedia = false
+    private var editorPreviewPinned = false
 
     init(workspace: WorkspaceStore) { self.workspace = workspace }
 
@@ -186,7 +187,11 @@ final class HaloHUDEngine {
             Task { @MainActor in self?.preview(note) }
         }
         previewExitObserver = NotificationCenter.default.addObserver(forName: .init("HaloHUDPreviewExit"), object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.hide(immediate: false) }
+            Task { @MainActor in
+                self?.editorPreviewPinned = false
+                self?.hide(immediate: false)
+                self?.removeMenuPresentation()
+            }
         }
         replacementObserver = NotificationCenter.default.addObserver(forName: haloHUDReplacementKeyNotification, object: nil, queue: .main) { [weak self] note in
             guard let key = note.userInfo?["key"] as? Int else { return }
@@ -198,18 +203,19 @@ final class HaloHUDEngine {
     }
 
     func stop() {
+        editorPreviewPinned = false
         tearDownInput(); hideWork?.cancel(); menuHideWork?.cancel(); subscriptions.removeAll()
         if let previewObserver { NotificationCenter.default.removeObserver(previewObserver) }
         if let previewExitObserver { NotificationCenter.default.removeObserver(previewExitObserver) }
         if let replacementObserver { NotificationCenter.default.removeObserver(replacementObserver) }
         if let tapReenableObserver { NotificationCenter.default.removeObserver(tapReenableObserver) }
         panel?.orderOut(nil); panel = nil
-        if let menuItem { NSStatusBar.system.removeStatusItem(menuItem); self.menuItem = nil }
+        removeMenuPresentation()
     }
 
     func configurationDidChange() {
         configureInput()
-        if model.visible {
+        if model.visible && !editorPreviewPinned {
             let settings = resolvedSettings
             guard settings.isEnabled(model.event.kind) else { hide(immediate: true); return }
             model.configuration = resolvedConfiguration(for: model.event, settings: settings)
@@ -358,9 +364,22 @@ final class HaloHUDEngine {
     private func preview(_ note: Notification) {
         let raw = note.userInfo?["kind"] as? String ?? "volume"
         let value = (note.userInfo?["value"] as? Double) ?? 0.68
+        let persistent = note.userInfo?["persistent"] as? Bool ?? false
         let kind: HaloHUDEventKind
         switch raw { case "brightness": kind = .displayBrightness; case "keyboard": kind = .keyboardBrightness; default: kind = HaloHUDEventKind(rawValue: raw) ?? .volume }
-        emit(HaloHUDEvent(kind: kind, value: value), force: true)
+        let event = HaloHUDEvent(kind: kind, value: value)
+        editorPreviewPinned = persistent
+
+        if let suppliedConfiguration = note.userInfo?["configuration"] as? HaloHUDConfiguration {
+            guard suppliedConfiguration.presentation.target != .disabled else {
+                hide(immediate: true)
+                removeMenuPresentation()
+                return
+            }
+            route(event, configuration: suppliedConfiguration, depth: 0)
+        } else {
+            emit(event, force: true)
+        }
     }
 
     func emit(_ event: HaloHUDEvent, force: Bool = false) {
@@ -400,7 +419,8 @@ final class HaloHUDEngine {
 
     private func showPanel(_ event: HaloHUDEvent, configuration: HaloHUDConfiguration) {
         guard let panel else { return }
-        if model.visible, model.event.kind != event.kind, configuration.behavior.collision == .queue {
+        removeMenuPresentation()
+        if model.visible, model.event.kind != event.kind, configuration.behavior.collision == .queue, !editorPreviewPinned {
             if queue.count < 12 { queue.append((event, configuration)) }; return
         }
         let repeated = model.visible && model.event.kind == event.kind
@@ -408,7 +428,7 @@ final class HaloHUDEngine {
         position(panel, configuration: configuration); hideWork?.cancel(); panel.orderFrontRegardless()
         if !repeated { model.visible = false; DispatchQueue.main.async { [weak self] in self?.model.visible = true } }
         else { model.visible = true }
-        scheduleHide(configuration.behavior.displayDuration)
+        if !editorPreviewPinned { scheduleHide(configuration.behavior.displayDuration) }
     }
     private func scheduleHide(_ delay: Double) {
         let work = DispatchWorkItem { [weak self] in self?.hide(immediate: false) }
@@ -426,13 +446,22 @@ final class HaloHUDEngine {
     private func presentNext() { guard !queue.isEmpty else { return }; let next = queue.removeFirst(); showPanel(next.0, configuration: next.1) }
 
     private func showMenuBar(_ event: HaloHUDEvent, configuration: HaloHUDConfiguration) {
+        hideWork?.cancel()
+        model.visible = false
+        panel?.orderOut(nil)
         if menuItem == nil { menuItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength) }
         guard let button = menuItem?.button else { return }
         button.image = NSImage(systemSymbolName: event.icon, accessibilityDescription: event.primaryText)
         button.title = event.progress.map { " \(Int(($0 * 100).rounded()))%" } ?? " " + event.primaryText
         menuHideWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in guard let self, let item = self.menuItem else { return }; NSStatusBar.system.removeStatusItem(item); self.menuItem = nil }
+        guard !editorPreviewPinned else { return }
+        let work = DispatchWorkItem { [weak self] in self?.removeMenuPresentation() }
         menuHideWork = work; DispatchQueue.main.asyncAfter(deadline: .now() + configuration.behavior.displayDuration, execute: work)
+    }
+
+    private func removeMenuPresentation() {
+        menuHideWork?.cancel(); menuHideWork = nil
+        if let menuItem { NSStatusBar.system.removeStatusItem(menuItem); self.menuItem = nil }
     }
 
     private func screen(for configuration: HaloHUDConfiguration) -> NSScreen? {
@@ -513,6 +542,10 @@ private struct HaloHUDRuntimeView: View {
     private var progress: Double { min(1, max(0, model.event.progress ?? 0)) }
     private var accent: Color { resolvedColor(configuration.appearance.primary) }
     private var progressColor: Color { resolvedColor(configuration.appearance.progress) }
+    private var isVerticalScreenEdge: Bool {
+        configuration.presentation.target == .screenEdge &&
+            (configuration.presentation.screenEdge == .left || configuration.presentation.screenEdge == .right)
+    }
 
     var body: some View {
         Group {
@@ -536,7 +569,21 @@ private struct HaloHUDRuntimeView: View {
     private var horizontal: some View { HStack(spacing: configuration.layout.spacing) { icon; VStack(alignment: .leading, spacing: max(3, configuration.layout.spacing * 0.45)) { header; progressView } } }
     private var vertical: some View { VStack(spacing: configuration.layout.spacing) { icon; header; progressView } }
     private var compact: some View { HStack(spacing: max(5, configuration.layout.spacing * 0.7)) { icon; if configuration.components.label { Text(model.event.primaryText).lineLimit(1) }; valueText; if configuration.components.progress { progressView.frame(maxWidth: 150) } } }
-    private var edgeContent: some View { progressView.frame(maxWidth: .infinity, maxHeight: .infinity) }
+    private var edgeContent: some View {
+        GeometryReader { proxy in
+            if isVerticalScreenEdge {
+                progressView
+                    .frame(width: proxy.size.height, height: proxy.size.width)
+                    .rotationEffect(.degrees(-90))
+                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+            } else {
+                progressView
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+            }
+        }
+        .clipped()
+    }
     @ViewBuilder private var icon: some View {
         if configuration.components.icon { Image(systemName: model.event.icon).font(.system(size: configuration.iconSize, weight: .semibold)).foregroundStyle(accent).frame(minWidth: configuration.iconSize * 1.2) }
     }
