@@ -93,7 +93,7 @@ struct SurfaceGeometry {
     var attachedToNotch: Bool { style == .notch && safeAreaTop > 0 }
     var minimumWidth: Double { 16 }
     var compactWidth: Double {
-        let requested = activeCompactWidth ?? appearance.compactWidth
+        let requested = max(appearance.compactWidth, activeCompactWidth ?? 0)
         return Geometry.width(screenWidth: visible.width, requested: max(minimumWidth, requested))
     }
     var compactHeight: Double { max(16, appearance.surface.compactHeight) }
