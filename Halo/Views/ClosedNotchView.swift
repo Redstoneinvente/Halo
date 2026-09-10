@@ -420,37 +420,35 @@ private struct LyricFrame {
 private enum LyricTimeline {
     static func parse(_ value: String, duration: Double) -> [TimedLyricLine] {
         var timed: [TimedLyricLine] = []
-        var plain: [String] = []
-        var sourceOffset = 0.0
         let rawLines = value.split(whereSeparator: \.isNewline).map(String.init)
+        let sourceOffset: Double = rawLines.compactMap { raw -> Double? in
+            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard line.lowercased().hasPrefix("[offset:"), let close = line.firstIndex(of: "]") else { return nil }
+            let start = line.index(line.startIndex, offsetBy: 8)
+            return Double(line[start..<close]).map { $0 / 1000 }
+        }.first ?? 0
         for raw in rawLines {
             let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !line.isEmpty else { continue }
-            if line.lowercased().hasPrefix("[offset:"), let close = line.firstIndex(of: "]") {
-                let start = line.index(line.startIndex, offsetBy: 8)
-                if let milliseconds = Double(line[start..<close]) { sourceOffset = milliseconds / 1000 }
-                continue
-            }
+            if line.lowercased().hasPrefix("[offset:") { continue }
             if let close = line.firstIndex(of: "]"), line.first == "[" {
                 let stamp = String(line[line.index(after: line.startIndex)..<close])
                 let text = String(line[line.index(after: close)...]).trimmingCharacters(in: .whitespaces)
                 if let time = timestamp(stamp), !text.isEmpty {
                     timed.append(TimedLyricLine(id: timed.count, time: max(0, time + sourceOffset), text: text))
-                    continue
                 }
             }
-            if !line.hasPrefix("[") { plain.append(line) }
         }
-        if !timed.isEmpty {
-            return timed.sorted { $0.time < $1.time }.enumerated().map { TimedLyricLine(id: $0.offset, time: $0.element.time, text: $0.element.text) }
+        // Do not invent timestamps for plain lyrics. A visually wrong line is worse than explicitly
+        // reporting that synchronized lyrics are unavailable for this recording.
+        guard !timed.isEmpty else { return [] }
+        return timed.sorted { $0.time < $1.time }.enumerated().map {
+            TimedLyricLine(id: $0.offset, time: $0.element.time, text: $0.element.text)
         }
-        guard !plain.isEmpty else { return [] }
-        let step = duration > 0 ? duration / Double(plain.count) : 4
-        return plain.enumerated().map { TimedLyricLine(id: $0.offset, time: Double($0.offset) * step, text: $0.element) }
     }
     static func frame(lines: [TimedLyricLine], position: Double, duration: Double) -> LyricFrame? {
         guard !lines.isEmpty else { return nil }
-        let index = lines.lastIndex(where: { $0.time <= position + 0.06 }) ?? 0
+        let index = lines.lastIndex(where: { $0.time <= position + 0.035 }) ?? 0
         let current = lines[index]
         let next = index + 1 < lines.count ? lines[index + 1] : nil
         let end = max(current.time + 0.35, next?.time ?? (duration > current.time ? duration : current.time + 4))
@@ -509,7 +507,15 @@ private struct ClosedMediaView: View {
             lyrics = ""; sampledPosition = 0; sampledDuration = 0; sampledAt = Date()
             guard options.textMode == .lyrics else { return }
             lyricsLoading = true
-            lyrics = await MediaAssetReader.lyrics(app: media.connectedApp, key: key, title: media.title, artist: media.artist, onlineFallback: options.usesOnlineLyrics)
+            let initial = await MediaAssetReader.playbackTime(app: media.connectedApp)
+            if let initial {
+                sampledPosition = initial.position
+                sampledDuration = initial.duration
+                sampledAt = initial.observedAt
+            }
+            lyrics = await MediaAssetReader.lyrics(app: media.connectedApp, key: key, title: media.title,
+                                                   artist: media.artist, duration: initial?.duration,
+                                                   onlineFallback: options.usesOnlineLyrics)
             lyricsLoading = false
             await samplePlaybackLoop()
         }
@@ -520,15 +526,15 @@ private struct ClosedMediaView: View {
                 let now = sample.observedAt
                 let predicted = sampledPosition + max(0, now.timeIntervalSince(sampledAt))
                 let drift = sample.position - predicted
-                if sampledDuration == 0 || abs(drift) > 0.24 {
+                if sampledDuration == 0 || abs(drift) > 0.10 {
                     sampledPosition = sample.position
                 } else {
-                    sampledPosition = predicted + drift * 0.72
+                    sampledPosition = predicted + drift * 0.88
                 }
                 sampledDuration = sample.duration
                 sampledAt = now
             }
-            try? await Task.sleep(nanoseconds: lowPower ? 850_000_000 : 450_000_000)
+            try? await Task.sleep(nanoseconds: lowPower ? 600_000_000 : 250_000_000)
         }
     }
     @ViewBuilder private var mediaText: some View {
@@ -555,7 +561,7 @@ private struct ClosedMediaView: View {
                 Text("Synced lyrics unavailable").font(.system(size: max(8, fontSize * 0.82))).opacity(0.65).lineLimit(1)
             }.frame(maxWidth: width, alignment: .leading)
         } else {
-            TimelineView(.animation(minimumInterval: lowPower ? 0.3 : 0.10, paused: !media.isPlaying)) { context in
+            TimelineView(.animation(minimumInterval: lowPower ? 0.24 : 0.06, paused: !media.isPlaying)) { context in
                 let interpolated = sampledPosition + (media.isPlaying ? max(0, context.date.timeIntervalSince(sampledAt)) : 0)
                 let position = max(0, interpolated + options.resolvedLyricSyncOffset)
                 let lines = LyricTimeline.parse(lyrics, duration: sampledDuration)
@@ -680,6 +686,7 @@ private enum MediaAssetReader {
         guard let app else { return nil }
         return await withCheckedContinuation { continuation in
             queue.async {
+                let requestStarted = Date()
                 let source = """
                 if application id "\(app)" is not running then return {-1, -1}
                 with timeout of 2 seconds
@@ -693,20 +700,24 @@ private enum MediaAssetReader {
                 end timeout
                 """
                 var failure: NSDictionary?; let result = NSAppleScript(source: source)?.executeAndReturnError(&failure)
+                let requestFinished = Date()
                 guard failure == nil,
                       let position = result?.atIndex(1)?.doubleValue,
                       let duration = result?.atIndex(2)?.doubleValue,
                       position >= 0, duration > 0 else { continuation.resume(returning: nil); return }
-                continuation.resume(returning: PlaybackSample(position: position, duration: duration, observedAt: Date()))
+                let observedAt = requestStarted.addingTimeInterval(requestFinished.timeIntervalSince(requestStarted) * 0.5)
+                continuation.resume(returning: PlaybackSample(position: position, duration: duration, observedAt: observedAt))
             }
         }
     }
-    static func lyrics(app: String?, key: String, title: String, artist: String, onlineFallback: Bool) async -> String {
-        lock.lock(); let cached = lyricsCache[key]; lock.unlock(); if let cached { return cached }
+    static func lyrics(app: String?, key: String, title: String, artist: String, duration: Double?, onlineFallback: Bool) async -> String {
+        let durationKey = duration.map { String(Int($0.rounded())) } ?? "unknown"
+        let cacheKey = key + "|duration:" + durationKey
+        lock.lock(); let cached = lyricsCache[cacheKey]; lock.unlock(); if let cached { return cached }
         var value = ""
-        if onlineFallback { value = await onlineLyrics(title: title, artist: artist) }
+        if onlineFallback { value = await onlineLyrics(title: title, artist: artist, duration: duration) }
         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, app == "com.apple.Music" { value = await embeddedAppleMusicLyrics() }
-        let bounded = String(value.prefix(20_000)); lock.lock(); lyricsCache[key] = bounded; lock.unlock(); return bounded
+        let bounded = String(value.prefix(20_000)); lock.lock(); lyricsCache[cacheKey] = bounded; lock.unlock(); return bounded
     }
     private static func embeddedAppleMusicLyrics() async -> String {
         await withCheckedContinuation { continuation in queue.async {
@@ -725,14 +736,19 @@ private enum MediaAssetReader {
             var failure: NSDictionary?; let result = NSAppleScript(source: source)?.executeAndReturnError(&failure); continuation.resume(returning: failure == nil ? (result?.stringValue ?? "") : "")
         } }
     }
-    private struct LRCLyrics: Decodable { let plainLyrics: String?; let syncedLyrics: String? }
-    private static func onlineLyrics(title: String, artist: String) async -> String {
-        guard !title.isEmpty else { return "" }; var components = URLComponents(string: "https://lrclib.net/api/get")!; components.queryItems = [URLQueryItem(name: "track_name", value: title)]
-        if !artist.isEmpty { components.queryItems?.append(URLQueryItem(name: "artist_name", value: artist)) }; guard let url = components.url else { return "" }
+    private struct LRCLyrics: Decodable { let duration: Double?; let plainLyrics: String?; let syncedLyrics: String? }
+    private static func onlineLyrics(title: String, artist: String, duration: Double?) async -> String {
+        guard !title.isEmpty, !artist.isEmpty else { return "" }
+        var components = URLComponents(string: "https://lrclib.net/api/get")!
+        components.queryItems = [URLQueryItem(name: "track_name", value: title), URLQueryItem(name: "artist_name", value: artist)]
+        if let duration, duration >= 1, duration <= 3600 {
+            components.queryItems?.append(URLQueryItem(name: "duration", value: String(Int(duration.rounded()))))
+        }
+        guard let url = components.url else { return "" }
         var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8); request.setValue("Halo/1.0 (https://github.com/Redstoneinvente/Halo)", forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await URLSession.shared.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 1_000_000, let result = try? JSONDecoder().decode(LRCLyrics.self, from: data) else { return "" }
-        if let synced = result.syncedLyrics, !synced.isEmpty { return synced }
-        return result.plainLyrics ?? ""
+        if let requested = duration, let returned = result.duration, abs(requested - returned) > 2.5 { return "" }
+        return result.syncedLyrics ?? ""
     }
 }
 
