@@ -147,6 +147,8 @@ final class WindowManager {
     func start() {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.$configuration.dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.$settings.map { [store] settings in
@@ -520,7 +522,8 @@ final class WindowManager {
             frame = CGRect(x: base.midX - width / 2, y: anchorBottom, width: width, height: height)
         default:
             // Top-attached surfaces stay physically attached to the menu-bar/notch edge. Only
-            // the lower edge moves as the context player grows or shrinks.
+            // the lower edge moves as the context player grows or shrinks before its independent
+            // context-only offset is applied below.
             let anchorTop = base.maxY
             let bottomLimit = geometry.visible.minY + margin
             let availableHeight = max(minimumHeight, anchorTop - bottomLimit)
@@ -530,8 +533,22 @@ final class WindowManager {
             if geometry.style == .right { frame.origin.x = base.maxX - width }
         }
 
+        // These values are intentionally independent of Appearance.surface.offsets. They move
+        // only the adaptive Context Music panel; the normal expanded dashboard still uses the
+        // regular opened offset from SurfaceGeometry.
+        let defaults = UserDefaults.standard
+        let contextX = CGFloat(defaults.double(forKey: "HaloContextOffsetX"))
+        let contextY = CGFloat(defaults.double(forKey: "HaloContextOffsetY"))
+        frame.origin.x += contextX
+        frame.origin.y -= contextY // UI convention: positive Y moves down.
+
         if frame.minX < geometry.visible.minX + margin { frame.origin.x = geometry.visible.minX + margin }
         if frame.maxX > geometry.visible.maxX - margin { frame.origin.x = geometry.visible.maxX - margin - width }
+
+        let bottomLimit = geometry.visible.minY + margin
+        let topLimit = max(base.maxY, geometry.visible.maxY - margin)
+        if frame.minY < bottomLimit { frame.origin.y = bottomLimit }
+        if frame.maxY > topLimit { frame.origin.y = topLimit - height }
         return frame
     }
 
