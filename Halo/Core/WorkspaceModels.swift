@@ -75,6 +75,7 @@ struct DisplayOverride: Codable, Identifiable, Equatable {
 }
 struct WorkspaceLayout: Codable, Equatable {
     var contextMusic: ContextMusicOptions?
+    var hud: HaloHUDSettings?
     var horizontalWidgets: Bool?
     var horizontalPages: Bool?
     var horizontalHeight: Double?
@@ -137,6 +138,7 @@ struct ThemeArchive: Codable {
         archive.layout.widgets = try layout.widgets?.mapValues { try $0.validated() }
         archive.layout.closedNotch = try layout.closedNotch?.validated()
         archive.layout.contextMusic = try layout.contextMusic?.validated()
+        archive.layout.hud = try layout.hud?.validated()
         return archive
     }
 }
@@ -336,5 +338,378 @@ struct ContextMusicOptions: Codable, Equatable {
         if lyricSyncOffset != nil { result.lyricSyncOffset = resolvedLyricSyncOffset }
         if lyricFontSize != nil { result.lyricFontSize = resolvedLyricFontSize }
         return result
+    }
+}
+
+// MARK: - Halo HUD Engine model
+
+/// Stable event identifiers. Providers translate platform events into these values; renderers never
+/// need to know which macOS API produced them.
+enum HaloHUDEventKind: String, Codable, CaseIterable, Identifiable {
+    case volume, mute, displayBrightness, keyboardBrightness
+    case microphoneState, microphoneMute, audioInputChanged, audioOutputChanged, audioDeviceConnected
+    case batteryStatus, chargingState, powerSourceChanged, wifiState, bluetoothState, focusState
+    case capsLock, screenshotCaptured, screenRecordingState, cameraActivity, microphoneActivity, mediaChanged
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .volume: return "Volume"
+        case .mute: return "Mute / Unmute"
+        case .displayBrightness: return "Display Brightness"
+        case .keyboardBrightness: return "Keyboard Brightness"
+        case .microphoneState: return "Microphone State"
+        case .microphoneMute: return "Microphone Mute"
+        case .audioInputChanged: return "Audio Input Changed"
+        case .audioOutputChanged: return "Audio Output Changed"
+        case .audioDeviceConnected: return "Audio Device Connection"
+        case .batteryStatus: return "Battery Status"
+        case .chargingState: return "Charging Started / Stopped"
+        case .powerSourceChanged: return "Power Source Changed"
+        case .wifiState: return "Wi-Fi State"
+        case .bluetoothState: return "Bluetooth State"
+        case .focusState: return "Focus / Do Not Disturb"
+        case .capsLock: return "Caps Lock"
+        case .screenshotCaptured: return "Screenshot Captured"
+        case .screenRecordingState: return "Screen Recording"
+        case .cameraActivity: return "Camera Activity"
+        case .microphoneActivity: return "Microphone Activity"
+        case .mediaChanged: return "Media Changed"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .volume: return "speaker.wave.2.fill"
+        case .mute: return "speaker.slash.fill"
+        case .displayBrightness: return "sun.max.fill"
+        case .keyboardBrightness: return "keyboard.fill"
+        case .microphoneState, .microphoneMute, .microphoneActivity: return "mic.fill"
+        case .audioInputChanged: return "mic.and.signal.meter.fill"
+        case .audioOutputChanged, .audioDeviceConnected: return "airpodspro"
+        case .batteryStatus: return "battery.75percent"
+        case .chargingState: return "bolt.fill"
+        case .powerSourceChanged: return "powerplug.fill"
+        case .wifiState: return "wifi"
+        case .bluetoothState: return "wave.3.right"
+        case .focusState: return "moon.fill"
+        case .capsLock: return "capslock.fill"
+        case .screenshotCaptured: return "camera.viewfinder"
+        case .screenRecordingState: return "record.circle"
+        case .cameraActivity: return "video.fill"
+        case .mediaChanged: return "music.note"
+        }
+    }
+    /// Only these event providers are currently connected to Halo's safe replacement/observer path.
+    var providerStatus: HaloHUDProviderStatus {
+        switch self {
+        case .volume, .mute, .displayBrightness, .keyboardBrightness: return .available
+        case .batteryStatus, .chargingState, .powerSourceChanged, .mediaChanged, .capsLock: return .observable
+        default: return .architected
+        }
+    }
+}
+
+enum HaloHUDProviderStatus: String, Codable {
+    case available, observable, architected
+    var title: String {
+        switch self {
+        case .available: return "Available"
+        case .observable: return "Observer-capable"
+        case .architected: return "Provider not connected"
+        }
+    }
+}
+
+enum HaloHUDPresentationTarget: String, Codable, CaseIterable, Identifiable {
+    case notch, floating, screenEdge, menuBar, nearCursor, disabled
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .notch: return "Notch"
+        case .floating: return "Floating HUD"
+        case .screenEdge: return "Screen Edge"
+        case .menuBar: return "Menu Bar"
+        case .nearCursor: return "Near Cursor"
+        case .disabled: return "Disabled"
+        }
+    }
+}
+enum HaloHUDNotchSide: String, Codable, CaseIterable, Identifiable { case left, right, automatic, full; var id: String { rawValue }; var title: String { rawValue == "full" ? "Full Notch" : rawValue.capitalized } }
+enum HaloHUDCollisionBehavior: String, Codable, CaseIterable, Identifiable { case replace, push, overlay, queue, showExternally; var id: String { rawValue }; var title: String { rawValue == "showExternally" ? "Show Externally" : rawValue.capitalized } }
+enum HaloHUDLayoutStyle: String, Codable, CaseIterable, Identifiable { case horizontal, vertical, compact; var id: String { rawValue }; var title: String { rawValue.capitalized } }
+enum HaloHUDProgressStyle: String, Codable, CaseIterable, Identifiable {
+    case bar, segmentedBar, ring, arc, dots, gauge, glow, numberOnly, iconFill, minimalLine, wave
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .segmentedBar: return "Segmented Bar"
+        case .numberOnly: return "Number Only"
+        case .iconFill: return "Icon Fill"
+        case .minimalLine: return "Minimal Line"
+        default: return rawValue.capitalized
+        }
+    }
+}
+enum HaloHUDBackgroundStyle: String, Codable, CaseIterable, Identifiable { case glass, solid, gradient, clear, image, video; var id: String { rawValue }; var title: String { rawValue.capitalized } }
+enum HaloHUDDynamicColorSource: String, Codable, CaseIterable, Identifiable {
+    case fixed, systemAccent, wallpaper, albumArtwork, systemAppearance, automaticContrast
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .fixed: return "Custom / Fixed"
+        case .systemAccent: return "System Accent"
+        case .wallpaper: return "Wallpaper"
+        case .albumArtwork: return "Album Artwork"
+        case .systemAppearance: return "System Appearance"
+        case .automaticContrast: return "Automatic Contrast"
+        }
+    }
+}
+enum HaloHUDEntranceAnimation: String, Codable, CaseIterable, Identifiable { case fade, scale, slide, spring, morph, notchExpand, liquid; var id: String { rawValue }; var title: String { rawValue == "notchExpand" ? "Notch Expand" : rawValue.capitalized } }
+enum HaloHUDExitAnimation: String, Codable, CaseIterable, Identifiable { case fade, collapse, slide, scale, morphBack; var id: String { rawValue }; var title: String { rawValue == "morphBack" ? "Morph Back" : rawValue.capitalized } }
+enum HaloHUDProgressAnimation: String, Codable, CaseIterable, Identifiable { case smooth, spring, instant; var id: String { rawValue }; var title: String { rawValue.capitalized } }
+enum HaloHUDInterruptBehavior: String, Codable, CaseIterable, Identifiable { case restart, `continue`, blend; var id: String { rawValue }; var title: String { rawValue.capitalized } }
+enum HaloHUDFloatingPosition: String, Codable, CaseIterable, Identifiable { case topLeft, top, topRight, center, bottomLeft, bottom, bottomRight, custom; var id: String { rawValue }; var title: String { rawValue.replacingOccurrences(of: "Left", with: " Left").replacingOccurrences(of: "Right", with: " Right").capitalized } }
+enum HaloHUDScreenEdge: String, Codable, CaseIterable, Identifiable { case left, right, top, bottom; var id: String { rawValue }; var title: String { rawValue.capitalized } }
+enum HaloHUDDisplayTarget: String, Codable, CaseIterable, Identifiable { case mouse, active, builtIn, main; var id: String { rawValue }; var title: String { rawValue == "builtIn" ? "Built-in Display" : rawValue.capitalized + (rawValue == "mouse" ? " Display" : rawValue == "active" ? " Display" : "") } }
+
+struct HaloHUDComponents: Codable, Equatable {
+    var icon = true
+    var label = true
+    var value = true
+    var percentage = true
+    var progress = true
+    var deviceName = false
+}
+struct HaloHUDLayoutConfiguration: Codable, Equatable {
+    var style: HaloHUDLayoutStyle = .horizontal
+    var width = 320.0
+    var height = 92.0
+    var minimumWidth = 120.0
+    var maximumWidth = 520.0
+    var horizontalPadding = 16.0
+    var verticalPadding = 14.0
+    var spacing = 12.0
+    var cornerRadius = 24.0
+    var offsetX = 0.0
+    var offsetY = 0.0
+    var edgeMargin = 28.0
+    var compact = false
+}
+struct HaloHUDColorConfiguration: Codable, Equatable {
+    var source: HaloHUDDynamicColorSource = .systemAccent
+    var hue = 0.59
+    var saturation = 0.72
+    var brightness = 1.0
+    var alpha = 1.0
+}
+struct HaloHUDAppearanceConfiguration: Codable, Equatable {
+    var background: HaloHUDBackgroundStyle = .glass
+    var backgroundOpacity = 0.72
+    var blur = 14.0
+    var glassIntensity = 0.75
+    var border = true
+    var borderOpacity = 0.12
+    var shadow = true
+    var glow = false
+    var noise = false
+    var primary = HaloHUDColorConfiguration()
+    var secondary = HaloHUDColorConfiguration(source: .automaticContrast, hue: 0, saturation: 0, brightness: 0.82, alpha: 1)
+    var progress = HaloHUDColorConfiguration()
+    var borderColor = HaloHUDColorConfiguration(source: .automaticContrast, hue: 0, saturation: 0, brightness: 1, alpha: 0.16)
+    var glowColor = HaloHUDColorConfiguration()
+}
+struct HaloHUDAnimationConfiguration: Codable, Equatable {
+    var entrance: HaloHUDEntranceAnimation = .spring
+    var exit: HaloHUDExitAnimation = .fade
+    var entranceDuration = 0.18
+    var exitDuration = 0.20
+    var springDamping = 0.82
+    var springStiffness = 180.0
+    var progress: HaloHUDProgressAnimation = .smooth
+    var intensity = 0.72
+}
+struct HaloHUDBehaviorConfiguration: Codable, Equatable {
+    var displayDuration = 1.15
+    var interrupt: HaloHUDInterruptBehavior = .blend
+    var collision: HaloHUDCollisionBehavior = .showExternally
+    var fallbackTarget: HaloHUDPresentationTarget = .floating
+}
+struct HaloHUDPresentationConfiguration: Codable, Equatable {
+    var target: HaloHUDPresentationTarget = .floating
+    var notchSide: HaloHUDNotchSide = .automatic
+    var floatingPosition: HaloHUDFloatingPosition = .top
+    var screenEdge: HaloHUDScreenEdge = .right
+    var displayTarget: HaloHUDDisplayTarget = .mouse
+    var screenEdgeLength = 220.0
+    var screenEdgeThickness = 6.0
+}
+struct HaloHUDConfiguration: Codable, Equatable {
+    var presentation = HaloHUDPresentationConfiguration()
+    var layout = HaloHUDLayoutConfiguration()
+    var components = HaloHUDComponents()
+    var progressStyle: HaloHUDProgressStyle = .bar
+    var segments = 16
+    var iconSize = 24.0
+    var textSize = 14.0
+    var appearance = HaloHUDAppearanceConfiguration()
+    var animation = HaloHUDAnimationConfiguration()
+    var behavior = HaloHUDBehaviorConfiguration()
+}
+struct HaloHUDEventOverride: Codable, Equatable {
+    var enabled = true
+    var useGlobalSettings = true
+    var configuration = HaloHUDConfiguration()
+}
+struct HaloHUDPreset: Codable, Equatable, Identifiable {
+    var id: String
+    var name: String
+    var builtIn: Bool
+    var configuration: HaloHUDConfiguration
+}
+struct HaloHUDAppRule: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var enabled = true
+    var bundleIdentifier = ""
+    var target: HaloHUDPresentationTarget = .screenEdge
+}
+struct HaloHUDSettings: Codable, Equatable {
+    var version = 2
+    var enabled = true
+    var global = HaloHUDConfiguration()
+    var events: [String: HaloHUDEventOverride] = [:]
+    var customPresets: [HaloHUDPreset] = []
+    var appRules: [HaloHUDAppRule] = []
+
+    func override(for kind: HaloHUDEventKind) -> HaloHUDEventOverride {
+        events[kind.rawValue] ?? HaloHUDEventOverride()
+    }
+    func isEnabled(_ kind: HaloHUDEventKind) -> Bool { enabled && override(for: kind).enabled }
+    func configuration(for kind: HaloHUDEventKind) -> HaloHUDConfiguration {
+        let item = override(for: kind)
+        return item.useGlobalSettings ? global : item.configuration
+    }
+    mutating func setOverride(_ value: HaloHUDEventOverride, for kind: HaloHUDEventKind) { events[kind.rawValue] = value }
+    func validated() throws -> HaloHUDSettings {
+        guard version <= 2 else { throw CocoaError(.fileReadCorruptFile) }
+        var result = self
+        result.version = 2
+        result.global = try global.validated()
+        result.events = try events.mapValues { item in
+            var value = item
+            value.configuration = try item.configuration.validated()
+            return value
+        }
+        result.customPresets = try customPresets.prefix(50).map { preset in
+            var value = preset
+            value.name = String(value.name.prefix(80))
+            value.configuration = try value.configuration.validated()
+            return value
+        }
+        result.appRules = Array(appRules.prefix(100))
+        return result
+    }
+}
+
+extension HaloHUDConfiguration {
+    func validated() throws -> HaloHUDConfiguration {
+        let numbers = [layout.width, layout.height, layout.minimumWidth, layout.maximumWidth, layout.horizontalPadding,
+                       layout.verticalPadding, layout.spacing, layout.cornerRadius, layout.offsetX, layout.offsetY,
+                       layout.edgeMargin, iconSize, textSize, appearance.backgroundOpacity, appearance.blur,
+                       appearance.glassIntensity, appearance.borderOpacity, animation.entranceDuration,
+                       animation.exitDuration, animation.springDamping, animation.springStiffness,
+                       animation.intensity, behavior.displayDuration, presentation.screenEdgeLength,
+                       presentation.screenEdgeThickness]
+        guard numbers.allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        var result = self
+        result.layout.width = min(900, max(80, layout.width))
+        result.layout.height = min(500, max(24, layout.height))
+        result.layout.minimumWidth = min(900, max(40, layout.minimumWidth))
+        result.layout.maximumWidth = min(1200, max(result.layout.minimumWidth, layout.maximumWidth))
+        result.layout.horizontalPadding = min(80, max(0, layout.horizontalPadding))
+        result.layout.verticalPadding = min(80, max(0, layout.verticalPadding))
+        result.layout.spacing = min(60, max(0, layout.spacing))
+        result.layout.cornerRadius = min(120, max(0, layout.cornerRadius))
+        result.layout.offsetX = min(1000, max(-1000, layout.offsetX))
+        result.layout.offsetY = min(1000, max(-1000, layout.offsetY))
+        result.layout.edgeMargin = min(200, max(0, layout.edgeMargin))
+        result.segments = min(64, max(2, segments))
+        result.iconSize = min(96, max(8, iconSize))
+        result.textSize = min(64, max(8, textSize))
+        result.appearance.backgroundOpacity = min(1, max(0, appearance.backgroundOpacity))
+        result.appearance.blur = min(60, max(0, appearance.blur))
+        result.appearance.glassIntensity = min(1, max(0, appearance.glassIntensity))
+        result.appearance.borderOpacity = min(1, max(0, appearance.borderOpacity))
+        result.animation.entranceDuration = min(2, max(0, animation.entranceDuration))
+        result.animation.exitDuration = min(2, max(0, animation.exitDuration))
+        result.animation.springDamping = min(1, max(0.1, animation.springDamping))
+        result.animation.springStiffness = min(600, max(20, animation.springStiffness))
+        result.animation.intensity = min(1, max(0, animation.intensity))
+        result.behavior.displayDuration = min(10, max(0.2, behavior.displayDuration))
+        result.presentation.screenEdgeLength = min(1600, max(40, presentation.screenEdgeLength))
+        result.presentation.screenEdgeThickness = min(48, max(1, presentation.screenEdgeThickness))
+        return result
+    }
+
+    static func haloPreset() -> HaloHUDConfiguration { HaloHUDConfiguration() }
+    static func nativePreset() -> HaloHUDConfiguration {
+        var c = HaloHUDConfiguration(); c.presentation.target = .floating; c.layout.style = .vertical; c.layout.width = 180; c.layout.height = 150; c.appearance.background = .glass; c.animation.entrance = .scale; return c
+    }
+    static func minimalPreset() -> HaloHUDConfiguration {
+        var c = HaloHUDConfiguration(); c.presentation.target = .floating; c.layout.style = .compact; c.layout.width = 190; c.layout.height = 52; c.components.label = false; c.components.value = false; c.progressStyle = .minimalLine; c.appearance.shadow = false; c.animation.entrance = .fade; return c
+    }
+    static func dynamicPreset() -> HaloHUDConfiguration {
+        var c = HaloHUDConfiguration(); c.appearance.primary.source = .albumArtwork; c.appearance.progress.source = .albumArtwork; c.appearance.glow = true; c.animation.entrance = .morph; c.animation.exit = .morphBack; return c
+    }
+    static func compactPreset() -> HaloHUDConfiguration {
+        var c = minimalPreset(); c.presentation.target = .notch; c.presentation.notchSide = .automatic; c.behavior.collision = .push; return c
+    }
+    static func classicPreset() -> HaloHUDConfiguration { nativePreset() }
+    static func cyberPreset() -> HaloHUDConfiguration {
+        var c = HaloHUDConfiguration(); c.progressStyle = .gauge; c.appearance.background = .solid; c.appearance.glow = true; c.layout.cornerRadius = 10; c.animation.entrance = .slide; return c
+    }
+}
+
+extension HaloHUDPreset {
+    static var builtIns: [HaloHUDPreset] {
+        [
+            HaloHUDPreset(id: "builtin.halo", name: "Halo", builtIn: true, configuration: .haloPreset()),
+            HaloHUDPreset(id: "builtin.native-plus", name: "Native+", builtIn: true, configuration: .nativePreset()),
+            HaloHUDPreset(id: "builtin.minimal", name: "Minimal", builtIn: true, configuration: .minimalPreset()),
+            HaloHUDPreset(id: "builtin.dynamic", name: "Dynamic", builtIn: true, configuration: .dynamicPreset()),
+            HaloHUDPreset(id: "builtin.compact", name: "Compact", builtIn: true, configuration: .compactPreset()),
+            HaloHUDPreset(id: "builtin.classic", name: "Classic", builtIn: true, configuration: .classicPreset()),
+            HaloHUDPreset(id: "builtin.cyber", name: "Cyber", builtIn: true, configuration: .cyberPreset())
+        ]
+    }
+}
+
+/// Generic payload consumed by renderers. Platform-specific providers should only construct this type.
+struct HaloHUDEvent: Identifiable, Equatable {
+    var id = UUID()
+    var kind: HaloHUDEventKind
+    var icon: String
+    var primaryText: String
+    var secondaryText: String?
+    var value: Double?
+    var minimumValue: Double?
+    var maximumValue: Double?
+    var progress: Double?
+    var state: String?
+    var timestamp = Date()
+    var artworkKey: String?
+    var metadata: [String: String] = [:]
+    var preferredTarget: HaloHUDPresentationTarget?
+
+    init(kind: HaloHUDEventKind, icon: String? = nil, primaryText: String? = nil, secondaryText: String? = nil,
+         value: Double? = nil, minimumValue: Double? = 0, maximumValue: Double? = 1, progress: Double? = nil,
+         state: String? = nil, artworkKey: String? = nil, metadata: [String: String] = [:],
+         preferredTarget: HaloHUDPresentationTarget? = nil) {
+        self.kind = kind; self.icon = icon ?? kind.symbol; self.primaryText = primaryText ?? kind.title
+        self.secondaryText = secondaryText; self.value = value; self.minimumValue = minimumValue; self.maximumValue = maximumValue
+        if let progress { self.progress = min(1, max(0, progress)) }
+        else if let value, let minimumValue, let maximumValue, maximumValue > minimumValue {
+            self.progress = min(1, max(0, (value - minimumValue) / (maximumValue - minimumValue)))
+        } else { self.progress = nil }
+        self.state = state; self.artworkKey = artworkKey; self.metadata = metadata; self.preferredTarget = preferredTarget
     }
 }
