@@ -9,15 +9,31 @@ struct ClosedNotchView: View {
     let occlusion: CGRect?
     let referenceWidth: CGFloat
     private var options: ClosedNotchOptions { layout.closedNotch ?? ClosedNotchOptions() }
+    private var activeActivity: LiveActivity? {
+        workspace.activities.first { activity in
+            (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(8) > Date()
+        }
+    }
+    private var resolvedItems: (left: ClosedNotchItem, right: ClosedNotchItem) {
+        var left = options.left
+        var right = options.right
+        guard activeActivity != nil, left != .activity, right != .activity else { return (left, right) }
+        let rightAvailable = right == .none || ((right == .media || right == .visualizer) && !workspace.media.isPlaying)
+        let leftAvailable = left == .none || ((left == .media || left == .visualizer) && !workspace.media.isPlaying)
+        if rightAvailable { right = .activity }
+        else if leftAvailable { left = .activity }
+        return (left, right)
+    }
     var body: some View {
         GeometryReader { proxy in
             let reservation = cameraReservation(width: proxy.size.width, height: proxy.size.height)
             let leftWidth = reservation?.minX ?? proxy.size.width / 2
             let rightWidth = reservation.map { proxy.size.width - $0.maxX } ?? proxy.size.width / 2
+            let items = resolvedItems
             HStack(spacing: 0) {
-                slot(options.left, decoration: options.leftDecoration, side: .left, width: leftWidth, height: proxy.size.height)
+                slot(items.left, decoration: options.leftDecoration, side: .left, width: leftWidth, height: proxy.size.height)
                 if let reservation { Color.clear.frame(width: reservation.width) }
-                slot(options.right, decoration: options.rightDecoration, side: .right, width: rightWidth, height: proxy.size.height)
+                slot(items.right, decoration: options.rightDecoration, side: .right, width: rightWidth, height: proxy.size.height)
             }.frame(height: proxy.size.height)
         }.foregroundStyle(options.color.color)
     }
@@ -29,13 +45,15 @@ struct ClosedNotchView: View {
     }
     private func slot(_ item: ClosedNotchItem, decoration: SideDecoration?, side: ClosedNotchSide, width: CGFloat, height: CGFloat) -> some View {
         Group {
-            if width >= 2 * options.contentPaddingX + options.contentSideMargin + 8 {
-                ClosedNotchSlot(item: item, decoration: decoration, side: side, availableHeight: height, availableWidth: width, options: options, clock: layout.widgetStyle(for: .clock), store: store,
-                                workspace: workspace, media: workspace.media, system: workspace.system)
+            if width >= 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin + 8 {
+                ClosedNotchSlot(item: item, decoration: decoration, side: side, availableHeight: height, availableWidth: width,
+                                options: options, clock: layout.widgetStyle(for: .clock), store: store, workspace: workspace,
+                                media: workspace.media, system: workspace.system)
             }
         }.frame(width: max(0, width)).clipped()
     }
 }
+
 struct ClosedNotchSlot: View {
     let item: ClosedNotchItem
     let decoration: SideDecoration?
@@ -48,13 +66,24 @@ struct ClosedNotchSlot: View {
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject var media: MediaService
     @ObservedObject var system: SystemService
+    private var activeActivity: LiveActivity? {
+        workspace.activities.first { activity in
+            (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(8) > Date()
+        }
+    }
     private var innerHeight: Double { max(1, availableHeight - 2 * options.contentPaddingY) }
-    private var innerWidth: Double { max(1, availableWidth - 2 * options.contentPaddingX - options.contentSideMargin) }
+    private var innerWidth: Double {
+        max(1, availableWidth - 2 * options.contentPaddingX - options.contentSideMargin - options.contentOuterMargin)
+    }
     private var isMusicItem: Bool { item == .media || item == .visualizer }
-    private var itemIsVisible: Bool { !isMusicItem || media.isPlaying }
+    private var itemIsVisible: Bool {
+        if isMusicItem { return media.isPlaying }
+        if item == .activity { return activeActivity != nil }
+        return item != .none
+    }
     private var decorationSize: Double {
         guard let decoration, decoration.isVisible(playing: media.isPlaying) else { return 0 }
-        return min(decoration.size, min(innerHeight, itemIsVisible && item != .none ? innerWidth / 3 : innerWidth))
+        return min(decoration.size, min(innerHeight, itemIsVisible ? innerWidth / 3 : innerWidth))
     }
     private var textSize: Double { min(options.fontSize, innerHeight / 1.25) }
     private var effectiveTextColor: Color {
@@ -68,7 +97,7 @@ struct ClosedNotchSlot: View {
         return v
     }
     var body: some View {
-        HStack(spacing: decorationSize > 0 && itemIsVisible && item != .none ? 5 : 0) {
+        HStack(spacing: decorationSize > 0 && itemIsVisible ? 5 : 0) {
             if let decoration, decorationSize > 0 {
                 SideDecorationView(options: decoration, playing: media.isPlaying, lowPower: system.lowPower, maximumHeight: decorationSize)
             }
@@ -82,6 +111,7 @@ struct ClosedNotchSlot: View {
         .padding(.horizontal, options.contentPaddingX)
         .padding(.vertical, options.contentPaddingY)
         .padding(side == .left ? .trailing : .leading, options.contentSideMargin)
+        .padding(side == .left ? .leading : .trailing, options.contentOuterMargin)
         .frame(width: availableWidth, height: availableHeight, alignment: .center)
         .clipped()
     }
@@ -105,8 +135,16 @@ struct ClosedNotchSlot: View {
                 PlaybackVisualizer(kind: options.animation, playing: true, enabled: options.animate && !system.lowPower,
                                    options: visualizerOptions, palette: media.artworkColors, fallback: effectiveTextColor)
             }
-        case .files: Label("\(store.files.count)", systemImage: "tray")
-        case .activity: Text(workspace.activities.first?.title ?? "No activity")
+        case .files:
+            Label("\(store.files.count)", systemImage: "tray")
+        case .activity:
+            if let activity = activeActivity {
+                HStack(spacing: 5) {
+                    Image(systemName: "waveform.path")
+                    Text(activity.title)
+                    if let progress = activity.progress { ProgressView(value: progress).frame(width: 36) }
+                }
+            }
         }
     }
     private var compactClock: WidgetStyle { var value = clock; value.fontSize = textSize; value.textColor = WidgetColor(effectiveTextColor); return value }
@@ -156,8 +194,7 @@ struct PlaybackVisualizer: View {
             let time = animated ? timestamp * options.speed : 0
             Canvas { graphics, size in
                 let w = Double(size.width), h = Double(size.height)
-                let paint = GraphicsContext.Shading.linearGradient(Gradient(colors: colors),
-                    startPoint: .zero, endPoint: CGPoint(x: w, y: h))
+                let paint = GraphicsContext.Shading.linearGradient(Gradient(colors: colors), startPoint: .zero, endPoint: CGPoint(x: w, y: h))
                 let strength = playing ? options.intensity : 0.12
                 switch kind {
                 case .waveform, .ribbon:
