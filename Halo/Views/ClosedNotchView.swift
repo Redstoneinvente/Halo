@@ -267,11 +267,9 @@ private struct ClosedArtworkView: View {
     private var paletteColor: Color { media.artworkColors.first?.color ?? Color.white.opacity(0.78) }
     var body: some View {
         Group {
-            if options.mode == .vinyl {
-                vinylView
-            } else if let artwork {
-                artworkImage(artwork).clipShape(RoundedRectangle(cornerRadius: 5))
-            } else {
+            if options.mode == .vinyl { vinylView }
+            else if let artwork { artworkImage(artwork).clipShape(RoundedRectangle(cornerRadius: 5)) }
+            else {
                 RoundedRectangle(cornerRadius: 5)
                     .fill(paletteColor.opacity(0.22))
                     .overlay(Image(systemName: "photo").font(.system(size: max(8, options.size * 0.34))).foregroundStyle(paletteColor))
@@ -291,9 +289,7 @@ private struct ClosedArtworkView: View {
                 let turns = context.date.timeIntervalSinceReferenceDate * options.vinylRPM / 60
                 vinylDisc.rotationEffect(.degrees(turns * 360))
             }
-        } else {
-            vinylDisc
-        }
+        } else { vinylDisc }
     }
     private var vinylDisc: some View {
         ZStack {
@@ -301,12 +297,9 @@ private struct ClosedArtworkView: View {
             Circle().stroke(Color.white.opacity(0.12), lineWidth: max(0.5, options.size * 0.025)).padding(options.size * 0.08)
             Circle().stroke(Color.white.opacity(0.08), lineWidth: max(0.5, options.size * 0.02)).padding(options.size * 0.17)
             if let artwork {
-                Image(nsImage: artwork).resizable().scaledToFill()
-                    .frame(width: options.size * 0.62, height: options.size * 0.62)
-                    .clipShape(Circle())
+                Image(nsImage: artwork).resizable().scaledToFill().frame(width: options.size * 0.62, height: options.size * 0.62).clipShape(Circle())
             } else {
-                Circle().fill(paletteColor.opacity(0.88))
-                    .frame(width: options.size * 0.62, height: options.size * 0.62)
+                Circle().fill(paletteColor.opacity(0.88)).frame(width: options.size * 0.62, height: options.size * 0.62)
                     .overlay(Image(systemName: "music.note").font(.system(size: max(7, options.size * 0.22))).foregroundStyle(.black.opacity(0.7)))
             }
             Circle().fill(Color.black).frame(width: max(3, options.size * 0.12), height: max(3, options.size * 0.12))
@@ -318,6 +311,62 @@ private struct ClosedArtworkView: View {
     private func artworkImage(_ image: NSImage) -> some View { Image(nsImage: image).resizable().scaledToFill().frame(width: options.size, height: options.size).clipped() }
 }
 
+private struct TimedLyricLine: Identifiable {
+    let id: Int
+    let time: Double
+    let text: String
+}
+
+private struct LyricFrame {
+    let current: TimedLyricLine
+    let next: TimedLyricLine?
+    let start: Double
+    let end: Double
+    let wordIndex: Int
+}
+
+private enum LyricTimeline {
+    static func parse(_ value: String, duration: Double) -> [TimedLyricLine] {
+        var timed: [TimedLyricLine] = []
+        var plain: [String] = []
+        for raw in value.split(whereSeparator: \.isNewline) {
+            let line = String(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            if let close = line.firstIndex(of: "]"), line.first == "[" {
+                let stamp = String(line[line.index(after: line.startIndex)..<close])
+                let text = String(line[line.index(after: close)...]).trimmingCharacters(in: .whitespaces)
+                if let time = timestamp(stamp), !text.isEmpty {
+                    timed.append(TimedLyricLine(id: timed.count, time: time, text: text))
+                    continue
+                }
+            }
+            plain.append(line)
+        }
+        if !timed.isEmpty {
+            return timed.sorted { $0.time < $1.time }.enumerated().map { TimedLyricLine(id: $0.offset, time: $0.element.time, text: $0.element.text) }
+        }
+        guard !plain.isEmpty else { return [] }
+        let step = duration > 0 ? duration / Double(plain.count) : 4
+        return plain.enumerated().map { TimedLyricLine(id: $0.offset, time: Double($0.offset) * step, text: $0.element) }
+    }
+    static func frame(lines: [TimedLyricLine], position: Double, duration: Double) -> LyricFrame? {
+        guard !lines.isEmpty else { return nil }
+        let index = lines.lastIndex(where: { $0.time <= position + 0.08 }) ?? 0
+        let current = lines[index]
+        let next = index + 1 < lines.count ? lines[index + 1] : nil
+        let end = max(current.time + 0.35, next?.time ?? (duration > current.time ? duration : current.time + 4))
+        let words = current.text.split(whereSeparator: \.isWhitespace)
+        let progress = min(0.999, max(0, (position - current.time) / max(0.35, end - current.time)))
+        let wordIndex = words.isEmpty ? 0 : min(words.count - 1, Int(progress * Double(words.count)))
+        return LyricFrame(current: current, next: next, start: current.time, end: end, wordIndex: wordIndex)
+    }
+    private static func timestamp(_ raw: String) -> Double? {
+        let pieces = raw.split(separator: ":")
+        guard pieces.count == 2, let minutes = Double(pieces[0]), let seconds = Double(pieces[1]) else { return nil }
+        return minutes * 60 + seconds
+    }
+}
+
 private struct ClosedMediaView: View {
     @ObservedObject var media: MediaService
     let options: ClosedMediaOptions
@@ -326,13 +375,29 @@ private struct ClosedMediaView: View {
     let lowPower: Bool
     @State private var lyrics = ""
     @State private var lyricsLoading = false
+    @State private var sampledPosition = 0.0
+    @State private var sampledDuration = 0.0
+    @State private var sampledAt = Date()
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }
-    private var lyricLines: [String] { lyrics.split(whereSeparator: \.isNewline).map(String.init).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } }
     var body: some View {
-        mediaText.task(id: key + "|\(options.textMode.rawValue)|\(options.usesOnlineLyrics)") {
-            lyrics = ""; guard options.textMode == .lyrics else { return }; lyricsLoading = true
-            lyrics = await MediaAssetReader.lyrics(app: media.connectedApp, key: key, title: media.title, artist: media.artist, onlineFallback: options.usesOnlineLyrics)
-            lyricsLoading = false
+        mediaText
+            .task(id: key + "|\(options.textMode.rawValue)|\(options.usesOnlineLyrics)|\(options.resolvedLyricDisplay.rawValue)") {
+                lyrics = ""; sampledPosition = 0; sampledDuration = 0; sampledAt = Date()
+                guard options.textMode == .lyrics else { return }
+                lyricsLoading = true
+                lyrics = await MediaAssetReader.lyrics(app: media.connectedApp, key: key, title: media.title, artist: media.artist, onlineFallback: options.usesOnlineLyrics)
+                lyricsLoading = false
+                await samplePlaybackLoop()
+            }
+    }
+    private func samplePlaybackLoop() async {
+        while !Task.isCancelled && media.isPlaying && options.textMode == .lyrics {
+            if let sample = await MediaAssetReader.playbackTime(app: media.connectedApp) {
+                sampledPosition = sample.position
+                sampledDuration = sample.duration
+                sampledAt = Date()
+            }
+            try? await Task.sleep(nanoseconds: 850_000_000)
         }
     }
     @ViewBuilder private var mediaText: some View {
@@ -345,21 +410,67 @@ private struct ClosedMediaView: View {
                     styledText(media.artist.isEmpty ? "Unknown artist" : media.artist, width: width).opacity(0.72).font(.system(size: max(8, fontSize * 0.82)))
                 }.frame(maxWidth: width, alignment: .leading)
             } else { inlineText([media.title, media.artist].filter { !$0.isEmpty }.joined(separator: " · "), width: width) }
-        case .lyrics: lyricsView(width: width)
+        case .lyrics: syncedLyricsView(width: width)
         case .title: inlineText(media.title, width: width)
         case .artist: inlineText(media.artist.isEmpty ? media.title : media.artist, width: width)
         }
     }
-    @ViewBuilder private func lyricsView(width: Double) -> some View {
-        if lyricsLoading && lyricLines.isEmpty { Label("Loading lyrics…", systemImage: "text.quote").lineLimit(1).opacity(0.72) }
-        else if lyricLines.isEmpty {
-            VStack(alignment: .leading, spacing: 2) { Text(media.title).lineLimit(1); Text("Lyrics unavailable").font(.system(size: max(8, fontSize * 0.82))).opacity(0.65).lineLimit(1) }.frame(maxWidth: width, alignment: .leading)
-        } else if options.lines == 2 {
-            VStack(alignment: .leading, spacing: 2) { styledText(lyricLines[0], width: width); if lyricLines.count > 1 { styledText(lyricLines[1], width: width).opacity(0.72) } }.frame(maxWidth: width, alignment: .leading)
-        } else { inlineText(lyricLines[0], width: width) }
+    @ViewBuilder private func syncedLyricsView(width: Double) -> some View {
+        if lyricsLoading && lyrics.isEmpty {
+            Label("Loading lyrics…", systemImage: "text.quote").lineLimit(1).opacity(0.72)
+        } else if lyrics.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(media.title).lineLimit(1)
+                Text("Synced lyrics unavailable").font(.system(size: max(8, fontSize * 0.82))).opacity(0.65).lineLimit(1)
+            }.frame(maxWidth: width, alignment: .leading)
+        } else {
+            TimelineView(.animation(minimumInterval: lowPower ? 0.35 : 0.12, paused: !media.isPlaying)) { context in
+                let position = sampledPosition + (media.isPlaying ? max(0, context.date.timeIntervalSince(sampledAt)) : 0)
+                let lines = LyricTimeline.parse(lyrics, duration: sampledDuration)
+                if let frame = LyricTimeline.frame(lines: lines, position: position, duration: sampledDuration) {
+                    lyricPresentation(frame: frame, width: width)
+                } else {
+                    Text("Synced lyrics unavailable").opacity(0.65).lineLimit(1)
+                }
+            }
+        }
+    }
+    @ViewBuilder private func lyricPresentation(frame: LyricFrame, width: Double) -> some View {
+        switch options.resolvedLyricDisplay {
+        case .line:
+            if options.lines == 2 {
+                VStack(alignment: .leading, spacing: 2) {
+                    styledText(frame.current.text, width: width)
+                    if let next = frame.next { styledText(next.text, width: width).opacity(0.45) }
+                }.frame(maxWidth: width, alignment: .leading)
+            } else { inlineText(frame.current.text, width: width) }
+        case .word:
+            let words = frame.current.text.split(whereSeparator: \.isWhitespace).map(String.init)
+            let word = words.indices.contains(frame.wordIndex) ? words[frame.wordIndex] : frame.current.text
+            inlineText(word, width: width)
+        case .focus:
+            VStack(alignment: .leading, spacing: 2) {
+                focusedLine(frame.current.text, activeWord: frame.wordIndex, width: width)
+                if options.lines == 2, let next = frame.next { styledText(next.text, width: width).opacity(0.35) }
+            }.frame(maxWidth: width, alignment: .leading)
+        }
+    }
+    private func focusedLine(_ text: String, activeWord: Int, width: Double) -> some View {
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        var result = Text("")
+        for (index, word) in words.enumerated() {
+            let piece = Text((index == 0 ? "" : " ") + word)
+                .fontWeight(index == activeWord ? .bold : .regular)
+                .foregroundColor(index == activeWord ? .primary : .secondary)
+            result = result + piece
+        }
+        return result.lineLimit(1).minimumScaleFactor(0.5).frame(maxWidth: width, alignment: .leading)
     }
     @ViewBuilder private func inlineText(_ text: String, width: Double) -> some View {
-        HStack(spacing: 6) { if options.showPlaybackIcon { Image(systemName: options.textMode == .lyrics ? "text.quote" : "music.note") }; styledText(text, width: width) }.frame(maxWidth: width)
+        HStack(spacing: 6) {
+            if options.showPlaybackIcon { Image(systemName: options.textMode == .lyrics ? "text.quote" : "music.note") }
+            styledText(text, width: width)
+        }.frame(maxWidth: width)
     }
     @ViewBuilder private func styledText(_ text: String, width: Double) -> some View {
         switch options.overflow {
@@ -386,6 +497,7 @@ private struct MarqueeText: View {
 }
 
 private enum MediaAssetReader {
+    struct PlaybackSample { let position: Double; let duration: Double }
     private static let queue = DispatchQueue(label: "Halo.ClosedMediaAssets", qos: .utility)
     private static let lock = NSLock()
     private static var artworkCache: [String: Data] = [:]
@@ -415,11 +527,37 @@ private enum MediaAssetReader {
         }
         guard let data, data.count <= 5_000_000 else { return nil }; lock.lock(); artworkCache[key] = data; lock.unlock(); return NSImage(data: data)
     }
+    static func playbackTime(app: String?) async -> PlaybackSample? {
+        guard let app else { return nil }
+        return await withCheckedContinuation { continuation in
+            queue.async {
+                let source = """
+                if application id "\(app)" is not running then return {-1, -1}
+                with timeout of 2 seconds
+                    tell application id "\(app)"
+                        try
+                            return {(player position as real), (duration of current track as real)}
+                        on error
+                            return {-1, -1}
+                        end try
+                    end tell
+                end timeout
+                """
+                var failure: NSDictionary?; let result = NSAppleScript(source: source)?.executeAndReturnError(&failure)
+                guard failure == nil,
+                      let position = result?.atIndex(1)?.doubleValue,
+                      let duration = result?.atIndex(2)?.doubleValue,
+                      position >= 0, duration > 0 else { continuation.resume(returning: nil); return }
+                continuation.resume(returning: PlaybackSample(position: position, duration: duration))
+            }
+        }
+    }
     static func lyrics(app: String?, key: String, title: String, artist: String, onlineFallback: Bool) async -> String {
         lock.lock(); let cached = lyricsCache[key]; lock.unlock(); if let cached { return cached }
-        var value = ""; if app == "com.apple.Music" { value = await embeddedAppleMusicLyrics() }
-        if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && onlineFallback { value = await onlineLyrics(title: title, artist: artist) }
-        let bounded = String(value.prefix(12_000)); lock.lock(); lyricsCache[key] = bounded; lock.unlock(); return bounded
+        var value = ""
+        if onlineFallback { value = await onlineLyrics(title: title, artist: artist) }
+        if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, app == "com.apple.Music" { value = await embeddedAppleMusicLyrics() }
+        let bounded = String(value.prefix(20_000)); lock.lock(); lyricsCache[key] = bounded; lock.unlock(); return bounded
     }
     private static func embeddedAppleMusicLyrics() async -> String {
         await withCheckedContinuation { continuation in queue.async {
@@ -444,7 +582,8 @@ private enum MediaAssetReader {
         if !artist.isEmpty { components.queryItems?.append(URLQueryItem(name: "artist_name", value: artist)) }; guard let url = components.url else { return "" }
         var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8); request.setValue("Halo/1.0 (https://github.com/Redstoneinvente/Halo)", forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await URLSession.shared.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 1_000_000, let result = try? JSONDecoder().decode(LRCLyrics.self, from: data) else { return "" }
-        if let plain = result.plainLyrics, !plain.isEmpty { return plain }; guard let synced = result.syncedLyrics else { return "" }; return synced.replacingOccurrences(of: "\\[[0-9:.]+\\]", with: "", options: .regularExpression)
+        if let synced = result.syncedLyrics, !synced.isEmpty { return synced }
+        return result.plainLyrics ?? ""
     }
 }
 
