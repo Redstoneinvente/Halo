@@ -25,6 +25,21 @@ private struct PowerEventInfo {
     }
 }
 
+private extension ClosedNotchOptions {
+    var resolvedArtwork: ClosedArtworkOptions {
+        if let artworkOptions { return artworkOptions }
+        let legacy = mediaOptions ?? ClosedMediaOptions()
+        guard legacy.artwork != .none else { return ClosedArtworkOptions() }
+        var value = ClosedArtworkOptions()
+        value.enabled = true
+        value.mode = legacy.artwork
+        value.size = legacy.artworkSize
+        value.vinylRPM = legacy.vinylRPM
+        value.backgroundOpacity = legacy.backgroundOpacity
+        return value
+    }
+}
+
 struct ClosedNotchView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
@@ -96,18 +111,29 @@ struct ClosedNotchSlot: View {
         }
     }
     private var innerHeight: Double { max(1, availableHeight - 2 * options.contentPaddingY) }
-    private var innerWidth: Double {
-        max(1, availableWidth - 2 * options.contentPaddingX - options.contentSideMargin - options.contentOuterMargin)
-    }
+    private var innerWidth: Double { max(1, availableWidth - 2 * options.contentPaddingX - options.contentSideMargin - options.contentOuterMargin) }
     private var isMusicItem: Bool { item == .media || item == .visualizer }
     private var itemIsVisible: Bool {
         if isMusicItem { return media.isPlaying }
         if item == .activity { return activeActivity != nil }
         return item != .none
     }
+    private var artwork: ClosedArtworkOptions { options.resolvedArtwork }
+    private var artworkTargetSide: ClosedNotchSide? {
+        guard media.isPlaying, artwork.enabled, artwork.mode != .none, artwork.mode != .background else { return nil }
+        switch artwork.side {
+        case .left: return .left
+        case .right: return .right
+        case .automatic:
+            if options.left == .media || options.left == .visualizer { return .left }
+            if options.right == .media || options.right == .visualizer { return .right }
+            return .right
+        }
+    }
+    private var showArtwork: Bool { artworkTargetSide == side }
     private var powerEvent: PowerEventInfo? {
         let settings = options.powerReaction ?? PowerReactionOptions()
-        guard let battery = system.battery else { return nil }
+        guard settings.isEnabled, let battery = system.battery else { return nil }
         let kind: PowerEventKind
         let style: PowerReactionStyle
         if battery >= 99 && !system.onBattery {
@@ -155,11 +181,15 @@ struct ClosedNotchSlot: View {
             if let decoration, decorationSize > 0 {
                 SideDecorationView(options: decoration, playing: media.isPlaying, lowPower: system.lowPower, maximumHeight: decorationSize)
             }
+            if showArtwork {
+                ClosedArtworkView(media: media, options: artwork, lowPower: system.lowPower)
+                    .padding(artwork.padding)
+                    .padding(.horizontal, artwork.margin / 2)
+            }
             if itemIsVisible { content }
             if showPowerEvent, let powerEvent { PowerEventBadge(event: powerEvent, options: options.powerReaction ?? PowerReactionOptions()) }
         }
         .font(.system(size: textSize))
-        .lineLimit(1)
         .minimumScaleFactor(0.65)
         .foregroundStyle(effectiveTextColor)
         .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: .center)
@@ -173,15 +203,13 @@ struct ClosedNotchSlot: View {
     @ViewBuilder private var content: some View {
         switch item {
         case .none: EmptyView()
-        case .clock:
-            WidgetClock(style: compactClock, compact: true)
-        case .date:
-            TimelineView(.periodic(from: .now, by: 60)) { context in Text(context.date, format: .dateTime.month().day()) }
+        case .clock: WidgetClock(style: compactClock, compact: true)
+        case .date: TimelineView(.periodic(from: .now, by: 60)) { context in Text(context.date, format: .dateTime.month().day()).lineLimit(1) }
         case .timer:
-            if let deadline = store.deadline { Text(deadline, style: .timer).monospacedDigit() }
-            else { Label(store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready", systemImage: "timer") }
+            if let deadline = store.deadline { Text(deadline, style: .timer).monospacedDigit().lineLimit(1) }
+            else { Label(store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready", systemImage: "timer").lineLimit(1) }
         case .battery:
-            if let battery = system.battery { Label("\(battery)%", systemImage: system.charging ? "battery.100.bolt" : "battery.100") }
+            if let battery = system.battery { Label("\(battery)%", systemImage: system.charging ? "battery.100.bolt" : "battery.100").lineLimit(1) }
             else { Image(systemName: "powerplug") }
         case .media:
             if media.isPlaying {
@@ -193,8 +221,7 @@ struct ClosedNotchSlot: View {
                 PlaybackVisualizer(kind: options.animation, playing: true, enabled: options.animate && !system.lowPower,
                                    options: visualizerOptions, palette: media.artworkColors, fallback: effectiveTextColor)
             }
-        case .files:
-            Label("\(store.files.count)", systemImage: "tray")
+        case .files: Label("\(store.files.count)", systemImage: "tray").lineLimit(1)
         case .activity:
             if let activity = activeActivity {
                 HStack(spacing: 5) {
@@ -227,10 +254,10 @@ private struct PowerEventBadge: View {
         }.foregroundStyle(powerColor)
     }
     private var powerColor: Color {
-        guard options.dynamicColor else { return options.color.color }
+        guard options.usesDynamicColor else { return options.color.color }
         let p = min(1, max(0, Double(event.battery) / 100))
-        if p <= 0.5 { return interpolate(options.lowColor, options.midColor, p / 0.5).color }
-        return interpolate(options.midColor, options.highColor, (p - 0.5) / 0.5).color
+        if p <= 0.5 { return interpolate(options.resolvedLowColor, options.resolvedMidColor, p / 0.5).color }
+        return interpolate(options.resolvedMidColor, options.resolvedHighColor, (p - 0.5) / 0.5).color
     }
     private func interpolate(_ a: WidgetColor, _ b: WidgetColor, _ t: Double) -> WidgetColor {
         let u = min(1, max(0, t))
@@ -240,68 +267,104 @@ private struct PowerEventBadge: View {
     }
 }
 
+private struct ClosedArtworkView: View {
+    @ObservedObject var media: MediaService
+    let options: ClosedArtworkOptions
+    let lowPower: Bool
+    @State private var artwork: NSImage?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }
+    var body: some View {
+        Group {
+            if let artwork {
+                if options.mode == .vinyl && !reduceMotion && !lowPower {
+                    TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !media.isPlaying)) { context in
+                        let turns = context.date.timeIntervalSinceReferenceDate * options.vinylRPM / 60
+                        artworkImage(artwork).clipShape(Circle())
+                            .overlay(Circle().fill(.black).frame(width: options.size * 0.16, height: options.size * 0.16))
+                            .rotationEffect(.degrees(turns * 360))
+                    }
+                } else {
+                    artworkImage(artwork).clipShape(RoundedRectangle(cornerRadius: 5))
+                }
+            }
+        }
+        .task(id: key) {
+            artwork = media.isPlaying ? await MediaAssetReader.artwork(app: media.connectedApp, key: key) : nil
+        }
+    }
+    private func artworkImage(_ image: NSImage) -> some View {
+        Image(nsImage: image).resizable().scaledToFill().frame(width: options.size, height: options.size).clipped()
+    }
+}
+
 private struct ClosedMediaView: View {
     @ObservedObject var media: MediaService
     let options: ClosedMediaOptions
     let fontSize: Double
     let availableWidth: Double
     let lowPower: Bool
-    @State private var artwork: NSImage?
     @State private var lyrics = ""
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var lyricsLoading = false
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }
-    private var displayText: String {
-        switch options.textMode {
-        case .title: return media.title
-        case .artist: return media.artist.isEmpty ? media.title : media.artist
-        case .titleArtist: return options.lines == 1 ? [media.title, media.artist].filter { !$0.isEmpty }.joined(separator: " · ") : media.title
-        case .lyrics:
-            let cleaned = lyrics.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            return cleaned.isEmpty ? [media.title, media.artist].filter { !$0.isEmpty }.joined(separator: " · ") : cleaned.prefix(options.lines).joined(separator: "  •  ")
-        }
+    private var lyricLines: [String] {
+        lyrics.split(whereSeparator: \.isNewline).map(String.init)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
     var body: some View {
-        HStack(spacing: 7) {
-            if options.artwork == .cover || options.artwork == .vinyl { artworkView }
-            mediaText
-        }
-        .task(id: key) {
-            artwork = nil; lyrics = ""
-            if options.artwork != .none { artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key) }
-            if options.textMode == .lyrics { lyrics = await MediaAssetReader.lyrics(app: media.connectedApp, key: key) }
-        }
-    }
-    @ViewBuilder private var artworkView: some View {
-        if let artwork {
-            if options.artwork == .vinyl && !reduceMotion && !lowPower {
-                TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !media.isPlaying)) { context in
-                    let turns = context.date.timeIntervalSinceReferenceDate * options.vinylRPM / 60
-                    Image(nsImage: artwork).resizable().scaledToFill()
-                        .frame(width: options.artworkSize, height: options.artworkSize)
-                        .clipShape(Circle())
-                        .overlay(Circle().fill(.black).frame(width: options.artworkSize * 0.16, height: options.artworkSize * 0.16))
-                        .rotationEffect(.degrees(turns * 360))
-                }
-            } else {
-                Image(nsImage: artwork).resizable().scaledToFill()
-                    .frame(width: options.artworkSize, height: options.artworkSize)
-                    .clipShape(options.artwork == .vinyl ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: 5)))
+        mediaText
+            .task(id: key + "|\(options.textMode.rawValue)|\(options.usesOnlineLyrics)") {
+                lyrics = ""
+                guard options.textMode == .lyrics else { return }
+                lyricsLoading = true
+                lyrics = await MediaAssetReader.lyrics(app: media.connectedApp, key: key, title: media.title,
+                                                       artist: media.artist, onlineFallback: options.usesOnlineLyrics)
+                lyricsLoading = false
             }
-        }
     }
     @ViewBuilder private var mediaText: some View {
-        let width = max(20, availableWidth - ((options.artwork == .cover || options.artwork == .vinyl) ? options.artworkSize + 7 : 0))
-        if options.textMode == .titleArtist && options.lines == 2 {
+        let width = max(20, availableWidth)
+        switch options.textMode {
+        case .titleArtist:
+            if options.lines == 2 {
+                VStack(alignment: .leading, spacing: 1) {
+                    styledText(media.title, width: width)
+                    styledText(media.artist.isEmpty ? "Unknown artist" : media.artist, width: width)
+                        .opacity(0.72).font(.system(size: max(8, fontSize * 0.82)))
+                }.frame(maxWidth: width, alignment: .leading)
+            } else {
+                inlineText([media.title, media.artist].filter { !$0.isEmpty }.joined(separator: " · "), width: width)
+            }
+        case .lyrics:
+            lyricsView(width: width)
+        case .title:
+            inlineText(media.title, width: width)
+        case .artist:
+            inlineText(media.artist.isEmpty ? media.title : media.artist, width: width)
+        }
+    }
+    @ViewBuilder private func lyricsView(width: Double) -> some View {
+        if lyricsLoading && lyricLines.isEmpty {
+            Label("Loading lyrics…", systemImage: "text.quote").lineLimit(1).opacity(0.72)
+        } else if lyricLines.isEmpty {
             VStack(alignment: .leading, spacing: 1) {
-                styledText(media.title, width: width)
-                styledText(media.artist, width: width).opacity(0.72).font(.system(size: max(8, fontSize * 0.82)))
+                Text(media.title).lineLimit(1)
+                Text("Lyrics unavailable").font(.system(size: max(8, fontSize * 0.82))).opacity(0.65).lineLimit(1)
+            }.frame(maxWidth: width, alignment: .leading)
+        } else if options.lines == 2 {
+            VStack(alignment: .leading, spacing: 1) {
+                styledText(lyricLines[0], width: width)
+                if lyricLines.count > 1 { styledText(lyricLines[1], width: width).opacity(0.72) }
             }.frame(maxWidth: width, alignment: .leading)
         } else {
-            HStack(spacing: 4) {
-                if options.showPlaybackIcon { Image(systemName: "music.note") }
-                styledText(displayText, width: width)
-            }.frame(maxWidth: width)
+            inlineText(lyricLines[0], width: width)
         }
+    }
+    @ViewBuilder private func inlineText(_ text: String, width: Double) -> some View {
+        HStack(spacing: 4) {
+            if options.showPlaybackIcon { Image(systemName: options.textMode == .lyrics ? "text.quote" : "music.note") }
+            styledText(text, width: width)
+        }.frame(maxWidth: width)
     }
     @ViewBuilder private func styledText(_ text: String, width: Double) -> some View {
         switch options.overflow {
@@ -310,12 +373,6 @@ private struct ClosedMediaView: View {
         case .marquee: MarqueeText(text: text, speed: options.marqueeSpeed, fontSize: fontSize, width: width, active: media.isPlaying && !lowPower)
         }
     }
-}
-
-private struct AnyShape: Shape {
-    private let pathBuilder: (CGRect) -> Path
-    init<S: Shape>(_ shape: S) { pathBuilder = { shape.path(in: $0) } }
-    func path(in rect: CGRect) -> Path { pathBuilder(rect) }
 }
 
 private struct MarqueeText: View {
@@ -372,7 +429,9 @@ private enum MediaAssetReader {
         }
         var data = payload.0
         if data == nil, let urlString = payload.1, let url = URL(string: urlString), url.scheme == "https" {
-            if let (downloaded, response) = try? await URLSession.shared.data(from: url), downloaded.count <= 5_000_000,
+            var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+            request.setValue("Halo/1.0", forHTTPHeaderField: "User-Agent")
+            if let (downloaded, response) = try? await URLSession.shared.data(for: request), downloaded.count <= 5_000_000,
                (response as? HTTPURLResponse)?.statusCode == 200 { data = downloaded }
         }
         guard let data, data.count <= 5_000_000 else { return nil }
@@ -380,18 +439,31 @@ private enum MediaAssetReader {
         return NSImage(data: data)
     }
 
-    static func lyrics(app: String?, key: String) async -> String {
-        guard app == "com.apple.Music" else { return "" }
+    static func lyrics(app: String?, key: String, title: String, artist: String, onlineFallback: Bool) async -> String {
         lock.lock(); let cached = lyricsCache[key]; lock.unlock()
         if let cached { return cached }
-        let value: String = await withCheckedContinuation { continuation in
+
+        var value = ""
+        if app == "com.apple.Music" {
+            value = await embeddedAppleMusicLyrics()
+        }
+        if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && onlineFallback {
+            value = await onlineLyrics(title: title, artist: artist)
+        }
+        let bounded = String(value.prefix(12_000))
+        lock.lock(); lyricsCache[key] = bounded; lock.unlock()
+        return bounded
+    }
+
+    private static func embeddedAppleMusicLyrics() async -> String {
+        await withCheckedContinuation { continuation in
             queue.async {
                 let source = """
                 if application id "com.apple.Music" is not running then return ""
                 with timeout of 4 seconds
                     tell application id "com.apple.Music"
                         try
-                            return lyrics of current track as text
+                            return (get lyrics of current track) as text
                         on error
                             return ""
                         end try
@@ -403,9 +475,24 @@ private enum MediaAssetReader {
                 continuation.resume(returning: failure == nil ? (result?.stringValue ?? "") : "")
             }
         }
-        let bounded = String(value.prefix(12_000))
-        lock.lock(); lyricsCache[key] = bounded; lock.unlock()
-        return bounded
+    }
+
+    private struct LRCLyrics: Decodable { let plainLyrics: String?; let syncedLyrics: String? }
+    private static func onlineLyrics(title: String, artist: String) async -> String {
+        guard !title.isEmpty else { return "" }
+        var components = URLComponents(string: "https://lrclib.net/api/get")!
+        components.queryItems = [URLQueryItem(name: "track_name", value: title)]
+        if !artist.isEmpty { components.queryItems?.append(URLQueryItem(name: "artist_name", value: artist)) }
+        guard let url = components.url else { return "" }
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+        request.setValue("Halo/1.0 (https://github.com/Redstoneinvente/Halo)", forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              data.count <= 1_000_000,
+              let result = try? JSONDecoder().decode(LRCLyrics.self, from: data) else { return "" }
+        if let plain = result.plainLyrics, !plain.isEmpty { return plain }
+        guard let synced = result.syncedLyrics else { return "" }
+        return synced.replacingOccurrences(of: "\\[[0-9:.]+\\]", with: "", options: .regularExpression)
     }
 }
 
@@ -416,16 +503,16 @@ struct AlbumNotchBackground: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var artwork: NSImage?
     private var colors: [Color] { media.artworkColors.map(\.color) }
-    private var mediaOptions: ClosedMediaOptions { options.mediaOptions ?? ClosedMediaOptions() }
+    private var artworkOptions: ClosedArtworkOptions { options.resolvedArtwork }
     private var reactive: ReactiveBackgroundOptions {
         if let saved = options.reactiveBackground { return saved }
         var legacy = ReactiveBackgroundOptions(); legacy.enabled = options.albumBackgroundFrequencyEffect ?? false
         return legacy
     }
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }
-    private var wantsArtworkBackground: Bool { mediaOptions.artwork == .background }
+    private var wantsArtworkBackground: Bool { artworkOptions.enabled && artworkOptions.mode == .background }
     private var active: Bool {
-        media.isPlaying && ((options.albumBackgroundColor == true && !colors.isEmpty) || (wantsArtworkBackground && artwork != nil))
+        media.isPlaying && (reactive.enabled || (options.albumBackgroundColor == true && !colors.isEmpty) || (wantsArtworkBackground && artwork != nil))
     }
     var body: some View {
         Group {
@@ -435,21 +522,23 @@ struct AlbumNotchBackground: View {
                 } else { baseBackground }
             }
         }
-        .task(id: key) {
+        .task(id: key + "|\(wantsArtworkBackground)") {
             guard media.isPlaying && wantsArtworkBackground else { artwork = nil; return }
             artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key)
         }
     }
     private var gradientColors: [Color] {
-        if colors.isEmpty { return [.black, .black] }
+        if colors.isEmpty { return [.clear, .clear] }
         return colors.count == 1 ? [colors[0], colors[0].opacity(0.72)] : Array(colors.prefix(2))
     }
     @ViewBuilder private var baseBackground: some View {
         if wantsArtworkBackground, let artwork {
-            Image(nsImage: artwork).resizable().scaledToFill().opacity(mediaOptions.backgroundOpacity)
+            Image(nsImage: artwork).resizable().scaledToFill().opacity(artworkOptions.backgroundOpacity)
                 .overlay(LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.42)], startPoint: .top, endPoint: .bottom))
-        } else {
+        } else if options.albumBackgroundColor == true && !colors.isEmpty {
             LinearGradient(colors: gradientColors, startPoint: .leading, endPoint: .trailing)
+        } else {
+            Color.clear
         }
     }
     private func signal(at timestamp: Double) -> Double {
@@ -470,6 +559,7 @@ struct AlbumNotchBackground: View {
             .scaleEffect(1 + amount * reactive.scale)
             .hueRotation(.degrees(amount * reactive.hueShift * 360))
             .blur(radius: amount * reactive.blur)
+            .overlay(Color.white.opacity(0.015 + amount * max(0.03, reactive.brightness * 0.16)))
             .overlay(GrainOverlay(options: GrainOptions(enabled: reactive.grain > 0, amount: amount * reactive.grain, size: 1, warmth: 0)))
     }
 }
