@@ -77,7 +77,7 @@ struct SurfaceView: View, Equatable {
                 if contextMusicActive {
                     ContextMusicView(media: workspace.media, options: contextOptions,
                                      visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
-                        .frame(width: state.dashboardWidth)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 } else {
                     VStack(alignment: .leading, spacing: 16) {
@@ -149,6 +149,12 @@ struct SurfaceView: View, Equatable {
         .onHover { state.hover($0, enabled: store.configuration.hoverToExpand) }
         .onChange(of: targeted) { active in
             if active { state.collapseTask?.cancel(); state.expanded = true }
+        }
+        .onChange(of: contextMusicActive) { active in
+            if !active { state.contextPreferredSize = nil }
+        }
+        .onChange(of: state.expanded) { expanded in
+            if !expanded { state.contextPreferredSize = nil }
         }
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $targeted) { providers in
             state.expanded = true
@@ -280,6 +286,13 @@ private struct ContextMusicView: View {
     }
     private var playbackKey: String { "\(media.connectedApp ?? "")|\(media.title)|\(media.artist)|\(media.isPlaying)" }
     private var lyricKey: String { playbackKey + "|lyrics|\(options.showsLyrics)|\(options.usesOnlineLyrics)" }
+    private var sizingKey: String {
+        [options.resolvedLayoutMode.rawValue, options.resolvedForegroundArtwork.rawValue,
+         String(options.artworkSize), String(options.showTitle), String(options.showArtist), String(options.showControls),
+         String(options.showVisualizer), String(options.showsLyrics), options.resolvedLyricDisplay.rawValue,
+         String(options.resolvedLyricFontSize), options.resolvedVisualizerStyle.rawValue,
+         String(options.resolvedSpacing), String(options.resolvedControlSize)].joined(separator: "|")
+    }
     private var songColors: [Color] { media.artworkColors.map(\.color) }
     private var primarySongColor: Color { songColors.first ?? options.textColor.color }
     private var effectiveTextColor: Color { options.usesSongTextColors && !songColors.isEmpty ? primarySongColor : options.textColor.color }
@@ -339,6 +352,47 @@ private struct ContextMusicView: View {
         }
         .task(id: playbackKey) { await playbackLoop() }
         .task(id: lyricKey) { await loadLyrics() }
+        .task(id: sizingKey) { publishPreferredSize() }
+        .onChange(of: playbackDuration) { _ in publishPreferredSize() }
+        .onDisappear { surfaceState.contextPreferredSize = nil }
+    }
+
+    private func publishPreferredSize() {
+        let next = preferredSurfaceSize
+        if let current = surfaceState.contextPreferredSize,
+           abs(current.width - next.width) < 1, abs(current.height - next.height) < 1 { return }
+        surfaceState.contextPreferredSize = next
+    }
+
+    private var preferredSurfaceSize: CGSize {
+        let spacing = options.resolvedSpacing
+        let metadataHeight = (options.showTitle ? options.fontSize * 2.0 : 0) + (options.showArtist ? max(14, options.fontSize * 0.8) : 0)
+        let lyricsHeight = options.showsLyrics ? options.resolvedLyricFontSize * (options.resolvedLyricDisplay == .word ? 1.45 : 2.45) : 0
+        let scrubHeight = playbackDuration > 0.5 ? 38.0 : 0
+        let controlsHeight = options.showControls ? options.resolvedControlSize * 1.7 : 0
+        let visualizerHeight = options.showVisualizer ? max(24, min(64, visualizer.height + 8)) : 0
+        let artworkSize = options.resolvedForegroundArtwork == .none ? 0 : options.artworkSize
+        let textColumn = metadataHeight + lyricsHeight + scrubHeight + controlsHeight + visualizerHeight + 28
+        let activeBlocks = [metadataHeight, lyricsHeight, scrubHeight, controlsHeight, visualizerHeight].filter { $0 > 0 }.count
+        let gaps = Double(max(0, activeBlocks - 1)) * spacing
+        let innerHeight: Double
+        let width: Double
+        switch options.resolvedLayoutMode {
+        case .hero:
+            innerHeight = artworkSize + textColumn + gaps + (artworkSize > 0 ? spacing : 0)
+            width = max(360, min(640, max(420, artworkSize * 2.4)))
+        case .split:
+            innerHeight = max(artworkSize, textColumn + gaps) + 20
+            width = max(430, min(700, 310 + artworkSize))
+        case .compact:
+            innerHeight = max(artworkSize, textColumn + gaps) + 16
+            width = max(440, min(720, 340 + artworkSize))
+        case .minimal:
+            innerHeight = artworkSize + textColumn + gaps + (artworkSize > 0 ? spacing * 0.7 : 0)
+            width = max(340, min(580, max(380, artworkSize * 2.15)))
+        }
+        let totalHeight = 48 + innerHeight + max(28, spacing * 2.2)
+        return CGSize(width: width, height: min(760, max(210, totalHeight)))
     }
 
     @ViewBuilder private func contextBackground(size: CGSize) -> some View {
