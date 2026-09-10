@@ -498,25 +498,29 @@ final class WindowManager {
         let base = geometry.frame(expanded: true)
         guard let requested, requested.width.isFinite, requested.height.isFinite else { return base }
 
+        // ContextMusicView estimates the footprint of its visible media elements. Reserve an
+        // additional layout budget here for the view's outer padding, top-right controls and
+        // SwiftUI compression. This prevents the final visible element from being pushed outside
+        // the panel even when several optional blocks are enabled at once.
+        let contextHorizontalSafety: CGFloat = 56
+        let contextVerticalSafety: CGFloat = 64
         let margin: CGFloat = 12
-        let minimumHeight = geometry.compactHeight + 96
-        let maxWidth = max(320, geometry.visible.width - margin * 2)
-        let width = min(maxWidth, max(320, requested.width))
-        var height = max(minimumHeight, requested.height)
+        let minimumHeight = geometry.compactHeight + 112
+        let maxWidth = max(360, geometry.visible.width - margin * 2)
+        let width = min(maxWidth, max(360, requested.width + contextHorizontalSafety))
+        var height = max(minimumHeight, requested.height + contextVerticalSafety)
         var frame: CGRect
 
         switch geometry.style {
         case .bottom:
-            // Bottom surfaces preserve their lower attachment edge and grow upward.
             let anchorBottom = base.minY
             let topLimit = geometry.visible.maxY - margin
             let availableHeight = max(minimumHeight, topLimit - anchorBottom)
             height = min(height, availableHeight)
             frame = CGRect(x: base.midX - width / 2, y: anchorBottom, width: width, height: height)
         default:
-            // Notch/menu-bar surfaces must stay physically attached to the display's top edge.
-            // NSScreen.visibleFrame excludes the menu bar, so never clamp maxY to visible.maxY here.
-            // Instead cap the height at the bottom while preserving base.maxY exactly.
+            // Top-attached surfaces stay physically attached to the menu-bar/notch edge. Only
+            // the lower edge moves as the context player grows or shrinks.
             let anchorTop = base.maxY
             let bottomLimit = geometry.visible.minY + margin
             let availableHeight = max(minimumHeight, anchorTop - bottomLimit)
