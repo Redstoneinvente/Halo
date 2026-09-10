@@ -73,6 +73,7 @@ struct DisplayOverride: Codable, Identifiable, Equatable {
     var layout: WorkspaceLayout?
 }
 struct WorkspaceLayout: Codable, Equatable {
+    var contextMusic: ContextMusicOptions?
     var horizontalWidgets: Bool?
     var horizontalPages: Bool?
     var horizontalHeight: Double?
@@ -135,6 +136,7 @@ struct ThemeArchive: Codable {
         archive.layout.order = layout.normalizedOrder()
         archive.layout.widgets = try layout.widgets?.mapValues { try $0.validated() }
         archive.layout.closedNotch = try layout.closedNotch?.validated()
+        archive.layout.contextMusic = try layout.contextMusic?.validated()
         return archive
     }
 }
@@ -233,5 +235,29 @@ enum CommandSearch {
             remaining = remaining[remaining.index(after: index)...]
         }
         return true
+    }
+}
+
+struct ContextMusicOptions: Codable, Equatable {
+    var enabled = false
+    var showArtwork = true
+    var showTitle = true
+    var showArtist = true
+    var showControls = true
+    var showVisualizer = false
+    var artworkSize = 100.0
+    var fontSize = 22.0
+    var background: BackgroundKind = .glass
+    var backgroundOpacity = 0.5
+    var textColor = WidgetColor.white
+    func validated() throws -> ContextMusicOptions {
+        guard [artworkSize, fontSize, backgroundOpacity].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        var result = self
+        result.artworkSize = min(200, max(32, artworkSize))
+        result.fontSize = min(40, max(12, fontSize))
+        result.backgroundOpacity = min(1, max(0, backgroundOpacity))
+        result.textColor = try textColor.validated()
+        if ![BackgroundKind.glass, .gradient, .solid].contains(background) { result.background = .glass }
+        return result
     }
 }

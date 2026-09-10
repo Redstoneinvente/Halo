@@ -71,6 +71,7 @@ struct SurfaceView: View, Equatable {
                         Button { state.pinned.toggle() } label: { Image(systemName: state.pinned ? "pin.fill" : "pin") }
                             .help("Keep expanded").accessibilityLabel("Keep expanded")
                     }
+                    ContextNotchInterface(media: workspace.media, options: layout.contextMusic ?? ContextMusicOptions(), visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions()) {
                     if layout.horizontalWidgets ?? false {
                         if layout.horizontalPages ?? false {
                             VStack(spacing: 8) {
@@ -100,6 +101,7 @@ struct SurfaceView: View, Equatable {
                             }
                         }
                     }
+                    }
                     HStack {
                         Spacer()
                         Button("Settings") { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) }
@@ -111,7 +113,7 @@ struct SurfaceView: View, Equatable {
         .background {
             ZStack {
                 SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
-                if !state.expanded {
+                if !state.expanded || layout.closedNotch?.applyBackgroundWhenOpened == true {
                     AlbumNotchBackground(options: layout.closedNotch ?? ClosedNotchOptions(), media: workspace.media, system: workspace.system)
                 }
             }
@@ -246,5 +248,80 @@ struct ShelfFileInfo: View {
         guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]) else { return "Original unavailable" }
         if values.isDirectory == true { return "Folder" }
         return url.pathExtension.uppercased() + " · " + ByteCountFormatter.string(fromByteCount: Int64(values.fileSize ?? 0), countStyle: .file)
+    }
+}
+
+
+private struct ContextNotchInterface<Dashboard: View>: View {
+    @ObservedObject var media: MediaService
+    let options: ContextMusicOptions
+    let visualizer: VisualizerOptions
+    @ViewBuilder var dashboard: Dashboard
+    @State private var showDashboard = false
+    var body: some View {
+        VStack(spacing: 8) {
+            if options.enabled && media.isPlaying && !showDashboard {
+                ContextMusicView(media: media, options: options, visualizer: visualizer)
+                Button("Show widgets") { showDashboard = true }.font(.caption)
+            } else {
+                dashboard
+                if options.enabled && media.isPlaying {
+                    Button("Show music") { showDashboard = false }.font(.caption)
+                }
+            }
+        }
+        .onChange(of: media.isPlaying) { playing in if !playing { showDashboard = false } }
+    }
+}
+
+private struct ContextMusicView: View {
+    @ObservedObject var media: MediaService
+    let options: ContextMusicOptions
+    let visualizer: VisualizerOptions
+    @State private var artwork: NSImage?
+    private var artworkKey: String { "\(media.connectedApp ?? "")|\(media.title)|\(media.artist)|\(options.showArtwork)" }
+    var body: some View {
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 12) {
+                    if options.showArtwork {
+                        Group {
+                            if let artwork { Image(nsImage: artwork).resizable().scaledToFit() }
+                            else { Image(systemName: "music.note").resizable().scaledToFit().padding(16) }
+                        }.frame(width: min(options.artworkSize, max(32, proxy.size.height * 0.35)), height: min(options.artworkSize, max(32, proxy.size.height * 0.35)))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    if options.showTitle { Text(media.title).font(.system(size: options.fontSize, weight: .semibold)).multilineTextAlignment(.center) }
+                    if options.showArtist { Text(media.artist).font(.system(size: max(10, options.fontSize * 0.7))).opacity(0.75) }
+                    if options.showControls {
+                        HStack(spacing: 28) {
+                            control("backward.end.fill", action: "previous track", label: "Previous track")
+                            control(media.isPlaying ? "pause.fill" : "play.fill", action: "playpause", label: "Play or pause")
+                            control("forward.end.fill", action: "next track", label: "Next track")
+                        }.font(.title2).disabled(media.busy)
+                    }
+                    if options.showVisualizer {
+                        PlaybackVisualizer(kind: .bars, playing: media.isPlaying, enabled: true, options: visualizer, palette: media.artworkColors, fallback: options.textColor.color)
+                            .frame(height: 32)
+                    }
+                    if let error = media.error { Text(error).font(.caption).foregroundStyle(.orange) }
+                }.padding(16).frame(maxWidth: .infinity, minHeight: proxy.size.height)
+            }.foregroundStyle(options.textColor.color)
+                .background {
+                    if options.background == .glass { RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial).opacity(options.backgroundOpacity) }
+                    else if options.background == .gradient {
+                        LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing).opacity(options.backgroundOpacity)
+                    } else { Color.black.opacity(options.backgroundOpacity) }
+                }.clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .task(id: artworkKey) {
+            artwork = nil
+            guard options.showArtwork else { return }
+            let result = await MediaAssetReader.artwork(app: media.connectedApp, key: artworkKey)
+            guard !Task.isCancelled else { return }; artwork = result
+        }
+    }
+    private func control(_ symbol: String, action: String, label: String) -> some View {
+        Button { if let app = media.connectedApp { media.perform(action, app: app) } } label: { Image(systemName: symbol) }.accessibilityLabel(label)
     }
 }

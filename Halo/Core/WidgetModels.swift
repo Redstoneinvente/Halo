@@ -209,6 +209,7 @@ struct PowerReactionOptions: Codable, Equatable {
 }
 
 struct ClosedNotchOptions: Codable, Equatable {
+    var applyBackgroundWhenOpened: Bool?
     var autoFitContent: Bool?
     var horizontalPadding: Double?
     var verticalPadding: Double?

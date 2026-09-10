@@ -17,7 +17,7 @@ struct SettingsView: View {
     @State private var renamingProfile: UUID?
     @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
-    private let sections = ["General", "Appearance", "Modules", "Widgets", "Closed notch", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "Advanced"]
+    private let sections = ["General", "Appearance", "Modules", "Widgets", "Closed notch", "Context notch interface", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "Advanced"]
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -75,6 +75,7 @@ struct SettingsView: View {
         case "Appearance": return "paintpalette"
         case "Modules": return "square.grid.2x2"
         case "Widgets": return "slider.horizontal.3"
+        case "Context notch interface": return "rectangle.stack"
         case "Closed notch": return "rectangle.topthird.inset.filled"
         case "Media & Files": return "play.rectangle"
         case "Profiles": return "person.crop.rectangle.stack"
@@ -200,6 +201,8 @@ struct SettingsView: View {
                     return true
                 }
             }
+        case "Context notch interface":
+            ContextMusicSettings(layout: $workspace.settings.layout)
         case "Media & Files":
             Toggle("Automatically detect the playing music app", isOn: Binding(
                 get: { workspace.settings.automaticMedia ?? true },
@@ -350,7 +353,7 @@ struct SettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack { Text("Customize profile").font(.title2.bold()); Spacer(); Button("Cancel") { dismiss() }; Button("Save") { save(profile); dismiss() }.disabled(profile.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }.padding()
-            Picker("Section", selection: $tab) { ForEach(["Details", "Layout", "Widgets", "Closed notch"], id: \.self) { Text($0).tag($0) } }.pickerStyle(.segmented).padding(.horizontal)
+            Picker("Section", selection: $tab) { ForEach(["Details", "Layout", "Widgets", "Closed notch", "Context"], id: \.self) { Text($0).tag($0) } }.pickerStyle(.segmented).padding(.horizontal)
             Form {
                 switch tab {
                 case "Details":
@@ -386,6 +389,7 @@ struct SettingsView: View {
                         }
                     }
                     SurfaceAppearanceControls(appearance: $profile.layout.appearance, theme: profile.theme)
+                case "Context": ContextMusicSettings(layout: $profile.layout)
                 case "Widgets": WidgetSettingsView(layout: $profile.layout)
                 default: ClosedNotchSettingsView(layout: $profile.layout, media: media, app: app)
                 }
@@ -395,5 +399,31 @@ struct SettingsView: View {
     private func moveUp(_ module: ModuleID) {
         let order = profile.layout.normalizedOrder()
         if let index = order.firstIndex(of: module), index > 0 { profile.layout.move(module, before: order[index - 1]) }
+    }
+}
+
+
+private struct ContextMusicSettings: View {
+    @Binding var layout: WorkspaceLayout
+    private var options: Binding<ContextMusicOptions> {
+        Binding(get: { layout.contextMusic ?? ContextMusicOptions() }, set: { layout.contextMusic = $0 })
+    }
+    var body: some View {
+        Section("Music interface") {
+            Toggle("Show music interface while playing", isOn: options.enabled)
+            Text("The opened notch switches to music while playback is active. Show widgets lets you access your dashboard at any time.").font(.caption)
+            Toggle("Album artwork", isOn: options.showArtwork)
+            Toggle("Song title", isOn: options.showTitle)
+            Toggle("Artist", isOn: options.showArtist)
+            Toggle("Playback controls", isOn: options.showControls)
+            Toggle("Visualizer", isOn: options.showVisualizer)
+            Slider(value: options.artworkSize, in: 32...200) { Text("Artwork size") }
+            Slider(value: options.fontSize, in: 12...40) { Text("Text size") }
+            ColorPicker("Text color", selection: Binding(get: { options.wrappedValue.textColor.color }, set: { options.wrappedValue.textColor = WidgetColor($0) }))
+            Picker("Music card background", selection: options.background) {
+                Text("Glass").tag(BackgroundKind.glass); Text("Gradient").tag(BackgroundKind.gradient); Text("Solid").tag(BackgroundKind.solid)
+            }
+            Slider(value: options.backgroundOpacity, in: 0...1) { Text("Background opacity") }
+        }
     }
 }
