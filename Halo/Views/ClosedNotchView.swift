@@ -228,6 +228,14 @@ struct ClosedNotchSlot: View {
         v.height = min(v.height, innerHeight)
         return v
     }
+    private var closedMediaOptions: ClosedMediaOptions { options.mediaOptions ?? ClosedMediaOptions() }
+    private var closedMediaWidth: Double {
+        let available = max(24, innerWidth)
+        if closedMediaOptions.overflow == .truncate || closedMediaOptions.overflow == .marquee {
+            return min(available, closedMediaOptions.resolvedHorizontalSpace)
+        }
+        return available
+    }
     var body: some View {
         HStack(spacing: elementSpacing) {
             if side == .left {
@@ -252,7 +260,7 @@ struct ClosedNotchSlot: View {
         .padding(side == .left ? .leading : .trailing, options.contentOuterMargin)
         .frame(width: availableWidth, height: availableHeight, alignment: .center)
         .clipped()
-        .modifier(MediaGestureModifier(media: media, options: options.mediaOptions ?? ClosedMediaOptions()))
+        .modifier(MediaGestureModifier(media: media, options: closedMediaOptions))
     }
     @ViewBuilder private var decorationElement: some View {
         if let decoration, decorationSize > 0 {
@@ -261,9 +269,10 @@ struct ClosedNotchSlot: View {
     }
     @ViewBuilder private var artworkElement: some View {
         if showArtwork {
-            ClosedArtworkView(media: media, options: artwork, mediaOptions: options.mediaOptions ?? ClosedMediaOptions(), lowPower: system.lowPower)
+            ClosedArtworkView(media: media, options: artwork, mediaOptions: closedMediaOptions, lowPower: system.lowPower)
                 .padding(artwork.padding)
                 .padding(side == .left ? .trailing : .leading, artwork.margin)
+                .fixedSize()
         }
     }
     @ViewBuilder private var contentElement: some View {
@@ -284,7 +293,10 @@ struct ClosedNotchSlot: View {
             if let battery = system.battery { Label("\(battery)%", systemImage: system.charging ? "battery.100.bolt" : "battery.100").lineLimit(1) }
             else { Image(systemName: "powerplug") }
         case .media:
-            if media.isPlaying { ClosedMediaView(media: media, options: options.mediaOptions ?? ClosedMediaOptions(), fontSize: textSize, availableWidth: max(24, innerWidth), lowPower: system.lowPower) }
+            if media.isPlaying {
+                ClosedMediaView(media: media, options: closedMediaOptions, fontSize: textSize, availableWidth: closedMediaWidth, lowPower: system.lowPower)
+                    .frame(width: closedMediaWidth)
+            }
         case .visualizer:
             if media.isPlaying { PlaybackVisualizer(kind: options.animation, playing: true, enabled: options.animate && !system.lowPower, options: visualizerOptions, palette: media.artworkColors, fallback: effectiveTextColor) }
         case .files: Label("\(store.files.count)", systemImage: "tray").lineLimit(1)
@@ -478,12 +490,20 @@ private struct ClosedMediaView: View {
     @State private var sampledAt = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }
+    private var effectiveWidth: Double {
+        let available = max(20, availableWidth)
+        if options.overflow == .truncate || options.overflow == .marquee {
+            return min(available, options.resolvedHorizontalSpace)
+        }
+        return available
+    }
     var body: some View {
         ZStack {
             mediaText
                 .id(key)
                 .transition(reduceMotion ? .opacity : options.resolvedChangeAnimation.transition)
         }
+        .frame(width: effectiveWidth)
         .animation(options.resolvedChangeAnimation == .none ? nil : .easeInOut(duration: options.resolvedChangeAnimationDuration), value: key)
         .task(id: key + "|\(options.textMode.rawValue)|\(options.usesOnlineLyrics)|\(options.resolvedLyricDisplay.rawValue)") {
             lyrics = ""; sampledPosition = 0; sampledDuration = 0; sampledAt = Date()
@@ -512,7 +532,7 @@ private struct ClosedMediaView: View {
         }
     }
     @ViewBuilder private var mediaText: some View {
-        let width = max(20, availableWidth)
+        let width = effectiveWidth
         switch options.textMode {
         case .titleArtist:
             if options.lines == 2 {
@@ -580,7 +600,8 @@ private struct ClosedMediaView: View {
             let font = NSFont.systemFont(ofSize: fontSize)
             let natural = texts.filter { !$0.isEmpty }.map { ceil(($0 as NSString).size(withAttributes: [.font: font]).width) }.max() ?? 36
             let icon = options.showPlaybackIcon ? fontSize + 10 : 0
-            LyricWidthReporter(width: min(300, max(28, natural + icon + 8)))
+            let maxWidth = (options.overflow == .truncate || options.overflow == .marquee) ? options.resolvedHorizontalSpace : 300
+            LyricWidthReporter(width: min(maxWidth, max(28, natural + icon + 8)))
         }
     }
     private func focusedLine(_ text: String, activeWord: Int, width: Double) -> some View {
