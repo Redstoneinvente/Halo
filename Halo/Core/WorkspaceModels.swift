@@ -239,9 +239,34 @@ enum CommandSearch {
     }
 }
 
+enum ContextMusicLayoutMode: String, Codable, CaseIterable, Identifiable {
+    case hero, split, compact, minimal
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .hero: return "Hero"
+        case .split: return "Split"
+        case .compact: return "Compact"
+        case .minimal: return "Minimal"
+        }
+    }
+}
+
+enum ContextArtworkPresentation: String, Codable, CaseIterable, Identifiable {
+    case none, cover, vinyl
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+enum ContextContentAlignment: String, Codable, CaseIterable, Identifiable {
+    case leading, center, trailing
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
 struct ContextMusicOptions: Codable, Equatable {
     var enabled = false
-    var showArtwork = true
+    var showArtwork = true // legacy compatibility; foregroundArtwork takes precedence when present
     var showTitle = true
     var showArtist = true
     var showControls = true
@@ -251,14 +276,44 @@ struct ContextMusicOptions: Codable, Equatable {
     var background: BackgroundKind = .glass
     var backgroundOpacity = 0.5
     var textColor = WidgetColor.white
+    var layoutMode: ContextMusicLayoutMode?
+    var foregroundArtwork: ContextArtworkPresentation?
+    var artworkBackground: Bool?
+    var artworkBackgroundBlur: Double?
+    var artworkBackgroundDim: Double?
+    var contentAlignment: ContextContentAlignment?
+    var spacing: Double?
+    var cornerRadius: Double?
+    var controlSize: Double?
+    var vinylRPM: Double?
+    var resolvedLayoutMode: ContextMusicLayoutMode { layoutMode ?? .hero }
+    var resolvedForegroundArtwork: ContextArtworkPresentation { foregroundArtwork ?? (showArtwork ? .cover : .none) }
+    var usesArtworkBackground: Bool { artworkBackground ?? false }
+    var resolvedArtworkBackgroundBlur: Double { min(30, max(0, artworkBackgroundBlur ?? 12)) }
+    var resolvedArtworkBackgroundDim: Double { min(0.9, max(0, artworkBackgroundDim ?? 0.38)) }
+    var resolvedContentAlignment: ContextContentAlignment { contentAlignment ?? .center }
+    var resolvedSpacing: Double { min(32, max(4, spacing ?? 12)) }
+    var resolvedCornerRadius: Double { min(48, max(0, cornerRadius ?? 18)) }
+    var resolvedControlSize: Double { min(42, max(14, controlSize ?? 24)) }
+    var resolvedVinylRPM: Double { min(45, max(1, vinylRPM ?? 8)) }
     func validated() throws -> ContextMusicOptions {
-        guard [artworkSize, fontSize, backgroundOpacity].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        guard [artworkSize, fontSize, backgroundOpacity, artworkBackgroundBlur ?? 12, artworkBackgroundDim ?? 0.38,
+               spacing ?? 12, cornerRadius ?? 18, controlSize ?? 24, vinylRPM ?? 8].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var result = self
-        result.artworkSize = min(200, max(32, artworkSize))
-        result.fontSize = min(40, max(12, fontSize))
+        result.artworkSize = min(240, max(32, artworkSize))
+        result.fontSize = min(48, max(12, fontSize))
         result.backgroundOpacity = min(1, max(0, backgroundOpacity))
         result.textColor = try textColor.validated()
         if ![BackgroundKind.glass, .gradient, .solid].contains(background) { result.background = .glass }
+        if layoutMode != nil { result.layoutMode = resolvedLayoutMode }
+        if foregroundArtwork != nil { result.foregroundArtwork = resolvedForegroundArtwork }
+        if artworkBackgroundBlur != nil { result.artworkBackgroundBlur = resolvedArtworkBackgroundBlur }
+        if artworkBackgroundDim != nil { result.artworkBackgroundDim = resolvedArtworkBackgroundDim }
+        if contentAlignment != nil { result.contentAlignment = resolvedContentAlignment }
+        if spacing != nil { result.spacing = resolvedSpacing }
+        if cornerRadius != nil { result.cornerRadius = resolvedCornerRadius }
+        if controlSize != nil { result.controlSize = resolvedControlSize }
+        if vinylRPM != nil { result.vinylRPM = resolvedVinylRPM }
         return result
     }
 }
