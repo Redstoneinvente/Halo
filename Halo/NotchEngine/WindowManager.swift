@@ -173,27 +173,64 @@ final class WindowManager {
         store.workspace.activities.contains { ($0.progress.map { $0 < 1 } ?? false) || $0.created.addingTimeInterval(8) > Date() }
     }
     private func configureDynamicWidth(_ host: Host) {
+        guard let geometry = host.geometry else { return }
         let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
-        let options = layout.closedNotch?.expansion ?? ClosedExpansionOptions()
-        var width = options.enabled && hasLiveContent ? options.width : 0
-        let decorations = [layout.closedNotch?.leftDecoration, layout.closedNotch?.rightDecoration].compactMap { $0 }
-        let visible = decorations.filter { $0.isVisible(playing: store.workspace.media.isPlaying) }
-        if let size = visible.map(\.size).max(), let geometry = host.geometry {
-            let camera = geometry.attachedToNotch ? geometry.physicalNotchWidth : 0
-            width = max(width, camera + 2 * (size + 20))
+        let options = layout.closedNotch ?? ClosedNotchOptions()
+        let expansion = options.expansion ?? ClosedExpansionOptions()
+        let sides = fittedClosedSides(host: host, layout: layout)
+        let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
+        let camera = attached ? geometry.physicalNotchWidth : 0
+        let fittedWidth = attached ? camera + sides.left + sides.right : ClosedContentSizing.width(left: sides.left, right: sides.right)
+        var requested = expansion.enabled && hasLiveContent ? expansion.width : 0
+        if options.autoFitContent ?? true { requested = max(requested, fittedWidth) }
+
+        // Preserve decoration sizing even if automatic text/content fitting is disabled.
+        let visibleDecorationWidth = attached ? camera + sides.decorationLeft + sides.decorationRight :
+            ClosedContentSizing.width(left: sides.decorationLeft, right: sides.decorationRight)
+        requested = max(requested, visibleDecorationWidth)
+
+        guard !host.state.editingGeometry, requested > 0 else {
+            host.geometry?.activeCompactWidth = nil
+            host.geometry?.activeCompactCenterOffset = nil
+            return
         }
-        if layout.closedNotch?.autoFitContent ?? true { width = max(width, fittedClosedWidth(host: host, layout: layout)) }
-        host.geometry?.activeCompactWidth = host.state.editingGeometry || width == 0 ? nil : width
+
+        let finalWidth = min(geometry.visible.width, max(geometry.appearance.compactWidth, requested))
+        host.geometry?.activeCompactWidth = requested
+
+        guard attached, finalWidth > camera else {
+            host.geometry?.activeCompactCenterOffset = nil
+            return
+        }
+
+        var left = sides.left
+        var right = sides.right
+        if !(options.autoFitContent ?? true) {
+            left = sides.decorationLeft
+            right = sides.decorationRight
+        }
+        let extra = max(0, finalWidth - camera - left - right)
+        if left > 0, right <= 0 {
+            left += extra
+        } else if right > 0, left <= 0 {
+            right += extra
+        } else {
+            left += extra / 2
+            right += extra / 2
+        }
+        // A negative center offset leaves the physical camera in place while the surface grows left;
+        // a positive value does the same toward the right.
+        host.geometry?.activeCompactCenterOffset = (right - left) / 2
     }
-    private func fittedClosedWidth(host: Host, layout: WorkspaceLayout) -> Double {
-        guard var geometry = host.geometry else { return 0 }
+    private func fittedClosedSides(host: Host, layout: WorkspaceLayout) -> (left: Double, right: Double, decorationLeft: Double, decorationRight: Double) {
+        guard let geometry = host.geometry else { return (0, 0, 0, 0) }
         let options = layout.closedNotch ?? ClosedNotchOptions()
         let size = min(options.fontSize, max(1, geometry.compactHeight - 2 * options.contentPaddingY) / 1.25)
         let font = NSFont.systemFont(ofSize: size)
         func textWidth(_ text: String, font: NSFont) -> Double {
             ceil((text as NSString).size(withAttributes: [.font: font]).width) + 4
         }
-        func slot(_ item: ClosedNotchItem, _ decoration: SideDecoration?) -> Double {
+        func measurements(_ item: ClosedNotchItem, _ decoration: SideDecoration?) -> (full: Double, decoration: Double) {
             let content: Double
             switch item {
             case .none: content = 0
@@ -211,16 +248,14 @@ final class WindowManager {
             case .activity: content = textWidth(String((store.workspace.activities.first?.title ?? "No activity").prefix(80)), font: font)
             }
             let ornament = decoration.flatMap { $0.isVisible(playing: store.workspace.media.isPlaying) ? min($0.size, max(1, geometry.compactHeight - 2 * options.contentPaddingY)) : nil } ?? 0
-            return content + ornament + (content > 0 && ornament > 0 ? 5 : 0) + 2 * options.contentPaddingX
+            guard content > 0 || ornament > 0 else { return (0, 0) }
+            let spacing = content > 0 && ornament > 0 ? 5.0 : 0
+            let padding = 2 * options.contentPaddingX + options.contentSideMargin
+            return (content + ornament + spacing + padding, ornament > 0 ? ornament + padding : 0)
         }
-        let left = slot(options.left, options.leftDecoration), right = slot(options.right, options.rightDecoration)
-        var width = ClosedContentSizing.width(left: left, right: right)
-        geometry.activeCompactWidth = width
-        if geometry.closedCameraOcclusion != nil {
-            let centerOffset = geometry.screen.midX - geometry.frame(expanded: false).midX
-            width = ClosedContentSizing.width(left: left, right: right, camera: geometry.physicalNotchWidth, cameraOffset: centerOffset)
-        }
-        return min(640, width)
+        let left = measurements(options.left, options.leftDecoration)
+        let right = measurements(options.right, options.rightDecoration)
+        return (left.full, right.full, left.decoration, right.decoration)
     }
     private func refreshDynamicWidths() {
         activityExpiry?.cancel()
@@ -231,8 +266,10 @@ final class WindowManager {
         }
         for host in hosts.values {
             let oldWidth = host.geometry?.compactWidth
+            let oldOffset = host.geometry?.activeCompactCenterOffset
             configureDynamicWidth(host)
-            guard let geometry = host.geometry, oldWidth != geometry.compactWidth else { continue }
+            guard let geometry = host.geometry,
+                  oldWidth != geometry.compactWidth || oldOffset != geometry.activeCompactCenterOffset else { continue }
             host.state.compactWidth = geometry.compactWidth
             host.state.closedOcclusion = geometry.closedCameraOcclusion
             guard !host.state.expanded else { continue }
