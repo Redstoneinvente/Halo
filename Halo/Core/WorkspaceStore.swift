@@ -49,7 +49,11 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     }
     private func updateArtworkPreference() {
         let layouts = [effectiveLayout] + settings.displays.compactMap { $0.enabled ? $0.layout : nil }
-        media.setArtworkEnabled(layouts.contains { $0.closedNotch?.visualizer?.dynamicColors == true })
+        media.setArtworkEnabled(layouts.contains {
+            $0.closedNotch?.visualizer?.dynamicColors == true ||
+            $0.closedNotch?.albumTextColor == true ||
+            $0.closedNotch?.albumBackgroundColor == true
+        })
     }
     func start() {
         updateArtworkPreference()
