@@ -1,10 +1,24 @@
 import Foundation
 
+enum ClosedContentSizing {
+    static func width(left: Double, right: Double, camera: Double = 0, cameraOffset: Double = 0) -> Double {
+        let half = camera > 0 ? max(left - cameraOffset, right + cameraOffset) : max(left, right)
+        return max(16, camera + 2 * max(0, half))
+    }
+}
+
+enum FrameRatePolicy {
+    static func target(maximum: Int, lowPower: Bool) -> Int {
+        min(lowPower ? 60 : 120, maximum > 0 ? maximum : 60)
+    }
+}
+
 /// Compare only render-affecting preferences; no JSON work on the slider hot path.
 struct SurfaceRenderConfiguration: Equatable {
     var appearance: Appearance
     var displays: [DisplayOverride]
     var closedNotch: ClosedNotchOptions? = nil
+    var clock: WidgetStyle? = nil
 }
 enum GlassRendering {
     /// The material supplies its own background. Tint must never hide the backdrop.

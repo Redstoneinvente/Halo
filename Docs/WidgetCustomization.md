@@ -8,7 +8,7 @@ Clock also supports seconds, date, 12/24-hour time and a time zone. The closed c
 
 Settings → Closed notch provides left and right slots: none, clock, date, timer, battery, track title, playback visualizer, shelf file count or latest activity. Increase closed width in Appearance if content does not fit. Physical camera space is reserved, including horizontal and vertical offsets. A 16-point surface can only hold a status dot; a surface entirely behind the physical camera cannot display visible content there.
 
-Halo detects playing Apple Music and Spotify instances automatically. Media & Files selects a preferred player and allows restricting detection to it. macOS may request Automation access for each player. Denied players are skipped until Retry detection; browser playback and other players are not supported. Bars, wave, pulse, waveform, ribbon, dots, rings, orbit and spectrum are decorative playback animations, not measured audio. They animate only while playing, at up to 30 updates per second, and stop for Reduce Motion or Low Power Mode. Halo does not request microphone access.
+Halo detects playing Apple Music and Spotify instances automatically. Media & Files selects a preferred player and allows restricting detection to it. macOS may request Automation access for each player. Denied players are skipped until Retry detection; browser playback and other players are not supported. Bars, wave, pulse, waveform, ribbon, dots, rings, orbit and spectrum are decorative playback animations, not measured audio. They animate only while playing, at the display cadence up to 120 updates per second, and stop for Reduce Motion or Low Power Mode. Halo does not request microphone access.
 
 Glass samples the desktop through native macOS material. Opacity now adjusts a light tint instead of covering glass with opaque black. Reduce Transparency intentionally uses a solid fallback. Image/video blur controls do not apply to native glass.
 
@@ -34,3 +34,13 @@ Artwork is requested once per track change after detecting the player. Spotify a
 On a Mac, verify all nine styles at minimum/maximum sizes, speed and intensity; test two tracks with visibly different covers in each player; toggle artwork colors during a fetch; skip tracks quickly; test unavailable artwork/offline Spotify; check manual fallback and Reduce Motion. Xcode compilation and native rendering remain required validation gates.
 
 See [Personalization.md](Personalization.md) for timed profiles/backgrounds, grain and side icons/GIFs.
+
+## Display cadence and content fit
+
+On macOS 14+, surface transitions and playback visuals use a view-linked CADisplayLink, requesting up to 120 fps on capable displays. The link follows display moves and runs in common run-loop modes so tracking menus does not stall it. macOS 13 uses a timer matched to the detected maximum refresh rate. Low Power Mode requests at most 60 fps; Reduce Motion still stops animation. macOS and display settings decide the actual delivered cadence. Settings → General reports the requested target, not a measured frame rate.
+
+Settings → Closed notch → Content fit enables **Auto-size to fit content** (default on) and horizontal/vertical padding. Auto-size measures text and includes visualizer/decorations, keeping the configured idle width as a minimum. Physical-camera reservations include horizontal offsets. The fitting contribution is capped at 640 pt and screen bounds; long text truncates once space runs out. Visualizers, symbols and GIFs respect the available closed height. Turn auto-size off to keep a fixed minimum width (activity expansion remains a separate setting).
+
+Font and time-zone catalogs now open as searchable lazy lists rather than hundreds of eagerly constructed picker entries.
+
+Mac checks: enable ProMotion/120 Hz, disable Low Power Mode, record frame pacing in Instruments while opening/closing Halo and scrolling settings. Move between 60/120 Hz screens and repeat. Test both slots with long titles, large custom clock fonts, seconds, a GIF plus visualizer, extreme padding, camera offsets and auto-size on/off. Native compilation and actual delivered frame rate have not been verified in this editing environment.

@@ -63,3 +63,7 @@ Automatic Music/Spotify detection now uses player notifications and fallback pol
 Profiles support weekday/time windows as runtime overrides without overwriting the user's base layout. Backgrounds support independent timed windows. Static grain/warmth and independently conditioned side icons/GIFs are wired into profiles/themes; imported local image paths are stripped. Pinned files, capture/OCR and recent file additions participate in horizontal expansion.
 
 Source checks and regression cases have been added; native compilation, Apple Events permission behavior, GIF rendering and measured frame pacing still require macOS validation. See Personalization.md.
+
+## Display cadence and closed-content fit
+
+Replaced fixed transition/visualizer timers with view-linked display callbacks on macOS 14+ (up to 120 fps, refresh-rate-matched timer fallback on macOS 13). Font/time-zone selection uses searchable lazy lists. Closed-content auto-sizing measures text and includes decoration/visualizer widths and offset camera space; child content is constrained to the padded closed height. Frame-rate policy and sizing math have regression cases. Native compilation and Instruments measurements remain required.

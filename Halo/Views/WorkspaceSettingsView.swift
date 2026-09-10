@@ -50,6 +50,9 @@ struct SettingsView: View {
                 Text("Your workspace, within reach.").font(.title2.bold())
                 Text("Hover to expand, click the top strip to toggle, right-click for profiles, and drag files onto the surface. Option–Command–Space toggles Halo by default.")
                 Text("Detected \(NSScreen.screens.count) display(s); \(NSScreen.screens.filter { $0.safeAreaInsets.top > 0 }.count) with a notch.")
+                ForEach(NSScreen.screens, id: \.localizedName) { screen in
+                    Text("\(screen.localizedName): animation target up to \(FrameRatePolicy.target(maximum: screen.maximumFramesPerSecond, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)) fps").font(.caption)
+                }
                 if !onboarded { Button("Finish setup and show Halo") { onboarded = true; NotificationCenter.default.post(name: .init("HaloToggle"), object: nil) } }
             }
             Toggle("Expand on hover", isOn: $store.configuration.hoverToExpand)

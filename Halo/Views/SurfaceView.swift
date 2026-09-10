@@ -33,7 +33,7 @@ struct SurfaceView: View, Equatable {
                 Circle().fill(store.deadline == nil ? accent : .green).frame(width: 6, height: 6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
               } else if !state.expanded {
-                ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion)
+                ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
               } else { HStack {
                 Circle().fill(store.deadline == nil ? accent : .green).frame(width: 7, height: 7)
                 Spacer()

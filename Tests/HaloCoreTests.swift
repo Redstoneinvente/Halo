@@ -4,6 +4,31 @@ import XCTest
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    func testRefreshRatePolicyMatchesDisplayAndPowerMode() {
+        XCTAssertEqual(FrameRatePolicy.target(maximum: 120, lowPower: false), 120)
+        XCTAssertEqual(FrameRatePolicy.target(maximum: 60, lowPower: false), 60)
+        XCTAssertEqual(FrameRatePolicy.target(maximum: 144, lowPower: false), 120)
+        XCTAssertEqual(FrameRatePolicy.target(maximum: 120, lowPower: true), 60)
+        XCTAssertEqual(FrameRatePolicy.target(maximum: 0, lowPower: false), 60)
+    }
+    func testClosedContentWidthReservesBothSidesOfOffsetCamera() {
+        XCTAssertEqual(ClosedContentSizing.width(left: 60, right: 80), 160)
+        XCTAssertEqual(ClosedContentSizing.width(left: 60, right: 80, camera: 190), 350)
+        let width = ClosedContentSizing.width(left: 60, right: 80, camera: 190, cameraOffset: 25)
+        XCTAssertEqual(width, 400)
+        XCTAssertGreaterThanOrEqual((width - 190) / 2 + 25, 60)
+        XCTAssertGreaterThanOrEqual((width - 190) / 2 - 25, 80)
+    }
+    func testClosedPaddingDefaultsAndValidation() throws {
+        var options = ClosedNotchOptions()
+        XCTAssertTrue(options.autoFitContent ?? true)
+        XCTAssertEqual(options.contentPaddingX, 8); XCTAssertEqual(options.contentPaddingY, 2)
+        options.horizontalPadding = 500; options.verticalPadding = -2
+        let safe = try options.validated()
+        XCTAssertEqual(safe.horizontalPadding, 24); XCTAssertEqual(safe.verticalPadding, 0)
+        options.horizontalPadding = .infinity
+        XCTAssertThrowsError(try options.validated())
+    }
     func testSchedulesHandleWeekdaysOvernightAndEndBoundary() {
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         func date(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {

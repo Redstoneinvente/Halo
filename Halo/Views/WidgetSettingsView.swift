@@ -4,6 +4,7 @@ import AppKit
 struct WidgetSettingsView: View {
     @Binding var layout: WorkspaceLayout
     @State private var selected: ModuleID = .clock
+    private static let timeZones = TimeZone.knownTimeZoneIdentifiers
     @State private var installedFonts: [String] = []
     private var style: Binding<WidgetStyle> {
         Binding(get: { layout.widgetStyle(for: selected) }, set: { layout.setWidgetStyle($0, for: selected) })
@@ -17,9 +18,9 @@ struct WidgetSettingsView: View {
                 ForEach(WidgetFontFamily.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
             }
             if style.wrappedValue.fontFamily == .custom {
-                Picker("Installed font", selection: style.customFont) {
-                    ForEach(Array(Set(installedFonts + [style.wrappedValue.customFont])).sorted(), id: \.self) { Text($0).tag($0) }
-                }.onAppear { if installedFonts.isEmpty { installedFonts = NSFontManager.shared.availableFontFamilies } }
+                SearchableStringPicker(title: "Installed font", selection: style.customFont,
+                    values: installedFonts.contains(style.wrappedValue.customFont) ? installedFonts : [style.wrappedValue.customFont] + installedFonts)
+                    .onAppear { if installedFonts.isEmpty { installedFonts = NSFontManager.shared.availableFontFamilies.sorted() } }
                 TextField("Font name", text: style.customFont)
                 Button("Browse fonts in Font Book") { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Font Book.app")) }
             }
@@ -47,10 +48,8 @@ struct WidgetSettingsView: View {
                 Toggle("24-hour time", isOn: style.clock.twentyFourHour)
                 Toggle("Show seconds", isOn: style.clock.showSeconds)
                 Toggle("Show date", isOn: style.clock.showDate)
-                Picker("Time zone", selection: style.clock.timeZone) {
-                    Text("System time zone").tag("")
-                    ForEach(TimeZone.knownTimeZoneIdentifiers, id: \.self) { Text($0).tag($0) }
-                }
+                SearchableStringPicker(title: "Time zone", selection: style.clock.timeZone,
+                                       values: [""] + Self.timeZones, emptyLabel: "System time zone")
                 WidgetClock(style: style.wrappedValue).foregroundStyle(style.wrappedValue.textColor.color)
                     .padding().background(.black, in: RoundedRectangle(cornerRadius: 12))
             }
@@ -79,6 +78,12 @@ struct ClosedNotchSettingsView: View {
                 set: { options.wrappedValue.expansion = $0 })
     }
     var body: some View {
+        Section("Content fit") {
+            Toggle("Auto-size to fit content", isOn: Binding(get: { options.wrappedValue.autoFitContent ?? true }, set: { options.wrappedValue.autoFitContent = $0 }))
+            Slider(value: Binding(get: { options.wrappedValue.contentPaddingX }, set: { options.wrappedValue.horizontalPadding = $0 }), in: 0...24) { Text("Horizontal padding") }
+            Slider(value: Binding(get: { options.wrappedValue.contentPaddingY }, set: { options.wrappedValue.verticalPadding = $0 }), in: 0...12) { Text("Vertical padding") }
+            Text("Auto-size treats your configured closed width as a minimum and reserves camera space, up to 640 pt or the display width. Text and artwork fit the closed height; long text truncates when space runs out.").font(.caption)
+        }
         Section("Automatic width") {
             Toggle("Widen for music and live activity", isOn: expansion.enabled)
             Slider(value: expansion.width, in: 120...640, step: 1) { Text("Active width · \(Int(expansion.wrappedValue.width)) pt") }

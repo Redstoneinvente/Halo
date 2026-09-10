@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Combine
+import QuartzCore
 
 @MainActor
 final class SurfaceViewport: ObservableObject {
@@ -41,11 +42,11 @@ final class HaloPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-/// Only runs a 60 Hz timer during a transition. Retargeting begins at the current frame.
+/// Uses the current display cadence during transitions, up to 120 Hz.
 @MainActor
 final class SurfaceAnimator {
-    private var ticker: AnyCancellable?
-    func cancel() { ticker?.cancel(); ticker = nil }
+    private let clock = DisplayClock()
+    func cancel() { clock.stop() }
     func move(panel: HaloPanel, state: SurfaceState, target: CGRect, options: SurfaceOptions,
               preset: AnimationPreset, animations: Bool, opening: Bool, style: SurfaceStyle) {
         cancel()
@@ -56,11 +57,14 @@ final class SurfaceAnimator {
         }
         let initial = panel.frame
         let initialAlpha = panel.alphaValue
-        let start = ProcessInfo.processInfo.systemUptime
+        let start = CACurrentMediaTime()
         let duration = options.duration
-        ticker = Timer.publish(every: 1.0 / 60, on: .main, in: .common).autoconnect().sink { [weak self, weak panel, weak state] _ in
+        guard let view = panel.contentView else {
+            state.viewport.size = target.size; panel.setFrame(target, display: false); return
+        }
+        clock.start(view: view) { [weak self, weak panel, weak state] timestamp in
             guard let self, let panel, let state else { self?.cancel(); return }
-            let t = min(1, (ProcessInfo.processInfo.systemUptime - start) / duration)
+            let t = min(1, max(0, timestamp - start) / max(0.01, duration))
             let p = SurfaceMotion.progress(t, transition: transition, preset: preset, damping: options.damping)
             let width = max(1, initial.width + (target.width - initial.width) * p)
             let height = max(1, initial.height + (target.height - initial.height) * p)
@@ -128,7 +132,7 @@ final class WindowManager {
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.$settings.map { [store] settings in
             let layout = settings.profiles.first { $0.id == store.workspace.scheduledProfileID }?.layout ?? settings.layout
-            return SurfaceRenderConfiguration(appearance: layout.appearance, displays: settings.displays, closedNotch: layout.closedNotch)
+            return SurfaceRenderConfiguration(appearance: layout.appearance, displays: settings.displays, closedNotch: layout.closedNotch, clock: layout.widgetStyle(for: .clock))
         }
             .removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
@@ -146,6 +150,10 @@ final class WindowManager {
             }.store(in: &subscriptions)
         store.workspace.$scheduledProfileID.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+        store.workspace.media.$title.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+        store.$files.map(\.count).removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.$pinnedFiles.map { !$0.isEmpty }.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.capture.$busy.removeDuplicates().receive(on: DispatchQueue.main)
@@ -174,7 +182,45 @@ final class WindowManager {
             let camera = geometry.attachedToNotch ? geometry.physicalNotchWidth : 0
             width = max(width, camera + 2 * (size + 20))
         }
+        if layout.closedNotch?.autoFitContent ?? true { width = max(width, fittedClosedWidth(host: host, layout: layout)) }
         host.geometry?.activeCompactWidth = host.state.editingGeometry || width == 0 ? nil : width
+    }
+    private func fittedClosedWidth(host: Host, layout: WorkspaceLayout) -> Double {
+        guard var geometry = host.geometry else { return 0 }
+        let options = layout.closedNotch ?? ClosedNotchOptions()
+        let size = min(options.fontSize, max(1, geometry.compactHeight - 2 * options.contentPaddingY) / 1.25)
+        let font = NSFont.systemFont(ofSize: size)
+        func textWidth(_ text: String, font: NSFont) -> Double {
+            ceil((text as NSString).size(withAttributes: [.font: font]).width) + 4
+        }
+        func slot(_ item: ClosedNotchItem, _ decoration: SideDecoration?) -> Double {
+            let content: Double
+            switch item {
+            case .none: content = 0
+            case .clock:
+                let style = layout.widgetStyle(for: .clock)
+                let clockFont = style.fontFamily == .custom ? NSFont(name: style.customFont, size: size) ?? font : NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
+                let template = "88:88" + (style.clock.showSeconds ? ":88" : "") + (style.clock.twentyFourHour ? "" : " PM")
+                content = textWidth(template, font: clockFont) * 1.08
+            case .date: content = textWidth("Sep 28", font: font)
+            case .timer: content = textWidth("88:88:88", font: font) + size
+            case .battery: content = textWidth("100%", font: font) + size + 5
+            case .media: content = textWidth(String(store.workspace.media.title.prefix(80)), font: font) + size + 5
+            case .visualizer: content = (options.visualizer ?? VisualizerOptions()).width
+            case .files: content = textWidth(String(store.files.count), font: font) + size + 5
+            case .activity: content = textWidth(String((store.workspace.activities.first?.title ?? "No activity").prefix(80)), font: font)
+            }
+            let ornament = decoration.flatMap { $0.isVisible(playing: store.workspace.media.isPlaying) ? min($0.size, max(1, geometry.compactHeight - 2 * options.contentPaddingY)) : nil } ?? 0
+            return content + ornament + (content > 0 && ornament > 0 ? 5 : 0) + 2 * options.contentPaddingX
+        }
+        let left = slot(options.left, options.leftDecoration), right = slot(options.right, options.rightDecoration)
+        var width = ClosedContentSizing.width(left: left, right: right)
+        geometry.activeCompactWidth = width
+        if geometry.closedCameraOcclusion != nil {
+            let centerOffset = geometry.screen.midX - geometry.frame(expanded: false).midX
+            width = ClosedContentSizing.width(left: left, right: right, camera: geometry.physicalNotchWidth, cameraOffset: centerOffset)
+        }
+        return min(640, width)
     }
     private func refreshDynamicWidths() {
         activityExpiry?.cancel()

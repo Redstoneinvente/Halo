@@ -1,6 +1,42 @@
 import SwiftUI
 import AppKit
 
+/// Large catalogs are built only when opened; scrolling creates visible rows lazily.
+struct SearchableStringPicker: View {
+    let title: String
+    @Binding var selection: String
+    let values: [String]
+    var emptyLabel = "System default"
+    @State private var showing = false
+    @State private var search = ""
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Button(selection.isEmpty ? emptyLabel : selection) { search = ""; showing = true }
+                .lineLimit(1)
+                .popover(isPresented: $showing) {
+                    VStack(spacing: 10) {
+                        TextField("Search \(title.lowercased())", text: $search).textFieldStyle(.roundedBorder)
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 2) {
+                                ForEach(values.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \.self) { value in
+                                    Button { selection = value; showing = false } label: {
+                                        HStack {
+                                            Text(value.isEmpty ? emptyLabel : value)
+                                            Spacer()
+                                            if selection == value { Image(systemName: "checkmark") }
+                                        }.padding(6).contentShape(Rectangle())
+                                    }.buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }.padding(12).frame(width: 340, height: 320)
+                }
+        }
+    }
+}
+
 extension WidgetColor {
     var color: Color { Color(red: red, green: green, blue: blue) }
     init(_ color: Color) {

@@ -5,24 +5,32 @@ struct ClosedNotchView: View {
     @ObservedObject var workspace: WorkspaceStore
     let layout: WorkspaceLayout
     let occlusion: CGRect?
+    let referenceWidth: CGFloat
     private var options: ClosedNotchOptions { layout.closedNotch ?? ClosedNotchOptions() }
     var body: some View {
         GeometryReader { proxy in
-            let leftWidth = occlusion?.minX ?? proxy.size.width / 2
-            let rightWidth = occlusion.map { proxy.size.width - $0.maxX } ?? proxy.size.width / 2
+            let reservation = cameraReservation(width: proxy.size.width, height: proxy.size.height)
+            let leftWidth = reservation?.minX ?? proxy.size.width / 2
+            let rightWidth = reservation.map { proxy.size.width - $0.maxX } ?? proxy.size.width / 2
             HStack(spacing: 0) {
                 slot(options.left, decoration: options.leftDecoration, width: leftWidth, height: proxy.size.height)
-                if let occlusion { Color.clear.frame(width: occlusion.width) }
+                if let reservation { Color.clear.frame(width: reservation.width) }
                 slot(options.right, decoration: options.rightDecoration, width: rightWidth, height: proxy.size.height)
             }.frame(height: proxy.size.height)
         }.foregroundStyle(options.color.color)
     }
+    private func cameraReservation(width: CGFloat, height: CGFloat) -> CGRect? {
+        guard var camera = occlusion else { return nil }
+        camera.origin.x += (width - referenceWidth) / 2
+        let intersection = camera.intersection(CGRect(x: 0, y: 0, width: width, height: max(1, height)))
+        return intersection.isNull || intersection.isEmpty ? nil : intersection
+    }
     private func slot(_ item: ClosedNotchItem, decoration: SideDecoration?, width: CGFloat, height: CGFloat) -> some View {
         Group {
-            if width >= 24 {
-                ClosedNotchSlot(item: item, decoration: decoration, availableHeight: height, options: options, clock: layout.widgetStyle(for: .clock), store: store,
+            if width >= 2 * options.contentPaddingX + 8 {
+                ClosedNotchSlot(item: item, decoration: decoration, availableHeight: height, availableWidth: width, options: options, clock: layout.widgetStyle(for: .clock), store: store,
                                 workspace: workspace, media: workspace.media, system: workspace.system)
-                    .padding(.horizontal, 6)
+
             }
         }.frame(width: max(0, width)).clipped()
     }
@@ -31,17 +39,36 @@ struct ClosedNotchSlot: View {
     let item: ClosedNotchItem
     let decoration: SideDecoration?
     let availableHeight: CGFloat
+    let availableWidth: CGFloat
     let options: ClosedNotchOptions
     let clock: WidgetStyle
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject var media: MediaService
     @ObservedObject var system: SystemService
+    private var innerHeight: Double { max(1, availableHeight - 2 * options.contentPaddingY) }
+    private var innerWidth: Double { max(1, availableWidth - 2 * options.contentPaddingX) }
+    private var decorationSize: Double {
+        guard let decoration, decoration.isVisible(playing: media.isPlaying) else { return 0 }
+        return min(decoration.size, min(innerHeight, item == .none ? innerWidth : innerWidth / 3))
+    }
+    private var textSize: Double { min(options.fontSize, innerHeight / 1.25) }
+    private var visualizerOptions: VisualizerOptions {
+        var v = options.visualizer ?? VisualizerOptions()
+        v.width = min(v.width, max(1, innerWidth - decorationSize - (decorationSize > 0 ? 5 : 0)))
+        v.height = min(v.height, innerHeight)
+        return v
+    }
     var body: some View {
-        HStack(spacing: 5) {
-            if let decoration { SideDecorationView(options: decoration, playing: media.isPlaying, lowPower: system.lowPower, maximumHeight: max(8, availableHeight - 2)) }
+        HStack(spacing: decorationSize > 0 && item != .none ? 5 : 0) {
+            if let decoration, decorationSize > 0 {
+                SideDecorationView(options: decoration, playing: media.isPlaying, lowPower: system.lowPower, maximumHeight: decorationSize)
+            }
             content
-        }.font(.system(size: options.fontSize)).lineLimit(1)
+        }.font(.system(size: textSize)).lineLimit(1).minimumScaleFactor(0.65)
+            .frame(maxWidth: innerWidth, maxHeight: innerHeight)
+            .padding(.horizontal, options.contentPaddingX).padding(.vertical, options.contentPaddingY)
+            .frame(width: availableWidth, height: availableHeight).clipped()
     }
     @ViewBuilder private var content: some View {
         switch item {
@@ -60,12 +87,12 @@ struct ClosedNotchSlot: View {
             Label(media.title, systemImage: media.isPlaying ? "music.note" : "pause.fill")
         case .visualizer:
             PlaybackVisualizer(kind: options.animation, playing: media.isPlaying, enabled: options.animate && !system.lowPower,
-                               options: options.visualizer ?? VisualizerOptions(), palette: media.artworkColors, fallback: options.color.color)
+                               options: visualizerOptions, palette: media.artworkColors, fallback: options.color.color)
         case .files: Label("\(store.files.count)", systemImage: "tray")
         case .activity: Text(workspace.activities.first?.title ?? "No activity")
         }
     }
-    private var compactClock: WidgetStyle { var value = clock; value.fontSize = options.fontSize; return value }
+    private var compactClock: WidgetStyle { var value = clock; value.fontSize = textSize; return value }
 }
 /// Playback decoration, deliberately not microphone or system-audio capture.
 struct PlaybackVisualizer: View {
@@ -82,8 +109,8 @@ struct PlaybackVisualizer: View {
         return extracted.isEmpty ? [fallback, fallback] : extracted.count == 1 ? [extracted[0], extracted[0]] : extracted
     }
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !animated)) { context in
-            let time = animated ? context.date.timeIntervalSinceReferenceDate * options.speed : 0
+        RefreshTimeline(active: animated) { timestamp in
+            let time = animated ? timestamp * options.speed : 0
             Canvas { graphics, size in
                 let w = Double(size.width), h = Double(size.height)
                 let paint = GraphicsContext.Shading.linearGradient(Gradient(colors: colors),
