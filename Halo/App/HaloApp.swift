@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import IOKit
 
 @main
 struct HaloApp: App {
@@ -44,17 +45,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         status?.button?.image = NSImage(systemSymbolName: "capsule.tophalf.filled", accessibilityDescription: "Halo")
         let menu = NSMenu()
-        for (title, action, key) in [
-            ("Toggle Halo", #selector(toggle), ""),
-            ("Settings…", #selector(openSettings), ","),
-            ("HUD Settings…", #selector(openHUDSettings), ""),
-            ("Quit Halo", #selector(quit), "q")
-        ] {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-            item.target = self
-            menu.addItem(item)
-        }
+
+        let toggleItem = NSMenuItem(title: "Toggle Halo", action: #selector(toggle), keyEquivalent: "")
+        toggleItem.target = self
+        menu.addItem(toggleItem)
+
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        let hudRoot = NSMenuItem(title: "HUD", action: nil, keyEquivalent: "")
+        let hudMenu = NSMenu(title: "HUD")
+        let hudSettingsItem = NSMenuItem(title: "HUD Settings…", action: #selector(openHUDSettings), keyEquivalent: "")
+        hudSettingsItem.target = self
+        hudMenu.addItem(hudSettingsItem)
+        hudMenu.addItem(.separator())
+        let previewVolume = NSMenuItem(title: "Preview Volume HUD", action: #selector(previewVolumeHUD), keyEquivalent: "")
+        previewVolume.target = self
+        hudMenu.addItem(previewVolume)
+        let previewBrightness = NSMenuItem(title: "Preview Screen Brightness HUD", action: #selector(previewBrightnessHUD), keyEquivalent: "")
+        previewBrightness.target = self
+        hudMenu.addItem(previewBrightness)
+        let previewKeyboard = NSMenuItem(title: "Preview Keyboard Brightness HUD", action: #selector(previewKeyboardHUD), keyEquivalent: "")
+        previewKeyboard.target = self
+        hudMenu.addItem(previewKeyboard)
+        hudRoot.submenu = hudMenu
+        menu.addItem(hudRoot)
+
+        menu.addItem(.separator())
+        let quitItem = NSMenuItem(title: "Quit Halo", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
         status?.menu = menu
+
         if !UserDefaults.standard.bool(forKey: "onboarded") { openSettings() }
     }
 
@@ -111,6 +134,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggle() { engine?.toggleAll() }
     @objc private func quit() { NSApp.terminate(nil) }
+    @objc private func previewVolumeHUD() { postHUDPreview("volume") }
+    @objc private func previewBrightnessHUD() { postHUDPreview("brightness") }
+    @objc private func previewKeyboardHUD() { postHUDPreview("keyboard") }
+    private func postHUDPreview(_ kind: String) {
+        NotificationCenter.default.post(name: .init("HaloHUDPreview"), object: nil, userInfo: ["kind": kind])
+    }
 
     @objc func openSettings() {
         if settings == nil {
@@ -129,9 +158,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openHUDSettings() {
         if hudSettings == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 720), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            window.title = "Halo · HUD Replacement"
-            window.contentMinSize = NSSize(width: 500, height: 620)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 790), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            window.title = "Halo · HUD"
+            window.contentMinSize = NSSize(width: 520, height: 650)
             window.contentView = NSHostingView(rootView: HaloHUDSettingsView())
             window.isReleasedWhenClosed = false
             window.center()
@@ -148,11 +177,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-private enum HaloHUDKeys {
+enum HaloHUDKeys {
     static let enabled = "HaloHUDEnabled"
     static let replaceVolume = "HaloHUDReplaceVolume"
+    static let replaceBrightness = "HaloHUDReplaceBrightness"
+    static let replaceKeyboardBrightness = "HaloHUDReplaceKeyboardBrightness"
     static let volumeHUD = "HaloHUDVolumeEnabled"
     static let muteHUD = "HaloHUDMuteEnabled"
+    static let brightnessHUD = "HaloHUDBrightnessEnabled"
+    static let keyboardBrightnessHUD = "HaloHUDKeyboardBrightnessEnabled"
     static let layout = "HaloHUDLayout"
     static let position = "HaloHUDPosition"
     static let progress = "HaloHUDProgressStyle"
@@ -178,9 +211,11 @@ private enum HaloHUDKeys {
     static let offsetX = "HaloHUDOffsetX"
     static let offsetY = "HaloHUDOffsetY"
     static let volumeStep = "HaloHUDVolumeStep"
+    static let brightnessStep = "HaloHUDBrightnessStep"
+    static let keyboardStep = "HaloHUDKeyboardBrightnessStep"
 }
 
-private enum HaloHUDKind { case volume, mute }
+private enum HaloHUDKind { case volume, mute, brightness, keyboardBrightness }
 
 @MainActor
 private final class HaloHUDState: ObservableObject {
@@ -191,9 +226,121 @@ private final class HaloHUDState: ObservableObject {
     @Published var sequence = 0
 }
 
+private final class HaloDisplayBrightnessService {
+    private let parameter = kIODisplayBrightnessKey as CFString
+
+    func current() -> Double? {
+        withService { service in
+            var value: Float = 0
+            guard IODisplayGetFloatParameter(service, 0, parameter, &value) == kIOReturnSuccess else { return nil }
+            return Double(min(1, max(0, value)))
+        }
+    }
+
+    @discardableResult func set(_ value: Double) -> Bool {
+        let target = Float(min(1, max(0, value)))
+        return withService { service in
+            IODisplaySetFloatParameter(service, 0, parameter, target) == kIOReturnSuccess
+        } ?? false
+    }
+
+    func canSet() -> Bool {
+        guard let value = current() else { return false }
+        return set(value)
+    }
+
+    private func withService<T>(_ body: (io_service_t) -> T?) -> T? {
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IODisplayConnect"), &iterator) == KERN_SUCCESS else { return nil }
+        defer { IOObjectRelease(iterator) }
+        while true {
+            let service = IOIteratorNext(iterator)
+            guard service != 0 else { break }
+            if let value = body(service) {
+                IOObjectRelease(service)
+                return value
+            }
+            IOObjectRelease(service)
+        }
+        return nil
+    }
+}
+
+private final class HaloKeyboardBrightnessService {
+    private let classes = ["AppleHIDKeyboardEventDriverV2", "AppleHIDKeyboardEventDriver", "AppleUserHIDEventDriver"]
+    private let keys = ["KeyboardBacklightBrightness", "KeyboardBacklightLevel"]
+
+    func current() -> Double? {
+        for className in classes {
+            if let value = withEntries(className: className, body: { entry in self.read(entry: entry) }) { return value }
+        }
+        return nil
+    }
+
+    @discardableResult func set(_ value: Double) -> Bool {
+        let target = min(1, max(0, value))
+        for className in classes {
+            if withEntries(className: className, body: { entry in self.write(entry: entry, normalized: target) ? true : nil }) == true { return true }
+        }
+        return false
+    }
+
+    func canSet() -> Bool {
+        guard let value = current() else { return false }
+        return set(value)
+    }
+
+    private func read(entry: io_service_t) -> Double? {
+        for keyName in keys {
+            let key = keyName as CFString
+            if let unmanaged = IORegistryEntrySearchCFProperty(entry, kIOServicePlane, key, kCFAllocatorDefault,
+                                                                 IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)),
+               let number = unmanaged.takeRetainedValue() as? NSNumber {
+                let raw = number.doubleValue
+                if raw <= 1.0001 { return min(1, max(0, raw)) }
+                if raw <= 255 { return min(1, max(0, raw / 255.0)) }
+                return min(1, max(0, raw / 4095.0))
+            }
+        }
+        return nil
+    }
+
+    private func write(entry: io_service_t, normalized: Double) -> Bool {
+        for keyName in keys {
+            let key = keyName as CFString
+            guard let unmanaged = IORegistryEntrySearchCFProperty(entry, kIOServicePlane, key, kCFAllocatorDefault,
+                                                                   IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)),
+                  let existing = unmanaged.takeRetainedValue() as? NSNumber else { continue }
+            let raw = existing.doubleValue
+            let scale: Double = raw <= 1.0001 ? 1 : (raw <= 255 ? 255 : 4095)
+            let value: NSNumber = scale == 1 ? NSNumber(value: normalized) : NSNumber(value: Int((normalized * scale).rounded()))
+            if IORegistryEntrySetCFProperty(entry, key, value) == KERN_SUCCESS { return true }
+        }
+        return false
+    }
+
+    private func withEntries<T>(className: String, body: (io_service_t) -> T?) -> T? {
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching(className), &iterator) == KERN_SUCCESS else { return nil }
+        defer { IOObjectRelease(iterator) }
+        while true {
+            let entry = IOIteratorNext(iterator)
+            guard entry != 0 else { break }
+            if let result = body(entry) {
+                IOObjectRelease(entry)
+                return result
+            }
+            IOObjectRelease(entry)
+        }
+        return nil
+    }
+}
+
 @MainActor
 private final class HaloHUDController {
     private let audio: AudioService
+    private let displayBrightness = HaloDisplayBrightnessService()
+    private let keyboardBrightness = HaloKeyboardBrightnessService()
     private let model = HaloHUDState()
     private var panel: NSPanel?
     private var eventTap: CFMachPort?
@@ -203,6 +350,9 @@ private final class HaloHUDController {
     private var previewObserver: NSObjectProtocol?
     private var hideWork: DispatchWorkItem?
     private var lastNonZeroVolume: Float32 = 0.5
+    private var lastDisplayBrightness = 0.5
+    private var lastKeyboardBrightness = 0.5
+    private var activeReplacementKeys = Set<Int>()
 
     init(audio: AudioService) { self.audio = audio }
 
@@ -213,8 +363,15 @@ private final class HaloHUDController {
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: UserDefaults.standard, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.configureInput() }
         }
-        previewObserver = NotificationCenter.default.addObserver(forName: .init("HaloHUDPreview"), object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.show(kind: .volume, value: 0.68, label: "Volume", symbol: "speaker.wave.2.fill") }
+        previewObserver = NotificationCenter.default.addObserver(forName: .init("HaloHUDPreview"), object: nil, queue: .main) { [weak self] note in
+            Task { @MainActor in
+                guard let self else { return }
+                switch note.userInfo?["kind"] as? String {
+                case "brightness": self.show(kind: .brightness, value: 0.68, label: "Screen Brightness", symbol: "sun.max.fill")
+                case "keyboard": self.show(kind: .keyboardBrightness, value: 0.58, label: "Keyboard Brightness", symbol: "keyboard")
+                default: self.show(kind: .volume, value: 0.68, label: "Volume", symbol: "speaker.wave.2.fill")
+                }
+            }
         }
     }
 
@@ -230,8 +387,12 @@ private final class HaloHUDController {
         UserDefaults.standard.register(defaults: [
             HaloHUDKeys.enabled: true,
             HaloHUDKeys.replaceVolume: false,
+            HaloHUDKeys.replaceBrightness: false,
+            HaloHUDKeys.replaceKeyboardBrightness: false,
             HaloHUDKeys.volumeHUD: true,
             HaloHUDKeys.muteHUD: true,
+            HaloHUDKeys.brightnessHUD: true,
+            HaloHUDKeys.keyboardBrightnessHUD: true,
             HaloHUDKeys.layout: "horizontal",
             HaloHUDKeys.position: "top",
             HaloHUDKeys.progress: "bar",
@@ -256,7 +417,9 @@ private final class HaloHUDController {
             HaloHUDKeys.shadow: true,
             HaloHUDKeys.offsetX: 0.0,
             HaloHUDKeys.offsetY: 0.0,
-            HaloHUDKeys.volumeStep: 0.0625
+            HaloHUDKeys.volumeStep: 0.0625,
+            HaloHUDKeys.brightnessStep: 0.0625,
+            HaloHUDKeys.keyboardStep: 0.0625
         ])
     }
 
@@ -277,13 +440,24 @@ private final class HaloHUDController {
 
     private func configureInput() {
         tearDownInput()
+        activeReplacementKeys.removeAll()
         let defaults = UserDefaults.standard
         guard defaults.bool(forKey: HaloHUDKeys.enabled) else { return }
+
         audio.refresh()
-        let wantsReplacement = defaults.bool(forKey: HaloHUDKeys.replaceVolume)
-        if wantsReplacement && audio.canSetVolume && AXIsProcessTrusted() && installEventTap() { return }
+        if defaults.bool(forKey: HaloHUDKeys.replaceVolume), audio.canSetVolume {
+            activeReplacementKeys.formUnion([0, 1, 7])
+        }
+        if defaults.bool(forKey: HaloHUDKeys.replaceBrightness), displayBrightness.canSet() {
+            activeReplacementKeys.formUnion([2, 3])
+        }
+        if defaults.bool(forKey: HaloHUDKeys.replaceKeyboardBrightness), keyboardBrightness.canSet() {
+            activeReplacementKeys.formUnion([21, 22, 23])
+        }
+
+        if !activeReplacementKeys.isEmpty, AXIsProcessTrusted() { _ = installEventTap() }
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .systemDefined) { [weak self] event in
-            Task { @MainActor in self?.handle(event: event, suppressingSystemHUD: false) }
+            Task { @MainActor in self?.handleObserved(event: event) }
         }
     }
 
@@ -308,14 +482,13 @@ private final class HaloHUDController {
             }
             let data = nsEvent.data1
             let keyCode = (data & 0xFFFF0000) >> 16
-            guard [0, 1, 7].contains(keyCode), UserDefaults.standard.bool(forKey: HaloHUDKeys.enabled),
-                  UserDefaults.standard.bool(forKey: HaloHUDKeys.replaceVolume) else {
+            guard controller.activeReplacementKeys.contains(keyCode), UserDefaults.standard.bool(forKey: HaloHUDKeys.enabled) else {
                 return Unmanaged.passUnretained(event)
             }
             let keyFlags = data & 0xFFFF
             let keyState = (keyFlags & 0xFF00) >> 8
             if keyState == 0xA {
-                Task { @MainActor in controller.handleMediaKey(keyCode) }
+                Task { @MainActor in controller.handleReplacementKey(keyCode) }
             }
             return nil
         }, userInfo: Unmanaged.passUnretained(self).toOpaque()) else { return false }
@@ -327,57 +500,102 @@ private final class HaloHUDController {
         return true
     }
 
-    private func handle(event: NSEvent, suppressingSystemHUD: Bool) {
+    private func handleObserved(event: NSEvent) {
         guard event.type == .systemDefined, event.subtype.rawValue == 8 else { return }
         let data = event.data1
         let keyCode = (data & 0xFFFF0000) >> 16
         let keyFlags = data & 0xFFFF
         let keyState = (keyFlags & 0xFF00) >> 8
-        guard keyState == 0xA else { return }
-        if suppressingSystemHUD { handleMediaKey(keyCode) }
-        else { showObservedMediaKey(keyCode) }
+        guard keyState == 0xA, !activeReplacementKeys.contains(keyCode) else { return }
+        showObservedSystemKey(keyCode)
     }
 
-    private func handleMediaKey(_ keyCode: Int) {
+    private func handleReplacementKey(_ keyCode: Int) {
         let defaults = UserDefaults.standard
-        audio.refresh()
-        let current = min(1, max(0, audio.volume))
-        let step = Float32(min(0.25, max(0.01, defaults.double(forKey: HaloHUDKeys.volumeStep))))
         switch keyCode {
-        case 0:
-            let next = min(1, current + step)
-            if next > 0.01 { lastNonZeroVolume = next }
-            audio.setVolume(next)
-            if defaults.bool(forKey: HaloHUDKeys.volumeHUD) { showVolume(next) }
-        case 1:
-            let next = max(0, current - step)
-            if next > 0.01 { lastNonZeroVolume = next }
-            audio.setVolume(next)
-            if defaults.bool(forKey: HaloHUDKeys.volumeHUD) { showVolume(next) }
-        case 7:
-            let next: Float32
-            if current > 0.005 {
-                lastNonZeroVolume = current
-                next = 0
-            } else { next = max(0.05, lastNonZeroVolume) }
-            audio.setVolume(next)
-            if defaults.bool(forKey: HaloHUDKeys.muteHUD) {
-                show(kind: .mute, value: Double(next), label: next <= 0.005 ? "Muted" : "Volume", symbol: next <= 0.005 ? "speaker.slash.fill" : volumeSymbol(next))
+        case 0, 1, 7:
+            audio.refresh()
+            let current = min(1, max(0, audio.volume))
+            let step = Float32(min(0.25, max(0.01, defaults.double(forKey: HaloHUDKeys.volumeStep))))
+            if keyCode == 0 {
+                let next = min(1, current + step)
+                if next > 0.01 { lastNonZeroVolume = next }
+                audio.setVolume(next)
+                if defaults.bool(forKey: HaloHUDKeys.volumeHUD) { showVolume(next) }
+            } else if keyCode == 1 {
+                let next = max(0, current - step)
+                if next > 0.01 { lastNonZeroVolume = next }
+                audio.setVolume(next)
+                if defaults.bool(forKey: HaloHUDKeys.volumeHUD) { showVolume(next) }
+            } else {
+                let next: Float32
+                if current > 0.005 { lastNonZeroVolume = current; next = 0 }
+                else { next = max(0.05, lastNonZeroVolume) }
+                audio.setVolume(next)
+                if defaults.bool(forKey: HaloHUDKeys.muteHUD) {
+                    show(kind: .mute, value: Double(next), label: next <= 0.005 ? "Muted" : "Volume", symbol: next <= 0.005 ? "speaker.slash.fill" : volumeSymbol(next))
+                }
             }
+
+        case 2, 3:
+            let current = displayBrightness.current() ?? lastDisplayBrightness
+            let step = min(0.25, max(0.01, defaults.double(forKey: HaloHUDKeys.brightnessStep)))
+            let next = min(1, max(0, current + (keyCode == 2 ? step : -step)))
+            if displayBrightness.set(next) { lastDisplayBrightness = next }
+            if defaults.bool(forKey: HaloHUDKeys.brightnessHUD) {
+                show(kind: .brightness, value: next, label: "Screen Brightness", symbol: screenBrightnessSymbol(next))
+            }
+
+        case 21, 22, 23:
+            let current = keyboardBrightness.current() ?? lastKeyboardBrightness
+            let step = min(0.25, max(0.01, defaults.double(forKey: HaloHUDKeys.keyboardStep)))
+            let next: Double
+            if keyCode == 23 { next = current > 0.01 ? 0 : max(0.25, lastKeyboardBrightness) }
+            else { next = min(1, max(0, current + (keyCode == 21 ? step : -step))) }
+            if next > 0.01 { lastKeyboardBrightness = next }
+            _ = keyboardBrightness.set(next)
+            if defaults.bool(forKey: HaloHUDKeys.keyboardBrightnessHUD) {
+                show(kind: .keyboardBrightness, value: next, label: "Keyboard Brightness", symbol: keyboardBrightnessSymbol(next))
+            }
+
         default: break
         }
     }
 
-    private func showObservedMediaKey(_ keyCode: Int) {
+    private func showObservedSystemKey(_ keyCode: Int) {
         let defaults = UserDefaults.standard
-        guard [0, 1, 7].contains(keyCode) else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.035) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
             guard let self else { return }
-            self.audio.refresh()
-            let value = Double(min(1, max(0, self.audio.volume)))
-            if keyCode == 7 {
-                if defaults.bool(forKey: HaloHUDKeys.muteHUD) { self.show(kind: .mute, value: value, label: value <= 0.005 ? "Muted" : "Volume", symbol: value <= 0.005 ? "speaker.slash.fill" : self.volumeSymbol(Float32(value))) }
-            } else if defaults.bool(forKey: HaloHUDKeys.volumeHUD) { self.showVolume(Float32(value)) }
+            switch keyCode {
+            case 0, 1, 7:
+                self.audio.refresh()
+                let value = Double(min(1, max(0, self.audio.volume)))
+                if keyCode == 7 {
+                    if defaults.bool(forKey: HaloHUDKeys.muteHUD) {
+                        self.show(kind: .mute, value: value, label: value <= 0.005 ? "Muted" : "Volume", symbol: value <= 0.005 ? "speaker.slash.fill" : self.volumeSymbol(Float32(value)))
+                    }
+                } else if defaults.bool(forKey: HaloHUDKeys.volumeHUD) { self.showVolume(Float32(value)) }
+
+            case 2, 3:
+                let step = min(0.25, max(0.01, defaults.double(forKey: HaloHUDKeys.brightnessStep)))
+                let value = self.displayBrightness.current() ?? min(1, max(0, self.lastDisplayBrightness + (keyCode == 2 ? step : -step)))
+                self.lastDisplayBrightness = value
+                if defaults.bool(forKey: HaloHUDKeys.brightnessHUD) {
+                    self.show(kind: .brightness, value: value, label: "Screen Brightness", symbol: self.screenBrightnessSymbol(value))
+                }
+
+            case 21, 22, 23:
+                let step = min(0.25, max(0.01, defaults.double(forKey: HaloHUDKeys.keyboardStep)))
+                let fallback: Double
+                if keyCode == 23 { fallback = self.lastKeyboardBrightness > 0.01 ? 0 : 0.5 }
+                else { fallback = min(1, max(0, self.lastKeyboardBrightness + (keyCode == 21 ? step : -step))) }
+                let value = self.keyboardBrightness.current() ?? fallback
+                self.lastKeyboardBrightness = value
+                if defaults.bool(forKey: HaloHUDKeys.keyboardBrightnessHUD) {
+                    self.show(kind: .keyboardBrightness, value: value, label: "Keyboard Brightness", symbol: self.keyboardBrightnessSymbol(value))
+                }
+            default: break
+            }
         }
     }
 
@@ -390,6 +608,14 @@ private final class HaloHUDController {
         if value < 0.34 { return "speaker.wave.1.fill" }
         if value < 0.68 { return "speaker.wave.2.fill" }
         return "speaker.wave.3.fill"
+    }
+
+    private func screenBrightnessSymbol(_ value: Double) -> String {
+        value <= 0.12 ? "sun.min.fill" : "sun.max.fill"
+    }
+
+    private func keyboardBrightnessSymbol(_ value: Double) -> String {
+        value <= 0.01 ? "keyboard" : "keyboard.fill"
     }
 
     private func show(kind: HaloHUDKind, value: Double, label: String, symbol: String) {
@@ -570,11 +796,15 @@ private struct HaloHUDOverlayView: View {
     }
 }
 
-private struct HaloHUDSettingsView: View {
+struct HaloHUDSettingsView: View {
     @AppStorage(HaloHUDKeys.enabled) private var enabled = true
     @AppStorage(HaloHUDKeys.replaceVolume) private var replaceVolume = false
+    @AppStorage(HaloHUDKeys.replaceBrightness) private var replaceBrightness = false
+    @AppStorage(HaloHUDKeys.replaceKeyboardBrightness) private var replaceKeyboardBrightness = false
     @AppStorage(HaloHUDKeys.volumeHUD) private var volumeHUD = true
     @AppStorage(HaloHUDKeys.muteHUD) private var muteHUD = true
+    @AppStorage(HaloHUDKeys.brightnessHUD) private var brightnessHUD = true
+    @AppStorage(HaloHUDKeys.keyboardBrightnessHUD) private var keyboardBrightnessHUD = true
     @AppStorage(HaloHUDKeys.layout) private var layout = "horizontal"
     @AppStorage(HaloHUDKeys.position) private var position = "top"
     @AppStorage(HaloHUDKeys.progress) private var progress = "bar"
@@ -600,21 +830,37 @@ private struct HaloHUDSettingsView: View {
     @AppStorage(HaloHUDKeys.offsetX) private var offsetX = 0.0
     @AppStorage(HaloHUDKeys.offsetY) private var offsetY = 0.0
     @AppStorage(HaloHUDKeys.volumeStep) private var volumeStep = 0.0625
+    @AppStorage(HaloHUDKeys.brightnessStep) private var brightnessStep = 0.0625
+    @AppStorage(HaloHUDKeys.keyboardStep) private var keyboardStep = 0.0625
+
+    private var wantsTrueReplacement: Bool { replaceVolume || replaceBrightness || replaceKeyboardBrightness }
 
     var body: some View {
         Form {
             Section("HUD replacement") {
                 Toggle("Enable Halo HUD", isOn: $enabled)
                 Toggle("Replace Apple's volume HUD", isOn: $replaceVolume)
-                Toggle("Volume changes", isOn: $volumeHUD)
-                Toggle("Mute / unmute", isOn: $muteHUD)
-                if replaceVolume && !AXIsProcessTrusted() {
-                    Text("Replacing Apple's HUD requires Accessibility permission so Halo can intercept the volume keys instead of merely observing them.").font(.caption).foregroundStyle(.orange)
+                Toggle("Replace Apple's screen brightness HUD", isOn: $replaceBrightness)
+                Toggle("Replace Apple's keyboard brightness HUD", isOn: $replaceKeyboardBrightness)
+                if wantsTrueReplacement && !AXIsProcessTrusted() {
+                    Text("True HUD replacement needs Accessibility permission so Halo can intercept the hardware keys. Without it, Halo observes the keys and leaves macOS behavior untouched.").font(.caption).foregroundStyle(.orange)
                     Button("Open Accessibility Settings") {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
                     }
                 }
-                Button("Preview HUD") { NotificationCenter.default.post(name: .init("HaloHUDPreview"), object: nil) }
+                Text("Display replacement is enabled only when the active display exposes a writable IOKit brightness control. Keyboard replacement is enabled only when Halo can prove the Mac's keyboard-backlight registry entry is writable; unsupported Macs safely fall back to observation.").font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("HUD types") {
+                Toggle("Volume changes", isOn: $volumeHUD)
+                Toggle("Mute / unmute", isOn: $muteHUD)
+                Toggle("Screen brightness", isOn: $brightnessHUD)
+                Toggle("Keyboard brightness", isOn: $keyboardBrightnessHUD)
+                HStack {
+                    Button("Preview volume") { preview("volume") }
+                    Button("Preview screen") { preview("brightness") }
+                    Button("Preview keyboard") { preview("keyboard") }
+                }
             }
 
             Section("Layout") {
@@ -668,10 +914,16 @@ private struct HaloHUDSettingsView: View {
             Section("Behavior") {
                 Slider(value: $timeout, in: 0.35...4) { Text("Dismiss delay") }
                 Slider(value: $volumeStep, in: 0.01...0.25) { Text("Volume key step") }
-                Text("When true replacement is enabled and Accessibility is granted, Halo consumes volume/mute media-key events and writes the default output volume itself. If replacement cannot be installed, Halo falls back to observing the keys so normal macOS behavior is preserved.").font(.caption).foregroundStyle(.secondary)
+                Slider(value: $brightnessStep, in: 0.01...0.25) { Text("Screen brightness key step") }
+                Slider(value: $keyboardStep, in: 0.01...0.25) { Text("Keyboard brightness key step") }
+                Text("Halo intercepts only controls it can actually write. If a replacement backend is unavailable, the hardware key is passed through to macOS and Halo can still show its customized observer HUD.").font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .frame(minWidth: 500, minHeight: 620)
+        .frame(minWidth: 520, minHeight: 650)
+    }
+
+    private func preview(_ kind: String) {
+        NotificationCenter.default.post(name: .init("HaloHUDPreview"), object: nil, userInfo: ["kind": kind])
     }
 }
