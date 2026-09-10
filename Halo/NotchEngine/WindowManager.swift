@@ -21,6 +21,7 @@ final class SurfaceState: ObservableObject {
     @Published var compactHeight: CGFloat = 40
     @Published var theme = Theme()
     @Published var layoutOverride: WorkspaceLayout?
+    @Published var contextPreferredSize: CGSize?
     var collapseTask: Task<Void, Never>?
     var editingGeometry = false
     func hover(_ inside: Bool, enabled: Bool) {
@@ -109,6 +110,7 @@ final class WindowManager {
         var geometry: SurfaceGeometry?
         var targetFrame: CGRect?
         var subscription: AnyCancellable?
+        var contextSizeSubscription: AnyCancellable?
         init() {
             panel = HaloPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             panel.isReleasedWhenClosed = false
@@ -117,7 +119,7 @@ final class WindowManager {
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         }
         func stop() {
-            animator.cancel(); state.collapseTask?.cancel(); subscription?.cancel(); panel.close()
+            animator.cancel(); state.collapseTask?.cancel(); subscription?.cancel(); contextSizeSubscription?.cancel(); panel.close()
         }
     }
 
@@ -316,7 +318,6 @@ final class WindowManager {
                 right: autoFit ? sides.right : sides.decorationRight,
                 expansion: expansion.enabled ? expansion.width : 0,
                 leftLive: leftLive, rightLive: rightLive)
-            // Clamp each wing to its own display space; never move overflow to the opposite wing.
             let center = geometry.visible.midX + geometry.offset(expanded: false).width
             let leftLimit = max(0, center - camera / 2 - geometry.visible.minX - 12)
             let rightLimit = max(0, geometry.visible.maxX - 12 - center - camera / 2)
@@ -492,6 +493,38 @@ final class WindowManager {
         hosts.values.forEach { $0.state.collapseTask?.cancel(); $0.state.expanded = expand }
     }
 
+    private func adjustedExpandedFrame(host: Host, requested: CGSize?) -> CGRect {
+        guard let geometry = host.geometry else { return .zero }
+        let base = geometry.frame(expanded: true)
+        guard let requested, requested.width.isFinite, requested.height.isFinite else { return base }
+        let margin: CGFloat = 12
+        let maxWidth = max(320, geometry.visible.width - margin * 2)
+        let maxHeight = max(180, geometry.visible.height - margin * 2)
+        let width = min(maxWidth, max(320, requested.width))
+        let height = min(maxHeight, max(geometry.compactHeight + 96, requested.height))
+        var frame = CGRect(x: base.midX - width / 2, y: base.maxY - height, width: width, height: height)
+        switch geometry.style {
+        case .bottom:
+            frame.origin.y = base.minY
+        case .left:
+            frame.origin.x = base.minX
+        case .right:
+            frame.origin.x = base.maxX - width
+        default:
+            break
+        }
+        if frame.minX < geometry.visible.minX + margin { frame.origin.x = geometry.visible.minX + margin }
+        if frame.maxX > geometry.visible.maxX - margin { frame.origin.x = geometry.visible.maxX - margin - width }
+        if frame.minY < geometry.visible.minY + margin { frame.origin.y = geometry.visible.minY + margin }
+        if frame.maxY > geometry.visible.maxY { frame.origin.y = geometry.visible.maxY - height }
+        return frame
+    }
+
+    private func targetFrame(host: Host, expanded: Bool) -> CGRect {
+        guard let geometry = host.geometry else { return .zero }
+        return expanded ? adjustedExpandedFrame(host: host, requested: host.state.contextPreferredSize) : geometry.frame(expanded: false)
+    }
+
     private func reconcile() {
         let screens = store.configuration.allDisplays ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
         var active = Set<String>()
@@ -521,7 +554,7 @@ final class WindowManager {
             if host.state.compactWidth != host.geometry!.compactWidth { host.state.compactWidth = host.geometry!.compactWidth }
             if host.state.closedOcclusion != host.geometry!.closedCameraOcclusion { host.state.closedOcclusion = host.geometry!.closedCameraOcclusion }
             host.panel.isMovableByWindowBackground = theme.style == .detached
-            var target = host.geometry!.frame(expanded: host.state.expanded)
+            var target = targetFrame(host: host, expanded: host.state.expanded)
             if existing != nil && theme.style == .detached {
                 let delta = host.geometry!.offset(expanded: host.state.expanded)
                 target.origin.x = host.panel.frame.midX - target.width / 2 + delta.width - previousOffset.width
@@ -539,9 +572,10 @@ final class WindowManager {
                 let view = NSHostingView(rootView: SurfaceViewportView(viewport: host.state.viewport, content: SurfaceView(store: store, state: host.state, workspace: store.workspace)))
                 view.sizingOptions = []
                 host.panel.contentView = view
-                host.subscription = host.state.$expanded.dropFirst().removeDuplicates().receive(on: DispatchQueue.main).sink { [weak host] expanded in
-                    guard let host, let geometry = host.geometry else { return }
-                    var target = geometry.frame(expanded: expanded)
+                host.subscription = host.state.$expanded.dropFirst().removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self, weak host] expanded in
+                    guard let self, let host, let geometry = host.geometry else { return }
+                    if !expanded { host.state.contextPreferredSize = nil }
+                    var target = self.targetFrame(host: host, expanded: expanded)
                     if geometry.style == .detached {
                         let oldOffset = geometry.offset(expanded: !expanded), newOffset = geometry.offset(expanded: expanded)
                         target.origin.x = host.panel.frame.midX - target.width / 2 + newOffset.width - oldOffset.width
@@ -550,6 +584,23 @@ final class WindowManager {
                     host.targetFrame = target
                     host.animator.move(panel: host.panel, state: host.state, target: target, options: geometry.appearance.surface,
                                        preset: geometry.appearance.animation, animations: host.state.theme.animations && !host.state.editingGeometry, opening: expanded, style: geometry.style)
+                }
+                host.contextSizeSubscription = host.state.$contextPreferredSize.dropFirst().removeDuplicates(by: { lhs, rhs in
+                    switch (lhs, rhs) {
+                    case (nil, nil): return true
+                    case let (a?, b?): return abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1
+                    default: return false
+                    }
+                }).receive(on: DispatchQueue.main).sink { [weak self, weak host] _ in
+                    guard let self, let host, let geometry = host.geometry, host.state.expanded else { return }
+                    let target = self.targetFrame(host: host, expanded: true)
+                    guard host.targetFrame != target else { return }
+                    host.targetFrame = target
+                    var motion = geometry.appearance.surface
+                    motion.opening = .resize; motion.closing = .resize; motion.duration = min(0.32, max(0.16, motion.duration))
+                    host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
+                                       preset: .smooth, animations: host.state.theme.animations && !host.state.editingGeometry,
+                                       opening: true, style: geometry.style)
                 }
                 host.panel.orderFrontRegardless()
                 hosts[id] = host
