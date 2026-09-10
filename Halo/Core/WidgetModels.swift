@@ -48,7 +48,7 @@ struct WidgetStyle: Codable, Equatable {
     }
 }
 enum ClosedNotchItem: String, Codable, CaseIterable, Identifiable {
-    case none, clock, date, timer, battery, media, visualizer, files, activity
+    case none, clock, date, timer, battery, media, visualizer, mirror, files, activity
     var id: String { rawValue }
 }
 enum PlaybackAnimation: String, Codable, CaseIterable { case bars, wave, pulse, waveform, ribbon, dots, rings, orbit, spectrum }
