@@ -110,6 +110,7 @@ final class WindowManager {
 
     private enum DynamicSide { case left, right }
     private var activityExpiry: DispatchWorkItem?
+    private var mediaWidthHint: Double?
     private let store: AppStore
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
@@ -151,10 +152,20 @@ final class WindowManager {
                 }
                 self?.refreshDynamicWidths()
             }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: .init("HaloClosedMediaWidthHint"))
+            .receive(on: DispatchQueue.main).sink { [weak self] note in
+                guard let self,
+                      let raw = note.userInfo?["width"] as? Double,
+                      raw.isFinite else { return }
+                let next = min(320, max(24, raw))
+                guard self.mediaWidthHint.map({ abs($0 - next) >= 3 }) ?? true else { return }
+                self.mediaWidthHint = next
+                self.refreshDynamicWidths()
+            }.store(in: &subscriptions)
         store.workspace.$scheduledProfileID.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.media.$title.removeDuplicates().receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+            .sink { [weak self] _ in self?.mediaWidthHint = nil; self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.media.$artist.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.$files.map(\.count).removeDuplicates().receive(on: DispatchQueue.main)
@@ -164,7 +175,10 @@ final class WindowManager {
         store.workspace.capture.$busy.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.media.$isPlaying.removeDuplicates().receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+            .sink { [weak self] playing in
+                if !playing { self?.mediaWidthHint = nil }
+                self?.refreshDynamicWidths()
+            }.store(in: &subscriptions)
         store.workspace.system.$battery.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.system.$charging.removeDuplicates().receive(on: DispatchQueue.main)
@@ -259,6 +273,19 @@ final class WindowManager {
         if power?.side == .left { leftLive = true }
         if power?.side == .right { rightLive = true }
 
+        // A synced lyric is itself the width driver. Do not force the fixed music Active Width on that
+        // side, otherwise a single short word would still leave the notch at the large music width.
+        let mediaSettings = options.mediaOptions ?? ClosedMediaOptions()
+        let adaptiveLyrics = store.workspace.media.isPlaying && mediaSettings.textMode == .lyrics && mediaSettings.usesDynamicLyricWidth
+        if adaptiveLyrics {
+            if items.left == .media {
+                leftLive = options.leftDecoration?.visibility == .playing && store.workspace.media.isPlaying
+            }
+            if items.right == .media {
+                rightLive = options.rightDecoration?.visibility == .playing && store.workspace.media.isPlaying
+            }
+        }
+
         let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
         let camera = attached ? geometry.physicalNotchWidth : 0
         let baseWidth = max(16, geometry.appearance.compactWidth)
@@ -327,20 +354,26 @@ final class WindowManager {
             let media = options.mediaOptions ?? ClosedMediaOptions()
             let title = textWidth(String(store.workspace.media.title.prefix(120)), font: font)
             let artist = textWidth(String(store.workspace.media.artist.prefix(120)), font: font)
+            let hasAdaptiveLyricHint = media.textMode == .lyrics && media.usesDynamicLyricWidth && mediaWidthHint != nil
             let natural: Double
             switch media.textMode {
             case .title: natural = title
             case .artist: natural = max(size * 3, artist)
             case .titleArtist: natural = media.lines == 2 ? max(title, artist) : title + (store.workspace.media.artist.isEmpty ? 0 : artist + size)
-            case .lyrics: natural = max(140, min(260, title + artist * 0.5))
+            case .lyrics:
+                natural = hasAdaptiveLyricHint ? min(300, max(28, mediaWidthHint!)) : max(90, min(220, title + artist * 0.35))
             }
             let textTarget: Double
-            switch media.overflow {
-            case .marquee: textTarget = min(max(120, natural * 0.55), 220)
-            case .truncate: textTarget = min(natural, 220)
-            case .scale: textTarget = min(natural, 260)
+            if hasAdaptiveLyricHint {
+                textTarget = natural
+            } else {
+                switch media.overflow {
+                case .marquee: textTarget = min(max(120, natural * 0.55), 220)
+                case .truncate: textTarget = min(natural, 220)
+                case .scale: textTarget = min(natural, 260)
+                }
             }
-            let icon = media.showPlaybackIcon ? size + 5 : 0
+            let icon = media.showPlaybackIcon && !hasAdaptiveLyricHint ? size + 5 : 0
             return textTarget + icon
         }
         func measurements(_ item: ClosedNotchItem, _ decoration: SideDecoration?) -> (full: Double, decoration: Double) {
@@ -367,7 +400,7 @@ final class WindowManager {
             }
             let ornament = decoration.flatMap { $0.isVisible(playing: playing) ? min($0.size, max(1, geometry.compactHeight - 2 * options.contentPaddingY)) : nil } ?? 0
             guard content > 0 || ornament > 0 else { return (0, 0) }
-            let spacing = content > 0 && ornament > 0 ? 5.0 : 0
+            let spacing = content > 0 && ornament > 0 ? 8.0 : 0
             let margins = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
             return (content + ornament + spacing + margins, ornament > 0 ? ornament + margins : 0)
         }
@@ -392,7 +425,7 @@ final class WindowManager {
             }
         }
 
-        let gap = 6.0
+        let gap = 8.0
         let leftPower = power?.side == .left ? power!.width + (leftFull > 0 ? gap : 0) : 0
         let rightPower = power?.side == .right ? power!.width + (rightFull > 0 ? gap : 0) : 0
         return (leftFull + leftPower, rightFull + rightPower, left.decoration, right.decoration)
@@ -421,7 +454,10 @@ final class WindowManager {
             }
             host.targetFrame = target
             var motion = geometry.appearance.surface
-            motion.opening = .resize; motion.closing = .resize; motion.duration = 0.34
+            let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
+            let media = (layout.closedNotch ?? ClosedNotchOptions()).mediaOptions ?? ClosedMediaOptions()
+            let adaptiveLyrics = media.textMode == .lyrics && media.usesDynamicLyricWidth
+            motion.opening = .resize; motion.closing = .resize; motion.duration = adaptiveLyrics ? 0.20 : 0.34
             host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
                                preset: .smooth, animations: host.state.theme.animations && !host.state.editingGeometry,
                                opening: true, style: geometry.style)
