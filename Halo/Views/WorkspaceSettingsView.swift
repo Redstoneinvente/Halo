@@ -22,7 +22,7 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
-                    Image(systemName: "circle.hexagongrid.fill").font(.title2).foregroundStyle(Color.accentColor)
+                    Image(nsImage: NSApp.applicationIconImage).resizable().scaledToFit().frame(width: 44, height: 44).accessibilityLabel("Halo app icon")
                     VStack(alignment: .leading) {
                         Text("Halo").font(.headline)
                         Text("Make it yours").font(.caption).foregroundStyle(.secondary)
@@ -33,6 +33,15 @@ struct SettingsView: View {
                 List(selection: $section) {
                     ForEach(sections.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \.self) { Label($0, systemImage: sectionIcon($0)).padding(.vertical, 5).tag($0) }
                 }.listStyle(.sidebar)
+                Divider()
+                VStack(alignment: .leading, spacing: 12) {
+                    Link(destination: URL(string: "https://halo.redstoneinvente.com")!) {
+                        Label("Halo website", systemImage: "globe")
+                    }
+                    Link(destination: URL(string: "https://buymeacoffee.com/redstoneinvente")!) {
+                        Label("Buy me a coffee", systemImage: "cup.and.saucer.fill")
+                    }
+                }.font(.callout).padding(16).frame(maxWidth: .infinity, alignment: .leading)
             }.frame(width: 220)
             Divider()
             VStack(alignment: .leading, spacing: 0) {
@@ -259,7 +268,7 @@ struct SettingsView: View {
             Section("Optional permissions") {
                 Button("Allow Calendar (today's events)") { workspace.calendar.requestAccess() }
                 Button("Allow Notifications (timer completion)") { workspace.enableNotifications() }
-                Text("Automation is requested when detecting or controlling a running supported music player. Screen Recording is requested only when you capture a region. Microphone and Accessibility are not requested. OCR runs on-device. No analytics. Enabling artwork colors downloads Spotify artwork; Apple Music artwork is read from the player. Plugin URLs open only after confirmation.")
+                Text("Automation is requested when detecting or controlling a running supported music player. Screen Recording is requested only when you capture a region. Microphone and Accessibility are not requested. No analytics. Enabling artwork colors downloads Spotify artwork; Apple Music artwork is read from the player. Plugin URLs open only after confirmation.")
                 Text("This direct-distribution build is not sandboxed. Files and notes are stored locally.")
             }
         default:

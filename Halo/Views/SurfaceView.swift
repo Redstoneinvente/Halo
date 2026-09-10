@@ -101,7 +101,6 @@ struct SurfaceView: View, Equatable {
                         }
                     }
                     HStack {
-                        Label("On-device. No account.", systemImage: "lock.shield").font(.caption2).foregroundStyle(.secondary)
                         Spacer()
                         Button("Settings") { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) }
                     }

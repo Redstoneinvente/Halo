@@ -80,7 +80,7 @@ struct CaptureModuleView: View {
     @ObservedObject var store: AppStore
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Capture asks for Screen Recording access. OCR runs on-device.").font(style.font(scale: 0.85))
+            Text("Capture asks for Screen Recording access.").font(style.font(scale: 0.85))
             HStack {
                 Button("Capture region…") { service.capture { store.addFiles([$0]) } }
                 Button("Extract text from image…") { service.chooseImage() }
