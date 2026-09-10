@@ -76,7 +76,12 @@ struct SurfaceView: View, Equatable {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
-            SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
+            ZStack {
+                SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
+                if !state.expanded {
+                    AlbumNotchBackground(options: layout.closedNotch ?? ClosedNotchOptions(), media: workspace.media, system: workspace.system)
+                }
+            }
         }
         .clipShape(contour)
         .contentShape(contour)
