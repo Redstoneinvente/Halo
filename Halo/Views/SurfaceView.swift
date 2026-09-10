@@ -76,11 +76,7 @@ struct SurfaceView: View, Equatable {
                             VStack(spacing: 8) {
                                 if !modules.isEmpty {
                                     let index = min(page, modules.count - 1)
-                                    ScrollView {
-                                        WidgetCard(style: layout.widgetStyle(for: modules[index])) {
-                                            BuiltinOrIntegrationWidget(module: modules[index], store: store)
-                                        }
-                                    }
+                                    horizontalWidget(modules[index])
                                     HStack {
                                         Button { page = max(0, index - 1) } label: { Image(systemName: "chevron.left") }
                                             .disabled(index == 0).accessibilityLabel("Previous widget")
@@ -146,14 +142,17 @@ struct SurfaceView: View, Equatable {
             return !providers.isEmpty
         }
     }
+    private func horizontalWidget(_ module: ModuleID) -> some View {
+        GeometryReader { proxy in
+            WidgetCard(style: layout.widgetStyle(for: module), availableHeight: proxy.size.height) {
+                BuiltinOrIntegrationWidget(module: module, store: store)
+            }
+        }
+    }
     @ViewBuilder private func widgetCards(horizontal: Bool) -> some View {
         ForEach(layout.normalizedOrder().filter { layout.enabled.contains($0) }) { module in
             if horizontal {
-                ScrollView(.vertical) {
-                    WidgetCard(style: layout.widgetStyle(for: module)) {
-                        BuiltinOrIntegrationWidget(module: module, store: store)
-                    }
-                }.frame(width: max(240, state.dashboardWidth - 64))
+                horizontalWidget(module).frame(width: max(240, state.dashboardWidth - 64))
             } else {
                 WidgetCard(style: layout.widgetStyle(for: module)) {
                     BuiltinOrIntegrationWidget(module: module, store: store)

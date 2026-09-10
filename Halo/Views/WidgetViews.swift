@@ -74,15 +74,41 @@ extension EnvironmentValues {
 }
 struct WidgetCard<Content: View>: View {
     let style: WidgetStyle
+    var availableHeight: CGFloat? = nil
     @ViewBuilder var content: Content
-    var body: some View {
-        content.environment(\.widgetStyle, style).font(style.font())
+    private var fittedStyle: WidgetStyle {
+        guard let height = availableHeight else { return style }
+        var fitted = style
+        fitted.padding = min(style.padding, max(0, height * 0.08))
+        fitted.minimumHeight = 0
+        fitted.fontSize = min(style.fontSize, max(10, height * 0.18))
+        return fitted
+    }
+    private var styledContent: some View {
+        content.environment(\.widgetStyle, fittedStyle).font(fittedStyle.font())
             .foregroundStyle(style.textColor.color).tint(style.accentColor.color)
-            .frame(maxWidth: .infinity, minHeight: style.minimumHeight, alignment: .leading)
-            .padding(style.padding)
-            .background(style.backgroundColor.color.opacity(style.backgroundOpacity), in: RoundedRectangle(cornerRadius: style.cornerRadius))
-            .frame(maxWidth: style.width > 0 ? style.width : .infinity)
-            .frame(maxWidth: .infinity)
+    }
+    var body: some View {
+        Group {
+            if let height = availableHeight {
+                let padding = fittedStyle.padding
+                // Keep the card within the viewport; only overflowing contents scroll.
+                ScrollView(.vertical) {
+                    styledContent
+                        .frame(maxWidth: .infinity, minHeight: max(0, height - 2 * padding), alignment: .topLeading)
+                }
+                .padding(padding)
+                .frame(height: max(0, height))
+                .clipped()
+            } else {
+                styledContent
+                    .frame(maxWidth: .infinity, minHeight: style.minimumHeight, alignment: .leading)
+                    .padding(style.padding)
+            }
+        }
+        .background(style.backgroundColor.color.opacity(style.backgroundOpacity), in: RoundedRectangle(cornerRadius: style.cornerRadius))
+        .frame(maxWidth: style.width > 0 ? style.width : .infinity)
+        .frame(maxWidth: .infinity)
     }
 }
 struct WidgetClock: View {
