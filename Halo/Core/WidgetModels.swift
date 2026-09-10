@@ -73,13 +73,16 @@ struct VisualizerOptions: Codable, Equatable {
 
 enum MediaTextMode: String, Codable, CaseIterable { case title, artist, titleArtist, lyrics }
 enum MediaOverflowMode: String, Codable, CaseIterable { case truncate, scale, marquee }
+enum LyricDisplayMode: String, Codable, CaseIterable { case line, focus, word }
 enum MediaArtworkMode: String, Codable, CaseIterable { case none, cover, background, vinyl }
 struct ClosedMediaOptions: Codable, Equatable {
     var textMode: MediaTextMode = .titleArtist
     var overflow: MediaOverflowMode = .truncate
     var lines = 1
     var onlineLyrics: Bool?
+    var lyricDisplay: LyricDisplayMode?
     var usesOnlineLyrics: Bool { onlineLyrics ?? true }
+    var resolvedLyricDisplay: LyricDisplayMode { lyricDisplay ?? .line }
     // Legacy artwork fields retained so existing saved profiles decode.
     var artwork: MediaArtworkMode = .none
     var artworkSize = 28.0
