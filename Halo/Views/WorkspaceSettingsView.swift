@@ -399,32 +399,97 @@ struct SettingsView: View {
     }
 }
 
-
 private struct ContextMusicSettings: View {
     @Binding var layout: WorkspaceLayout
     private var options: Binding<ContextMusicOptions> {
         Binding(get: { layout.contextMusic ?? ContextMusicOptions() }, set: { layout.contextMusic = $0 })
     }
+    private var layoutMode: Binding<ContextMusicLayoutMode> {
+        Binding(get: { options.wrappedValue.resolvedLayoutMode }, set: { options.wrappedValue.layoutMode = $0 })
+    }
+    private var foregroundArtwork: Binding<ContextArtworkPresentation> {
+        Binding(get: { options.wrappedValue.resolvedForegroundArtwork }, set: {
+            options.wrappedValue.foregroundArtwork = $0
+            options.wrappedValue.showArtwork = $0 != .none
+        })
+    }
+    private var artworkBackground: Binding<Bool> {
+        Binding(get: { options.wrappedValue.usesArtworkBackground }, set: { options.wrappedValue.artworkBackground = $0 })
+    }
+    private var contentAlignment: Binding<ContextContentAlignment> {
+        Binding(get: { options.wrappedValue.resolvedContentAlignment }, set: { options.wrappedValue.contentAlignment = $0 })
+    }
+    private var artworkBlur: Binding<Double> {
+        Binding(get: { options.wrappedValue.resolvedArtworkBackgroundBlur }, set: { options.wrappedValue.artworkBackgroundBlur = $0 })
+    }
+    private var artworkDim: Binding<Double> {
+        Binding(get: { options.wrappedValue.resolvedArtworkBackgroundDim }, set: { options.wrappedValue.artworkBackgroundDim = $0 })
+    }
+    private var spacing: Binding<Double> {
+        Binding(get: { options.wrappedValue.resolvedSpacing }, set: { options.wrappedValue.spacing = $0 })
+    }
+    private var cornerRadius: Binding<Double> {
+        Binding(get: { options.wrappedValue.resolvedCornerRadius }, set: { options.wrappedValue.cornerRadius = $0 })
+    }
+    private var controlSize: Binding<Double> {
+        Binding(get: { options.wrappedValue.resolvedControlSize }, set: { options.wrappedValue.controlSize = $0 })
+    }
+    private var vinylRPM: Binding<Double> {
+        Binding(get: { options.wrappedValue.resolvedVinylRPM }, set: { options.wrappedValue.vinylRPM = $0 })
+    }
     var body: some View {
-        Section("Music interface") {
-            Toggle("Show music interface while playing", isOn: options.enabled)
-            Text("The opened notch switches to music while playback is active. Show widgets lets you access your dashboard at any time.").font(.caption)
-            Toggle("Album artwork", isOn: options.showArtwork)
+        Section("Context music interface") {
+            Toggle("Replace the opened notch while music is playing", isOn: options.enabled)
+            Text("When enabled, the music interface becomes the expanded Halo surface. The normal widget dashboard returns automatically when playback stops.").font(.caption).foregroundStyle(.secondary)
+
+            Picker("Layout", selection: layoutMode) {
+                ForEach(ContextMusicLayoutMode.allCases) { Text($0.title).tag($0) }
+            }.pickerStyle(.segmented)
+
+            Picker("Content alignment", selection: contentAlignment) {
+                ForEach(ContextContentAlignment.allCases) { Text($0.title).tag($0) }
+            }.pickerStyle(.segmented)
+
             Toggle("Song title", isOn: options.showTitle)
             Toggle("Artist", isOn: options.showArtist)
             Toggle("Playback controls", isOn: options.showControls)
             Toggle("Visualizer", isOn: options.showVisualizer)
-            Slider(value: options.artworkSize, in: 32...200) { Text("Artwork size") }
-            Slider(value: options.fontSize, in: 12...40) { Text("Text size") }
-            ColorPicker("Text color", selection: Binding(get: { options.wrappedValue.textColor.color }, set: { options.wrappedValue.textColor = WidgetColor($0) }))
-            Picker("Music card background", selection: options.background) {
-                Text("Glass").tag(BackgroundKind.glass); Text("Gradient").tag(BackgroundKind.gradient); Text("Solid").tag(BackgroundKind.solid)
+        }
+
+        Section("Artwork layers") {
+            Picker("Foreground artwork", selection: foregroundArtwork) {
+                ForEach(ContextArtworkPresentation.allCases) { Text($0.title).tag($0) }
+            }.pickerStyle(.segmented)
+            Text("Foreground artwork is independent from the background. You can use the album cover as the background while still showing a square cover or spinning vinyl in front.").font(.caption).foregroundStyle(.secondary)
+            if foregroundArtwork.wrappedValue != .none {
+                Slider(value: options.artworkSize, in: 32...240) { Text("Foreground artwork size") }
             }
-            Slider(value: options.backgroundOpacity, in: 0...1) { Text("Background opacity") }
+            if foregroundArtwork.wrappedValue == .vinyl {
+                Slider(value: vinylRPM, in: 1...45) { Text("Vinyl rotation speed") }
+            }
+
+            Toggle("Use album cover as background", isOn: artworkBackground)
+            if artworkBackground.wrappedValue {
+                Slider(value: artworkBlur, in: 0...30) { Text("Artwork background blur") }
+                Slider(value: artworkDim, in: 0...0.9) { Text("Artwork background dim") }
+            }
+        }
+
+        Section("Appearance") {
+            Slider(value: options.fontSize, in: 12...48) { Text("Title size") }
+            Slider(value: controlSize, in: 14...42) { Text("Control size") }
+            Slider(value: spacing, in: 4...32) { Text("Content spacing") }
+            Slider(value: cornerRadius, in: 0...48) { Text("Inner corner radius") }
+            ColorPicker("Text color", selection: Binding(get: { options.wrappedValue.textColor.color }, set: { options.wrappedValue.textColor = WidgetColor($0) }))
+            Picker("Base background", selection: options.background) {
+                Text("Glass").tag(BackgroundKind.glass)
+                Text("Gradient").tag(BackgroundKind.gradient)
+                Text("Solid").tag(BackgroundKind.solid)
+            }
+            Slider(value: options.backgroundOpacity, in: 0...1) { Text("Base background opacity") }
         }
     }
 }
-
 
 // Edit this content to update the About page without changing its layout.
 private enum HaloAboutContent {
