@@ -182,7 +182,7 @@ final class WindowManager {
 
     private var activeClosedActivity: LiveActivity? {
         store.workspace.activities.first { activity in
-            (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(8) > Date()
+            (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(12) > Date()
         }
     }
 
@@ -360,7 +360,11 @@ final class WindowManager {
             case .visualizer: content = playing ? (options.visualizer ?? VisualizerOptions()).width : 0
             case .files: content = textWidth(String(store.files.count), font: font) + size + 5
             case .activity:
-                content = activity.map { textWidth(String($0.title.prefix(80)), font: font) + size + ($0.progress == nil ? 5 : 46) } ?? 0
+                content = activity.map {
+                    let title = textWidth(String($0.title.prefix(80)), font: font)
+                    let detail = $0.detail.isEmpty ? 0 : textWidth(String($0.detail.prefix(80)), font: NSFont.systemFont(ofSize: max(8, size * 0.78)))
+                    return max(title, detail) + size + ($0.progress == nil ? 5 : 46)
+                } ?? 0
             }
             let ornament = decoration.flatMap { $0.isVisible(playing: playing) ? min($0.size, max(1, geometry.compactHeight - 2 * options.contentPaddingY)) : nil } ?? 0
             guard content > 0 || ornament > 0 else { return (0, 0) }
@@ -378,7 +382,7 @@ final class WindowManager {
 
     private func refreshDynamicWidths() {
         activityExpiry?.cancel()
-        if let next = store.workspace.activities.map({ $0.created.addingTimeInterval(8) }).filter({ $0 > Date() }).min() {
+        if let next = store.workspace.activities.map({ $0.created.addingTimeInterval(12) }).filter({ $0 > Date() }).min() {
             let work = DispatchWorkItem { [weak self] in self?.refreshDynamicWidths() }
             activityExpiry = work
             DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, next.timeIntervalSinceNow), execute: work)
