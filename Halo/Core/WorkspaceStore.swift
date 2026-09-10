@@ -68,7 +68,17 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
                 layout.closedNotch?.albumBackgroundColor == true
         })
     }
+    private func disableLegacyHUDRenderer() {
+        // HaloHUDEngine is the only HUD renderer now. Keep the old controller inert so it cannot
+        // draw a second overlay or ignore the new per-event enable/disable state. The legacy
+        // replacement toggles remain untouched because the new engine still uses them to decide
+        // whether hardware keys can safely suppress the native macOS HUD.
+        if defaults.object(forKey: HaloHUDKeys.enabled) as? Bool != false {
+            defaults.set(false, forKey: HaloHUDKeys.enabled)
+        }
+    }
     func start() {
+        disableLegacyHUDRenderer()
         updateArtworkPreference()
         if hudEngine == nil { hudEngine = HaloHUDEngine(workspace: self); hudEngine?.start() }
         evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey()
@@ -83,6 +93,10 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             if self.tick % 5 == 0 { self.system.refresh(); self.evaluateRules() }
             if self.tick % 30 == 0, self.settings.layout.enabled.contains(.calendar) { self.calendar.refresh() }
         }
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification, object: defaults)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.disableLegacyHUDRenderer() }
+            .store(in: &subscriptions)
         for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didWakeNotification] {
             NSWorkspace.shared.notificationCenter.publisher(for: name).receive(on: RunLoop.main).sink { [weak self] _ in
                 self?.refreshApps(); self?.evaluateRules(); self?.evaluateSchedules(); self?.hudEngine?.configurationDidChange()
