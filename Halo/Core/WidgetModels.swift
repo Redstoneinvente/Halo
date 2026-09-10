@@ -85,6 +85,7 @@ struct ClosedMediaOptions: Codable, Equatable {
     var lyricDisplay: LyricDisplayMode?
     var lyricSyncOffset: Double?
     var dynamicLyricWidth: Bool?
+    var horizontalSpace: Double?
     var changeAnimation: MediaChangeAnimation?
     var changeAnimationDuration: Double?
     var tapAction: MediaGestureAction?
@@ -95,13 +96,13 @@ struct ClosedMediaOptions: Codable, Equatable {
     var resolvedLyricDisplay: LyricDisplayMode { lyricDisplay ?? .line }
     var resolvedLyricSyncOffset: Double { min(5, max(-5, lyricSyncOffset ?? 0)) }
     var usesDynamicLyricWidth: Bool { dynamicLyricWidth ?? true }
+    var resolvedHorizontalSpace: Double { min(360, max(48, horizontalSpace ?? 180)) }
     var resolvedChangeAnimation: MediaChangeAnimation { changeAnimation ?? .slide }
     var resolvedChangeAnimationDuration: Double { min(1.2, max(0.08, changeAnimationDuration ?? 0.28)) }
     var resolvedTapAction: MediaGestureAction { tapAction ?? .playPause }
     var resolvedDoubleTapAction: MediaGestureAction { doubleTapAction ?? .none }
     var resolvedSwipeLeftAction: MediaGestureAction { swipeLeftAction ?? .next }
     var resolvedSwipeRightAction: MediaGestureAction { swipeRightAction ?? .previous }
-    // Legacy artwork fields retained so existing saved profiles decode.
     var artwork: MediaArtworkMode = .none
     var artworkSize = 28.0
     var marqueeSpeed = 28.0
@@ -109,7 +110,7 @@ struct ClosedMediaOptions: Codable, Equatable {
     var backgroundOpacity = 0.32
     var showPlaybackIcon = true
     func validated() throws -> ClosedMediaOptions {
-        guard [artworkSize, marqueeSpeed, vinylRPM, backgroundOpacity, lyricSyncOffset ?? 0, changeAnimationDuration ?? 0.28].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        guard [artworkSize, marqueeSpeed, vinylRPM, backgroundOpacity, lyricSyncOffset ?? 0, horizontalSpace ?? 180, changeAnimationDuration ?? 0.28].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
         v.lines = min(2, max(1, lines))
         v.artworkSize = min(72, max(14, artworkSize))
@@ -117,6 +118,7 @@ struct ClosedMediaOptions: Codable, Equatable {
         v.vinylRPM = min(45, max(1, vinylRPM))
         v.backgroundOpacity = min(1, max(0, backgroundOpacity))
         if lyricSyncOffset != nil { v.lyricSyncOffset = resolvedLyricSyncOffset }
+        if horizontalSpace != nil { v.horizontalSpace = resolvedHorizontalSpace }
         if changeAnimationDuration != nil { v.changeAnimationDuration = resolvedChangeAnimationDuration }
         return v
     }
