@@ -495,8 +495,8 @@ private struct ContextMusicSettings: View {
             Text("Halo translates supported system events into reusable HUD events, resolves the active profile and per-event override, then sends the result to a presentation renderer.").font(.caption).foregroundStyle(.secondary)
         }
         Section("System status") {
-            Label("Volume, mute, display brightness and keyboard brightness are connected to Halo's existing safe key-observer/replacement path.", systemImage: "checkmark.seal.fill")
-            Label("Other event types stay capability-gated until a reliable provider is connected; Halo will not use fragile private hooks just to make the list look complete.", systemImage: "shield.lefthalf.filled")
+            Label("Volume, mute, display brightness and keyboard brightness are connected to Halo's safe key-observer/replacement path.", systemImage: "checkmark.seal.fill")
+            Label("Observer-capable events use public or stable data paths. Events marked Provider not connected are configuration-ready but do not generate real system events yet.", systemImage: "shield.lefthalf.filled")
             if !AXIsProcessTrusted() {
                 Text("Native key suppression needs Accessibility permission. Observer HUDs can still work without suppressing Apple's HUD.").font(.caption).foregroundStyle(.orange)
                 Button("Open Accessibility Settings") {
@@ -516,6 +516,11 @@ private struct ContextMusicSettings: View {
     @ViewBuilder private var studio: some View {
         Section("HUD Studio") {
             Picker("Event", selection: $selectedEvent) { ForEach(HaloHUDEventKind.allCases) { Text($0.title).tag($0) } }
+            HStack {
+                Text(selectedEvent.providerStatus.title).font(.caption).foregroundStyle(selectedEvent.providerStatus == .available ? .green : .secondary)
+                Spacer()
+                if selectedEvent.providerStatus == .architected { Text("Preview only until a provider is connected").font(.caption).foregroundStyle(.orange) }
+            }
             Toggle("Enable this HUD", isOn: Binding(get: { eventOverride.wrappedValue.enabled }, set: { var v = eventOverride.wrappedValue; v.enabled = $0; eventOverride.wrappedValue = v }))
             Toggle("Use Global Settings", isOn: Binding(get: { eventOverride.wrappedValue.useGlobalSettings }, set: { enabled in
                 var v = eventOverride.wrappedValue
@@ -543,7 +548,7 @@ private struct ContextMusicSettings: View {
                 Text("\(Int(previewValue * 100))%").monospacedDigit()
                 Spacer()
                 Button("Preview HUD") { preview(selectedEvent, persistent: keepHUDVisibleWhileEditing) }
-                Button("Test Entrance") { preview(selectedEvent, persistent: keepHUDVisibleWhileEditing) }
+                Button("Test Entrance") { preview(selectedEvent, persistent: keepHUDVisibleWhileEditing, restart: true) }
                 Button("Test Exit") { stopPersistentPreview() }
             }
         }
@@ -555,7 +560,7 @@ private struct ContextMusicSettings: View {
             case .notch:
                 Picker("Notch side", selection: configuration.presentation.notchSide) { ForEach(HaloHUDNotchSide.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
                 Picker("Collision", selection: configuration.behavior.collision) { ForEach(HaloHUDCollisionBehavior.allCases) { Text($0.title).tag($0) } }
-                Text("The model preserves Left, Right, Automatic and Full Notch as distinct presentation intents. Unsupported collisions fall back externally instead of destabilizing the notch.").font(.caption).foregroundStyle(.secondary)
+                Text("Left, Right, Automatic and Full Notch are distinct placement intents. Show Externally falls back when the chosen side is occupied; deeper Push/Overlay integration with Halo's closed-notch content is still intentionally separate from the HUD panel renderer.").font(.caption).foregroundStyle(.secondary)
             case .floating:
                 Picker("Position", selection: configuration.presentation.floatingPosition) { ForEach(HaloHUDFloatingPosition.allCases) { Text($0.title).tag($0) } }
             case .screenEdge:
@@ -563,7 +568,7 @@ private struct ContextMusicSettings: View {
                 Slider(value: configuration.presentation.screenEdgeLength, in: 40...800) { Text("Length") }
                 Slider(value: configuration.presentation.screenEdgeThickness, in: 1...24) { Text("Thickness") }
             case .menuBar:
-                Text("Menu Bar is intended for state-like events. Events that need richer content can fall back to the configured external HUD.").font(.caption).foregroundStyle(.secondary)
+                Text("Menu Bar uses the system status-item renderer. Layout dimensions and panel background effects do not apply to a menu-bar item.").font(.caption).foregroundStyle(.secondary)
             case .nearCursor:
                 Text("Near Cursor uses the configured offsets and edge margin while keeping the HUD inside the selected display.").font(.caption).foregroundStyle(.secondary)
             case .disabled:
@@ -594,7 +599,7 @@ private struct ContextMusicSettings: View {
             Toggle("Numeric value", isOn: configuration.components.value)
             Toggle("Percentage", isOn: configuration.components.percentage)
             Toggle("Progress visualization", isOn: configuration.components.progress)
-            Toggle("Device name", isOn: configuration.components.deviceName)
+            Toggle("Device name / detail", isOn: configuration.components.deviceName)
             if configuration.wrappedValue.components.progress {
                 Picker("Progress style", selection: configuration.progressStyle) { ForEach(HaloHUDProgressStyle.allCases) { Text($0.title).tag($0) } }
                 if configuration.wrappedValue.progressStyle == .segmentedBar || configuration.wrappedValue.progressStyle == .dots {
@@ -606,7 +611,16 @@ private struct ContextMusicSettings: View {
         }
 
         Section("Appearance") {
-            Picker("Background", selection: configuration.appearance.background) { ForEach(HaloHUDBackgroundStyle.allCases) { Text($0.title).tag($0) } }
+            Picker("Background", selection: configuration.appearance.background) {
+                ForEach(HaloHUDBackgroundStyle.allCases) { style in
+                    Text(style.title + ((style == .image || style == .video) ? " · unavailable" : ""))
+                        .tag(style)
+                        .disabled(style == .image || style == .video)
+                }
+            }
+            if configuration.wrappedValue.appearance.background == .image || configuration.wrappedValue.appearance.background == .video {
+                Text("This saved HUD uses an asset-backed background type from the model, but HUD asset-path persistence is not connected yet. Halo renders a styled fallback until that provider is implemented.").font(.caption).foregroundStyle(.orange)
+            }
             Slider(value: configuration.appearance.backgroundOpacity, in: 0...1) { Text("Background opacity") }
             Slider(value: configuration.appearance.blur, in: 0...60) { Text("Blur") }
             if configuration.wrappedValue.appearance.background == .glass { Slider(value: configuration.appearance.glassIntensity, in: 0...1) { Text("Glass intensity") } }
@@ -618,12 +632,12 @@ private struct ContextMusicSettings: View {
         }
 
         Section("Dynamic Colors") {
-            colorSource("Primary", binding: configuration.appearance.primary.source)
-            colorSource("Secondary", binding: configuration.appearance.secondary.source)
-            colorSource("Progress", binding: configuration.appearance.progress.source)
-            colorSource("Border", binding: configuration.appearance.borderColor.source)
-            colorSource("Glow", binding: configuration.appearance.glowColor.source)
-            Text("Album Artwork is a reusable color provider, not a music-HUD special case. When its source is unavailable the renderer falls back to Halo's accent/contrast colors.").font(.caption).foregroundStyle(.secondary)
+            colorSource("Primary", binding: configuration.appearance.primary)
+            colorSource("Secondary", binding: configuration.appearance.secondary)
+            colorSource("Progress", binding: configuration.appearance.progress)
+            colorSource("Border", binding: configuration.appearance.borderColor)
+            colorSource("Glow", binding: configuration.appearance.glowColor)
+            Text("Album Artwork uses the current media palette when available. Wallpaper sampling is reserved in the model but is not connected yet and therefore falls back to the system accent.").font(.caption).foregroundStyle(.secondary)
         }
 
         Section("Animation") {
@@ -643,7 +657,7 @@ private struct ContextMusicSettings: View {
             Slider(value: configuration.behavior.displayDuration, in: 0.2...6) { Text("Display duration") }
             Picker("Repeated events", selection: configuration.behavior.interrupt) { ForEach(HaloHUDInterruptBehavior.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
             Picker("Collision behaviour", selection: configuration.behavior.collision) { ForEach(HaloHUDCollisionBehavior.allCases) { Text($0.title).tag($0) } }
-            Text("Rapid values are designed to update the currently visible HUD and reset its dismissal deadline instead of repeatedly destroying and recreating the presentation.").font(.caption).foregroundStyle(.secondary)
+            Text("Restart replays the entrance and restarts the dismissal timer. Continue updates the value without extending the current lifetime. Blend updates in place and extends the dismissal timer.").font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -666,7 +680,7 @@ private struct ContextMusicSettings: View {
             }
         }
         Section("Provider policy") {
-            Text("Available means the event is connected to Halo's current provider path. Observer-capable events have safe data sources but are not yet replacing a native HUD. Provider not connected means the event identifier/configuration exists, but Halo deliberately does not fake support with brittle private APIs.").font(.caption).foregroundStyle(.secondary)
+            Text("Available means Halo can safely observe and optionally replace the related native hardware-key HUD. Observer-capable means Halo has a stable data/event source but does not suppress a native HUD. Provider not connected means only the event configuration and preview exist today.").font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -717,13 +731,42 @@ private struct ContextMusicSettings: View {
                 }
             }
             Button("Add Application Rule") { var settings = hud.wrappedValue; settings.appRules.append(HaloHUDAppRule()); hud.wrappedValue = settings }
-            Text("Rules are persisted now so the presentation router can evolve without changing the settings format. The current hardware-key compatibility renderer still uses the resolved global presentation.").font(.caption).foregroundStyle(.secondary)
+            Text("Application rules currently override presentation target only; all visual settings still resolve from the selected event/global HUD configuration.").font(.caption).foregroundStyle(.secondary)
         }
     }
 
-    private func colorSource(_ title: String, binding: Binding<HaloHUDDynamicColorSource>) -> some View {
-        Picker(title, selection: binding) { ForEach(HaloHUDDynamicColorSource.allCases) { Text($0.title).tag($0) } }
+    private func colorSource(_ title: String, binding: Binding<HaloHUDColorConfiguration>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker(title, selection: binding.source) {
+                ForEach(HaloHUDDynamicColorSource.allCases) { source in
+                    Text(source.title + (source == .wallpaper ? " · unavailable" : ""))
+                        .tag(source)
+                        .disabled(source == .wallpaper)
+                }
+            }
+            if binding.wrappedValue.source == .fixed {
+                ColorPicker("\(title) color", selection: fixedColor(binding), supportsOpacity: true)
+            }
+        }
     }
+
+    private func fixedColor(_ binding: Binding<HaloHUDColorConfiguration>) -> Binding<Color> {
+        Binding(get: {
+            let c = binding.wrappedValue
+            return Color(hue: c.hue, saturation: c.saturation, brightness: c.brightness, opacity: c.alpha)
+        }, set: { color in
+            guard let rgb = NSColor(color).usingColorSpace(.deviceRGB) else { return }
+            var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+            guard rgb.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha) else { return }
+            var value = binding.wrappedValue
+            value.hue = Double(hue)
+            value.saturation = Double(saturation)
+            value.brightness = Double(brightness)
+            value.alpha = Double(alpha)
+            binding.wrappedValue = value
+        })
+    }
+
     private func appRuleBinding<T>(_ id: UUID, keyPath: WritableKeyPath<HaloHUDAppRule, T>) -> Binding<T> {
         Binding(get: {
             hud.wrappedValue.appRules.first(where: { $0.id == id })![keyPath: keyPath]
@@ -740,7 +783,7 @@ private struct ContextMusicSettings: View {
         settings.customPresets.append(HaloHUDPreset(id: UUID().uuidString, name: String(name.prefix(80)), builtIn: false, configuration: settings.global))
         hud.wrappedValue = settings
     }
-    private func preview(_ kind: HaloHUDEventKind, persistent: Bool = false) {
+    private func preview(_ kind: HaloHUDEventKind, persistent: Bool = false, restart: Bool = false) {
         let settings = hud.wrappedValue
         let previewConfiguration = settings.configuration(for: kind)
         NotificationCenter.default.post(
@@ -750,7 +793,8 @@ private struct ContextMusicSettings: View {
                 "kind": kind.rawValue,
                 "value": previewValue,
                 "configuration": previewConfiguration,
-                "persistent": persistent
+                "persistent": persistent,
+                "restart": restart
             ]
         )
     }
@@ -767,71 +811,56 @@ private struct HaloHUDStudioPreview: View {
     let kind: HaloHUDEventKind
     let value: Double
     let configuration: HaloHUDConfiguration
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    private var accent: Color {
-        let c = configuration.appearance.primary
-        switch c.source {
-        case .systemAccent: return .accentColor
-        case .automaticContrast, .systemAppearance: return .primary
-        case .albumArtwork, .wallpaper: return .accentColor
-        case .fixed: return Color(hue: c.hue, saturation: c.saturation, brightness: c.brightness, opacity: c.alpha)
+
+    private var event: HaloHUDEvent { HaloHUDEvent.preview(kind: kind, value: value) }
+    private var rawSize: CGSize {
+        switch configuration.presentation.target {
+        case .screenEdge:
+            let length = max(40, configuration.presentation.screenEdgeLength)
+            let thickness = max(1, configuration.presentation.screenEdgeThickness)
+            if configuration.presentation.screenEdge == .left || configuration.presentation.screenEdge == .right {
+                return CGSize(width: thickness, height: length)
+            }
+            return CGSize(width: length, height: thickness)
+        default:
+            let width = min(configuration.layout.maximumWidth, max(configuration.layout.minimumWidth, configuration.layout.width))
+            return CGSize(width: max(80, width), height: max(24, configuration.layout.height))
         }
     }
+    private var previewScale: CGFloat {
+        min(1, 520 / max(1, rawSize.width), 220 / max(1, rawSize.height))
+    }
+
     var body: some View {
         Group {
-            if configuration.layout.style == .vertical {
-                VStack(spacing: configuration.layout.spacing) { previewIcon; previewHeader; previewProgress }
-            } else {
-                HStack(spacing: configuration.layout.spacing) {
-                    previewIcon
-                    VStack(alignment: .leading, spacing: max(3, configuration.layout.spacing * 0.45)) { previewHeader; previewProgress }
-                }
-            }
-        }
-        .padding(.horizontal, configuration.layout.horizontalPadding)
-        .padding(.vertical, configuration.layout.verticalPadding)
-        .frame(width: min(520, max(100, configuration.layout.width)), height: min(220, max(36, configuration.layout.height)))
-        .background { previewBackground }
-        .clipShape(RoundedRectangle(cornerRadius: configuration.layout.cornerRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: configuration.layout.cornerRadius, style: .continuous).stroke(.white.opacity(configuration.appearance.border ? configuration.appearance.borderOpacity : 0)))
-        .shadow(color: configuration.appearance.shadow ? .black.opacity(0.28) : .clear, radius: 16, y: 7)
-        .animation(configuration.animation.progress == .instant ? nil : .easeOut(duration: 0.16), value: value)
-    }
-    @ViewBuilder private var previewIcon: some View {
-        if configuration.components.icon { Image(systemName: kind.symbol).font(.system(size: configuration.iconSize, weight: .semibold)).foregroundStyle(accent) }
-    }
-    @ViewBuilder private var previewHeader: some View {
-        HStack {
-            if configuration.components.label { Text(kind.title).font(.system(size: configuration.textSize, weight: .semibold)) }
-            Spacer()
-            if configuration.components.value || configuration.components.percentage { Text("\(Int((value * 100).rounded()))%").font(.system(size: configuration.textSize, weight: .bold, design: .rounded)).monospacedDigit() }
-        }
-    }
-    @ViewBuilder private var previewProgress: some View {
-        if configuration.components.progress {
-            switch configuration.progressStyle {
-            case .segmentedBar, .dots:
-                HStack(spacing: 2) { ForEach(0..<max(2, configuration.segments), id: \.self) { index in Capsule().fill(Double(index + 1) / Double(max(2, configuration.segments)) <= value ? accent : Color.secondary.opacity(0.2)).frame(height: configuration.progressStyle == .dots ? 5 : 7) } }
-            case .ring, .arc, .gauge, .iconFill:
-                ZStack { Circle().stroke(.secondary.opacity(0.2), lineWidth: 5); Circle().trim(from: 0, to: value).stroke(accent, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(-90)) }.frame(width: 34, height: 34)
-            case .numberOnly:
-                Text("\(Int(value * 100))").font(.system(size: configuration.textSize * 1.2, weight: .bold, design: .rounded)).foregroundStyle(accent)
-            case .glow:
-                Capsule().fill(accent.opacity(0.22)).overlay(alignment: .leading) { GeometryReader { p in Capsule().fill(accent).frame(width: max(2, p.size.width * value)).shadow(color: accent, radius: 7) } }.frame(height: 7)
-            case .minimalLine:
-                GeometryReader { p in Rectangle().fill(.secondary.opacity(0.18)).overlay(alignment: .leading) { Rectangle().fill(accent).frame(width: p.size.width * value) } }.frame(height: 2)
-            case .wave:
-                HStack(alignment: .center, spacing: 2) { ForEach(0..<18, id: \.self) { i in Capsule().fill(accent.opacity(Double(i) / 18 <= value ? 1 : 0.22)).frame(width: 3, height: 4 + 12 * abs(sin(Double(i) * 0.8))) } }.frame(height: 18)
+            switch configuration.presentation.target {
+            case .disabled:
+                Label("HUD disabled for this target", systemImage: "nosign")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+            case .menuBar:
+                menuBarPreview
             default:
-                GeometryReader { p in Capsule().fill(.secondary.opacity(0.18)).overlay(alignment: .leading) { Capsule().fill(accent).frame(width: max(2, p.size.width * value)) } }.frame(height: 7)
+                HaloHUDRenderView(event: event, configuration: configuration, palette: [.accent], visible: true)
+                    .frame(width: rawSize.width, height: rawSize.height)
+                    .scaleEffect(previewScale)
+                    .frame(width: rawSize.width * previewScale, height: rawSize.height * previewScale)
             }
         }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
     }
-    @ViewBuilder private var previewBackground: some View {
-        if reduceTransparency || configuration.appearance.background == .solid { Color.black.opacity(max(0.5, configuration.appearance.backgroundOpacity)) }
-        else if configuration.appearance.background == .clear { Color.clear }
-        else if configuration.appearance.background == .gradient { LinearGradient(colors: [accent.opacity(0.55), .black.opacity(0.75)], startPoint: .topLeading, endPoint: .bottomTrailing) }
-        else { Rectangle().fill(.ultraThinMaterial).overlay(Color.black.opacity(max(0, configuration.appearance.backgroundOpacity - 0.45))) }
+
+    private var menuBarPreview: some View {
+        HStack(spacing: 5) {
+            if configuration.components.icon { Image(systemName: event.icon) }
+            if configuration.components.label { Text(event.primaryText) }
+            let valueText = HaloHUDRenderFormatting.valueText(event: event, configuration: configuration)
+            if !valueText.isEmpty { Text(valueText).monospacedDigit() }
+        }
+        .font(.system(size: 12, weight: .medium))
+        .padding(.horizontal, 10)
+        .frame(height: 24)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
 
