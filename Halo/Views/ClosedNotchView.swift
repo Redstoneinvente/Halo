@@ -833,7 +833,7 @@ private struct MarqueeText: View {
     }
 }
 
-private enum MediaAssetReader {
+enum MediaAssetReader {
     struct PlaybackSample { let position: Double; let duration: Double; let observedAt: Date }
     private static let queue = DispatchQueue(label: "Halo.ClosedMediaAssets", qos: .utility)
     private static let lock = NSLock()
