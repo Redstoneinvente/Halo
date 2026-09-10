@@ -42,7 +42,6 @@ final class HaloPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-/// Uses the current display cadence during transitions, up to 120 Hz.
 @MainActor
 final class SurfaceAnimator {
     private let clock = DisplayClock()
@@ -157,7 +156,10 @@ final class WindowManager {
                 guard let self,
                       let raw = note.userInfo?["width"] as? Double,
                       raw.isFinite else { return }
-                let next = min(320, max(24, raw))
+                let layout = self.store.workspace.effectiveLayout
+                let media = (layout.closedNotch ?? ClosedNotchOptions()).mediaOptions ?? ClosedMediaOptions()
+                let cap = (media.overflow == .truncate || media.overflow == .marquee) ? media.resolvedHorizontalSpace : 320
+                let next = min(cap, max(24, raw))
                 guard self.mediaWidthHint.map({ abs($0 - next) >= 3 }) ?? true else { return }
                 self.mediaWidthHint = next
                 self.refreshDynamicWidths()
@@ -273,11 +275,10 @@ final class WindowManager {
         if power?.side == .left { leftLive = true }
         if power?.side == .right { rightLive = true }
 
-        // A synced lyric is itself the width driver. Do not force the fixed music Active Width on that
-        // side, otherwise a single short word would still leave the notch at the large music width.
         let mediaSettings = options.mediaOptions ?? ClosedMediaOptions()
         let adaptiveLyrics = store.workspace.media.isPlaying && mediaSettings.textMode == .lyrics && mediaSettings.usesDynamicLyricWidth
-        if adaptiveLyrics {
+        let constrainedMedia = store.workspace.media.isPlaying && (mediaSettings.overflow == .truncate || mediaSettings.overflow == .marquee)
+        if adaptiveLyrics || constrainedMedia {
             if items.left == .media {
                 leftLive = options.leftDecoration?.visibility == .playing && store.workspace.media.isPlaying
             }
@@ -318,11 +319,24 @@ final class WindowManager {
                 required = camera + leftExtent + rightExtent
             }
 
+            // Right-side status items can be physically reserved by Halo. Left-side app menus cannot be moved
+            // through a supported API, so keep a protected portion of the left menu-bar region accessible and
+            // spill excess Halo growth to the right instead of covering File/Edit/etc.
+            if let screen = host.panel.screen, let leftArea = screen.auxiliaryTopLeftArea {
+                let maximumLeftIntrusion = max(72, min(150, leftArea.width * 0.42))
+                if leftExtent > maximumLeftIntrusion {
+                    let spill = leftExtent - maximumLeftIntrusion
+                    leftExtent = maximumLeftIntrusion
+                    rightExtent += spill
+                    required = camera + leftExtent + rightExtent
+                }
+            }
+
             let maxWidth = geometry.visible.width
             if required > maxWidth {
                 let overflow = required - maxWidth
-                if leftExtent >= rightExtent { leftExtent = max(0, leftExtent - overflow) }
-                else { rightExtent = max(0, rightExtent - overflow) }
+                if rightExtent >= leftExtent { rightExtent = max(0, rightExtent - overflow) }
+                else { leftExtent = max(0, leftExtent - overflow) }
                 required = camera + leftExtent + rightExtent
             }
             host.geometry?.activeCompactWidth = max(baseWidth, required)
@@ -346,6 +360,27 @@ final class WindowManager {
         let activity = activeClosedActivity
         let size = min(options.fontSize, max(1, geometry.compactHeight - 2 * options.contentPaddingY) / 1.25)
         let font = NSFont.systemFont(ofSize: size)
+        let slotMargins = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
+        let elementGap = 8.0
+
+        var artwork = options.artworkOptions ?? ClosedArtworkOptions()
+        if options.artworkOptions == nil, let legacy = options.mediaOptions, legacy.artwork != .none {
+            artwork.enabled = true; artwork.mode = legacy.artwork; artwork.size = legacy.artworkSize
+            artwork.vinylRPM = legacy.vinylRPM; artwork.backgroundOpacity = legacy.backgroundOpacity
+        }
+
+        let artworkTarget: DynamicSide? = {
+            guard playing, artwork.enabled, artwork.mode != .none, artwork.mode != .background else { return nil }
+            switch artwork.side {
+            case .left: return .left
+            case .right: return .right
+            case .automatic:
+                if options.left == .media || options.left == .visualizer { return .left }
+                if options.right == .media || options.right == .visualizer { return .right }
+                return .right
+            }
+        }()
+
         func textWidth(_ text: String, font: NSFont) -> Double {
             ceil((text as NSString).size(withAttributes: [.font: font]).width) + 4
         }
@@ -354,80 +389,83 @@ final class WindowManager {
             let media = options.mediaOptions ?? ClosedMediaOptions()
             let title = textWidth(String(store.workspace.media.title.prefix(120)), font: font)
             let artist = textWidth(String(store.workspace.media.artist.prefix(120)), font: font)
-            let hasAdaptiveLyricHint = media.textMode == .lyrics && media.usesDynamicLyricWidth && mediaWidthHint != nil
-            let natural: Double
+            let adaptive = media.textMode == .lyrics && media.usesDynamicLyricWidth && mediaWidthHint != nil
+            let icon = media.showPlaybackIcon ? size + 5 : 0
+            let naturalText: Double
             switch media.textMode {
-            case .title: natural = title
-            case .artist: natural = max(size * 3, artist)
-            case .titleArtist: natural = media.lines == 2 ? max(title, artist) : title + (store.workspace.media.artist.isEmpty ? 0 : artist + size)
+            case .title: naturalText = title
+            case .artist: naturalText = max(size * 3, artist)
+            case .titleArtist: naturalText = media.lines == 2 ? max(title, artist) : title + (store.workspace.media.artist.isEmpty ? 0 : artist + size)
             case .lyrics:
-                natural = hasAdaptiveLyricHint ? min(300, max(28, mediaWidthHint!)) : max(90, min(220, title + artist * 0.35))
+                naturalText = adaptive ? max(28, mediaWidthHint!) : max(90, min(220, title + artist * 0.35))
             }
-            let textTarget: Double
-            if hasAdaptiveLyricHint {
-                textTarget = natural
-            } else {
-                switch media.overflow {
-                case .marquee: textTarget = min(max(120, natural * 0.55), 220)
-                case .truncate: textTarget = min(natural, 220)
-                case .scale: textTarget = min(natural, 260)
-                }
+            let naturalTotal = naturalText + (adaptive ? 0 : icon)
+            if adaptive {
+                let cap = (media.overflow == .truncate || media.overflow == .marquee) ? media.resolvedHorizontalSpace : 320
+                return min(cap, max(28, naturalText))
             }
-            let icon = media.showPlaybackIcon && !hasAdaptiveLyricHint ? size + 5 : 0
-            return textTarget + icon
+            switch media.overflow {
+            case .marquee, .truncate:
+                return media.resolvedHorizontalSpace
+            case .scale:
+                return min(naturalTotal, 260)
+            }
         }
-        func measurements(_ item: ClosedNotchItem, _ decoration: SideDecoration?) -> (full: Double, decoration: Double) {
+
+        func isArtworkOnly(_ side: DynamicSide, item: ClosedNotchItem) -> Bool {
+            guard artwork.isArtworkOnly, artworkTarget == side else { return false }
+            return item == .media || item == .visualizer
+        }
+
+        func measurements(_ side: DynamicSide, _ item: ClosedNotchItem, _ decoration: SideDecoration?) -> (full: Double, decoration: Double) {
             let content: Double
-            switch item {
-            case .none: content = 0
-            case .clock:
-                let style = layout.widgetStyle(for: .clock)
-                let clockFont = style.fontFamily == .custom ? NSFont(name: style.customFont, size: size) ?? font : NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
-                let template = "88:88" + (style.clock.showSeconds ? ":88" : "") + (style.clock.twentyFourHour ? "" : " PM")
-                content = textWidth(template, font: clockFont) * 1.08
-            case .date: content = textWidth("Sep 28", font: font)
-            case .timer: content = textWidth("88:88:88", font: font) + size
-            case .battery: content = textWidth("100%", font: font) + size + 5
-            case .media: content = mediaWidth()
-            case .visualizer: content = playing ? (options.visualizer ?? VisualizerOptions()).width : 0
-            case .files: content = textWidth(String(store.files.count), font: font) + size + 5
-            case .activity:
-                content = activity.map {
-                    let title = textWidth(String($0.title.prefix(80)), font: font)
-                    let detail = $0.detail.isEmpty ? 0 : textWidth(String($0.detail.prefix(80)), font: NSFont.systemFont(ofSize: max(8, size * 0.78)))
-                    return max(title, detail) + size + ($0.progress == nil ? 5 : 46)
-                } ?? 0
+            if isArtworkOnly(side, item: item) {
+                content = 0
+            } else {
+                switch item {
+                case .none: content = 0
+                case .clock:
+                    let style = layout.widgetStyle(for: .clock)
+                    let clockFont = style.fontFamily == .custom ? NSFont(name: style.customFont, size: size) ?? font : NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
+                    let template = "88:88" + (style.clock.showSeconds ? ":88" : "") + (style.clock.twentyFourHour ? "" : " PM")
+                    content = textWidth(template, font: clockFont) * 1.08
+                case .date: content = textWidth("Sep 28", font: font)
+                case .timer: content = textWidth("88:88:88", font: font) + size
+                case .battery: content = textWidth("100%", font: font) + size + 5
+                case .media: content = mediaWidth()
+                case .visualizer: content = playing ? (options.visualizer ?? VisualizerOptions()).width : 0
+                case .files: content = textWidth(String(store.files.count), font: font) + size + 5
+                case .activity:
+                    content = activity.map {
+                        let title = textWidth(String($0.title.prefix(80)), font: font)
+                        let detail = $0.detail.isEmpty ? 0 : textWidth(String($0.detail.prefix(80)), font: NSFont.systemFont(ofSize: max(8, size * 0.78)))
+                        return max(title, detail) + size + ($0.progress == nil ? 5 : 46)
+                    } ?? 0
+                }
             }
             let ornament = decoration.flatMap { $0.isVisible(playing: playing) ? min($0.size, max(1, geometry.compactHeight - 2 * options.contentPaddingY)) : nil } ?? 0
             guard content > 0 || ornament > 0 else { return (0, 0) }
-            let spacing = content > 0 && ornament > 0 ? 8.0 : 0
-            let margins = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
-            return (content + ornament + spacing + margins, ornament > 0 ? ornament + margins : 0)
+            let spacing = content > 0 && ornament > 0 ? elementGap : 0
+            return (content + ornament + spacing + slotMargins, ornament > 0 ? ornament + slotMargins : 0)
         }
-        let left = measurements(items.left, options.leftDecoration)
-        let right = measurements(items.right, options.rightDecoration)
+
+        let left = measurements(.left, items.left, options.leftDecoration)
+        let right = measurements(.right, items.right, options.rightDecoration)
         var leftFull = left.full
         var rightFull = right.full
 
-        var artwork = options.artworkOptions ?? ClosedArtworkOptions()
-        if options.artworkOptions == nil, let legacy = options.mediaOptions, legacy.artwork != .none {
-            artwork.enabled = true; artwork.mode = legacy.artwork; artwork.size = legacy.artworkSize
-            artwork.vinylRPM = legacy.vinylRPM; artwork.backgroundOpacity = legacy.backgroundOpacity
-        }
-        if playing && artwork.enabled && artwork.mode != .none && artwork.mode != .background {
-            let width = artwork.size + 2 * artwork.padding + artwork.margin
-            switch artwork.side {
-            case .left: leftFull += width
-            case .right: rightFull += width
-            case .automatic:
-                if options.left == .media || options.left == .visualizer { leftFull += width }
-                else { rightFull += width }
+        if let artworkTarget {
+            let artworkWidth = artwork.size + 2 * artwork.padding + artwork.margin
+            switch artworkTarget {
+            case .left:
+                leftFull = leftFull > 0 ? leftFull + elementGap + artworkWidth : slotMargins + artworkWidth
+            case .right:
+                rightFull = rightFull > 0 ? rightFull + elementGap + artworkWidth : slotMargins + artworkWidth
             }
         }
 
-        let gap = 8.0
-        let leftPower = power?.side == .left ? power!.width + (leftFull > 0 ? gap : 0) : 0
-        let rightPower = power?.side == .right ? power!.width + (rightFull > 0 ? gap : 0) : 0
+        let leftPower = power?.side == .left ? power!.width + (leftFull > 0 ? elementGap : 0) : 0
+        let rightPower = power?.side == .right ? power!.width + (rightFull > 0 ? elementGap : 0) : 0
         return (leftFull + leftPower, rightFull + rightPower, left.decoration, right.decoration)
     }
 
