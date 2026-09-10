@@ -497,26 +497,37 @@ final class WindowManager {
         guard let geometry = host.geometry else { return .zero }
         let base = geometry.frame(expanded: true)
         guard let requested, requested.width.isFinite, requested.height.isFinite else { return base }
+
         let margin: CGFloat = 12
+        let minimumHeight = geometry.compactHeight + 96
         let maxWidth = max(320, geometry.visible.width - margin * 2)
-        let maxHeight = max(180, geometry.visible.height - margin * 2)
         let width = min(maxWidth, max(320, requested.width))
-        let height = min(maxHeight, max(geometry.compactHeight + 96, requested.height))
-        var frame = CGRect(x: base.midX - width / 2, y: base.maxY - height, width: width, height: height)
+        var height = max(minimumHeight, requested.height)
+        var frame: CGRect
+
         switch geometry.style {
         case .bottom:
-            frame.origin.y = base.minY
-        case .left:
-            frame.origin.x = base.minX
-        case .right:
-            frame.origin.x = base.maxX - width
+            // Bottom surfaces preserve their lower attachment edge and grow upward.
+            let anchorBottom = base.minY
+            let topLimit = geometry.visible.maxY - margin
+            let availableHeight = max(minimumHeight, topLimit - anchorBottom)
+            height = min(height, availableHeight)
+            frame = CGRect(x: base.midX - width / 2, y: anchorBottom, width: width, height: height)
         default:
-            break
+            // Notch/menu-bar surfaces must stay physically attached to the display's top edge.
+            // NSScreen.visibleFrame excludes the menu bar, so never clamp maxY to visible.maxY here.
+            // Instead cap the height at the bottom while preserving base.maxY exactly.
+            let anchorTop = base.maxY
+            let bottomLimit = geometry.visible.minY + margin
+            let availableHeight = max(minimumHeight, anchorTop - bottomLimit)
+            height = min(height, availableHeight)
+            frame = CGRect(x: base.midX - width / 2, y: anchorTop - height, width: width, height: height)
+            if geometry.style == .left { frame.origin.x = base.minX }
+            if geometry.style == .right { frame.origin.x = base.maxX - width }
         }
+
         if frame.minX < geometry.visible.minX + margin { frame.origin.x = geometry.visible.minX + margin }
         if frame.maxX > geometry.visible.maxX - margin { frame.origin.x = geometry.visible.maxX - margin - width }
-        if frame.minY < geometry.visible.minY + margin { frame.origin.y = geometry.visible.minY + margin }
-        if frame.maxY > geometry.visible.maxY { frame.origin.y = geometry.visible.maxY - height }
         return frame
     }
 
@@ -549,7 +560,8 @@ final class WindowManager {
             if host.state.theme != theme { host.state.theme = theme }
             if host.state.layoutOverride != override?.layout { host.state.layoutOverride = override?.layout }
             configureDynamicWidth(host)
-            if host.state.dashboardWidth != host.geometry!.frame(expanded: true).width { host.state.dashboardWidth = host.geometry!.frame(expanded: true).width }
+            let baseDashboardWidth = host.geometry!.frame(expanded: true).width
+            if host.state.contextPreferredSize == nil && host.state.dashboardWidth != baseDashboardWidth { host.state.dashboardWidth = baseDashboardWidth }
             if host.state.compactHeight != host.geometry!.compactHeight { host.state.compactHeight = host.geometry!.compactHeight }
             if host.state.compactWidth != host.geometry!.compactWidth { host.state.compactWidth = host.geometry!.compactWidth }
             if host.state.closedOcclusion != host.geometry!.closedCameraOcclusion { host.state.closedOcclusion = host.geometry!.closedCameraOcclusion }
@@ -581,6 +593,9 @@ final class WindowManager {
                         target.origin.x = host.panel.frame.midX - target.width / 2 + newOffset.width - oldOffset.width
                         target.origin.y = host.panel.frame.maxY - target.height + newOffset.height - oldOffset.height
                     }
+                    let baseWidth = geometry.frame(expanded: true).width
+                    let contentWidth = expanded && host.state.contextPreferredSize != nil ? target.width : baseWidth
+                    if host.state.dashboardWidth != contentWidth { host.state.dashboardWidth = contentWidth }
                     host.targetFrame = target
                     host.animator.move(panel: host.panel, state: host.state, target: target, options: geometry.appearance.surface,
                                        preset: geometry.appearance.animation, animations: host.state.theme.animations && !host.state.editingGeometry, opening: expanded, style: geometry.style)
@@ -591,10 +606,13 @@ final class WindowManager {
                     case let (a?, b?): return abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1
                     default: return false
                     }
-                }).receive(on: DispatchQueue.main).sink { [weak self, weak host] _ in
+                }).receive(on: DispatchQueue.main).sink { [weak self, weak host] requested in
                     guard let self, let host, let geometry = host.geometry, host.state.expanded else { return }
                     let target = self.targetFrame(host: host, expanded: true)
-                    guard host.targetFrame != target else { return }
+                    guard host.targetFrame != target || abs(host.state.dashboardWidth - target.width) >= 1 else { return }
+                    let baseWidth = geometry.frame(expanded: true).width
+                    let contentWidth = requested == nil ? baseWidth : target.width
+                    if host.state.dashboardWidth != contentWidth { host.state.dashboardWidth = contentWidth }
                     host.targetFrame = target
                     var motion = geometry.appearance.surface
                     motion.opening = .resize; motion.closing = .resize; motion.duration = min(0.32, max(0.16, motion.duration))
