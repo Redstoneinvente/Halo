@@ -35,21 +35,15 @@ struct SettingsView: View {
                 }.listStyle(.sidebar)
                 Divider()
                 VStack(alignment: .leading, spacing: 12) {
-                    Link(destination: URL(string: "https://halo.redstoneinvente.com")!) {
-                        Label("Halo website", systemImage: "globe")
-                    }
-                    Link(destination: URL(string: "https://buymeacoffee.com/redstoneinvente")!) {
-                        Label("Buy me a coffee", systemImage: "cup.and.saucer.fill")
-                    }
+                    Link(destination: URL(string: "https://halo.redstoneinvente.com")!) { Label("Halo website", systemImage: "globe") }
+                    Link(destination: URL(string: "https://buymeacoffee.com/redstoneinvente")!) { Label("Buy me a coffee", systemImage: "cup.and.saucer.fill") }
                 }.font(.callout).padding(16).frame(maxWidth: .infinity, alignment: .leading)
             }.frame(width: 220)
             Divider()
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {
-                    Image(systemName: sectionIcon(section ?? "General"))
-                        .font(.title2).foregroundStyle(Color.accentColor)
-                        .frame(width: 40, height: 40)
-                        .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                    Image(systemName: sectionIcon(section ?? "General")).font(.title2).foregroundStyle(Color.accentColor)
+                        .frame(width: 40, height: 40).background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
                     VStack(alignment: .leading, spacing: 4) {
                         Text(section ?? "General").font(.title2.bold())
                         Text("Changes are saved automatically").font(.caption).foregroundStyle(.secondary)
@@ -113,14 +107,10 @@ struct SettingsView: View {
                     Text("Option + Command").tag(UInt32(2304)); Text("Control + Option").tag(UInt32(6144)); Text("Control + Shift").tag(UInt32(4608))
                 }
             }
-        case "Schedules":
-            ScheduleSettingsView(workspace: workspace)
+        case "Schedules": ScheduleSettingsView(workspace: workspace)
         case "Appearance":
             Section("Expanded dashboard") {
-                Toggle("Horizontal widget layout", isOn: Binding(
-                    get: { workspace.settings.layout.horizontalWidgets ?? false },
-                    set: { workspace.settings.layout.horizontalWidgets = $0 }
-                ))
+                Toggle("Horizontal widget layout", isOn: Binding(get: { workspace.settings.layout.horizontalWidgets ?? false }, set: { workspace.settings.layout.horizontalWidgets = $0 }))
                 if workspace.settings.layout.horizontalWidgets ?? false {
                     Picker("Navigation", selection: Binding(get: { workspace.settings.layout.horizontalPages ?? false }, set: { workspace.settings.layout.horizontalPages = $0 })) {
                         Text("Scroll").tag(false); Text("Pages").tag(true)
@@ -138,13 +128,8 @@ struct SettingsView: View {
             Slider(value: $store.configuration.theme.tint, in: 0...1) { Text("Accent hue") }
             Slider(value: $store.configuration.theme.opacity, in: 0.5...1) { Text("Opacity") }
             Section("Background") {
-                Picker("Type", selection: Binding(
-                    get: { workspace.settings.layout.appearance.background.rawValue },
-                    set: { if let v = BackgroundKind(rawValue: $0) { workspace.settings.layout.appearance.background = v } }
-                )) {
-                    ForEach(BackgroundKind.allCases, id: \.self) {
-                        Text($0.rawValue.capitalized).tag($0.rawValue)
-                    }
+                Picker("Type", selection: Binding(get: { workspace.settings.layout.appearance.background.rawValue }, set: { if let v = BackgroundKind(rawValue: $0) { workspace.settings.layout.appearance.background = v } })) {
+                    ForEach(BackgroundKind.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0.rawValue) }
                 }
                 Button("Choose image or video…") { workspace.chooseBackground() }
                 Text(workspace.settings.layout.appearance.assetPath.isEmpty ? "No background file selected" : URL(fileURLWithPath: workspace.settings.layout.appearance.assetPath).lastPathComponent).font(.caption)
@@ -155,42 +140,28 @@ struct SettingsView: View {
                     Slider(value: $workspace.settings.layout.appearance.saturation, in: 0...2) { Text("Saturation") }
                     Slider(value: $workspace.settings.layout.appearance.brightness, in: -0.5...0.5) { Text("Brightness") }
                 }
-                GrainSettingsView(options: Binding(
-                    get: { workspace.settings.layout.appearance.grain ?? GrainOptions() },
-                    set: { workspace.settings.layout.appearance.grain = $0 }
-                ))
+                GrainSettingsView(options: Binding(get: { workspace.settings.layout.appearance.grain ?? GrainOptions() }, set: { workspace.settings.layout.appearance.grain = $0 }))
                 Toggle("Pause video on battery", isOn: $workspace.settings.layout.appearance.pauseVideoOnBattery)
                 Text("Video is muted, loops, and pauses when collapsed. Large videos and blur increase GPU use. Background files are referenced in place.").font(.caption)
             }
             Toggle("Animate expansion", isOn: $store.configuration.theme.animations)
-            Picker("Animation timing", selection: Binding(
-                get: { workspace.settings.layout.appearance.animation.rawValue },
-                set: { if let v = AnimationPreset(rawValue: $0) { workspace.settings.layout.appearance.animation = v } }
-            )) {
-                ForEach(AnimationPreset.allCases, id: \.self) {
-                    Text($0.rawValue.capitalized).tag($0.rawValue)
-                }
+            Picker("Animation timing", selection: Binding(get: { workspace.settings.layout.appearance.animation.rawValue }, set: { if let v = AnimationPreset(rawValue: $0) { workspace.settings.layout.appearance.animation = v } })) {
+                ForEach(AnimationPreset.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0.rawValue) }
             }
             HStack { Button("Import theme…") { store.importTheme() }; Button("Export theme…") { store.exportTheme() }; Button("Reset") { store.configuration.theme = Theme(); workspace.settings.layout.appearance = Appearance() } }
-        case "Widgets":
-            WidgetSettingsView(layout: $workspace.settings.layout)
-        case "Closed notch":
-            ClosedNotchSettingsView(layout: $workspace.settings.layout, media: workspace.media, app: workspace.settings.mediaApp)
+        case "Widgets": WidgetSettingsView(layout: $workspace.settings.layout)
+        case "Closed notch": ClosedNotchSettingsView(layout: $workspace.settings.layout, media: workspace.media, app: workspace.settings.mediaApp)
         case "Modules":
             Text("Drag a module row to reorder it, or use the arrow buttons.")
             ForEach(workspace.settings.layout.normalizedOrder()) { module in
                 HStack {
-                    Toggle(isOn: Binding(get: { workspace.settings.layout.enabled.contains(module) }, set: { value in
-                        if value { workspace.settings.layout.enabled.insert(module) } else { workspace.settings.layout.enabled.remove(module) }
-                    })) { Label(module.title, systemImage: module.symbol) }
+                    Toggle(isOn: Binding(get: { workspace.settings.layout.enabled.contains(module) }, set: { value in if value { workspace.settings.layout.enabled.insert(module) } else { workspace.settings.layout.enabled.remove(module) } })) { Label(module.title, systemImage: module.symbol) }
                     Button { workspace.moveModule(module, by: -1) } label: { Image(systemName: "arrow.up") }.accessibilityLabel("Move \(module.title) up")
                     Button { workspace.moveModule(module, by: 1) } label: { Image(systemName: "arrow.down") }.accessibilityLabel("Move \(module.title) down")
                 }
                 .onDrag {
                     let provider = NSItemProvider()
-                    provider.registerDataRepresentation(forTypeIdentifier: "com.redstoneinvente.halo.module", visibility: .ownProcess) { completion in
-                        completion(Data(module.rawValue.utf8), nil); return nil
-                    }
+                    provider.registerDataRepresentation(forTypeIdentifier: "com.redstoneinvente.halo.module", visibility: .ownProcess) { completion in completion(Data(module.rawValue.utf8), nil); return nil }
                     return provider
                 }
                 .onDrop(of: ["com.redstoneinvente.halo.module"], isTargeted: nil) { providers in
@@ -202,8 +173,7 @@ struct SettingsView: View {
                     return true
                 }
             }
-        case "Context notch interface":
-            ContextMusicSettings(layout: $workspace.settings.layout)
+        case "Context notch interface": ContextMusicSettings(layout: $workspace.settings.layout)
         case "Media & Files":
             Toggle("Automatically detect the playing music app", isOn: Binding(
                 get: { workspace.settings.automaticMedia ?? true },
@@ -215,8 +185,7 @@ struct SettingsView: View {
             Picker("Remove shelf references after", selection: $workspace.settings.shelfRetentionMinutes) { Text("Manually").tag(0); Text("5 minutes").tag(5); Text("30 minutes").tag(30); Text("1 hour").tag(60) }
             Text("Up to 100 references. Pinned items do not expire. Saved references keep their original retention age after relaunch. Removing a shelf item never deletes its original.")
             Button("Clear shelf references") { store.clearShelf() }
-        case "Profiles":
-            ProfileLibraryView(store: store, workspace: workspace)
+        case "Profiles": ProfileLibraryView(store: store, workspace: workspace)
         case "Automation":
             Text("Rules apply a profile when a condition becomes true. The first newly matching rule wins. No scripts or shell commands run.")
             ForEach($workspace.settings.rules) { $rule in
@@ -240,20 +209,11 @@ struct SettingsView: View {
                         Picker("Style", selection: $workspace.settings.displays[index].theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
                         Slider(value: $workspace.settings.displays[index].theme.width, in: 340...640, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0, display: screen) }) { Text("Width") }
                         Slider(value: $workspace.settings.displays[index].theme.tint, in: 0...1) { Text("Accent") }
-                        Menu("Use a profile on this display") {
-                            ForEach(workspace.settings.profiles) { profile in
-                                Button(profile.name) { workspace.settings.displays[index].theme = profile.theme; workspace.settings.displays[index].layout = profile.layout }
-                            }
-                        }
+                        Menu("Use a profile on this display") { ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.settings.displays[index].theme = profile.theme; workspace.settings.displays[index].layout = profile.layout } } }
                         Button("Follow global modules and background") { workspace.settings.displays[index].layout = nil }
                         if workspace.settings.displays[index].layout != nil {
-                            SurfaceAppearanceControls(appearance: Binding(
-                                get: { workspace.settings.displays[index].layout?.appearance ?? workspace.settings.layout.appearance },
-                                set: { workspace.settings.displays[index].layout?.appearance = $0 }
-                            ), theme: workspace.settings.displays[index].theme, screen: screen)
-                        } else {
-                            Button("Customize closed size, shape and transitions here") { workspace.settings.displays[index].layout = workspace.settings.layout }
-                        }
+                            SurfaceAppearanceControls(appearance: Binding(get: { workspace.settings.displays[index].layout?.appearance ?? workspace.settings.layout.appearance }, set: { workspace.settings.displays[index].layout?.appearance = $0 }), theme: workspace.settings.displays[index].theme, screen: screen)
+                        } else { Button("Customize closed size, shape and transitions here") { workspace.settings.displays[index].layout = workspace.settings.layout } }
                         Button("Use global theme") { workspace.settings.displays.removeAll { $0.id == id } }
                     } else { Button("Customize this display") { workspace.settings.displays.append(DisplayOverride(id: id, theme: store.configuration.theme)) } }
                 }
@@ -275,8 +235,7 @@ struct SettingsView: View {
                 Text("Automation is requested when detecting or controlling a running supported music player. Screen Recording is requested only when you capture a region. Microphone and Accessibility are not requested. No analytics. Enabling artwork colors downloads Spotify artwork; Apple Music artwork is read from the player. Plugin URLs open only after confirmation.")
                 Text("This direct-distribution build is not sandboxed. Files and notes are stored locally.")
             }
-        default:
-            HaloAboutView()
+        default: HaloAboutView()
         }
     }
 }
@@ -288,19 +247,12 @@ struct SettingsView: View {
     @State private var editing: Profile?
     @State private var name = "My profile"
     var body: some View {
-        HStack {
-            TextField("New profile name", text: $name)
-            Button("Save current") { workspace.saveProfile(name: name, theme: store.configuration.theme) }
-        }
-        Picker("View", selection: $cards) {
-            Label("Cards", systemImage: "square.grid.2x2").tag(true)
-            Label("List", systemImage: "list.bullet").tag(false)
-        }.pickerStyle(.segmented)
+        HStack { TextField("New profile name", text: $name); Button("Save current") { workspace.saveProfile(name: name, theme: store.configuration.theme) } }
+        Picker("View", selection: $cards) { Label("Cards", systemImage: "square.grid.2x2").tag(true); Label("List", systemImage: "list.bullet").tag(false) }.pickerStyle(.segmented)
         LazyVGrid(columns: cards ? [GridItem(.adaptive(minimum: 220), alignment: .top)] : [GridItem(.flexible())], alignment: .leading, spacing: 12) {
             ForEach(workspace.settings.profiles) { profile in
                 VStack(alignment: .leading, spacing: 10) {
-                    Label(profile.name, systemImage: profile.icon ?? "person.crop.rectangle")
-                        .font(.headline).foregroundStyle(Color.accentColor)
+                    Label(profile.name, systemImage: profile.icon ?? "person.crop.rectangle").font(.headline).foregroundStyle(Color.accentColor)
                     if let detail = profile.description, !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(.secondary) }
                     Text("\(profile.layout.enabled.intersection(Set(ModuleID.allCases)).count) widgets · \(profile.theme.style.rawValue)").font(.caption)
                     Text(activationSummary(profile)).font(.caption).foregroundStyle(.secondary)
@@ -332,9 +284,7 @@ struct SettingsView: View {
             let time = w.startMinute == w.endMinute ? "All day" : String(format: "%02d:%02d–%02d:%02d", w.startMinute / 60, w.startMinute % 60, w.endMinute / 60, w.endMinute % 60)
             lines.append("\(entry.enabled ? "Scheduled" : "Schedule paused"): \(days) · \(time)")
         }
-        for rule in workspace.settings.rules where rule.profileID == profile.id {
-            lines.append("\(rule.enabled ? "Automatic" : "Rule paused"): \(rule.trigger.rawValue) · \(rule.value)")
-        }
+        for rule in workspace.settings.rules where rule.profileID == profile.id { lines.append("\(rule.enabled ? "Automatic" : "Rule paused"): \(rule.trigger.rawValue) · \(rule.value)") }
         return lines.isEmpty ? "Manual · Apply whenever you like" : lines.joined(separator: "\n")
     }
 }
@@ -356,9 +306,7 @@ struct SettingsView: View {
                 case "Details":
                     TextField("Name", text: $profile.name)
                     TextField("Description", text: Binding(get: { profile.description ?? "" }, set: { profile.description = $0 }), axis: .vertical)
-                    Picker("Icon", selection: Binding(get: { profile.icon ?? icons[0] }, set: { profile.icon = $0 })) {
-                        ForEach(icons, id: \.self) { Label($0, systemImage: $0).tag($0) }
-                    }
+                    Picker("Icon", selection: Binding(get: { profile.icon ?? icons[0] }, set: { profile.icon = $0 })) { ForEach(icons, id: \.self) { Label($0, systemImage: $0).tag($0) } }
                 case "Layout":
                     Picker("Surface", selection: $profile.theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
                     Slider(value: $profile.theme.width, in: 340...640) { Text("Expanded width") }
@@ -377,9 +325,7 @@ struct SettingsView: View {
                         Slider(value: $profile.theme.tint, in: 0...1) { Text("Accent hue") }
                         Slider(value: $profile.theme.opacity, in: 0.5...1) { Text("Opacity") }
                         Slider(value: $profile.layout.appearance.expandedHeight, in: 280...800) { Text("Vertical dashboard height") }
-                        Picker("Background", selection: $profile.layout.appearance.background) {
-                            ForEach(BackgroundKind.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
-                        }
+                        Picker("Background", selection: $profile.layout.appearance.background) { ForEach(BackgroundKind.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
                         Button("Choose background image or video…") {
                             let panel = NSOpenPanel(); panel.allowedContentTypes = [.image, .movie]; panel.canChooseDirectories = false
                             if panel.runModal() == .OK, let url = panel.url { profile.layout.appearance.assetPath = url.path }
@@ -401,78 +347,83 @@ struct SettingsView: View {
 
 private struct ContextMusicSettings: View {
     @Binding var layout: WorkspaceLayout
-    private var options: Binding<ContextMusicOptions> {
-        Binding(get: { layout.contextMusic ?? ContextMusicOptions() }, set: { layout.contextMusic = $0 })
-    }
-    private var layoutMode: Binding<ContextMusicLayoutMode> {
-        Binding(get: { options.wrappedValue.resolvedLayoutMode }, set: { options.wrappedValue.layoutMode = $0 })
-    }
+    private var options: Binding<ContextMusicOptions> { Binding(get: { layout.contextMusic ?? ContextMusicOptions() }, set: { layout.contextMusic = $0 }) }
+    private var layoutMode: Binding<ContextMusicLayoutMode> { Binding(get: { options.wrappedValue.resolvedLayoutMode }, set: { options.wrappedValue.layoutMode = $0 }) }
     private var foregroundArtwork: Binding<ContextArtworkPresentation> {
-        Binding(get: { options.wrappedValue.resolvedForegroundArtwork }, set: {
-            options.wrappedValue.foregroundArtwork = $0
-            options.wrappedValue.showArtwork = $0 != .none
-        })
+        Binding(get: { options.wrappedValue.resolvedForegroundArtwork }, set: { options.wrappedValue.foregroundArtwork = $0; options.wrappedValue.showArtwork = $0 != .none })
     }
-    private var artworkBackground: Binding<Bool> {
-        Binding(get: { options.wrappedValue.usesArtworkBackground }, set: { options.wrappedValue.artworkBackground = $0 })
-    }
-    private var contentAlignment: Binding<ContextContentAlignment> {
-        Binding(get: { options.wrappedValue.resolvedContentAlignment }, set: { options.wrappedValue.contentAlignment = $0 })
-    }
-    private var artworkBlur: Binding<Double> {
-        Binding(get: { options.wrappedValue.resolvedArtworkBackgroundBlur }, set: { options.wrappedValue.artworkBackgroundBlur = $0 })
-    }
-    private var artworkDim: Binding<Double> {
-        Binding(get: { options.wrappedValue.resolvedArtworkBackgroundDim }, set: { options.wrappedValue.artworkBackgroundDim = $0 })
-    }
-    private var spacing: Binding<Double> {
-        Binding(get: { options.wrappedValue.resolvedSpacing }, set: { options.wrappedValue.spacing = $0 })
-    }
-    private var cornerRadius: Binding<Double> {
-        Binding(get: { options.wrappedValue.resolvedCornerRadius }, set: { options.wrappedValue.cornerRadius = $0 })
-    }
-    private var controlSize: Binding<Double> {
-        Binding(get: { options.wrappedValue.resolvedControlSize }, set: { options.wrappedValue.controlSize = $0 })
-    }
-    private var vinylRPM: Binding<Double> {
-        Binding(get: { options.wrappedValue.resolvedVinylRPM }, set: { options.wrappedValue.vinylRPM = $0 })
+    private var artworkBackground: Binding<Bool> { Binding(get: { options.wrappedValue.usesArtworkBackground }, set: { options.wrappedValue.artworkBackground = $0 }) }
+    private var contentAlignment: Binding<ContextContentAlignment> { Binding(get: { options.wrappedValue.resolvedContentAlignment }, set: { options.wrappedValue.contentAlignment = $0 }) }
+    private var artworkBlur: Binding<Double> { Binding(get: { options.wrappedValue.resolvedArtworkBackgroundBlur }, set: { options.wrappedValue.artworkBackgroundBlur = $0 }) }
+    private var artworkDim: Binding<Double> { Binding(get: { options.wrappedValue.resolvedArtworkBackgroundDim }, set: { options.wrappedValue.artworkBackgroundDim = $0 }) }
+    private var spacing: Binding<Double> { Binding(get: { options.wrappedValue.resolvedSpacing }, set: { options.wrappedValue.spacing = $0 }) }
+    private var cornerRadius: Binding<Double> { Binding(get: { options.wrappedValue.resolvedCornerRadius }, set: { options.wrappedValue.cornerRadius = $0 }) }
+    private var controlSize: Binding<Double> { Binding(get: { options.wrappedValue.resolvedControlSize }, set: { options.wrappedValue.controlSize = $0 }) }
+    private var vinylRPM: Binding<Double> { Binding(get: { options.wrappedValue.resolvedVinylRPM }, set: { options.wrappedValue.vinylRPM = $0 }) }
+    private var showLyrics: Binding<Bool> { Binding(get: { options.wrappedValue.showsLyrics }, set: { options.wrappedValue.showLyrics = $0 }) }
+    private var lyricDisplay: Binding<LyricDisplayMode> { Binding(get: { options.wrappedValue.resolvedLyricDisplay }, set: { options.wrappedValue.lyricDisplay = $0 }) }
+    private var lyricOffset: Binding<Double> { Binding(get: { options.wrappedValue.resolvedLyricSyncOffset }, set: { options.wrappedValue.lyricSyncOffset = $0 }) }
+    private var lyricFontSize: Binding<Double> { Binding(get: { options.wrappedValue.resolvedLyricFontSize }, set: { options.wrappedValue.lyricFontSize = $0 }) }
+    private var onlineLyrics: Binding<Bool> { Binding(get: { options.wrappedValue.usesOnlineLyrics }, set: { options.wrappedValue.lyricsOnline = $0 }) }
+    private var visualizerStyle: Binding<PlaybackAnimation> { Binding(get: { options.wrappedValue.resolvedVisualizerStyle }, set: { options.wrappedValue.visualizerStyle = $0 }) }
+    private func boolBinding(_ keyPath: WritableKeyPath<ContextMusicOptions, Bool?>, resolved: @escaping (ContextMusicOptions) -> Bool) -> Binding<Bool> {
+        Binding(get: { resolved(options.wrappedValue) }, set: { options.wrappedValue[keyPath: keyPath] = $0 })
     }
     var body: some View {
         Section("Context music interface") {
             Toggle("Replace the opened notch while music is playing", isOn: options.enabled)
             Text("When enabled, the music interface becomes the expanded Halo surface. The normal widget dashboard returns automatically when playback stops.").font(.caption).foregroundStyle(.secondary)
-
-            Picker("Layout", selection: layoutMode) {
-                ForEach(ContextMusicLayoutMode.allCases) { Text($0.title).tag($0) }
-            }.pickerStyle(.segmented)
-
-            Picker("Content alignment", selection: contentAlignment) {
-                ForEach(ContextContentAlignment.allCases) { Text($0.title).tag($0) }
-            }.pickerStyle(.segmented)
-
+            Picker("Layout", selection: layoutMode) { ForEach(ContextMusicLayoutMode.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+            Picker("Content alignment", selection: contentAlignment) { ForEach(ContextContentAlignment.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
             Toggle("Song title", isOn: options.showTitle)
             Toggle("Artist", isOn: options.showArtist)
             Toggle("Playback controls", isOn: options.showControls)
             Toggle("Visualizer", isOn: options.showVisualizer)
         }
 
-        Section("Artwork layers") {
-            Picker("Foreground artwork", selection: foregroundArtwork) {
-                ForEach(ContextArtworkPresentation.allCases) { Text($0.title).tag($0) }
-            }.pickerStyle(.segmented)
-            Text("Foreground artwork is independent from the background. You can use the album cover as the background while still showing a square cover or spinning vinyl in front.").font(.caption).foregroundStyle(.secondary)
-            if foregroundArtwork.wrappedValue != .none {
-                Slider(value: options.artworkSize, in: 32...240) { Text("Foreground artwork size") }
+        Section("Lyrics") {
+            Toggle("Show synced lyrics", isOn: showLyrics)
+            if showLyrics.wrappedValue {
+                Picker("Lyric display", selection: lyricDisplay) {
+                    Text("Current line").tag(LyricDisplayMode.line)
+                    Text("Focus phrase").tag(LyricDisplayMode.focus)
+                    Text("Current word").tag(LyricDisplayMode.word)
+                }.pickerStyle(.segmented)
+                Slider(value: lyricFontSize, in: 10...44) { Text("Lyrics size") }
+                Slider(value: lyricOffset, in: -5...5, step: 0.05) { Text("Lyrics sync offset") }
+                Toggle("Use online lyrics fallback", isOn: onlineLyrics)
+                Text("Uses the same synced LRC timing approach as the closed notch, including timestamp offsets and Apple Music embedded-lyrics fallback.").font(.caption).foregroundStyle(.secondary)
             }
-            if foregroundArtwork.wrappedValue == .vinyl {
-                Slider(value: vinylRPM, in: 1...45) { Text("Vinyl rotation speed") }
-            }
+        }
 
+        if options.wrappedValue.showVisualizer {
+            Section("Visualizer") {
+                Picker("Style", selection: visualizerStyle) {
+                    ForEach(PlaybackAnimation.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+                }
+                Text("Bars, Wave, Pulse, Waveform, Ribbon, Dots, Rings, Orbit and Spectrum are available in the context interface.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+
+        Section("Artwork layers") {
+            Picker("Foreground artwork", selection: foregroundArtwork) { ForEach(ContextArtworkPresentation.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+            Text("Foreground artwork is independent from the background. You can use the album cover as the background while still showing a square cover or spinning vinyl in front.").font(.caption).foregroundStyle(.secondary)
+            if foregroundArtwork.wrappedValue != .none { Slider(value: options.artworkSize, in: 32...240) { Text("Foreground artwork size") } }
+            if foregroundArtwork.wrappedValue == .vinyl { Slider(value: vinylRPM, in: 1...45) { Text("Vinyl rotation speed") } }
             Toggle("Use album cover as background", isOn: artworkBackground)
             if artworkBackground.wrappedValue {
                 Slider(value: artworkBlur, in: 0...30) { Text("Artwork background blur") }
                 Slider(value: artworkDim, in: 0...0.9) { Text("Artwork background dim") }
+                Text("Album artwork is clipped to the context surface before blur/cropping, so enabling it cannot resize or overflow the notch.").font(.caption).foregroundStyle(.secondary)
             }
+        }
+
+        Section("Colors from current song") {
+            Toggle("Color text from song", isOn: boolBinding(\.songTextColors, resolved: { $0.usesSongTextColors }))
+            Toggle("Color controls and scrubber from song", isOn: boolBinding(\.songControlColors, resolved: { $0.usesSongControlColors }))
+            Toggle("Color visualizer from song", isOn: boolBinding(\.songVisualizerColors, resolved: { $0.usesSongVisualizerColors }))
+            Toggle("Tint background from song", isOn: boolBinding(\.songBackgroundColors, resolved: { $0.usesSongBackgroundColors }))
+            Text("Halo extracts a small palette from each track's artwork and updates these elements automatically when the song changes.").font(.caption).foregroundStyle(.secondary)
         }
 
         Section("Appearance") {
@@ -482,16 +433,13 @@ private struct ContextMusicSettings: View {
             Slider(value: cornerRadius, in: 0...48) { Text("Inner corner radius") }
             ColorPicker("Text color", selection: Binding(get: { options.wrappedValue.textColor.color }, set: { options.wrappedValue.textColor = WidgetColor($0) }))
             Picker("Base background", selection: options.background) {
-                Text("Glass").tag(BackgroundKind.glass)
-                Text("Gradient").tag(BackgroundKind.gradient)
-                Text("Solid").tag(BackgroundKind.solid)
+                Text("Glass").tag(BackgroundKind.glass); Text("Gradient").tag(BackgroundKind.gradient); Text("Solid").tag(BackgroundKind.solid)
             }
             Slider(value: options.backgroundOpacity, in: 0...1) { Text("Base background opacity") }
         }
     }
 }
 
-// Edit this content to update the About page without changing its layout.
 private enum HaloAboutContent {
     static let description = "A customizable workspace for your Mac’s notch. Keep music, widgets and everyday controls within reach."
     static let creator = "Redstoneinvente"
