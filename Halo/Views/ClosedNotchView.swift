@@ -132,6 +132,7 @@ struct ClosedNotchSlot: View {
         }
     }
     private var showArtwork: Bool { artworkTargetSide == side }
+    private var hideMusicContentForArtworkOnly: Bool { showArtwork && artwork.isArtworkOnly && isMusicItem }
     private var powerEvent: PowerEventInfo? {
         let settings = options.powerReaction ?? PowerReactionOptions()
         guard settings.isEnabled, let battery = system.battery else { return nil }
@@ -176,16 +177,17 @@ struct ClosedNotchSlot: View {
     }
     var body: some View {
         HStack(spacing: elementSpacing) {
-            if let decoration, decorationSize > 0 {
-                SideDecorationView(options: decoration, playing: media.isPlaying, lowPower: system.lowPower, maximumHeight: decorationSize)
+            if side == .left {
+                decorationElement
+                artworkElement
+                contentElement
+                powerElement
+            } else {
+                powerElement
+                contentElement
+                artworkElement
+                decorationElement
             }
-            if showArtwork {
-                ClosedArtworkView(media: media, options: artwork, lowPower: system.lowPower)
-                    .padding(artwork.padding)
-                    .padding(.horizontal, artwork.margin / 2)
-            }
-            if itemIsVisible { content }
-            if showPowerEvent, let powerEvent { PowerEventBadge(event: powerEvent, options: options.powerReaction ?? PowerReactionOptions()) }
         }
         .font(.system(size: textSize))
         .minimumScaleFactor(0.65)
@@ -197,6 +199,26 @@ struct ClosedNotchSlot: View {
         .padding(side == .left ? .leading : .trailing, options.contentOuterMargin)
         .frame(width: availableWidth, height: availableHeight, alignment: .center)
         .clipped()
+    }
+    @ViewBuilder private var decorationElement: some View {
+        if let decoration, decorationSize > 0 {
+            SideDecorationView(options: decoration, playing: media.isPlaying, lowPower: system.lowPower, maximumHeight: decorationSize)
+        }
+    }
+    @ViewBuilder private var artworkElement: some View {
+        if showArtwork {
+            ClosedArtworkView(media: media, options: artwork, lowPower: system.lowPower)
+                .padding(artwork.padding)
+                // Artwork margin is spacing toward the content/camera side only. The independent outer-notch
+                // margin is applied by the slot container, so cover/vinyl can never consume that protected edge.
+                .padding(side == .left ? .trailing : .leading, artwork.margin)
+        }
+    }
+    @ViewBuilder private var contentElement: some View {
+        if itemIsVisible && !hideMusicContentForArtworkOnly { content }
+    }
+    @ViewBuilder private var powerElement: some View {
+        if showPowerEvent, let powerEvent { PowerEventBadge(event: powerEvent, options: options.powerReaction ?? PowerReactionOptions()) }
     }
     @ViewBuilder private var content: some View {
         switch item {
