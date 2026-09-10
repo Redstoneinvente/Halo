@@ -293,9 +293,9 @@ private final class HaloKeyboardBrightnessService {
     private func read(entry: io_service_t) -> Double? {
         for keyName in keys {
             let key = keyName as CFString
-            if let unmanaged = IORegistryEntrySearchCFProperty(entry, kIOServicePlane, key, kCFAllocatorDefault,
-                                                                 IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)),
-               let number = unmanaged.takeRetainedValue() as? NSNumber {
+            if let value = IORegistryEntrySearchCFProperty(entry, kIOServicePlane, key, kCFAllocatorDefault,
+                                                            IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)),
+               let number = value as? NSNumber {
                 let raw = number.doubleValue
                 if raw <= 1.0001 { return min(1, max(0, raw)) }
                 if raw <= 255 { return min(1, max(0, raw / 255.0)) }
@@ -308,13 +308,13 @@ private final class HaloKeyboardBrightnessService {
     private func write(entry: io_service_t, normalized: Double) -> Bool {
         for keyName in keys {
             let key = keyName as CFString
-            guard let unmanaged = IORegistryEntrySearchCFProperty(entry, kIOServicePlane, key, kCFAllocatorDefault,
-                                                                   IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)),
-                  let existing = unmanaged.takeRetainedValue() as? NSNumber else { continue }
+            guard let value = IORegistryEntrySearchCFProperty(entry, kIOServicePlane, key, kCFAllocatorDefault,
+                                                               IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)),
+                  let existing = value as? NSNumber else { continue }
             let raw = existing.doubleValue
             let scale: Double = raw <= 1.0001 ? 1 : (raw <= 255 ? 255 : 4095)
-            let value: NSNumber = scale == 1 ? NSNumber(value: normalized) : NSNumber(value: Int((normalized * scale).rounded()))
-            if IORegistryEntrySetCFProperty(entry, key, value) == KERN_SUCCESS { return true }
+            let valueToWrite: NSNumber = scale == 1 ? NSNumber(value: normalized) : NSNumber(value: Int((normalized * scale).rounded()))
+            if IORegistryEntrySetCFProperty(entry, key, valueToWrite) == KERN_SUCCESS { return true }
         }
         return false
     }
