@@ -1,6 +1,7 @@
 import Foundation
 import ScreenCaptureKit
 import CoreMedia
+import CoreGraphics
 import Accelerate
 import AudioToolbox
 
@@ -22,6 +23,9 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
     private var stream: SCStream?
     private var starting = false
     private var wanted = false
+    private var blockedForCurrentActivation = false
+    private var permissionRequestedThisRun = false
+    private var idleStopTask: Task<Void, Never>?
     private var smoothed = AudioSpectrumSnapshot()
 
     func snapshot() -> AudioSpectrumSnapshot {
@@ -32,7 +36,10 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
     func setActive(_ active: Bool) {
         stateLock.lock()
         wanted = active
-        let shouldStart = active && stream == nil && !starting
+        idleStopTask?.cancel()
+        idleStopTask = nil
+
+        let shouldStart = active && stream == nil && !starting && !blockedForCurrentActivation
         if shouldStart { starting = true }
         let current = stream
         stateLock.unlock()
@@ -40,17 +47,45 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
         if shouldStart {
             Task { await startIfNeeded() }
         } else if !active, let current {
-            Task {
-                try? await current.stopCapture()
-                stateLock.lock()
-                if stream === current { stream = nil }
-                smoothed = AudioSpectrumSnapshot()
-                stateLock.unlock()
+            // Closed-notch SwiftUI views can be recreated while lyrics resize or profiles update. Keep the
+            // capture alive briefly so those transient lifecycle changes do not repeatedly tear down and
+            // recreate ScreenCaptureKit, which can retrigger macOS capture-consent UI.
+            let task = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                guard !Task.isCancelled, let self else { return }
+                await self.stopIfStillIdle(current)
             }
+            stateLock.lock()
+            idleStopTask = task
+            stateLock.unlock()
         }
     }
 
+    private func screenCaptureAccessAvailable() async -> Bool {
+        if CGPreflightScreenCaptureAccess() { return true }
+
+        stateLock.lock()
+        let shouldRequest = !permissionRequestedThisRun
+        if shouldRequest { permissionRequestedThisRun = true }
+        stateLock.unlock()
+
+        // Never hammer the system permission dialog. If access is denied/not yet reflected, ask at most
+        // once per Halo process. A later Settings change is detected by CGPreflightScreenCaptureAccess().
+        guard shouldRequest else { return false }
+        return await MainActor.run { CGRequestScreenCaptureAccess() }
+    }
+
     private func startIfNeeded() async {
+        guard await screenCaptureAccessAvailable() else {
+            stateLock.lock()
+            starting = false
+            stream = nil
+            blockedForCurrentActivation = true
+            smoothed = AudioSpectrumSnapshot()
+            stateLock.unlock()
+            return
+        }
+
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             guard let display = content.displays.first else { throw SpectrumError.noDisplay }
@@ -77,23 +112,50 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
 
             guard stillWanted else { return }
             try await candidate.startCapture()
+
+            stateLock.lock()
+            blockedForCurrentActivation = false
+            stateLock.unlock()
         } catch {
             stateLock.lock()
             starting = false
             stream = nil
+            blockedForCurrentActivation = true
             smoothed = AudioSpectrumSnapshot()
             stateLock.unlock()
+            // Do not automatically recreate SCShareableContent/SCStream after a failure. An immediate retry
+            // loop can repeatedly invoke the macOS capture-consent path. The next genuine activation after an
+            // idle stop (or app relaunch) may try again.
         }
+    }
+
+    private func stopIfStillIdle(_ current: SCStream) async {
+        stateLock.lock()
+        guard !wanted, stream === current else {
+            if wanted { blockedForCurrentActivation = false }
+            stateLock.unlock()
+            return
+        }
+        stateLock.unlock()
+
+        try? await current.stopCapture()
+
+        stateLock.lock()
+        if stream === current { stream = nil }
+        smoothed = AudioSpectrumSnapshot()
+        blockedForCurrentActivation = false
+        idleStopTask = nil
+        stateLock.unlock()
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         stateLock.lock()
         if self.stream === stream { self.stream = nil }
         smoothed = AudioSpectrumSnapshot()
-        let restart = wanted && !starting
-        if restart { starting = true }
+        starting = false
+        blockedForCurrentActivation = true
         stateLock.unlock()
-        if restart { Task { await startIfNeeded() } }
+        // Deliberately no immediate restart. ScreenCaptureKit failures must not become permission-prompt loops.
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
