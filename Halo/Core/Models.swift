@@ -93,8 +93,22 @@ extension View {
     }
 }
 
+private struct HaloSliderWindowProbe: NSViewRepresentable {
+    let resolve: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { resolve(view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { resolve(nsView.window) }
+    }
+}
+
 /// A drop-in replacement for SwiftUI's common Double slider initializers.
-/// Settings windows opt into the richer presentation; normal runtime controls remain native sliders.
+/// Settings windows get a numeric field and tactile ticks; normal runtime controls stay native.
 struct Slider<Label: View>: View {
     @Binding private var value: Double
     private let bounds: ClosedRange<Double>
@@ -104,6 +118,7 @@ struct Slider<Label: View>: View {
     private let bypassSettingsEnhancement: Bool
 
     @Environment(\.haloEnhancedSettingsSliders) private var enhancedInSettings
+    @State private var hostWindow: NSWindow?
     @State private var text = ""
     @State private var dragging = false
     @State private var lastTick: Int?
@@ -154,7 +169,21 @@ struct Slider<Label: View>: View {
         self.bypassSettingsEnhancement = true
     }
 
-    private var shouldEnhance: Bool { enhancedInSettings && !bypassSettingsEnhancement }
+    private var livesInSettingsWindow: Bool {
+        var window = hostWindow
+        while let current = window {
+            let title = current.title.lowercased()
+            if title.contains("settings") || title.contains("halo · hud") || title.contains("customize profile") {
+                return true
+            }
+            window = current.sheetParent
+        }
+        return false
+    }
+
+    private var shouldEnhance: Bool {
+        (enhancedInSettings || livesInSettingsWindow) && !bypassSettingsEnhancement
+    }
 
     var body: some View {
         Group {
@@ -178,6 +207,12 @@ struct Slider<Label: View>: View {
             } else {
                 nativeSlider
             }
+        }
+        .background {
+            HaloSliderWindowProbe { window in
+                if hostWindow !== window { hostWindow = window }
+            }
+            .frame(width: 0, height: 0)
         }
         .onAppear { syncText() }
         .onChange(of: value) { newValue in
