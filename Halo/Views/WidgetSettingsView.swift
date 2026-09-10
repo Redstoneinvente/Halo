@@ -29,7 +29,7 @@ struct PreciseSlider: View {
                     .onChange(of: fieldFocused) { focused in if !focused { commitText() } }
                 if !suffix.isEmpty { Text(suffix).foregroundStyle(.secondary) }
             }
-            Slider(value: Binding(get: { value }, set: { newValue in
+            SwiftUI.Slider(value: Binding(get: { value }, set: { newValue in
                 value = quantized(newValue)
                 if dragging { tickIfNeeded(value) }
             }), in: range, step: step, onEditingChanged: { editing in
