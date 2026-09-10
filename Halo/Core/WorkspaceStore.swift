@@ -4,7 +4,13 @@ import UserNotifications
 
 @MainActor
 final class WorkspaceStore: ObservableObject, LiveActivityProvider {
-    @Published var settings: WorkspaceSettings { didSet { schedulePersistence(); updateHotkey(); if oldValue.mediaApp != settings.mediaApp { media.disconnect() } } }
+    @Published var settings: WorkspaceSettings { didSet { schedulePersistence(); updateHotkey(); if oldValue.mediaApp != settings.mediaApp { media.disconnect() }; updateArtworkPreference(); queueScheduleEvaluation() } }
+    @Published private(set) var scheduledProfileID: UUID?
+    var effectiveLayout: WorkspaceLayout { settings.profiles.first { $0.id == scheduledProfileID }?.layout ?? settings.layout }
+    var scheduledTheme: Theme? { settings.profiles.first { $0.id == scheduledProfileID }?.theme }
+    private var suppressedOccurrence: String?
+    private var scheduleEvaluationQueued = false
+    private var lastScheduleMinute: Int?
     @Published var activities: [LiveActivity] = []
     @Published var plugins: [PluginManifest] = []
     @Published var error: String?
@@ -41,25 +47,42 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             plugins = saved.compactMap { try? $0.validated() }
         }
     }
+    private func updateArtworkPreference() {
+        let layouts = [effectiveLayout] + settings.displays.compactMap { $0.enabled ? $0.layout : nil }
+        media.setArtworkEnabled(layouts.contains { $0.closedNotch?.visualizer?.dynamicColors == true })
+    }
     func start() {
-        system.refresh(); audio.refresh(); refreshApps(); updateHotkey()
+        updateArtworkPreference()
+        evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey()
+        media.poll(app: settings.mediaApp, automatic: settings.automaticMedia ?? true)
         ticker = Timer.publish(every: 2, on: .main, in: .common).autoconnect().sink { [weak self] _ in
             guard let self else { return }
             self.tick += 1
-            self.media.poll(app: self.settings.mediaApp)
+            self.media.poll(app: self.settings.mediaApp, automatic: self.settings.automaticMedia ?? true)
+            let minute = Int(Date().timeIntervalSince1970 / 60)
+            if self.lastScheduleMinute != minute { self.lastScheduleMinute = minute; self.evaluateSchedules() }
             self.clipboard.poll(enabled: self.settings.clipboardEnabled, excluded: self.settings.clipboardExcludedApps)
             if self.tick % 5 == 0 { self.system.refresh(); self.evaluateRules() }
             if self.tick % 30 == 0, self.settings.layout.enabled.contains(.calendar) { self.calendar.refresh() }
         }
         for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didWakeNotification] {
             NSWorkspace.shared.notificationCenter.publisher(for: name).receive(on: RunLoop.main).sink { [weak self] _ in
-                self?.refreshApps(); self?.system.refresh(); self?.evaluateRules()
+                self?.refreshApps(); self?.evaluateRules(); self?.evaluateSchedules()
+                if let self { self.media.poll(app: self.settings.mediaApp, automatic: self.settings.automaticMedia ?? true) }
             }.store(in: &subscriptions)
+        }
+        for name in ["com.apple.Music.playerInfo", "com.spotify.client.PlaybackStateChanged"] {
+            DistributedNotificationCenter.default().publisher(for: Notification.Name(name))
+                .debounce(for: .milliseconds(120), scheduler: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    guard let self else { return }
+                    self.media.poll(app: self.settings.mediaApp, automatic: self.settings.automaticMedia ?? true)
+                }.store(in: &subscriptions)
         }
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.evaluateRules() }.store(in: &subscriptions)
     }
-    func stop() { pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); hotkey.stop(); clipboard.reset() }
+    func stop() { pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); hotkey.stop(); clipboard.reset(); media.disconnect() }
     private func schedulePersistence() {
         pendingSave?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.persist() }
@@ -78,14 +101,38 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             DispatchQueue.main.async { [weak self] in self?.error = "The global shortcut is unavailable or already used. Choose another shortcut." }
         }
     }
-    func apply(_ profile: Profile) { settings.layout = profile.layout; applyTheme?(profile.theme) }
+    private func scheduleWinner(at date: Date) -> (UUID, String)? {
+        for entry in settings.profileSchedules ?? [] where entry.enabled {
+            guard settings.profiles.contains(where: { $0.id == entry.profileID }),
+                  let day = entry.window.occurrence(at: date) else { continue }
+            return (entry.profileID, entry.id.uuidString + ":" + String(day.timeIntervalSince1970))
+        }
+        return nil
+    }
+    private func queueScheduleEvaluation() {
+        guard !scheduleEvaluationQueued else { return }; scheduleEvaluationQueued = true
+        DispatchQueue.main.async { [weak self] in
+            self?.scheduleEvaluationQueued = false; self?.evaluateSchedules()
+        }
+    }
+    func evaluateSchedules() {
+        let winner = scheduleWinner(at: Date())
+        let selected = winner?.1 == suppressedOccurrence ? nil : winner?.0
+        if scheduledProfileID != selected { scheduledProfileID = selected; updateArtworkPreference() }
+    }
+    func resumeSchedules() { suppressedOccurrence = nil; evaluateSchedules() }
+    func apply(_ profile: Profile) {
+        suppressedOccurrence = scheduleWinner(at: Date())?.1
+        scheduledProfileID = nil
+        settings.layout = profile.layout; applyTheme?(profile.theme)
+    }
     func saveProfile(name: String, theme: Theme) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         settings.profiles.append(Profile(name: name, theme: theme, layout: settings.layout))
     }
     func deleteProfile(_ id: UUID) {
-        settings.profiles.removeAll { $0.id == id }; settings.rules.removeAll { $0.profileID == id }
+        settings.profiles.removeAll { $0.id == id }; settings.rules.removeAll { $0.profileID == id }; settings.profileSchedules?.removeAll { $0.profileID == id }
     }
     func renameProfile(_ id: UUID, to name: String) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -108,8 +155,8 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         if let selected { apply(selected) }
     }
     func publish(_ title: String, detail: String = "", progress: Double? = nil) {
-        activities.insert(LiveActivity(title: title, detail: detail, progress: progress.map { min(1, max(0, $0)) }), at: 0)
-        activities = Array(activities.prefix(20))
+        let activity = LiveActivity(title: title, detail: detail, progress: progress.map { min(1, max(0, $0)) })
+        activities = [activity] + Array(activities.prefix(19))
     }
     func enableNotifications() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] _, error in
@@ -124,7 +171,8 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
     }
     func refreshApps() {
-        runningApps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+        let updated = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+        if runningApps.map(\.processIdentifier) != updated.map(\.processIdentifier) { runningApps = updated }
     }
     func chooseBackground() {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.image, .movie]

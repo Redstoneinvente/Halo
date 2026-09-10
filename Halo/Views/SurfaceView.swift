@@ -18,7 +18,7 @@ struct SurfaceView: View, Equatable {
     @ObservedObject var state: SurfaceState
     @ObservedObject var workspace: WorkspaceStore
     private var theme: Theme { state.theme }
-    private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.settings.layout }
+    private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.effectiveLayout }
     private var contour: HaloContour {
         HaloContour(kind: layout.appearance.surface.shape, radius: theme.cornerRadius,
                     topRadius: layout.appearance.surface.topRadius, bottomRadius: layout.appearance.surface.bottomRadius,
@@ -58,7 +58,7 @@ struct SurfaceView: View, Equatable {
                             .help("Keep expanded").accessibilityLabel("Keep expanded")
                     }
                     ScrollView {
-                        VStack(spacing: layout.appearance.spacing) {
+                        LazyVStack(spacing: layout.appearance.spacing) {
                             ForEach(layout.normalizedOrder().filter { layout.enabled.contains($0) }) { module in
                                 WidgetCard(style: layout.widgetStyle(for: module)) {
                                     BuiltinOrIntegrationWidget(module: module, store: store)
@@ -71,7 +71,7 @@ struct SurfaceView: View, Equatable {
                         Spacer()
                         Button("Settings") { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) }
                     }
-                }.padding(.horizontal, max(20, layout.appearance.surface.shoulder + 12)).padding(.vertical, 20).transition(.opacity)
+                }.padding(.horizontal, max(20, layout.appearance.surface.shoulder + 12)).padding(.vertical, 20).frame(width: state.dashboardWidth).transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

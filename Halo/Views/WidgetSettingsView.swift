@@ -70,6 +70,10 @@ struct ClosedNotchSettingsView: View {
     private var options: Binding<ClosedNotchOptions> {
         Binding(get: { layout.closedNotch ?? ClosedNotchOptions() }, set: { layout.closedNotch = $0 })
     }
+    private var visualizer: Binding<VisualizerOptions> {
+        Binding(get: { options.wrappedValue.visualizer ?? VisualizerOptions() },
+                set: { options.wrappedValue.visualizer = $0 })
+    }
     private var expansion: Binding<ClosedExpansionOptions> {
         Binding(get: { options.wrappedValue.expansion ?? ClosedExpansionOptions() },
                 set: { options.wrappedValue.expansion = $0 })
@@ -78,8 +82,16 @@ struct ClosedNotchSettingsView: View {
         Section("Automatic width") {
             Toggle("Widen for music and live activity", isOn: expansion.enabled)
             Slider(value: expansion.width, in: 120...640, step: 1) { Text("Active width · \(Int(expansion.wrappedValue.width)) pt") }
-            Text("Music playback, a running timer or stopwatch, and live activities widen the closed notch without opening the dashboard. Completed activities stay visible for eight seconds. Idle width and height remain as set in Appearance.").font(.caption)
+            Text("Music playback, pinned files, screen capture/OCR, a running timer or stopwatch, and live activities widen the closed notch without opening the dashboard. Completed activities stay visible for eight seconds. Idle width and height remain as set in Appearance.").font(.caption)
         }
+        SideDecorationSettingsView(title: "Left icon / GIF", options: Binding(
+            get: { options.wrappedValue.leftDecoration ?? SideDecoration() },
+            set: { options.wrappedValue.leftDecoration = $0 }
+        ))
+        SideDecorationSettingsView(title: "Right icon / GIF", options: Binding(
+            get: { options.wrappedValue.rightDecoration ?? SideDecoration() },
+            set: { options.wrappedValue.rightDecoration = $0 }
+        ))
         Section("Content") {
             itemPicker("Left slot", options.left)
             itemPicker("Right slot", options.right)
@@ -96,10 +108,19 @@ struct ClosedNotchSettingsView: View {
                 ForEach(PlaybackAnimation.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
             }
             Toggle("Animate while music plays", isOn: options.animate)
-            Button("Connect selected music player") { media.perform("refresh", app: app) }.disabled(media.busy)
+            Toggle("Use colors from music artwork", isOn: visualizer.dynamicColors)
+            Slider(value: visualizer.speed, in: 0.25...2) { Text("Animation speed") }
+            Slider(value: visualizer.intensity, in: 0.1...1) { Text("Motion intensity") }
+            Slider(value: visualizer.width, in: 32...160) { Text("Visualizer width") }
+            Slider(value: visualizer.height, in: 8...48) { Text("Visualizer height") }
+            PlaybackVisualizer(kind: options.wrappedValue.animation, playing: true, enabled: options.wrappedValue.animate,
+                               options: visualizer.wrappedValue, palette: media.artworkColors, fallback: options.wrappedValue.color.color)
+                .padding(12).background(.black, in: RoundedRectangle(cornerRadius: 12))
+            Text("Artwork colors apply to the visualizer. Spotify artwork is downloaded from its artwork URL when enabled; Apple Music artwork comes from the player. Missing artwork uses your selected color. Increase closed height in Appearance for taller visualizers.").font(.caption)
+            Button("Retry player detection") { media.retryDetection(preferred: app) }.disabled(media.busy)
             Text(media.title)
             if let error = media.error { Text(error).foregroundStyle(.orange) }
-            Text("Select Apple Music or Spotify in Media & Files. After connecting, Halo checks playback every two seconds. The visualizer is a playback animation, not an audio waveform. It stops when paused and respects Reduce Motion and Low Power Mode.").font(.caption)
+            Text("Halo automatically detects Apple Music and Spotify. Playback notifications are backed by a two-second check. The visualizer is a playback animation, not an audio waveform. It stops when paused and respects Reduce Motion and Low Power Mode.").font(.caption)
         }
         Button("Reset closed content") { layout.closedNotch = ClosedNotchOptions() }
     }

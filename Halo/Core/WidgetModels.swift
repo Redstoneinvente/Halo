@@ -51,12 +51,29 @@ enum ClosedNotchItem: String, Codable, CaseIterable, Identifiable {
     case none, clock, date, timer, battery, media, visualizer, files, activity
     var id: String { rawValue }
 }
-enum PlaybackAnimation: String, Codable, CaseIterable { case bars, wave, pulse }
+enum PlaybackAnimation: String, Codable, CaseIterable { case bars, wave, pulse, waveform, ribbon, dots, rings, orbit, spectrum }
 struct ClosedExpansionOptions: Codable, Equatable {
     var enabled = true
     var width = 400.0
 }
+struct VisualizerOptions: Codable, Equatable {
+    var dynamicColors = false
+    var speed = 1.0
+    var intensity = 1.0
+    var width = 64.0
+    var height = 16.0
+    func validated() throws -> VisualizerOptions {
+        guard [speed, intensity, width, height].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        var v = self
+        v.speed = min(2, max(0.25, speed)); v.intensity = min(1, max(0.1, intensity))
+        v.width = min(160, max(32, width)); v.height = min(48, max(8, height))
+        return v
+    }
+}
 struct ClosedNotchOptions: Codable, Equatable {
+    var leftDecoration: SideDecoration?
+    var rightDecoration: SideDecoration?
+    var visualizer: VisualizerOptions?
     var expansion: ClosedExpansionOptions?
     var left: ClosedNotchItem = .clock
     var right: ClosedNotchItem = .visualizer
@@ -67,10 +84,39 @@ struct ClosedNotchOptions: Codable, Equatable {
     func validated() throws -> ClosedNotchOptions {
         guard fontSize.isFinite else { throw CocoaError(.fileReadCorruptFile) }
         var v = self; v.fontSize = min(24, max(8, fontSize)); v.color = try color.validated()
+        v.leftDecoration = try leftDecoration?.validatedForImport()
+        v.rightDecoration = try rightDecoration?.validatedForImport()
+        v.visualizer = try visualizer?.validated()
         if var expansion {
             guard expansion.width.isFinite else { throw CocoaError(.fileReadCorruptFile) }
             expansion.width = min(640, max(120, expansion.width)); v.expansion = expansion
         }
         return v
+    }
+}
+
+/// Quantized dominant colors, with a brightness floor for a dark notch.
+enum MusicPalette {
+    static func colors(from samples: [WidgetColor]) -> [WidgetColor] {
+        var bins: [Int: Int] = [:]
+        for sample in samples {
+            guard let c = try? sample.validated() else { continue }
+            let high = max(c.red, max(c.green, c.blue))
+            let low = min(c.red, min(c.green, c.blue))
+            guard high > 0.12, low < 0.92 else { continue }
+            let key = Int(c.red * 7) * 64 + Int(c.green * 7) * 8 + Int(c.blue * 7)
+            bins[key, default: 0] += high - low > 0.15 ? 3 : 1
+        }
+        let ranked = bins.keys.sorted { bins[$0] == bins[$1] ? $0 < $1 : bins[$0]! > bins[$1]! }
+        var result: [WidgetColor] = []
+        for key in ranked {
+            var c = WidgetColor(red: Double(key / 64) / 7, green: Double(key / 8 % 8) / 7, blue: Double(key % 8) / 7)
+            let high = max(c.red, max(c.green, c.blue))
+            let lift = max(0, 0.65 - high)
+            c.red += lift; c.green += lift; c.blue += lift
+            if result.allSatisfy({ abs($0.red - c.red) + abs($0.green - c.green) + abs($0.blue - c.blue) > 0.35 }) { result.append(c) }
+            if result.count == 2 { break }
+        }
+        return result
     }
 }

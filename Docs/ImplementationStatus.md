@@ -11,7 +11,7 @@ Updated after commit 0e24329: closed sizing bug fixed; eight contours, separate 
 | Modules | Fourteen selectable views, ordering, per-widget fonts/colors/card dimensions, configurable clock | Priorities, interactive compact variants for every module |
 | Focus | Deadline timer, pause/resume/reset, completion activity/sound, authorized notification, stopwatch | Pomodoro cycles, task history, world clocks, reminders and productivity analytics |
 | Shelf | References, drag in/out, Quick Look, file metadata, pins, open/reveal/share, expiry timestamps and opt-in persistence | Controlled move/copy workflows, reliable bookmark tracking, thumbnail caching |
-| Media | Apple Music/Spotify controls, opt-in playback polling, configurable closed-notch playback animation | Artwork, progress/seek, shuffle/repeat, browser/universal media, lyrics, audio-sampled visualizer |
+| Media | Apple Music/Spotify controls, automatic detection and playback polling, nine closed-notch playback animations and opt-in artwork palettes | Artwork display, progress/seek, shuffle/repeat, browser/universal media, lyrics, audio-sampled visualizer |
 | Audio | Output enumeration/selection, supported master-volume control | Input selection, microphone mute, per-channel fallback, accessory battery |
 | Calendar | Today's remaining events and recognized meeting links, optional EventKit access | Reminders, broader schedule navigation, richer countdown presentations |
 | Clipboard | Optional bounded RAM text history, search/copy/remove, exclusions and sensitive markers | Images, rich text, files, pin/favorites, provenance guarantees |
@@ -20,9 +20,9 @@ Updated after commit 0e24329: closed sizing bug fixed; eight contours, separate 
 | Launcher | Running apps, choose app, Downloads, fuzzy timer/plugin commands | Indexed app catalog, favorites/recents persistence, full command-palette window |
 | Developer | Read-only Git status in a selected folder | Build/run/test commands, server/Docker integrations, branch/commit widgets |
 | Live activities | Internal model/API and timer completion list | External progress ingestion, compact prioritization, downloads/build/render tracking |
-| Appearance | Image/video/solid/gradient/glass; blur/saturation/brightness; eight shapes, six transitions, duration and spring damping | Shader editor, broad effect stacks, audio reaction, artwork/wallpaper integration, icon editor |
+| Appearance | Image/video/solid/gradient/glass; blur/saturation/brightness; eight shapes, six transitions, grain/warmth and side icons/GIFs | Shader editor, broad effect stacks, audio reaction, artwork/wallpaper integration, icon editor |
 | Themes/profiles | v1/v2 theme import/export; backward-compatible appearance decoding; presets; save/rename/duplicate/delete; display snapshots | Editor polish, share UI, marketplace; portable bundled image/video assets |
-| Automation | Five condition types, profile switching, edge triggering | App-open/close, audio/Focus/Wi-Fi triggers; generalized action UI, approved scripts/shortcuts |
+| Automation | Five condition types, scheduled profiles/backgrounds, weekdays/overnight windows, edge triggering | App-open/close, audio/Focus/Wi-Fi triggers; generalized action UI, approved scripts/shortcuts |
 | Plugins | Validated declarative URL commands, installation/revocation, per-run confirmation | Native module loading and secure process isolation, third-party trigger/activity providers |
 | Weather and AI | Provider contracts only | Provider implementation, key management, disclosure/consent UX, feature views |
 | Licensing | Offline signature/expiry verification with tests; no gates | Production public key, issuer, purchase/import UI, entitlement integration |
@@ -30,7 +30,7 @@ Updated after commit 0e24329: closed sizing bug fixed; eight contours, separate 
 
 ## Widget and performance update
 
-Settings → Widgets edits each module's typography, text/accent/background colors, card dimensions, padding, corners and title visibility live. Clock adds font presets and installed fonts, seconds, 12/24-hour time, date and time zone. Settings → Closed notch configures two slots with camera-space reservation and bars/wave/pulse playback decoration. Preferences persist in layouts, profiles and exported themes; older layouts retain defaults.
+Settings → Widgets edits each module's typography, text/accent/background colors, card dimensions, padding, corners and title visibility live. Clock adds font presets and installed fonts, seconds, 12/24-hour time, date and time zone. Settings → Closed notch configures two slots with camera-space reservation and nine playback decorations with optional artwork colors and speed/intensity/size controls. Preferences persist in layouts, profiles and exported themes; older layouts retain defaults.
 
 Animation ticks update only a viewport wrapper, preferences are saved after slider activity settles and flushed at shutdown, background images are downsampled off the main thread, shelf icons/metadata are cached while rows are mounted, and video transport changes only when playback state changes. Glass uses native behind-window material with a capped tint, outside SwiftUI blur filters. These are code-level performance improvements; frame rate and energy use still need measurement on a Mac.
 
@@ -55,3 +55,11 @@ Xcode build, XCTest execution, SDK availability/type correctness, actual permiss
 5. Add production identity/updater and complete signed/notarized release validation.
 
 This package is an expanded development build. It is not the completed production product described by the original brief.
+
+## Scheduling and rendering follow-up
+
+Automatic Music/Spotify detection now uses player notifications and fallback polling without publishing busy state on every scan. Power/disk sampling runs off the main thread, unchanged snapshots are not republished, and dashboard content uses a stable width with lazy module creation during surface resizing. Cosmetic settings changes no longer snap an in-flight transition to its endpoint.
+
+Profiles support weekday/time windows as runtime overrides without overwriting the user's base layout. Backgrounds support independent timed windows. Static grain/warmth and independently conditioned side icons/GIFs are wired into profiles/themes; imported local image paths are stripped. Pinned files, capture/OCR and recent file additions participate in horizontal expansion.
+
+Source checks and regression cases have been added; native compilation, Apple Events permission behavior, GIF rendering and measured frame pacing still require macOS validation. See Personalization.md.

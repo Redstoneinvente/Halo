@@ -5,6 +5,7 @@ import IOKit.ps
 import CoreAudio
 import Carbon
 import UserNotifications
+import ImageIO
 
 @MainActor
 final class CalendarService: ObservableObject {
@@ -83,25 +84,39 @@ final class SystemService: ObservableObject {
     @Published var storage = ""
     @Published var uptime = ""
     @Published var lowPower = false
+    private var refreshing = false
     func refresh() {
-        lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
-        uptime = "\(Int(ProcessInfo.processInfo.systemUptime / 3600))h uptime"
-        memory = ByteCountFormatter.string(fromByteCount: Int64(ProcessInfo.processInfo.physicalMemory), countStyle: .memory) + " installed"
-        if let values = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
-           let free = values.volumeAvailableCapacityForImportantUsage {
-            storage = ByteCountFormatter.string(fromByteCount: free, countStyle: .file) + " free"
-        }
-        battery = nil; charging = false; onBattery = false
-        guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef] else { return }
-        for source in sources {
-            guard let info = IOPSGetPowerSourceDescription(snapshot, source)?.takeUnretainedValue() as? [String: Any],
-                  let current = info[kIOPSCurrentCapacityKey] as? Int,
-                  let max = info[kIOPSMaxCapacityKey] as? Int, max > 0 else { continue }
-            battery = Int(Double(current) / Double(max) * 100)
-            charging = (info[kIOPSIsChargingKey] as? Bool) ?? false
-            onBattery = (info[kIOPSPowerSourceStateKey] as? String) == kIOPSBatteryPowerValue
-            break
+        guard !refreshing else { return }; refreshing = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+            let uptime = "\(Int(ProcessInfo.processInfo.systemUptime / 3600))h uptime"
+            let memory = ByteCountFormatter.string(fromByteCount: Int64(ProcessInfo.processInfo.physicalMemory), countStyle: .memory) + " installed"
+            let free = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage
+            let storage = free.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) + " free" } ?? ""
+            var battery: Int?, charging = false, onBattery = false
+            if let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+               let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef] {
+                for source in sources {
+                    guard let info = IOPSGetPowerSourceDescription(snapshot, source)?.takeUnretainedValue() as? [String: Any],
+                          let current = info[kIOPSCurrentCapacityKey] as? Int,
+                          let maximum = info[kIOPSMaxCapacityKey] as? Int, maximum > 0 else { continue }
+                    battery = Int(Double(current) / Double(maximum) * 100)
+                    charging = (info[kIOPSIsChargingKey] as? Bool) ?? false
+                    onBattery = (info[kIOPSPowerSourceStateKey] as? String) == kIOPSBatteryPowerValue
+                    break
+                }
+            }
+            let power = (battery, charging, onBattery)
+            Task { @MainActor in
+                guard let self else { return }; self.refreshing = false
+                if self.lowPower != lowPower { self.lowPower = lowPower }
+                if self.uptime != uptime { self.uptime = uptime }
+                if self.memory != memory { self.memory = memory }
+                if self.storage != storage { self.storage = storage }
+                if self.battery != power.0 { self.battery = power.0 }
+                if self.charging != power.1 { self.charging = power.1 }
+                if self.onBattery != power.2 { self.onBattery = power.2 }
+            }
         }
     }
 }
@@ -161,55 +176,213 @@ final class MediaService: ObservableObject {
     @Published var error: String?
     @Published var busy = false
     @Published var isPlaying = false
-    private var connectedApp: String?
+    @Published private(set) var artworkColors: [WidgetColor] = []
+    private var artworkEnabled = false
+    private var trackID = ""
+    private var artworkKey = ""
+    private var artworkTask: Task<Void, Never>?
+    func setArtworkEnabled(_ enabled: Bool) {
+        guard artworkEnabled != enabled else { return }
+        artworkEnabled = enabled
+        artworkTask?.cancel(); artworkKey = ""; artworkColors = []
+        if enabled, let app = connectedApp { requestArtwork(app: app) }
+    }
+    @Published private(set) var connectedApp: String?
+    private var detecting = false
+    private var automaticMode = true
+    private var deniedApps = Set<String>()
     private var generation = 0
     func disconnect() {
         generation += 1; connectedApp = nil; isPlaying = false
+        artworkTask?.cancel(); artworkKey = ""; trackID = ""; artworkColors = []
         title = "Connect a player"; artist = "Apple Music or Spotify"
     }
-    func poll(app: String) {
-        guard connectedApp == app else { return }
-        perform("refresh", app: app)
+    private let queue = DispatchQueue(label: "Halo.Media.AppleEvents", qos: .utility)
+    func retryDetection(preferred: String) {
+        deniedApps.removeAll()
+        poll(app: preferred, automatic: automaticMode)
     }
-    private let queue = DispatchQueue(label: "Halo.Media.AppleEvents")
-    func perform(_ command: String, app: String) {
+    func poll(app: String, automatic: Bool = true) {
+        automaticMode = automatic
+        guard !detecting, !busy else { return }
+        let supported = automatic ? ["com.apple.Music", "com.spotify.client"] : [app]
+        let candidates = supported.filter { !deniedApps.contains($0) && !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
+        guard !candidates.isEmpty else {
+            if isPlaying || connectedApp != nil { disconnect() }
+            return
+        }
+        detecting = true
+        let expectedGeneration = generation
+        queue.async { [weak self] in
+            let results = candidates.map { MediaProbe.read(app: $0) }
+            Task { @MainActor in
+                guard let self else { return }
+                self.detecting = false
+                guard self.generation == expectedGeneration else { return }
+                for result in results where result.denied { self.deniedApps.insert(result.app) }
+                let snapshots = results.compactMap(\.snapshot)
+                if let selected = PlayerSelection.choose(snapshots, current: self.connectedApp, preferred: app) {
+                    self.accept(selected)
+                } else if self.connectedApp != nil || self.isPlaying { self.disconnect() }
+                if snapshots.isEmpty, let message = results.compactMap(\.error).first, self.error != message { self.error = message }
+            }
+        }
+    }
+    private func accept(_ snapshot: PlayerSnapshot) {
+        if connectedApp != snapshot.app {
+            artworkTask?.cancel(); artworkKey = ""; artworkColors = []
+            connectedApp = snapshot.app
+        }
+        if title != snapshot.title { title = snapshot.title }
+        if artist != snapshot.artist { artist = snapshot.artist }
+        if isPlaying != snapshot.playing { isPlaying = snapshot.playing }
+        if error != nil { error = nil }
+        trackID = snapshot.trackID
+        requestArtwork(app: snapshot.app)
+    }
+    func perform(_ command: String, app preferred: String) {
+        let app = command == "refresh" ? preferred : (connectedApp ?? preferred)
         guard ["com.apple.Music", "com.spotify.client"].contains(app),
               ["refresh", "playpause", "next track", "previous track"].contains(command), !busy else { return }
-        guard NSRunningApplication.runningApplications(withBundleIdentifier: app).first != nil else {
-            error = "Open the selected music player first."; isPlaying = false; connectedApp = nil; return
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: app).isEmpty else {
+            error = "Open Apple Music or Spotify to play music."; return
         }
+        deniedApps.remove(app)
+        generation += 1 // Ignore an older automatic probe completing behind this command.
+        artworkTask?.cancel(); artworkKey = ""
+        let expectedGeneration = generation
         busy = true
-        let requestGeneration = generation
         queue.async { [weak self] in
-            let action = command == "refresh" ? "" : command
+            let result = MediaProbe.read(app: app, command: command)
+            Task { @MainActor in
+                guard let self else { return }
+                self.busy = false
+                guard self.generation == expectedGeneration else { return }
+                if let snapshot = result.snapshot { self.accept(snapshot) }
+                else {
+                    if result.denied { self.deniedApps.insert(app) }
+                    self.error = result.error
+                }
+            }
+        }
+    }
+    private func requestArtwork(app: String) {
+        let key = app + ":" + trackID
+        guard artworkEnabled, key != artworkKey else { return }
+        artworkTask?.cancel(); artworkKey = key; artworkColors = []
+        guard !trackID.isEmpty else { return }
+        let expectedID = trackID
+        let expectedGeneration = generation
+        // A separate query runs only on track changes, never for every playback poll.
+        queue.async { [weak self] in
+            let artwork = app == "com.spotify.client" ? "artwork url of current track" : "raw data of artwork 1 of current track"
             let source = """
+            if application id "\(app)" is not running then return {"", ""}
             with timeout of 5 seconds
                 tell application id "\(app)"
-                    \(action)
-                    if player state is stopped then return {"Nothing playing", "", false}
-                    return {name of current track, artist of current track, (player state is playing)}
+                    return {(id of current track as text), \(artwork)}
                 end tell
             end timeout
             """
             var failure: NSDictionary?
             let result = NSAppleScript(source: source)?.executeAndReturnError(&failure)
-            let title = result?.atIndex(1)?.stringValue
-            let artist = result?.atIndex(2)?.stringValue
-            let playing = result?.atIndex(3)?.booleanValue ?? false
-            let message = failure?[NSAppleScript.errorMessage] as? String
+            let returnedID = result?.atIndex(1)?.stringValue
+            let urlString = app == "com.spotify.client" ? result?.atIndex(2)?.stringValue : nil
+            let bytes = app == "com.apple.Music" ? result?.atIndex(2)?.data : nil
             Task { @MainActor in
-                guard let self else { return }
-                self.busy = false
-                guard self.generation == requestGeneration else { return }
-                self.error = message
-                if let title, message == nil {
-                    if self.title != title { self.title = title }
-                    if self.artist != (artist ?? "") { self.artist = artist ?? "" }
-                    if self.isPlaying != playing { self.isPlaying = playing }
-                    self.connectedApp = app
-                } else { self.connectedApp = nil; self.isPlaying = false }
+                guard let self, self.artworkEnabled, self.generation == expectedGeneration,
+                      self.artworkKey == key, returnedID == expectedID else { return }
+                self.artworkTask = Task { [weak self] in
+                    let colors = await ArtworkReader.palette(data: bytes, urlString: urlString)
+                    guard !Task.isCancelled, let self, self.artworkEnabled,
+                          self.generation == expectedGeneration, self.artworkKey == key else { return }
+                    self.artworkColors = colors
+                }
             }
         }
+    }
+}
+
+private struct MediaProbe {
+    var app: String
+    var snapshot: PlayerSnapshot?
+    var error: String?
+    var denied = false
+    static func read(app: String, command: String = "refresh") -> MediaProbe {
+        let action = command == "refresh" ? "" : command
+        let source = """
+        if application id "\(app)" is not running then return {"Nothing playing", "", false, ""}
+        with timeout of 3 seconds
+            tell application id "\(app)"
+                \(action)
+                if player state is stopped then return {"Nothing playing", "", false, ""}
+                set trackKey to ""
+                set trackTitle to "Playing audio"
+                set trackArtist to ""
+                try
+                    set trackKey to (id of current track as text)
+                    set trackTitle to name of current track
+                    set trackArtist to artist of current track
+                end try
+                return {trackTitle, trackArtist, (player state is playing), trackKey}
+            end tell
+        end timeout
+        """
+        var failure: NSDictionary?
+        let result = NSAppleScript(source: source)?.executeAndReturnError(&failure)
+        if let failure {
+            let denied = (failure[NSAppleScript.errorNumber] as? NSNumber)?.intValue == -1743
+            return MediaProbe(app: app, error: failure[NSAppleScript.errorMessage] as? String ?? "Player unavailable", denied: denied)
+        }
+        guard let title = result?.atIndex(1)?.stringValue else { return MediaProbe(app: app) }
+        return MediaProbe(app: app, snapshot: PlayerSnapshot(app: app, title: title,
+            artist: result?.atIndex(2)?.stringValue ?? "", playing: result?.atIndex(3)?.booleanValue ?? false,
+            trackID: result?.atIndex(4)?.stringValue ?? ""))
+    }
+}
+
+/// Bounded network reads and small image samples; no artwork decoding in view bodies.
+private enum ArtworkReader {
+    static func palette(data: Data?, urlString: String?) async -> [WidgetColor] {
+        var imageData = data
+        if let urlString, let url = URL(string: urlString), url.scheme == "https" {
+            do {
+                let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+                let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+                      response.expectedContentLength <= 5_000_000 else { return [] }
+                var received = Data()
+                for try await byte in bytes {
+                    try Task.checkCancellation()
+                    guard received.count < 5_000_000 else { return [] }
+                    received.append(byte)
+                }
+                imageData = received
+            } catch { return [] }
+        }
+        guard !Task.isCancelled, let imageData, imageData.count <= 5_000_000 else { return [] }
+        return await Task.detached(priority: .utility) { extract(imageData) }.value
+    }
+    static func extract(_ data: Data) -> [WidgetColor] {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 40,
+                kCGImageSourceCreateThumbnailWithTransform: true
+              ] as CFDictionary) else { return [] }
+        var pixels = [UInt8](repeating: 0, count: 40 * 40 * 4)
+        let samples: [WidgetColor] = pixels.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(data: buffer.baseAddress, width: 40, height: 40, bitsPerComponent: 8,
+                bytesPerRow: 160, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else { return [] }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: 40, height: 40))
+            let values = buffer.bindMemory(to: UInt8.self)
+            return stride(from: 0, to: values.count, by: 4).compactMap { index in
+                guard values[index + 3] > 200 else { return nil }
+                return WidgetColor(red: Double(values[index]) / 255, green: Double(values[index + 1]) / 255, blue: Double(values[index + 2]) / 255)
+            }
+        }
+        return MusicPalette.colors(from: samples)
     }
 }
 

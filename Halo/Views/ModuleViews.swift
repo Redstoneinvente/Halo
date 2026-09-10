@@ -102,13 +102,14 @@ struct MediaModuleView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(service.title).lineLimit(2)
+            if let source = service.connectedApp { Text(source == "com.apple.Music" ? "Apple Music" : "Spotify").font(style.font(scale: 0.75)).foregroundStyle(.secondary) }
             Text(service.artist).font(style.font(scale: 0.85)).foregroundStyle(.secondary)
             HStack {
                 Button { service.perform("previous track", app: app) } label: { Image(systemName: "backward.end.fill") }.accessibilityLabel("Previous track")
                 Button { service.perform("playpause", app: app) } label: { Image(systemName: "playpause.fill") }.accessibilityLabel("Play or pause")
                 Button { service.perform("next track", app: app) } label: { Image(systemName: "forward.end.fill") }.accessibilityLabel("Next track")
                 Spacer()
-                Button("Connect / Refresh") { service.perform("refresh", app: app) }
+                Button("Retry detection") { service.retryDetection(preferred: app) }
             }.disabled(service.busy)
             if let error = service.error { Text(error).font(style.font(scale: 0.85)).foregroundStyle(.orange) }
         }
@@ -227,9 +228,22 @@ struct SurfaceBackground: View {
     let theme: Theme
     let expanded: Bool
     @ObservedObject var system: SystemService
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @ViewBuilder
     var body: some View {
+        TimelineView(.periodic(from: Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970 / 60) * 60), by: 60)) { context in
+            ResolvedSurfaceBackground(appearance: appearance.resolved(at: context.date), theme: theme, expanded: expanded, system: system)
+        }
+    }
+}
+struct ResolvedSurfaceBackground: View {
+    let appearance: Appearance
+    let theme: Theme
+    let expanded: Bool
+    @ObservedObject var system: SystemService
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        material.overlay { GrainOverlay(options: appearance.grain ?? GrainOptions()) }
+    }
+    @ViewBuilder private var material: some View {
         if appearance.background == .glass {
             if reduceTransparency {
                 Color.black
@@ -286,7 +300,7 @@ struct CachedBackgroundImage: View {
                 return CGImageSourceCreateThumbnailAtIndex(source, 0, [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
                     kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 2048,
+                    kCGImageSourceThumbnailMaxPixelSize: 1280,
                     kCGImageSourceShouldCacheImmediately: true
                 ] as CFDictionary)
             }.value

@@ -14,7 +14,7 @@ Latest update: closed-width handling fixed, eight contours, independent opening/
 - App/battery/charging/display-count/hour rules that switch profiles.
 - Image, muted looping video, gradient, solid and glass backgrounds; blur, saturation and brightness.
 - Theme v1 import and v2 layout/theme import/export. Imported themes cannot access foreign local asset paths.
-- Apple Music/Spotify scripting controls, CoreAudio output selection/volume where supported, EventKit schedule.
+- Automatic Apple Music/Spotify detection and scripting controls, CoreAudio output selection/volume where supported, EventKit schedule.
 - Opt-in memory-only text clipboard history, exclusions, search, copy and clear.
 - Screenshot-region capture using macOS's capture tool; on-device Vision OCR.
 - File references, drag in/out, open/reveal/share, retention and optional persistence.
@@ -49,7 +49,7 @@ The optional tree-sitter Swift parser only checks grammar. It is not an SDK type
 
 Settings opens on first launch. Enable modules under Modules and optional data access under Privacy. Default global shortcut: **Option–Command–Space**. Hover or click the top strip to expand. Right-click the surface for profiles. Pin to keep it open. Use the menu-bar icon for Settings or Quit.
 
-Media access is requested by Connect / Refresh. Open the selected music player first. Refresh is explicit, not continuous Now Playing observation. Audio devices without writable master volume show an explanation.
+Halo automatically detects playing Apple Music/Spotify instances using playback notifications plus a two-second fallback check. macOS Automation permission may be requested once per player. A denied player is skipped until Retry detection; browsers and other players are not supported. Audio devices without writable master volume show an explanation.
 
 Choose a display override in Displays; applying a profile there snapshots that display's modules/background separately. Global profile changes do not replace independent display snapshots. Detached panels retain their position through appearance edits; positions are not persisted across launches.
 
@@ -57,7 +57,7 @@ Choose a display override in Displays; applying a profile there snapshots that d
 
 This is a non-sandboxed direct-distribution target with hardened runtime enabled. Preferences, notes, profile settings, manifests, and optionally shelf paths are in UserDefaults. Clipboard history stays in RAM and clears on quit; it captures text only and is off by default. Clipboard exclusions are best-effort, not a guarantee against secrets.
 
-Backgrounds and shelf items reference original files; moving them can break references. Shelf removal never deletes originals. Screenshots are saved only to a user-selected destination. OCR is on-device. No background analytics, network providers, weather requests, or AI uploads are configured.
+Backgrounds and shelf items reference original files; moving them can break references. Shelf removal never deletes originals. Screenshots are saved only to a user-selected destination. OCR is on-device. No analytics, weather requests, or AI uploads are configured. Optional music artwork colors download Spotify cover images and read Apple Music artwork from the player.
 
 Imported theme assets must be reselected locally. Plugin URLs are shown for confirmation before opening; Shortcuts may themselves perform actions configured by the user.
 
@@ -66,3 +66,12 @@ Imported theme assets must be reselected locally. Plugin URLs are shown for conf
 See Docs/ReleaseChecklist.md. Signing, notarization, production icon, update service, performance/accessibility QA, and outstanding brief features are not complete. No licensing gate is enabled; the signed-license verifier is isolated from the free core.
 
 See Docs/Architecture.md and Docs/Plugins.md for extension contracts.
+
+### Personalization update
+
+- **Schedules:** weekday/time ranges for profiles and backgrounds, including overnight ranges and restoration of the normal layout/background.
+- **Appearance:** static soft grain, grain size and warmth; glass stays native.
+- **Closed notch:** independent left/right icons or GIFs, shown always, never or during music; widening for pinned files, capture/OCR and recent file additions as well as playback/timers/activities.
+- **Rendering:** dashboard layout stays at its final width during transitions; lazy widget creation, unchanged-state suppression and background disk/power sampling reduce main-thread work.
+
+See [Personalization.md](Docs/Personalization.md) for behavior and the Mac validation checklist. The pending nine visualizer styles and optional artwork colors are included in this update. Source and Swift grammar checks pass in the editing environment; macOS build/runtime performance remain unverified.

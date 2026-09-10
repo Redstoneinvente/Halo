@@ -14,6 +14,7 @@ final class SurfaceState: ObservableObject {
         didSet { if pinned { collapseTask?.cancel(); expanded = true } }
     }
     let viewport = SurfaceViewport()
+    @Published var dashboardWidth: CGFloat = 420
     @Published var compactWidth: CGFloat = 190
     @Published var closedOcclusion: CGRect?
     @Published var compactHeight: CGFloat = 40
@@ -90,6 +91,7 @@ final class WindowManager {
         let state = SurfaceState()
         let animator = SurfaceAnimator()
         var geometry: SurfaceGeometry?
+        var targetFrame: CGRect?
         var subscription: AnyCancellable?
         init() {
             panel = HaloPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -124,7 +126,10 @@ final class WindowManager {
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.$configuration.dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
-        store.workspace.$settings.map { SurfaceRenderConfiguration(appearance: $0.layout.appearance, displays: $0.displays, closedNotch: $0.layout.closedNotch) }
+        store.workspace.$settings.map { [store] settings in
+            let layout = settings.profiles.first { $0.id == store.workspace.scheduledProfileID }?.layout ?? settings.layout
+            return SurfaceRenderConfiguration(appearance: layout.appearance, displays: settings.displays, closedNotch: layout.closedNotch)
+        }
             .removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloGeometryPreview"))
@@ -139,6 +144,12 @@ final class WindowManager {
                 }
                 self?.refreshDynamicWidths()
             }.store(in: &subscriptions)
+        store.workspace.$scheduledProfileID.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+        store.$pinnedFiles.map { !$0.isEmpty }.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+        store.workspace.capture.$busy.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.media.$isPlaying.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.$deadline.map { $0 != nil }.removeDuplicates().receive(on: DispatchQueue.main)
@@ -150,13 +161,20 @@ final class WindowManager {
         reconcile()
     }
     private var hasLiveContent: Bool {
-        store.workspace.media.isPlaying || store.deadline != nil || store.workspace.stopwatchStart != nil ||
+        !store.pinnedFiles.isEmpty || store.workspace.capture.busy || store.workspace.media.isPlaying || store.deadline != nil || store.workspace.stopwatchStart != nil ||
         store.workspace.activities.contains { ($0.progress.map { $0 < 1 } ?? false) || $0.created.addingTimeInterval(8) > Date() }
     }
     private func configureDynamicWidth(_ host: Host) {
-        let layout = host.state.layoutOverride ?? store.workspace.settings.layout
+        let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
         let options = layout.closedNotch?.expansion ?? ClosedExpansionOptions()
-        host.geometry?.activeCompactWidth = options.enabled && hasLiveContent && !host.state.editingGeometry ? options.width : nil
+        var width = options.enabled && hasLiveContent ? options.width : 0
+        let decorations = [layout.closedNotch?.leftDecoration, layout.closedNotch?.rightDecoration].compactMap { $0 }
+        let visible = decorations.filter { $0.isVisible(playing: store.workspace.media.isPlaying) }
+        if let size = visible.map(\.size).max(), let geometry = host.geometry {
+            let camera = geometry.attachedToNotch ? geometry.physicalNotchWidth : 0
+            width = max(width, camera + 2 * (size + 20))
+        }
+        host.geometry?.activeCompactWidth = host.state.editingGeometry || width == 0 ? nil : width
     }
     private func refreshDynamicWidths() {
         activityExpiry?.cancel()
@@ -177,6 +195,7 @@ final class WindowManager {
                 target.origin.x = host.panel.frame.midX - target.width / 2
                 target.origin.y = host.panel.frame.maxY - target.height
             }
+            host.targetFrame = target
             var motion = geometry.appearance.surface
             motion.opening = .resize; motion.closing = .resize; motion.duration = 0.25
             host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
@@ -199,16 +218,16 @@ final class WindowManager {
             active.insert(id)
             let existing = hosts[id]
             let host = existing ?? Host()
-            var theme = override?.theme ?? store.configuration.theme
+            var theme = override?.theme ?? store.workspace.scheduledTheme ?? store.configuration.theme
             if store.configuration.simulateNotch && theme.style == .notch { theme.style = .simulated }
-            var appearance = override?.layout?.appearance ?? store.workspace.settings.layout.appearance
+            var appearance = override?.layout?.appearance ?? store.workspace.effectiveLayout.appearance
             appearance.surface = (try? appearance.surface.validated()) ?? SurfaceOptions()
             let previousOffset = host.geometry?.offset(expanded: host.state.expanded) ?? .zero
             host.geometry = Self.geometry(screen: screen, theme: theme, appearance: appearance)
-            host.animator.cancel()
             if host.state.theme != theme { host.state.theme = theme }
             if host.state.layoutOverride != override?.layout { host.state.layoutOverride = override?.layout }
             configureDynamicWidth(host)
+            if host.state.dashboardWidth != host.geometry!.frame(expanded: true).width { host.state.dashboardWidth = host.geometry!.frame(expanded: true).width }
             if host.state.compactHeight != host.geometry!.compactHeight { host.state.compactHeight = host.geometry!.compactHeight }
             if host.state.compactWidth != host.geometry!.compactWidth { host.state.compactWidth = host.geometry!.compactWidth }
             if host.state.closedOcclusion != host.geometry!.closedCameraOcclusion { host.state.closedOcclusion = host.geometry!.closedCameraOcclusion }
@@ -219,9 +238,12 @@ final class WindowManager {
                 target.origin.x = host.panel.frame.midX - target.width / 2 + delta.width - previousOffset.width
                 target.origin.y = host.panel.frame.maxY - target.height + delta.height - previousOffset.height
             }
-            if host.state.viewport.size != target.size { host.state.viewport.size = target.size }
-            host.panel.alphaValue = 1
-            if host.panel.frame != target { host.panel.setFrame(target, display: false) }
+            if host.targetFrame != target {
+                host.targetFrame = target; host.animator.cancel()
+                if host.state.viewport.size != target.size { host.state.viewport.size = target.size }
+                host.panel.alphaValue = 1
+                if host.panel.frame != target { host.panel.setFrame(target, display: false) }
+            }
             if existing == nil {
                 let view = NSHostingView(rootView: SurfaceViewportView(viewport: host.state.viewport, content: SurfaceView(store: store, state: host.state, workspace: store.workspace)))
                 view.sizingOptions = []
@@ -234,6 +256,7 @@ final class WindowManager {
                         target.origin.x = host.panel.frame.midX - target.width / 2 + newOffset.width - oldOffset.width
                         target.origin.y = host.panel.frame.maxY - target.height + newOffset.height - oldOffset.height
                     }
+                    host.targetFrame = target
                     host.animator.move(panel: host.panel, state: host.state, target: target, options: geometry.appearance.surface,
                                        preset: geometry.appearance.animation, animations: host.state.theme.animations && !host.state.editingGeometry, opening: expanded, style: geometry.style)
                 }

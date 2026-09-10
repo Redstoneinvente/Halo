@@ -4,6 +4,84 @@ import XCTest
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    func testSchedulesHandleWeekdaysOvernightAndEndBoundary() {
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        func date(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+            calendar.date(from: DateComponents(year: 2026, month: 9, day: day, hour: hour, minute: minute))!
+        }
+        let overnight = DailyWindow(startMinute: 22 * 60, endMinute: 6 * 60, weekdays: [2])
+        XCTAssertNotNil(overnight.occurrence(at: date(7, 22), calendar: calendar)) // Monday
+        XCTAssertEqual(overnight.occurrence(at: date(8, 5, 59), calendar: calendar), calendar.startOfDay(for: date(7, 0)))
+        XCTAssertNil(overnight.occurrence(at: date(8, 6), calendar: calendar))
+        XCTAssertNil(overnight.occurrence(at: date(8, 22), calendar: calendar))
+        let allDay = DailyWindow(startMinute: 0, endMinute: 0, weekdays: [2])
+        XCTAssertNotNil(allDay.occurrence(at: date(7, 23, 59), calendar: calendar))
+        XCTAssertNil(allDay.occurrence(at: date(8, 0), calendar: calendar))
+    }
+    func testBackgroundScheduleRestoresBaseAndUsesFirstMatch() {
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let noon = calendar.date(from: DateComponents(year: 2026, month: 9, day: 7, hour: 12))!
+        var base = Appearance(); base.background = .solid
+        var first = TimedBackground(); first.kind = .glass
+        var second = TimedBackground(); second.kind = .image; second.assetPath = "/chosen/photo.png"
+        base.backgroundSchedule = [first, second]
+        XCTAssertEqual(base.resolved(at: noon, calendar: calendar).background, .glass)
+        XCTAssertEqual(base.resolved(at: noon.addingTimeInterval(8 * 3600), calendar: calendar).background, .solid)
+        XCTAssertEqual(base.background, .solid)
+    }
+    func testPlayerSelectionFollowsPlayingAppAndAvoidsTieFlapping() {
+        var music = PlayerSnapshot(app: "com.apple.Music")
+        var spotify = PlayerSnapshot(app: "com.spotify.client", playing: true)
+        XCTAssertEqual(PlayerSelection.choose([music, spotify], current: music.app, preferred: music.app)?.app, spotify.app)
+        music.playing = true
+        XCTAssertEqual(PlayerSelection.choose([music, spotify], current: spotify.app, preferred: music.app)?.app, spotify.app)
+        spotify.playing = false
+        XCTAssertEqual(PlayerSelection.choose([music, spotify], current: spotify.app, preferred: spotify.app)?.app, music.app)
+        XCTAssertNil(PlayerSelection.choose([], current: nil, preferred: music.app))
+    }
+    func testDecorationVisibilityAndImportedPaths() throws {
+        var decoration = SideDecoration(); decoration.visibility = .playing
+        XCTAssertFalse(decoration.isVisible(playing: false)); XCTAssertTrue(decoration.isVisible(playing: true))
+        decoration.visibility = .always
+        XCTAssertTrue(decoration.isVisible(playing: false))
+        decoration.kind = .image; decoration.assetPath = "/private/image.gif"
+        let imported = try decoration.validatedForImport()
+        XCTAssertEqual(imported.assetPath, ""); XCTAssertEqual(imported.visibility, .disabled)
+    }
+    func testPersonalizationRoundTripAndLegacySettings() throws {
+        let defaults = try JSONDecoder().decode(WorkspaceSettings.self, from: JSONEncoder().encode(WorkspaceSettings()))
+        XCTAssertNil(defaults.automaticMedia); XCTAssertNil(defaults.profileSchedules)
+        XCTAssertTrue(defaults.automaticMedia ?? true)
+        var layout = WorkspaceLayout()
+        layout.appearance.grain = GrainOptions(enabled: true)
+        layout.appearance.backgroundSchedule = [TimedBackground()]
+        var options = ClosedNotchOptions()
+        options.leftDecoration = SideDecoration(visibility: .always, symbol: "heart.fill")
+        layout.closedNotch = options
+        XCTAssertEqual(try JSONDecoder().decode(WorkspaceLayout.self, from: JSONEncoder().encode(layout)), layout)
+    }
+    func testVisualizerSettingsRoundTripAndLegacyDefaults() throws {
+        let legacy = try JSONDecoder().decode(ClosedNotchOptions.self, from: JSONEncoder().encode(ClosedNotchOptions()))
+        XCTAssertNil(legacy.visualizer)
+        XCTAssertFalse((legacy.visualizer ?? VisualizerOptions()).dynamicColors)
+        for animation in PlaybackAnimation.allCases {
+            var options = ClosedNotchOptions()
+            options.animation = animation
+            options.visualizer = VisualizerOptions(dynamicColors: true, speed: 1.5, intensity: 0.8, width: 96, height: 24)
+            let restored = try JSONDecoder().decode(ClosedNotchOptions.self, from: JSONEncoder().encode(options)).validated()
+            XCTAssertEqual(restored, options)
+        }
+        var invalid = VisualizerOptions(); invalid.speed = .infinity
+        XCTAssertThrowsError(try invalid.validated())
+    }
+    func testArtworkPaletteUsesDominantColorsAndRejectsEmptyArtwork() {
+        let red = WidgetColor(red: 1, green: 0, blue: 0)
+        let blue = WidgetColor(red: 0, green: 0, blue: 1)
+        let colors = MusicPalette.colors(from: Array(repeating: red, count: 8) + [blue, blue, .white])
+        XCTAssertEqual(colors, [red, blue])
+        XCTAssertTrue(MusicPalette.colors(from: []).isEmpty)
+        XCTAssertTrue(MusicPalette.colors(from: [.white, WidgetColor(red: 0, green: 0, blue: 0)]).isEmpty)
+    }
     func testLiveWidthOnlyChangesClosedHorizontalGeometry() {
         var model = geometry(requested: 190)
         model.appearance.surface.offsets = SurfaceOffsets(closedX: 30, closedY: 10)

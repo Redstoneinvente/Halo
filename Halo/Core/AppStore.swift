@@ -106,9 +106,12 @@ final class AppStore: ObservableObject {
         addedAt = addedAt.filter { files.contains($0.key) }
     }
     func addFiles(_ urls: [URL]) {
-        for url in urls where url.isFileURL && !files.contains(url) && files.count < 100 {
-            addedAt[url] = Date(); files.append(url)
-        }
+        var seen = Set(files)
+        let accepted = Array(urls.filter { $0.isFileURL && seen.insert($0).inserted }.prefix(max(0, 100 - files.count)))
+        guard !accepted.isEmpty else { return }
+        for url in accepted { addedAt[url] = Date() }
+        files.append(contentsOf: accepted)
+        workspace.publish(accepted.count == 1 ? "File added" : "Files added", detail: "\(accepted.count) shelf references")
     }
     func chooseFiles() {
         let panel = NSOpenPanel()

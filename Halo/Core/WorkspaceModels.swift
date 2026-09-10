@@ -32,6 +32,8 @@ enum AnimationPreset: String, Codable, CaseIterable {
     }
 }
 struct Appearance: Codable, Equatable {
+    var grain: GrainOptions?
+    var backgroundSchedule: [TimedBackground]?
     var surface = SurfaceOptions()
     var background: BackgroundKind = .gradient
     var assetPath = ""
@@ -45,10 +47,12 @@ struct Appearance: Codable, Equatable {
     var pauseVideoOnBattery = true
     init() {}
     private enum CodingKeys: String, CodingKey {
-        case surface, background, assetPath, blur, saturation, brightness, expandedHeight, compactWidth, spacing, animation, pauseVideoOnBattery
+        case grain, backgroundSchedule, surface, background, assetPath, blur, saturation, brightness, expandedHeight, compactWidth, spacing, animation, pauseVideoOnBattery
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        grain = try c.decodeIfPresent(GrainOptions.self, forKey: .grain)
+        backgroundSchedule = try c.decodeIfPresent([TimedBackground].self, forKey: .backgroundSchedule)
         surface = try c.decodeIfPresent(SurfaceOptions.self, forKey: .surface) ?? SurfaceOptions()
         background = try c.decodeIfPresent(BackgroundKind.self, forKey: .background) ?? .gradient
         assetPath = try c.decodeIfPresent(String.self, forKey: .assetPath) ?? ""
@@ -113,6 +117,13 @@ struct ThemeArchive: Codable {
         // Imports must not implicitly read arbitrary local file paths supplied by another person.
         appearance.assetPath = ""
         if appearance.background == .video || appearance.background == .image { appearance.background = .gradient }
+        appearance.grain = try appearance.grain?.validated()
+        appearance.backgroundSchedule = try appearance.backgroundSchedule?.map { entry in
+            guard entry.blur.isFinite else { throw CocoaError(.fileReadCorruptFile) }
+            var v = entry; v.blur = min(20, max(0, v.blur)); v.grain = try v.grain.validated(); v.assetPath = ""
+            if v.kind == .image || v.kind == .video { v.kind = .gradient }
+            return v
+        }
         archive.layout.appearance = appearance
         archive.layout.order = layout.normalizedOrder()
         archive.layout.widgets = try layout.widgets?.mapValues { try $0.validated() }
@@ -156,6 +167,8 @@ struct AutomationRule: Codable, Identifiable {
     }
 }
 struct WorkspaceSettings: Codable {
+    var automaticMedia: Bool?
+    var profileSchedules: [ProfileSchedule]?
     var version = 1
     var layout = WorkspaceLayout()
     var profiles = Profile.presets
