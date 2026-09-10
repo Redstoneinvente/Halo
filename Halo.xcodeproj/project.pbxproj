@@ -1,98 +1,487 @@
 // !$*UTF8*$!
 {
-archiveVersion = 1;
-classes = {};
-objectVersion = 56;
-objects = {
-000000000000000000000300 = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
-000000000000000000000301 = {isa = PBXBuildFile; fileRef = 000000000000000000000300; };
-0000000000000000000002BC = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NotchEngine/DisplayClock.swift"; sourceTree = "<group>"; };
-0000000000000000000002C6 = {isa = PBXBuildFile; fileRef = 0000000000000000000002BC; };
-0000000000000000000002D0 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/AudioSpectrumService.swift"; sourceTree = "<group>"; };
-0000000000000000000002D1 = {isa = PBXBuildFile; fileRef = 0000000000000000000002D0; };
-0000000000000000000002E2 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/HUDEngine.swift"; sourceTree = "<group>"; };
-0000000000000000000002E3 = {isa = PBXBuildFile; fileRef = 0000000000000000000002E2; };
-000000000000000000000258 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/PersonalizationModels.swift"; sourceTree = "<group>"; };
-000000000000000000000262 = {isa = PBXBuildFile; fileRef = 000000000000000000000258; };
-000000000000000000000259 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/PersonalizationSettingsView.swift"; sourceTree = "<group>"; };
-000000000000000000000263 = {isa = PBXBuildFile; fileRef = 000000000000000000000259; };
-00000000000000000000025A = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/DecorationsView.swift"; sourceTree = "<group>"; };
-000000000000000000000264 = {isa = PBXBuildFile; fileRef = 00000000000000000000025A; };
-00000000000000000000026C = {isa = PBXBuildFile; fileRef = 000000000000000000000258; };
-0000000000000000000001F4 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/WidgetModels.swift"; sourceTree = "<group>"; };
-0000000000000000000001FE = {isa = PBXBuildFile; fileRef = 0000000000000000000001F4; };
-0000000000000000000001F5 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/WidgetViews.swift"; sourceTree = "<group>"; };
-0000000000000000000001FF = {isa = PBXBuildFile; fileRef = 0000000000000000000001F5; };
-0000000000000000000001F6 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/WidgetSettingsView.swift"; sourceTree = "<group>"; };
-000000000000000000000200 = {isa = PBXBuildFile; fileRef = 0000000000000000000001F6; };
-0000000000000000000001F7 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/ClosedNotchView.swift"; sourceTree = "<group>"; };
-000000000000000000000201 = {isa = PBXBuildFile; fileRef = 0000000000000000000001F7; };
-000000000000000000000208 = {isa = PBXBuildFile; fileRef = 0000000000000000000001F4; };
-000000000000000000000190 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/SurfaceModels.swift"; sourceTree = "<group>"; };
-00000000000000000000019A = {isa = PBXBuildFile; fileRef = 000000000000000000000190; };
-000000000000000000000191 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/SurfaceAppearanceView.swift"; sourceTree = "<group>"; };
-00000000000000000000019B = {isa = PBXBuildFile; fileRef = 000000000000000000000191; };
-000000000000000000000192 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/ShelfPreview.swift"; sourceTree = "<group>"; };
-00000000000000000000019C = {isa = PBXBuildFile; fileRef = 000000000000000000000192; };
-0000000000000000000001A4 = {isa = PBXBuildFile; fileRef = 000000000000000000000190; };
-00000000000000000000012C = {isa = PBXFileReference; lastKnownFileType = folder; path = Docs; sourceTree = "<group>"; };
-00000000000000000000012D = {isa = PBXFileReference; lastKnownFileType = folder; path = Scripts; sourceTree = "<group>"; };
-00000000000000000000012E = {isa = PBXFileReference; lastKnownFileType = folder; path = Examples; sourceTree = "<group>"; };
-00000000000000000000012F = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
-000000000000000000000130 = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Halo/Halo.entitlements; sourceTree = "<group>"; };
-000000000000000000000064 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "App/HaloApp.swift"; sourceTree = "<group>"; };
-0000000000000000000000C8 = {isa = PBXBuildFile; fileRef = 000000000000000000000064; };
-000000000000000000000065 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/Models.swift"; sourceTree = "<group>"; };
-0000000000000000000000C9 = {isa = PBXBuildFile; fileRef = 000000000000000000000065; };
-000000000000000000000066 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/AppStore.swift"; sourceTree = "<group>"; };
-0000000000000000000000CA = {isa = PBXBuildFile; fileRef = 000000000000000000000066; };
-000000000000000000000067 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NotchEngine/WindowManager.swift"; sourceTree = "<group>"; };
-0000000000000000000000CB = {isa = PBXBuildFile; fileRef = 000000000000000000000067; };
-000000000000000000000068 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/SurfaceView.swift"; sourceTree = "<group>"; };
-0000000000000000000000CC = {isa = PBXBuildFile; fileRef = 000000000000000000000068; };
-000000000000000000000069 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/WorkspaceSettingsView.swift"; sourceTree = "<group>"; };
-0000000000000000000000CD = {isa = PBXBuildFile; fileRef = 000000000000000000000069; };
-00000000000000000000006A = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/WorkspaceModels.swift"; sourceTree = "<group>"; };
-0000000000000000000000CE = {isa = PBXBuildFile; fileRef = 00000000000000000000006A; };
-00000000000000000000006B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/WorkspaceStore.swift"; sourceTree = "<group>"; };
-0000000000000000000000CF = {isa = PBXBuildFile; fileRef = 00000000000000000000006B; };
-00000000000000000000006C = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/ModuleViews.swift"; sourceTree = "<group>"; };
-0000000000000000000000D0 = {isa = PBXBuildFile; fileRef = 00000000000000000000006C; };
-00000000000000000000006D = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/Integrations.swift"; sourceTree = "<group>"; };
-0000000000000000000000D1 = {isa = PBXBuildFile; fileRef = 00000000000000000000006D; };
-00000000000000000000006E = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/CaptureService.swift"; sourceTree = "<group>"; };
-0000000000000000000000D2 = {isa = PBXBuildFile; fileRef = 00000000000000000000006E; };
-00000000000000000000006F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/ExtensionContracts.swift"; sourceTree = "<group>"; };
-0000000000000000000000D3 = {isa = PBXBuildFile; fileRef = 00000000000000000000006F; };
-000000000000000000000096 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/HaloCoreTests.swift; sourceTree = "<group>"; };
-000000000000000000000097 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/LicenseTests.swift; sourceTree = "<group>"; };
-0000000000000000000000FA = {isa = PBXBuildFile; fileRef = 000000000000000000000065; };
-0000000000000000000000FB = {isa = PBXBuildFile; fileRef = 00000000000000000000006A; };
-0000000000000000000000FC = {isa = PBXBuildFile; fileRef = 00000000000000000000006F; };
-0000000000000000000000FD = {isa = PBXBuildFile; fileRef = 000000000000000000000096; };
-0000000000000000000000FE = {isa = PBXBuildFile; fileRef = 000000000000000000000097; };
-000000000000000000000001 = {isa = PBXProject; attributes = {LastUpgradeCheck = 1500; }; buildConfigurationList = 00000000000000000000000A; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = 000000000000000000000002; productRefGroup = 000000000000000000000004; projectDirPath = ""; projectRoot = ""; targets = (000000000000000000000005, 000000000000000000000014); };
-000000000000000000000002 = {isa = PBXGroup; children = (000000000000000000000003, 000000000000000000000096, 000000000000000000000097, 00000000000000000000012C, 00000000000000000000012D, 00000000000000000000012E, 00000000000000000000012F, 000000000000000000000130, 000000000000000000000004); sourceTree = "<group>"; };
-000000000000000000000003 = {isa = PBXGroup; path = Halo; children = (000000000000000000000300,0000000000000000000002BC,0000000000000000000002D0,0000000000000000000002E2,000000000000000000000258,000000000000000000000259,00000000000000000000025A,0000000000000000000001F4,0000000000000000000001F5,0000000000000000000001F6,0000000000000000000001F7,000000000000000000000190,000000000000000000000191,000000000000000000000192,000000000000000000000064,000000000000000000000065,000000000000000000000066,000000000000000000000067,000000000000000000000068,000000000000000000000069,00000000000000000000006A,00000000000000000000006B,00000000000000000000006C,00000000000000000000006D,00000000000000000000006E,00000000000000000000006F); sourceTree = "<group>"; };
-000000000000000000000004 = {isa = PBXGroup; name = Products; children = (000000000000000000000006, 000000000000000000000015); sourceTree = "<group>"; };
-000000000000000000000006 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Halo.app; sourceTree = BUILT_PRODUCTS_DIR; };
-000000000000000000000015 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HaloCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-000000000000000000000005 = {isa = PBXNativeTarget; buildConfigurationList = 00000000000000000000000B; buildPhases = (000000000000000000000007, 000000000000000000000008, 000000000000000000000009); buildRules = (); dependencies = (); name = Halo; productName = Halo; productReference = 000000000000000000000006; productType = "com.apple.product-type.application"; };
-000000000000000000000014 = {isa = PBXNativeTarget; buildConfigurationList = 000000000000000000000016; buildPhases = (000000000000000000000017, 000000000000000000000018); buildRules = (); dependencies = (); name = HaloCoreTests; productName = HaloCoreTests; productReference = 000000000000000000000015; productType = "com.apple.product-type.bundle.unit-test"; };
-000000000000000000000007 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (0000000000000000000002C6,0000000000000000000002D1,0000000000000000000002E3,000000000000000000000262,000000000000000000000263,000000000000000000000264,0000000000000000000001FE,0000000000000000000001FF,000000000000000000000200,000000000000000000000201,00000000000000000000019A,00000000000000000000019B,00000000000000000000019C,0000000000000000000000C8,0000000000000000000000C9,0000000000000000000000CA,0000000000000000000000CB,0000000000000000000000CC,0000000000000000000000CD,0000000000000000000000CE,0000000000000000000000CF,0000000000000000000000D0,0000000000000000000000D1,0000000000000000000000D2,0000000000000000000000D3); runOnlyForDeploymentPostprocessing = 0; };
-000000000000000000000017 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (00000000000000000000026C,000000000000000000000208,0000000000000000000001A4,0000000000000000000000FA,0000000000000000000000FB,0000000000000000000000FC,0000000000000000000000FD,0000000000000000000000FE); runOnlyForDeploymentPostprocessing = 0; };
-000000000000000000000008 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-000000000000000000000018 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-000000000000000000000009 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (000000000000000000000301); runOnlyForDeploymentPostprocessing = 0; };
-00000000000000000000000A = {isa = XCConfigurationList; buildConfigurations = (00000000000000000000000C,00000000000000000000000D); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-00000000000000000000000B = {isa = XCConfigurationList; buildConfigurations = (00000000000000000000000E,00000000000000000000000F); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-000000000000000000000016 = {isa = XCConfigurationList; buildConfigurations = (000000000000000000000019,00000000000000000000001A); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-00000000000000000000000C = {isa = XCBuildConfiguration; buildSettings = {SDKROOT = macosx; MACOSX_DEPLOYMENT_TARGET = 13.0; CLANG_ENABLE_MODULES = YES; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; ENABLE_TESTABILITY = YES;}; name = Debug; };
-00000000000000000000000D = {isa = XCBuildConfiguration; buildSettings = {SDKROOT = macosx; MACOSX_DEPLOYMENT_TARGET = 13.0; CLANG_ENABLE_MODULES = YES; SWIFT_OPTIMIZATION_LEVEL = "-O"; }; name = Release; };
-00000000000000000000000E = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements; ENABLE_HARDENED_RUNTIME = YES; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_LSUIElement = YES; INFOPLIST_KEY_CFBundleDisplayName = Halo; INFOPLIST_KEY_CFBundleIconFile = AppIcon; INFOPLIST_KEY_NSCalendarsUsageDescription = "Halo reads today's calendar events when you enable Calendar."; INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Halo shows today's schedule and meeting links. It does not modify events."; INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls."; INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo uses ScreenCaptureKit to analyze system audio for optional music-reactive visual effects. Halo does not save or transmit screen content."; INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted."; INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted."; PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo; PRODUCT_NAME = "$(TARGET_NAME)"; MARKETING_VERSION = 0.2.0; CURRENT_PROJECT_VERSION = 2; ENABLE_APP_SANDBOX = NO; SWIFT_VERSION = 5.0; COMBINE_HIDPI_IMAGES = YES; }; name = Debug; };
-00000000000000000000000F = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements; ENABLE_HARDENED_RUNTIME = YES; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_LSUIElement = YES; INFOPLIST_KEY_CFBundleDisplayName = Halo; INFOPLIST_KEY_CFBundleIconFile = AppIcon; INFOPLIST_KEY_NSCalendarsUsageDescription = "Halo reads today's calendar events when you enable Calendar."; INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Halo shows today's schedule and meeting links. It does not modify events."; INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls."; INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo uses ScreenCaptureKit to analyze system audio for optional music-reactive visual effects. Halo does not save or transmit screen content."; INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted."; INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted."; PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo; PRODUCT_NAME = "$(TARGET_NAME)"; MARKETING_VERSION = 0.2.0; CURRENT_PROJECT_VERSION = 2; ENABLE_APP_SANDBOX = NO; SWIFT_VERSION = 5.0; COMBINE_HIDPI_IMAGES = YES; }; name = Release; };
-000000000000000000000019 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; CODE_SIGN_STYLE = Automatic; }; name = Debug; };
-00000000000000000000001A = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; CODE_SIGN_STYLE = Automatic; }; name = Release; };
-};
-rootObject = 000000000000000000000001;
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0000000000000000000000C8 /* App/HaloApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000064 /* App/HaloApp.swift */; };
+		0000000000000000000000C9 /* Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000065 /* Core/Models.swift */; };
+		0000000000000000000000CA /* Core/AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000066 /* Core/AppStore.swift */; };
+		0000000000000000000000CB /* NotchEngine/WindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000067 /* NotchEngine/WindowManager.swift */; };
+		0000000000000000000000CC /* Views/SurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000068 /* Views/SurfaceView.swift */; };
+		0000000000000000000000CD /* Views/WorkspaceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000069 /* Views/WorkspaceSettingsView.swift */; };
+		0000000000000000000000CE /* Core/WorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006A /* Core/WorkspaceModels.swift */; };
+		0000000000000000000000CF /* Core/WorkspaceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006B /* Core/WorkspaceStore.swift */; };
+		0000000000000000000000D0 /* Views/ModuleViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006C /* Views/ModuleViews.swift */; };
+		0000000000000000000000D1 /* Services/Integrations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006D /* Services/Integrations.swift */; };
+		0000000000000000000000D2 /* Services/CaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006E /* Services/CaptureService.swift */; };
+		0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006F /* Core/ExtensionContracts.swift */; };
+		0000000000000000000000FA /* Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000065 /* Core/Models.swift */; };
+		0000000000000000000000FB /* Core/WorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006A /* Core/WorkspaceModels.swift */; };
+		0000000000000000000000FC /* Core/ExtensionContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006F /* Core/ExtensionContracts.swift */; };
+		0000000000000000000000FD /* Tests/HaloCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000096 /* Tests/HaloCoreTests.swift */; };
+		0000000000000000000000FE /* Tests/LicenseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000097 /* Tests/LicenseTests.swift */; };
+		00000000000000000000019A /* Core/SurfaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000190 /* Core/SurfaceModels.swift */; };
+		00000000000000000000019B /* Views/SurfaceAppearanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000191 /* Views/SurfaceAppearanceView.swift */; };
+		00000000000000000000019C /* Services/ShelfPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000192 /* Services/ShelfPreview.swift */; };
+		0000000000000000000001A4 /* Core/SurfaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000190 /* Core/SurfaceModels.swift */; };
+		0000000000000000000001FE /* Core/WidgetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000001F4 /* Core/WidgetModels.swift */; };
+		0000000000000000000001FF /* Views/WidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000001F5 /* Views/WidgetViews.swift */; };
+		000000000000000000000200 /* Views/WidgetSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000001F6 /* Views/WidgetSettingsView.swift */; };
+		000000000000000000000201 /* Views/ClosedNotchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000001F7 /* Views/ClosedNotchView.swift */; };
+		000000000000000000000208 /* Core/WidgetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000001F4 /* Core/WidgetModels.swift */; };
+		000000000000000000000262 /* Core/PersonalizationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000258 /* Core/PersonalizationModels.swift */; };
+		000000000000000000000263 /* Views/PersonalizationSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000259 /* Views/PersonalizationSettingsView.swift */; };
+		000000000000000000000264 /* Views/DecorationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000025A /* Views/DecorationsView.swift */; };
+		00000000000000000000026C /* Core/PersonalizationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000258 /* Core/PersonalizationModels.swift */; };
+		0000000000000000000002C6 /* NotchEngine/DisplayClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002BC /* NotchEngine/DisplayClock.swift */; };
+		0000000000000000000002D1 /* Services/AudioSpectrumService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002D0 /* Services/AudioSpectrumService.swift */; };
+		0000000000000000000002E3 /* Services/HUDEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002E2 /* Services/HUDEngine.swift */; };
+		F8614B61305322E600D4943C /* AppIcon 2.icns in Resources */ = {isa = PBXBuildFile; fileRef = F8614B60305322E600D4943C /* AppIcon 2.icns */; };
+		F8614B693053262D00D4943C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F8614B683053262D00D4943C /* Assets.xcassets */; };
+		F8614B6B3053275D00D4943C /* Halo_AppIcon_Transparent.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6A3053275D00D4943C /* Halo_AppIcon_Transparent.png */; };
+		F8614B783053291B00D4943C /* icon_128x128@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B723053291B00D4943C /* icon_128x128@2x.png */; };
+		F8614B793053291B00D4943C /* icon_512x512@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B763053291B00D4943C /* icon_512x512@2x.png */; };
+		F8614B7A3053291B00D4943C /* icon_32x32@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B703053291B00D4943C /* icon_32x32@2x.png */; };
+		F8614B7B3053291B00D4943C /* icon_128x128.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B713053291B00D4943C /* icon_128x128.png */; };
+		F8614B7C3053291B00D4943C /* icon_512x512.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B753053291B00D4943C /* icon_512x512.png */; };
+		F8614B7D3053291B00D4943C /* icon_256x256.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B733053291B00D4943C /* icon_256x256.png */; };
+		F8614B7E3053291B00D4943C /* icon_32x32.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6F3053291B00D4943C /* icon_32x32.png */; };
+		F8614B7F3053291B00D4943C /* icon_256x256@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B743053291B00D4943C /* icon_256x256@2x.png */; };
+		F8614B803053291B00D4943C /* icon_16x16@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6E3053291B00D4943C /* icon_16x16@2x.png */; };
+		F8614B813053291B00D4943C /* icon_16x16.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6D3053291B00D4943C /* icon_16x16.png */; };
+		F8614B823053291B00D4943C /* Halo.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6C3053291B00D4943C /* Halo.png */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		000000000000000000000006 /* Halo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Halo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000015 /* HaloCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HaloCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000064 /* App/HaloApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/HaloApp.swift; sourceTree = "<group>"; };
+		000000000000000000000065 /* Core/Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/Models.swift; sourceTree = "<group>"; };
+		000000000000000000000066 /* Core/AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/AppStore.swift; sourceTree = "<group>"; };
+		000000000000000000000067 /* NotchEngine/WindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchEngine/WindowManager.swift; sourceTree = "<group>"; };
+		000000000000000000000068 /* Views/SurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/SurfaceView.swift; sourceTree = "<group>"; };
+		000000000000000000000069 /* Views/WorkspaceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/WorkspaceSettingsView.swift; sourceTree = "<group>"; };
+		00000000000000000000006A /* Core/WorkspaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/WorkspaceModels.swift; sourceTree = "<group>"; };
+		00000000000000000000006B /* Core/WorkspaceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/WorkspaceStore.swift; sourceTree = "<group>"; };
+		00000000000000000000006C /* Views/ModuleViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ModuleViews.swift; sourceTree = "<group>"; };
+		00000000000000000000006D /* Services/Integrations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Integrations.swift; sourceTree = "<group>"; };
+		00000000000000000000006E /* Services/CaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CaptureService.swift; sourceTree = "<group>"; };
+		00000000000000000000006F /* Core/ExtensionContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/ExtensionContracts.swift; sourceTree = "<group>"; };
+		000000000000000000000096 /* Tests/HaloCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/HaloCoreTests.swift; sourceTree = "<group>"; };
+		000000000000000000000097 /* Tests/LicenseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/LicenseTests.swift; sourceTree = "<group>"; };
+		00000000000000000000012C /* Docs */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Docs; sourceTree = "<group>"; };
+		00000000000000000000012D /* Scripts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Scripts; sourceTree = "<group>"; };
+		00000000000000000000012E /* Examples */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Examples; sourceTree = "<group>"; };
+		00000000000000000000012F /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		000000000000000000000130 /* Halo/Halo.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Halo/Halo.entitlements; sourceTree = "<group>"; };
+		000000000000000000000190 /* Core/SurfaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/SurfaceModels.swift; sourceTree = "<group>"; };
+		000000000000000000000191 /* Views/SurfaceAppearanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/SurfaceAppearanceView.swift; sourceTree = "<group>"; };
+		000000000000000000000192 /* Services/ShelfPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/ShelfPreview.swift; sourceTree = "<group>"; };
+		0000000000000000000001F4 /* Core/WidgetModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/WidgetModels.swift; sourceTree = "<group>"; };
+		0000000000000000000001F5 /* Views/WidgetViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/WidgetViews.swift; sourceTree = "<group>"; };
+		0000000000000000000001F6 /* Views/WidgetSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/WidgetSettingsView.swift; sourceTree = "<group>"; };
+		0000000000000000000001F7 /* Views/ClosedNotchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ClosedNotchView.swift; sourceTree = "<group>"; };
+		000000000000000000000258 /* Core/PersonalizationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/PersonalizationModels.swift; sourceTree = "<group>"; };
+		000000000000000000000259 /* Views/PersonalizationSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PersonalizationSettingsView.swift; sourceTree = "<group>"; };
+		00000000000000000000025A /* Views/DecorationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/DecorationsView.swift; sourceTree = "<group>"; };
+		0000000000000000000002BC /* NotchEngine/DisplayClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchEngine/DisplayClock.swift; sourceTree = "<group>"; };
+		0000000000000000000002D0 /* Services/AudioSpectrumService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/AudioSpectrumService.swift; sourceTree = "<group>"; };
+		0000000000000000000002E2 /* Services/HUDEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HUDEngine.swift; sourceTree = "<group>"; };
+		F8614B60305322E600D4943C /* AppIcon 2.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = "AppIcon 2.icns"; sourceTree = "<group>"; };
+		F8614B623053239E00D4943C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		F8614B633053242D00D4943C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		F8614B683053262D00D4943C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F8614B6A3053275D00D4943C /* Halo_AppIcon_Transparent.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Halo_AppIcon_Transparent.png; sourceTree = "<group>"; };
+		F8614B6C3053291B00D4943C /* Halo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Halo.png; sourceTree = "<group>"; };
+		F8614B6D3053291B00D4943C /* icon_16x16.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_16x16.png; sourceTree = "<group>"; };
+		F8614B6E3053291B00D4943C /* icon_16x16@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_16x16@2x.png"; sourceTree = "<group>"; };
+		F8614B6F3053291B00D4943C /* icon_32x32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_32x32.png; sourceTree = "<group>"; };
+		F8614B703053291B00D4943C /* icon_32x32@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_32x32@2x.png"; sourceTree = "<group>"; };
+		F8614B713053291B00D4943C /* icon_128x128.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_128x128.png; sourceTree = "<group>"; };
+		F8614B723053291B00D4943C /* icon_128x128@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_128x128@2x.png"; sourceTree = "<group>"; };
+		F8614B733053291B00D4943C /* icon_256x256.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_256x256.png; sourceTree = "<group>"; };
+		F8614B743053291B00D4943C /* icon_256x256@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_256x256@2x.png"; sourceTree = "<group>"; };
+		F8614B753053291B00D4943C /* icon_512x512.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_512x512.png; sourceTree = "<group>"; };
+		F8614B763053291B00D4943C /* icon_512x512@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_512x512@2x.png"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		000000000000000000000008 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000018 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		000000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				F8614B683053262D00D4943C /* Assets.xcassets */,
+				000000000000000000000003 /* Halo */,
+				000000000000000000000096 /* Tests/HaloCoreTests.swift */,
+				000000000000000000000097 /* Tests/LicenseTests.swift */,
+				00000000000000000000012C /* Docs */,
+				00000000000000000000012D /* Scripts */,
+				00000000000000000000012E /* Examples */,
+				00000000000000000000012F /* README.md */,
+				000000000000000000000130 /* Halo/Halo.entitlements */,
+				F8614B633053242D00D4943C /* Info.plist */,
+				000000000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		000000000000000000000003 /* Halo */ = {
+			isa = PBXGroup;
+			children = (
+				F8614B773053291B00D4943C /* Halo Icons */,
+				F8614B6A3053275D00D4943C /* Halo_AppIcon_Transparent.png */,
+				F8614B623053239E00D4943C /* Info.plist */,
+				0000000000000000000002BC /* NotchEngine/DisplayClock.swift */,
+				0000000000000000000002D0 /* Services/AudioSpectrumService.swift */,
+				0000000000000000000002E2 /* Services/HUDEngine.swift */,
+				000000000000000000000258 /* Core/PersonalizationModels.swift */,
+				000000000000000000000259 /* Views/PersonalizationSettingsView.swift */,
+				00000000000000000000025A /* Views/DecorationsView.swift */,
+				0000000000000000000001F4 /* Core/WidgetModels.swift */,
+				0000000000000000000001F5 /* Views/WidgetViews.swift */,
+				0000000000000000000001F6 /* Views/WidgetSettingsView.swift */,
+				0000000000000000000001F7 /* Views/ClosedNotchView.swift */,
+				000000000000000000000190 /* Core/SurfaceModels.swift */,
+				000000000000000000000191 /* Views/SurfaceAppearanceView.swift */,
+				000000000000000000000192 /* Services/ShelfPreview.swift */,
+				000000000000000000000064 /* App/HaloApp.swift */,
+				000000000000000000000065 /* Core/Models.swift */,
+				000000000000000000000066 /* Core/AppStore.swift */,
+				000000000000000000000067 /* NotchEngine/WindowManager.swift */,
+				000000000000000000000068 /* Views/SurfaceView.swift */,
+				000000000000000000000069 /* Views/WorkspaceSettingsView.swift */,
+				00000000000000000000006A /* Core/WorkspaceModels.swift */,
+				00000000000000000000006B /* Core/WorkspaceStore.swift */,
+				00000000000000000000006C /* Views/ModuleViews.swift */,
+				00000000000000000000006D /* Services/Integrations.swift */,
+				00000000000000000000006E /* Services/CaptureService.swift */,
+				00000000000000000000006F /* Core/ExtensionContracts.swift */,
+				F8614B60305322E600D4943C /* AppIcon 2.icns */,
+			);
+			path = Halo;
+			sourceTree = "<group>";
+		};
+		000000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000006 /* Halo.app */,
+				000000000000000000000015 /* HaloCoreTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		F8614B773053291B00D4943C /* Halo Icons */ = {
+			isa = PBXGroup;
+			children = (
+				F8614B6C3053291B00D4943C /* Halo.png */,
+				F8614B6D3053291B00D4943C /* icon_16x16.png */,
+				F8614B6E3053291B00D4943C /* icon_16x16@2x.png */,
+				F8614B6F3053291B00D4943C /* icon_32x32.png */,
+				F8614B703053291B00D4943C /* icon_32x32@2x.png */,
+				F8614B713053291B00D4943C /* icon_128x128.png */,
+				F8614B723053291B00D4943C /* icon_128x128@2x.png */,
+				F8614B733053291B00D4943C /* icon_256x256.png */,
+				F8614B743053291B00D4943C /* icon_256x256@2x.png */,
+				F8614B753053291B00D4943C /* icon_512x512.png */,
+				F8614B763053291B00D4943C /* icon_512x512@2x.png */,
+			);
+			path = "Halo Icons";
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		000000000000000000000005 /* Halo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 00000000000000000000000B /* Build configuration list for PBXNativeTarget "Halo" */;
+			buildPhases = (
+				000000000000000000000007 /* Sources */,
+				000000000000000000000008 /* Frameworks */,
+				000000000000000000000009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Halo;
+			productName = Halo;
+			productReference = 000000000000000000000006 /* Halo.app */;
+			productType = "com.apple.product-type.application";
+		};
+		000000000000000000000014 /* HaloCoreTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000000000016 /* Build configuration list for PBXNativeTarget "HaloCoreTests" */;
+			buildPhases = (
+				000000000000000000000017 /* Sources */,
+				000000000000000000000018 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = HaloCoreTests;
+			productName = HaloCoreTests;
+			productReference = 000000000000000000000015 /* HaloCoreTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		000000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 1500;
+			};
+			buildConfigurationList = 00000000000000000000000A /* Build configuration list for PBXProject "Halo" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 000000000000000000000002;
+			productRefGroup = 000000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				000000000000000000000005 /* Halo */,
+				000000000000000000000014 /* HaloCoreTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		000000000000000000000009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F8614B693053262D00D4943C /* Assets.xcassets in Resources */,
+				F8614B61305322E600D4943C /* AppIcon 2.icns in Resources */,
+				F8614B783053291B00D4943C /* icon_128x128@2x.png in Resources */,
+				F8614B793053291B00D4943C /* icon_512x512@2x.png in Resources */,
+				F8614B7A3053291B00D4943C /* icon_32x32@2x.png in Resources */,
+				F8614B7B3053291B00D4943C /* icon_128x128.png in Resources */,
+				F8614B7C3053291B00D4943C /* icon_512x512.png in Resources */,
+				F8614B7D3053291B00D4943C /* icon_256x256.png in Resources */,
+				F8614B7E3053291B00D4943C /* icon_32x32.png in Resources */,
+				F8614B7F3053291B00D4943C /* icon_256x256@2x.png in Resources */,
+				F8614B803053291B00D4943C /* icon_16x16@2x.png in Resources */,
+				F8614B813053291B00D4943C /* icon_16x16.png in Resources */,
+				F8614B823053291B00D4943C /* Halo.png in Resources */,
+				F8614B6B3053275D00D4943C /* Halo_AppIcon_Transparent.png in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		000000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0000000000000000000002C6 /* NotchEngine/DisplayClock.swift in Sources */,
+				0000000000000000000002D1 /* Services/AudioSpectrumService.swift in Sources */,
+				0000000000000000000002E3 /* Services/HUDEngine.swift in Sources */,
+				000000000000000000000262 /* Core/PersonalizationModels.swift in Sources */,
+				000000000000000000000263 /* Views/PersonalizationSettingsView.swift in Sources */,
+				000000000000000000000264 /* Views/DecorationsView.swift in Sources */,
+				0000000000000000000001FE /* Core/WidgetModels.swift in Sources */,
+				0000000000000000000001FF /* Views/WidgetViews.swift in Sources */,
+				000000000000000000000200 /* Views/WidgetSettingsView.swift in Sources */,
+				000000000000000000000201 /* Views/ClosedNotchView.swift in Sources */,
+				00000000000000000000019A /* Core/SurfaceModels.swift in Sources */,
+				00000000000000000000019B /* Views/SurfaceAppearanceView.swift in Sources */,
+				00000000000000000000019C /* Services/ShelfPreview.swift in Sources */,
+				0000000000000000000000C8 /* App/HaloApp.swift in Sources */,
+				0000000000000000000000C9 /* Core/Models.swift in Sources */,
+				0000000000000000000000CA /* Core/AppStore.swift in Sources */,
+				0000000000000000000000CB /* NotchEngine/WindowManager.swift in Sources */,
+				0000000000000000000000CC /* Views/SurfaceView.swift in Sources */,
+				0000000000000000000000CD /* Views/WorkspaceSettingsView.swift in Sources */,
+				0000000000000000000000CE /* Core/WorkspaceModels.swift in Sources */,
+				0000000000000000000000CF /* Core/WorkspaceStore.swift in Sources */,
+				0000000000000000000000D0 /* Views/ModuleViews.swift in Sources */,
+				0000000000000000000000D1 /* Services/Integrations.swift in Sources */,
+				0000000000000000000000D2 /* Services/CaptureService.swift in Sources */,
+				0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000017 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				00000000000000000000026C /* Core/PersonalizationModels.swift in Sources */,
+				000000000000000000000208 /* Core/WidgetModels.swift in Sources */,
+				0000000000000000000001A4 /* Core/SurfaceModels.swift in Sources */,
+				0000000000000000000000FA /* Core/Models.swift in Sources */,
+				0000000000000000000000FB /* Core/WorkspaceModels.swift in Sources */,
+				0000000000000000000000FC /* Core/ExtensionContracts.swift in Sources */,
+				0000000000000000000000FD /* Tests/HaloCoreTests.swift in Sources */,
+				0000000000000000000000FE /* Tests/LicenseTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		00000000000000000000000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				ENABLE_TESTABILITY = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		00000000000000000000000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				SDKROOT = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		00000000000000000000000E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = U3H97AL77M;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Halo/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Halo;
+				INFOPLIST_KEY_CFBundleIconFile = AppIcon;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
+				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Halo shows today's schedule and meeting links. It does not modify events.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "Halo reads today's calendar events when you enable Calendar.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
+				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo uses ScreenCaptureKit to analyze system audio for optional music-reactive visual effects. Halo does not save or transmit screen content.";
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		00000000000000000000000F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = U3H97AL77M;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Halo/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Halo;
+				INFOPLIST_KEY_CFBundleIconFile = AppIcon;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
+				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Halo shows today's schedule and meeting links. It does not modify events.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "Halo reads today's calendar events when you enable Calendar.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
+				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo uses ScreenCaptureKit to analyze system audio for optional music-reactive visual effects. Halo does not save or transmit screen content.";
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		000000000000000000000019 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		00000000000000000000001A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		00000000000000000000000A /* Build configuration list for PBXProject "Halo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				00000000000000000000000C /* Debug */,
+				00000000000000000000000D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		00000000000000000000000B /* Build configuration list for PBXNativeTarget "Halo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				00000000000000000000000E /* Debug */,
+				00000000000000000000000F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		000000000000000000000016 /* Build configuration list for PBXNativeTarget "HaloCoreTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				000000000000000000000019 /* Debug */,
+				00000000000000000000001A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 000000000000000000000001 /* Project object */;
 }
