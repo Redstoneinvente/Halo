@@ -93,7 +93,8 @@ struct SurfaceGeometry {
     var attachedToNotch: Bool { style == .notch && safeAreaTop > 0 }
     var minimumWidth: Double { 16 }
     var compactWidth: Double {
-        Geometry.width(screenWidth: visible.width, requested: max(minimumWidth, max(appearance.compactWidth, activeCompactWidth ?? 0)))
+        let requested = activeCompactWidth ?? appearance.compactWidth
+        return Geometry.width(screenWidth: visible.width, requested: max(minimumWidth, requested))
     }
     var compactHeight: Double { max(16, appearance.surface.compactHeight) }
     var closedCameraOcclusion: CGRect? {
