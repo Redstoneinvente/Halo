@@ -17,7 +17,7 @@ struct ClockOptions: Codable, Equatable {
     var twentyFourHour = false
     var showSeconds = false
     var showDate = true
-    var timeZone = "" // empty follows the system
+    var timeZone = ""
 }
 struct WidgetStyle: Codable, Equatable {
     var fontFamily: WidgetFontFamily = .system
@@ -30,7 +30,7 @@ struct WidgetStyle: Codable, Equatable {
     var backgroundOpacity = 0.06
     var padding = 12.0
     var cornerRadius = 14.0
-    var width = 0.0 // zero fills available width
+    var width = 0.0
     var minimumHeight = 0.0
     var showTitle = true
     var clock = ClockOptions()
@@ -130,12 +130,17 @@ struct PowerReactionOptions: Codable, Equatable {
     var expandForEvent = true
     var eventWidth = 96.0
     var color = WidgetColor.accent
+    var dynamicColor = false
+    var lowColor = WidgetColor(red: 1.0, green: 0.22, blue: 0.18)
+    var midColor = WidgetColor(red: 1.0, green: 0.72, blue: 0.12)
+    var highColor = WidgetColor(red: 0.28, green: 0.92, blue: 0.42)
     func validated() throws -> PowerReactionOptions {
         guard eventWidth.isFinite else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
         v.lowThreshold = min(50, max(5, lowThreshold))
         v.eventWidth = min(240, max(48, eventWidth))
         v.color = try color.validated()
+        v.lowColor = try lowColor.validated(); v.midColor = try midColor.validated(); v.highColor = try highColor.validated()
         return v
     }
 }
@@ -144,7 +149,6 @@ struct ClosedNotchOptions: Codable, Equatable {
     var autoFitContent: Bool?
     var horizontalPadding: Double?
     var verticalPadding: Double?
-    // Optional so preferences created before these controls continue decoding cleanly.
     var sideMargin: Double?
     var outerMargin: Double?
     var albumTextColor: Bool?
@@ -190,7 +194,6 @@ struct ClosedNotchOptions: Codable, Equatable {
     }
 }
 
-/// Quantized dominant colors, with a brightness floor for a dark notch.
 enum MusicPalette {
     static func colors(from samples: [WidgetColor]) -> [WidgetColor] {
         var bins: [Int: Int] = [:]
