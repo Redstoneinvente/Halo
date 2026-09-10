@@ -1,6 +1,6 @@
 import SwiftUI
 
-private enum ClosedNotchSide { case left, right }
+enum ClosedNotchSide { case left, right }
 
 struct ClosedNotchView: View {
     @ObservedObject var store: AppStore
@@ -129,7 +129,6 @@ struct AlbumNotchBackground: View {
     }
 }
 
-/// Playback decoration, deliberately not microphone or system-audio capture.
 struct PlaybackVisualizer: View {
     let kind: PlaybackAnimation
     let playing: Bool
