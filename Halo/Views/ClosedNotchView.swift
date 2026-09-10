@@ -40,6 +40,59 @@ private extension ClosedNotchOptions {
     }
 }
 
+private struct MediaBlurTransitionModifier: ViewModifier {
+    let blur: CGFloat
+    let opacity: Double
+    func body(content: Content) -> some View { content.blur(radius: blur).opacity(opacity) }
+}
+
+private extension MediaChangeAnimation {
+    var transition: AnyTransition {
+        switch self {
+        case .none: return .identity
+        case .fade: return .opacity
+        case .slide: return .asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .move(edge: .leading).combined(with: .opacity))
+        case .scale: return .scale(scale: 0.86).combined(with: .opacity)
+        case .blur:
+            return .modifier(active: MediaBlurTransitionModifier(blur: 8, opacity: 0), identity: MediaBlurTransitionModifier(blur: 0, opacity: 1))
+        }
+    }
+}
+
+private struct MediaGestureModifier: ViewModifier {
+    @ObservedObject var media: MediaService
+    let options: ClosedMediaOptions
+    private var preferredApp: String { media.connectedApp ?? "com.apple.Music" }
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(Rectangle())
+            .gesture(TapGesture(count: 2).exclusively(before: TapGesture(count: 1)).onEnded { value in
+                switch value {
+                case .first: perform(options.resolvedDoubleTapAction)
+                case .second: perform(options.resolvedTapAction)
+                }
+            })
+            .simultaneousGesture(DragGesture(minimumDistance: 18).onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height), abs(value.translation.width) >= 24 else { return }
+                perform(value.translation.width < 0 ? options.resolvedSwipeLeftAction : options.resolvedSwipeRightAction)
+            })
+    }
+
+    private func perform(_ action: MediaGestureAction) {
+        switch action {
+        case .none: break
+        case .playPause: media.perform("playpause", app: preferredApp)
+        case .next: media.perform("next track", app: preferredApp)
+        case .previous: media.perform("previous track", app: preferredApp)
+        case .openPlayer:
+            guard let app = media.connectedApp,
+                  let running = NSRunningApplication.runningApplications(withBundleIdentifier: app).first else { return }
+            running.activate(options: [.activateAllWindows])
+        }
+    }
+}
+
 struct ClosedNotchView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
@@ -199,6 +252,7 @@ struct ClosedNotchSlot: View {
         .padding(side == .left ? .leading : .trailing, options.contentOuterMargin)
         .frame(width: availableWidth, height: availableHeight, alignment: .center)
         .clipped()
+        .modifier(MediaGestureModifier(media: media, options: options.mediaOptions ?? ClosedMediaOptions()))
     }
     @ViewBuilder private var decorationElement: some View {
         if let decoration, decorationSize > 0 {
@@ -207,10 +261,8 @@ struct ClosedNotchSlot: View {
     }
     @ViewBuilder private var artworkElement: some View {
         if showArtwork {
-            ClosedArtworkView(media: media, options: artwork, lowPower: system.lowPower)
+            ClosedArtworkView(media: media, options: artwork, mediaOptions: options.mediaOptions ?? ClosedMediaOptions(), lowPower: system.lowPower)
                 .padding(artwork.padding)
-                // Artwork margin is spacing toward the content/camera side only. The independent outer-notch
-                // margin is applied by the slot container, so cover/vinyl can never consume that protected edge.
                 .padding(side == .left ? .trailing : .leading, artwork.margin)
         }
     }
@@ -282,23 +334,29 @@ private struct PowerEventBadge: View {
 private struct ClosedArtworkView: View {
     @ObservedObject var media: MediaService
     let options: ClosedArtworkOptions
+    let mediaOptions: ClosedMediaOptions
     let lowPower: Bool
     @State private var artwork: NSImage?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }
     private var paletteColor: Color { media.artworkColors.first?.color ?? Color.white.opacity(0.78) }
     var body: some View {
-        Group {
-            if options.mode == .vinyl { vinylView }
-            else if let artwork { artworkImage(artwork).clipShape(RoundedRectangle(cornerRadius: 5)) }
-            else {
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(paletteColor.opacity(0.22))
-                    .overlay(Image(systemName: "photo").font(.system(size: max(8, options.size * 0.34))).foregroundStyle(paletteColor))
-                    .frame(width: options.size, height: options.size)
+        ZStack {
+            Group {
+                if options.mode == .vinyl { vinylView }
+                else if let artwork { artworkImage(artwork).clipShape(RoundedRectangle(cornerRadius: 5)) }
+                else {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(paletteColor.opacity(0.22))
+                        .overlay(Image(systemName: "photo").font(.system(size: max(8, options.size * 0.34))).foregroundStyle(paletteColor))
+                        .frame(width: options.size, height: options.size)
+                }
             }
+            .id(key)
+            .transition(reduceMotion ? .opacity : mediaOptions.resolvedChangeAnimation.transition)
         }
         .frame(width: options.size, height: options.size)
+        .animation(mediaOptions.resolvedChangeAnimation == .none ? nil : .easeInOut(duration: mediaOptions.resolvedChangeAnimationDuration), value: key)
         .task(id: key + "|\(options.mode.rawValue)") {
             artwork = nil
             guard media.isPlaying else { return }
@@ -351,18 +409,25 @@ private enum LyricTimeline {
     static func parse(_ value: String, duration: Double) -> [TimedLyricLine] {
         var timed: [TimedLyricLine] = []
         var plain: [String] = []
-        for raw in value.split(whereSeparator: \.isNewline) {
-            let line = String(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+        var sourceOffset = 0.0
+        let rawLines = value.split(whereSeparator: \.isNewline).map(String.init)
+        for raw in rawLines {
+            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !line.isEmpty else { continue }
+            if line.lowercased().hasPrefix("[offset:"), let close = line.firstIndex(of: "]") {
+                let start = line.index(line.startIndex, offsetBy: 8)
+                if let milliseconds = Double(line[start..<close]) { sourceOffset = milliseconds / 1000 }
+                continue
+            }
             if let close = line.firstIndex(of: "]"), line.first == "[" {
                 let stamp = String(line[line.index(after: line.startIndex)..<close])
                 let text = String(line[line.index(after: close)...]).trimmingCharacters(in: .whitespaces)
                 if let time = timestamp(stamp), !text.isEmpty {
-                    timed.append(TimedLyricLine(id: timed.count, time: time, text: text))
+                    timed.append(TimedLyricLine(id: timed.count, time: max(0, time + sourceOffset), text: text))
                     continue
                 }
             }
-            plain.append(line)
+            if !line.hasPrefix("[") { plain.append(line) }
         }
         if !timed.isEmpty {
             return timed.sorted { $0.time < $1.time }.enumerated().map { TimedLyricLine(id: $0.offset, time: $0.element.time, text: $0.element.text) }
@@ -373,7 +438,7 @@ private enum LyricTimeline {
     }
     static func frame(lines: [TimedLyricLine], position: Double, duration: Double) -> LyricFrame? {
         guard !lines.isEmpty else { return nil }
-        let index = lines.lastIndex(where: { $0.time <= position + 0.08 }) ?? 0
+        let index = lines.lastIndex(where: { $0.time <= position + 0.06 }) ?? 0
         let current = lines[index]
         let next = index + 1 < lines.count ? lines[index + 1] : nil
         let end = max(current.time + 0.35, next?.time ?? (duration > current.time ? duration : current.time + 4))
@@ -389,6 +454,17 @@ private enum LyricTimeline {
     }
 }
 
+private struct LyricWidthReporter: View {
+    let width: Double
+    var body: some View {
+        Color.clear.frame(width: 0, height: 0).task(id: Int(width.rounded())) {
+            try? await Task.sleep(nanoseconds: 90_000_000)
+            guard !Task.isCancelled else { return }
+            NotificationCenter.default.post(name: .init("HaloClosedMediaWidthHint"), object: nil, userInfo: ["width": width])
+        }
+    }
+}
+
 private struct ClosedMediaView: View {
     @ObservedObject var media: MediaService
     let options: ClosedMediaOptions
@@ -400,26 +476,39 @@ private struct ClosedMediaView: View {
     @State private var sampledPosition = 0.0
     @State private var sampledDuration = 0.0
     @State private var sampledAt = Date()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }
     var body: some View {
-        mediaText
-            .task(id: key + "|\(options.textMode.rawValue)|\(options.usesOnlineLyrics)|\(options.resolvedLyricDisplay.rawValue)") {
-                lyrics = ""; sampledPosition = 0; sampledDuration = 0; sampledAt = Date()
-                guard options.textMode == .lyrics else { return }
-                lyricsLoading = true
-                lyrics = await MediaAssetReader.lyrics(app: media.connectedApp, key: key, title: media.title, artist: media.artist, onlineFallback: options.usesOnlineLyrics)
-                lyricsLoading = false
-                await samplePlaybackLoop()
-            }
+        ZStack {
+            mediaText
+                .id(key)
+                .transition(reduceMotion ? .opacity : options.resolvedChangeAnimation.transition)
+        }
+        .animation(options.resolvedChangeAnimation == .none ? nil : .easeInOut(duration: options.resolvedChangeAnimationDuration), value: key)
+        .task(id: key + "|\(options.textMode.rawValue)|\(options.usesOnlineLyrics)|\(options.resolvedLyricDisplay.rawValue)") {
+            lyrics = ""; sampledPosition = 0; sampledDuration = 0; sampledAt = Date()
+            guard options.textMode == .lyrics else { return }
+            lyricsLoading = true
+            lyrics = await MediaAssetReader.lyrics(app: media.connectedApp, key: key, title: media.title, artist: media.artist, onlineFallback: options.usesOnlineLyrics)
+            lyricsLoading = false
+            await samplePlaybackLoop()
+        }
     }
     private func samplePlaybackLoop() async {
         while !Task.isCancelled && media.isPlaying && options.textMode == .lyrics {
             if let sample = await MediaAssetReader.playbackTime(app: media.connectedApp) {
-                sampledPosition = sample.position
+                let now = sample.observedAt
+                let predicted = sampledPosition + max(0, now.timeIntervalSince(sampledAt))
+                let drift = sample.position - predicted
+                if sampledDuration == 0 || abs(drift) > 0.24 {
+                    sampledPosition = sample.position
+                } else {
+                    sampledPosition = predicted + drift * 0.72
+                }
                 sampledDuration = sample.duration
-                sampledAt = Date()
+                sampledAt = now
             }
-            try? await Task.sleep(nanoseconds: 850_000_000)
+            try? await Task.sleep(nanoseconds: lowPower ? 850_000_000 : 450_000_000)
         }
     }
     @ViewBuilder private var mediaText: some View {
@@ -446,8 +535,9 @@ private struct ClosedMediaView: View {
                 Text("Synced lyrics unavailable").font(.system(size: max(8, fontSize * 0.82))).opacity(0.65).lineLimit(1)
             }.frame(maxWidth: width, alignment: .leading)
         } else {
-            TimelineView(.animation(minimumInterval: lowPower ? 0.35 : 0.12, paused: !media.isPlaying)) { context in
-                let position = sampledPosition + (media.isPlaying ? max(0, context.date.timeIntervalSince(sampledAt)) : 0)
+            TimelineView(.animation(minimumInterval: lowPower ? 0.3 : 0.10, paused: !media.isPlaying)) { context in
+                let interpolated = sampledPosition + (media.isPlaying ? max(0, context.date.timeIntervalSince(sampledAt)) : 0)
+                let position = max(0, interpolated + options.resolvedLyricSyncOffset)
                 let lines = LyricTimeline.parse(lyrics, duration: sampledDuration)
                 if let frame = LyricTimeline.frame(lines: lines, position: position, duration: sampledDuration) {
                     lyricPresentation(frame: frame, width: width)
@@ -464,17 +554,33 @@ private struct ClosedMediaView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     styledText(frame.current.text, width: width)
                     if let next = frame.next { styledText(next.text, width: width).opacity(0.45) }
-                }.frame(maxWidth: width, alignment: .leading)
-            } else { inlineText(frame.current.text, width: width) }
+                }
+                .frame(maxWidth: width, alignment: .leading)
+                .background(widthReporter(texts: [frame.current.text, frame.next?.text ?? ""]))
+            } else {
+                inlineText(frame.current.text, width: width)
+                    .background(widthReporter(texts: [frame.current.text]))
+            }
         case .word:
             let words = frame.current.text.split(whereSeparator: \.isWhitespace).map(String.init)
             let word = words.indices.contains(frame.wordIndex) ? words[frame.wordIndex] : frame.current.text
             inlineText(word, width: width)
+                .background(widthReporter(texts: [word]))
         case .focus:
             VStack(alignment: .leading, spacing: 2) {
                 focusedLine(frame.current.text, activeWord: frame.wordIndex, width: width)
                 if options.lines == 2, let next = frame.next { styledText(next.text, width: width).opacity(0.35) }
-            }.frame(maxWidth: width, alignment: .leading)
+            }
+            .frame(maxWidth: width, alignment: .leading)
+            .background(widthReporter(texts: options.lines == 2 ? [frame.current.text, frame.next?.text ?? ""] : [frame.current.text]))
+        }
+    }
+    @ViewBuilder private func widthReporter(texts: [String]) -> some View {
+        if options.usesDynamicLyricWidth {
+            let font = NSFont.systemFont(ofSize: fontSize)
+            let natural = texts.filter { !$0.isEmpty }.map { ceil(($0 as NSString).size(withAttributes: [.font: font]).width) }.max() ?? 36
+            let icon = options.showPlaybackIcon ? fontSize + 10 : 0
+            LyricWidthReporter(width: min(300, max(28, natural + icon + 8)))
         }
     }
     private func focusedLine(_ text: String, activeWord: Int, width: Double) -> some View {
@@ -519,7 +625,7 @@ private struct MarqueeText: View {
 }
 
 private enum MediaAssetReader {
-    struct PlaybackSample { let position: Double; let duration: Double }
+    struct PlaybackSample { let position: Double; let duration: Double; let observedAt: Date }
     private static let queue = DispatchQueue(label: "Halo.ClosedMediaAssets", qos: .utility)
     private static let lock = NSLock()
     private static var artworkCache: [String: Data] = [:]
@@ -570,7 +676,7 @@ private enum MediaAssetReader {
                       let position = result?.atIndex(1)?.doubleValue,
                       let duration = result?.atIndex(2)?.doubleValue,
                       position >= 0, duration > 0 else { continuation.resume(returning: nil); return }
-                continuation.resume(returning: PlaybackSample(position: position, duration: duration))
+                continuation.resume(returning: PlaybackSample(position: position, duration: duration, observedAt: Date()))
             }
         }
     }
@@ -617,22 +723,42 @@ struct AlbumNotchBackground: View {
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }; private var wantsArtworkBackground: Bool { artworkOptions.enabled && artworkOptions.mode == .background }
     private var active: Bool { media.isPlaying && (reactive.enabled || (options.albumBackgroundColor == true && !colors.isEmpty) || (wantsArtworkBackground && artwork != nil)) }
     var body: some View {
-        Group { if active { if reactive.enabled && !reduceMotion && !system.lowPower { RefreshTimeline(active: true) { timestamp in reactiveBackground(signal: signal(at: timestamp)) } } else { baseBackground } } }
-            .task(id: key + "|\(wantsArtworkBackground)") { guard media.isPlaying && wantsArtworkBackground else { artwork = nil; return }; artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key) }
+        Group {
+            if active {
+                if reactive.enabled && !reduceMotion && !system.lowPower {
+                    RefreshTimeline(active: true) { timestamp in reactiveBackground(signal: signal(at: timestamp)) }
+                } else { baseBackground }
+            }
+        }
+        .task(id: key + "|\(wantsArtworkBackground)") { guard media.isPlaying && wantsArtworkBackground else { artwork = nil; return }; artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key) }
+        .task(id: "spectrum|\(media.isPlaying)|\(reactive.enabled)|\(reactive.driver.rawValue)") {
+            AudioSpectrumService.shared.setActive(media.isPlaying && reactive.enabled && reactive.driver != .pulse)
+        }
+        .onDisappear { AudioSpectrumService.shared.setActive(false) }
     }
     private var gradientColors: [Color] { if colors.isEmpty { return [.clear, .clear] }; return colors.count == 1 ? [colors[0], colors[0].opacity(0.72)] : Array(colors.prefix(2)) }
     @ViewBuilder private var baseBackground: some View {
         if wantsArtworkBackground, let artwork { Image(nsImage: artwork).resizable().scaledToFill().opacity(artworkOptions.backgroundOpacity).overlay(LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.42)], startPoint: .top, endPoint: .bottom)) }
         else if options.albumBackgroundColor == true && !colors.isEmpty { LinearGradient(colors: gradientColors, startPoint: .leading, endPoint: .trailing) }
-        else { Color.clear }
+        else { Color.white.opacity(reactive.enabled ? 0.035 : 0) }
     }
     private func signal(at timestamp: Double) -> Double {
-        let t = timestamp * reactive.speed
-        switch reactive.driver { case .pulse: return (sin(t * 5.2) + 1) / 2; case .bass: return pow((sin(t * 3.1) + 1) / 2, 1.7); case .mids: return ((sin(t * 7.3) + sin(t * 4.7) * 0.5) + 1.5) / 3; case .treble: return ((sin(t * 13.1) + sin(t * 17.7) * 0.4) + 1.4) / 2.8; case .spectrum: return ((sin(t * 3.2) + sin(t * 8.6) + sin(t * 15.4)) + 3) / 6 }
+        if reactive.driver == .pulse { return (sin(timestamp * reactive.speed * 5.2) + 1) / 2 }
+        let spectrum = AudioSpectrumService.shared.snapshot()
+        guard spectrum.available else { return (sin(timestamp * reactive.speed * 4.1) + 1) * 0.08 + 0.08 }
+        let raw: Double
+        switch reactive.driver {
+        case .pulse: raw = spectrum.overall
+        case .bass: raw = spectrum.bass
+        case .mids: raw = spectrum.mids
+        case .treble: raw = spectrum.treble
+        case .spectrum: raw = max(spectrum.bass, max(spectrum.mids, spectrum.treble)) * 0.65 + spectrum.overall * 0.35
+        }
+        return min(1, max(0, raw * reactive.resolvedAudioSensitivity))
     }
     private func reactiveBackground(signal: Double) -> some View {
         let amount = min(1, max(0, signal)) * reactive.intensity
-        return baseBackground.brightness((amount - 0.35) * reactive.brightness).saturation(1 + amount * reactive.saturation).scaleEffect(1 + amount * reactive.scale).hueRotation(.degrees(amount * reactive.hueShift * 360)).blur(radius: amount * reactive.blur).overlay(Color.white.opacity(0.015 + amount * max(0.03, reactive.brightness * 0.16))).overlay(GrainOverlay(options: GrainOptions(enabled: reactive.grain > 0, amount: amount * reactive.grain, size: 1, warmth: 0)))
+        return baseBackground.brightness((amount - 0.18) * reactive.brightness).saturation(1 + amount * reactive.saturation).scaleEffect(1 + amount * reactive.scale).hueRotation(.degrees(amount * reactive.hueShift * 360)).blur(radius: amount * reactive.blur).overlay(Color.white.opacity(0.012 + amount * max(0.04, reactive.brightness * 0.18))).overlay(GrainOverlay(options: GrainOptions(enabled: reactive.grain > 0, amount: amount * reactive.grain, size: 1, warmth: 0)))
     }
 }
 
