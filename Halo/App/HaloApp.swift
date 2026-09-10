@@ -39,9 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// macOS does not expose a supported API for moving another app's menu-bar items. Instead Halo
-    /// reserves space with its own invisible status item while a notch panel grows beyond the physical
-    /// camera cutout. This nudges compatible right-side menu extras away and releases the space again
-    /// when Halo returns to the physical-notch width.
+    /// reserves space with its own invisible status item while a notch panel grows into the right-side
+    /// menu-extra region. This releases automatically when Halo returns inside the physical cutout.
     @objc private func haloPanelResized(_ note: Notification) {
         guard let panel = note.object as? HaloPanel else { return }
         updateMenuBarReservation(for: panel)
@@ -60,17 +59,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let physicalWidth: CGFloat
-        if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
-            physicalWidth = max(0, right.minX - left.maxX)
+        let physicalRightEdge: CGFloat
+        if let right = screen.auxiliaryTopRightArea {
+            physicalRightEdge = right.minX
         } else {
-            physicalWidth = 190
+            physicalRightEdge = screen.frame.midX + 95
         }
 
-        // A status item can only influence the right-hand menu extras. Reserve the amount Halo extends
-        // beyond the right edge of the physical notch, plus a small breathing margin.
-        let extensionPerSide = max(0, (panel.frame.width - physicalWidth) / 2)
-        let reserve = min(240, extensionPerSide + (extensionPerSide > 2 ? 10 : 0))
+        // Measure the actual right-hand intrusion. This preserves the one-sided expansion behavior:
+        // left-only growth reserves nothing, while right/both-side growth nudges right menu extras away.
+        let rightExtension = max(0, panel.frame.maxX - physicalRightEdge)
+        let reserve = min(240, rightExtension + (rightExtension > 2 ? 10 : 0))
         guard reserve > 2 else {
             releaseMenuBarReservation()
             return
