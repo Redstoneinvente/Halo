@@ -267,6 +267,12 @@ struct ClosedNotchSlot: View {
         }
         return remaining
     }
+    private var mirrorContentWidth: Double {
+        // Mirror is deliberately the flexible element. Reserve decoration, artwork, power, every inter-element
+        // gap, the camera-side margin, outer margin, and slot padding first; only the remaining content area
+        // belongs to the live camera preview. This prevents Mirror from pushing siblings outside the notch.
+        max(1, min(112, innerWidth - mediaSiblingFootprint))
+    }
     private var renderedArtworkOptions: ClosedArtworkOptions {
         var value = artwork
         value.size = renderedArtworkSize
@@ -340,7 +346,8 @@ struct ClosedNotchSlot: View {
             if media.isPlaying { PlaybackVisualizer(kind: options.animation, playing: true, enabled: options.animate && !system.lowPower, options: visualizerOptions, palette: media.artworkColors, fallback: effectiveTextColor) }
         case .mirror:
             MirrorWidgetView()
-                .frame(width: min(112, max(44, innerWidth)), height: innerHeight)
+                .frame(width: mirrorContentWidth, height: innerHeight)
+                .layoutPriority(0)
         case .files: Label("\(store.files.count)", systemImage: "tray").lineLimit(1)
         case .activity:
             if let activity = activeActivity {
