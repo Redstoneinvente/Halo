@@ -19,6 +19,8 @@ struct SurfaceView: View, Equatable {
     @ObservedObject var workspace: WorkspaceStore
     private var theme: Theme { state.theme }
     private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.effectiveLayout }
+    private var contextOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
+    private var contextMusicActive: Bool { contextOptions.enabled && workspace.media.isPlaying }
     private var contour: HaloContour {
         HaloContour(kind: effectiveShape, radius: (layout.appearance.surface.useStyleContour ?? true) ? (theme.style == .menuBar ? 4 : theme.style == .pill ? 40 : theme.cornerRadius) : theme.cornerRadius,
                     topRadius: layout.appearance.surface.topRadius, bottomRadius: layout.appearance.surface.bottomRadius,
@@ -61,52 +63,57 @@ struct SurfaceView: View, Equatable {
             .accessibilityLabel("Toggle Halo dashboard")
             .accessibilityAddTraits(.isButton)
             if state.expanded {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Your space, within reach.").font(.headline)
-                            Text("HALO / PERSONAL WORKSPACE").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(accent)
+                if contextMusicActive {
+                    ContextMusicView(media: workspace.media, options: contextOptions,
+                                     visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions())
+                        .frame(width: state.dashboardWidth)
+                        .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                } else {
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Your space, within reach.").font(.headline)
+                                Text("HALO / PERSONAL WORKSPACE").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(accent)
+                            }
+                            Spacer()
+                            Button { state.pinned.toggle() } label: { Image(systemName: state.pinned ? "pin.fill" : "pin") }
+                                .help("Keep expanded").accessibilityLabel("Keep expanded")
                         }
-                        Spacer()
-                        Button { state.pinned.toggle() } label: { Image(systemName: state.pinned ? "pin.fill" : "pin") }
-                            .help("Keep expanded").accessibilityLabel("Keep expanded")
-                    }
-                    ContextNotchInterface(media: workspace.media, options: layout.contextMusic ?? ContextMusicOptions(), visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions()) {
-                    if layout.horizontalWidgets ?? false {
-                        if layout.horizontalPages ?? false {
-                            VStack(spacing: 8) {
-                                if !modules.isEmpty {
-                                    let index = min(page, modules.count - 1)
-                                    horizontalWidget(modules[index])
-                                    HStack {
-                                        Button { page = max(0, index - 1) } label: { Image(systemName: "chevron.left") }
-                                            .disabled(index == 0).accessibilityLabel("Previous widget")
-                                        Spacer()
-                                        Text("\(modules[index].title) · \(index + 1) / \(modules.count)").font(.caption)
-                                        Spacer()
-                                        Button { page = min(modules.count - 1, index + 1) } label: { Image(systemName: "chevron.right") }
-                                            .disabled(index == modules.count - 1).accessibilityLabel("Next widget")
-                                    }
-                                } else { Text("Enable widgets in Settings → Modules.").foregroundStyle(.secondary) }
-                            }
-                        } else { ScrollView(.horizontal) {
-                            LazyHStack(alignment: .top, spacing: layout.appearance.spacing) {
-                                widgetCards(horizontal: true)
-                            }
-                        } }
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: layout.appearance.spacing) {
-                                widgetCards(horizontal: false)
+                        if layout.horizontalWidgets ?? false {
+                            if layout.horizontalPages ?? false {
+                                VStack(spacing: 8) {
+                                    if !modules.isEmpty {
+                                        let index = min(page, modules.count - 1)
+                                        horizontalWidget(modules[index])
+                                        HStack {
+                                            Button { page = max(0, index - 1) } label: { Image(systemName: "chevron.left") }
+                                                .disabled(index == 0).accessibilityLabel("Previous widget")
+                                            Spacer()
+                                            Text("\(modules[index].title) · \(index + 1) / \(modules.count)").font(.caption)
+                                            Spacer()
+                                            Button { page = min(modules.count - 1, index + 1) } label: { Image(systemName: "chevron.right") }
+                                                .disabled(index == modules.count - 1).accessibilityLabel("Next widget")
+                                        }
+                                    } else { Text("Enable widgets in Settings → Modules.").foregroundStyle(.secondary) }
+                                }
+                            } else { ScrollView(.horizontal) {
+                                LazyHStack(alignment: .top, spacing: layout.appearance.spacing) {
+                                    widgetCards(horizontal: true)
+                                }
+                            } }
+                        } else {
+                            ScrollView {
+                                LazyVStack(spacing: layout.appearance.spacing) {
+                                    widgetCards(horizontal: false)
+                                }
                             }
                         }
-                    }
-                    }
-                    HStack {
-                        Spacer()
-                        Button("Settings") { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) }
-                    }
-                }.padding(.horizontal, max(20, layout.appearance.surface.shoulder + 12)).padding(.vertical, 20).frame(width: state.dashboardWidth).transition(.opacity)
+                        HStack {
+                            Spacer()
+                            Button("Settings") { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) }
+                        }
+                    }.padding(.horizontal, max(20, layout.appearance.surface.shoulder + 12)).padding(.vertical, 20).frame(width: state.dashboardWidth).transition(.opacity)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -161,7 +168,6 @@ struct SurfaceView: View, Equatable {
             }
         }
     }
-
 }
 
 struct BuiltinOrIntegrationWidget: View {
@@ -251,77 +257,231 @@ struct ShelfFileInfo: View {
     }
 }
 
-private struct ContextNotchInterface<Dashboard: View>: View {
-    @ObservedObject var media: MediaService
-    let options: ContextMusicOptions
-    let visualizer: VisualizerOptions
-    @ViewBuilder var dashboard: Dashboard
-    @State private var showDashboard = false
-    var body: some View {
-        VStack(spacing: 8) {
-            if options.enabled && media.isPlaying && !showDashboard {
-                ContextMusicView(media: media, options: options, visualizer: visualizer)
-                Button("Show widgets") { showDashboard = true }.font(.caption)
-            } else {
-                dashboard
-                if options.enabled && media.isPlaying {
-                    Button("Show music") { showDashboard = false }.font(.caption)
-                }
-            }
-        }
-        .onChange(of: media.isPlaying) { playing in if !playing { showDashboard = false } }
-    }
-}
-
 private struct ContextMusicView: View {
     @ObservedObject var media: MediaService
     let options: ContextMusicOptions
     let visualizer: VisualizerOptions
     @State private var artwork: NSImage?
-    private var artworkKey: String { "\(media.connectedApp ?? "")|\(media.title)|\(media.artist)|\(options.showArtwork)" }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var artworkKey: String {
+        "\(media.connectedApp ?? "")|\(media.title)|\(media.artist)|\(options.resolvedForegroundArtwork.rawValue)|\(options.usesArtworkBackground)"
+    }
+    private var horizontalAlignment: HorizontalAlignment {
+        switch options.resolvedContentAlignment { case .leading: return .leading; case .center: return .center; case .trailing: return .trailing }
+    }
+    private var frameAlignment: Alignment {
+        switch options.resolvedContentAlignment { case .leading: return .leading; case .center: return .center; case .trailing: return .trailing }
+    }
     var body: some View {
         GeometryReader { proxy in
-            ScrollView {
-                VStack(spacing: 12) {
-                    if options.showArtwork {
-                        Group {
-                            if let artwork { Image(nsImage: artwork).resizable().scaledToFit() }
-                            else { Image(systemName: "music.note").resizable().scaledToFit().padding(16) }
-                        }.frame(width: min(options.artworkSize, max(32, proxy.size.height * 0.35)), height: min(options.artworkSize, max(32, proxy.size.height * 0.35)))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+            ZStack {
+                contextBackground
+                Group {
+                    switch options.resolvedLayoutMode {
+                    case .hero: heroLayout(proxy: proxy)
+                    case .split: splitLayout(proxy: proxy)
+                    case .compact: compactLayout(proxy: proxy)
+                    case .minimal: minimalLayout(proxy: proxy)
                     }
-                    if options.showTitle { Text(media.title).font(.system(size: options.fontSize, weight: .semibold)).multilineTextAlignment(.center) }
-                    if options.showArtist { Text(media.artist).font(.system(size: max(10, options.fontSize * 0.7))).opacity(0.75) }
-                    if options.showControls {
-                        HStack(spacing: 28) {
-                            control("backward.end.fill", action: "previous track", label: "Previous track")
-                            control(media.isPlaying ? "pause.fill" : "play.fill", action: "playpause", label: "Play or pause")
-                            control("forward.end.fill", action: "next track", label: "Next track")
-                        }.font(.title2).disabled(media.busy)
-                    }
-                    if options.showVisualizer {
-                        PlaybackVisualizer(kind: .bars, playing: media.isPlaying, enabled: true, options: visualizer, palette: media.artworkColors, fallback: options.textColor.color)
-                            .frame(height: 32)
-                    }
-                    if let error = media.error { Text(error).font(.caption).foregroundStyle(.orange) }
-                }.padding(16).frame(maxWidth: .infinity, minHeight: proxy.size.height)
-            }.foregroundStyle(options.textColor.color)
-                .background {
-                    if options.background == .glass { RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial).opacity(options.backgroundOpacity) }
-                    else if options.background == .gradient {
-                        LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing).opacity(options.backgroundOpacity)
-                    } else { Color.black.opacity(options.backgroundOpacity) }
-                }.clipShape(RoundedRectangle(cornerRadius: 16))
+                }
+                .padding(max(16, options.resolvedSpacing * 1.35))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: options.resolvedCornerRadius, style: .continuous))
+            .overlay(alignment: .topTrailing) {
+                Button { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) } label: {
+                    Image(systemName: "gearshape.fill").font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .padding(14)
+                .help("Open Halo settings")
+            }
+            .foregroundStyle(options.textColor.color)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 10)
         }
         .task(id: artworkKey) {
             artwork = nil
-            guard options.showArtwork else { return }
+            let needsArtwork = options.resolvedForegroundArtwork != .none || options.usesArtworkBackground
+            guard needsArtwork else { return }
             let result = await ContextMusicArtworkReader.artwork(app: media.connectedApp, key: artworkKey)
-            guard !Task.isCancelled else { return }; artwork = result
+            guard !Task.isCancelled else { return }
+            artwork = result
         }
     }
+
+    @ViewBuilder private var contextBackground: some View {
+        ZStack {
+            switch options.background {
+            case .glass:
+                Rectangle().fill(.ultraThinMaterial).opacity(max(0.12, options.backgroundOpacity))
+            case .gradient:
+                let palette = media.artworkColors.map(\.color)
+                LinearGradient(colors: palette.isEmpty ? [.blue, .purple] : Array(palette.prefix(3)), startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .opacity(options.backgroundOpacity)
+            default:
+                Color.black.opacity(options.backgroundOpacity)
+            }
+            if options.usesArtworkBackground, let artwork {
+                Image(nsImage: artwork)
+                    .resizable()
+                    .scaledToFill()
+                    .blur(radius: options.resolvedArtworkBackgroundBlur)
+                    .overlay(Color.black.opacity(options.resolvedArtworkBackgroundDim))
+                    .clipped()
+            }
+        }
+    }
+
+    private func heroLayout(proxy: GeometryProxy) -> some View {
+        VStack(alignment: horizontalAlignment, spacing: options.resolvedSpacing) {
+            if options.resolvedForegroundArtwork != .none { foregroundArtwork(size: min(options.artworkSize, max(48, proxy.size.height * 0.38))) }
+            metadata
+            controls
+            visualizerView
+            errorView
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: frameAlignment)
+    }
+
+    private func splitLayout(proxy: GeometryProxy) -> some View {
+        HStack(spacing: options.resolvedSpacing * 1.4) {
+            if options.resolvedForegroundArtwork != .none { foregroundArtwork(size: min(options.artworkSize, max(52, proxy.size.height * 0.52))) }
+            VStack(alignment: horizontalAlignment, spacing: options.resolvedSpacing) {
+                metadata
+                controls
+                visualizerView
+                errorView
+            }
+            .frame(maxWidth: .infinity, alignment: frameAlignment)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    private func compactLayout(proxy: GeometryProxy) -> some View {
+        HStack(spacing: options.resolvedSpacing) {
+            if options.resolvedForegroundArtwork != .none { foregroundArtwork(size: min(options.artworkSize, max(42, proxy.size.height * 0.26))) }
+            VStack(alignment: .leading, spacing: max(3, options.resolvedSpacing * 0.45)) {
+                metadata
+                visualizerView
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            controls
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    private func minimalLayout(proxy: GeometryProxy) -> some View {
+        VStack(alignment: horizontalAlignment, spacing: max(4, options.resolvedSpacing * 0.6)) {
+            if options.resolvedForegroundArtwork != .none {
+                foregroundArtwork(size: min(options.artworkSize, max(36, proxy.size.height * 0.22)))
+            }
+            metadata
+            controls
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: frameAlignment)
+    }
+
+    @ViewBuilder private func foregroundArtwork(size: Double) -> some View {
+        switch options.resolvedForegroundArtwork {
+        case .none:
+            EmptyView()
+        case .cover:
+            Group {
+                if let artwork { Image(nsImage: artwork).resizable().scaledToFill() }
+                else { artworkPlaceholder }
+            }
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: min(options.resolvedCornerRadius, size * 0.18), style: .continuous))
+        case .vinyl:
+            vinylArtwork(size: size)
+        }
+    }
+
+    @ViewBuilder private func vinylArtwork(size: Double) -> some View {
+        if !reduceMotion {
+            TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !media.isPlaying)) { context in
+                let turns = context.date.timeIntervalSinceReferenceDate * options.resolvedVinylRPM / 60
+                vinylDisc(size: size).rotationEffect(.degrees(turns * 360))
+            }
+        } else {
+            vinylDisc(size: size)
+        }
+    }
+
+    private func vinylDisc(size: Double) -> some View {
+        ZStack {
+            Circle().fill(Color.black.opacity(0.97))
+            Circle().stroke(Color.white.opacity(0.11), lineWidth: max(0.7, size * 0.012)).padding(size * 0.08)
+            Circle().stroke(Color.white.opacity(0.07), lineWidth: max(0.6, size * 0.009)).padding(size * 0.17)
+            Group {
+                if let artwork { Image(nsImage: artwork).resizable().scaledToFill() }
+                else { Color.white.opacity(0.14) }
+            }
+            .frame(width: size * 0.62, height: size * 0.62)
+            .clipShape(Circle())
+            Circle().fill(Color.black).frame(width: max(5, size * 0.11), height: max(5, size * 0.11))
+            Circle().fill(Color.white.opacity(0.55)).frame(width: max(1.5, size * 0.025), height: max(1.5, size * 0.025))
+        }
+        .frame(width: size, height: size)
+    }
+
+    private var artworkPlaceholder: some View {
+        ZStack {
+            Color.white.opacity(0.07)
+            Image(systemName: "music.note").font(.system(size: 28, weight: .medium)).opacity(0.75)
+        }
+    }
+
+    private var metadata: some View {
+        VStack(alignment: horizontalAlignment, spacing: max(2, options.resolvedSpacing * 0.28)) {
+            if options.showTitle {
+                Text(media.title)
+                    .font(.system(size: options.fontSize, weight: .semibold, design: .rounded))
+                    .lineLimit(2)
+                    .multilineTextAlignment(textAlignment)
+            }
+            if options.showArtist {
+                Text(media.artist.isEmpty ? "Unknown artist" : media.artist)
+                    .font(.system(size: max(10, options.fontSize * 0.68), weight: .medium))
+                    .opacity(0.72)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: frameAlignment)
+    }
+
+    @ViewBuilder private var controls: some View {
+        if options.showControls {
+            HStack(spacing: options.resolvedControlSize * 1.05) {
+                control("backward.end.fill", action: "previous track", label: "Previous track")
+                control(media.isPlaying ? "pause.fill" : "play.fill", action: "playpause", label: "Play or pause")
+                control("forward.end.fill", action: "next track", label: "Next track")
+            }
+            .font(.system(size: options.resolvedControlSize, weight: .semibold))
+            .disabled(media.busy)
+        }
+    }
+
+    @ViewBuilder private var visualizerView: some View {
+        if options.showVisualizer {
+            PlaybackVisualizer(kind: .bars, playing: media.isPlaying, enabled: true,
+                               options: visualizer, palette: media.artworkColors, fallback: options.textColor.color)
+                .frame(height: max(18, min(48, visualizer.height)))
+        }
+    }
+
+    @ViewBuilder private var errorView: some View {
+        if let error = media.error { Text(error).font(.caption).foregroundStyle(.orange) }
+    }
+
+    private var textAlignment: TextAlignment {
+        switch options.resolvedContentAlignment { case .leading: return .leading; case .center: return .center; case .trailing: return .trailing }
+    }
+
     private func control(_ symbol: String, action: String, label: String) -> some View {
-        Button { if let app = media.connectedApp { media.perform(action, app: app) } } label: { Image(systemName: symbol) }.accessibilityLabel(label)
+        Button { if let app = media.connectedApp { media.perform(action, app: app) } } label: { Image(systemName: symbol) }
+            .buttonStyle(.plain)
+            .accessibilityLabel(label)
     }
 }
 
