@@ -108,6 +108,7 @@ final class WindowManager {
         }
     }
 
+    private enum DynamicSide { case left, right }
     private var activityExpiry: DispatchWorkItem?
     private let store: AppStore
     private var hosts: [String: Host] = [:]
@@ -154,6 +155,8 @@ final class WindowManager {
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.media.$title.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+        store.workspace.media.$artist.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.$files.map(\.count).removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.$pinnedFiles.map { !$0.isEmpty }.removeDuplicates().receive(on: DispatchQueue.main)
@@ -161,6 +164,12 @@ final class WindowManager {
         store.workspace.capture.$busy.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.media.$isPlaying.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+        store.workspace.system.$battery.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+        store.workspace.system.$charging.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+        store.workspace.system.$onBattery.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.$deadline.map { $0 != nil }.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
@@ -182,10 +191,10 @@ final class WindowManager {
         var right = options.right
         guard activeClosedActivity != nil, left != .activity, right != .activity else { return (left, right) }
         let playing = store.workspace.media.isPlaying
-        let rightMusicActive = (right == .media || right == .visualizer) && playing
-        let leftMusicActive = (left == .media || left == .visualizer) && playing
-        if !rightMusicActive { right = .activity }
-        else if !leftMusicActive { left = .activity }
+        let rightAvailable = right == .none || ((right == .media || right == .visualizer) && !playing)
+        let leftAvailable = left == .none || ((left == .media || left == .visualizer) && !playing)
+        if rightAvailable { right = .activity }
+        else if leftAvailable { left = .activity }
         else { right = .activity }
         return (left, right)
     }
@@ -201,68 +210,108 @@ final class WindowManager {
         }
     }
 
+    private func powerReaction(options: ClosedNotchOptions,
+                               items: (left: ClosedNotchItem, right: ClosedNotchItem)) -> (side: DynamicSide, width: Double)? {
+        let settings = options.powerReaction ?? PowerReactionOptions()
+        guard let battery = store.workspace.system.battery else { return nil }
+        let style: PowerReactionStyle
+        if battery >= 99 && !store.workspace.system.onBattery { style = settings.charged }
+        else if store.workspace.system.charging { style = settings.charging }
+        else if store.workspace.system.onBattery && battery <= settings.lowThreshold { style = settings.low }
+        else { return nil }
+        guard style != .off else { return nil }
+
+        let size = max(10, options.fontSize)
+        let estimated: Double
+        switch style {
+        case .off: estimated = 0
+        case .icon: estimated = size + 6
+        case .percent: estimated = size * 3.3
+        case .iconPercent: estimated = size * 4.4
+        case .label: estimated = size * 7.0
+        }
+        let width = settings.expandForEvent ? max(estimated, settings.eventWidth) : estimated
+        let side: DynamicSide
+        switch settings.side {
+        case .left: side = .left
+        case .right: side = .right
+        case .automatic:
+            let playing = store.workspace.media.isPlaying
+            let rightFree = items.right == .none || ((items.right == .media || items.right == .visualizer) && !playing)
+            let leftFree = items.left == .none || ((items.left == .media || items.left == .visualizer) && !playing)
+            if rightFree { side = .right }
+            else if leftFree { side = .left }
+            else { side = .right }
+        }
+        return (side, width)
+    }
+
     private func configureDynamicWidth(_ host: Host) {
         guard let geometry = host.geometry else { return }
         let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
         let options = layout.closedNotch ?? ClosedNotchOptions()
         let expansion = options.expansion ?? ClosedExpansionOptions()
         let items = resolvedClosedItems(options)
-        let sides = fittedClosedSides(host: host, layout: layout, items: items)
-        let leftLive = sideHasLiveReason(item: items.left, decoration: options.leftDecoration)
-        let rightLive = sideHasLiveReason(item: items.right, decoration: options.rightDecoration)
+        let power = powerReaction(options: options, items: items)
+        let sides = fittedClosedSides(host: host, layout: layout, items: items, power: power)
+        var leftLive = sideHasLiveReason(item: items.left, decoration: options.leftDecoration)
+        var rightLive = sideHasLiveReason(item: items.right, decoration: options.rightDecoration)
+        if power?.side == .left { leftLive = true }
+        if power?.side == .right { rightLive = true }
+
         let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
         let camera = attached ? geometry.physicalNotchWidth : 0
-        let fittedWidth = attached ? camera + sides.left + sides.right : max(16, sides.left + sides.right)
+        let baseWidth = max(16, geometry.appearance.compactWidth)
         let autoFit = options.autoFitContent ?? true
 
-        var requested = autoFit ? fittedWidth : 0
-        if expansion.enabled && (leftLive || rightLive) { requested = max(requested, expansion.width) }
-
-        let visibleDecorationWidth = attached ? camera + sides.decorationLeft + sides.decorationRight :
-            max(16, sides.decorationLeft + sides.decorationRight)
-        requested = max(requested, visibleDecorationWidth)
-
-        guard !host.state.editingGeometry, requested > 0 else {
+        guard !host.state.editingGeometry else {
             host.geometry?.activeCompactWidth = nil
             host.geometry?.activeCompactCenterOffset = nil
             return
         }
 
-        let finalWidth = min(geometry.visible.width, requested)
-        host.geometry?.activeCompactWidth = finalWidth
+        if attached {
+            let baseSide = max(0, (baseWidth - camera) / 2)
+            var leftExtent = baseSide
+            var rightExtent = baseSide
+            if autoFit {
+                leftExtent = max(leftExtent, sides.left)
+                rightExtent = max(rightExtent, sides.right)
+            } else {
+                leftExtent = max(leftExtent, sides.decorationLeft)
+                rightExtent = max(rightExtent, sides.decorationRight)
+            }
 
-        guard attached, finalWidth > camera else {
-            host.geometry?.activeCompactCenterOffset = nil
-            return
-        }
+            var required = camera + leftExtent + rightExtent
+            if expansion.enabled && (leftLive || rightLive), expansion.width > required {
+                let extra = expansion.width - required
+                if leftLive && !rightLive { leftExtent += extra }
+                else if rightLive && !leftLive { rightExtent += extra }
+                else { leftExtent += extra / 2; rightExtent += extra / 2 }
+                required = camera + leftExtent + rightExtent
+            }
 
-        var left = autoFit ? sides.left : sides.decorationLeft
-        var right = autoFit ? sides.right : sides.decorationRight
-        let extra = max(0, finalWidth - camera - left - right)
-
-        if leftLive && !rightLive {
-            left += extra
-        } else if rightLive && !leftLive {
-            right += extra
-        } else if leftLive && rightLive {
-            left += extra / 2
-            right += extra / 2
-        } else if left > 0, right <= 0 {
-            left += extra
-        } else if right > 0, left <= 0 {
-            right += extra
+            let maxWidth = geometry.visible.width
+            if required > maxWidth {
+                let overflow = required - maxWidth
+                if leftExtent >= rightExtent { leftExtent = max(0, leftExtent - overflow) }
+                else { rightExtent = max(0, rightExtent - overflow) }
+                required = camera + leftExtent + rightExtent
+            }
+            host.geometry?.activeCompactWidth = max(baseWidth, required)
+            host.geometry?.activeCompactCenterOffset = (rightExtent - leftExtent) / 2
         } else {
-            left += extra / 2
-            right += extra / 2
+            var requested = baseWidth
+            if autoFit { requested = max(requested, sides.left + sides.right) }
+            if expansion.enabled && (leftLive || rightLive) { requested = max(requested, expansion.width) }
+            host.geometry?.activeCompactWidth = min(geometry.visible.width, requested)
+            host.geometry?.activeCompactCenterOffset = nil
         }
-
-        // With camera-centered coordinates this keeps the opposite outer edge fixed for one-sided growth.
-        // right-only growth => left extent is unchanged; left-only growth => right extent is unchanged.
-        host.geometry?.activeCompactCenterOffset = (right - left) / 2
     }
 
     private func fittedClosedSides(host: Host, layout: WorkspaceLayout,
-                                   items: (left: ClosedNotchItem, right: ClosedNotchItem)) ->
+                                   items: (left: ClosedNotchItem, right: ClosedNotchItem),
+                                   power: (side: DynamicSide, width: Double)?) ->
         (left: Double, right: Double, decorationLeft: Double, decorationRight: Double) {
         guard let geometry = host.geometry else { return (0, 0, 0, 0) }
         let options = layout.closedNotch ?? ClosedNotchOptions()
@@ -272,6 +321,28 @@ final class WindowManager {
         let font = NSFont.systemFont(ofSize: size)
         func textWidth(_ text: String, font: NSFont) -> Double {
             ceil((text as NSString).size(withAttributes: [.font: font]).width) + 4
+        }
+        func mediaWidth() -> Double {
+            guard playing else { return 0 }
+            let media = options.mediaOptions ?? ClosedMediaOptions()
+            let title = textWidth(String(store.workspace.media.title.prefix(120)), font: font)
+            let artist = textWidth(String(store.workspace.media.artist.prefix(120)), font: font)
+            let natural: Double
+            switch media.textMode {
+            case .title: natural = title
+            case .artist: natural = max(size * 3, artist)
+            case .titleArtist: natural = media.lines == 2 ? max(title, artist) : title + (store.workspace.media.artist.isEmpty ? 0 : artist + size)
+            case .lyrics: natural = max(140, min(260, title + artist * 0.5))
+            }
+            let textTarget: Double
+            switch media.overflow {
+            case .marquee: textTarget = min(max(120, natural * 0.55), 220)
+            case .truncate: textTarget = min(natural, 220)
+            case .scale: textTarget = min(natural, 260)
+            }
+            let artwork = (media.artwork == .cover || media.artwork == .vinyl) ? media.artworkSize + 7 : 0
+            let icon = media.showPlaybackIcon ? size + 5 : 0
+            return textTarget + artwork + icon
         }
         func measurements(_ item: ClosedNotchItem, _ decoration: SideDecoration?) -> (full: Double, decoration: Double) {
             let content: Double
@@ -285,7 +356,7 @@ final class WindowManager {
             case .date: content = textWidth("Sep 28", font: font)
             case .timer: content = textWidth("88:88:88", font: font) + size
             case .battery: content = textWidth("100%", font: font) + size + 5
-            case .media: content = playing ? textWidth(String(store.workspace.media.title.prefix(80)), font: font) + size + 5 : 0
+            case .media: content = mediaWidth()
             case .visualizer: content = playing ? (options.visualizer ?? VisualizerOptions()).width : 0
             case .files: content = textWidth(String(store.files.count), font: font) + size + 5
             case .activity:
@@ -299,7 +370,10 @@ final class WindowManager {
         }
         let left = measurements(items.left, options.leftDecoration)
         let right = measurements(items.right, options.rightDecoration)
-        return (left.full, right.full, left.decoration, right.decoration)
+        let gap = 6.0
+        let leftPower = power?.side == .left ? power!.width + (left.full > 0 ? gap : 0) : 0
+        let rightPower = power?.side == .right ? power!.width + (right.full > 0 ? gap : 0) : 0
+        return (left.full + leftPower, right.full + rightPower, left.decoration, right.decoration)
     }
 
     private func refreshDynamicWidths() {
