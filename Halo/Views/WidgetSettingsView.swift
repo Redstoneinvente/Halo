@@ -176,7 +176,7 @@ struct ClosedNotchSettingsView: View {
         Section("Automatic width") {
             Toggle("Widen for music and live activity", isOn: expansion.enabled)
             PreciseSlider(title: "Active width", value: expansion.width, range: 120...640, step: 1, suffix: "pt")
-            Text("Music, pinned files, timers, power events and live activities can widen the closed notch. Extra width is assigned only to the side that needs it.").font(.caption)
+            Text("Music, pinned files, timers, power events and live activities can widen the closed notch. Dynamic lyrics bypass the fixed music width and resize to the currently displayed lyric instead.").font(.caption)
         }
         SideDecorationSettingsView(title: "Left icon / GIF", options: Binding(
             get: { options.wrappedValue.leftDecoration ?? SideDecoration() }, set: { options.wrappedValue.leftDecoration = $0 }
@@ -212,6 +212,14 @@ struct ClosedNotchSettingsView: View {
                     Text("Focus phrase").tag(LyricDisplayMode.focus)
                     Text("Current word").tag(LyricDisplayMode.word)
                 }
+                Toggle("Resize notch to current lyric", isOn: Binding(
+                    get: { mediaOptions.wrappedValue.usesDynamicLyricWidth },
+                    set: { mediaOptions.wrappedValue.dynamicLyricWidth = $0 }
+                ))
+                PreciseSlider(title: "Lyrics sync offset", value: Binding(
+                    get: { mediaOptions.wrappedValue.resolvedLyricSyncOffset },
+                    set: { mediaOptions.wrappedValue.lyricSyncOffset = $0 }
+                ), range: -5...5, step: 0.05, suffix: "s", decimals: 2)
             }
             if mediaOptions.wrappedValue.textMode != .lyrics || mediaOptions.wrappedValue.resolvedLyricDisplay != .word {
                 Picker("Lines", selection: mediaOptions.lines) {
@@ -228,8 +236,34 @@ struct ClosedNotchSettingsView: View {
                     get: { mediaOptions.wrappedValue.usesOnlineLyrics },
                     set: { mediaOptions.wrappedValue.onlineLyrics = $0 }
                 ))
-                Text("Halo prefers timestamped synced lyrics when online fallback is enabled, then follows the current player position. Current-word and Focus Phrase estimate word timing inside each timestamped line when word-level timing is unavailable.").font(.caption)
+                Text("Halo re-samples the player clock and snaps meaningful drift automatically. The sync offset lets you correct a lyric source that is consistently early or late. Timestamped LRC offset metadata is also respected.").font(.caption)
             }
+        }
+        Section("Song changes") {
+            Picker("Transition", selection: Binding(
+                get: { mediaOptions.wrappedValue.resolvedChangeAnimation },
+                set: { mediaOptions.wrappedValue.changeAnimation = $0 }
+            )) {
+                Text("None").tag(MediaChangeAnimation.none)
+                Text("Fade").tag(MediaChangeAnimation.fade)
+                Text("Slide").tag(MediaChangeAnimation.slide)
+                Text("Scale").tag(MediaChangeAnimation.scale)
+                Text("Blur + fade").tag(MediaChangeAnimation.blur)
+            }
+            if mediaOptions.wrappedValue.resolvedChangeAnimation != .none {
+                PreciseSlider(title: "Transition duration", value: Binding(
+                    get: { mediaOptions.wrappedValue.resolvedChangeAnimationDuration },
+                    set: { mediaOptions.wrappedValue.changeAnimationDuration = $0 }
+                ), range: 0.08...1.2, step: 0.02, suffix: "s", decimals: 2)
+            }
+            Text("The chosen transition applies to song text, synced lyrics and cover/vinyl changes.").font(.caption)
+        }
+        Section("Media gestures") {
+            gesturePicker("Tap", Binding(get: { mediaOptions.wrappedValue.resolvedTapAction }, set: { mediaOptions.wrappedValue.tapAction = $0 }))
+            gesturePicker("Double tap", Binding(get: { mediaOptions.wrappedValue.resolvedDoubleTapAction }, set: { mediaOptions.wrappedValue.doubleTapAction = $0 }))
+            gesturePicker("Swipe left", Binding(get: { mediaOptions.wrappedValue.resolvedSwipeLeftAction }, set: { mediaOptions.wrappedValue.swipeLeftAction = $0 }))
+            gesturePicker("Swipe right", Binding(get: { mediaOptions.wrappedValue.resolvedSwipeRightAction }, set: { mediaOptions.wrappedValue.swipeRightAction = $0 }))
+            Text("Gestures work across the closed media region, including artwork-only layouts. Defaults: tap Play/Pause, swipe left Next, swipe right Previous.").font(.caption)
         }
         Section("Artwork") {
             Toggle("Show artwork", isOn: artwork.enabled)
@@ -277,13 +311,19 @@ struct ClosedNotchSettingsView: View {
             Toggle("React while music plays", isOn: reactive.enabled)
             Picker("Reaction profile", selection: reactive.driver) {
                 Text("Pulse").tag(ReactiveDriver.pulse)
-                Text("Bass-like").tag(ReactiveDriver.bass)
-                Text("Mid-like").tag(ReactiveDriver.mids)
-                Text("Treble-like").tag(ReactiveDriver.treble)
-                Text("Spectrum-like").tag(ReactiveDriver.spectrum)
+                Text("Bass").tag(ReactiveDriver.bass)
+                Text("Mids").tag(ReactiveDriver.mids)
+                Text("Treble").tag(ReactiveDriver.treble)
+                Text("Spectrum").tag(ReactiveDriver.spectrum)
             }.disabled(!reactive.wrappedValue.enabled)
             if reactive.wrappedValue.enabled {
                 PreciseSlider(title: "Reaction speed", value: reactive.speed, range: 0.2...3, step: 0.05, decimals: 2)
+                if reactive.wrappedValue.driver != .pulse {
+                    PreciseSlider(title: "Audio sensitivity", value: Binding(
+                        get: { reactive.wrappedValue.resolvedAudioSensitivity },
+                        set: { reactive.wrappedValue.audioSensitivity = $0 }
+                    ), range: 0.25...4, step: 0.05, decimals: 2)
+                }
                 PreciseSlider(title: "Master intensity", value: reactive.intensity, range: 0...1, step: 0.05, decimals: 2)
                 PreciseSlider(title: "Affect brightness", value: reactive.brightness, range: 0...0.8, step: 0.01, decimals: 2)
                 PreciseSlider(title: "Affect saturation", value: reactive.saturation, range: 0...1, step: 0.01, decimals: 2)
@@ -292,7 +332,7 @@ struct ClosedNotchSettingsView: View {
                 PreciseSlider(title: "Affect blur", value: reactive.blur, range: 0...12, step: 0.25, suffix: "pt", decimals: 2)
                 PreciseSlider(title: "Affect grain", value: reactive.grain, range: 0...0.6, step: 0.01, decimals: 2)
             }
-            Text("Reactive mode now remains visibly active even without album-color mode. These are still lightweight playback-driven profiles rather than true FFT frequency analysis.").font(.caption)
+            Text("Bass, Mids, Treble and Spectrum now analyse captured system-audio PCM rather than synthetic oscillators. macOS may request Screen Recording/audio-capture permission the first time. Pulse remains permission-free.").font(.caption)
         }
         Section("Power events") {
             Toggle("Enable power events", isOn: Binding(
@@ -345,6 +385,15 @@ struct ClosedNotchSettingsView: View {
     }
     private func itemPicker(_ title: String, _ value: Binding<ClosedNotchItem>) -> some View {
         Picker(title, selection: value) { ForEach(ClosedNotchItem.allCases) { Text($0.rawValue.capitalized).tag($0) } }
+    }
+    private func gesturePicker(_ title: String, _ value: Binding<MediaGestureAction>) -> some View {
+        Picker(title, selection: value) {
+            Text("None").tag(MediaGestureAction.none)
+            Text("Play / Pause").tag(MediaGestureAction.playPause)
+            Text("Next track").tag(MediaGestureAction.next)
+            Text("Previous track").tag(MediaGestureAction.previous)
+            Text("Open player").tag(MediaGestureAction.openPlayer)
+        }
     }
     @ViewBuilder private func powerStyles() -> some View {
         Text("Off").tag(PowerReactionStyle.off)
