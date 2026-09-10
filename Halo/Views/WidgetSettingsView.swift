@@ -184,7 +184,7 @@ struct ClosedNotchSettingsView: View {
             itemPicker("Right slot", options.right)
             PreciseSlider(title: "Text size", value: options.fontSize, range: 8...24, step: 1, suffix: "pt")
             ColorPicker("Color", selection: Binding(get: { options.wrappedValue.color.color }, set: { options.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
-            Text("Live activities temporarily use the Activity slot, or take over an available inactive side so they are not missed.").font(.caption)
+            Text("Active Halo activities have priority: they use an Activity slot, an inactive side, or temporarily replace the right slot if both sides are occupied. The configured widget returns automatically afterward.").font(.caption)
         }
         Section("Closed media") {
             Picker("Text", selection: mediaOptions.textMode) {
@@ -269,7 +269,15 @@ struct ClosedNotchSettingsView: View {
             if power.wrappedValue.expandForEvent {
                 PreciseSlider(title: "Power event width", value: power.eventWidth, range: 48...240, step: 1, suffix: "pt")
             }
-            ColorPicker("Power event color", selection: Binding(get: { power.wrappedValue.color.color }, set: { power.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
+            Toggle("Dynamic color by battery level", isOn: power.dynamicColor)
+            if power.wrappedValue.dynamicColor {
+                ColorPicker("Low battery color", selection: Binding(get: { power.wrappedValue.lowColor.color }, set: { power.wrappedValue.lowColor = WidgetColor($0) }), supportsOpacity: false)
+                ColorPicker("Mid battery color", selection: Binding(get: { power.wrappedValue.midColor.color }, set: { power.wrappedValue.midColor = WidgetColor($0) }), supportsOpacity: false)
+                ColorPicker("High battery color", selection: Binding(get: { power.wrappedValue.highColor.color }, set: { power.wrappedValue.highColor = WidgetColor($0) }), supportsOpacity: false)
+                Text("The power-event color blends continuously from Low → Mid → High as the battery level changes.").font(.caption)
+            } else {
+                ColorPicker("Power event color", selection: Binding(get: { power.wrappedValue.color.color }, set: { power.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
+            }
             Text("Charging, low-battery and charged states can show an icon, percentage, combined icon + percentage, or label. Automatic side prefers free/inactive space and avoids forcing the opposite edge to move.").font(.caption)
         }
         Section("Music animation") {
