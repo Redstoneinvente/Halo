@@ -143,6 +143,12 @@ enum SurfaceMotion {
             let frequency = omega * sqrt(1 - zeta * zeta)
             return 1 - exp(-zeta * omega * t) * (cos(frequency * t) + zeta / sqrt(1 - zeta * zeta) * sin(frequency * t))
         }
+        // Closed-notch live resizing uses resize + snappy. Give that path a symmetric
+        // smootherstep curve so left/right width changes accelerate and settle gently
+        // instead of jumping most of the distance in the first few frames.
+        if transition == .resize && preset == .snappy {
+            return t * t * t * (t * (t * 6 - 15) + 10)
+        }
         switch preset {
         case .snappy: return 1 - pow(1 - t, 4)
         case .minimal: return t
