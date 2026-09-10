@@ -6,14 +6,11 @@ struct SurfaceViewportView: View {
     @ObservedObject var viewport: SurfaceViewport
     let content: SurfaceView
     var body: some View {
-        content.equatable().frame(width: viewport.size.width, height: viewport.size.height, alignment: .top).clipped()
+        content.frame(width: viewport.size.width, height: viewport.size.height, alignment: .top).clipped()
     }
 }
 
-struct SurfaceView: View, Equatable {
-    static func == (lhs: SurfaceView, rhs: SurfaceView) -> Bool {
-        lhs.store === rhs.store && lhs.state === rhs.state && lhs.workspace === rhs.workspace
-    }
+struct SurfaceView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var state: SurfaceState
     @ObservedObject var workspace: WorkspaceStore
