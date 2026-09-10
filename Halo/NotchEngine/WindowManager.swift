@@ -42,25 +42,38 @@ final class HaloPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-/// Uses the current display cadence during transitions, up to 120 Hz.
 @MainActor
 final class SurfaceAnimator {
     private let clock = DisplayClock()
     func cancel() { clock.stop() }
+
+    private func publishGeometry(panel: HaloPanel, frame: CGRect) {
+        guard let screen = panel.screen else { return }
+        NotificationCenter.default.post(name: .init("HaloPanelGeometryChanged"), object: panel,
+                                        userInfo: ["frame": frame, "screen": WindowManager.displayID(screen)])
+    }
+
     func move(panel: HaloPanel, state: SurfaceState, target: CGRect, options: SurfaceOptions,
               preset: AnimationPreset, animations: Bool, opening: Bool, style: SurfaceStyle) {
         cancel()
         let transition = opening ? options.opening : options.closing
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard animations, !reduceMotion, preset != .none, transition != .instant else {
-            panel.alphaValue = 1; state.viewport.size = target.size; panel.setFrame(target, display: false); return
+            panel.alphaValue = 1
+            state.viewport.size = target.size
+            panel.setFrame(target, display: false)
+            publishGeometry(panel: panel, frame: target)
+            return
         }
         let initial = panel.frame
         let initialAlpha = panel.alphaValue
         let start = CACurrentMediaTime()
         let duration = options.duration
         guard let view = panel.contentView else {
-            state.viewport.size = target.size; panel.setFrame(target, display: false); return
+            state.viewport.size = target.size
+            panel.setFrame(target, display: false)
+            publishGeometry(panel: panel, frame: target)
+            return
         }
         clock.start(view: view) { [weak self, weak panel, weak state] timestamp in
             guard let self, let panel, let state else { self?.cancel(); return }
@@ -71,7 +84,6 @@ final class SurfaceAnimator {
             let centerX = initial.midX + (target.midX - initial.midX) * p
             let top = initial.maxY + (target.maxY - initial.maxY) * p
             var frame = CGRect(x: centerX - width / 2, y: top - height, width: width, height: height)
-            // Preserve the selected attachment point during overshoot.
             if style == .bottom { frame.origin.y = target.minY }
             if style == .left { frame.origin.x = target.minX }
             if style == .right { frame.origin.x = target.maxX - width }
@@ -84,6 +96,7 @@ final class SurfaceAnimator {
             if t >= 1 { frame = target; panel.alphaValue = 1; self.cancel() }
             if state.viewport.size != frame.size { state.viewport.size = frame.size }
             panel.setFrame(frame, display: false)
+            self.publishGeometry(panel: panel, frame: frame)
         }
     }
 }
@@ -108,10 +121,14 @@ final class WindowManager {
             animator.cancel(); state.collapseTask?.cancel(); subscription?.cancel(); panel.close()
         }
     }
+
+    private enum DynamicSide { case left, right }
     private var activityExpiry: DispatchWorkItem?
+    private var mediaWidthHint: Double?
     private let store: AppStore
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
+
     static func displayID(_ screen: NSScreen) -> String {
         guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
               let uuid = CGDisplayCreateUUIDFromDisplayID(number.uint32Value)?.takeRetainedValue() else { return screen.localizedName }
@@ -125,6 +142,7 @@ final class WindowManager {
                                physicalNotchWidth: width, style: theme.style, appearance: appearance, expandedWidth: theme.width)
     }
     init(store: AppStore) { self.store = store }
+
     func start() {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
@@ -148,9 +166,21 @@ final class WindowManager {
                 }
                 self?.refreshDynamicWidths()
             }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: .init("HaloClosedMediaWidthHint"))
+            .receive(on: DispatchQueue.main).sink { [weak self] note in
+                guard let self,
+                      let raw = note.userInfo?["width"] as? Double,
+                      raw.isFinite else { return }
+                let next = min(320, max(24, raw))
+                guard self.mediaWidthHint.map({ abs($0 - next) >= 3 }) ?? true else { return }
+                self.mediaWidthHint = next
+                self.refreshDynamicWidths()
+            }.store(in: &subscriptions)
         store.workspace.$scheduledProfileID.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.media.$title.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.mediaWidthHint = nil; self?.refreshDynamicWidths() }.store(in: &subscriptions)
+        store.workspace.media.$artist.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.$files.map(\.count).removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
@@ -159,6 +189,15 @@ final class WindowManager {
         store.workspace.capture.$busy.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.media.$isPlaying.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] playing in
+                if !playing { self?.mediaWidthHint = nil }
+                self?.refreshDynamicWidths()
+            }.store(in: &subscriptions)
+        store.workspace.system.$battery.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+        store.workspace.system.$charging.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+        store.workspace.system.$onBattery.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.$deadline.map { $0 != nil }.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
@@ -168,71 +207,287 @@ final class WindowManager {
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         reconcile()
     }
-    private var hasLiveContent: Bool {
-        !store.pinnedFiles.isEmpty || store.workspace.capture.busy || store.workspace.media.isPlaying || store.deadline != nil || store.workspace.stopwatchStart != nil ||
-        store.workspace.activities.contains { ($0.progress.map { $0 < 1 } ?? false) || $0.created.addingTimeInterval(8) > Date() }
-    }
-    private func configureDynamicWidth(_ host: Host) {
-        let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
-        let options = layout.closedNotch?.expansion ?? ClosedExpansionOptions()
-        var width = options.enabled && hasLiveContent ? options.width : 0
-        let decorations = [layout.closedNotch?.leftDecoration, layout.closedNotch?.rightDecoration].compactMap { $0 }
-        let visible = decorations.filter { $0.isVisible(playing: store.workspace.media.isPlaying) }
-        if let size = visible.map(\.size).max(), let geometry = host.geometry {
-            let camera = geometry.attachedToNotch ? geometry.physicalNotchWidth : 0
-            width = max(width, camera + 2 * (size + 20))
+
+    private var activeClosedActivity: LiveActivity? {
+        store.workspace.activities.first { activity in
+            (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(12) > Date()
         }
-        if layout.closedNotch?.autoFitContent ?? true { width = max(width, fittedClosedWidth(host: host, layout: layout)) }
-        host.geometry?.activeCompactWidth = host.state.editingGeometry || width == 0 ? nil : width
     }
-    private func fittedClosedWidth(host: Host, layout: WorkspaceLayout) -> Double {
-        guard var geometry = host.geometry else { return 0 }
+
+    private func resolvedClosedItems(_ options: ClosedNotchOptions) -> (left: ClosedNotchItem, right: ClosedNotchItem) {
+        var left = options.left
+        var right = options.right
+        guard activeClosedActivity != nil, left != .activity, right != .activity else { return (left, right) }
+        let playing = store.workspace.media.isPlaying
+        let rightAvailable = right == .none || ((right == .media || right == .visualizer) && !playing)
+        let leftAvailable = left == .none || ((left == .media || left == .visualizer) && !playing)
+        if rightAvailable { right = .activity }
+        else if leftAvailable { left = .activity }
+        else { right = .activity }
+        return (left, right)
+    }
+
+    private func sideHasLiveReason(item: ClosedNotchItem, decoration: SideDecoration?) -> Bool {
+        if decoration?.visibility == .playing, store.workspace.media.isPlaying { return true }
+        switch item {
+        case .media, .visualizer: return store.workspace.media.isPlaying
+        case .timer: return store.deadline != nil
+        case .files: return !store.pinnedFiles.isEmpty
+        case .activity: return activeClosedActivity != nil
+        default: return false
+        }
+    }
+
+    private func powerReaction(options: ClosedNotchOptions,
+                               items: (left: ClosedNotchItem, right: ClosedNotchItem)) -> (side: DynamicSide, width: Double)? {
+        let settings = options.powerReaction ?? PowerReactionOptions()
+        guard settings.isEnabled, let battery = store.workspace.system.battery else { return nil }
+        let style: PowerReactionStyle
+        if battery >= 99 && !store.workspace.system.onBattery { style = settings.charged }
+        else if store.workspace.system.charging { style = settings.charging }
+        else if store.workspace.system.onBattery && battery <= settings.lowThreshold { style = settings.low }
+        else { return nil }
+        guard style != .off else { return nil }
+
+        let size = max(10, options.fontSize)
+        let estimated: Double
+        switch style {
+        case .off: estimated = 0
+        case .icon: estimated = size + 6
+        case .percent: estimated = size * 3.3
+        case .iconPercent: estimated = size * 4.4
+        case .label: estimated = size * 7.0
+        }
+        let width = settings.expandForEvent ? max(estimated, settings.eventWidth) : estimated
+        let side: DynamicSide
+        switch settings.side {
+        case .left: side = .left
+        case .right: side = .right
+        case .automatic:
+            let playing = store.workspace.media.isPlaying
+            let rightFree = items.right == .none || ((items.right == .media || items.right == .visualizer) && !playing)
+            let leftFree = items.left == .none || ((items.left == .media || items.left == .visualizer) && !playing)
+            if rightFree { side = .right }
+            else if leftFree { side = .left }
+            else { side = .right }
+        }
+        return (side, width)
+    }
+
+    private func configureDynamicWidth(_ host: Host) {
+        guard let geometry = host.geometry else { return }
+        let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
         let options = layout.closedNotch ?? ClosedNotchOptions()
+        let expansion = options.expansion ?? ClosedExpansionOptions()
+        let items = resolvedClosedItems(options)
+        let power = powerReaction(options: options, items: items)
+        let sides = fittedClosedSides(host: host, layout: layout, items: items, power: power)
+        var leftLive = sideHasLiveReason(item: items.left, decoration: options.leftDecoration)
+        var rightLive = sideHasLiveReason(item: items.right, decoration: options.rightDecoration)
+        if power?.side == .left { leftLive = true }
+        if power?.side == .right { rightLive = true }
+
+        let mediaSettings = options.mediaOptions ?? ClosedMediaOptions()
+        let adaptiveLyrics = store.workspace.media.isPlaying && mediaSettings.textMode == .lyrics && mediaSettings.usesDynamicLyricWidth
+        let constrainedMedia = store.workspace.media.isPlaying && (mediaSettings.overflow == .truncate || mediaSettings.overflow == .marquee)
+        if adaptiveLyrics || constrainedMedia {
+            if items.left == .media {
+                leftLive = options.leftDecoration?.visibility == .playing && store.workspace.media.isPlaying
+            }
+            if items.right == .media {
+                rightLive = options.rightDecoration?.visibility == .playing && store.workspace.media.isPlaying
+            }
+        }
+
+        let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
+        let camera = attached ? geometry.physicalNotchWidth : 0
+        let baseWidth = max(16, geometry.appearance.compactWidth)
+        let autoFit = options.autoFitContent ?? true
+
+        guard !host.state.editingGeometry else {
+            host.geometry?.activeCompactWidth = nil
+            host.geometry?.activeCompactCenterOffset = nil
+            return
+        }
+
+        if attached {
+            let baseSide = max(0, (baseWidth - camera) / 2)
+            var leftExtent = baseSide
+            var rightExtent = baseSide
+            if autoFit {
+                leftExtent = max(leftExtent, sides.left)
+                rightExtent = max(rightExtent, sides.right)
+            } else {
+                leftExtent = max(leftExtent, sides.decorationLeft)
+                rightExtent = max(rightExtent, sides.decorationRight)
+            }
+
+            var required = camera + leftExtent + rightExtent
+            if expansion.enabled && (leftLive || rightLive), expansion.width > required {
+                let extra = expansion.width - required
+                if leftLive && !rightLive { leftExtent += extra }
+                else if rightLive && !leftLive { rightExtent += extra }
+                else { leftExtent += extra / 2; rightExtent += extra / 2 }
+                required = camera + leftExtent + rightExtent
+            }
+
+            if let screen = host.panel.screen, let leftArea = screen.auxiliaryTopLeftArea {
+                let maximumLeftIntrusion = max(72, min(150, leftArea.width * 0.42))
+                if leftExtent > maximumLeftIntrusion {
+                    let spill = leftExtent - maximumLeftIntrusion
+                    leftExtent = maximumLeftIntrusion
+                    rightExtent += spill
+                    required = camera + leftExtent + rightExtent
+                }
+            }
+
+            let maxWidth = geometry.visible.width
+            if required > maxWidth {
+                let overflow = required - maxWidth
+                if rightExtent >= leftExtent { rightExtent = max(0, rightExtent - overflow) }
+                else { leftExtent = max(0, leftExtent - overflow) }
+                required = camera + leftExtent + rightExtent
+            }
+            host.geometry?.activeCompactWidth = max(baseWidth, required)
+            host.geometry?.activeCompactCenterOffset = (rightExtent - leftExtent) / 2
+        } else {
+            var requested = baseWidth
+            if autoFit { requested = max(requested, sides.left + sides.right) }
+            if expansion.enabled && (leftLive || rightLive) { requested = max(requested, expansion.width) }
+            host.geometry?.activeCompactWidth = min(geometry.visible.width, requested)
+            host.geometry?.activeCompactCenterOffset = nil
+        }
+    }
+
+    private func fittedClosedSides(host: Host, layout: WorkspaceLayout,
+                                   items: (left: ClosedNotchItem, right: ClosedNotchItem),
+                                   power: (side: DynamicSide, width: Double)?) ->
+        (left: Double, right: Double, decorationLeft: Double, decorationRight: Double) {
+        guard let geometry = host.geometry else { return (0, 0, 0, 0) }
+        let options = layout.closedNotch ?? ClosedNotchOptions()
+        let playing = store.workspace.media.isPlaying
+        let activity = activeClosedActivity
         let size = min(options.fontSize, max(1, geometry.compactHeight - 2 * options.contentPaddingY) / 1.25)
         let font = NSFont.systemFont(ofSize: size)
+        let slotMargins = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
+        let elementGap = 8.0
+
+        var artwork = options.artworkOptions ?? ClosedArtworkOptions()
+        if options.artworkOptions == nil, let legacy = options.mediaOptions, legacy.artwork != .none {
+            artwork.enabled = true; artwork.mode = legacy.artwork; artwork.size = legacy.artworkSize
+            artwork.vinylRPM = legacy.vinylRPM; artwork.backgroundOpacity = legacy.backgroundOpacity
+        }
+
+        let artworkTarget: DynamicSide? = {
+            guard playing, artwork.enabled, artwork.mode != .none, artwork.mode != .background else { return nil }
+            switch artwork.side {
+            case .left: return .left
+            case .right: return .right
+            case .automatic:
+                if options.left == .media || options.left == .visualizer { return .left }
+                if options.right == .media || options.right == .visualizer { return .right }
+                return .right
+            }
+        }()
+
         func textWidth(_ text: String, font: NSFont) -> Double {
             ceil((text as NSString).size(withAttributes: [.font: font]).width) + 4
         }
-        func slot(_ item: ClosedNotchItem, _ decoration: SideDecoration?) -> Double {
-            let content: Double
-            switch item {
-            case .none: content = 0
-            case .clock:
-                let style = layout.widgetStyle(for: .clock)
-                let clockFont = style.fontFamily == .custom ? NSFont(name: style.customFont, size: size) ?? font : NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
-                let template = "88:88" + (style.clock.showSeconds ? ":88" : "") + (style.clock.twentyFourHour ? "" : " PM")
-                content = textWidth(template, font: clockFont) * 1.08
-            case .date: content = textWidth("Sep 28", font: font)
-            case .timer: content = textWidth("88:88:88", font: font) + size
-            case .battery: content = textWidth("100%", font: font) + size + 5
-            case .media: content = textWidth(String(store.workspace.media.title.prefix(80)), font: font) + size + 5
-            case .visualizer: content = (options.visualizer ?? VisualizerOptions()).width
-            case .files: content = textWidth(String(store.files.count), font: font) + size + 5
-            case .activity: content = textWidth(String((store.workspace.activities.first?.title ?? "No activity").prefix(80)), font: font)
+        func mediaWidth() -> Double {
+            guard playing else { return 0 }
+            let media = options.mediaOptions ?? ClosedMediaOptions()
+            let title = textWidth(String(store.workspace.media.title.prefix(120)), font: font)
+            let artist = textWidth(String(store.workspace.media.artist.prefix(120)), font: font)
+            let adaptive = media.textMode == .lyrics && media.usesDynamicLyricWidth && mediaWidthHint != nil
+            let icon = media.showPlaybackIcon ? size + 5 : 0
+            let naturalText: Double
+            switch media.textMode {
+            case .title: naturalText = title
+            case .artist: naturalText = max(size * 3, artist)
+            case .titleArtist: naturalText = media.lines == 2 ? max(title, artist) : title + (store.workspace.media.artist.isEmpty ? 0 : artist + size)
+            case .lyrics:
+                naturalText = adaptive ? max(28, mediaWidthHint!) : max(90, min(220, title + artist * 0.35))
             }
-            let ornament = decoration.flatMap { $0.isVisible(playing: store.workspace.media.isPlaying) ? min($0.size, max(1, geometry.compactHeight - 2 * options.contentPaddingY)) : nil } ?? 0
-            return content + ornament + (content > 0 && ornament > 0 ? 5 : 0) + 2 * options.contentPaddingX
+            let naturalTotal = naturalText + (adaptive ? 0 : icon)
+            if adaptive { return min(320, max(28, naturalText)) }
+            switch media.overflow {
+            case .marquee: return min(max(120, naturalTotal * 0.55), 220)
+            case .truncate: return min(naturalTotal, 220)
+            case .scale: return min(naturalTotal, 260)
+            }
         }
-        let left = slot(options.left, options.leftDecoration), right = slot(options.right, options.rightDecoration)
-        var width = ClosedContentSizing.width(left: left, right: right)
-        geometry.activeCompactWidth = width
-        if geometry.closedCameraOcclusion != nil {
-            let centerOffset = geometry.screen.midX - geometry.frame(expanded: false).midX
-            width = ClosedContentSizing.width(left: left, right: right, camera: geometry.physicalNotchWidth, cameraOffset: centerOffset)
+
+        func isArtworkOnly(_ side: DynamicSide, item: ClosedNotchItem) -> Bool {
+            guard artwork.isArtworkOnly, artworkTarget == side else { return false }
+            return item == .media || item == .visualizer
         }
-        return min(640, width)
+
+        func measurements(_ side: DynamicSide, _ item: ClosedNotchItem, _ decoration: SideDecoration?) -> (full: Double, decoration: Double) {
+            let content: Double
+            if isArtworkOnly(side, item: item) {
+                content = 0
+            } else {
+                switch item {
+                case .none: content = 0
+                case .clock:
+                    let style = layout.widgetStyle(for: .clock)
+                    let clockFont = style.fontFamily == .custom ? NSFont(name: style.customFont, size: size) ?? font : NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
+                    let template = "88:88" + (style.clock.showSeconds ? ":88" : "") + (style.clock.twentyFourHour ? "" : " PM")
+                    content = textWidth(template, font: clockFont) * 1.08
+                case .date: content = textWidth("Sep 28", font: font)
+                case .timer: content = textWidth("88:88:88", font: font) + size
+                case .battery: content = textWidth("100%", font: font) + size + 5
+                case .media: content = mediaWidth()
+                case .visualizer: content = playing ? (options.visualizer ?? VisualizerOptions()).width : 0
+                case .mirror: content = 112
+                case .files: content = textWidth(String(store.files.count), font: font) + size + 5
+                case .activity:
+                    content = activity.map {
+                        let title = textWidth(String($0.title.prefix(80)), font: font)
+                        let detail = $0.detail.isEmpty ? 0 : textWidth(String($0.detail.prefix(80)), font: NSFont.systemFont(ofSize: max(8, size * 0.78)))
+                        return max(title, detail) + size + ($0.progress == nil ? 5 : 46)
+                    } ?? 0
+                }
+            }
+            let ornament = decoration.flatMap { $0.isVisible(playing: playing) ? min($0.size, max(1, geometry.compactHeight - 2 * options.contentPaddingY)) : nil } ?? 0
+            guard content > 0 || ornament > 0 else { return (0, 0) }
+            let spacing = content > 0 && ornament > 0 ? elementGap : 0
+            return (content + ornament + spacing + slotMargins, ornament > 0 ? ornament + slotMargins : 0)
+        }
+
+        let left = measurements(.left, items.left, options.leftDecoration)
+        let right = measurements(.right, items.right, options.rightDecoration)
+        var leftFull = left.full
+        var rightFull = right.full
+
+        if let artworkTarget {
+            let artworkWidth = artwork.size + 2 * artwork.padding + artwork.margin
+            switch artworkTarget {
+            case .left:
+                leftFull = leftFull > 0 ? leftFull + elementGap + artworkWidth : slotMargins + artworkWidth
+            case .right:
+                rightFull = rightFull > 0 ? rightFull + elementGap + artworkWidth : slotMargins + artworkWidth
+            }
+        }
+
+        let leftPower = power?.side == .left ? power!.width + (leftFull > 0 ? elementGap : 0) : 0
+        let rightPower = power?.side == .right ? power!.width + (rightFull > 0 ? elementGap : 0) : 0
+        return (leftFull + leftPower, rightFull + rightPower, left.decoration, right.decoration)
     }
+
     private func refreshDynamicWidths() {
         activityExpiry?.cancel()
-        if let next = store.workspace.activities.map({ $0.created.addingTimeInterval(8) }).filter({ $0 > Date() }).min() {
+        if let next = store.workspace.activities.map({ $0.created.addingTimeInterval(12) }).filter({ $0 > Date() }).min() {
             let work = DispatchWorkItem { [weak self] in self?.refreshDynamicWidths() }
             activityExpiry = work
             DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, next.timeIntervalSinceNow), execute: work)
         }
         for host in hosts.values {
             let oldWidth = host.geometry?.compactWidth
+            let oldOffset = host.geometry?.activeCompactCenterOffset
             configureDynamicWidth(host)
-            guard let geometry = host.geometry, oldWidth != geometry.compactWidth else { continue }
+            guard let geometry = host.geometry,
+                  oldWidth != geometry.compactWidth || oldOffset != geometry.activeCompactCenterOffset else { continue }
             host.state.compactWidth = geometry.compactWidth
             host.state.closedOcclusion = geometry.closedCameraOcclusion
             guard !host.state.expanded else { continue }
@@ -243,17 +498,25 @@ final class WindowManager {
             }
             host.targetFrame = target
             var motion = geometry.appearance.surface
-            motion.opening = .resize; motion.closing = .resize; motion.duration = 0.25
+            let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
+            let closed = layout.closedNotch ?? ClosedNotchOptions()
+            let media = closed.mediaOptions ?? ClosedMediaOptions()
+            let adaptiveLyrics = media.textMode == .lyrics && media.usesDynamicLyricWidth
+            let art = closed.artworkOptions ?? ClosedArtworkOptions()
+            let visibleArtwork = store.workspace.media.isPlaying && art.enabled && art.mode != .none && art.mode != .background
+            motion.opening = .resize; motion.closing = .resize; motion.duration = adaptiveLyrics ? 0.20 : 0.34
             host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
-                               preset: .snappy, animations: host.state.theme.animations && !host.state.editingGeometry,
+                               preset: .smooth, animations: host.state.theme.animations && !host.state.editingGeometry && !visibleArtwork,
                                opening: true, style: geometry.style)
         }
     }
+
     func stop() { activityExpiry?.cancel(); hosts.values.forEach { $0.stop() }; hosts.removeAll(); subscriptions.removeAll() }
     func toggleAll() {
         let expand = !hosts.values.contains { $0.state.expanded }
         hosts.values.forEach { $0.state.collapseTask?.cancel(); $0.state.expanded = expand }
     }
+
     private func reconcile() {
         let screens = store.configuration.allDisplays ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
         var active = Set<String>()
@@ -289,6 +552,8 @@ final class WindowManager {
                 if host.state.viewport.size != target.size { host.state.viewport.size = target.size }
                 host.panel.alphaValue = 1
                 if host.panel.frame != target { host.panel.setFrame(target, display: false) }
+                NotificationCenter.default.post(name: .init("HaloPanelGeometryChanged"), object: host.panel,
+                                                userInfo: ["frame": target, "screen": id])
             }
             if existing == nil {
                 let view = NSHostingView(rootView: SurfaceViewportView(viewport: host.state.viewport, content: SurfaceView(store: store, state: host.state, workspace: store.workspace)))

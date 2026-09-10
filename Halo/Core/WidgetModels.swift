@@ -17,7 +17,7 @@ struct ClockOptions: Codable, Equatable {
     var twentyFourHour = false
     var showSeconds = false
     var showDate = true
-    var timeZone = "" // empty follows the system
+    var timeZone = ""
 }
 struct WidgetStyle: Codable, Equatable {
     var fontFamily: WidgetFontFamily = .system
@@ -30,7 +30,7 @@ struct WidgetStyle: Codable, Equatable {
     var backgroundOpacity = 0.06
     var padding = 12.0
     var cornerRadius = 14.0
-    var width = 0.0 // zero fills available width
+    var width = 0.0
     var minimumHeight = 0.0
     var showTitle = true
     var clock = ClockOptions()
@@ -48,7 +48,7 @@ struct WidgetStyle: Codable, Equatable {
     }
 }
 enum ClosedNotchItem: String, Codable, CaseIterable, Identifiable {
-    case none, clock, date, timer, battery, media, visualizer, files, activity
+    case none, clock, date, timer, battery, media, visualizer, mirror, files, activity
     var id: String { rawValue }
 }
 enum PlaybackAnimation: String, Codable, CaseIterable { case bars, wave, pulse, waveform, ribbon, dots, rings, orbit, spectrum }
@@ -70,12 +70,161 @@ struct VisualizerOptions: Codable, Equatable {
         return v
     }
 }
+
+enum MediaTextMode: String, Codable, CaseIterable { case title, artist, titleArtist, lyrics }
+enum MediaOverflowMode: String, Codable, CaseIterable { case truncate, scale, marquee }
+enum LyricDisplayMode: String, Codable, CaseIterable { case line, focus, word }
+enum MediaChangeAnimation: String, Codable, CaseIterable { case none, fade, slide, scale, blur }
+enum MediaGestureAction: String, Codable, CaseIterable { case none, playPause, next, previous, openPlayer }
+enum MediaArtworkMode: String, Codable, CaseIterable { case none, cover, background, vinyl }
+struct ClosedMediaOptions: Codable, Equatable {
+    var textMode: MediaTextMode = .titleArtist
+    var overflow: MediaOverflowMode = .truncate
+    var lines = 1
+    var onlineLyrics: Bool?
+    var lyricDisplay: LyricDisplayMode?
+    var lyricSyncOffset: Double?
+    var dynamicLyricWidth: Bool?
+    var horizontalSpace: Double?
+    var changeAnimation: MediaChangeAnimation?
+    var changeAnimationDuration: Double?
+    var tapAction: MediaGestureAction?
+    var doubleTapAction: MediaGestureAction?
+    var swipeLeftAction: MediaGestureAction?
+    var swipeRightAction: MediaGestureAction?
+    var usesOnlineLyrics: Bool { onlineLyrics ?? true }
+    var resolvedLyricDisplay: LyricDisplayMode { lyricDisplay ?? .line }
+    var resolvedLyricSyncOffset: Double { min(5, max(-5, lyricSyncOffset ?? 0)) }
+    var usesDynamicLyricWidth: Bool { dynamicLyricWidth ?? true }
+    var resolvedHorizontalSpace: Double { min(360, max(48, horizontalSpace ?? 180)) }
+    var resolvedChangeAnimation: MediaChangeAnimation { changeAnimation ?? .slide }
+    var resolvedChangeAnimationDuration: Double { min(1.2, max(0.08, changeAnimationDuration ?? 0.28)) }
+    var resolvedTapAction: MediaGestureAction { tapAction ?? .playPause }
+    var resolvedDoubleTapAction: MediaGestureAction { doubleTapAction ?? .none }
+    var resolvedSwipeLeftAction: MediaGestureAction { swipeLeftAction ?? .next }
+    var resolvedSwipeRightAction: MediaGestureAction { swipeRightAction ?? .previous }
+    var artwork: MediaArtworkMode = .none
+    var artworkSize = 28.0
+    var marqueeSpeed = 28.0
+    var vinylRPM = 8.0
+    var backgroundOpacity = 0.32
+    var showPlaybackIcon = true
+    func validated() throws -> ClosedMediaOptions {
+        guard [artworkSize, marqueeSpeed, vinylRPM, backgroundOpacity, lyricSyncOffset ?? 0, horizontalSpace ?? 180, changeAnimationDuration ?? 0.28].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        var v = self
+        v.lines = min(2, max(1, lines))
+        v.artworkSize = min(72, max(14, artworkSize))
+        v.marqueeSpeed = min(120, max(8, marqueeSpeed))
+        v.vinylRPM = min(45, max(1, vinylRPM))
+        v.backgroundOpacity = min(1, max(0, backgroundOpacity))
+        if lyricSyncOffset != nil { v.lyricSyncOffset = resolvedLyricSyncOffset }
+        if horizontalSpace != nil { v.horizontalSpace = resolvedHorizontalSpace }
+        if changeAnimationDuration != nil { v.changeAnimationDuration = resolvedChangeAnimationDuration }
+        return v
+    }
+}
+
+struct ClosedArtworkOptions: Codable, Equatable {
+    var enabled = false
+    var mode: MediaArtworkMode = .cover
+    var side: ClosedNotchSideChoice = .automatic
+    var size = 28.0
+    var padding = 0.0
+    var margin = 7.0
+    var vinylRPM = 8.0
+    var backgroundOpacity = 0.32
+    var artworkOnly: Bool?
+    var isArtworkOnly: Bool { artworkOnly ?? false }
+    func validated() throws -> ClosedArtworkOptions {
+        guard [size, padding, margin, vinylRPM, backgroundOpacity].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        var v = self
+        if v.mode == .none { v.enabled = false }
+        v.size = min(72, max(14, size))
+        v.padding = min(24, max(0, padding))
+        v.margin = min(48, max(0, margin))
+        v.vinylRPM = min(45, max(1, vinylRPM))
+        v.backgroundOpacity = min(1, max(0, backgroundOpacity))
+        return v
+    }
+}
+
+enum ReactiveDriver: String, Codable, CaseIterable { case pulse, bass, mids, treble, spectrum }
+struct ReactiveBackgroundOptions: Codable, Equatable {
+    var enabled = false
+    var driver: ReactiveDriver = .pulse
+    var speed = 1.0
+    var intensity = 0.5
+    var brightness = 0.22
+    var saturation = 0.15
+    var scale = 0.015
+    var hueShift = 0.0
+    var blur = 0.0
+    var grain = 0.0
+    var audioSensitivity: Double?
+    var resolvedAudioSensitivity: Double { min(4, max(0.25, audioSensitivity ?? 1.35)) }
+    func validated() throws -> ReactiveBackgroundOptions {
+        guard [speed, intensity, brightness, saturation, scale, hueShift, blur, grain, audioSensitivity ?? 1.35].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        var v = self
+        v.speed = min(3, max(0.2, speed)); v.intensity = min(1, max(0, intensity))
+        v.brightness = min(0.8, max(0, brightness)); v.saturation = min(1, max(0, saturation))
+        v.scale = min(0.12, max(0, scale)); v.hueShift = min(1, max(0, hueShift))
+        v.blur = min(12, max(0, blur)); v.grain = min(0.6, max(0, grain))
+        if audioSensitivity != nil { v.audioSensitivity = resolvedAudioSensitivity }
+        return v
+    }
+}
+
+enum PowerReactionStyle: String, Codable, CaseIterable { case off, icon, percent, iconPercent, label }
+enum ClosedNotchSideChoice: String, Codable, CaseIterable { case automatic, left, right }
+struct PowerReactionOptions: Codable, Equatable {
+    var enabled: Bool?
+    var isEnabled: Bool { enabled ?? true }
+    var lowThreshold = 20
+    var side: ClosedNotchSideChoice = .automatic
+    var charging: PowerReactionStyle = .iconPercent
+    var low: PowerReactionStyle = .iconPercent
+    var charged: PowerReactionStyle = .icon
+    var expandForEvent = true
+    var eventWidth = 96.0
+    var color = WidgetColor.accent
+    var dynamicColor: Bool?
+    var usesDynamicColor: Bool { dynamicColor ?? false }
+    var lowColor: WidgetColor?
+    var midColor: WidgetColor?
+    var highColor: WidgetColor?
+    var resolvedLowColor: WidgetColor { lowColor ?? WidgetColor(red: 1.0, green: 0.22, blue: 0.18) }
+    var resolvedMidColor: WidgetColor { midColor ?? WidgetColor(red: 1.0, green: 0.72, blue: 0.12) }
+    var resolvedHighColor: WidgetColor { highColor ?? WidgetColor(red: 0.28, green: 0.92, blue: 0.42) }
+    func validated() throws -> PowerReactionOptions {
+        guard eventWidth.isFinite else { throw CocoaError(.fileReadCorruptFile) }
+        var v = self
+        v.lowThreshold = min(50, max(5, lowThreshold))
+        v.eventWidth = min(240, max(48, eventWidth))
+        v.color = try color.validated()
+        if lowColor != nil { v.lowColor = try resolvedLowColor.validated() }
+        if midColor != nil { v.midColor = try resolvedMidColor.validated() }
+        if highColor != nil { v.highColor = try resolvedHighColor.validated() }
+        return v
+    }
+}
+
 struct ClosedNotchOptions: Codable, Equatable {
     var autoFitContent: Bool?
     var horizontalPadding: Double?
     var verticalPadding: Double?
+    var sideMargin: Double?
+    var outerMargin: Double?
+    var albumTextColor: Bool?
+    var albumBackgroundColor: Bool?
+    var albumBackgroundFrequencyEffect: Bool?
+    var mediaOptions: ClosedMediaOptions?
+    var artworkOptions: ClosedArtworkOptions?
+    var reactiveBackground: ReactiveBackgroundOptions?
+    var powerReaction: PowerReactionOptions?
     var contentPaddingX: Double { min(24, max(0, horizontalPadding ?? 8)) }
     var contentPaddingY: Double { min(12, max(0, verticalPadding ?? 2)) }
+    var contentSideMargin: Double { min(48, max(0, sideMargin ?? 4)) }
+    var contentOuterMargin: Double { min(48, max(0, outerMargin ?? 4)) }
     var leftDecoration: SideDecoration?
     var rightDecoration: SideDecoration?
     var visualizer: VisualizerOptions?
@@ -88,14 +237,20 @@ struct ClosedNotchOptions: Codable, Equatable {
     var animate = true
     func validated() throws -> ClosedNotchOptions {
         guard fontSize.isFinite else { throw CocoaError(.fileReadCorruptFile) }
-        guard (horizontalPadding ?? 8).isFinite, (verticalPadding ?? 2).isFinite else { throw CocoaError(.fileReadCorruptFile) }
+        guard (horizontalPadding ?? 8).isFinite, (verticalPadding ?? 2).isFinite, (sideMargin ?? 4).isFinite, (outerMargin ?? 4).isFinite else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
         if horizontalPadding != nil { v.horizontalPadding = contentPaddingX }
         if verticalPadding != nil { v.verticalPadding = contentPaddingY }
+        if sideMargin != nil { v.sideMargin = contentSideMargin }
+        if outerMargin != nil { v.outerMargin = contentOuterMargin }
         v.fontSize = min(24, max(8, fontSize)); v.color = try color.validated()
         v.leftDecoration = try leftDecoration?.validatedForImport()
         v.rightDecoration = try rightDecoration?.validatedForImport()
         v.visualizer = try visualizer?.validated()
+        v.mediaOptions = try mediaOptions?.validated()
+        v.artworkOptions = try artworkOptions?.validated()
+        v.reactiveBackground = try reactiveBackground?.validated()
+        v.powerReaction = try powerReaction?.validated()
         if var expansion {
             guard expansion.width.isFinite else { throw CocoaError(.fileReadCorruptFile) }
             expansion.width = min(640, max(120, expansion.width)); v.expansion = expansion
@@ -104,7 +259,6 @@ struct ClosedNotchOptions: Codable, Equatable {
     }
 }
 
-/// Quantized dominant colors, with a brightness floor for a dark notch.
 enum MusicPalette {
     static func colors(from samples: [WidgetColor]) -> [WidgetColor] {
         var bins: [Int: Int] = [:]

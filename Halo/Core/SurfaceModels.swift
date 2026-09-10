@@ -88,10 +88,13 @@ struct SurfaceGeometry {
     var appearance: Appearance
     var expandedWidth: Double
     var activeCompactWidth: Double? = nil
+    /// Dynamic horizontal bias for closed mode. Negative grows toward the left, positive toward the right.
+    var activeCompactCenterOffset: Double? = nil
     var attachedToNotch: Bool { style == .notch && safeAreaTop > 0 }
     var minimumWidth: Double { 16 }
     var compactWidth: Double {
-        Geometry.width(screenWidth: visible.width, requested: max(minimumWidth, max(appearance.compactWidth, activeCompactWidth ?? 0)))
+        let requested = max(appearance.compactWidth, activeCompactWidth ?? 0)
+        return Geometry.width(screenWidth: visible.width, requested: max(minimumWidth, requested))
     }
     var compactHeight: Double { max(16, appearance.surface.compactHeight) }
     var closedCameraOcclusion: CGRect? {
@@ -117,6 +120,7 @@ struct SurfaceGeometry {
         let height = max(1, min(visible.height - 16, expanded ? appearance.expandedHeight + max(40, compactHeight) : compactHeight))
         var x = visible.midX - width / 2
         var y = (attachedToNotch ? screen.maxY : visible.maxY - 8) - height
+        if !expanded { x += activeCompactCenterOffset ?? 0 }
         switch style {
         case .left: x = visible.minX + 8; y = visible.midY - height / 2
         case .right: x = visible.maxX - width - 8; y = visible.midY - height / 2
@@ -138,6 +142,12 @@ enum SurfaceMotion {
             let omega = 12.0
             let frequency = omega * sqrt(1 - zeta * zeta)
             return 1 - exp(-zeta * omega * t) * (cos(frequency * t) + zeta / sqrt(1 - zeta * zeta) * sin(frequency * t))
+        }
+        // Closed-notch live resizing uses resize + snappy. Give that path a symmetric
+        // smootherstep curve so left/right width changes accelerate and settle gently
+        // instead of jumping most of the distance in the first few frames.
+        if transition == .resize && preset == .snappy {
+            return t * t * t * (t * (t * 6 - 15) + 10)
         }
         switch preset {
         case .snappy: return 1 - pow(1 - t, 4)
