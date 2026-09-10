@@ -264,18 +264,56 @@ private struct ClosedArtworkView: View {
     @State private var artwork: NSImage?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }
+    private var paletteColor: Color { media.artworkColors.first?.color ?? Color.white.opacity(0.78) }
     var body: some View {
         Group {
-            if let artwork {
-                if options.mode == .vinyl && !reduceMotion && !lowPower {
-                    TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !media.isPlaying)) { context in
-                        let turns = context.date.timeIntervalSinceReferenceDate * options.vinylRPM / 60
-                        artworkImage(artwork).clipShape(Circle()).overlay(Circle().fill(.black).frame(width: options.size * 0.16, height: options.size * 0.16)).rotationEffect(.degrees(turns * 360))
-                    }
-                } else { artworkImage(artwork).clipShape(RoundedRectangle(cornerRadius: 5)) }
+            if options.mode == .vinyl {
+                vinylView
+            } else if let artwork {
+                artworkImage(artwork).clipShape(RoundedRectangle(cornerRadius: 5))
+            } else {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(paletteColor.opacity(0.22))
+                    .overlay(Image(systemName: "photo").font(.system(size: max(8, options.size * 0.34))).foregroundStyle(paletteColor))
+                    .frame(width: options.size, height: options.size)
             }
         }
-        .task(id: key) { artwork = media.isPlaying ? await MediaAssetReader.artwork(app: media.connectedApp, key: key) : nil }
+        .frame(width: options.size, height: options.size)
+        .task(id: key + "|\(options.mode.rawValue)") {
+            artwork = nil
+            guard media.isPlaying else { return }
+            artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key)
+        }
+    }
+    @ViewBuilder private var vinylView: some View {
+        if !reduceMotion && !lowPower {
+            TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !media.isPlaying)) { context in
+                let turns = context.date.timeIntervalSinceReferenceDate * options.vinylRPM / 60
+                vinylDisc.rotationEffect(.degrees(turns * 360))
+            }
+        } else {
+            vinylDisc
+        }
+    }
+    private var vinylDisc: some View {
+        ZStack {
+            Circle().fill(Color.black.opacity(0.96))
+            Circle().stroke(Color.white.opacity(0.12), lineWidth: max(0.5, options.size * 0.025)).padding(options.size * 0.08)
+            Circle().stroke(Color.white.opacity(0.08), lineWidth: max(0.5, options.size * 0.02)).padding(options.size * 0.17)
+            if let artwork {
+                Image(nsImage: artwork).resizable().scaledToFill()
+                    .frame(width: options.size * 0.62, height: options.size * 0.62)
+                    .clipShape(Circle())
+            } else {
+                Circle().fill(paletteColor.opacity(0.88))
+                    .frame(width: options.size * 0.62, height: options.size * 0.62)
+                    .overlay(Image(systemName: "music.note").font(.system(size: max(7, options.size * 0.22))).foregroundStyle(.black.opacity(0.7)))
+            }
+            Circle().fill(Color.black).frame(width: max(3, options.size * 0.12), height: max(3, options.size * 0.12))
+            Circle().fill(Color.white.opacity(0.48)).frame(width: max(1, options.size * 0.035), height: max(1, options.size * 0.035))
+        }
+        .frame(width: options.size, height: options.size)
+        .accessibilityLabel(artwork == nil ? "Vinyl artwork loading" : "Rotating album artwork")
     }
     private func artworkImage(_ image: NSImage) -> some View { Image(nsImage: image).resizable().scaledToFill().frame(width: options.size, height: options.size).clipped() }
 }
