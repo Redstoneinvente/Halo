@@ -88,6 +88,8 @@ struct SurfaceGeometry {
     var appearance: Appearance
     var expandedWidth: Double
     var activeCompactWidth: Double? = nil
+    /// Dynamic horizontal bias for closed mode. Negative grows toward the left, positive toward the right.
+    var activeCompactCenterOffset: Double? = nil
     var attachedToNotch: Bool { style == .notch && safeAreaTop > 0 }
     var minimumWidth: Double { 16 }
     var compactWidth: Double {
@@ -117,6 +119,7 @@ struct SurfaceGeometry {
         let height = max(1, min(visible.height - 16, expanded ? appearance.expandedHeight + max(40, compactHeight) : compactHeight))
         var x = visible.midX - width / 2
         var y = (attachedToNotch ? screen.maxY : visible.maxY - 8) - height
+        if !expanded { x += activeCompactCenterOffset ?? 0 }
         switch style {
         case .left: x = visible.minX + 8; y = visible.midY - height / 2
         case .right: x = visible.maxX - width - 8; y = visible.midY - height / 2
