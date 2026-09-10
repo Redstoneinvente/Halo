@@ -2,7 +2,6 @@ import Foundation
 
 enum ModuleID: String, Codable, CaseIterable, Identifiable {
     case clock, timer, shelf, media, audio, calendar, clipboard, system, launcher, activities, developer, notes, capture, stopwatch
-    // Retain the retired raw value so existing profiles continue to decode.
     static var allCases: [ModuleID] { [.clock, .timer, .shelf, .media, .audio, .calendar, .clipboard, .system, .launcher, .activities, .notes, .capture, .stopwatch] }
     var id: String { rawValue }
     var title: String { rawValue == "shelf" ? "File shelf" : rawValue.capitalized }
@@ -120,7 +119,6 @@ struct ThemeArchive: Codable {
         appearance.compactWidth = min(640, max(16, appearance.compactWidth))
         appearance.surface = try appearance.surface.validated()
         appearance.spacing = min(28, max(4, appearance.spacing))
-        // Imports must not implicitly read arbitrary local file paths supplied by another person.
         appearance.assetPath = ""
         if appearance.background == .video || appearance.background == .image { appearance.background = .gradient }
         appearance.grain = try appearance.grain?.validated()
@@ -195,7 +193,7 @@ struct WorkspaceSettings: Codable {
     var notes = ""
     var hotkeyEnabled = true
     var hotkeyCode: UInt32 = 49
-    var hotkeyModifiers: UInt32 = 2304 // option + command
+    var hotkeyModifiers: UInt32 = 2304
 }
 struct LiveActivity: Identifiable, Codable {
     var id = UUID()
@@ -266,7 +264,7 @@ enum ContextContentAlignment: String, Codable, CaseIterable, Identifiable {
 
 struct ContextMusicOptions: Codable, Equatable {
     var enabled = false
-    var showArtwork = true // legacy compatibility; foregroundArtwork takes precedence when present
+    var showArtwork = true
     var showTitle = true
     var showArtist = true
     var showControls = true
@@ -286,6 +284,16 @@ struct ContextMusicOptions: Codable, Equatable {
     var cornerRadius: Double?
     var controlSize: Double?
     var vinylRPM: Double?
+    var showLyrics: Bool?
+    var lyricDisplay: LyricDisplayMode?
+    var lyricSyncOffset: Double?
+    var lyricsOnline: Bool?
+    var lyricFontSize: Double?
+    var visualizerStyle: PlaybackAnimation?
+    var songTextColors: Bool?
+    var songControlColors: Bool?
+    var songVisualizerColors: Bool?
+    var songBackgroundColors: Bool?
     var resolvedLayoutMode: ContextMusicLayoutMode { layoutMode ?? .hero }
     var resolvedForegroundArtwork: ContextArtworkPresentation { foregroundArtwork ?? (showArtwork ? .cover : .none) }
     var usesArtworkBackground: Bool { artworkBackground ?? false }
@@ -296,9 +304,20 @@ struct ContextMusicOptions: Codable, Equatable {
     var resolvedCornerRadius: Double { min(48, max(0, cornerRadius ?? 18)) }
     var resolvedControlSize: Double { min(42, max(14, controlSize ?? 24)) }
     var resolvedVinylRPM: Double { min(45, max(1, vinylRPM ?? 8)) }
+    var showsLyrics: Bool { showLyrics ?? false }
+    var resolvedLyricDisplay: LyricDisplayMode { lyricDisplay ?? .line }
+    var resolvedLyricSyncOffset: Double { min(5, max(-5, lyricSyncOffset ?? 0)) }
+    var usesOnlineLyrics: Bool { lyricsOnline ?? true }
+    var resolvedLyricFontSize: Double { min(44, max(10, lyricFontSize ?? max(14, fontSize * 0.72))) }
+    var resolvedVisualizerStyle: PlaybackAnimation { visualizerStyle ?? .bars }
+    var usesSongTextColors: Bool { songTextColors ?? false }
+    var usesSongControlColors: Bool { songControlColors ?? false }
+    var usesSongVisualizerColors: Bool { songVisualizerColors ?? true }
+    var usesSongBackgroundColors: Bool { songBackgroundColors ?? false }
     func validated() throws -> ContextMusicOptions {
         guard [artworkSize, fontSize, backgroundOpacity, artworkBackgroundBlur ?? 12, artworkBackgroundDim ?? 0.38,
-               spacing ?? 12, cornerRadius ?? 18, controlSize ?? 24, vinylRPM ?? 8].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+               spacing ?? 12, cornerRadius ?? 18, controlSize ?? 24, vinylRPM ?? 8,
+               lyricSyncOffset ?? 0, lyricFontSize ?? 16].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var result = self
         result.artworkSize = min(240, max(32, artworkSize))
         result.fontSize = min(48, max(12, fontSize))
@@ -314,6 +333,8 @@ struct ContextMusicOptions: Codable, Equatable {
         if cornerRadius != nil { result.cornerRadius = resolvedCornerRadius }
         if controlSize != nil { result.controlSize = resolvedControlSize }
         if vinylRPM != nil { result.vinylRPM = resolvedVinylRPM }
+        if lyricSyncOffset != nil { result.lyricSyncOffset = resolvedLyricSyncOffset }
+        if lyricFontSize != nil { result.lyricFontSize = resolvedLyricFontSize }
         return result
     }
 }
