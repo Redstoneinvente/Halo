@@ -4,6 +4,38 @@ import XCTest
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    func testProfilePresentationMetadataRoundTripsAndOldProfilesDecode() throws {
+        var profile = Profile(name: "Evening")
+        profile.icon = "moon"; profile.description = "Quiet workspace"
+        profile.layout.horizontalWidgets = true; profile.layout.horizontalPages = true; profile.layout.horizontalHeight = 240
+        let data = try JSONEncoder().encode(profile)
+        let saved = try JSONDecoder().decode(Profile.self, from: data)
+        XCTAssertEqual(saved.icon, "moon"); XCTAssertEqual(saved.description, "Quiet workspace")
+        XCTAssertEqual(saved.layout.horizontalPages, true); XCTAssertEqual(saved.layout.horizontalHeight, 240)
+        var old = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        old.removeValue(forKey: "icon"); old.removeValue(forKey: "description")
+        var layout = try XCTUnwrap(old["layout"] as? [String: Any])
+        for key in ["horizontalWidgets", "horizontalPages", "horizontalHeight"] { layout.removeValue(forKey: key) }
+        old["layout"] = layout
+        let restored = try JSONDecoder().decode(Profile.self, from: JSONSerialization.data(withJSONObject: old))
+        XCTAssertNil(restored.icon); XCTAssertNil(restored.layout.horizontalWidgets)
+    }
+    func testSurfaceStylesHaveDistinctPlacementAndWidth() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        var geometry = SurfaceGeometry(screen: screen, visible: CGRect(x: 0, y: 0, width: 1440, height: 875), safeAreaTop: 0, physicalNotchWidth: 0, style: .pill, appearance: Appearance(), expandedWidth: 420)
+        let pill = geometry.frame(expanded: false)
+        geometry.style = .island
+        XCTAssertNotEqual(pill.maxY, geometry.frame(expanded: false).maxY)
+        geometry.style = .simulated
+        XCTAssertEqual(geometry.frame(expanded: false).maxY, screen.maxY)
+        geometry.style = .shelf
+        XCTAssertGreaterThan(geometry.frame(expanded: false).width, pill.width)
+        geometry.style = .menuBar
+        XCTAssertEqual(geometry.frame(expanded: false).width, 1416)
+        geometry.style = .detached
+        XCTAssertEqual(geometry.frame(expanded: false).midY, geometry.visible.midY)
+    }
+
     func testRefreshRatePolicyMatchesDisplayAndPowerMode() {
         XCTAssertEqual(FrameRatePolicy.target(maximum: 120, lowPower: false), 120)
         XCTAssertEqual(FrameRatePolicy.target(maximum: 60, lowPower: false), 60)

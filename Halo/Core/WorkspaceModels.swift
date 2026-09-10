@@ -74,6 +74,8 @@ struct DisplayOverride: Codable, Identifiable, Equatable {
 }
 struct WorkspaceLayout: Codable, Equatable {
     var horizontalWidgets: Bool?
+    var horizontalPages: Bool?
+    var horizontalHeight: Double?
     var widgets: [String: WidgetStyle]?
     var closedNotch: ClosedNotchOptions?
     func widgetStyle(for id: ModuleID) -> WidgetStyle {
@@ -125,6 +127,10 @@ struct ThemeArchive: Codable {
             if v.kind == .image || v.kind == .video { v.kind = .gradient }
             return v
         }
+        if let height = layout.horizontalHeight {
+            guard height.isFinite else { throw CocoaError(.fileReadCorruptFile) }
+            archive.layout.horizontalHeight = min(500, max(200, height))
+        }
         archive.layout.appearance = appearance
         archive.layout.order = layout.normalizedOrder()
         archive.layout.widgets = try layout.widgets?.mapValues { try $0.validated() }
@@ -133,6 +139,8 @@ struct ThemeArchive: Codable {
     }
 }
 struct Profile: Codable, Identifiable {
+    var icon: String?
+    var description: String?
     var id = UUID()
     var name: String
     var theme = Theme()

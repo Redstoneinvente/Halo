@@ -19,6 +19,8 @@ struct SurfaceRenderConfiguration: Equatable {
     var displays: [DisplayOverride]
     var closedNotch: ClosedNotchOptions? = nil
     var clock: WidgetStyle? = nil
+    var horizontalWidgets: Bool? = nil
+    var horizontalHeight: Double? = nil
 }
 enum GlassRendering {
     /// The material supplies its own background. Tint must never hide the backdrop.
@@ -41,6 +43,7 @@ enum SurfaceTransition: String, Codable, CaseIterable, Identifiable {
 }
 struct SurfaceOptions: Codable, Equatable {
     // Optional for compatibility with themes/preferences saved before offsets existed.
+    var useStyleContour: Bool?
     var offsets: SurfaceOffsets?
     var shape: SurfaceShapeKind = .rounded
     var compactHeight = 40.0
@@ -90,10 +93,11 @@ struct SurfaceGeometry {
     var activeCompactWidth: Double? = nil
     /// Dynamic horizontal bias for closed mode. Negative grows toward the left, positive toward the right.
     var activeCompactCenterOffset: Double? = nil
-    var attachedToNotch: Bool { style == .notch && safeAreaTop > 0 }
+    var attachedToNotch: Bool { (style == .notch && safeAreaTop > 0) || style == .simulated }
     var minimumWidth: Double { 16 }
     var compactWidth: Double {
-        let requested = max(appearance.compactWidth, activeCompactWidth ?? 0)
+        let base = style == .shelf ? max(320, appearance.compactWidth) : style == .menuBar ? visible.width - 24 : appearance.compactWidth
+        let requested = max(base, activeCompactWidth ?? 0)
         return Geometry.width(screenWidth: visible.width, requested: max(minimumWidth, requested))
     }
     var compactHeight: Double { max(16, appearance.surface.compactHeight) }
@@ -126,6 +130,10 @@ struct SurfaceGeometry {
         case .right: x = visible.maxX - width - 8; y = visible.midY - height / 2
         case .bottom: y = visible.minY + 8
         case .detached: y = visible.midY - height / 2
+        case .pill: y = visible.maxY - 24 - height
+        case .island: y = visible.maxY - 12 - height
+        case .menuBar: y = visible.maxY - height
+        case .shelf: y = visible.maxY - 4 - height
         default: break
         }
         let delta = offset(expanded: expanded)

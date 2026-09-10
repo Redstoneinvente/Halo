@@ -149,7 +149,7 @@ final class WindowManager {
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.$settings.map { [store] settings in
             let layout = settings.profiles.first { $0.id == store.workspace.scheduledProfileID }?.layout ?? settings.layout
-            return SurfaceRenderConfiguration(appearance: layout.appearance, displays: settings.displays, closedNotch: layout.closedNotch, clock: layout.widgetStyle(for: .clock))
+            return SurfaceRenderConfiguration(appearance: layout.appearance, displays: settings.displays, closedNotch: layout.closedNotch, clock: layout.widgetStyle(for: .clock), horizontalWidgets: layout.horizontalWidgets, horizontalHeight: layout.horizontalHeight)
         }
             .removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
@@ -529,6 +529,11 @@ final class WindowManager {
             var theme = override?.theme ?? store.workspace.scheduledTheme ?? store.configuration.theme
             if store.configuration.simulateNotch && theme.style == .notch { theme.style = .simulated }
             var appearance = override?.layout?.appearance ?? store.workspace.effectiveLayout.appearance
+            let effectiveLayout = override?.layout ?? store.workspace.effectiveLayout
+            if effectiveLayout.horizontalWidgets ?? false {
+                let requested = effectiveLayout.horizontalHeight ?? 260
+                appearance.expandedHeight = requested.isFinite ? min(500, max(200, requested)) : 260
+            }
             appearance.surface = (try? appearance.surface.validated()) ?? SurfaceOptions()
             let previousOffset = host.geometry?.offset(expanded: host.state.expanded) ?? .zero
             host.geometry = Self.geometry(screen: screen, theme: theme, appearance: appearance)

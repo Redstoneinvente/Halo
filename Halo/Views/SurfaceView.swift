@@ -20,10 +20,24 @@ struct SurfaceView: View, Equatable {
     private var theme: Theme { state.theme }
     private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.effectiveLayout }
     private var contour: HaloContour {
-        HaloContour(kind: layout.appearance.surface.shape, radius: theme.cornerRadius,
+        HaloContour(kind: effectiveShape, radius: (layout.appearance.surface.useStyleContour ?? true) ? (theme.style == .menuBar ? 4 : theme.style == .pill ? 40 : theme.cornerRadius) : theme.cornerRadius,
                     topRadius: layout.appearance.surface.topRadius, bottomRadius: layout.appearance.surface.bottomRadius,
                     shoulder: layout.appearance.surface.shoulder)
     }
+    private var effectiveShape: SurfaceShapeKind {
+        guard layout.appearance.surface.useStyleContour ?? true else { return layout.appearance.surface.shape }
+        switch theme.style {
+        case .pill: return state.expanded ? .rounded : .capsule
+        case .island: return state.expanded ? .rounded : .capsule
+        case .simulated, .notch: return .scoop
+        case .shelf: return .chamfer
+        case .detached: return .rounded
+        case .menuBar: return .rounded
+        default: return layout.appearance.surface.shape
+        }
+    }
+    @State private var page = 0
+    private var modules: [ModuleID] { layout.normalizedOrder().filter { layout.enabled.contains($0) } }
     @State private var targeted = false
     private var accent: Color { Color(hue: theme.tint, saturation: 0.65, brightness: 1) }
     var body: some View {
@@ -58,11 +72,31 @@ struct SurfaceView: View, Equatable {
                             .help("Keep expanded").accessibilityLabel("Keep expanded")
                     }
                     if layout.horizontalWidgets ?? false {
-                        ScrollView(.horizontal) {
+                        if layout.horizontalPages ?? false {
+                            VStack(spacing: 8) {
+                                if !modules.isEmpty {
+                                    let index = min(page, modules.count - 1)
+                                    ScrollView {
+                                        WidgetCard(style: layout.widgetStyle(for: modules[index])) {
+                                            BuiltinOrIntegrationWidget(module: modules[index], store: store)
+                                        }
+                                    }
+                                    HStack {
+                                        Button { page = max(0, index - 1) } label: { Image(systemName: "chevron.left") }
+                                            .disabled(index == 0).accessibilityLabel("Previous widget")
+                                        Spacer()
+                                        Text("\(modules[index].title) · \(index + 1) / \(modules.count)").font(.caption)
+                                        Spacer()
+                                        Button { page = min(modules.count - 1, index + 1) } label: { Image(systemName: "chevron.right") }
+                                            .disabled(index == modules.count - 1).accessibilityLabel("Next widget")
+                                    }
+                                } else { Text("Enable widgets in Settings → Modules.").foregroundStyle(.secondary) }
+                            }
+                        } else { ScrollView(.horizontal) {
                             LazyHStack(alignment: .top, spacing: layout.appearance.spacing) {
                                 widgetCards(horizontal: true)
                             }
-                        }
+                        } }
                     } else {
                         ScrollView {
                             LazyVStack(spacing: layout.appearance.spacing) {

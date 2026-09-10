@@ -110,6 +110,12 @@ struct SettingsView: View {
                     get: { workspace.settings.layout.horizontalWidgets ?? false },
                     set: { workspace.settings.layout.horizontalWidgets = $0 }
                 ))
+                if workspace.settings.layout.horizontalWidgets ?? false {
+                    Picker("Navigation", selection: Binding(get: { workspace.settings.layout.horizontalPages ?? false }, set: { workspace.settings.layout.horizontalPages = $0 })) {
+                        Text("Scroll").tag(false); Text("Pages").tag(true)
+                    }.pickerStyle(.segmented)
+                    Slider(value: Binding(get: { workspace.settings.layout.horizontalHeight ?? 260 }, set: { workspace.settings.layout.horizontalHeight = $0 }), in: 200...500) { Text("Horizontal dashboard height") }
+                }
                 Text("Arrange widgets in a sideways-scrolling row. Turn off for the original vertical layout. Widget order and customizations apply to both.").font(.caption).foregroundStyle(.secondary)
             }
             Picker("Surface", selection: $store.configuration.theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
@@ -197,16 +203,7 @@ struct SettingsView: View {
             Text("Up to 100 references. Pinned items do not expire. Saved references keep their original retention age after relaunch. Removing a shelf item never deletes its original.")
             Button("Clear shelf references") { store.clearShelf() }
         case "Profiles":
-            HStack { TextField("Profile name", text: $profileName); Button("Save current") { workspace.saveProfile(name: profileName, theme: store.configuration.theme) } }
-            ForEach(workspace.settings.profiles) { profile in
-                HStack {
-                    Text(profile.name); Spacer(); Button("Apply") { workspace.apply(profile) }
-                    Button("Rename") { renamedProfile = profile.name; renamingProfile = profile.id }
-                    Button("Duplicate") { var copy = profile; copy.id = UUID(); copy.name += " copy"; workspace.settings.profiles.append(copy) }
-                    Button("Delete") { workspace.deleteProfile(profile.id) }
-                }
-            }
-            Text("Profiles save modules, appearance, and theme. They never enable clipboard capture or grant permissions.").font(.caption)
+            ProfileLibraryView(store: store, workspace: workspace)
         case "Automation":
             Text("Rules apply a profile when a condition becomes true. The first newly matching rule wins. No scripts or shell commands run.")
             ForEach($workspace.settings.rules) { $rule in
@@ -272,5 +269,122 @@ struct SettingsView: View {
             Text("Git status is read-only and runs only when requested. No build commands or executable plugins run.")
             Text("Compilation and hardware validation on macOS are required. See Docs/ImplementationStatus.md and Docs/ReleaseChecklist.md.")
         }
+    }
+}
+
+@MainActor private struct ProfileLibraryView: View {
+    @ObservedObject var store: AppStore
+    @ObservedObject var workspace: WorkspaceStore
+    @AppStorage("HaloProfileCards") private var cards = true
+    @State private var editing: Profile?
+    @State private var name = "My profile"
+    var body: some View {
+        HStack {
+            TextField("New profile name", text: $name)
+            Button("Save current") { workspace.saveProfile(name: name, theme: store.configuration.theme) }
+        }
+        Picker("View", selection: $cards) {
+            Label("Cards", systemImage: "square.grid.2x2").tag(true)
+            Label("List", systemImage: "list.bullet").tag(false)
+        }.pickerStyle(.segmented)
+        LazyVGrid(columns: cards ? [GridItem(.adaptive(minimum: 220), alignment: .top)] : [GridItem(.flexible())], alignment: .leading, spacing: 12) {
+            ForEach(workspace.settings.profiles) { profile in
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(profile.name, systemImage: profile.icon ?? "person.crop.rectangle")
+                        .font(.headline).foregroundStyle(Color.accentColor)
+                    if let detail = profile.description, !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                    Text("\(profile.layout.enabled.count) widgets · \(profile.theme.style.rawValue)").font(.caption)
+                    Text(activationSummary(profile)).font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Button("Apply") { workspace.apply(profile) }
+                        Button("Customize") { editing = profile }
+                        Menu {
+                            Button("Duplicate") { var copy = profile; copy.id = UUID(); copy.name += " copy"; workspace.settings.profiles.append(copy) }
+                            Button("Delete", role: .destructive) { workspace.deleteProfile(profile.id) }
+                        } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 24)
+                    }
+                }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.accentColor.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.08)))
+            }
+        }
+        Text("Apply switches now. Customize edits only that saved profile. Manage automatic times in Schedules and conditions in Automation.").font(.caption).foregroundStyle(.secondary)
+        .sheet(item: $editing) { profile in
+            ProfileEditor(profile: profile, media: workspace.media, app: workspace.settings.mediaApp) { updated in
+                if let index = workspace.settings.profiles.firstIndex(where: { $0.id == updated.id }) { workspace.settings.profiles[index] = updated }
+            }
+        }
+    }
+    private func activationSummary(_ profile: Profile) -> String {
+        var lines: [String] = []
+        for entry in workspace.settings.profileSchedules ?? [] where entry.profileID == profile.id {
+            let w = entry.window
+            let days = w.weekdays.sorted().filter { (1...7).contains($0) }.map { Calendar.current.shortWeekdaySymbols[$0 - 1] }.joined(separator: ", ")
+            let time = w.startMinute == w.endMinute ? "All day" : String(format: "%02d:%02d–%02d:%02d", w.startMinute / 60, w.startMinute % 60, w.endMinute / 60, w.endMinute % 60)
+            lines.append("\(entry.enabled ? "Scheduled" : "Schedule paused"): \(days) · \(time)")
+        }
+        for rule in workspace.settings.rules where rule.profileID == profile.id {
+            lines.append("\(rule.enabled ? "Automatic" : "Rule paused"): \(rule.trigger.rawValue) · \(rule.value)")
+        }
+        return lines.isEmpty ? "Manual · Apply whenever you like" : lines.joined(separator: "\n")
+    }
+}
+
+@MainActor private struct ProfileEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State var profile: Profile
+    let media: MediaService
+    let app: String
+    let save: (Profile) -> Void
+    @State private var tab = "Details"
+    private let icons = ["person.crop.rectangle", "briefcase", "house", "moon", "sun.max", "gamecontroller", "music.note", "hammer", "leaf", "heart", "bolt", "star"]
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack { Text("Customize profile").font(.title2.bold()); Spacer(); Button("Cancel") { dismiss() }; Button("Save") { save(profile); dismiss() }.disabled(profile.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }.padding()
+            Picker("Section", selection: $tab) { ForEach(["Details", "Layout", "Widgets", "Closed notch"], id: \.self) { Text($0).tag($0) } }.pickerStyle(.segmented).padding(.horizontal)
+            Form {
+                switch tab {
+                case "Details":
+                    TextField("Name", text: $profile.name)
+                    TextField("Description", text: Binding(get: { profile.description ?? "" }, set: { profile.description = $0 }), axis: .vertical)
+                    Picker("Icon", selection: Binding(get: { profile.icon ?? icons[0] }, set: { profile.icon = $0 })) {
+                        ForEach(icons, id: \.self) { Label($0, systemImage: $0).tag($0) }
+                    }
+                case "Layout":
+                    Picker("Surface", selection: $profile.theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
+                    Slider(value: $profile.theme.width, in: 340...640) { Text("Expanded width") }
+                    Toggle("Horizontal widgets", isOn: Binding(get: { profile.layout.horizontalWidgets ?? false }, set: { profile.layout.horizontalWidgets = $0 }))
+                    Toggle("Page navigation", isOn: Binding(get: { profile.layout.horizontalPages ?? false }, set: { profile.layout.horizontalPages = $0 }))
+                    Slider(value: Binding(get: { profile.layout.horizontalHeight ?? 260 }, set: { profile.layout.horizontalHeight = $0 }), in: 200...500) { Text("Horizontal height") }
+                    Section("Modules and order") {
+                        ForEach(profile.layout.normalizedOrder()) { module in
+                            HStack {
+                                Toggle(module.title, isOn: Binding(get: { profile.layout.enabled.contains(module) }, set: { if $0 { profile.layout.enabled.insert(module) } else { profile.layout.enabled.remove(module) } }))
+                                Button { moveUp(module) } label: { Image(systemName: "arrow.up") }.disabled(profile.layout.normalizedOrder().first == module).help("Move earlier")
+                            }
+                        }
+                    }
+                    Section("Theme and background") {
+                        Slider(value: $profile.theme.tint, in: 0...1) { Text("Accent hue") }
+                        Slider(value: $profile.theme.opacity, in: 0.5...1) { Text("Opacity") }
+                        Slider(value: $profile.layout.appearance.expandedHeight, in: 280...800) { Text("Vertical dashboard height") }
+                        Picker("Background", selection: $profile.layout.appearance.background) {
+                            ForEach(BackgroundKind.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+                        }
+                        Button("Choose background image or video…") {
+                            let panel = NSOpenPanel(); panel.allowedContentTypes = [.image, .movie]; panel.canChooseDirectories = false
+                            if panel.runModal() == .OK, let url = panel.url { profile.layout.appearance.assetPath = url.path }
+                        }
+                    }
+                    SurfaceAppearanceControls(appearance: $profile.layout.appearance, theme: profile.theme)
+                case "Widgets": WidgetSettingsView(layout: $profile.layout)
+                default: ClosedNotchSettingsView(layout: $profile.layout, media: media, app: app)
+                }
+            }.formStyle(.grouped)
+        }.frame(width: 620, height: 650)
+    }
+    private func moveUp(_ module: ModuleID) {
+        let order = profile.layout.normalizedOrder()
+        if let index = order.firstIndex(of: module), index > 0 { profile.layout.move(module, before: order[index - 1]) }
     }
 }

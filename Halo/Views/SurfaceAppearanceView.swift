@@ -97,7 +97,9 @@ struct HaloContour: Shape {
             Button("Reset offsets") { appearance.surface.offsets = SurfaceOffsets() }
         }
         Section("Shape") {
-            Picker("Contour", selection: $appearance.surface.shape) { ForEach(SurfaceShapeKind.allCases) { Text($0.rawValue).tag($0) } }
+            Toggle("Use surface style contour", isOn: Binding(get: { appearance.surface.useStyleContour ?? true }, set: { appearance.surface.useStyleContour = $0 }))
+            Text("Turn off to use a custom contour below.").font(.caption)
+            Picker("Contour", selection: Binding(get: { appearance.surface.shape }, set: { appearance.surface.shape = $0; appearance.surface.useStyleContour = false })) { ForEach(SurfaceShapeKind.allCases) { Text($0.rawValue).tag($0) } }
             if appearance.surface.shape == .asymmetric {
                 PreciseSlider(title: "Top corners", value: $appearance.surface.topRadius, range: 0...64, step: 1, suffix: "pt")
                 PreciseSlider(title: "Bottom corners", value: $appearance.surface.bottomRadius, range: 0...64, step: 1, suffix: "pt")
