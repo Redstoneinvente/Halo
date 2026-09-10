@@ -78,6 +78,7 @@ struct ClosedMediaOptions: Codable, Equatable {
     var textMode: MediaTextMode = .titleArtist
     var overflow: MediaOverflowMode = .truncate
     var lines = 1
+    // Legacy artwork fields are retained so older saved profiles still decode.
     var artwork: MediaArtworkMode = .none
     var artworkSize = 28.0
     var marqueeSpeed = 28.0
@@ -90,6 +91,28 @@ struct ClosedMediaOptions: Codable, Equatable {
         v.lines = min(2, max(1, lines))
         v.artworkSize = min(72, max(14, artworkSize))
         v.marqueeSpeed = min(120, max(8, marqueeSpeed))
+        v.vinylRPM = min(45, max(1, vinylRPM))
+        v.backgroundOpacity = min(1, max(0, backgroundOpacity))
+        return v
+    }
+}
+
+struct ClosedArtworkOptions: Codable, Equatable {
+    var enabled = false
+    var mode: MediaArtworkMode = .cover
+    var side: ClosedNotchSideChoice = .automatic
+    var size = 28.0
+    var padding = 0.0
+    var margin = 7.0
+    var vinylRPM = 8.0
+    var backgroundOpacity = 0.32
+    func validated() throws -> ClosedArtworkOptions {
+        guard [size, padding, margin, vinylRPM, backgroundOpacity].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        var v = self
+        if v.mode == .none { v.enabled = false }
+        v.size = min(72, max(14, size))
+        v.padding = min(24, max(0, padding))
+        v.margin = min(48, max(0, margin))
         v.vinylRPM = min(45, max(1, vinylRPM))
         v.backgroundOpacity = min(1, max(0, backgroundOpacity))
         return v
@@ -122,6 +145,9 @@ struct ReactiveBackgroundOptions: Codable, Equatable {
 enum PowerReactionStyle: String, Codable, CaseIterable { case off, icon, percent, iconPercent, label }
 enum ClosedNotchSideChoice: String, Codable, CaseIterable { case automatic, left, right }
 struct PowerReactionOptions: Codable, Equatable {
+    // Optional for backwards compatibility with profiles saved before the master toggle.
+    var enabled: Bool?
+    var isEnabled: Bool { enabled ?? true }
     var lowThreshold = 20
     var side: ClosedNotchSideChoice = .automatic
     var charging: PowerReactionStyle = .iconPercent
@@ -130,17 +156,23 @@ struct PowerReactionOptions: Codable, Equatable {
     var expandForEvent = true
     var eventWidth = 96.0
     var color = WidgetColor.accent
-    var dynamicColor = false
-    var lowColor = WidgetColor(red: 1.0, green: 0.22, blue: 0.18)
-    var midColor = WidgetColor(red: 1.0, green: 0.72, blue: 0.12)
-    var highColor = WidgetColor(red: 0.28, green: 0.92, blue: 0.42)
+    var dynamicColor: Bool?
+    var usesDynamicColor: Bool { dynamicColor ?? false }
+    var lowColor: WidgetColor?
+    var midColor: WidgetColor?
+    var highColor: WidgetColor?
+    var resolvedLowColor: WidgetColor { lowColor ?? WidgetColor(red: 1.0, green: 0.22, blue: 0.18) }
+    var resolvedMidColor: WidgetColor { midColor ?? WidgetColor(red: 1.0, green: 0.72, blue: 0.12) }
+    var resolvedHighColor: WidgetColor { highColor ?? WidgetColor(red: 0.28, green: 0.92, blue: 0.42) }
     func validated() throws -> PowerReactionOptions {
         guard eventWidth.isFinite else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
         v.lowThreshold = min(50, max(5, lowThreshold))
         v.eventWidth = min(240, max(48, eventWidth))
         v.color = try color.validated()
-        v.lowColor = try lowColor.validated(); v.midColor = try midColor.validated(); v.highColor = try highColor.validated()
+        if lowColor != nil { v.lowColor = try resolvedLowColor.validated() }
+        if midColor != nil { v.midColor = try resolvedMidColor.validated() }
+        if highColor != nil { v.highColor = try resolvedHighColor.validated() }
         return v
     }
 }
@@ -155,6 +187,7 @@ struct ClosedNotchOptions: Codable, Equatable {
     var albumBackgroundColor: Bool?
     var albumBackgroundFrequencyEffect: Bool?
     var mediaOptions: ClosedMediaOptions?
+    var artworkOptions: ClosedArtworkOptions?
     var reactiveBackground: ReactiveBackgroundOptions?
     var powerReaction: PowerReactionOptions?
     var contentPaddingX: Double { min(24, max(0, horizontalPadding ?? 8)) }
@@ -184,6 +217,7 @@ struct ClosedNotchOptions: Codable, Equatable {
         v.rightDecoration = try rightDecoration?.validatedForImport()
         v.visualizer = try visualizer?.validated()
         v.mediaOptions = try mediaOptions?.validated()
+        v.artworkOptions = try artworkOptions?.validated()
         v.reactiveBackground = try reactiveBackground?.validated()
         v.powerReaction = try powerReaction?.validated()
         if var expansion {
