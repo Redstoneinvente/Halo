@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 enum SurfaceStyle: String, Codable, CaseIterable, Identifiable {
     case notch = "Notch", pill = "Floating pill", island = "Dynamic island", shelf = "Wide shelf"
@@ -60,4 +61,14 @@ struct BuiltinModule: NotchModule, Identifiable {
         BuiltinModule(id: "timer", title: "Focus timer", symbol: "timer"),
         BuiltinModule(id: "shelf", title: "File shelf", symbol: "tray")
     ]
+}
+
+/// `Binding` already has an `animation(_:)` method, which shadows dynamic-member lookup for a
+/// model property also named `animation`. Expose the HUD model's animation binding explicitly so
+/// expressions such as `configuration.animation.entrance` resolve to the model instead of the
+/// SwiftUI method reference.
+extension Binding where Value == HaloHUDConfiguration {
+    var animation: Binding<HaloHUDAnimationConfiguration> {
+        self[dynamicMember: \.animation]
+    }
 }
