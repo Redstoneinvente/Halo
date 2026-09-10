@@ -245,9 +245,16 @@ struct ClosedNotchSettingsView: View {
                     Text("Right").tag(ClosedNotchSideChoice.right)
                 }.disabled(artwork.wrappedValue.mode == .background)
                 if artwork.wrappedValue.mode != .background {
+                    Toggle("Artwork only", isOn: Binding(
+                        get: { artwork.wrappedValue.isArtworkOnly },
+                        set: { artwork.wrappedValue.artworkOnly = $0 }
+                    ))
                     PreciseSlider(title: "Artwork size", value: artwork.size, range: 14...72, step: 1, suffix: "pt")
                     PreciseSlider(title: "Artwork padding", value: artwork.padding, range: 0...24, step: 1, suffix: "pt")
                     PreciseSlider(title: "Artwork margin", value: artwork.margin, range: 0...48, step: 1, suffix: "pt")
+                    if artwork.wrappedValue.isArtworkOnly {
+                        Text("Artwork only hides Media/Visualizer content on this artwork side while music plays. Other closed widgets remain available. You can also set that side's content slot to None for a pure cover/vinyl layout.").font(.caption)
+                    }
                 }
                 if artwork.wrappedValue.mode == .vinyl {
                     PreciseSlider(title: "Vinyl speed", value: artwork.vinylRPM, range: 1...45, step: 1, suffix: "rpm")
@@ -255,7 +262,7 @@ struct ClosedNotchSettingsView: View {
                 if artwork.wrappedValue.mode == .background {
                     PreciseSlider(title: "Artwork background opacity", value: artwork.backgroundOpacity, range: 0...1, step: 0.01, decimals: 2)
                 }
-                Text("Artwork is independent from the Media text slot. It can stay on either side while the text slot is elsewhere, or be used only as the closed-notch background.").font(.caption)
+                Text("Artwork is independent from Media text. Its own margin controls spacing toward neighboring content; Margin from outer edge remains a protected inset between cover/vinyl and Halo's outside edge.").font(.caption)
             }
         }
         Section("Album colors") {
