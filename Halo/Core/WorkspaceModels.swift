@@ -2,6 +2,8 @@ import Foundation
 
 enum ModuleID: String, Codable, CaseIterable, Identifiable {
     case clock, timer, shelf, media, audio, calendar, clipboard, system, launcher, activities, developer, notes, capture, stopwatch
+    // Retain the retired raw value so existing profiles continue to decode.
+    static var allCases: [ModuleID] { [.clock, .timer, .shelf, .media, .audio, .calendar, .clipboard, .system, .launcher, .activities, .notes, .capture, .stopwatch] }
     var id: String { rawValue }
     var title: String { rawValue == "shelf" ? "File shelf" : rawValue.capitalized }
     var symbol: String {
@@ -93,7 +95,7 @@ struct WorkspaceLayout: Codable, Equatable {
     var appearance = Appearance()
     func normalizedOrder() -> [ModuleID] {
         var seen = Set<ModuleID>()
-        return (order + ModuleID.allCases).filter { seen.insert($0).inserted }
+        return (order + ModuleID.allCases).filter { $0 != .developer && seen.insert($0).inserted }
     }
     mutating func move(_ module: ModuleID, before target: ModuleID) {
         guard module != target else { return }
@@ -150,7 +152,7 @@ struct Profile: Codable, Identifiable {
     static var presets: [Profile] {
         [("Default", Set<ModuleID>([.clock, .timer, .shelf, .system, .launcher])),
          ("Minimal", [.clock]), ("Work", [.calendar, .timer, .shelf, .notes]),
-         ("Coding", [.developer, .system, .timer, .shelf]), ("Media", [.media, .audio]),
+         ("Coding", [.notes, .system, .timer, .shelf]), ("Media", [.media, .audio]),
          ("Gaming", [.system, .audio]), ("Presentation", [.clock, .timer]),
          ("Battery Saver", [.clock, .system])].map { name, modules in
             var p = Profile(name: name); p.layout.enabled = modules
@@ -191,7 +193,6 @@ struct WorkspaceSettings: Codable {
     var persistShelf = false
     var mediaApp = "com.apple.Music"
     var notes = ""
-    var repositoryPath = ""
     var hotkeyEnabled = true
     var hotkeyCode: UInt32 = 49
     var hotkeyModifiers: UInt32 = 2304 // option + command

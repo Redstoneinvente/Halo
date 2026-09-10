@@ -53,12 +53,7 @@ struct IntegrationModuleView: View {
                     Button { workspace.activities.removeAll { $0.id == activity.id } } label: { Image(systemName: "xmark") }.accessibilityLabel("Dismiss activity")
                 }
             }
-        case .developer:
-            Text(workspace.gitSummary).font(style.font()).textSelection(.enabled)
-            HStack {
-                Button("Choose repository…") { workspace.chooseRepository() }
-                Button(workspace.gitBusy ? "Refreshing…" : "Refresh") { workspace.refreshGit() }.disabled(workspace.gitBusy)
-            }
+        case .developer: EmptyView() // Legacy saved module, no longer displayed.
         case .notes: TextEditor(text: $workspace.settings.notes).frame(height: 90).accessibilityLabel("Quick note")
         case .capture: CaptureModuleView(service: workspace.capture, store: store)
         case .stopwatch:

@@ -17,7 +17,7 @@ struct SettingsView: View {
     @State private var renamingProfile: UUID?
     @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
-    private let sections = ["General", "Appearance", "Modules", "Widgets", "Closed notch", "Context notch interface", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "Advanced"]
+    private let sections = ["General", "Appearance", "Modules", "Widgets", "Closed notch", "Context notch interface", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -84,6 +84,7 @@ struct SettingsView: View {
         case "Displays": return "display.2"
         case "Plugins": return "puzzlepiece.extension"
         case "Privacy": return "hand.raised"
+        case "About": return "info.circle"
         default: return "wrench.and.screwdriver"
         }
     }
@@ -275,11 +276,7 @@ struct SettingsView: View {
                 Text("This direct-distribution build is not sandboxed. Files and notes are stored locally.")
             }
         default:
-            Text("Halo 0.2 · macOS 13+ · Native SwiftUI and AppKit")
-            Button("Choose developer repository…") { workspace.chooseRepository() }
-            Text(workspace.settings.repositoryPath).font(.caption)
-            Text("Git status is read-only and runs only when requested. No build commands or executable plugins run.")
-            Text("Compilation and hardware validation on macOS are required. See Docs/ImplementationStatus.md and Docs/ReleaseChecklist.md.")
+            HaloAboutView()
         }
     }
 }
@@ -305,7 +302,7 @@ struct SettingsView: View {
                     Label(profile.name, systemImage: profile.icon ?? "person.crop.rectangle")
                         .font(.headline).foregroundStyle(Color.accentColor)
                     if let detail = profile.description, !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(.secondary) }
-                    Text("\(profile.layout.enabled.count) widgets · \(profile.theme.style.rawValue)").font(.caption)
+                    Text("\(profile.layout.enabled.intersection(Set(ModuleID.allCases)).count) widgets · \(profile.theme.style.rawValue)").font(.caption)
                     Text(activationSummary(profile)).font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Button("Apply") { workspace.apply(profile) }
@@ -424,6 +421,34 @@ private struct ContextMusicSettings: View {
                 Text("Glass").tag(BackgroundKind.glass); Text("Gradient").tag(BackgroundKind.gradient); Text("Solid").tag(BackgroundKind.solid)
             }
             Slider(value: options.backgroundOpacity, in: 0...1) { Text("Background opacity") }
+        }
+    }
+}
+
+
+// Edit this content to update the About page without changing its layout.
+private enum HaloAboutContent {
+    static let description = "A customizable workspace for your Mac’s notch. Keep music, widgets and everyday controls within reach."
+    static let creator = "Redstoneinvente"
+    static let website = URL(string: "https://halo.redstoneinvente.com")!
+    static let support = URL(string: "https://buymeacoffee.com/redstoneinvente")!
+}
+private struct HaloAboutView: View {
+    private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0" }
+    private var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "2" }
+    var body: some View {
+        Section {
+            VStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().scaledToFit().frame(width: 100, height: 100).accessibilityLabel("Halo app icon")
+                Text("Halo").font(.largeTitle.bold())
+                Text("Version \(version) · Build \(build)").font(.caption).foregroundStyle(.secondary)
+                Text(HaloAboutContent.description).multilineTextAlignment(.center)
+                Text("Created by \(HaloAboutContent.creator)").font(.callout).foregroundStyle(.secondary)
+            }.padding(.vertical, 16).frame(maxWidth: .infinity)
+        }
+        Section("Find out more") {
+            Link(destination: HaloAboutContent.website) { Label("Visit Halo’s website", systemImage: "globe") }
+            Link(destination: HaloAboutContent.support) { Label("Buy me a coffee", systemImage: "cup.and.saucer.fill") }
         }
     }
 }

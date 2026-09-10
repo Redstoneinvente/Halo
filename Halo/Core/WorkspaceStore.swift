@@ -14,8 +14,6 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     @Published var activities: [LiveActivity] = []
     @Published var plugins: [PluginManifest] = []
     @Published var error: String?
-    @Published var gitSummary = "Choose a repository in Settings."
-    @Published var gitBusy = false
     @Published var runningApps: [NSRunningApplication] = []
     let calendar = CalendarService()
     let clipboard = ClipboardService()
@@ -184,30 +182,6 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         settings.layout.appearance.assetPath = url.path
         settings.layout.appearance.background = ["mp4", "mov", "m4v"].contains(url.pathExtension.lowercased()) ? .video : .image
-    }
-    func chooseRepository() {
-        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        settings.repositoryPath = url.path; refreshGit()
-    }
-    func refreshGit() {
-        guard !gitBusy, !settings.repositoryPath.isEmpty else { return }
-        gitBusy = true
-        let path = settings.repositoryPath
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let task = Process(); task.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            task.arguments = ["--no-optional-locks", "-C", path, "status", "--short", "--branch", "--untracked-files=no"]
-            let pipe = Pipe(); task.standardOutput = pipe; task.standardError = pipe
-            var result: String
-            do {
-                try task.run()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile(); task.waitUntilExit()
-                result = String(data: data, encoding: .utf8) ?? "Unable to decode Git output"
-                if task.terminationStatus != 0 { result = "Git failed: " + result }
-            } catch { result = error.localizedDescription }
-            let summary = String(result.prefix(8_000))
-            Task { @MainActor in self?.gitSummary = summary; self?.gitBusy = false }
-        }
     }
     func importPlugin() {
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = false
