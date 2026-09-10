@@ -50,9 +50,11 @@ struct ClosedNotchSlot: View {
     @ObservedObject var system: SystemService
     private var innerHeight: Double { max(1, availableHeight - 2 * options.contentPaddingY) }
     private var innerWidth: Double { max(1, availableWidth - 2 * options.contentPaddingX - options.contentSideMargin) }
+    private var isMusicItem: Bool { item == .media || item == .visualizer }
+    private var itemIsVisible: Bool { !isMusicItem || media.isPlaying }
     private var decorationSize: Double {
         guard let decoration, decoration.isVisible(playing: media.isPlaying) else { return 0 }
-        return min(decoration.size, min(innerHeight, item == .none ? innerWidth : innerWidth / 3))
+        return min(decoration.size, min(innerHeight, itemIsVisible && item != .none ? innerWidth / 3 : innerWidth))
     }
     private var textSize: Double { min(options.fontSize, innerHeight / 1.25) }
     private var effectiveTextColor: Color {
@@ -66,17 +68,22 @@ struct ClosedNotchSlot: View {
         return v
     }
     var body: some View {
-        HStack(spacing: decorationSize > 0 && item != .none ? 5 : 0) {
+        HStack(spacing: decorationSize > 0 && itemIsVisible && item != .none ? 5 : 0) {
             if let decoration, decorationSize > 0 {
                 SideDecorationView(options: decoration, playing: media.isPlaying, lowPower: system.lowPower, maximumHeight: decorationSize)
             }
-            content
-        }.font(.system(size: textSize)).lineLimit(1).minimumScaleFactor(0.65)
-            .foregroundStyle(effectiveTextColor)
-            .frame(maxWidth: innerWidth, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
-            .padding(.horizontal, options.contentPaddingX).padding(.vertical, options.contentPaddingY)
-            .padding(side == .left ? .trailing : .leading, options.contentSideMargin)
-            .frame(width: availableWidth, height: availableHeight, alignment: side == .left ? .trailing : .leading).clipped()
+            if itemIsVisible { content }
+        }
+        .font(.system(size: textSize))
+        .lineLimit(1)
+        .minimumScaleFactor(0.65)
+        .foregroundStyle(effectiveTextColor)
+        .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: .center)
+        .padding(.horizontal, options.contentPaddingX)
+        .padding(.vertical, options.contentPaddingY)
+        .padding(side == .left ? .trailing : .leading, options.contentSideMargin)
+        .frame(width: availableWidth, height: availableHeight, alignment: .center)
+        .clipped()
     }
     @ViewBuilder private var content: some View {
         switch item {
@@ -92,10 +99,12 @@ struct ClosedNotchSlot: View {
             if let battery = system.battery { Label("\(battery)%", systemImage: system.charging ? "battery.100.bolt" : "battery.100") }
             else { Image(systemName: "powerplug") }
         case .media:
-            Label(media.title, systemImage: media.isPlaying ? "music.note" : "pause.fill")
+            if media.isPlaying { Label(media.title, systemImage: "music.note") }
         case .visualizer:
-            PlaybackVisualizer(kind: options.animation, playing: media.isPlaying, enabled: options.animate && !system.lowPower,
-                               options: visualizerOptions, palette: media.artworkColors, fallback: effectiveTextColor)
+            if media.isPlaying {
+                PlaybackVisualizer(kind: options.animation, playing: true, enabled: options.animate && !system.lowPower,
+                                   options: visualizerOptions, palette: media.artworkColors, fallback: effectiveTextColor)
+            }
         case .files: Label("\(store.files.count)", systemImage: "tray")
         case .activity: Text(workspace.activities.first?.title ?? "No activity")
         }
