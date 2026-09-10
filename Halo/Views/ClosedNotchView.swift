@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ImageIO
+import AVFoundation
 
 enum ClosedNotchSide { case left, right }
 
@@ -62,21 +63,26 @@ private extension MediaChangeAnimation {
 private struct MediaGestureModifier: ViewModifier {
     @ObservedObject var media: MediaService
     let options: ClosedMediaOptions
+    let enabled: Bool
     private var preferredApp: String { media.connectedApp ?? "com.apple.Music" }
 
-    func body(content: Content) -> some View {
-        content
-            .contentShape(Rectangle())
-            .gesture(TapGesture(count: 2).exclusively(before: TapGesture(count: 1)).onEnded { value in
-                switch value {
-                case .first: perform(options.resolvedDoubleTapAction)
-                case .second: perform(options.resolvedTapAction)
-                }
-            })
-            .simultaneousGesture(DragGesture(minimumDistance: 18).onEnded { value in
-                guard abs(value.translation.width) > abs(value.translation.height), abs(value.translation.width) >= 24 else { return }
-                perform(value.translation.width < 0 ? options.resolvedSwipeLeftAction : options.resolvedSwipeRightAction)
-            })
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled {
+            content
+                .contentShape(Rectangle())
+                .gesture(TapGesture(count: 2).exclusively(before: TapGesture(count: 1)).onEnded { value in
+                    switch value {
+                    case .first: perform(options.resolvedDoubleTapAction)
+                    case .second: perform(options.resolvedTapAction)
+                    }
+                })
+                .simultaneousGesture(DragGesture(minimumDistance: 18).onEnded { value in
+                    guard abs(value.translation.width) > abs(value.translation.height), abs(value.translation.width) >= 24 else { return }
+                    perform(value.translation.width < 0 ? options.resolvedSwipeLeftAction : options.resolvedSwipeRightAction)
+                })
+        } else {
+            content
+        }
     }
 
     private func perform(_ action: MediaGestureAction) {
@@ -290,7 +296,7 @@ struct ClosedNotchSlot: View {
         .padding(side == .left ? .leading : .trailing, options.contentOuterMargin)
         .frame(width: availableWidth, height: availableHeight, alignment: .center)
         .clipped()
-        .modifier(MediaGestureModifier(media: media, options: closedMediaOptions))
+        .modifier(MediaGestureModifier(media: media, options: closedMediaOptions, enabled: isMusicItem))
     }
     @ViewBuilder private var decorationElement: some View {
         if let decoration, decorationSize > 0 {
@@ -332,6 +338,9 @@ struct ClosedNotchSlot: View {
             }
         case .visualizer:
             if media.isPlaying { PlaybackVisualizer(kind: options.animation, playing: true, enabled: options.animate && !system.lowPower, options: visualizerOptions, palette: media.artworkColors, fallback: effectiveTextColor) }
+        case .mirror:
+            MirrorWidgetView()
+                .frame(width: min(112, max(44, innerWidth)), height: innerHeight)
         case .files: Label("\(store.files.count)", systemImage: "tray").lineLimit(1)
         case .activity:
             if let activity = activeActivity {
@@ -348,6 +357,120 @@ struct ClosedNotchSlot: View {
         }
     }
     private var compactClock: WidgetStyle { var value = clock; value.fontSize = textSize; value.textColor = WidgetColor(effectiveTextColor); return value }
+}
+
+@MainActor
+private final class MirrorCameraService: ObservableObject {
+    enum State: Equatable { case idle, requesting, ready, denied, unavailable, failed }
+    static let shared = MirrorCameraService()
+
+    @Published private(set) var state: State = .idle
+    let session = AVCaptureSession()
+    private var configured = false
+    private var clients = 0
+    private var stopTask: Task<Void, Never>?
+
+    func acquire() {
+        clients += 1
+        stopTask?.cancel()
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: configureAndStart()
+        case .notDetermined:
+            state = .requesting
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                Task { @MainActor in
+                    if granted { MirrorCameraService.shared.configureAndStart() }
+                    else { MirrorCameraService.shared.state = .denied }
+                }
+            }
+        case .denied, .restricted: state = .denied
+        @unknown default: state = .failed
+        }
+    }
+
+    func release() {
+        clients = max(0, clients - 1)
+        guard clients == 0 else { return }
+        stopTask?.cancel()
+        stopTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled, let self, self.clients == 0 else { return }
+            if self.session.isRunning { self.session.stopRunning() }
+            self.state = self.configured ? .idle : self.state
+        }
+    }
+
+    private func configureAndStart() {
+        guard clients > 0 else { return }
+        if !configured {
+            session.beginConfiguration()
+            session.sessionPreset = .medium
+            guard let device = AVCaptureDevice.default(for: .video),
+                  let input = try? AVCaptureDeviceInput(device: device),
+                  session.canAddInput(input) else {
+                session.commitConfiguration()
+                state = .unavailable
+                return
+            }
+            session.addInput(input)
+            session.commitConfiguration()
+            configured = true
+        }
+        if !session.isRunning { session.startRunning() }
+        state = session.isRunning ? .ready : .failed
+    }
+}
+
+private final class MirrorPreviewNSView: NSView {
+    let previewLayer = AVCaptureVideoPreviewLayer()
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer = CALayer()
+        previewLayer.videoGravity = .resizeAspectFill
+        layer?.addSublayer(previewLayer)
+    }
+    required init?(coder: NSCoder) { nil }
+    override func layout() {
+        super.layout()
+        previewLayer.frame = bounds
+        if let connection = previewLayer.connection, connection.isVideoMirroringSupported {
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = true
+        }
+    }
+}
+
+private struct MirrorPreviewRepresentable: NSViewRepresentable {
+    let session: AVCaptureSession
+    func makeNSView(context: Context) -> MirrorPreviewNSView {
+        let view = MirrorPreviewNSView(frame: .zero)
+        view.previewLayer.session = session
+        return view
+    }
+    func updateNSView(_ nsView: MirrorPreviewNSView, context: Context) {
+        if nsView.previewLayer.session !== session { nsView.previewLayer.session = session }
+    }
+}
+
+private struct MirrorWidgetView: View {
+    @ObservedObject private var camera = MirrorCameraService.shared
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.055))
+            switch camera.state {
+            case .ready: MirrorPreviewRepresentable(session: camera.session)
+            case .idle, .requesting: ProgressView().controlSize(.mini)
+            case .denied: Image(systemName: "video.slash.fill").foregroundStyle(.secondary)
+            case .unavailable: Image(systemName: "camera.metering.unknown").foregroundStyle(.secondary)
+            case .failed: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.secondary)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onAppear { camera.acquire() }
+        .onDisappear { camera.release() }
+        .accessibilityLabel("Mirror")
+    }
 }
 
 private struct PowerEventBadge: View {
