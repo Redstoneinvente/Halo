@@ -76,12 +76,14 @@ struct ClosedNotchOptions: Codable, Equatable {
     var verticalPadding: Double?
     // Optional so preferences created before these controls continue decoding cleanly.
     var sideMargin: Double?
+    var outerMargin: Double?
     var albumTextColor: Bool?
     var albumBackgroundColor: Bool?
     var albumBackgroundFrequencyEffect: Bool?
     var contentPaddingX: Double { min(24, max(0, horizontalPadding ?? 8)) }
     var contentPaddingY: Double { min(12, max(0, verticalPadding ?? 2)) }
     var contentSideMargin: Double { min(48, max(0, sideMargin ?? 4)) }
+    var contentOuterMargin: Double { min(48, max(0, outerMargin ?? 4)) }
     var leftDecoration: SideDecoration?
     var rightDecoration: SideDecoration?
     var visualizer: VisualizerOptions?
@@ -94,11 +96,13 @@ struct ClosedNotchOptions: Codable, Equatable {
     var animate = true
     func validated() throws -> ClosedNotchOptions {
         guard fontSize.isFinite else { throw CocoaError(.fileReadCorruptFile) }
-        guard (horizontalPadding ?? 8).isFinite, (verticalPadding ?? 2).isFinite, (sideMargin ?? 4).isFinite else { throw CocoaError(.fileReadCorruptFile) }
+        guard (horizontalPadding ?? 8).isFinite, (verticalPadding ?? 2).isFinite,
+              (sideMargin ?? 4).isFinite, (outerMargin ?? 4).isFinite else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
         if horizontalPadding != nil { v.horizontalPadding = contentPaddingX }
         if verticalPadding != nil { v.verticalPadding = contentPaddingY }
         if sideMargin != nil { v.sideMargin = contentSideMargin }
+        if outerMargin != nil { v.outerMargin = contentOuterMargin }
         v.fontSize = min(24, max(8, fontSize)); v.color = try color.validated()
         v.leftDecoration = try leftDecoration?.validatedForImport()
         v.rightDecoration = try rightDecoration?.validatedForImport()
