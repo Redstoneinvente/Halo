@@ -251,7 +251,6 @@ struct ShelfFileInfo: View {
     }
 }
 
-
 private struct ContextNotchInterface<Dashboard: View>: View {
     @ObservedObject var media: MediaService
     let options: ContextMusicOptions
@@ -317,11 +316,59 @@ private struct ContextMusicView: View {
         .task(id: artworkKey) {
             artwork = nil
             guard options.showArtwork else { return }
-            let result = await MediaAssetReader.artwork(app: media.connectedApp, key: artworkKey)
+            let result = await ContextMusicArtworkReader.artwork(app: media.connectedApp, key: artworkKey)
             guard !Task.isCancelled else { return }; artwork = result
         }
     }
     private func control(_ symbol: String, action: String, label: String) -> some View {
         Button { if let app = media.connectedApp { media.perform(action, app: app) } } label: { Image(systemName: symbol) }.accessibilityLabel(label)
+    }
+}
+
+private enum ContextMusicArtworkReader {
+    private static let queue = DispatchQueue(label: "Halo.ContextMusicArtwork", qos: .utility)
+    private static let lock = NSLock()
+    private static var cache: [String: Data] = [:]
+
+    static func artwork(app: String?, key: String) async -> NSImage? {
+        guard let app else { return nil }
+        lock.lock(); let cached = cache[key]; lock.unlock()
+        if let cached { return NSImage(data: cached) }
+
+        let payload: (Data?, String?) = await withCheckedContinuation { continuation in
+            queue.async {
+                let artworkExpression = app == "com.spotify.client" ? "artwork url of current track" : "raw data of artwork 1 of current track"
+                let source = """
+                if application id "\(app)" is not running then return {"", ""}
+                with timeout of 5 seconds
+                    tell application id "\(app)"
+                        return {(name of current track as text), \(artworkExpression)}
+                    end tell
+                end timeout
+                """
+                var failure: NSDictionary?
+                let result = NSAppleScript(source: source)?.executeAndReturnError(&failure)
+                if failure != nil { continuation.resume(returning: (nil, nil)); return }
+                continuation.resume(returning: (
+                    app == "com.apple.Music" ? result?.atIndex(2)?.data : nil,
+                    app == "com.spotify.client" ? result?.atIndex(2)?.stringValue : nil
+                ))
+            }
+        }
+
+        var data = payload.0
+        if data == nil, let urlString = payload.1, let url = URL(string: urlString), url.scheme == "https" {
+            var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+            request.setValue("Halo/1.0", forHTTPHeaderField: "User-Agent")
+            if let (downloaded, response) = try? await URLSession.shared.data(for: request),
+               downloaded.count <= 5_000_000,
+               (response as? HTTPURLResponse)?.statusCode == 200 {
+                data = downloaded
+            }
+        }
+
+        guard let data, data.count <= 5_000_000 else { return nil }
+        lock.lock(); cache[key] = data; lock.unlock()
+        return NSImage(data: data)
     }
 }
