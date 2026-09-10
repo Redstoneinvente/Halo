@@ -138,24 +138,31 @@ struct ClosedNotchSettingsView: View {
         Binding(get: { layout.closedNotch ?? ClosedNotchOptions() }, set: { layout.closedNotch = $0 })
     }
     private var visualizer: Binding<VisualizerOptions> {
-        Binding(get: { options.wrappedValue.visualizer ?? VisualizerOptions() },
-                set: { options.wrappedValue.visualizer = $0 })
+        Binding(get: { options.wrappedValue.visualizer ?? VisualizerOptions() }, set: { options.wrappedValue.visualizer = $0 })
     }
     private var expansion: Binding<ClosedExpansionOptions> {
-        Binding(get: { options.wrappedValue.expansion ?? ClosedExpansionOptions() },
-                set: { options.wrappedValue.expansion = $0 })
+        Binding(get: { options.wrappedValue.expansion ?? ClosedExpansionOptions() }, set: { options.wrappedValue.expansion = $0 })
     }
     private var mediaOptions: Binding<ClosedMediaOptions> {
-        Binding(get: { options.wrappedValue.mediaOptions ?? ClosedMediaOptions() },
-                set: { options.wrappedValue.mediaOptions = $0 })
+        Binding(get: { options.wrappedValue.mediaOptions ?? ClosedMediaOptions() }, set: { options.wrappedValue.mediaOptions = $0 })
+    }
+    private var artwork: Binding<ClosedArtworkOptions> {
+        Binding(get: {
+            if let saved = options.wrappedValue.artworkOptions { return saved }
+            let legacy = options.wrappedValue.mediaOptions ?? ClosedMediaOptions()
+            var value = ClosedArtworkOptions()
+            if legacy.artwork != .none {
+                value.enabled = true; value.mode = legacy.artwork; value.size = legacy.artworkSize
+                value.vinylRPM = legacy.vinylRPM; value.backgroundOpacity = legacy.backgroundOpacity
+            }
+            return value
+        }, set: { options.wrappedValue.artworkOptions = $0 })
     }
     private var reactive: Binding<ReactiveBackgroundOptions> {
-        Binding(get: { options.wrappedValue.reactiveBackground ?? ReactiveBackgroundOptions() },
-                set: { options.wrappedValue.reactiveBackground = $0 })
+        Binding(get: { options.wrappedValue.reactiveBackground ?? ReactiveBackgroundOptions() }, set: { options.wrappedValue.reactiveBackground = $0 })
     }
     private var power: Binding<PowerReactionOptions> {
-        Binding(get: { options.wrappedValue.powerReaction ?? PowerReactionOptions() },
-                set: { options.wrappedValue.powerReaction = $0 })
+        Binding(get: { options.wrappedValue.powerReaction ?? PowerReactionOptions() }, set: { options.wrappedValue.powerReaction = $0 })
     }
     var body: some View {
         Section("Content fit") {
@@ -172,21 +179,19 @@ struct ClosedNotchSettingsView: View {
             Text("Music, pinned files, timers, power events and live activities can widen the closed notch. Extra width is assigned only to the side that needs it.").font(.caption)
         }
         SideDecorationSettingsView(title: "Left icon / GIF", options: Binding(
-            get: { options.wrappedValue.leftDecoration ?? SideDecoration() },
-            set: { options.wrappedValue.leftDecoration = $0 }
+            get: { options.wrappedValue.leftDecoration ?? SideDecoration() }, set: { options.wrappedValue.leftDecoration = $0 }
         ))
         SideDecorationSettingsView(title: "Right icon / GIF", options: Binding(
-            get: { options.wrappedValue.rightDecoration ?? SideDecoration() },
-            set: { options.wrappedValue.rightDecoration = $0 }
+            get: { options.wrappedValue.rightDecoration ?? SideDecoration() }, set: { options.wrappedValue.rightDecoration = $0 }
         ))
         Section("Content") {
             itemPicker("Left slot", options.left)
             itemPicker("Right slot", options.right)
             PreciseSlider(title: "Text size", value: options.fontSize, range: 8...24, step: 1, suffix: "pt")
             ColorPicker("Color", selection: Binding(get: { options.wrappedValue.color.color }, set: { options.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
-            Text("Active Halo activities have priority: they use an Activity slot, an inactive side, or temporarily replace the right slot if both sides are occupied. The configured widget returns automatically afterward.").font(.caption)
+            Text("Active Halo activities have priority: they use an Activity slot, an inactive side, or temporarily replace the right slot if both sides are occupied.").font(.caption)
         }
-        Section("Closed media") {
+        Section("Closed media text") {
             Picker("Text", selection: mediaOptions.textMode) {
                 Text("Track title").tag(MediaTextMode.title)
                 Text("Artist").tag(MediaTextMode.artist)
@@ -202,38 +207,54 @@ struct ClosedNotchSettingsView: View {
                 Text("1 line").tag(1)
                 Text("2 lines").tag(2)
             }
-            Picker("Artwork", selection: mediaOptions.artwork) {
-                Text("None").tag(MediaArtworkMode.none)
-                Text("Album cover").tag(MediaArtworkMode.cover)
-                Text("Use as notch background").tag(MediaArtworkMode.background)
-                Text("Rotating vinyl").tag(MediaArtworkMode.vinyl)
-            }
-            if mediaOptions.wrappedValue.artwork != .none {
-                PreciseSlider(title: "Artwork size", value: mediaOptions.artworkSize, range: 14...72, step: 1, suffix: "pt")
-            }
-            if mediaOptions.wrappedValue.artwork == .vinyl {
-                PreciseSlider(title: "Vinyl speed", value: mediaOptions.vinylRPM, range: 1...45, step: 1, suffix: "rpm")
-            }
-            if mediaOptions.wrappedValue.artwork == .background {
-                PreciseSlider(title: "Artwork background opacity", value: mediaOptions.backgroundOpacity, range: 0...1, step: 0.01, decimals: 2)
-            }
             if mediaOptions.wrappedValue.overflow == .marquee {
                 PreciseSlider(title: "Marquee speed", value: mediaOptions.marqueeSpeed, range: 8...120, step: 1, suffix: "pt/s")
             }
             Toggle("Show playback icon", isOn: mediaOptions.showPlaybackIcon)
-            Text("Lyrics are requested on track changes rather than every media poll. Apple Music can expose embedded lyrics; unsupported players fall back to title/artist rather than continuously querying the network.").font(.caption)
+            if mediaOptions.wrappedValue.textMode == .lyrics {
+                Toggle("Use online lyrics fallback", isOn: Binding(
+                    get: { mediaOptions.wrappedValue.usesOnlineLyrics },
+                    set: { mediaOptions.wrappedValue.onlineLyrics = $0 }
+                ))
+                Text("Halo first asks Apple Music for embedded lyrics. If unavailable and online fallback is enabled, it sends only the track title and artist to LRCLIB once per track and caches the result.").font(.caption)
+            }
+        }
+        Section("Artwork") {
+            Toggle("Show artwork", isOn: artwork.enabled)
+            if artwork.wrappedValue.enabled {
+                Picker("Style", selection: artwork.mode) {
+                    Text("Album cover").tag(MediaArtworkMode.cover)
+                    Text("Notch background").tag(MediaArtworkMode.background)
+                    Text("Rotating vinyl").tag(MediaArtworkMode.vinyl)
+                }
+                Picker("Side", selection: artwork.side) {
+                    Text("Automatic").tag(ClosedNotchSideChoice.automatic)
+                    Text("Left").tag(ClosedNotchSideChoice.left)
+                    Text("Right").tag(ClosedNotchSideChoice.right)
+                }.disabled(artwork.wrappedValue.mode == .background)
+                if artwork.wrappedValue.mode != .background {
+                    PreciseSlider(title: "Artwork size", value: artwork.size, range: 14...72, step: 1, suffix: "pt")
+                    PreciseSlider(title: "Artwork padding", value: artwork.padding, range: 0...24, step: 1, suffix: "pt")
+                    PreciseSlider(title: "Artwork margin", value: artwork.margin, range: 0...48, step: 1, suffix: "pt")
+                }
+                if artwork.wrappedValue.mode == .vinyl {
+                    PreciseSlider(title: "Vinyl speed", value: artwork.vinylRPM, range: 1...45, step: 1, suffix: "rpm")
+                }
+                if artwork.wrappedValue.mode == .background {
+                    PreciseSlider(title: "Artwork background opacity", value: artwork.backgroundOpacity, range: 0...1, step: 0.01, decimals: 2)
+                }
+                Text("Artwork is independent from the Media text slot. It can stay on either side while the text slot is elsewhere, or be used only as the closed-notch background.").font(.caption)
+            }
         }
         Section("Album colors") {
             Toggle("Color notch background from album", isOn: Binding(
-                get: { options.wrappedValue.albumBackgroundColor ?? false },
-                set: { options.wrappedValue.albumBackgroundColor = $0 }
+                get: { options.wrappedValue.albumBackgroundColor ?? false }, set: { options.wrappedValue.albumBackgroundColor = $0 }
             ))
             Toggle("Color closed-notch text from album", isOn: Binding(
-                get: { options.wrappedValue.albumTextColor ?? false },
-                set: { options.wrappedValue.albumTextColor = $0 }
+                get: { options.wrappedValue.albumTextColor ?? false }, set: { options.wrappedValue.albumTextColor = $0 }
             ))
         }
-        Section("Reactive album background") {
+        Section("Reactive background") {
             Toggle("React while music plays", isOn: reactive.enabled)
             Picker("Reaction profile", selection: reactive.driver) {
                 Text("Pulse").tag(ReactiveDriver.pulse)
@@ -241,8 +262,7 @@ struct ClosedNotchSettingsView: View {
                 Text("Mid-like").tag(ReactiveDriver.mids)
                 Text("Treble-like").tag(ReactiveDriver.treble)
                 Text("Spectrum-like").tag(ReactiveDriver.spectrum)
-            }
-            .disabled(!reactive.wrappedValue.enabled)
+            }.disabled(!reactive.wrappedValue.enabled)
             if reactive.wrappedValue.enabled {
                 PreciseSlider(title: "Reaction speed", value: reactive.speed, range: 0.2...3, step: 0.05, decimals: 2)
                 PreciseSlider(title: "Master intensity", value: reactive.intensity, range: 0...1, step: 0.05, decimals: 2)
@@ -253,38 +273,40 @@ struct ClosedNotchSettingsView: View {
                 PreciseSlider(title: "Affect blur", value: reactive.blur, range: 0...12, step: 0.25, suffix: "pt", decimals: 2)
                 PreciseSlider(title: "Affect grain", value: reactive.grain, range: 0...0.6, step: 0.01, decimals: 2)
             }
-            Text("These profiles are lightweight playback-reactive motion profiles, not FFT capture. Each effect amount can be zeroed independently. Reduce Motion and Low Power Mode disable continuous background animation.").font(.caption)
+            Text("Reactive mode now remains visibly active even without album-color mode. These are still lightweight playback-driven profiles rather than true FFT frequency analysis.").font(.caption)
         }
         Section("Power events") {
-            Picker("Side", selection: power.side) {
-                Text("Automatic").tag(ClosedNotchSideChoice.automatic)
-                Text("Left").tag(ClosedNotchSideChoice.left)
-                Text("Right").tag(ClosedNotchSideChoice.right)
+            Toggle("Enable power events", isOn: Binding(
+                get: { power.wrappedValue.isEnabled }, set: { power.wrappedValue.enabled = $0 }
+            ))
+            if power.wrappedValue.isEnabled {
+                Picker("Side", selection: power.side) {
+                    Text("Automatic").tag(ClosedNotchSideChoice.automatic)
+                    Text("Left").tag(ClosedNotchSideChoice.left)
+                    Text("Right").tag(ClosedNotchSideChoice.right)
+                }
+                Picker("Charging", selection: power.charging) { powerStyles() }
+                Picker("Low battery", selection: power.low) { powerStyles() }
+                Picker("Charged", selection: power.charged) { powerStyles() }
+                PreciseSlider(title: "Low battery threshold", value: Binding(get: { Double(power.wrappedValue.lowThreshold) }, set: { power.wrappedValue.lowThreshold = Int($0) }), range: 5...50, step: 1, suffix: "%")
+                Toggle("Expand for power events", isOn: power.expandForEvent)
+                if power.wrappedValue.expandForEvent {
+                    PreciseSlider(title: "Power event width", value: power.eventWidth, range: 48...240, step: 1, suffix: "pt")
+                }
+                Toggle("Dynamic color by battery level", isOn: Binding(
+                    get: { power.wrappedValue.usesDynamicColor }, set: { power.wrappedValue.dynamicColor = $0 }
+                ))
+                if power.wrappedValue.usesDynamicColor {
+                    ColorPicker("Low battery color", selection: Binding(get: { power.wrappedValue.resolvedLowColor.color }, set: { power.wrappedValue.lowColor = WidgetColor($0) }), supportsOpacity: false)
+                    ColorPicker("Mid battery color", selection: Binding(get: { power.wrappedValue.resolvedMidColor.color }, set: { power.wrappedValue.midColor = WidgetColor($0) }), supportsOpacity: false)
+                    ColorPicker("High battery color", selection: Binding(get: { power.wrappedValue.resolvedHighColor.color }, set: { power.wrappedValue.highColor = WidgetColor($0) }), supportsOpacity: false)
+                } else {
+                    ColorPicker("Power event color", selection: Binding(get: { power.wrappedValue.color.color }, set: { power.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
+                }
             }
-            Picker("Charging", selection: power.charging) { powerStyles() }
-            Picker("Low battery", selection: power.low) { powerStyles() }
-            Picker("Charged", selection: power.charged) { powerStyles() }
-            PreciseSlider(title: "Low battery threshold", value: Binding(get: { Double(power.wrappedValue.lowThreshold) }, set: { power.wrappedValue.lowThreshold = Int($0) }), range: 5...50, step: 1, suffix: "%")
-            Toggle("Expand for power events", isOn: power.expandForEvent)
-            if power.wrappedValue.expandForEvent {
-                PreciseSlider(title: "Power event width", value: power.eventWidth, range: 48...240, step: 1, suffix: "pt")
-            }
-            Toggle("Dynamic color by battery level", isOn: power.dynamicColor)
-            if power.wrappedValue.dynamicColor {
-                ColorPicker("Low battery color", selection: Binding(get: { power.wrappedValue.lowColor.color }, set: { power.wrappedValue.lowColor = WidgetColor($0) }), supportsOpacity: false)
-                ColorPicker("Mid battery color", selection: Binding(get: { power.wrappedValue.midColor.color }, set: { power.wrappedValue.midColor = WidgetColor($0) }), supportsOpacity: false)
-                ColorPicker("High battery color", selection: Binding(get: { power.wrappedValue.highColor.color }, set: { power.wrappedValue.highColor = WidgetColor($0) }), supportsOpacity: false)
-                Text("The power-event color blends continuously from Low → Mid → High as the battery level changes.").font(.caption)
-            } else {
-                ColorPicker("Power event color", selection: Binding(get: { power.wrappedValue.color.color }, set: { power.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
-            }
-            Text("Charging, low-battery and charged states can show an icon, percentage, combined icon + percentage, or label. Automatic side prefers free/inactive space and avoids forcing the opposite edge to move.").font(.caption)
         }
         Section("Music animation") {
-            Picker("Visualizer style", selection: Binding<PlaybackAnimation>(
-                get: { options.wrappedValue.animation },
-                set: { options.wrappedValue.animation = $0 }
-            )) {
+            Picker("Visualizer style", selection: Binding<PlaybackAnimation>(get: { options.wrappedValue.animation }, set: { options.wrappedValue.animation = $0 })) {
                 ForEach(PlaybackAnimation.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
             }
             Toggle("Animate while music plays", isOn: options.animate)
@@ -303,9 +325,7 @@ struct ClosedNotchSettingsView: View {
         Button("Reset closed content") { layout.closedNotch = ClosedNotchOptions() }
     }
     private func itemPicker(_ title: String, _ value: Binding<ClosedNotchItem>) -> some View {
-        Picker(title, selection: value) {
-            ForEach(ClosedNotchItem.allCases) { Text($0.rawValue.capitalized).tag($0) }
-        }
+        Picker(title, selection: value) { ForEach(ClosedNotchItem.allCases) { Text($0.rawValue.capitalized).tag($0) } }
     }
     @ViewBuilder private func powerStyles() -> some View {
         Text("Off").tag(PowerReactionStyle.off)
