@@ -17,7 +17,7 @@ struct SettingsView: View {
     @State private var renamingProfile: UUID?
     @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
-    private let sections = ["General", "Appearance", "Modules", "Widgets", "Closed notch", "Context notch interface", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
+    private let sections = ["General", "Appearance", "Modules", "Widgets", "Closed notch", "Context notch interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -70,6 +70,7 @@ struct SettingsView: View {
         case "Modules": return "square.grid.2x2"
         case "Widgets": return "slider.horizontal.3"
         case "Context notch interface": return "rectangle.stack"
+        case "HUD": return "rectangle.inset.filled.and.person.filled"
         case "Closed notch": return "rectangle.topthird.inset.filled"
         case "Media & Files": return "play.rectangle"
         case "Profiles": return "person.crop.rectangle.stack"
@@ -151,6 +152,7 @@ struct SettingsView: View {
             HStack { Button("Import theme…") { store.importTheme() }; Button("Export theme…") { store.exportTheme() }; Button("Reset") { store.configuration.theme = Theme(); workspace.settings.layout.appearance = Appearance() } }
         case "Widgets": WidgetSettingsView(layout: $workspace.settings.layout)
         case "Closed notch": ClosedNotchSettingsView(layout: $workspace.settings.layout, media: workspace.media, app: workspace.settings.mediaApp)
+        case "HUD": HaloHUDWorkspaceSettingsView(layout: $workspace.settings.layout, profileNames: workspace.settings.profiles.map(\.name))
         case "Modules":
             Text("Drag a module row to reorder it, or use the arrow buttons.")
             ForEach(workspace.settings.layout.normalizedOrder()) { module in
@@ -300,7 +302,7 @@ struct SettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack { Text("Customize profile").font(.title2.bold()); Spacer(); Button("Cancel") { dismiss() }; Button("Save") { save(profile); dismiss() }.disabled(profile.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }.padding()
-            Picker("Section", selection: $tab) { ForEach(["Details", "Layout", "Widgets", "Closed notch", "Context"], id: \.self) { Text($0).tag($0) } }.pickerStyle(.segmented).padding(.horizontal)
+            Picker("Section", selection: $tab) { ForEach(["Details", "Layout", "Widgets", "Closed notch", "Context", "HUD"], id: \.self) { Text($0).tag($0) } }.pickerStyle(.segmented).padding(.horizontal)
             Form {
                 switch tab {
                 case "Details":
@@ -333,11 +335,12 @@ struct SettingsView: View {
                     }
                     SurfaceAppearanceControls(appearance: $profile.layout.appearance, theme: profile.theme)
                 case "Context": ContextMusicSettings(layout: $profile.layout)
+                case "HUD": HaloHUDWorkspaceSettingsView(layout: $profile.layout, profileNames: [])
                 case "Widgets": WidgetSettingsView(layout: $profile.layout)
                 default: ClosedNotchSettingsView(layout: $profile.layout, media: media, app: app)
                 }
             }.formStyle(.grouped)
-        }.frame(width: 620, height: 650)
+        }.frame(width: 720, height: 700)
     }
     private func moveUp(_ module: ModuleID) {
         let order = profile.layout.normalizedOrder()
@@ -437,6 +440,371 @@ private struct ContextMusicSettings: View {
             }
             Slider(value: options.backgroundOpacity, in: 0...1) { Text("Base background opacity") }
         }
+    }
+}
+
+// MARK: - HUD Studio
+
+@MainActor private struct HaloHUDWorkspaceSettingsView: View {
+    @Binding var layout: WorkspaceLayout
+    let profileNames: [String]
+    @State private var page = "Overview"
+    @State private var selectedEvent: HaloHUDEventKind = .volume
+    @State private var previewValue = 0.72
+    @State private var customPresetName = "My HUD"
+
+    private var hud: Binding<HaloHUDSettings> {
+        Binding(get: { layout.hud ?? HaloHUDSettings() }, set: { layout.hud = $0 })
+    }
+    private var eventOverride: Binding<HaloHUDEventOverride> {
+        Binding(get: { hud.wrappedValue.override(for: selectedEvent) }, set: {
+            var settings = hud.wrappedValue; settings.setOverride($0, for: selectedEvent); hud.wrappedValue = settings
+        })
+    }
+    private var configuration: Binding<HaloHUDConfiguration> {
+        Binding(get: {
+            let settings = hud.wrappedValue, item = settings.override(for: selectedEvent)
+            return item.useGlobalSettings ? settings.global : item.configuration
+        }, set: { newValue in
+            var settings = hud.wrappedValue
+            var item = settings.override(for: selectedEvent)
+            if item.useGlobalSettings { settings.global = newValue }
+            else { item.configuration = newValue; settings.setOverride(item, for: selectedEvent) }
+            hud.wrappedValue = settings
+        })
+    }
+
+    var body: some View {
+        Picker("HUD", selection: $page) {
+            ForEach(["Overview", "HUD Studio", "Events", "Presets", "Profiles / Rules"], id: \.self) { Text($0).tag($0) }
+        }.pickerStyle(.segmented)
+
+        switch page {
+        case "HUD Studio": studio
+        case "Events": events
+        case "Presets": presets
+        case "Profiles / Rules": rules
+        default: overview
+        }
+    }
+
+    @ViewBuilder private var overview: some View {
+        Section("HUD Replacement") {
+            Toggle("Enable HUD Replacement", isOn: hud.enabled)
+            Text("Halo translates supported system events into reusable HUD events, resolves the active profile and per-event override, then sends the result to a presentation renderer.").font(.caption).foregroundStyle(.secondary)
+        }
+        Section("System status") {
+            Label("Volume, mute, display brightness and keyboard brightness are connected to Halo's existing safe key-observer/replacement path.", systemImage: "checkmark.seal.fill")
+            Label("Other event types stay capability-gated until a reliable provider is connected; Halo will not use fragile private hooks just to make the list look complete.", systemImage: "shield.lefthalf.filled")
+            if !AXIsProcessTrusted() {
+                Text("Native key suppression needs Accessibility permission. Observer HUDs can still work without suppressing Apple's HUD.").font(.caption).foregroundStyle(.orange)
+                Button("Open Accessibility Settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
+                }
+            }
+        }
+        Section("Quick actions") {
+            HStack {
+                Button("Preview Volume") { preview(.volume) }
+                Button("Preview Brightness") { preview(.displayBrightness) }
+                Button("Open HUD Studio") { page = "HUD Studio" }
+            }
+        }
+    }
+
+    @ViewBuilder private var studio: some View {
+        Section("HUD Studio") {
+            Picker("Event", selection: $selectedEvent) { ForEach(HaloHUDEventKind.allCases) { Text($0.title).tag($0) } }
+            Toggle("Enable this HUD", isOn: Binding(get: { eventOverride.wrappedValue.enabled }, set: { var v = eventOverride.wrappedValue; v.enabled = $0; eventOverride.wrappedValue = v }))
+            Toggle("Use Global Settings", isOn: Binding(get: { eventOverride.wrappedValue.useGlobalSettings }, set: { enabled in
+                var v = eventOverride.wrappedValue
+                if !enabled && v.useGlobalSettings { v.configuration = hud.wrappedValue.global }
+                v.useGlobalSettings = enabled; eventOverride.wrappedValue = v
+            }))
+            Text(eventOverride.wrappedValue.useGlobalSettings ? "This HUD inherits the global configuration. Editing below changes the global HUD style." : "This HUD has its own configuration override.").font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("Preview") {
+            HaloHUDStudioPreview(kind: selectedEvent, value: previewValue, configuration: configuration.wrappedValue)
+                .frame(maxWidth: .infinity).padding(.vertical, 8)
+            Slider(value: $previewValue, in: 0...1) { Text("Preview value") }
+            HStack {
+                Text("\(Int(previewValue * 100))%").monospacedDigit()
+                Spacer()
+                Button("Preview HUD") { preview(selectedEvent) }
+                Button("Test Entrance") { preview(selectedEvent) }
+                Button("Test Exit") { NotificationCenter.default.post(name: .init("HaloHUDPreviewExit"), object: nil) }
+            }
+        }
+
+        Section("Presentation") {
+            Picker("Target", selection: configuration.presentation.target) { ForEach(HaloHUDPresentationTarget.allCases) { Text($0.title).tag($0) } }
+            Picker("Display", selection: configuration.presentation.displayTarget) { ForEach(HaloHUDDisplayTarget.allCases) { Text($0.title).tag($0) } }
+            switch configuration.wrappedValue.presentation.target {
+            case .notch:
+                Picker("Notch side", selection: configuration.presentation.notchSide) { ForEach(HaloHUDNotchSide.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+                Picker("Collision", selection: configuration.behavior.collision) { ForEach(HaloHUDCollisionBehavior.allCases) { Text($0.title).tag($0) } }
+                Text("The model preserves Left, Right, Automatic and Full Notch as distinct presentation intents. Unsupported collisions fall back externally instead of destabilizing the notch.").font(.caption).foregroundStyle(.secondary)
+            case .floating:
+                Picker("Position", selection: configuration.presentation.floatingPosition) { ForEach(HaloHUDFloatingPosition.allCases) { Text($0.title).tag($0) } }
+            case .screenEdge:
+                Picker("Edge", selection: configuration.presentation.screenEdge) { ForEach(HaloHUDScreenEdge.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+                Slider(value: configuration.presentation.screenEdgeLength, in: 40...800) { Text("Length") }
+                Slider(value: configuration.presentation.screenEdgeThickness, in: 1...24) { Text("Thickness") }
+            case .menuBar:
+                Text("Menu Bar is intended for state-like events. Events that need richer content can fall back to the configured external HUD.").font(.caption).foregroundStyle(.secondary)
+            case .nearCursor:
+                Text("Near Cursor uses the configured offsets and edge margin while keeping the HUD inside the selected display.").font(.caption).foregroundStyle(.secondary)
+            case .disabled:
+                Text("This event will not be presented.").font(.caption).foregroundStyle(.secondary)
+            }
+            Picker("Fallback target", selection: configuration.behavior.fallbackTarget) { ForEach(HaloHUDPresentationTarget.allCases.filter { $0 != .disabled }) { Text($0.title).tag($0) } }
+        }
+
+        Section("Layout") {
+            Picker("Layout", selection: configuration.layout.style) { ForEach(HaloHUDLayoutStyle.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+            Slider(value: configuration.layout.width, in: 80...900) { Text("Width") }
+            Slider(value: configuration.layout.height, in: 24...500) { Text("Height") }
+            Slider(value: configuration.layout.minimumWidth, in: 40...600) { Text("Minimum width") }
+            Slider(value: configuration.layout.maximumWidth, in: 80...1200) { Text("Maximum width") }
+            Slider(value: configuration.layout.horizontalPadding, in: 0...80) { Text("Horizontal padding") }
+            Slider(value: configuration.layout.verticalPadding, in: 0...80) { Text("Vertical padding") }
+            Slider(value: configuration.layout.spacing, in: 0...60) { Text("Content spacing") }
+            Slider(value: configuration.layout.cornerRadius, in: 0...120) { Text("Corner radius") }
+            Slider(value: configuration.layout.offsetX, in: -500...500) { Text("X offset") }
+            Slider(value: configuration.layout.offsetY, in: -500...500) { Text("Y offset") }
+            Slider(value: configuration.layout.edgeMargin, in: 0...120) { Text("Screen / edge margin") }
+            Toggle("Compact mode", isOn: configuration.layout.compact)
+        }
+
+        Section("Components") {
+            Toggle("Icon", isOn: configuration.components.icon)
+            Toggle("Label", isOn: configuration.components.label)
+            Toggle("Numeric value", isOn: configuration.components.value)
+            Toggle("Percentage", isOn: configuration.components.percentage)
+            Toggle("Progress visualization", isOn: configuration.components.progress)
+            Toggle("Device name", isOn: configuration.components.deviceName)
+            if configuration.wrappedValue.components.progress {
+                Picker("Progress style", selection: configuration.progressStyle) { ForEach(HaloHUDProgressStyle.allCases) { Text($0.title).tag($0) } }
+                if configuration.wrappedValue.progressStyle == .segmentedBar || configuration.wrappedValue.progressStyle == .dots {
+                    Stepper("Segments / dots: \(configuration.wrappedValue.segments)", value: configuration.segments, in: 2...64)
+                }
+            }
+            Slider(value: configuration.iconSize, in: 8...96) { Text("Icon size") }
+            Slider(value: configuration.textSize, in: 8...64) { Text("Text size") }
+        }
+
+        Section("Appearance") {
+            Picker("Background", selection: configuration.appearance.background) { ForEach(HaloHUDBackgroundStyle.allCases) { Text($0.title).tag($0) } }
+            Slider(value: configuration.appearance.backgroundOpacity, in: 0...1) { Text("Background opacity") }
+            Slider(value: configuration.appearance.blur, in: 0...60) { Text("Blur") }
+            if configuration.wrappedValue.appearance.background == .glass { Slider(value: configuration.appearance.glassIntensity, in: 0...1) { Text("Glass intensity") } }
+            Toggle("Border", isOn: configuration.appearance.border)
+            if configuration.wrappedValue.appearance.border { Slider(value: configuration.appearance.borderOpacity, in: 0...1) { Text("Border opacity") } }
+            Toggle("Shadow", isOn: configuration.appearance.shadow)
+            Toggle("Glow", isOn: configuration.appearance.glow)
+            Toggle("Noise", isOn: configuration.appearance.noise)
+        }
+
+        Section("Dynamic Colors") {
+            colorSource("Primary", binding: configuration.appearance.primary.source)
+            colorSource("Secondary", binding: configuration.appearance.secondary.source)
+            colorSource("Progress", binding: configuration.appearance.progress.source)
+            colorSource("Border", binding: configuration.appearance.borderColor.source)
+            colorSource("Glow", binding: configuration.appearance.glowColor.source)
+            Text("Album Artwork is a reusable color provider, not a music-HUD special case. When its source is unavailable the renderer falls back to Halo's accent/contrast colors.").font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("Animation") {
+            Picker("Entrance", selection: configuration.animation.entrance) { ForEach(HaloHUDEntranceAnimation.allCases) { Text($0.title).tag($0) } }
+            Picker("Exit", selection: configuration.animation.exit) { ForEach(HaloHUDExitAnimation.allCases) { Text($0.title).tag($0) } }
+            Slider(value: configuration.animation.entranceDuration, in: 0...1.5) { Text("Entrance duration") }
+            Slider(value: configuration.animation.exitDuration, in: 0...1.5) { Text("Exit duration") }
+            if configuration.wrappedValue.animation.entrance == .spring {
+                Slider(value: configuration.animation.springDamping, in: 0.1...1) { Text("Spring damping") }
+                Slider(value: configuration.animation.springStiffness, in: 20...600) { Text("Spring stiffness") }
+            }
+            Picker("Progress animation", selection: configuration.animation.progress) { ForEach(HaloHUDProgressAnimation.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+            Slider(value: configuration.animation.intensity, in: 0...1) { Text("Animation intensity") }
+        }
+
+        Section("Behaviour") {
+            Slider(value: configuration.behavior.displayDuration, in: 0.2...6) { Text("Display duration") }
+            Picker("Repeated events", selection: configuration.behavior.interrupt) { ForEach(HaloHUDInterruptBehavior.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+            Picker("Collision behaviour", selection: configuration.behavior.collision) { ForEach(HaloHUDCollisionBehavior.allCases) { Text($0.title).tag($0) } }
+            Text("Rapid values are designed to update the currently visible HUD and reset its dismissal deadline instead of repeatedly destroying and recreating the presentation.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var events: some View {
+        Section("HUD Events") {
+            ForEach(HaloHUDEventKind.allCases) { kind in
+                let item = hud.wrappedValue.override(for: kind)
+                HStack(spacing: 10) {
+                    Image(systemName: kind.symbol).frame(width: 22)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(kind.title)
+                        Text(kind.providerStatus.title).font(.caption2).foregroundStyle(kind.providerStatus == .available ? .green : .secondary)
+                    }
+                    Spacer()
+                    Text(hud.wrappedValue.configuration(for: kind).presentation.target.title).font(.caption).foregroundStyle(.secondary)
+                    Toggle("", isOn: Binding(get: { item.enabled }, set: { enabled in
+                        var settings = hud.wrappedValue, changed = settings.override(for: kind); changed.enabled = enabled; settings.setOverride(changed, for: kind); hud.wrappedValue = settings
+                    })).labelsHidden()
+                }
+            }
+        }
+        Section("Provider policy") {
+            Text("Available means the event is connected to Halo's current provider path. Observer-capable events have safe data sources but are not yet replacing a native HUD. Provider not connected means the event identifier/configuration exists, but Halo deliberately does not fake support with brittle private APIs.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var presets: some View {
+        Section("Built-in Presets") {
+            ForEach(HaloHUDPreset.builtIns) { preset in
+                HStack {
+                    VStack(alignment: .leading) { Text(preset.name).font(.headline); Text(preset.configuration.presentation.target.title).font(.caption).foregroundStyle(.secondary) }
+                    Spacer()
+                    Button("Apply") { var settings = hud.wrappedValue; settings.global = preset.configuration; hud.wrappedValue = settings }
+                    Button("Duplicate") {
+                        var settings = hud.wrappedValue
+                        settings.customPresets.append(HaloHUDPreset(id: UUID().uuidString, name: preset.name + " Copy", builtIn: false, configuration: preset.configuration))
+                        hud.wrappedValue = settings
+                    }
+                }
+            }
+        }
+        Section("Custom Presets") {
+            HStack { TextField("Preset name", text: $customPresetName); Button("Save Current") { saveCustomPreset() } }
+            ForEach(hud.wrappedValue.customPresets) { preset in
+                HStack {
+                    Text(preset.name)
+                    Spacer()
+                    Button("Apply") { var settings = hud.wrappedValue; settings.global = preset.configuration; hud.wrappedValue = settings }
+                    Button("Duplicate") {
+                        var settings = hud.wrappedValue; var copy = preset; copy.id = UUID().uuidString; copy.name += " Copy"; settings.customPresets.append(copy); hud.wrappedValue = settings
+                    }
+                    Button("Delete", role: .destructive) { var settings = hud.wrappedValue; settings.customPresets.removeAll { $0.id == preset.id }; hud.wrappedValue = settings }
+                }
+            }
+            Button("Reset to Halo Default") { var settings = hud.wrappedValue; settings.global = .haloPreset(); hud.wrappedValue = settings }
+        }
+    }
+
+    @ViewBuilder private var rules: some View {
+        Section("Profiles") {
+            Text("HUD settings are stored inside WorkspaceLayout, so saved Halo profiles carry their own HUD configuration and scheduled/profile switches resolve the matching HUD settings automatically.").font(.caption).foregroundStyle(.secondary)
+            if profileNames.isEmpty { Text("This editor is already inside a profile. Save the profile to keep these HUD settings with it.").foregroundStyle(.secondary) }
+            else { ForEach(profileNames, id: \.self) { Label($0, systemImage: "person.crop.rectangle") } }
+        }
+        Section("Application-specific behaviour") {
+            ForEach(hud.wrappedValue.appRules) { rule in
+                HStack {
+                    TextField("Bundle identifier", text: appRuleBinding(rule.id, keyPath: \.bundleIdentifier))
+                    Picker("Target", selection: appRuleBinding(rule.id, keyPath: \.target)) { ForEach(HaloHUDPresentationTarget.allCases) { Text($0.title).tag($0) } }.frame(width: 160)
+                    Button(role: .destructive) { var settings = hud.wrappedValue; settings.appRules.removeAll { $0.id == rule.id }; hud.wrappedValue = settings } label: { Image(systemName: "trash") }
+                }
+            }
+            Button("Add Application Rule") { var settings = hud.wrappedValue; settings.appRules.append(HaloHUDAppRule()); hud.wrappedValue = settings }
+            Text("Rules are persisted now so the presentation router can evolve without changing the settings format. The current hardware-key compatibility renderer still uses the resolved global presentation.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func colorSource(_ title: String, binding: Binding<HaloHUDDynamicColorSource>) -> some View {
+        Picker(title, selection: binding) { ForEach(HaloHUDDynamicColorSource.allCases) { Text($0.title).tag($0) } }
+    }
+    private func appRuleBinding<T>(_ id: UUID, keyPath: WritableKeyPath<HaloHUDAppRule, T>) -> Binding<T> {
+        Binding(get: {
+            hud.wrappedValue.appRules.first(where: { $0.id == id })![keyPath: keyPath]
+        }, set: { value in
+            var settings = hud.wrappedValue
+            guard let index = settings.appRules.firstIndex(where: { $0.id == id }) else { return }
+            settings.appRules[index][keyPath: keyPath] = value; hud.wrappedValue = settings
+        })
+    }
+    private func saveCustomPreset() {
+        let name = customPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        var settings = hud.wrappedValue
+        settings.customPresets.append(HaloHUDPreset(id: UUID().uuidString, name: String(name.prefix(80)), builtIn: false, configuration: settings.global))
+        hud.wrappedValue = settings
+    }
+    private func preview(_ kind: HaloHUDEventKind) {
+        let legacy: String
+        switch kind { case .displayBrightness: legacy = "brightness"; case .keyboardBrightness: legacy = "keyboard"; default: legacy = "volume" }
+        NotificationCenter.default.post(name: .init("HaloHUDPreview"), object: nil, userInfo: ["kind": legacy, "value": previewValue])
+    }
+}
+
+private struct HaloHUDStudioPreview: View {
+    let kind: HaloHUDEventKind
+    let value: Double
+    let configuration: HaloHUDConfiguration
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private var accent: Color {
+        let c = configuration.appearance.primary
+        switch c.source {
+        case .systemAccent: return .accentColor
+        case .automaticContrast, .systemAppearance: return .primary
+        case .albumArtwork, .wallpaper: return .accentColor
+        case .fixed: return Color(hue: c.hue, saturation: c.saturation, brightness: c.brightness, opacity: c.alpha)
+        }
+    }
+    var body: some View {
+        Group {
+            if configuration.layout.style == .vertical {
+                VStack(spacing: configuration.layout.spacing) { previewIcon; previewHeader; previewProgress }
+            } else {
+                HStack(spacing: configuration.layout.spacing) {
+                    previewIcon
+                    VStack(alignment: .leading, spacing: max(3, configuration.layout.spacing * 0.45)) { previewHeader; previewProgress }
+                }
+            }
+        }
+        .padding(.horizontal, configuration.layout.horizontalPadding)
+        .padding(.vertical, configuration.layout.verticalPadding)
+        .frame(width: min(520, max(100, configuration.layout.width)), height: min(220, max(36, configuration.layout.height)))
+        .background { previewBackground }
+        .clipShape(RoundedRectangle(cornerRadius: configuration.layout.cornerRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: configuration.layout.cornerRadius, style: .continuous).stroke(.white.opacity(configuration.appearance.border ? configuration.appearance.borderOpacity : 0)))
+        .shadow(color: configuration.appearance.shadow ? .black.opacity(0.28) : .clear, radius: 16, y: 7)
+        .animation(configuration.animation.progress == .instant ? nil : .easeOut(duration: 0.16), value: value)
+    }
+    @ViewBuilder private var previewIcon: some View {
+        if configuration.components.icon { Image(systemName: kind.symbol).font(.system(size: configuration.iconSize, weight: .semibold)).foregroundStyle(accent) }
+    }
+    @ViewBuilder private var previewHeader: some View {
+        HStack {
+            if configuration.components.label { Text(kind.title).font(.system(size: configuration.textSize, weight: .semibold)) }
+            Spacer()
+            if configuration.components.value || configuration.components.percentage { Text("\(Int((value * 100).rounded()))%").font(.system(size: configuration.textSize, weight: .bold, design: .rounded)).monospacedDigit() }
+        }
+    }
+    @ViewBuilder private var previewProgress: some View {
+        if configuration.components.progress {
+            switch configuration.progressStyle {
+            case .segmentedBar, .dots:
+                HStack(spacing: 2) { ForEach(0..<max(2, configuration.segments), id: \.self) { index in Capsule().fill(Double(index + 1) / Double(max(2, configuration.segments)) <= value ? accent : Color.secondary.opacity(0.2)).frame(height: configuration.progressStyle == .dots ? 5 : 7) } }
+            case .ring, .arc, .gauge, .iconFill:
+                ZStack { Circle().stroke(.secondary.opacity(0.2), lineWidth: 5); Circle().trim(from: 0, to: value).stroke(accent, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(-90)) }.frame(width: 34, height: 34)
+            case .numberOnly:
+                Text("\(Int(value * 100))").font(.system(size: configuration.textSize * 1.2, weight: .bold, design: .rounded)).foregroundStyle(accent)
+            case .glow:
+                Capsule().fill(accent.opacity(0.22)).overlay(alignment: .leading) { GeometryReader { p in Capsule().fill(accent).frame(width: max(2, p.size.width * value)).shadow(color: accent, radius: 7) } }.frame(height: 7)
+            case .minimalLine:
+                GeometryReader { p in Rectangle().fill(.secondary.opacity(0.18)).overlay(alignment: .leading) { Rectangle().fill(accent).frame(width: p.size.width * value) } }.frame(height: 2)
+            case .wave:
+                HStack(alignment: .center, spacing: 2) { ForEach(0..<18, id: \.self) { i in Capsule().fill(accent.opacity(Double(i) / 18 <= value ? 1 : 0.22)).frame(width: 3, height: 4 + 12 * abs(sin(Double(i) * 0.8))) } }.frame(height: 18)
+            default:
+                GeometryReader { p in Capsule().fill(.secondary.opacity(0.18)).overlay(alignment: .leading) { Capsule().fill(accent).frame(width: max(2, p.size.width * value)) } }.frame(height: 7)
+            }
+        }
+    }
+    @ViewBuilder private var previewBackground: some View {
+        if reduceTransparency || configuration.appearance.background == .solid { Color.black.opacity(max(0.5, configuration.appearance.backgroundOpacity)) }
+        else if configuration.appearance.background == .clear { Color.clear }
+        else if configuration.appearance.background == .gradient { LinearGradient(colors: [accent.opacity(0.55), .black.opacity(0.75)], startPoint: .topLeading, endPoint: .bottomTrailing) }
+        else { Rectangle().fill(.ultraThinMaterial).overlay(Color.black.opacity(max(0, configuration.appearance.backgroundOpacity - 0.45))) }
     }
 }
 
