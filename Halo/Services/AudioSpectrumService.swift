@@ -13,8 +13,8 @@ struct AudioSpectrumSnapshot: Equatable {
     var available = false
 }
 
-/// Lightweight system-audio analyser used only while an audio-reactive closed-notch background is active.
-/// ScreenCaptureKit supplies mono PCM buffers; Accelerate reduces each buffer into low/mid/high energy bands.
+/// System-audio analyser used by the closed-notch reactive background.
+/// ScreenCaptureKit supplies PCM audio and Accelerate converts it into normalized low/mid/high energy bands.
 final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     static let shared = AudioSpectrumService()
 
@@ -47,9 +47,6 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
         if shouldStart {
             Task { await startIfNeeded() }
         } else if !active, let current {
-            // Closed-notch SwiftUI views can be recreated while lyrics resize or profiles update. Keep the
-            // capture alive briefly so those transient lifecycle changes do not repeatedly tear down and
-            // recreate ScreenCaptureKit, which can retrigger macOS capture-consent UI.
             let task = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 8_000_000_000)
                 guard !Task.isCancelled, let self else { return }
@@ -69,8 +66,6 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
         if shouldRequest { permissionRequestedThisRun = true }
         stateLock.unlock()
 
-        // Never hammer the system permission dialog. If access is denied/not yet reflected, ask at most
-        // once per Halo process. A later Settings change is detected by CGPreflightScreenCaptureAccess().
         guard shouldRequest else { return false }
         return await MainActor.run { CGRequestScreenCaptureAccess() }
     }
@@ -94,12 +89,11 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
             configuration.width = 2
             configuration.height = 2
             configuration.minimumFrameInterval = CMTime(value: 1, timescale: 2)
-            configuration.queueDepth = 2
+            configuration.queueDepth = 3
             configuration.capturesAudio = true
             configuration.excludesCurrentProcessAudio = true
             configuration.sampleRate = 48_000
-            // Frequency analysis does not need stereo. Mono keeps the callback layout deterministic and cheap.
-            configuration.channelCount = 1
+            configuration.channelCount = 2
 
             let candidate = SCStream(filter: filter, configuration: configuration, delegate: self)
             try candidate.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleQueue)
@@ -123,9 +117,6 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
             blockedForCurrentActivation = true
             smoothed = AudioSpectrumSnapshot()
             stateLock.unlock()
-            // Do not automatically recreate SCShareableContent/SCStream after a failure. An immediate retry
-            // loop can repeatedly invoke the macOS capture-consent path. The next genuine activation after an
-            // idle stop (or app relaunch) may try again.
         }
     }
 
@@ -155,59 +146,110 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
         starting = false
         blockedForCurrentActivation = true
         stateLock.unlock()
-        // Deliberately no immediate restart. ScreenCaptureKit failures must not become permission-prompt loops.
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
-        guard outputType == .audio, sampleBuffer.isValid,
+        guard outputType == .audio,
+              sampleBuffer.isValid,
               let format = sampleBuffer.formatDescription,
               let asbdPointer = CMAudioFormatDescriptionGetStreamBasicDescription(format) else { return }
+
         let asbd = asbdPointer.pointee
         guard asbd.mFormatID == kAudioFormatLinearPCM else { return }
 
-        var blockBuffer: CMBlockBuffer?
-        var bufferList = AudioBufferList(
-            mNumberBuffers: 1,
-            mBuffers: AudioBuffer(mNumberChannels: 1, mDataByteSize: 0, mData: nil)
-        )
         var needed = 0
-        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+        var blockBuffer: CMBlockBuffer?
+        let sizingStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
             sampleBuffer,
             bufferListSizeNeededOut: &needed,
-            bufferListOut: &bufferList,
-            bufferListSize: MemoryLayout<AudioBufferList>.size,
+            bufferListOut: nil,
+            bufferListSize: 0,
             blockBufferAllocator: kCFAllocatorDefault,
             blockBufferMemoryAllocator: kCFAllocatorDefault,
             flags: 0,
             blockBufferOut: &blockBuffer
         )
-        guard status == noErr,
-              bufferList.mNumberBuffers > 0,
-              let data = bufferList.mBuffers.mData else { return }
+        guard sizingStatus == noErr || needed > 0 else { return }
+
+        let byteCount = max(needed, MemoryLayout<AudioBufferList>.size)
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: byteCount, alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { raw.deallocate() }
+        let list = raw.bindMemory(to: AudioBufferList.self, capacity: 1)
+
+        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: &needed,
+            bufferListOut: list,
+            bufferListSize: byteCount,
+            blockBufferAllocator: kCFAllocatorDefault,
+            blockBufferMemoryAllocator: kCFAllocatorDefault,
+            flags: 0,
+            blockBufferOut: &blockBuffer
+        )
+        guard status == noErr else { return }
+
+        let buffers = UnsafeMutableAudioBufferListPointer(list)
+        guard !buffers.isEmpty else { return }
 
         let isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
+        let isInterleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) == 0
         let bytesPerSample = max(1, Int(asbd.mBitsPerChannel / 8))
-        let count = min(2048, Int(bufferList.mBuffers.mDataByteSize) / bytesPerSample)
-        guard count >= 128 else { return }
+        let channelCount = max(1, Int(asbd.mChannelsPerFrame))
+        var mono = [Float]()
 
-        var mono = [Float](repeating: 0, count: count)
-        if isFloat && asbd.mBitsPerChannel == 32 {
-            let samples = data.assumingMemoryBound(to: Float.self)
-            for i in 0..<count { mono[i] = samples[i] }
-        } else if !isFloat && asbd.mBitsPerChannel == 16 {
-            let samples = data.assumingMemoryBound(to: Int16.self)
-            for i in 0..<count { mono[i] = Float(samples[i]) / 32768 }
-        } else { return }
+        if isInterleaved, let first = buffers.first, let data = first.mData {
+            let scalarCount = Int(first.mDataByteSize) / bytesPerSample
+            let frameCount = min(4096, scalarCount / channelCount)
+            guard frameCount >= 128 else { return }
+            mono = [Float](repeating: 0, count: frameCount)
+
+            if isFloat && asbd.mBitsPerChannel == 32 {
+                let samples = data.assumingMemoryBound(to: Float.self)
+                for frame in 0..<frameCount {
+                    var sum: Float = 0
+                    for channel in 0..<channelCount { sum += samples[frame * channelCount + channel] }
+                    mono[frame] = sum / Float(channelCount)
+                }
+            } else if !isFloat && asbd.mBitsPerChannel == 16 {
+                let samples = data.assumingMemoryBound(to: Int16.self)
+                for frame in 0..<frameCount {
+                    var sum: Float = 0
+                    for channel in 0..<channelCount { sum += Float(samples[frame * channelCount + channel]) / 32768 }
+                    mono[frame] = sum / Float(channelCount)
+                }
+            } else { return }
+        } else {
+            let validBuffers = buffers.filter { $0.mData != nil && $0.mDataByteSize >= UInt32(bytesPerSample * 128) }
+            guard !validBuffers.isEmpty else { return }
+            let frameCount = min(4096, validBuffers.map { Int($0.mDataByteSize) / bytesPerSample }.min() ?? 0)
+            guard frameCount >= 128 else { return }
+            mono = [Float](repeating: 0, count: frameCount)
+
+            for buffer in validBuffers {
+                guard let data = buffer.mData else { continue }
+                if isFloat && asbd.mBitsPerChannel == 32 {
+                    let samples = data.assumingMemoryBound(to: Float.self)
+                    for i in 0..<frameCount { mono[i] += samples[i] / Float(validBuffers.count) }
+                } else if !isFloat && asbd.mBitsPerChannel == 16 {
+                    let samples = data.assumingMemoryBound(to: Int16.self)
+                    for i in 0..<frameCount { mono[i] += (Float(samples[i]) / 32768) / Float(validBuffers.count) }
+                } else { return }
+            }
+        }
 
         analyse(mono, sampleRate: max(8_000, Double(asbd.mSampleRate)))
     }
 
     private func analyse(_ input: [Float], sampleRate: Double) {
-        let n = 1024
+        let n = 2048
         guard input.count >= 128 else { return }
+
         var samples = [Float](repeating: 0, count: n)
         let copyCount = min(n, input.count)
         samples.replaceSubrange(0..<copyCount, with: input.prefix(copyCount))
+
+        var rms: Float = 0
+        vDSP_rmsqv(samples, 1, &rms, vDSP_Length(copyCount))
 
         var window = [Float](repeating: 0, count: n)
         vDSP_hann_window(&window, vDSP_Length(n), Int32(vDSP_HANN_NORM))
@@ -224,11 +266,21 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
         windowed.withUnsafeBufferPointer { source in
             guard let base = source.baseAddress else { return }
             base.withMemoryRebound(to: DSPComplex.self, capacity: n / 2) { complex in
-                var split = DSPSplitComplex(realp: &real, imagp: &imag)
-                vDSP_ctoz(complex, 2, &split, 1, vDSP_Length(n / 2))
-                vDSP_fft_zrip(setup, &split, 1, log2n, FFTDirection(FFT_FORWARD))
-                vDSP_zvmags(&split, 1, &magnitudes, 1, vDSP_Length(n / 2))
+                real.withUnsafeMutableBufferPointer { realBuffer in
+                    imag.withUnsafeMutableBufferPointer { imagBuffer in
+                        guard let realBase = realBuffer.baseAddress, let imagBase = imagBuffer.baseAddress else { return }
+                        var split = DSPSplitComplex(realp: realBase, imagp: imagBase)
+                        vDSP_ctoz(complex, 2, &split, 1, vDSP_Length(n / 2))
+                        vDSP_fft_zrip(setup, &split, 1, log2n, FFTDirection(FFT_FORWARD))
+                        vDSP_zvmags(&split, 1, &magnitudes, 1, vDSP_Length(n / 2))
+                    }
+                }
             }
+        }
+
+        func normalizedDB(_ amplitude: Double, floor: Double = -68, ceiling: Double = -10) -> Double {
+            let db = 20 * log10(max(0.0000001, amplitude))
+            return min(1, max(0, (db - floor) / (ceiling - floor)))
         }
 
         let hzPerBin = sampleRate / Double(n)
@@ -236,18 +288,23 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
             let lower = max(1, Int(low / hzPerBin))
             let upper = min(magnitudes.count - 1, Int(high / hzPerBin))
             guard upper >= lower else { return 0 }
-            let slice = magnitudes[lower...upper]
-            let mean = slice.reduce(0, +) / Float(slice.count)
-            return min(1, max(0, log10(1 + Double(mean) * 180) / 2.4))
+            var meanPower: Float = 0
+            magnitudes.withUnsafeBufferPointer { buffer in
+                guard let base = buffer.baseAddress else { return }
+                vDSP_meanv(base.advanced(by: lower), 1, &meanPower, vDSP_Length(upper - lower + 1))
+            }
+            let amplitude = sqrt(max(0, Double(meanPower))) * 2 / Double(n)
+            return normalizedDB(amplitude, floor: -74, ceiling: -18)
         }
+
         let bass = band(45, 220)
         let mids = band(220, 2_500)
-        let treble = band(2_500, 12_000)
-        let overall = min(1, max(0, bass * 0.42 + mids * 0.38 + treble * 0.20))
+        let treble = band(2_500, min(18_000, sampleRate * 0.45))
+        let overall = normalizedDB(Double(rms), floor: -58, ceiling: -8)
 
         stateLock.lock()
-        let attack = 0.42
-        let release = 0.16
+        let attack = 0.58
+        let release = 0.22
         func smooth(_ old: Double, _ new: Double) -> Double {
             let factor = new > old ? attack : release
             return old + (new - old) * factor
@@ -256,7 +313,7 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
         smoothed.mids = smooth(smoothed.mids, mids)
         smoothed.treble = smooth(smoothed.treble, treble)
         smoothed.overall = smooth(smoothed.overall, overall)
-        smoothed.available = true
+        smoothed.available = rms > 0.00001
         stateLock.unlock()
     }
 
