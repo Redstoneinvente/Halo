@@ -77,7 +77,7 @@ struct SurfaceView: View, Equatable {
                 if contextMusicActive {
                     ContextMusicView(media: workspace.media, options: contextOptions,
                                      visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                         .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 } else {
                     VStack(alignment: .leading, spacing: 16) {
@@ -273,6 +273,7 @@ private struct ContextMusicView: View {
     let options: ContextMusicOptions
     let visualizer: VisualizerOptions
     @ObservedObject var surfaceState: SurfaceState
+    @AppStorage("HaloContextVisualizerFullWidth") private var visualizerFullWidth = false
     @State private var artwork: NSImage?
     @State private var playbackPosition = 0.0
     @State private var playbackDuration = 0.0
@@ -281,6 +282,7 @@ private struct ContextMusicView: View {
     @State private var lyrics = ""
     @State private var lyricsLoading = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var safeInset: Double { max(18, options.resolvedSpacing * 1.25) }
     private var artworkKey: String {
         "\(media.connectedApp ?? "")|\(media.title)|\(media.artist)|\(options.resolvedForegroundArtwork.rawValue)|\(options.usesArtworkBackground)"
     }
@@ -291,7 +293,7 @@ private struct ContextMusicView: View {
          String(options.artworkSize), String(options.showTitle), String(options.showArtist), String(options.showControls),
          String(options.showVisualizer), String(options.showsLyrics), options.resolvedLyricDisplay.rawValue,
          String(options.resolvedLyricFontSize), options.resolvedVisualizerStyle.rawValue,
-         String(options.resolvedSpacing), String(options.resolvedControlSize)].joined(separator: "|")
+         String(options.resolvedSpacing), String(options.resolvedControlSize), String(visualizerFullWidth)].joined(separator: "|")
     }
     private var songColors: [Color] { media.artworkColors.map(\.color) }
     private var primarySongColor: Color { songColors.first ?? options.textColor.color }
@@ -305,7 +307,7 @@ private struct ContextMusicView: View {
     }
     var body: some View {
         GeometryReader { proxy in
-            ZStack {
+            ZStack(alignment: .top) {
                 contextBackground(size: proxy.size)
                 Group {
                     switch options.resolvedLayoutMode {
@@ -315,9 +317,11 @@ private struct ContextMusicView: View {
                     case .minimal: minimalLayout(proxy: proxy)
                     }
                 }
-                .padding(max(16, options.resolvedSpacing * 1.35))
+                .padding(.horizontal, safeInset)
+                .padding(.top, max(16, safeInset * 0.75))
+                .padding(.bottom, max(10, safeInset * 0.55))
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             .clipped()
             .clipShape(RoundedRectangle(cornerRadius: options.resolvedCornerRadius, style: .continuous))
             .overlay(alignment: .topTrailing) {
@@ -336,11 +340,10 @@ private struct ContextMusicView: View {
                     .foregroundStyle(effectiveControlColor)
                     .help("Open Halo settings")
                 }
-                .padding(14)
+                .padding(.top, max(12, safeInset * 0.65))
+                .padding(.trailing, safeInset)
             }
             .foregroundStyle(effectiveTextColor)
-            .padding(.horizontal, 10)
-            .padding(.bottom, 10)
         }
         .task(id: artworkKey) {
             artwork = nil
@@ -366,33 +369,34 @@ private struct ContextMusicView: View {
 
     private var preferredSurfaceSize: CGSize {
         let spacing = options.resolvedSpacing
-        let metadataHeight = (options.showTitle ? options.fontSize * 2.0 : 0) + (options.showArtist ? max(14, options.fontSize * 0.8) : 0)
-        let lyricsHeight = options.showsLyrics ? options.resolvedLyricFontSize * (options.resolvedLyricDisplay == .word ? 1.45 : 2.45) : 0
-        let scrubHeight = playbackDuration > 0.5 ? 38.0 : 0
-        let controlsHeight = options.showControls ? options.resolvedControlSize * 1.7 : 0
-        let visualizerHeight = options.showVisualizer ? max(24, min(64, visualizer.height + 8)) : 0
+        let metadataHeight = (options.showTitle ? options.fontSize * 1.35 : 0) + (options.showArtist ? max(12, options.fontSize * 0.72) : 0)
+        let lyricsHeight = options.showsLyrics ? options.resolvedLyricFontSize * (options.resolvedLyricDisplay == .word ? 1.25 : 2.05) : 0
+        let scrubHeight = playbackDuration > 0.5 ? 30.0 : 0
+        let controlsHeight = options.showControls ? options.resolvedControlSize * 1.35 : 0
+        let visualizerHeight = options.showVisualizer ? max(18, min(64, visualizer.height)) : 0
         let artworkSize = options.resolvedForegroundArtwork == .none ? 0 : options.artworkSize
-        let textColumn = metadataHeight + lyricsHeight + scrubHeight + controlsHeight + visualizerHeight + 28
         let activeBlocks = [metadataHeight, lyricsHeight, scrubHeight, controlsHeight, visualizerHeight].filter { $0 > 0 }.count
         let gaps = Double(max(0, activeBlocks - 1)) * spacing
+        let textColumn = metadataHeight + lyricsHeight + scrubHeight + controlsHeight + visualizerHeight + gaps
         let innerHeight: Double
         let width: Double
         switch options.resolvedLayoutMode {
         case .hero:
-            innerHeight = artworkSize + textColumn + gaps + (artworkSize > 0 ? spacing : 0)
+            innerHeight = artworkSize + textColumn + (artworkSize > 0 && textColumn > 0 ? spacing : 0)
             width = max(360, min(640, max(420, artworkSize * 2.4)))
         case .split:
-            innerHeight = max(artworkSize, textColumn + gaps) + 20
+            innerHeight = max(artworkSize, textColumn)
             width = max(430, min(700, 310 + artworkSize))
         case .compact:
-            innerHeight = max(artworkSize, textColumn + gaps) + 16
+            innerHeight = max(artworkSize, textColumn)
             width = max(440, min(720, 340 + artworkSize))
         case .minimal:
-            innerHeight = artworkSize + textColumn + gaps + (artworkSize > 0 ? spacing * 0.7 : 0)
+            innerHeight = artworkSize + textColumn + (artworkSize > 0 && textColumn > 0 ? spacing * 0.7 : 0)
             width = max(340, min(580, max(380, artworkSize * 2.15)))
         }
-        let totalHeight = 48 + innerHeight + max(28, spacing * 2.2)
-        return CGSize(width: width, height: min(760, max(210, totalHeight)))
+        // WindowManager already contributes the panel-level safety budget and top strip.
+        // Keep this estimate close to the content itself so the player does not accumulate dead space.
+        return CGSize(width: width, height: min(700, max(150, innerHeight + 18)))
     }
 
     @ViewBuilder private func contextBackground(size: CGSize) -> some View {
@@ -436,7 +440,8 @@ private struct ContextMusicView: View {
             visualizerView
             errorView
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: frameAlignment)
+        .frame(maxWidth: .infinity, alignment: frameAlignment)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func splitLayout(proxy: GeometryProxy) -> some View {
@@ -452,7 +457,8 @@ private struct ContextMusicView: View {
             }
             .frame(maxWidth: .infinity, alignment: frameAlignment)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func compactLayout(proxy: GeometryProxy) -> some View {
@@ -467,7 +473,8 @@ private struct ContextMusicView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             controls
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func minimalLayout(proxy: GeometryProxy) -> some View {
@@ -479,7 +486,8 @@ private struct ContextMusicView: View {
             controls
             visualizerView
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: frameAlignment)
+        .frame(maxWidth: .infinity, alignment: frameAlignment)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder private func foregroundArtwork(size: Double) -> some View {
@@ -644,14 +652,30 @@ private struct ContextMusicView: View {
             let configured = contextVisualizerOptions
             PlaybackVisualizer(kind: options.resolvedVisualizerStyle, playing: media.isPlaying, enabled: true,
                                options: configured, palette: media.artworkColors, fallback: effectiveControlColor)
+                .frame(maxWidth: visualizerFullWidth ? .infinity : CGFloat(configured.width), alignment: .center)
                 .frame(height: max(18, min(64, configured.height)))
+                .contentShape(Rectangle())
+                .contextMenu {
+                    Toggle("Fill interface width", isOn: $visualizerFullWidth)
+                }
+                .overlay(alignment: .topTrailing) {
+                    Button { visualizerFullWidth.toggle() } label: {
+                        Image(systemName: visualizerFullWidth ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(4)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(effectiveControlColor.opacity(0.72))
+                    .help(visualizerFullWidth ? "Use visualizer's normal width" : "Fill the interface width")
+                    .padding(.trailing, 2)
+                }
         }
     }
 
     private var contextVisualizerOptions: VisualizerOptions {
         var value = visualizer
         value.dynamicColors = options.usesSongVisualizerColors
-        value.width = max(value.width, 120)
+        value.width = visualizerFullWidth ? max(120, surfaceState.dashboardWidth - safeInset * 2) : max(value.width, 120)
         return value
     }
 
