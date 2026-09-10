@@ -180,13 +180,15 @@ final class WindowManager {
         let sides = fittedClosedSides(host: host, layout: layout)
         let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
         let camera = attached ? geometry.physicalNotchWidth : 0
-        let fittedWidth = attached ? camera + sides.left + sides.right : ClosedContentSizing.width(left: sides.left, right: sides.right)
-        var requested = expansion.enabled && hasLiveContent ? expansion.width : 0
-        if options.autoFitContent ?? true { requested = max(requested, fittedWidth) }
+        let fittedWidth = attached ? camera + sides.left + sides.right : max(16, sides.left + sides.right)
+        let autoFit = options.autoFitContent ?? true
 
-        // Preserve decoration sizing even if automatic text/content fitting is disabled.
+        var requested = autoFit ? fittedWidth : 0
+        if expansion.enabled && hasLiveContent { requested = max(requested, expansion.width) }
+
+        // Decorations can still request space even with auto-fit disabled.
         let visibleDecorationWidth = attached ? camera + sides.decorationLeft + sides.decorationRight :
-            ClosedContentSizing.width(left: sides.decorationLeft, right: sides.decorationRight)
+            max(16, sides.decorationLeft + sides.decorationRight)
         requested = max(requested, visibleDecorationWidth)
 
         guard !host.state.editingGeometry, requested > 0 else {
@@ -195,36 +197,36 @@ final class WindowManager {
             return
         }
 
-        let finalWidth = min(geometry.visible.width, max(geometry.appearance.compactWidth, requested))
-        host.geometry?.activeCompactWidth = requested
+        let finalWidth = min(geometry.visible.width, requested)
+        host.geometry?.activeCompactWidth = finalWidth
 
         guard attached, finalWidth > camera else {
             host.geometry?.activeCompactCenterOffset = nil
             return
         }
 
-        var left = sides.left
-        var right = sides.right
-        if !(options.autoFitContent ?? true) {
-            left = sides.decorationLeft
-            right = sides.decorationRight
-        }
+        var left = autoFit ? sides.left : sides.decorationLeft
+        var right = autoFit ? sides.right : sides.decorationRight
         let extra = max(0, finalWidth - camera - left - right)
         if left > 0, right <= 0 {
             left += extra
         } else if right > 0, left <= 0 {
             right += extra
+        } else if left <= 0, right <= 0 {
+            left += extra / 2
+            right += extra / 2
         } else {
             left += extra / 2
             right += extra / 2
         }
-        // A negative center offset leaves the physical camera in place while the surface grows left;
-        // a positive value does the same toward the right.
+
+        // Keep the physical camera fixed while assigning the extra closed width to the side(s) that actually contain content.
         host.geometry?.activeCompactCenterOffset = (right - left) / 2
     }
     private func fittedClosedSides(host: Host, layout: WorkspaceLayout) -> (left: Double, right: Double, decorationLeft: Double, decorationRight: Double) {
         guard let geometry = host.geometry else { return (0, 0, 0, 0) }
         let options = layout.closedNotch ?? ClosedNotchOptions()
+        let playing = store.workspace.media.isPlaying
         let size = min(options.fontSize, max(1, geometry.compactHeight - 2 * options.contentPaddingY) / 1.25)
         let font = NSFont.systemFont(ofSize: size)
         func textWidth(_ text: String, font: NSFont) -> Double {
@@ -242,12 +244,14 @@ final class WindowManager {
             case .date: content = textWidth("Sep 28", font: font)
             case .timer: content = textWidth("88:88:88", font: font) + size
             case .battery: content = textWidth("100%", font: font) + size + 5
-            case .media: content = textWidth(String(store.workspace.media.title.prefix(80)), font: font) + size + 5
-            case .visualizer: content = (options.visualizer ?? VisualizerOptions()).width
+            case .media:
+                content = playing ? textWidth(String(store.workspace.media.title.prefix(80)), font: font) + size + 5 : 0
+            case .visualizer:
+                content = playing ? (options.visualizer ?? VisualizerOptions()).width : 0
             case .files: content = textWidth(String(store.files.count), font: font) + size + 5
             case .activity: content = textWidth(String((store.workspace.activities.first?.title ?? "No activity").prefix(80)), font: font)
             }
-            let ornament = decoration.flatMap { $0.isVisible(playing: store.workspace.media.isPlaying) ? min($0.size, max(1, geometry.compactHeight - 2 * options.contentPaddingY)) : nil } ?? 0
+            let ornament = decoration.flatMap { $0.isVisible(playing: playing) ? min($0.size, max(1, geometry.compactHeight - 2 * options.contentPaddingY)) : nil } ?? 0
             guard content > 0 || ornament > 0 else { return (0, 0) }
             let spacing = content > 0 && ornament > 0 ? 5.0 : 0
             let padding = 2 * options.contentPaddingX + options.contentSideMargin
