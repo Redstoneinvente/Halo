@@ -46,20 +46,34 @@ final class HaloPanel: NSPanel {
 final class SurfaceAnimator {
     private let clock = DisplayClock()
     func cancel() { clock.stop() }
+
+    private func publishGeometry(panel: HaloPanel, frame: CGRect) {
+        guard let screen = panel.screen else { return }
+        NotificationCenter.default.post(name: .init("HaloPanelGeometryChanged"), object: panel,
+                                        userInfo: ["frame": frame, "screen": WindowManager.displayID(screen)])
+    }
+
     func move(panel: HaloPanel, state: SurfaceState, target: CGRect, options: SurfaceOptions,
               preset: AnimationPreset, animations: Bool, opening: Bool, style: SurfaceStyle) {
         cancel()
         let transition = opening ? options.opening : options.closing
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard animations, !reduceMotion, preset != .none, transition != .instant else {
-            panel.alphaValue = 1; state.viewport.size = target.size; panel.setFrame(target, display: false); return
+            panel.alphaValue = 1
+            state.viewport.size = target.size
+            panel.setFrame(target, display: false)
+            publishGeometry(panel: panel, frame: target)
+            return
         }
         let initial = panel.frame
         let initialAlpha = panel.alphaValue
         let start = CACurrentMediaTime()
         let duration = options.duration
         guard let view = panel.contentView else {
-            state.viewport.size = target.size; panel.setFrame(target, display: false); return
+            state.viewport.size = target.size
+            panel.setFrame(target, display: false)
+            publishGeometry(panel: panel, frame: target)
+            return
         }
         clock.start(view: view) { [weak self, weak panel, weak state] timestamp in
             guard let self, let panel, let state else { self?.cancel(); return }
@@ -82,6 +96,7 @@ final class SurfaceAnimator {
             if t >= 1 { frame = target; panel.alphaValue = 1; self.cancel() }
             if state.viewport.size != frame.size { state.viewport.size = frame.size }
             panel.setFrame(frame, display: false)
+            self.publishGeometry(panel: panel, frame: frame)
         }
     }
 }
@@ -156,10 +171,9 @@ final class WindowManager {
                 guard let self,
                       let raw = note.userInfo?["width"] as? Double,
                       raw.isFinite else { return }
-                let layout = self.store.workspace.effectiveLayout
-                let media = (layout.closedNotch ?? ClosedNotchOptions()).mediaOptions ?? ClosedMediaOptions()
-                let cap = (media.overflow == .truncate || media.overflow == .marquee) ? media.resolvedHorizontalSpace : 320
-                let next = min(cap, max(24, raw))
+                // This hint is only for truly adaptive lyrics. The user's Media horizontal space setting
+                // belongs to the renderer and must not resize the entire notch.
+                let next = min(320, max(24, raw))
                 guard self.mediaWidthHint.map({ abs($0 - next) >= 3 }) ?? true else { return }
                 self.mediaWidthHint = next
                 self.refreshDynamicWidths()
@@ -319,9 +333,6 @@ final class WindowManager {
                 required = camera + leftExtent + rightExtent
             }
 
-            // Right-side status items can be physically reserved by Halo. Left-side app menus cannot be moved
-            // through a supported API, so keep a protected portion of the left menu-bar region accessible and
-            // spill excess Halo growth to the right instead of covering File/Edit/etc.
             if let screen = host.panel.screen, let leftArea = screen.auxiliaryTopLeftArea {
                 let maximumLeftIntrusion = max(72, min(150, leftArea.width * 0.42))
                 if leftExtent > maximumLeftIntrusion {
@@ -400,15 +411,13 @@ final class WindowManager {
                 naturalText = adaptive ? max(28, mediaWidthHint!) : max(90, min(220, title + artist * 0.35))
             }
             let naturalTotal = naturalText + (adaptive ? 0 : icon)
-            if adaptive {
-                let cap = (media.overflow == .truncate || media.overflow == .marquee) ? media.resolvedHorizontalSpace : 320
-                return min(cap, max(28, naturalText))
-            }
+            if adaptive { return min(320, max(28, naturalText)) }
+            // Truncate/Marquee horizontal-space is a render budget only. Keep auto-fit stable so moving
+            // that slider does not resize the whole closed notch.
             switch media.overflow {
-            case .marquee, .truncate:
-                return media.resolvedHorizontalSpace
-            case .scale:
-                return min(naturalTotal, 260)
+            case .marquee: return min(max(120, naturalTotal * 0.55), 220)
+            case .truncate: return min(naturalTotal, 220)
+            case .scale: return min(naturalTotal, 260)
             }
         }
 
@@ -493,11 +502,16 @@ final class WindowManager {
             host.targetFrame = target
             var motion = geometry.appearance.surface
             let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
-            let media = (layout.closedNotch ?? ClosedNotchOptions()).mediaOptions ?? ClosedMediaOptions()
+            let closed = layout.closedNotch ?? ClosedNotchOptions()
+            let media = closed.mediaOptions ?? ClosedMediaOptions()
             let adaptiveLyrics = media.textMode == .lyrics && media.usesDynamicLyricWidth
+            let art = closed.artworkOptions ?? ClosedArtworkOptions()
+            let visibleArtwork = store.workspace.media.isPlaying && art.enabled && art.mode != .none && art.mode != .background
             motion.opening = .resize; motion.closing = .resize; motion.duration = adaptiveLyrics ? 0.20 : 0.34
+            // Fixed-size artwork must never animate through a side that is temporarily narrower than its
+            // final measured footprint. Snap that geometry first; artwork has its own track-change animation.
             host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
-                               preset: .smooth, animations: host.state.theme.animations && !host.state.editingGeometry,
+                               preset: .smooth, animations: host.state.theme.animations && !host.state.editingGeometry && !visibleArtwork,
                                opening: true, style: geometry.style)
         }
     }
@@ -543,6 +557,8 @@ final class WindowManager {
                 if host.state.viewport.size != target.size { host.state.viewport.size = target.size }
                 host.panel.alphaValue = 1
                 if host.panel.frame != target { host.panel.setFrame(target, display: false) }
+                NotificationCenter.default.post(name: .init("HaloPanelGeometryChanged"), object: host.panel,
+                                                userInfo: ["frame": target, "screen": id])
             }
             if existing == nil {
                 let view = NSHostingView(rootView: SurfaceViewportView(viewport: host.state.viewport, content: SurfaceView(store: store, state: host.state, workspace: store.workspace)))
