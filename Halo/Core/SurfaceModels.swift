@@ -7,6 +7,18 @@ enum ClosedContentSizing {
     }
 }
 
+/// Each wing has a stable minimum independent of the other wing's measured content.
+enum ClosedWingSizing {
+    static func extents(base: Double, camera: Double, left: Double, right: Double,
+                        expansion: Double, leftLive: Bool, rightLive: Bool) -> (left: Double, right: Double) {
+        let baseSide = max(0, (base - camera) / 2)
+        let liveCount = (leftLive ? 1 : 0) + (rightLive ? 1 : 0)
+        let extra = liveCount > 0 ? max(0, expansion - camera - 2 * baseSide) / Double(liveCount) : 0
+        return (max(left, baseSide + (leftLive ? extra : 0)),
+                max(right, baseSide + (rightLive ? extra : 0)))
+    }
+}
+
 enum FrameRatePolicy {
     static func target(maximum: Int, lowPower: Bool) -> Int {
         min(lowPower ? 60 : 120, maximum > 0 ? maximum : 60)

@@ -310,43 +310,19 @@ final class WindowManager {
         }
 
         if attached {
-            let baseSide = max(0, (baseWidth - camera) / 2)
-            var leftExtent = baseSide
-            var rightExtent = baseSide
-            if autoFit {
-                leftExtent = max(leftExtent, sides.left)
-                rightExtent = max(rightExtent, sides.right)
-            } else {
-                leftExtent = max(leftExtent, sides.decorationLeft)
-                rightExtent = max(rightExtent, sides.decorationRight)
-            }
-
-            var required = camera + leftExtent + rightExtent
-            if expansion.enabled && (leftLive || rightLive), expansion.width > required {
-                let extra = expansion.width - required
-                if leftLive && !rightLive { leftExtent += extra }
-                else if rightLive && !leftLive { rightExtent += extra }
-                else { leftExtent += extra / 2; rightExtent += extra / 2 }
-                required = camera + leftExtent + rightExtent
-            }
-
-            if let screen = host.panel.screen, let leftArea = screen.auxiliaryTopLeftArea {
-                let maximumLeftIntrusion = max(72, min(150, leftArea.width * 0.42))
-                if leftExtent > maximumLeftIntrusion {
-                    let spill = leftExtent - maximumLeftIntrusion
-                    leftExtent = maximumLeftIntrusion
-                    rightExtent += spill
-                    required = camera + leftExtent + rightExtent
-                }
-            }
-
-            let maxWidth = geometry.visible.width
-            if required > maxWidth {
-                let overflow = required - maxWidth
-                if rightExtent >= leftExtent { rightExtent = max(0, rightExtent - overflow) }
-                else { leftExtent = max(0, leftExtent - overflow) }
-                required = camera + leftExtent + rightExtent
-            }
+            let extents = ClosedWingSizing.extents(
+                base: baseWidth, camera: camera,
+                left: autoFit ? sides.left : sides.decorationLeft,
+                right: autoFit ? sides.right : sides.decorationRight,
+                expansion: expansion.enabled ? expansion.width : 0,
+                leftLive: leftLive, rightLive: rightLive)
+            // Clamp each wing to its own display space; never move overflow to the opposite wing.
+            let center = geometry.visible.midX + geometry.offset(expanded: false).width
+            let leftLimit = max(0, center - camera / 2 - geometry.visible.minX - 12)
+            let rightLimit = max(0, geometry.visible.maxX - 12 - center - camera / 2)
+            let leftExtent = min(extents.left, leftLimit)
+            let rightExtent = min(extents.right, rightLimit)
+            let required = camera + leftExtent + rightExtent
             host.geometry?.activeCompactWidth = max(baseWidth, required)
             host.geometry?.activeCompactCenterOffset = (rightExtent - leftExtent) / 2
         } else {

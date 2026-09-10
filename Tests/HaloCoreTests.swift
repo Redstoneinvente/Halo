@@ -4,6 +4,20 @@ import XCTest
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    func testMediaWidthChangesDoNotResizeOppositeWing() {
+        for leftLive in [false, true] {
+            for rightLive in [false, true] {
+                let initial = ClosedWingSizing.extents(base: 206, camera: 190, left: 80, right: 90, expansion: 400, leftLive: leftLive, rightLive: rightLive)
+                let longLeft = ClosedWingSizing.extents(base: 206, camera: 190, left: 320, right: 90, expansion: 400, leftLive: leftLive, rightLive: rightLive)
+                let longRight = ClosedWingSizing.extents(base: 206, camera: 190, left: 80, right: 320, expansion: 400, leftLive: leftLive, rightLive: rightLive)
+                XCTAssertEqual(initial.right, longLeft.right)
+                XCTAssertEqual(initial.left, longRight.left)
+                XCTAssertGreaterThan(longLeft.left, initial.left)
+                XCTAssertGreaterThan(longRight.right, initial.right)
+            }
+        }
+    }
+
     func testProfilePresentationMetadataRoundTripsAndOldProfilesDecode() throws {
         var profile = Profile(name: "Evening")
         profile.icon = "moon"; profile.description = "Quiet workspace"
