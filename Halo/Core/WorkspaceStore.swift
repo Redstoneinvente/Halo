@@ -4,7 +4,7 @@ import UserNotifications
 
 @MainActor
 final class WorkspaceStore: ObservableObject, LiveActivityProvider {
-    @Published var settings: WorkspaceSettings { didSet { schedulePersistence(); updateHotkey(); if oldValue.mediaApp != settings.mediaApp { media.disconnect() }; updateArtworkPreference(); queueScheduleEvaluation() } }
+    @Published var settings: WorkspaceSettings { didSet { schedulePersistence(); updateHotkey(); if oldValue.mediaApp != settings.mediaApp { media.disconnect() }; updateArtworkPreference(); syncHUDRuntime(); queueScheduleEvaluation() } }
     @Published private(set) var scheduledProfileID: UUID?
     var effectiveLayout: WorkspaceLayout { settings.profiles.first { $0.id == scheduledProfileID }?.layout ?? settings.layout }
     var scheduledTheme: Theme? { settings.profiles.first { $0.id == scheduledProfileID }?.theme }
@@ -56,14 +56,19 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
                 context?.usesSongBackgroundColors == true ||
                 context?.background == .gradient
             )
-            return contextNeedsPalette ||
+            let hudNeedsPalette = layout.hud?.enabled == true && HaloHUDEventKind.allCases.contains { kind in
+                let configuration = layout.hud?.configuration(for: kind)
+                return configuration?.appearance.primary.source == .albumArtwork ||
+                       configuration?.appearance.progress.source == .albumArtwork
+            }
+            return contextNeedsPalette || hudNeedsPalette ||
                 layout.closedNotch?.visualizer?.dynamicColors == true ||
                 layout.closedNotch?.albumTextColor == true ||
                 layout.closedNotch?.albumBackgroundColor == true
         })
     }
     func start() {
-        updateArtworkPreference()
+        updateArtworkPreference(); syncHUDRuntime()
         evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey()
         media.poll(app: settings.mediaApp, automatic: settings.automaticMedia ?? true)
         ticker = Timer.publish(every: 2, on: .main, in: .common).autoconnect().sink { [weak self] _ in
@@ -129,13 +134,14 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     func evaluateSchedules() {
         let winner = scheduleWinner(at: Date())
         let selected = winner?.1 == suppressedOccurrence ? nil : winner?.0
-        if scheduledProfileID != selected { scheduledProfileID = selected; updateArtworkPreference() }
+        if scheduledProfileID != selected { scheduledProfileID = selected; updateArtworkPreference(); syncHUDRuntime() }
     }
     func resumeSchedules() { suppressedOccurrence = nil; evaluateSchedules() }
     func apply(_ profile: Profile) {
         suppressedOccurrence = scheduleWinner(at: Date())?.1
         scheduledProfileID = nil
         settings.layout = profile.layout; applyTheme?(profile.theme)
+        syncHUDRuntime()
     }
     func saveProfile(name: String, theme: Theme) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -215,5 +221,69 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         alert.informativeText = "Open this URL? Shortcuts may perform actions configured in the Shortcuts app.\n\n\(command.url)"
         alert.addButton(withTitle: "Open"); alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(url) }
+    }
+
+    /// Transitional adapter for the existing safe hardware-key controller. New HUD settings live in
+    /// WorkspaceLayout and therefore follow profiles; the renderer can migrate off these keys without
+    /// changing the persisted HUD model.
+    func syncHUDRuntime() {
+        let hud = effectiveLayout.hud ?? HaloHUDSettings()
+        let configuration = hud.global
+        let d = UserDefaults.standard
+        d.set(hud.enabled, forKey: HaloHUDKeys.enabled)
+        d.set(hud.isEnabled(.volume), forKey: HaloHUDKeys.volumeHUD)
+        d.set(hud.isEnabled(.mute), forKey: HaloHUDKeys.muteHUD)
+        d.set(hud.isEnabled(.displayBrightness), forKey: HaloHUDKeys.brightnessHUD)
+        d.set(hud.isEnabled(.keyboardBrightness), forKey: HaloHUDKeys.keyboardBrightnessHUD)
+        d.set(configuration.layout.style.rawValue, forKey: HaloHUDKeys.layout)
+        d.set(legacyPosition(configuration.presentation), forKey: HaloHUDKeys.position)
+        d.set(legacyProgress(configuration.progressStyle), forKey: HaloHUDKeys.progress)
+        d.set(legacyBackground(configuration.appearance.background), forKey: HaloHUDKeys.background)
+        d.set(configuration.layout.width, forKey: HaloHUDKeys.width)
+        d.set(configuration.layout.height, forKey: HaloHUDKeys.height)
+        d.set(configuration.layout.horizontalPadding, forKey: HaloHUDKeys.padding)
+        d.set(configuration.layout.cornerRadius, forKey: HaloHUDKeys.corner)
+        d.set(configuration.iconSize, forKey: HaloHUDKeys.iconSize)
+        d.set(configuration.textSize, forKey: HaloHUDKeys.valueSize)
+        d.set(configuration.appearance.backgroundOpacity, forKey: HaloHUDKeys.opacity)
+        d.set(configuration.appearance.primary.hue, forKey: HaloHUDKeys.accentHue)
+        d.set(configuration.appearance.primary.saturation, forKey: HaloHUDKeys.saturation)
+        d.set(configuration.appearance.primary.brightness, forKey: HaloHUDKeys.brightness)
+        d.set(configuration.appearance.primary.source != .fixed, forKey: HaloHUDKeys.dynamicAccent)
+        d.set(configuration.components.icon, forKey: HaloHUDKeys.showIcon)
+        d.set(configuration.components.label, forKey: HaloHUDKeys.showLabel)
+        d.set(configuration.components.value || configuration.components.percentage, forKey: HaloHUDKeys.showValue)
+        d.set(configuration.components.progress, forKey: HaloHUDKeys.showProgress)
+        d.set(configuration.segments, forKey: HaloHUDKeys.segments)
+        d.set(configuration.behavior.displayDuration, forKey: HaloHUDKeys.timeout)
+        d.set(configuration.appearance.shadow, forKey: HaloHUDKeys.shadow)
+        d.set(configuration.layout.offsetX, forKey: HaloHUDKeys.offsetX)
+        d.set(configuration.layout.offsetY, forKey: HaloHUDKeys.offsetY)
+    }
+
+    private func legacyProgress(_ style: HaloHUDProgressStyle) -> String {
+        switch style {
+        case .segmentedBar, .dots: return "segments"
+        case .ring, .arc, .gauge, .iconFill: return "ring"
+        case .numberOnly: return "none"
+        default: return "bar"
+        }
+    }
+    private func legacyBackground(_ style: HaloHUDBackgroundStyle) -> String {
+        switch style { case .clear: return "clear"; case .solid: return "solid"; default: return "glass" }
+    }
+    private func legacyPosition(_ presentation: HaloHUDPresentationConfiguration) -> String {
+        if presentation.target == .screenEdge {
+            switch presentation.screenEdge { case .left: return "center"; case .right: return "center"; case .top: return "top"; case .bottom: return "bottom" }
+        }
+        switch presentation.floatingPosition {
+        case .topLeft: return "topLeading"
+        case .top: return "top"
+        case .topRight: return "topTrailing"
+        case .center, .custom: return "center"
+        case .bottomLeft: return "bottomLeading"
+        case .bottom: return "bottom"
+        case .bottomRight: return "bottomTrailing"
+        }
     }
 }
