@@ -281,6 +281,8 @@ private struct ContextMusicView: View {
     @State private var isScrubbing = false
     @State private var lyrics = ""
     @State private var lyricsLoading = false
+    @State private var vinylRotation = 0.0
+    @State private var vinylLastTick = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var safeInset: Double { max(18, options.resolvedSpacing * 1.25) }
     private var artworkKey: String {
@@ -510,13 +512,47 @@ private struct ContextMusicView: View {
         .id(options.resolvedForegroundArtwork.rawValue)
     }
 
-    @ViewBuilder private func vinylArtwork(size: Double) -> some View {
-        if !reduceMotion {
-            TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !media.isPlaying)) { context in
-                let turns = context.date.timeIntervalSinceReferenceDate * options.resolvedVinylRPM / 60
-                vinylDisc(size: size).rotationEffect(.degrees(turns * 360))
-            }
-        } else { vinylDisc(size: size) }
+    @ViewBuilder
+    private func vinylArtwork(size: Double) -> some View {
+        if reduceMotion {
+            vinylDisc(size: size)
+        } else {
+            vinylDisc(size: size)
+                .rotationEffect(.degrees(vinylRotation))
+                .onReceive(
+                    Timer.publish(
+                        every: 1.0 / 60.0,
+                        on: .main,
+                        in: .common
+                    ).autoconnect()
+                ) { now in
+                    defer { vinylLastTick = now }
+
+                    guard media.isPlaying else { return }
+
+                    let delta = min(
+                        0.1,
+                        max(0, now.timeIntervalSince(vinylLastTick))
+                    )
+
+                    let degreesPerSecond =
+                        options.resolvedVinylRPM * 360.0 / 60.0
+
+                    vinylRotation += degreesPerSecond * delta
+
+                    if vinylRotation >= 360 {
+                        vinylRotation.formTruncatingRemainder(
+                            dividingBy: 360
+                        )
+                    }
+                }
+                .onAppear {
+                    vinylLastTick = Date()
+                }
+                .onChange(of: media.isPlaying) { _ in
+                    vinylLastTick = Date()
+                }
+        }
     }
 
     private func vinylDisc(size: Double) -> some View {
