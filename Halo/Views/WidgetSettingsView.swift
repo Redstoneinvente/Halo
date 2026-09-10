@@ -203,9 +203,21 @@ struct ClosedNotchSettingsView: View {
                 Text("Scale to fit").tag(MediaOverflowMode.scale)
                 Text("Marquee").tag(MediaOverflowMode.marquee)
             }
-            Picker("Lines", selection: mediaOptions.lines) {
-                Text("1 line").tag(1)
-                Text("2 lines").tag(2)
+            if mediaOptions.wrappedValue.textMode == .lyrics {
+                Picker("Lyric display", selection: Binding(
+                    get: { mediaOptions.wrappedValue.resolvedLyricDisplay },
+                    set: { mediaOptions.wrappedValue.lyricDisplay = $0 }
+                )) {
+                    Text("Current line").tag(LyricDisplayMode.line)
+                    Text("Focus phrase").tag(LyricDisplayMode.focus)
+                    Text("Current word").tag(LyricDisplayMode.word)
+                }
+            }
+            if mediaOptions.wrappedValue.textMode != .lyrics || mediaOptions.wrappedValue.resolvedLyricDisplay != .word {
+                Picker("Lines", selection: mediaOptions.lines) {
+                    Text("1 line").tag(1)
+                    Text("2 lines").tag(2)
+                }
             }
             if mediaOptions.wrappedValue.overflow == .marquee {
                 PreciseSlider(title: "Marquee speed", value: mediaOptions.marqueeSpeed, range: 8...120, step: 1, suffix: "pt/s")
@@ -216,7 +228,7 @@ struct ClosedNotchSettingsView: View {
                     get: { mediaOptions.wrappedValue.usesOnlineLyrics },
                     set: { mediaOptions.wrappedValue.onlineLyrics = $0 }
                 ))
-                Text("Halo first asks Apple Music for embedded lyrics. If unavailable and online fallback is enabled, it sends only the track title and artist to LRCLIB once per track and caches the result.").font(.caption)
+                Text("Halo prefers timestamped synced lyrics when online fallback is enabled, then follows the current player position. Current-word and Focus Phrase estimate word timing inside each timestamped line when word-level timing is unavailable.").font(.caption)
             }
         }
         Section("Artwork") {
