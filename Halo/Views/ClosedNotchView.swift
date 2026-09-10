@@ -229,12 +229,42 @@ struct ClosedNotchSlot: View {
         return v
     }
     private var closedMediaOptions: ClosedMediaOptions { options.mediaOptions ?? ClosedMediaOptions() }
-    private var closedMediaWidth: Double {
-        let available = max(24, innerWidth)
-        if closedMediaOptions.overflow == .truncate || closedMediaOptions.overflow == .marquee {
-            return min(available, closedMediaOptions.resolvedHorizontalSpace)
+    private var renderedArtworkSize: Double {
+        guard showArtwork else { return 0 }
+        return max(1, min(artwork.size, innerHeight - 2 * artwork.padding))
+    }
+    private var artworkFootprint: Double {
+        guard showArtwork else { return 0 }
+        return renderedArtworkSize + 2 * artwork.padding + artwork.margin
+    }
+    private var powerFootprint: Double {
+        guard showPowerEvent, let event = powerEvent else { return 0 }
+        switch event.style {
+        case .off: return 0
+        case .icon: return textSize + 6
+        case .percent: return textSize * 3.3
+        case .iconPercent: return textSize * 4.4
+        case .label: return textSize * 7.0
         }
-        return available
+    }
+    private var mediaSiblingFootprint: Double {
+        var widths: [Double] = []
+        if decorationSize > 0 { widths.append(decorationSize) }
+        if artworkFootprint > 0 { widths.append(artworkFootprint) }
+        if powerFootprint > 0 { widths.append(powerFootprint) }
+        return widths.reduce(0, +) + Double(widths.count) * elementSpacing
+    }
+    private var closedMediaWidth: Double {
+        let remaining = max(24, innerWidth - mediaSiblingFootprint)
+        if closedMediaOptions.overflow == .truncate || closedMediaOptions.overflow == .marquee {
+            return min(remaining, closedMediaOptions.resolvedHorizontalSpace)
+        }
+        return remaining
+    }
+    private var renderedArtworkOptions: ClosedArtworkOptions {
+        var value = artwork
+        value.size = renderedArtworkSize
+        return value
     }
     var body: some View {
         HStack(spacing: elementSpacing) {
@@ -269,10 +299,12 @@ struct ClosedNotchSlot: View {
     }
     @ViewBuilder private var artworkElement: some View {
         if showArtwork {
-            ClosedArtworkView(media: media, options: artwork, mediaOptions: closedMediaOptions, lowPower: system.lowPower)
+            ClosedArtworkView(media: media, options: renderedArtworkOptions, mediaOptions: closedMediaOptions, lowPower: system.lowPower)
                 .padding(artwork.padding)
                 .padding(side == .left ? .trailing : .leading, artwork.margin)
-                .fixedSize()
+                .frame(width: artworkFootprint, height: innerHeight)
+                .clipped()
+                .layoutPriority(2)
         }
     }
     @ViewBuilder private var contentElement: some View {
@@ -296,6 +328,7 @@ struct ClosedNotchSlot: View {
             if media.isPlaying {
                 ClosedMediaView(media: media, options: closedMediaOptions, fontSize: textSize, availableWidth: closedMediaWidth, lowPower: system.lowPower)
                     .frame(width: closedMediaWidth)
+                    .layoutPriority(1)
             }
         case .visualizer:
             if media.isPlaying { PlaybackVisualizer(kind: options.animation, playing: true, enabled: options.animate && !system.lowPower, options: visualizerOptions, palette: media.artworkColors, fallback: effectiveTextColor) }
@@ -439,8 +472,6 @@ private enum LyricTimeline {
                 }
             }
         }
-        // Do not invent timestamps for plain lyrics. A visually wrong line is worse than explicitly
-        // reporting that synchronized lyrics are unavailable for this recording.
         guard !timed.isEmpty else { return [] }
         return timed.sorted { $0.time < $1.time }.enumerated().map {
             TimedLyricLine(id: $0.offset, time: $0.element.time, text: $0.element.text)
