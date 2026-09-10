@@ -268,9 +268,6 @@ struct ClosedNotchSlot: View {
         return remaining
     }
     private var mirrorContentWidth: Double {
-        // Mirror is deliberately the flexible element. Reserve decoration, artwork, power, every inter-element
-        // gap, the camera-side margin, outer margin, and slot padding first; only the remaining content area
-        // belongs to the live camera preview. This prevents Mirror from pushing siblings outside the notch.
         max(1, min(112, innerWidth - mediaSiblingFootprint))
     }
     private var renderedArtworkOptions: ClosedArtworkOptions {
@@ -374,41 +371,53 @@ private final class MirrorCameraService: ObservableObject {
     @Published private(set) var state: State = .idle
     let session = AVCaptureSession()
     private var configured = false
-    private var clients = 0
+    private var clients = Set<UUID>()
     private var stopTask: Task<Void, Never>?
 
-    func acquire() {
-        clients += 1
+    func acquire(_ id: UUID) {
+        let inserted = clients.insert(id).inserted
         stopTask?.cancel()
+        stopTask = nil
+        guard inserted || !session.isRunning || state != .ready else { return }
+
         switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .authorized: configureAndStart()
+        case .authorized:
+            configureAndStart()
         case .notDetermined:
             state = .requesting
             AVCaptureDevice.requestAccess(for: .video) { granted in
                 Task { @MainActor in
+                    guard !MirrorCameraService.shared.clients.isEmpty else { return }
                     if granted { MirrorCameraService.shared.configureAndStart() }
                     else { MirrorCameraService.shared.state = .denied }
                 }
             }
-        case .denied, .restricted: state = .denied
-        @unknown default: state = .failed
+        case .denied, .restricted:
+            state = .denied
+        @unknown default:
+            state = .failed
         }
     }
 
-    func release() {
-        clients = max(0, clients - 1)
-        guard clients == 0 else { return }
+    func release(_ id: UUID) {
+        clients.remove(id)
+        guard clients.isEmpty else { return }
         stopTask?.cancel()
         stopTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-            guard !Task.isCancelled, let self, self.clients == 0 else { return }
+            guard !Task.isCancelled, let self, self.clients.isEmpty else { return }
             if self.session.isRunning { self.session.stopRunning() }
+            guard self.clients.isEmpty else {
+                self.configureAndStart()
+                return
+            }
             self.state = self.configured ? .idle : self.state
+            self.stopTask = nil
         }
     }
 
     private func configureAndStart() {
-        guard clients > 0 else { return }
+        guard !clients.isEmpty else { return }
         if !configured {
             session.beginConfiguration()
             session.sessionPreset = .medium
@@ -462,6 +471,8 @@ private struct MirrorPreviewRepresentable: NSViewRepresentable {
 
 private struct MirrorWidgetView: View {
     @ObservedObject private var camera = MirrorCameraService.shared
+    @State private var clientID = UUID()
+
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.055))
@@ -474,8 +485,8 @@ private struct MirrorWidgetView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .onAppear { camera.acquire() }
-        .onDisappear { camera.release() }
+        .onAppear { camera.acquire(clientID) }
+        .onDisappear { camera.release(clientID) }
         .accessibilityLabel("Mirror")
     }
 }
