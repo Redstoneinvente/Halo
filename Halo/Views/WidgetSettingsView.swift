@@ -176,7 +176,7 @@ struct ClosedNotchSettingsView: View {
         Section("Automatic width") {
             Toggle("Widen for music and live activity", isOn: expansion.enabled)
             PreciseSlider(title: "Active width", value: expansion.width, range: 120...640, step: 1, suffix: "pt")
-            Text("Music, pinned files, timers, power events and live activities can widen the closed notch. Dynamic lyrics bypass the fixed music width and resize to the currently displayed lyric instead.").font(.caption)
+            Text("Music, pinned files, timers, power events and live activities can widen the closed notch. Dynamic lyrics and constrained Truncate/Marquee media use their own content width instead of forcing the fixed music width.").font(.caption)
         }
         SideDecorationSettingsView(title: "Left icon / GIF", options: Binding(
             get: { options.wrappedValue.leftDecoration ?? SideDecoration() }, set: { options.wrappedValue.leftDecoration = $0 }
@@ -202,6 +202,13 @@ struct ClosedNotchSettingsView: View {
                 Text("Truncate").tag(MediaOverflowMode.truncate)
                 Text("Scale to fit").tag(MediaOverflowMode.scale)
                 Text("Marquee").tag(MediaOverflowMode.marquee)
+            }
+            if mediaOptions.wrappedValue.overflow == .truncate || mediaOptions.wrappedValue.overflow == .marquee {
+                PreciseSlider(title: "Media horizontal space", value: Binding(
+                    get: { mediaOptions.wrappedValue.resolvedHorizontalSpace },
+                    set: { mediaOptions.wrappedValue.horizontalSpace = $0 }
+                ), range: 48...360, step: 1, suffix: "pt")
+                Text("This is the maximum horizontal space reserved for Truncate or Marquee media. Lyrics can still shrink below it when dynamic lyric width is enabled.").font(.caption)
             }
             if mediaOptions.wrappedValue.textMode == .lyrics {
                 Picker("Lyric display", selection: Binding(
