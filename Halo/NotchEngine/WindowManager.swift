@@ -213,7 +213,7 @@ final class WindowManager {
     private func powerReaction(options: ClosedNotchOptions,
                                items: (left: ClosedNotchItem, right: ClosedNotchItem)) -> (side: DynamicSide, width: Double)? {
         let settings = options.powerReaction ?? PowerReactionOptions()
-        guard let battery = store.workspace.system.battery else { return nil }
+        guard settings.isEnabled, let battery = store.workspace.system.battery else { return nil }
         let style: PowerReactionStyle
         if battery >= 99 && !store.workspace.system.onBattery { style = settings.charged }
         else if store.workspace.system.charging { style = settings.charging }
@@ -340,9 +340,8 @@ final class WindowManager {
             case .truncate: textTarget = min(natural, 220)
             case .scale: textTarget = min(natural, 260)
             }
-            let artwork = (media.artwork == .cover || media.artwork == .vinyl) ? media.artworkSize + 7 : 0
             let icon = media.showPlaybackIcon ? size + 5 : 0
-            return textTarget + artwork + icon
+            return textTarget + icon
         }
         func measurements(_ item: ClosedNotchItem, _ decoration: SideDecoration?) -> (full: Double, decoration: Double) {
             let content: Double
@@ -374,10 +373,29 @@ final class WindowManager {
         }
         let left = measurements(items.left, options.leftDecoration)
         let right = measurements(items.right, options.rightDecoration)
+        var leftFull = left.full
+        var rightFull = right.full
+
+        var artwork = options.artworkOptions ?? ClosedArtworkOptions()
+        if options.artworkOptions == nil, let legacy = options.mediaOptions, legacy.artwork != .none {
+            artwork.enabled = true; artwork.mode = legacy.artwork; artwork.size = legacy.artworkSize
+            artwork.vinylRPM = legacy.vinylRPM; artwork.backgroundOpacity = legacy.backgroundOpacity
+        }
+        if playing && artwork.enabled && artwork.mode != .none && artwork.mode != .background {
+            let width = artwork.size + 2 * artwork.padding + artwork.margin
+            switch artwork.side {
+            case .left: leftFull += width
+            case .right: rightFull += width
+            case .automatic:
+                if options.left == .media || options.left == .visualizer { leftFull += width }
+                else { rightFull += width }
+            }
+        }
+
         let gap = 6.0
-        let leftPower = power?.side == .left ? power!.width + (left.full > 0 ? gap : 0) : 0
-        let rightPower = power?.side == .right ? power!.width + (right.full > 0 ? gap : 0) : 0
-        return (left.full + leftPower, right.full + rightPower, left.decoration, right.decoration)
+        let leftPower = power?.side == .left ? power!.width + (leftFull > 0 ? gap : 0) : 0
+        let rightPower = power?.side == .right ? power!.width + (rightFull > 0 ? gap : 0) : 0
+        return (leftFull + leftPower, rightFull + rightPower, left.decoration, right.decoration)
     }
 
     private func refreshDynamicWidths() {
