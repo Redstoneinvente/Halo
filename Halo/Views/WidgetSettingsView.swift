@@ -82,12 +82,15 @@ struct ClosedNotchSettingsView: View {
             Toggle("Auto-size to fit content", isOn: Binding(get: { options.wrappedValue.autoFitContent ?? true }, set: { options.wrappedValue.autoFitContent = $0 }))
             Slider(value: Binding(get: { options.wrappedValue.contentPaddingX }, set: { options.wrappedValue.horizontalPadding = $0 }), in: 0...24) { Text("Horizontal padding") }
             Slider(value: Binding(get: { options.wrappedValue.contentPaddingY }, set: { options.wrappedValue.verticalPadding = $0 }), in: 0...12) { Text("Vertical padding") }
-            Text("Auto-size treats your configured closed width as a minimum and reserves camera space, up to 640 pt or the display width. Text and artwork fit the closed height; long text truncates when space runs out.").font(.caption)
+            HStack { Text("Widget margin from camera"); Spacer(); Text("\(Int(options.wrappedValue.contentSideMargin)) pt").monospacedDigit() }
+            Slider(value: Binding(get: { options.wrappedValue.contentSideMargin }, set: { options.wrappedValue.sideMargin = $0 }), in: 0...48, step: 1)
+                .accessibilityLabel("Widget margin from camera")
+            Text("Auto-size treats your configured closed width as a minimum and reserves camera space, up to 640 pt or the display width. Each active side can now grow independently, so a left-only or right-only widget does not force matching empty space on the other side.").font(.caption)
         }
         Section("Automatic width") {
             Toggle("Widen for music and live activity", isOn: expansion.enabled)
             Slider(value: expansion.width, in: 120...640, step: 1) { Text("Active width · \(Int(expansion.wrappedValue.width)) pt") }
-            Text("Music playback, pinned files, screen capture/OCR, a running timer or stopwatch, and live activities widen the closed notch without opening the dashboard. Completed activities stay visible for eight seconds. Idle width and height remain as set in Appearance.").font(.caption)
+            Text("Music playback, pinned files, screen capture/OCR, a running timer or stopwatch, and live activities widen the closed notch without opening the dashboard. When content exists on only one side, the extra width is assigned to that side instead of expanding evenly.").font(.caption)
         }
         SideDecorationSettingsView(title: "Left icon / GIF", options: Binding(
             get: { options.wrappedValue.leftDecoration ?? SideDecoration() },
@@ -102,7 +105,22 @@ struct ClosedNotchSettingsView: View {
             itemPicker("Right slot", options.right)
             Slider(value: options.fontSize, in: 8...24, step: 1) { Text("Text size · \(Int(options.wrappedValue.fontSize)) pt") }
             ColorPicker("Color", selection: Binding(get: { options.wrappedValue.color.color }, set: { options.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
-            Text("Increase closed width in Appearance to fit both slots. Space behind the camera is reserved. A tiny notch shows a status dot instead.").font(.caption)
+            Text("Increase closed width in Appearance to set a larger minimum. Space behind the camera is reserved; inactive sides no longer need to mirror the active side.").font(.caption)
+        }
+        Section("Album colors") {
+            Toggle("Color notch background from album", isOn: Binding(
+                get: { options.wrappedValue.albumBackgroundColor ?? false },
+                set: { options.wrappedValue.albumBackgroundColor = $0 }
+            ))
+            Toggle("Apply frequency effect to album background", isOn: Binding(
+                get: { options.wrappedValue.albumBackgroundFrequencyEffect ?? false },
+                set: { options.wrappedValue.albumBackgroundFrequencyEffect = $0 }
+            )).disabled(!(options.wrappedValue.albumBackgroundColor ?? false))
+            Toggle("Color closed-notch text from album", isOn: Binding(
+                get: { options.wrappedValue.albumTextColor ?? false },
+                set: { options.wrappedValue.albumTextColor = $0 }
+            ))
+            Text("Album colors take precedence only while music is actively playing and artwork colors are available. Pausing or stopping music immediately restores your normal notch background and text color. The optional frequency effect is a lightweight playback-driven visual pulse and does not capture microphone or system audio.").font(.caption)
         }
         Section("Music animation") {
             // Binding.animation(_:) shadows the model's animation property.
