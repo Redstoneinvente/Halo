@@ -1,6 +1,74 @@
 import SwiftUI
 import AppKit
 
+struct PreciseSlider: View {
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    var step: Double = 1
+    var suffix = ""
+    var decimals = 0
+    var onEditingChanged: ((Bool) -> Void)? = nil
+
+    @State private var text = ""
+    @State private var dragging = false
+    @State private var lastTick: Int?
+    @FocusState private var fieldFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Text(title)
+                Spacer()
+                TextField("", text: $text)
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: decimals > 0 ? 72 : 62)
+                    .focused($fieldFocused)
+                    .onSubmit { commitText() }
+                    .onChange(of: fieldFocused) { focused in if !focused { commitText() } }
+                if !suffix.isEmpty { Text(suffix).foregroundStyle(.secondary) }
+            }
+            Slider(value: Binding(get: { value }, set: { newValue in
+                value = quantized(newValue)
+                if dragging { tickIfNeeded(value) }
+            }), in: range, step: step, onEditingChanged: { editing in
+                dragging = editing
+                lastTick = editing ? tickIndex(value) : nil
+                onEditingChanged?(editing)
+                if !editing { syncText() }
+            })
+            .accessibilityLabel(title)
+        }
+        .onAppear { syncText() }
+        .onChange(of: value) { _ in if !fieldFocused && !dragging { syncText() } }
+    }
+
+    private func quantized(_ raw: Double) -> Double {
+        let clamped = min(range.upperBound, max(range.lowerBound, raw))
+        guard step > 0 else { return clamped }
+        return min(range.upperBound, max(range.lowerBound,
+            ((clamped - range.lowerBound) / step).rounded() * step + range.lowerBound))
+    }
+    private func tickIndex(_ value: Double) -> Int { Int(((value - range.lowerBound) / max(step, 0.0001)).rounded()) }
+    private func tickIfNeeded(_ value: Double) {
+        let tick = tickIndex(value)
+        guard tick != lastTick else { return }
+        lastTick = tick
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+    private func syncText() { text = String(format: "%.*f", decimals, value) }
+    private func commitText() {
+        guard let parsed = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)) else { syncText(); return }
+        let newValue = quantized(parsed)
+        if newValue != value {
+            value = newValue
+            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+        }
+        syncText()
+    }
+}
+
 struct WidgetSettingsView: View {
     @Binding var layout: WorkspaceLayout
     @State private var selected: ModuleID = .clock
@@ -27,21 +95,21 @@ struct WidgetSettingsView: View {
             Picker("Weight", selection: style.weight) {
                 ForEach(WidgetFontWeight.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
             }
-            Slider(value: style.fontSize, in: 10...48, step: 1) { Text("Text size · \(Int(style.wrappedValue.fontSize)) pt") }
+            PreciseSlider(title: "Text size", value: style.fontSize, range: 10...48, step: 1, suffix: "pt")
             colorPicker("Text", style.textColor)
             colorPicker("Accent", style.accentColor)
             Toggle("Show title", isOn: style.showTitle)
         }
         Section("Card") {
             colorPicker("Background", style.backgroundColor)
-            Slider(value: style.backgroundOpacity, in: 0...1) { Text("Background opacity") }
-            Slider(value: style.padding, in: 0...32) { Text("Padding") }
-            Slider(value: style.cornerRadius, in: 0...40) { Text("Corner radius") }
+            PreciseSlider(title: "Background opacity", value: style.backgroundOpacity, range: 0...1, step: 0.01, decimals: 2)
+            PreciseSlider(title: "Padding", value: style.padding, range: 0...32, step: 1, suffix: "pt")
+            PreciseSlider(title: "Corner radius", value: style.cornerRadius, range: 0...40, step: 1, suffix: "pt")
             Toggle("Fill available width", isOn: Binding(get: { style.wrappedValue.width == 0 }, set: { style.wrappedValue.width = $0 ? 0 : 280 }))
             if style.wrappedValue.width > 0 {
-                Slider(value: style.width, in: 120...640, step: 1) { Text("Maximum width · \(Int(style.wrappedValue.width)) pt") }
+                PreciseSlider(title: "Maximum width", value: style.width, range: 120...640, step: 1, suffix: "pt")
             }
-            Slider(value: style.minimumHeight, in: 0...400, step: 1) { Text("Minimum height · \(Int(style.wrappedValue.minimumHeight)) pt") }
+            PreciseSlider(title: "Minimum height", value: style.minimumHeight, range: 0...400, step: 1, suffix: "pt")
         }
         if selected == .clock {
             Section("Clock") {
@@ -80,16 +148,14 @@ struct ClosedNotchSettingsView: View {
     var body: some View {
         Section("Content fit") {
             Toggle("Auto-size to fit content", isOn: Binding(get: { options.wrappedValue.autoFitContent ?? true }, set: { options.wrappedValue.autoFitContent = $0 }))
-            Slider(value: Binding(get: { options.wrappedValue.contentPaddingX }, set: { options.wrappedValue.horizontalPadding = $0 }), in: 0...24) { Text("Horizontal padding") }
-            Slider(value: Binding(get: { options.wrappedValue.contentPaddingY }, set: { options.wrappedValue.verticalPadding = $0 }), in: 0...12) { Text("Vertical padding") }
-            HStack { Text("Widget margin from camera"); Spacer(); Text("\(Int(options.wrappedValue.contentSideMargin)) pt").monospacedDigit() }
-            Slider(value: Binding(get: { options.wrappedValue.contentSideMargin }, set: { options.wrappedValue.sideMargin = $0 }), in: 0...48, step: 1)
-                .accessibilityLabel("Widget margin from camera")
-            Text("Auto-size treats your configured closed width as a minimum and reserves camera space, up to 640 pt or the display width. Each active side can now grow independently, so a left-only or right-only widget does not force matching empty space on the other side.").font(.caption)
+            PreciseSlider(title: "Horizontal padding", value: Binding(get: { options.wrappedValue.contentPaddingX }, set: { options.wrappedValue.horizontalPadding = $0 }), range: 0...24, step: 1, suffix: "pt")
+            PreciseSlider(title: "Vertical padding", value: Binding(get: { options.wrappedValue.contentPaddingY }, set: { options.wrappedValue.verticalPadding = $0 }), range: 0...12, step: 1, suffix: "pt")
+            PreciseSlider(title: "Widget margin from camera", value: Binding(get: { options.wrappedValue.contentSideMargin }, set: { options.wrappedValue.sideMargin = $0 }), range: 0...48, step: 1, suffix: "pt")
+            Text("Auto-size reserves only the space each active side actually needs. A left-only or right-only widget does not force matching empty space on the other side.").font(.caption)
         }
         Section("Automatic width") {
             Toggle("Widen for music and live activity", isOn: expansion.enabled)
-            Slider(value: expansion.width, in: 120...640, step: 1) { Text("Active width · \(Int(expansion.wrappedValue.width)) pt") }
+            PreciseSlider(title: "Active width", value: expansion.width, range: 120...640, step: 1, suffix: "pt")
             Text("Music playback, pinned files, screen capture/OCR, a running timer or stopwatch, and live activities widen the closed notch without opening the dashboard. When content exists on only one side, the extra width is assigned to that side instead of expanding evenly.").font(.caption)
         }
         SideDecorationSettingsView(title: "Left icon / GIF", options: Binding(
@@ -103,9 +169,9 @@ struct ClosedNotchSettingsView: View {
         Section("Content") {
             itemPicker("Left slot", options.left)
             itemPicker("Right slot", options.right)
-            Slider(value: options.fontSize, in: 8...24, step: 1) { Text("Text size · \(Int(options.wrappedValue.fontSize)) pt") }
+            PreciseSlider(title: "Text size", value: options.fontSize, range: 8...24, step: 1, suffix: "pt")
             ColorPicker("Color", selection: Binding(get: { options.wrappedValue.color.color }, set: { options.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
-            Text("Increase closed width in Appearance to set a larger minimum. Space behind the camera is reserved; inactive sides no longer need to mirror the active side.").font(.caption)
+            Text("Space behind the camera is reserved; inactive sides do not mirror the active side.").font(.caption)
         }
         Section("Album colors") {
             Toggle("Color notch background from album", isOn: Binding(
@@ -123,7 +189,6 @@ struct ClosedNotchSettingsView: View {
             Text("Album colors take precedence only while music is actively playing and artwork colors are available. Pausing or stopping music immediately restores your normal notch background and text color. The optional frequency effect is a lightweight playback-driven visual pulse and does not capture microphone or system audio.").font(.caption)
         }
         Section("Music animation") {
-            // Binding.animation(_:) shadows the model's animation property.
             Picker("Style", selection: Binding<PlaybackAnimation>(
                 get: { options.wrappedValue.animation },
                 set: { options.wrappedValue.animation = $0 }
@@ -132,10 +197,10 @@ struct ClosedNotchSettingsView: View {
             }
             Toggle("Animate while music plays", isOn: options.animate)
             Toggle("Use colors from music artwork", isOn: visualizer.dynamicColors)
-            Slider(value: visualizer.speed, in: 0.25...2) { Text("Animation speed") }
-            Slider(value: visualizer.intensity, in: 0.1...1) { Text("Motion intensity") }
-            Slider(value: visualizer.width, in: 32...160) { Text("Visualizer width") }
-            Slider(value: visualizer.height, in: 8...48) { Text("Visualizer height") }
+            PreciseSlider(title: "Animation speed", value: visualizer.speed, range: 0.25...2, step: 0.05, decimals: 2)
+            PreciseSlider(title: "Motion intensity", value: visualizer.intensity, range: 0.1...1, step: 0.05, decimals: 2)
+            PreciseSlider(title: "Visualizer width", value: visualizer.width, range: 32...160, step: 1, suffix: "pt")
+            PreciseSlider(title: "Visualizer height", value: visualizer.height, range: 8...48, step: 1, suffix: "pt")
             PlaybackVisualizer(kind: options.wrappedValue.animation, playing: true, enabled: options.wrappedValue.animate,
                                options: visualizer.wrappedValue, palette: media.artworkColors, fallback: options.wrappedValue.color.color)
                 .padding(12).background(.black, in: RoundedRectangle(cornerRadius: 12))
