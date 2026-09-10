@@ -63,9 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// WindowManager posts this while animating because NSWindow resize/move notifications may be
     /// coalesced. Using the explicit frame keeps the menu reservation synchronized with Halo at 120 Hz.
     @objc private func haloPanelGeometryChanged(_ note: Notification) {
-        guard let frame = note.userInfo?["frame"] as? CGRect,
-              let screenID = note.userInfo?["screen"] as? String,
-              let screen = NSScreen.screens.first(where: { WindowManager.displayID($0) == screenID }) else { return }
+        guard let panel = note.object as? HaloPanel,
+              let frame = note.userInfo?["frame"] as? CGRect,
+              let screen = panel.screen else { return }
         updateMenuBarReservation(frame: frame, screen: screen)
     }
 

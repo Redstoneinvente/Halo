@@ -48,9 +48,8 @@ final class SurfaceAnimator {
     func cancel() { clock.stop() }
 
     private func publishGeometry(panel: HaloPanel, frame: CGRect) {
-        guard let screen = panel.screen else { return }
         NotificationCenter.default.post(name: .init("HaloPanelGeometryChanged"), object: panel,
-                                        userInfo: ["frame": frame, "screen": WindowManager.displayID(screen)])
+                                        userInfo: ["frame": frame])
     }
 
     func move(panel: HaloPanel, state: SurfaceState, target: CGRect, options: SurfaceOptions,
