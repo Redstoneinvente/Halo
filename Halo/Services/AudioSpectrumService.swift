@@ -13,7 +13,7 @@ struct AudioSpectrumSnapshot: Equatable {
 }
 
 /// Lightweight system-audio analyser used only while an audio-reactive closed-notch background is active.
-/// ScreenCaptureKit supplies PCM buffers; Accelerate reduces each buffer into low/mid/high energy bands.
+/// ScreenCaptureKit supplies mono PCM buffers; Accelerate reduces each buffer into low/mid/high energy bands.
 final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     static let shared = AudioSpectrumService()
 
@@ -63,7 +63,8 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
             configuration.capturesAudio = true
             configuration.excludesCurrentProcessAudio = true
             configuration.sampleRate = 48_000
-            configuration.channelCount = 2
+            // Frequency analysis does not need stereo. Mono keeps the callback layout deterministic and cheap.
+            configuration.channelCount = 1
 
             let candidate = SCStream(filter: filter, configuration: configuration, delegate: self)
             try candidate.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleQueue)
@@ -80,7 +81,7 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
             stateLock.lock()
             starting = false
             stream = nil
-            smoothed.available = false
+            smoothed = AudioSpectrumSnapshot()
             stateLock.unlock()
         }
     }
@@ -103,7 +104,10 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
         guard asbd.mFormatID == kAudioFormatLinearPCM else { return }
 
         var blockBuffer: CMBlockBuffer?
-        var bufferList = AudioBufferList(mNumberBuffers: 0, mBuffers: AudioBuffer())
+        var bufferList = AudioBufferList(
+            mNumberBuffers: 1,
+            mBuffers: AudioBuffer(mNumberChannels: 1, mDataByteSize: 0, mData: nil)
+        )
         var needed = 0
         let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
             sampleBuffer,
@@ -115,41 +119,22 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
             flags: 0,
             blockBufferOut: &blockBuffer
         )
-        guard status == noErr else { return }
+        guard status == noErr,
+              bufferList.mNumberBuffers > 0,
+              let data = bufferList.mBuffers.mData else { return }
 
-        let buffers = UnsafeMutableAudioBufferListPointer(&bufferList)
-        guard let first = buffers.first, let data = first.mData else { return }
         let isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
-        let channels = max(1, Int(asbd.mChannelsPerFrame))
-        let interleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) == 0
         let bytesPerSample = max(1, Int(asbd.mBitsPerChannel / 8))
-        let availableFrames = Int(first.mDataByteSize) / max(1, bytesPerSample * (interleaved ? channels : 1))
-        let count = min(2048, availableFrames)
+        let count = min(2048, Int(bufferList.mBuffers.mDataByteSize) / bytesPerSample)
         guard count >= 128 else { return }
 
         var mono = [Float](repeating: 0, count: count)
         if isFloat && asbd.mBitsPerChannel == 32 {
             let samples = data.assumingMemoryBound(to: Float.self)
-            if interleaved {
-                for i in 0..<count {
-                    var sum: Float = 0
-                    for channel in 0..<channels { sum += samples[i * channels + channel] }
-                    mono[i] = sum / Float(channels)
-                }
-            } else {
-                for i in 0..<count { mono[i] = samples[i] }
-            }
+            for i in 0..<count { mono[i] = samples[i] }
         } else if !isFloat && asbd.mBitsPerChannel == 16 {
             let samples = data.assumingMemoryBound(to: Int16.self)
-            if interleaved {
-                for i in 0..<count {
-                    var sum: Float = 0
-                    for channel in 0..<channels { sum += Float(samples[i * channels + channel]) / 32768 }
-                    mono[i] = sum / Float(channels)
-                }
-            } else {
-                for i in 0..<count { mono[i] = Float(samples[i]) / 32768 }
-            }
+            for i in 0..<count { mono[i] = Float(samples[i]) / 32768 }
         } else { return }
 
         analyse(mono, sampleRate: max(8_000, Double(asbd.mSampleRate)))
@@ -164,18 +149,22 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
 
         var window = [Float](repeating: 0, count: n)
         vDSP_hann_window(&window, vDSP_Length(n), Int32(vDSP_HANN_NORM))
-        vDSP.multiply(samples, window, result: &samples)
+        var windowed = [Float](repeating: 0, count: n)
+        vDSP_vmul(samples, 1, window, 1, &windowed, 1, vDSP_Length(n))
 
         var real = [Float](repeating: 0, count: n / 2)
         var imag = [Float](repeating: 0, count: n / 2)
         var magnitudes = [Float](repeating: 0, count: n / 2)
-        samples.withUnsafeBufferPointer { source in
-            source.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: n / 2) { complex in
+        let log2n = vDSP_Length(log2(Float(n)))
+        guard let setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else { return }
+        defer { vDSP_destroy_fftsetup(setup) }
+
+        windowed.withUnsafeBufferPointer { source in
+            guard let base = source.baseAddress else { return }
+            base.withMemoryRebound(to: DSPComplex.self, capacity: n / 2) { complex in
                 var split = DSPSplitComplex(realp: &real, imagp: &imag)
                 vDSP_ctoz(complex, 2, &split, 1, vDSP_Length(n / 2))
-                guard let setup = vDSP_create_fftsetup(vDSP_Length(log2(Float(n))), FFTRadix(kFFTRadix2)) else { return }
-                defer { vDSP_destroy_fftsetup(setup) }
-                vDSP_fft_zrip(setup, &split, 1, vDSP_Length(log2(Float(n))), FFTDirection(FFT_FORWARD))
+                vDSP_fft_zrip(setup, &split, 1, log2n, FFTDirection(FFT_FORWARD))
                 vDSP_zvmags(&split, 1, &magnitudes, 1, vDSP_Length(n / 2))
             }
         }
