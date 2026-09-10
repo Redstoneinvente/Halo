@@ -74,6 +74,8 @@ struct VisualizerOptions: Codable, Equatable {
 enum MediaTextMode: String, Codable, CaseIterable { case title, artist, titleArtist, lyrics }
 enum MediaOverflowMode: String, Codable, CaseIterable { case truncate, scale, marquee }
 enum LyricDisplayMode: String, Codable, CaseIterable { case line, focus, word }
+enum MediaChangeAnimation: String, Codable, CaseIterable { case none, fade, slide, scale, blur }
+enum MediaGestureAction: String, Codable, CaseIterable { case none, playPause, next, previous, openPlayer }
 enum MediaArtworkMode: String, Codable, CaseIterable { case none, cover, background, vinyl }
 struct ClosedMediaOptions: Codable, Equatable {
     var textMode: MediaTextMode = .titleArtist
@@ -81,8 +83,24 @@ struct ClosedMediaOptions: Codable, Equatable {
     var lines = 1
     var onlineLyrics: Bool?
     var lyricDisplay: LyricDisplayMode?
+    var lyricSyncOffset: Double?
+    var dynamicLyricWidth: Bool?
+    var changeAnimation: MediaChangeAnimation?
+    var changeAnimationDuration: Double?
+    var tapAction: MediaGestureAction?
+    var doubleTapAction: MediaGestureAction?
+    var swipeLeftAction: MediaGestureAction?
+    var swipeRightAction: MediaGestureAction?
     var usesOnlineLyrics: Bool { onlineLyrics ?? true }
     var resolvedLyricDisplay: LyricDisplayMode { lyricDisplay ?? .line }
+    var resolvedLyricSyncOffset: Double { min(5, max(-5, lyricSyncOffset ?? 0)) }
+    var usesDynamicLyricWidth: Bool { dynamicLyricWidth ?? true }
+    var resolvedChangeAnimation: MediaChangeAnimation { changeAnimation ?? .slide }
+    var resolvedChangeAnimationDuration: Double { min(1.2, max(0.08, changeAnimationDuration ?? 0.28)) }
+    var resolvedTapAction: MediaGestureAction { tapAction ?? .playPause }
+    var resolvedDoubleTapAction: MediaGestureAction { doubleTapAction ?? .none }
+    var resolvedSwipeLeftAction: MediaGestureAction { swipeLeftAction ?? .next }
+    var resolvedSwipeRightAction: MediaGestureAction { swipeRightAction ?? .previous }
     // Legacy artwork fields retained so existing saved profiles decode.
     var artwork: MediaArtworkMode = .none
     var artworkSize = 28.0
@@ -91,13 +109,15 @@ struct ClosedMediaOptions: Codable, Equatable {
     var backgroundOpacity = 0.32
     var showPlaybackIcon = true
     func validated() throws -> ClosedMediaOptions {
-        guard [artworkSize, marqueeSpeed, vinylRPM, backgroundOpacity].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        guard [artworkSize, marqueeSpeed, vinylRPM, backgroundOpacity, lyricSyncOffset ?? 0, changeAnimationDuration ?? 0.28].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
         v.lines = min(2, max(1, lines))
         v.artworkSize = min(72, max(14, artworkSize))
         v.marqueeSpeed = min(120, max(8, marqueeSpeed))
         v.vinylRPM = min(45, max(1, vinylRPM))
         v.backgroundOpacity = min(1, max(0, backgroundOpacity))
+        if lyricSyncOffset != nil { v.lyricSyncOffset = resolvedLyricSyncOffset }
+        if changeAnimationDuration != nil { v.changeAnimationDuration = resolvedChangeAnimationDuration }
         return v
     }
 }
@@ -138,13 +158,16 @@ struct ReactiveBackgroundOptions: Codable, Equatable {
     var hueShift = 0.0
     var blur = 0.0
     var grain = 0.0
+    var audioSensitivity: Double?
+    var resolvedAudioSensitivity: Double { min(4, max(0.25, audioSensitivity ?? 1.35)) }
     func validated() throws -> ReactiveBackgroundOptions {
-        guard [speed, intensity, brightness, saturation, scale, hueShift, blur, grain].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        guard [speed, intensity, brightness, saturation, scale, hueShift, blur, grain, audioSensitivity ?? 1.35].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
         v.speed = min(3, max(0.2, speed)); v.intensity = min(1, max(0, intensity))
         v.brightness = min(0.8, max(0, brightness)); v.saturation = min(1, max(0, saturation))
         v.scale = min(0.12, max(0, scale)); v.hueShift = min(1, max(0, hueShift))
         v.blur = min(12, max(0, blur)); v.grain = min(0.6, max(0, grain))
+        if audioSensitivity != nil { v.audioSensitivity = resolvedAudioSensitivity }
         return v
     }
 }
