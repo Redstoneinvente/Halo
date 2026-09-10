@@ -171,8 +171,6 @@ final class WindowManager {
                 guard let self,
                       let raw = note.userInfo?["width"] as? Double,
                       raw.isFinite else { return }
-                // This hint is only for truly adaptive lyrics. The user's Media horizontal space setting
-                // belongs to the renderer and must not resize the entire notch.
                 let next = min(320, max(24, raw))
                 guard self.mediaWidthHint.map({ abs($0 - next) >= 3 }) ?? true else { return }
                 self.mediaWidthHint = next
@@ -412,8 +410,6 @@ final class WindowManager {
             }
             let naturalTotal = naturalText + (adaptive ? 0 : icon)
             if adaptive { return min(320, max(28, naturalText)) }
-            // Truncate/Marquee horizontal-space is a render budget only. Keep auto-fit stable so moving
-            // that slider does not resize the whole closed notch.
             switch media.overflow {
             case .marquee: return min(max(120, naturalTotal * 0.55), 220)
             case .truncate: return min(naturalTotal, 220)
@@ -443,6 +439,7 @@ final class WindowManager {
                 case .battery: content = textWidth("100%", font: font) + size + 5
                 case .media: content = mediaWidth()
                 case .visualizer: content = playing ? (options.visualizer ?? VisualizerOptions()).width : 0
+                case .mirror: content = 112
                 case .files: content = textWidth(String(store.files.count), font: font) + size + 5
                 case .activity:
                     content = activity.map {
@@ -508,8 +505,6 @@ final class WindowManager {
             let art = closed.artworkOptions ?? ClosedArtworkOptions()
             let visibleArtwork = store.workspace.media.isPlaying && art.enabled && art.mode != .none && art.mode != .background
             motion.opening = .resize; motion.closing = .resize; motion.duration = adaptiveLyrics ? 0.20 : 0.34
-            // Fixed-size artwork must never animate through a side that is temporarily narrower than its
-            // final measured footprint. Snap that geometry first; artwork has its own track-change animation.
             host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
                                preset: .smooth, animations: host.state.theme.animations && !host.state.editingGeometry && !visibleArtwork,
                                opening: true, style: geometry.style)
