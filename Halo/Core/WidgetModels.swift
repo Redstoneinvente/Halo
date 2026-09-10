@@ -133,12 +133,16 @@ struct ClosedArtworkOptions: Codable, Equatable {
     var margin = 7.0
     var vinylRPM = 8.0
     var backgroundOpacity = 0.32
+    var backgroundEnabled: Bool?
     var artworkOnly: Bool?
     var isArtworkOnly: Bool { artworkOnly ?? false }
+    // Older profiles used mode == .background. New profiles can enable the background independently
+    // while keeping mode set to cover or vinyl for foreground artwork.
+    var usesBackgroundArtwork: Bool { backgroundEnabled ?? (mode == .background) }
     func validated() throws -> ClosedArtworkOptions {
         guard [size, padding, margin, vinylRPM, backgroundOpacity].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
-        if v.mode == .none { v.enabled = false }
+        if v.mode == .none && !v.usesBackgroundArtwork { v.enabled = false }
         v.size = min(72, max(14, size))
         v.padding = min(24, max(0, padding))
         v.margin = min(48, max(0, margin))
