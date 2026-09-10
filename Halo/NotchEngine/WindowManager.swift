@@ -71,7 +71,6 @@ final class SurfaceAnimator {
             let centerX = initial.midX + (target.midX - initial.midX) * p
             let top = initial.maxY + (target.maxY - initial.maxY) * p
             var frame = CGRect(x: centerX - width / 2, y: top - height, width: width, height: height)
-            // Preserve the selected attachment point during overshoot.
             if style == .bottom { frame.origin.y = target.minY }
             if style == .left { frame.origin.x = target.minX }
             if style == .right { frame.origin.x = target.maxX - width }
@@ -108,10 +107,12 @@ final class WindowManager {
             animator.cancel(); state.collapseTask?.cancel(); subscription?.cancel(); panel.close()
         }
     }
+
     private var activityExpiry: DispatchWorkItem?
     private let store: AppStore
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
+
     static func displayID(_ screen: NSScreen) -> String {
         guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
               let uuid = CGDisplayCreateUUIDFromDisplayID(number.uint32Value)?.takeRetainedValue() else { return screen.localizedName }
@@ -125,6 +126,7 @@ final class WindowManager {
                                physicalNotchWidth: width, style: theme.style, appearance: appearance, expandedWidth: theme.width)
     }
     init(store: AppStore) { self.store = store }
+
     func start() {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
@@ -168,25 +170,54 @@ final class WindowManager {
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         reconcile()
     }
-    private var hasLiveContent: Bool {
-        !store.pinnedFiles.isEmpty || store.workspace.capture.busy || store.workspace.media.isPlaying || store.deadline != nil || store.workspace.stopwatchStart != nil ||
-        store.workspace.activities.contains { ($0.progress.map { $0 < 1 } ?? false) || $0.created.addingTimeInterval(8) > Date() }
+
+    private var activeClosedActivity: LiveActivity? {
+        store.workspace.activities.first { activity in
+            (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(8) > Date()
+        }
     }
+
+    private func resolvedClosedItems(_ options: ClosedNotchOptions) -> (left: ClosedNotchItem, right: ClosedNotchItem) {
+        var left = options.left
+        var right = options.right
+        guard activeClosedActivity != nil, left != .activity, right != .activity else { return (left, right) }
+        let playing = store.workspace.media.isPlaying
+        let rightMusicActive = (right == .media || right == .visualizer) && playing
+        let leftMusicActive = (left == .media || left == .visualizer) && playing
+        if !rightMusicActive { right = .activity }
+        else if !leftMusicActive { left = .activity }
+        else { right = .activity }
+        return (left, right)
+    }
+
+    private func sideHasLiveReason(item: ClosedNotchItem, decoration: SideDecoration?) -> Bool {
+        if decoration?.visibility == .playing, store.workspace.media.isPlaying { return true }
+        switch item {
+        case .media, .visualizer: return store.workspace.media.isPlaying
+        case .timer: return store.deadline != nil
+        case .files: return !store.pinnedFiles.isEmpty
+        case .activity: return activeClosedActivity != nil
+        default: return false
+        }
+    }
+
     private func configureDynamicWidth(_ host: Host) {
         guard let geometry = host.geometry else { return }
         let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
         let options = layout.closedNotch ?? ClosedNotchOptions()
         let expansion = options.expansion ?? ClosedExpansionOptions()
-        let sides = fittedClosedSides(host: host, layout: layout)
+        let items = resolvedClosedItems(options)
+        let sides = fittedClosedSides(host: host, layout: layout, items: items)
+        let leftLive = sideHasLiveReason(item: items.left, decoration: options.leftDecoration)
+        let rightLive = sideHasLiveReason(item: items.right, decoration: options.rightDecoration)
         let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
         let camera = attached ? geometry.physicalNotchWidth : 0
         let fittedWidth = attached ? camera + sides.left + sides.right : max(16, sides.left + sides.right)
         let autoFit = options.autoFitContent ?? true
 
         var requested = autoFit ? fittedWidth : 0
-        if expansion.enabled && hasLiveContent { requested = max(requested, expansion.width) }
+        if expansion.enabled && (leftLive || rightLive) { requested = max(requested, expansion.width) }
 
-        // Decorations can still request space even with auto-fit disabled.
         let visibleDecorationWidth = attached ? camera + sides.decorationLeft + sides.decorationRight :
             max(16, sides.decorationLeft + sides.decorationRight)
         requested = max(requested, visibleDecorationWidth)
@@ -208,25 +239,35 @@ final class WindowManager {
         var left = autoFit ? sides.left : sides.decorationLeft
         var right = autoFit ? sides.right : sides.decorationRight
         let extra = max(0, finalWidth - camera - left - right)
-        if left > 0, right <= 0 {
+
+        if leftLive && !rightLive {
+            left += extra
+        } else if rightLive && !leftLive {
+            right += extra
+        } else if leftLive && rightLive {
+            left += extra / 2
+            right += extra / 2
+        } else if left > 0, right <= 0 {
             left += extra
         } else if right > 0, left <= 0 {
             right += extra
-        } else if left <= 0, right <= 0 {
-            left += extra / 2
-            right += extra / 2
         } else {
             left += extra / 2
             right += extra / 2
         }
 
-        // Keep the physical camera fixed while assigning the extra closed width to the side(s) that actually contain content.
+        // With camera-centered coordinates this keeps the opposite outer edge fixed for one-sided growth.
+        // right-only growth => left extent is unchanged; left-only growth => right extent is unchanged.
         host.geometry?.activeCompactCenterOffset = (right - left) / 2
     }
-    private func fittedClosedSides(host: Host, layout: WorkspaceLayout) -> (left: Double, right: Double, decorationLeft: Double, decorationRight: Double) {
+
+    private func fittedClosedSides(host: Host, layout: WorkspaceLayout,
+                                   items: (left: ClosedNotchItem, right: ClosedNotchItem)) ->
+        (left: Double, right: Double, decorationLeft: Double, decorationRight: Double) {
         guard let geometry = host.geometry else { return (0, 0, 0, 0) }
         let options = layout.closedNotch ?? ClosedNotchOptions()
         let playing = store.workspace.media.isPlaying
+        let activity = activeClosedActivity
         let size = min(options.fontSize, max(1, geometry.compactHeight - 2 * options.contentPaddingY) / 1.25)
         let font = NSFont.systemFont(ofSize: size)
         func textWidth(_ text: String, font: NSFont) -> Double {
@@ -244,23 +285,23 @@ final class WindowManager {
             case .date: content = textWidth("Sep 28", font: font)
             case .timer: content = textWidth("88:88:88", font: font) + size
             case .battery: content = textWidth("100%", font: font) + size + 5
-            case .media:
-                content = playing ? textWidth(String(store.workspace.media.title.prefix(80)), font: font) + size + 5 : 0
-            case .visualizer:
-                content = playing ? (options.visualizer ?? VisualizerOptions()).width : 0
+            case .media: content = playing ? textWidth(String(store.workspace.media.title.prefix(80)), font: font) + size + 5 : 0
+            case .visualizer: content = playing ? (options.visualizer ?? VisualizerOptions()).width : 0
             case .files: content = textWidth(String(store.files.count), font: font) + size + 5
-            case .activity: content = textWidth(String((store.workspace.activities.first?.title ?? "No activity").prefix(80)), font: font)
+            case .activity:
+                content = activity.map { textWidth(String($0.title.prefix(80)), font: font) + size + ($0.progress == nil ? 5 : 46) } ?? 0
             }
             let ornament = decoration.flatMap { $0.isVisible(playing: playing) ? min($0.size, max(1, geometry.compactHeight - 2 * options.contentPaddingY)) : nil } ?? 0
             guard content > 0 || ornament > 0 else { return (0, 0) }
             let spacing = content > 0 && ornament > 0 ? 5.0 : 0
-            let padding = 2 * options.contentPaddingX + options.contentSideMargin
-            return (content + ornament + spacing + padding, ornament > 0 ? ornament + padding : 0)
+            let margins = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
+            return (content + ornament + spacing + margins, ornament > 0 ? ornament + margins : 0)
         }
-        let left = measurements(options.left, options.leftDecoration)
-        let right = measurements(options.right, options.rightDecoration)
+        let left = measurements(items.left, options.leftDecoration)
+        let right = measurements(items.right, options.rightDecoration)
         return (left.full, right.full, left.decoration, right.decoration)
     }
+
     private func refreshDynamicWidths() {
         activityExpiry?.cancel()
         if let next = store.workspace.activities.map({ $0.created.addingTimeInterval(8) }).filter({ $0 > Date() }).min() {
@@ -284,17 +325,19 @@ final class WindowManager {
             }
             host.targetFrame = target
             var motion = geometry.appearance.surface
-            motion.opening = .resize; motion.closing = .resize; motion.duration = 0.25
+            motion.opening = .resize; motion.closing = .resize; motion.duration = 0.34
             host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
-                               preset: .snappy, animations: host.state.theme.animations && !host.state.editingGeometry,
+                               preset: .smooth, animations: host.state.theme.animations && !host.state.editingGeometry,
                                opening: true, style: geometry.style)
         }
     }
+
     func stop() { activityExpiry?.cancel(); hosts.values.forEach { $0.stop() }; hosts.removeAll(); subscriptions.removeAll() }
     func toggleAll() {
         let expand = !hosts.values.contains { $0.state.expanded }
         hosts.values.forEach { $0.state.collapseTask?.cancel(); $0.state.expanded = expand }
     }
+
     private func reconcile() {
         let screens = store.configuration.allDisplays ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
         var active = Set<String>()
