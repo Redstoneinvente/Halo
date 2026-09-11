@@ -386,7 +386,7 @@ struct SettingsView: View {
 }
 
 private enum ContextInterfaceSelection: String, Identifiable {
-    case music, bluetooth
+    case music, bluetooth, retro
     var id: String { rawValue }
 }
 
@@ -394,6 +394,7 @@ private struct ContextInterfaceLibraryView: View {
     @Binding var layout: WorkspaceLayout
     @State private var selection: ContextInterfaceSelection?
     @AppStorage("HaloContextBluetoothEnabled") private var bluetoothEnabled = false
+    @AppStorage("HaloContextRetroEnabled") private var retroEnabled = false
 
     private var musicEnabled: Bool { layout.contextMusic?.enabled ?? false }
 
@@ -426,6 +427,20 @@ private struct ContextInterfaceLibraryView: View {
                 }
             }
             ContextBluetoothSettings()
+        } else if selection == .retro {
+            Section {
+                HStack(spacing: 12) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) { selection = nil }
+                    } label: {
+                        Label("All CI", systemImage: "chevron.left")
+                    }
+                    Spacer()
+                    Label("Retro Game CI", systemImage: "gamecontroller.fill")
+                        .font(.headline)
+                }
+            }
+            ContextRetroGameSettings()
         } else {
             Section {
                 VStack(alignment: .leading, spacing: 7) {
@@ -445,6 +460,9 @@ private struct ContextInterfaceLibraryView: View {
                     BluetoothContextInterfaceCard(enabled: bluetoothEnabled) {
                         withAnimation(.easeInOut(duration: 0.18)) { selection = .bluetooth }
                     }
+                    RetroGameContextInterfaceCard(enabled: retroEnabled) {
+                        withAnimation(.easeInOut(duration: 0.18)) { selection = .retro }
+                    }
                 }
                 .padding(.vertical, 6)
             }
@@ -461,6 +479,7 @@ private struct ContextInterfaceLibraryView: View {
 private struct ContextInterfaceCard: View {
     let enabled: Bool
     let action: () -> Void
+    @AppStorage("HaloContextMusicPriority") private var priority = 60.0
     @State private var hovered = false
 
     var body: some View {
@@ -514,6 +533,9 @@ private struct ContextInterfaceCard: View {
                     Label(layoutSummary, systemImage: "rectangle.3.group")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                    Text("Priority \(Int(priority))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     Spacer()
                     Label("Edit", systemImage: "chevron.right")
                         .font(.caption.weight(.semibold))
@@ -544,6 +566,7 @@ private struct ContextMusicSettings: View {
     @Binding var layout: WorkspaceLayout
     @AppStorage("HaloContextMusicUseFullNotchArea") private var useFullNotchArea = false
     @AppStorage("HaloContextMusicKeepClosedNotchContents") private var keepClosedNotchContents = false
+    @AppStorage("HaloContextMusicPriority") private var priority = 60.0
     private var options: Binding<ContextMusicOptions> { Binding(get: { layout.contextMusic ?? ContextMusicOptions() }, set: { layout.contextMusic = $0 }) }
     private var layoutMode: Binding<ContextMusicLayoutMode> { Binding(get: { options.wrappedValue.resolvedLayoutMode }, set: { options.wrappedValue.layoutMode = $0 }) }
     private var foregroundArtwork: Binding<ContextArtworkPresentation> {
@@ -581,6 +604,12 @@ private struct ContextMusicSettings: View {
             Toggle("Artist", isOn: options.showArtist)
             Toggle("Playback controls", isOn: options.showControls)
             Toggle("Visualizer", isOn: options.showVisualizer)
+        }
+
+        Section("CI priority") {
+            Slider(value: $priority, in: 0...100, step: 1) { Text("Music CI priority") }
+            Text("When multiple Context Interfaces are eligible, Halo gives the surface to the eligible CI with the highest priority.")
+                .font(.caption).foregroundStyle(.secondary)
         }
 
         Section("CI surface") {
