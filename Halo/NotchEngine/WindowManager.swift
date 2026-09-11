@@ -723,9 +723,12 @@ final class WindowManager {
             let naturalTotal = naturalText + (adaptive ? 0 : icon)
             if adaptive { return min(320, max(28, naturalText)) }
             switch media.overflow {
-            case .marquee: return min(max(120, naturalTotal * 0.55), 220)
-            case .truncate: return min(naturalTotal, 220)
-            case .scale: return min(naturalTotal, 260)
+            case .marquee:
+                return min(max(24, naturalTotal), media.resolvedHorizontalSpace)
+            case .truncate:
+                return min(max(24, naturalTotal), media.resolvedHorizontalSpace)
+            case .scale:
+                return min(naturalTotal, 260)
             }
         }
 
