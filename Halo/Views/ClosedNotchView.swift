@@ -36,6 +36,36 @@ private struct PowerEventInfo {
     }
 }
 
+private enum BluetoothClosedActivity {
+    static func kind(for activity: LiveActivity) -> BluetoothConnectionEventKind? {
+        switch activity.title {
+        case "Bluetooth connected": return .connected
+        case "Bluetooth disconnected": return .disconnected
+        case "Bluetooth on": return .poweredOn
+        case "Bluetooth off": return .poweredOff
+        default: return nil
+        }
+    }
+
+    static func symbol(for kind: BluetoothConnectionEventKind) -> String {
+        switch kind {
+        case .connected: return "wave.3.right.circle.fill"
+        case .disconnected: return "wave.3.right.circle"
+        case .poweredOn: return "wave.3.right"
+        case .poweredOff: return "wave.3.right.slash"
+        }
+    }
+
+    static func label(for kind: BluetoothConnectionEventKind) -> String {
+        switch kind {
+        case .connected: return "Connected"
+        case .disconnected: return "Disconnected"
+        case .poweredOn: return "Bluetooth On"
+        case .poweredOff: return "Bluetooth Off"
+        }
+    }
+}
+
 private extension ClosedNotchOptions {
     var resolvedArtwork: ClosedArtworkOptions {
         if let artworkOptions { return artworkOptions }
@@ -114,6 +144,14 @@ struct ClosedNotchView: View {
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject private var hudBridge = HaloHUDNotchBridge.shared
     @Environment(\.haloScreenFrame) private var haloScreenFrame
+    @AppStorage("HaloBluetoothClosedNotchEvents") private var bluetoothEvents = true
+    @AppStorage("HaloBluetoothClosedNotchConnected") private var bluetoothConnected = true
+    @AppStorage("HaloBluetoothClosedNotchDisconnected") private var bluetoothDisconnected = true
+    @AppStorage("HaloBluetoothClosedNotchPoweredOn") private var bluetoothPoweredOn = true
+    @AppStorage("HaloBluetoothClosedNotchPoweredOff") private var bluetoothPoweredOff = true
+    @AppStorage("HaloBluetoothClosedNotchSide") private var bluetoothSide = BluetoothClosedNotchSide.automatic.rawValue
+    @AppStorage("HaloBluetoothClosedNotchDuration") private var bluetoothDuration = 10.0
+    @State private var activityClock = Date()
     let layout: WorkspaceLayout
     let occlusion: CGRect?
     let referenceWidth: CGFloat
@@ -129,13 +167,39 @@ struct ClosedNotchView: View {
     }
     private var activeActivity: LiveActivity? {
         workspace.activities.first { activity in
-            (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(12) > Date()
+            guard activityAllowed(activity) else { return false }
+            let duration = BluetoothClosedActivity.kind(for: activity) == nil ? 12.0 : min(20, max(2, bluetoothDuration))
+            return (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(duration) > activityClock
+        }
+    }
+    private func activityAllowed(_ activity: LiveActivity) -> Bool {
+        guard let kind = BluetoothClosedActivity.kind(for: activity) else { return true }
+        guard bluetoothEvents else { return false }
+        switch kind {
+        case .connected: return bluetoothConnected
+        case .disconnected: return bluetoothDisconnected
+        case .poweredOn: return bluetoothPoweredOn
+        case .poweredOff: return bluetoothPoweredOff
         }
     }
     private var resolvedItems: (left: ClosedNotchItem, right: ClosedNotchItem) {
         var left = options.left
         var right = options.right
-        guard activeActivity != nil, left != .activity, right != .activity else { return (left, right) }
+        guard let activity = activeActivity, left != .activity, right != .activity else { return (left, right) }
+
+        if BluetoothClosedActivity.kind(for: activity) != nil {
+            switch BluetoothClosedNotchSide(rawValue: bluetoothSide) ?? .automatic {
+            case .left:
+                left = .activity
+                return (left, right)
+            case .right:
+                right = .activity
+                return (left, right)
+            case .automatic:
+                break
+            }
+        }
+
         let rightAvailable = right == .none || ((right == .media || right == .visualizer) && !workspace.media.isPlaying)
         let leftAvailable = left == .none || ((left == .media || left == .visualizer) && !workspace.media.isPlaying)
         if rightAvailable { right = .activity }
@@ -158,7 +222,9 @@ struct ClosedNotchView: View {
                     slot(items.right, decoration: options.rightDecoration, side: .right, width: rightWidth, height: proxy.size.height)
                 }.frame(height: proxy.size.height)
             }
-        }.foregroundStyle(options.color.color)
+        }
+        .foregroundStyle(options.color.color)
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { activityClock = $0 }
     }
     private func verticalHUDContent(_ hud: HaloHUDNotchPresentation, size: CGSize, reservation: CGRect?) -> some View {
         let notch = hud.configuration.presentation.resolvedNotch
@@ -201,7 +267,7 @@ struct ClosedNotchView: View {
             if width >= 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin + 8 {
                 ClosedNotchSlot(item: item, decoration: decoration, side: side, availableHeight: height, availableWidth: width,
                                 options: options, clock: layout.widgetStyle(for: .clock), store: store, workspace: workspace,
-                                media: workspace.media, system: workspace.system, hud: hud(for: side))
+                                media: workspace.media, system: workspace.system, activity: activeActivity, hud: hud(for: side))
             }
         }.frame(width: max(0, width)).clipped()
     }
@@ -219,13 +285,10 @@ struct ClosedNotchSlot: View {
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject var media: MediaService
     @ObservedObject var system: SystemService
+    let activity: LiveActivity?
     let hud: HaloHUDNotchPresentation?
     private let elementSpacing = 6.0
-    private var activeActivity: LiveActivity? {
-        workspace.activities.first { activity in
-            (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(12) > Date()
-        }
-    }
+    private var activeActivity: LiveActivity? { activity }
     private var innerHeight: Double { max(1, availableHeight - 2 * options.contentPaddingY) }
     private var innerWidth: Double { max(1, availableWidth - 2 * options.contentPaddingX - options.contentSideMargin - options.contentOuterMargin) }
     private var isMusicItem: Bool { item == .media || item == .visualizer }
@@ -497,38 +560,129 @@ struct ClosedNotchSlot: View {
         case .files: Label("\(store.files.count)", systemImage: "tray").lineLimit(1)
         case .activity:
             if let activity = activeActivity {
-                HStack(spacing: 6) {
-                    Image(systemName: "waveform.path")
-                        .frame(width: max(12, textSize), alignment: .center)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(activity.title)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        if !activity.detail.isEmpty {
-                            Text(activity.detail)
-                                .font(.system(size: max(8, textSize * 0.76)))
-                                .opacity(0.72)
+                if let kind = BluetoothClosedActivity.kind(for: activity) {
+                    BluetoothClosedActivityView(activity: activity, kind: kind, side: side,
+                                                textSize: textSize, availableWidth: activityContentWidth,
+                                                inheritedColor: effectiveTextColor)
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: "waveform.path")
+                            .frame(width: max(12, textSize), alignment: .center)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(activity.title)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
+                            if !activity.detail.isEmpty {
+                                Text(activity.detail)
+                                    .font(.system(size: max(8, textSize * 0.76)))
+                                    .opacity(0.72)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                        }
+                        .layoutPriority(1)
+                        if let progress = activity.progress {
+                            ProgressView(value: progress)
+                                .controlSize(.mini)
+                                .frame(width: min(38, max(24, activityContentWidth * 0.22)))
                         }
                     }
+                    .frame(width: activityContentWidth,
+                           alignment: side == .left ? .trailing : .leading)
+                    .padding(.horizontal, 1)
+                    .clipped()
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     .layoutPriority(1)
-                    if let progress = activity.progress {
-                        ProgressView(value: progress)
-                            .controlSize(.mini)
-                            .frame(width: min(38, max(24, activityContentWidth * 0.22)))
-                    }
                 }
-                .frame(width: activityContentWidth,
-                       alignment: side == .left ? .trailing : .leading)
-                .padding(.horizontal, 1)
-                .clipped()
-                .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                .layoutPriority(1)
             }
         }
     }
     private var compactClock: WidgetStyle { var value = clock; value.fontSize = textSize; value.textColor = WidgetColor(effectiveTextColor); return value }
+}
+
+private struct BluetoothClosedActivityView: View {
+    let activity: LiveActivity
+    let kind: BluetoothConnectionEventKind
+    let side: ClosedNotchSide
+    let textSize: Double
+    let availableWidth: Double
+    let inheritedColor: Color
+    @AppStorage("HaloBluetoothClosedNotchLayout") private var layoutRaw = BluetoothClosedNotchLayout.stacked.rawValue
+    @AppStorage("HaloBluetoothClosedNotchAccent") private var accentRaw = BluetoothClosedNotchAccent.blue.rawValue
+    @AppStorage("HaloBluetoothClosedNotchShowIcon") private var showIcon = true
+    @AppStorage("HaloBluetoothClosedNotchShowLabel") private var showLabel = true
+    @AppStorage("HaloBluetoothClosedNotchShowDevice") private var showDevice = true
+    @AppStorage("HaloBluetoothClosedNotchIconSize") private var iconSize = 16.0
+
+    private var layout: BluetoothClosedNotchLayout { BluetoothClosedNotchLayout(rawValue: layoutRaw) ?? .stacked }
+    private var accent: Color {
+        switch BluetoothClosedNotchAccent(rawValue: accentRaw) ?? .blue {
+        case .inherit: return inheritedColor
+        case .blue: return .blue
+        case .green: return .green
+        case .accent: return .accentColor
+        case .white: return .white
+        }
+    }
+    private var alignment: Alignment { side == .left ? .trailing : .leading }
+    private var horizontalAlignment: HorizontalAlignment { side == .left ? .trailing : .leading }
+    private var label: String { BluetoothClosedActivity.label(for: kind) }
+    private var detail: String { activity.detail }
+    private var clampedIconSize: Double { min(max(8, iconSize), max(8, textSize * 1.8)) }
+
+    var body: some View {
+        Group {
+            switch layout {
+            case .iconOnly:
+                if showIcon { eventIcon }
+            case .textOnly:
+                textBlock
+            case .inline:
+                HStack(spacing: 5) {
+                    if showIcon { eventIcon }
+                    if showLabel { Text(label).fontWeight(.semibold).lineLimit(1) }
+                    if showDevice && !detail.isEmpty {
+                        Text(detail).font(.system(size: max(8, textSize * 0.76))).opacity(0.72).lineLimit(1)
+                    }
+                }
+            case .stacked:
+                HStack(spacing: 6) {
+                    if showIcon { eventIcon }
+                    textBlock
+                }
+            }
+        }
+        .foregroundStyle(accent)
+        .frame(width: availableWidth, alignment: alignment)
+        .padding(.horizontal, 1)
+        .clipped()
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        .layoutPriority(2)
+    }
+
+    private var eventIcon: some View {
+        Image(systemName: BluetoothClosedActivity.symbol(for: kind))
+            .font(.system(size: clampedIconSize, weight: .semibold))
+            .frame(width: max(12, clampedIconSize + 2), alignment: .center)
+    }
+
+    @ViewBuilder private var textBlock: some View {
+        if showLabel || (showDevice && !detail.isEmpty) {
+            VStack(alignment: horizontalAlignment, spacing: 1) {
+                if showLabel {
+                    Text(label).fontWeight(.semibold).lineLimit(1).truncationMode(.tail)
+                }
+                if showDevice && !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: max(8, textSize * 0.76)))
+                        .opacity(0.72)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            .layoutPriority(1)
+        }
+    }
 }
 
 @MainActor
