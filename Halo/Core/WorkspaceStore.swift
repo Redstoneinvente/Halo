@@ -9,10 +9,39 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
 
     @Published var settings: WorkspaceSettings { didSet {
         schedulePersistence()
-        updateHotkey()
-        if oldValue.mediaApp != settings.mediaApp || oldValue.automaticMedia != settings.automaticMedia { media.disconnect() }
-        updateArtworkPreference()
-        hudEngine?.configurationDidChange()
+
+        let hotkeyChanged = oldValue.hotkeyEnabled != settings.hotkeyEnabled ||
+            oldValue.hotkeyCode != settings.hotkeyCode ||
+            oldValue.hotkeyModifiers != settings.hotkeyModifiers
+        if hotkeyChanged { updateHotkey() }
+
+        let mediaSourceChanged = oldValue.mediaApp != settings.mediaApp || oldValue.automaticMedia != settings.automaticMedia
+        if mediaSourceChanged { media.disconnect() }
+
+        let baseArtworkInputsChanged = oldValue.layout.contextMusic != settings.layout.contextMusic ||
+            oldValue.layout.hud != settings.layout.hud ||
+            oldValue.layout.closedNotch != settings.layout.closedNotch ||
+            oldValue.layout.enabled != settings.layout.enabled ||
+            oldValue.displays != settings.displays || mediaSourceChanged
+        let activeProfileArtworkInputsChanged: Bool = {
+            guard let id = scheduledProfileID else { return false }
+            let oldLayout = oldValue.profiles.first(where: { $0.id == id })?.layout
+            let newLayout = settings.profiles.first(where: { $0.id == id })?.layout
+            return oldLayout?.contextMusic != newLayout?.contextMusic ||
+                oldLayout?.hud != newLayout?.hud ||
+                oldLayout?.closedNotch != newLayout?.closedNotch ||
+                oldLayout?.enabled != newLayout?.enabled
+        }()
+        if baseArtworkInputsChanged || activeProfileArtworkInputsChanged { updateArtworkPreference() }
+
+        let activeProfileHUDChanged: Bool = {
+            guard let id = scheduledProfileID else { return false }
+            return oldValue.profiles.first(where: { $0.id == id })?.layout.hud != settings.profiles.first(where: { $0.id == id })?.layout.hud
+        }()
+        if oldValue.layout.hud != settings.layout.hud || oldValue.displays != settings.displays || activeProfileHUDChanged {
+            hudEngine?.configurationDidChange()
+        }
+
         queueScheduleEvaluation()
     } }
     @Published private(set) var scheduledProfileID: UUID?
