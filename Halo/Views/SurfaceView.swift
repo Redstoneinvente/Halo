@@ -2,6 +2,550 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+enum VinylStylePreset: String, Codable, CaseIterable, Identifiable {
+    case classic = "Classic"
+    case studio = "Studio Gloss"
+    case minimal = "Minimal"
+    case retro = "Retro"
+    case neon = "Neon"
+    case smoked = "Smoked"
+    case custom = "Custom"
+    var id: String { rawValue }
+}
+
+enum VinylColorSource: String, Codable, CaseIterable, Identifiable {
+    case classic = "Classic black"
+    case album = "Album color"
+    case custom = "Custom"
+    var id: String { rawValue }
+}
+
+enum VinylAccentSource: String, Codable, CaseIterable, Identifiable {
+    case white = "Neutral"
+    case album = "Album color"
+    case custom = "Custom"
+    var id: String { rawValue }
+}
+
+enum VinylLabelStyle: String, Codable, CaseIterable, Identifiable {
+    case artwork = "Album artwork"
+    case albumColor = "Album color"
+    case custom = "Custom color"
+    case dark = "Dark label"
+    case none = "No label"
+    var id: String { rawValue }
+}
+
+struct VinylStyleOptions: Codable, Equatable {
+    var preset: VinylStylePreset = .classic
+    var discColorSource: VinylColorSource = .classic
+    var accentSource: VinylAccentSource = .white
+    var labelStyle: VinylLabelStyle = .artwork
+    var customDiscColor = WidgetColor(red: 0.025, green: 0.025, blue: 0.03)
+    var customAccentColor = WidgetColor.white
+    var customLabelColor = WidgetColor(red: 0.78, green: 0.16, blue: 0.12)
+    var discOpacity = 0.98
+    var depth = 0.72
+    var grooveCount = 8
+    var grooveOpacity = 0.11
+    var grooveWidth = 0.006
+    var grooveStart = 0.055
+    var grooveEnd = 0.34
+    var edgeRingOpacity = 0.16
+    var edgeRingWidth = 0.008
+    var labelScale = 0.46
+    var labelOpacity = 1.0
+    var labelSaturation = 1.0
+    var labelBrightness = 0.0
+    var labelBorderOpacity = 0.32
+    var labelBorderWidth = 0.007
+    var centerCapScale = 0.105
+    var centerHoleScale = 0.024
+    var highlightIntensity = 0.16
+    var highlightArc = 0.23
+    var highlightAngle = -28.0
+    var highlightWidth = 0.009
+    var gloss = 0.14
+    var shadowOpacity = 0.36
+    var shadowRadius = 0.06
+    var shadowYOffset = 0.025
+    var glowOpacity = 0.0
+    var glowRadius = 0.10
+    var rpm = 8.0
+    var reverse = false
+
+    static func made(_ preset: VinylStylePreset) -> VinylStyleOptions {
+        var value = VinylStyleOptions()
+        value.preset = preset
+        switch preset {
+        case .classic:
+            break
+        case .studio:
+            value.grooveCount = 12
+            value.grooveOpacity = 0.13
+            value.grooveWidth = 0.0045
+            value.edgeRingOpacity = 0.24
+            value.highlightIntensity = 0.30
+            value.highlightArc = 0.30
+            value.gloss = 0.30
+            value.shadowOpacity = 0.48
+            value.shadowRadius = 0.075
+            value.labelBorderOpacity = 0.42
+            value.depth = 0.82
+        case .minimal:
+            value.grooveCount = 3
+            value.grooveOpacity = 0.045
+            value.edgeRingOpacity = 0.06
+            value.highlightIntensity = 0.06
+            value.gloss = 0.04
+            value.shadowOpacity = 0.20
+            value.labelBorderOpacity = 0.12
+            value.labelScale = 0.42
+            value.centerCapScale = 0.085
+        case .retro:
+            value.discColorSource = .custom
+            value.accentSource = .custom
+            value.customDiscColor = WidgetColor(red: 0.075, green: 0.047, blue: 0.035)
+            value.customAccentColor = WidgetColor(red: 0.92, green: 0.77, blue: 0.48)
+            value.grooveCount = 7
+            value.grooveOpacity = 0.16
+            value.grooveWidth = 0.0065
+            value.labelScale = 0.52
+            value.labelSaturation = 0.82
+            value.labelBrightness = -0.035
+            value.highlightIntensity = 0.11
+            value.gloss = 0.08
+            value.rpm = 6
+        case .neon:
+            value.discColorSource = .album
+            value.accentSource = .album
+            value.grooveCount = 10
+            value.grooveOpacity = 0.23
+            value.grooveWidth = 0.0065
+            value.edgeRingOpacity = 0.34
+            value.highlightIntensity = 0.35
+            value.gloss = 0.24
+            value.glowOpacity = 0.55
+            value.glowRadius = 0.16
+            value.depth = 0.55
+            value.rpm = 10
+        case .smoked:
+            value.discColorSource = .custom
+            value.customDiscColor = WidgetColor(red: 0.075, green: 0.09, blue: 0.11)
+            value.discOpacity = 0.90
+            value.grooveCount = 14
+            value.grooveOpacity = 0.08
+            value.grooveWidth = 0.004
+            value.highlightIntensity = 0.20
+            value.highlightArc = 0.38
+            value.gloss = 0.22
+            value.depth = 0.42
+            value.labelScale = 0.43
+        case .custom:
+            break
+        }
+        return value
+    }
+
+    func normalized() -> VinylStyleOptions {
+        var value = self
+        value.discOpacity = min(1, max(0.3, discOpacity))
+        value.depth = min(1, max(0, depth))
+        value.grooveCount = min(24, max(0, grooveCount))
+        value.grooveOpacity = min(0.8, max(0, grooveOpacity))
+        value.grooveWidth = min(0.03, max(0.001, grooveWidth))
+        value.grooveStart = min(0.32, max(0.01, grooveStart))
+        value.grooveEnd = min(0.46, max(value.grooveStart + 0.02, grooveEnd))
+        value.edgeRingOpacity = min(1, max(0, edgeRingOpacity))
+        value.edgeRingWidth = min(0.04, max(0.001, edgeRingWidth))
+        value.labelScale = min(0.72, max(0.18, labelScale))
+        value.labelOpacity = min(1, max(0, labelOpacity))
+        value.labelSaturation = min(2, max(0, labelSaturation))
+        value.labelBrightness = min(0.5, max(-0.5, labelBrightness))
+        value.labelBorderOpacity = min(1, max(0, labelBorderOpacity))
+        value.labelBorderWidth = min(0.04, max(0.001, labelBorderWidth))
+        value.centerCapScale = min(0.32, max(0.03, centerCapScale))
+        value.centerHoleScale = min(0.12, max(0.006, centerHoleScale))
+        value.highlightIntensity = min(1, max(0, highlightIntensity))
+        value.highlightArc = min(0.80, max(0.03, highlightArc))
+        value.highlightAngle = min(180, max(-180, highlightAngle))
+        value.highlightWidth = min(0.05, max(0.002, highlightWidth))
+        value.gloss = min(0.8, max(0, gloss))
+        value.shadowOpacity = min(0.9, max(0, shadowOpacity))
+        value.shadowRadius = min(0.20, max(0, shadowRadius))
+        value.shadowYOffset = min(0.15, max(-0.10, shadowYOffset))
+        value.glowOpacity = min(1, max(0, glowOpacity))
+        value.glowRadius = min(0.30, max(0, glowRadius))
+        value.rpm = min(60, max(0.5, rpm))
+        value.customDiscColor = (try? customDiscColor.validated()) ?? VinylStyleOptions().customDiscColor
+        value.customAccentColor = (try? customAccentColor.validated()) ?? .white
+        value.customLabelColor = (try? customLabelColor.validated()) ?? VinylStyleOptions().customLabelColor
+        return value
+    }
+}
+
+final class VinylStyleStore: ObservableObject {
+    static let shared = VinylStyleStore()
+    private let defaults: UserDefaults
+    private let key = "HaloVinylStyle.v1"
+    @Published var options: VinylStyleOptions {
+        didSet { persist() }
+    }
+
+    private init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let data = defaults.data(forKey: key),
+           let decoded = try? JSONDecoder().decode(VinylStyleOptions.self, from: data) {
+            options = decoded.normalized()
+        } else {
+            options = .made(.classic)
+        }
+    }
+
+    func applyPreset(_ preset: VinylStylePreset) {
+        guard preset != .custom else {
+            var next = options
+            next.preset = .custom
+            options = next
+            return
+        }
+        options = .made(preset)
+    }
+
+    func update<T>(_ keyPath: WritableKeyPath<VinylStyleOptions, T>, _ newValue: T) {
+        var next = options
+        next[keyPath: keyPath] = newValue
+        next.preset = .custom
+        options = next.normalized()
+    }
+
+    func reset() { options = .made(.classic) }
+
+    private func persist() {
+        guard let data = try? JSONEncoder().encode(options.normalized()) else { return }
+        defaults.set(data, forKey: key)
+    }
+}
+
+@MainActor
+final class VinylStyleWindowController {
+    static let shared = VinylStyleWindowController()
+    private var window: NSWindow?
+
+    func show() {
+        if let window {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        let controller = NSHostingController(rootView: VinylStyleSettingsView())
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 570, height: 760),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                              backing: .buffered, defer: false)
+        window.title = "Halo · Vinyl Studio"
+        window.contentViewController = controller
+        window.isReleasedWhenClosed = false
+        window.minSize = CGSize(width: 520, height: 620)
+        window.center()
+        self.window = window
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+}
+
+struct VinylRecordView: View {
+    let artwork: NSImage?
+    let size: Double
+    let palette: [WidgetColor]
+    let playing: Bool
+    let lowPower: Bool
+    var interactive = true
+    @ObservedObject private var styleStore = VinylStyleStore.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovering = false
+
+    private var style: VinylStyleOptions { styleStore.options.normalized() }
+    private var albumColor: Color { palette.first?.color ?? Color(hue: 0.58, saturation: 0.72, brightness: 0.95) }
+    private var secondaryAlbumColor: Color { palette.dropFirst().first?.color ?? albumColor.opacity(0.72) }
+    private var discColor: Color {
+        switch style.discColorSource {
+        case .classic: return Color(red: 0.018, green: 0.019, blue: 0.024)
+        case .album: return albumColor
+        case .custom: return style.customDiscColor.color
+        }
+    }
+    private var accentColor: Color {
+        switch style.accentSource {
+        case .white: return .white
+        case .album: return secondaryAlbumColor
+        case .custom: return style.customAccentColor.color
+        }
+    }
+    private var shouldAnimate: Bool { playing && !reduceMotion && !lowPower }
+
+    var body: some View {
+        Group {
+            if shouldAnimate {
+                TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !playing)) { context in
+                    record
+                        .rotationEffect(.degrees(rotationAngle(at: context.date)))
+                }
+            } else {
+                record
+            }
+        }
+        .frame(width: size, height: size)
+        .contentShape(Circle())
+        .contextMenu {
+            if interactive {
+                Button("Open Vinyl Studio…") { VinylStyleWindowController.shared.show() }
+                Menu("Preset") {
+                    ForEach(VinylStylePreset.allCases.filter { $0 != .custom }) { preset in
+                        Button(preset.rawValue) { styleStore.applyPreset(preset) }
+                    }
+                }
+                Divider()
+                Button("Reset to Classic") { styleStore.reset() }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if interactive && hovering && size >= 26 {
+                Button { VinylStyleWindowController.shared.show() } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: min(11, max(7, size * 0.13)), weight: .semibold))
+                        .frame(width: min(22, max(12, size * 0.24)), height: min(22, max(12, size * 0.24)))
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Customize vinyl")
+                .offset(x: size * 0.02, y: -size * 0.02)
+            }
+        }
+        .onHover { if interactive { hovering = $0 } }
+        .help(interactive ? "Right-click to customize the shared vinyl style" : "Vinyl preview")
+        .accessibilityLabel("Customizable vinyl record")
+    }
+
+    private func rotationAngle(at date: Date) -> Double {
+        let direction = style.reverse ? -1.0 : 1.0
+        return date.timeIntervalSinceReferenceDate * style.rpm / 60.0 * 360.0 * direction
+    }
+
+    private var record: some View {
+        ZStack {
+            Circle()
+                .fill(RadialGradient(colors: [
+                    discColor.opacity(style.discOpacity),
+                    discColor.opacity(max(0.35, style.discOpacity * 0.94)),
+                    Color.black.opacity(0.30 + style.depth * 0.62)
+                ], center: .center, startRadius: size * 0.04, endRadius: size * 0.52))
+
+            if style.grooveCount > 0 {
+                ForEach(0..<style.grooveCount, id: \.self) { index in
+                    let denominator = Double(max(1, style.grooveCount - 1))
+                    let t = Double(index) / denominator
+                    let inset = style.grooveStart + (style.grooveEnd - style.grooveStart) * t
+                    Circle()
+                        .stroke(accentColor.opacity(style.grooveOpacity * (index.isMultiple(of: 2) ? 1 : 0.62)),
+                                lineWidth: max(0.35, size * style.grooveWidth))
+                        .padding(size * inset)
+                }
+            }
+
+            if style.edgeRingOpacity > 0 {
+                Circle()
+                    .stroke(accentColor.opacity(style.edgeRingOpacity), lineWidth: max(0.45, size * style.edgeRingWidth))
+                    .padding(size * 0.018)
+            }
+
+            if style.highlightIntensity > 0 {
+                Circle()
+                    .trim(from: 0.06, to: min(0.94, 0.06 + style.highlightArc))
+                    .stroke(accentColor.opacity(style.highlightIntensity),
+                            style: StrokeStyle(lineWidth: max(0.5, size * style.highlightWidth), lineCap: .round))
+                    .padding(size * 0.052)
+                    .rotationEffect(.degrees(style.highlightAngle))
+            }
+
+            if style.gloss > 0 {
+                Circle()
+                    .fill(LinearGradient(colors: [
+                        Color.white.opacity(style.gloss),
+                        Color.white.opacity(style.gloss * 0.12),
+                        Color.clear,
+                        Color.black.opacity(style.gloss * 0.18)
+                    ], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .blendMode(.screen)
+                    .padding(size * 0.012)
+            }
+
+            label
+
+            Circle()
+                .stroke(accentColor.opacity(style.labelBorderOpacity), lineWidth: max(0.45, size * style.labelBorderWidth))
+                .frame(width: size * min(0.78, style.labelScale + 0.03), height: size * min(0.78, style.labelScale + 0.03))
+
+            Circle()
+                .fill(Color.black.opacity(0.92))
+                .frame(width: max(3, size * style.centerCapScale), height: max(3, size * style.centerCapScale))
+
+            Circle()
+                .fill(accentColor.opacity(0.78))
+                .frame(width: max(1, size * style.centerHoleScale), height: max(1, size * style.centerHoleScale))
+        }
+        .frame(width: size, height: size)
+        .shadow(color: accentColor.opacity(style.glowOpacity), radius: size * style.glowRadius)
+        .shadow(color: .black.opacity(style.shadowOpacity), radius: size * style.shadowRadius, y: size * style.shadowYOffset)
+    }
+
+    @ViewBuilder private var label: some View {
+        Group {
+            switch style.labelStyle {
+            case .artwork:
+                if let artwork {
+                    Image(nsImage: artwork).resizable().scaledToFill()
+                } else {
+                    albumColor.overlay(Image(systemName: "music.note").foregroundStyle(Color.black.opacity(0.66)))
+                }
+            case .albumColor:
+                albumColor.overlay(Image(systemName: "music.note").foregroundStyle(Color.black.opacity(0.55)))
+            case .custom:
+                style.customLabelColor.color
+            case .dark:
+                Color.black.opacity(0.88)
+            case .none:
+                Color.clear
+            }
+        }
+        .frame(width: size * style.labelScale, height: size * style.labelScale)
+        .clipShape(Circle())
+        .opacity(style.labelOpacity)
+        .saturation(style.labelSaturation)
+        .brightness(style.labelBrightness)
+    }
+}
+
+struct VinylStyleSettingsView: View {
+    @ObservedObject private var store = VinylStyleStore.shared
+    private var options: VinylStyleOptions { store.options.normalized() }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .center, spacing: 24) {
+                    VinylRecordView(artwork: NSApp.applicationIconImage,
+                                    size: 154,
+                                    palette: [WidgetColor(red: 0.42, green: 0.68, blue: 1.0), WidgetColor(red: 0.82, green: 0.28, blue: 0.72)],
+                                    playing: true, lowPower: false, interactive: false)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Vinyl Studio").font(.title.bold())
+                        Text("One vinyl design, shared everywhere Halo shows a record — Closed Notch and Music CI update together.")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Picker("Preset", selection: Binding(get: { options.preset }, set: { store.applyPreset($0) })) {
+                            ForEach(VinylStylePreset.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        HStack {
+                            Button("Classic") { store.applyPreset(.classic) }
+                            Button("Reset") { store.reset() }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GroupBox("Disc & palette") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Picker("Disc color", selection: binding(\.discColorSource)) {
+                            ForEach(VinylColorSource.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        if options.discColorSource == .custom { colorPicker("Custom disc color", \.customDiscColor) }
+                        Picker("Detail color", selection: binding(\.accentSource)) {
+                            ForEach(VinylAccentSource.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        if options.accentSource == .custom { colorPicker("Custom detail color", \.customAccentColor) }
+                        slider("Disc opacity", \.discOpacity, 0.3...1, value: { String(format: "%.2f", $0) })
+                        slider("Radial depth", \.depth, 0...1, value: { String(format: "%.2f", $0) })
+                    }.padding(.vertical, 4)
+                }
+
+                GroupBox("Center label") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Picker("Label", selection: binding(\.labelStyle)) {
+                            ForEach(VinylLabelStyle.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        if options.labelStyle == .custom { colorPicker("Label color", \.customLabelColor) }
+                        slider("Label size", \.labelScale, 0.18...0.72, value: percent)
+                        slider("Label opacity", \.labelOpacity, 0...1, value: percent)
+                        slider("Artwork saturation", \.labelSaturation, 0...2, value: { String(format: "%.2fx", $0) })
+                        slider("Artwork brightness", \.labelBrightness, -0.5...0.5, value: { String(format: "%+.2f", $0) })
+                        slider("Label ring opacity", \.labelBorderOpacity, 0...1, value: percent)
+                        slider("Label ring width", \.labelBorderWidth, 0.001...0.04, value: { String(format: "%.3f", $0) })
+                        slider("Center cap size", \.centerCapScale, 0.03...0.32, value: percent)
+                        slider("Center hole size", \.centerHoleScale, 0.006...0.12, value: percent)
+                    }.padding(.vertical, 4)
+                }
+
+                GroupBox("Grooves & edge") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Stepper("Grooves: \(options.grooveCount)", value: binding(\.grooveCount), in: 0...24)
+                        slider("Groove opacity", \.grooveOpacity, 0...0.8, value: percent)
+                        slider("Groove width", \.grooveWidth, 0.001...0.03, value: { String(format: "%.3f", $0) })
+                        slider("Outer groove inset", \.grooveStart, 0.01...0.32, value: percent)
+                        slider("Inner groove inset", \.grooveEnd, max(0.03, options.grooveStart + 0.02)...0.46, value: percent)
+                        slider("Edge ring opacity", \.edgeRingOpacity, 0...1, value: percent)
+                        slider("Edge ring width", \.edgeRingWidth, 0.001...0.04, value: { String(format: "%.3f", $0) })
+                    }.padding(.vertical, 4)
+                }
+
+                GroupBox("Light, gloss & depth") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        slider("Specular highlight", \.highlightIntensity, 0...1, value: percent)
+                        slider("Highlight arc", \.highlightArc, 0.03...0.80, value: percent)
+                        slider("Highlight angle", \.highlightAngle, -180...180, value: { "\(Int($0))°" })
+                        slider("Highlight width", \.highlightWidth, 0.002...0.05, value: { String(format: "%.3f", $0) })
+                        slider("Surface gloss", \.gloss, 0...0.8, value: percent)
+                        slider("Shadow opacity", \.shadowOpacity, 0...0.9, value: percent)
+                        slider("Shadow radius", \.shadowRadius, 0...0.20, value: percent)
+                        slider("Shadow Y offset", \.shadowYOffset, -0.10...0.15, value: percent)
+                        slider("Accent glow", \.glowOpacity, 0...1, value: percent)
+                        slider("Glow radius", \.glowRadius, 0...0.30, value: percent)
+                    }.padding(.vertical, 4)
+                }
+
+                GroupBox("Motion") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        slider("Rotation speed", \.rpm, 0.5...60, value: { String(format: "%.1f rpm", $0) })
+                        Toggle("Reverse rotation", isOn: binding(\.reverse))
+                        Text("Reduce Motion and Low Power Mode still stop continuous rotation where Halo already respects those system preferences.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }.padding(.vertical, 4)
+                }
+
+                Text("Vinyl Studio is global by design: changing the record here immediately updates every vinyl instance in Halo, including the closed notch and Music CI.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(20)
+        }
+        .frame(minWidth: 500, minHeight: 600)
+    }
+
+    private func binding<T>(_ keyPath: WritableKeyPath<VinylStyleOptions, T>) -> Binding<T> {
+        Binding(get: { store.options[keyPath: keyPath] }, set: { store.update(keyPath, $0) })
+    }
+
+    private func colorPicker(_ title: String, _ keyPath: WritableKeyPath<VinylStyleOptions, WidgetColor>) -> some View {
+        ColorPicker(title, selection: Binding(get: { store.options[keyPath: keyPath].color }, set: { store.update(keyPath, WidgetColor($0)) }), supportsOpacity: false)
+    }
+
+    private func slider(_ title: String, _ keyPath: WritableKeyPath<VinylStyleOptions, Double>, _ range: ClosedRange<Double>, value formatter: @escaping (Double) -> String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack { Text(title); Spacer(); Text(formatter(store.options[keyPath: keyPath])).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+            SwiftUI.Slider(value: binding(keyPath), in: range)
+        }
+    }
+
+    private func percent(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
+}
+
 struct SurfaceViewportView: View {
     @ObservedObject var viewport: SurfaceViewport
     let content: SurfaceView
@@ -511,70 +1055,12 @@ private struct ContextMusicView: View {
         .id(options.resolvedForegroundArtwork.rawValue)
     }
 
-    @ViewBuilder
     private func vinylArtwork(size: Double) -> some View {
-        if reduceMotion {
-            vinylDisc(size: size)
-        } else {
-            vinylDisc(size: size)
-                .rotationEffect(.degrees(vinylRotation))
-                .onReceive(
-                    Timer.publish(
-                        every: 1.0 / 60.0,
-                        on: .main,
-                        in: .common
-                    ).autoconnect()
-                ) { now in
-                    defer { vinylLastTick = now }
-
-                    guard media.isPlaying else { return }
-
-                    let delta = min(
-                        0.1,
-                        max(0, now.timeIntervalSince(vinylLastTick))
-                    )
-
-                    let degreesPerSecond =
-                        options.resolvedVinylRPM * 360.0 / 60.0
-
-                    vinylRotation += degreesPerSecond * delta
-
-                    if vinylRotation >= 360 {
-                        vinylRotation.formTruncatingRemainder(
-                            dividingBy: 360
-                        )
-                    }
-                }
-                .onAppear {
-                    vinylLastTick = Date()
-                }
-                .onChange(of: media.isPlaying) { _ in
-                    vinylLastTick = Date()
-                }
-        }
-    }
-
-    private func vinylDisc(size: Double) -> some View {
-        ZStack {
-            Circle().fill(RadialGradient(colors: [.black.opacity(0.84), .black, .black.opacity(0.92)], center: .center, startRadius: size * 0.05, endRadius: size * 0.5))
-            ForEach(1..<8, id: \.self) { ring in
-                Circle().stroke(Color.white.opacity(ring.isMultiple(of: 2) ? 0.10 : 0.045), lineWidth: max(0.45, size * 0.005)).padding(size * (0.055 + Double(ring) * 0.038))
-            }
-            Circle().trim(from: 0.08, to: 0.31)
-                .stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: max(0.7, size * 0.009), lineCap: .round))
-                .padding(size * 0.055).rotationEffect(.degrees(-28))
-            Group {
-                if let artwork { Image(nsImage: artwork).resizable().scaledToFill() }
-                else { Color.white.opacity(0.14).overlay(Image(systemName: "music.note").opacity(0.65)) }
-            }
-            .frame(width: size * 0.46, height: size * 0.46).clipShape(Circle())
-            Circle().stroke(Color.white.opacity(0.32), lineWidth: max(0.8, size * 0.007)).frame(width: size * 0.49, height: size * 0.49)
-            Circle().fill(Color.black).frame(width: max(7, size * 0.105), height: max(7, size * 0.105))
-            Circle().fill(Color.white.opacity(0.72)).frame(width: max(1.5, size * 0.024), height: max(1.5, size * 0.024))
-        }
-        .frame(width: size, height: size)
-        .shadow(color: .black.opacity(0.36), radius: size * 0.06, y: size * 0.025)
-        .accessibilityLabel("Spinning vinyl record")
+        VinylRecordView(artwork: artwork,
+                        size: size,
+                        palette: media.artworkColors,
+                        playing: media.isPlaying,
+                        lowPower: false)
     }
 
     private var artworkPlaceholder: some View {
