@@ -412,8 +412,14 @@ final class WindowManager {
             return
         }
 
-        let width = min(configuration.layout.maximumWidth,
-                        max(configuration.layout.minimumWidth, configuration.layout.width))
+        let notch = configuration.presentation.resolvedNotch
+        let outwardOffset: Double
+        switch side {
+        case .left: outwardOffset = max(0, -notch.horizontalOffset)
+        case .right: outwardOffset = max(0, notch.horizontalOffset)
+        case .full, .automatic: outwardOffset = abs(notch.horizontalOffset)
+        }
+        let width = notch.width + outwardOffset
         let repeatedContinue = hudNotchExpansion?.kind == kind &&
             configuration.behavior.interrupt == .continue && hudNotchHideWork != nil
 
@@ -558,8 +564,7 @@ final class WindowManager {
             let leftFree = items.left == .none || ((items.left == .media || items.left == .visualizer) && !playing)
             if rightFree { side = .right }
             else if leftFree { side = .left }
-            else { side = .right
-            }
+            else { side = .right }
         }
         return (side, badgeWidth, minimumSideWidth)
     }
