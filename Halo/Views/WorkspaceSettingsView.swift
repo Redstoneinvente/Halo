@@ -508,6 +508,14 @@ private struct ContextMusicSettings: View {
             hud.wrappedValue = settings
         })
     }
+    private var notchConfiguration: Binding<HaloHUDNotchConfiguration> {
+        Binding(get: { configuration.wrappedValue.presentation.resolvedNotch }, set: { value in
+            var updated = configuration.wrappedValue
+            updated.presentation.notch = value
+            configuration.wrappedValue = updated
+        })
+    }
+    private var isNotchTarget: Bool { configuration.wrappedValue.presentation.target == .notch }
 
     var body: some View {
         Picker("HUD", selection: $page) {
@@ -594,7 +602,17 @@ private struct ContextMusicSettings: View {
             case .notch:
                 Picker("Notch side", selection: configuration.presentation.notchSide) { ForEach(HaloHUDNotchSide.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
                 Picker("Collision", selection: configuration.behavior.collision) { ForEach(HaloHUDCollisionBehavior.allCases) { Text($0.title).tag($0) } }
-                Text("Left, Right, Automatic and Full Notch are distinct placement intents. Show Externally falls back when the chosen side is occupied; deeper Push/Overlay integration with Halo's closed-notch content is still intentionally separate from the HUD panel renderer.").font(.caption).foregroundStyle(.secondary)
+                Text("Notch HUD is rendered inside Halo's closed-notch strip. It can expand the chosen side horizontally, but it never increases closed-notch height or moves below the closed area.").font(.caption).foregroundStyle(.secondary)
+                Divider()
+                Text("Notch HUD customization").font(.headline)
+                Slider(value: notchConfiguration.width, in: 48...600) { Text("HUD width") }
+                Slider(value: notchConfiguration.horizontalPadding, in: 0...40) { Text("Horizontal padding") }
+                Slider(value: notchConfiguration.spacing, in: 0...32) { Text("Content spacing") }
+                Slider(value: notchConfiguration.horizontalOffset, in: -300...300) { Text("Horizontal offset") }
+                Slider(value: notchConfiguration.iconSize, in: 8...32) { Text("Icon size") }
+                Slider(value: notchConfiguration.textSize, in: 8...24) { Text("Text size") }
+                Slider(value: notchConfiguration.progressWidth, in: 20...220) { Text("Progress width") }
+                Text("These values are stored separately from the normal floating HUD layout and are used only when Target is Notch.").font(.caption).foregroundStyle(.secondary)
             case .floating:
                 Picker("Position", selection: configuration.presentation.floatingPosition) { ForEach(HaloHUDFloatingPosition.allCases) { Text($0.title).tag($0) } }
             case .screenEdge:
@@ -612,19 +630,24 @@ private struct ContextMusicSettings: View {
         }
 
         Section("Layout") {
-            Picker("Layout", selection: configuration.layout.style) { ForEach(HaloHUDLayoutStyle.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
-            Slider(value: configuration.layout.width, in: 80...900) { Text("Width") }
-            Slider(value: configuration.layout.height, in: 24...500) { Text("Height") }
-            Slider(value: configuration.layout.minimumWidth, in: 40...600) { Text("Minimum width") }
-            Slider(value: configuration.layout.maximumWidth, in: 80...1200) { Text("Maximum width") }
-            Slider(value: configuration.layout.horizontalPadding, in: 0...80) { Text("Horizontal padding") }
-            Slider(value: configuration.layout.verticalPadding, in: 0...80) { Text("Vertical padding") }
-            Slider(value: configuration.layout.spacing, in: 0...60) { Text("Content spacing") }
-            Slider(value: configuration.layout.cornerRadius, in: 0...120) { Text("Corner radius") }
-            Slider(value: configuration.layout.offsetX, in: -500...500) { Text("X offset") }
-            Slider(value: configuration.layout.offsetY, in: -500...500) { Text("Y offset") }
-            Slider(value: configuration.layout.edgeMargin, in: 0...120) { Text("Screen / edge margin") }
-            Toggle("Compact mode", isOn: configuration.layout.compact)
+            if isNotchTarget {
+                Text("The Notch target always uses a compact horizontal HUD inside the current Closed Notch height. Generic height, vertical padding, Y offset, corner radius and panel layout settings do not apply here.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Picker("Layout", selection: configuration.layout.style) { ForEach(HaloHUDLayoutStyle.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+                Slider(value: configuration.layout.width, in: 80...900) { Text("Width") }
+                Slider(value: configuration.layout.height, in: 24...500) { Text("Height") }
+                Slider(value: configuration.layout.minimumWidth, in: 40...600) { Text("Minimum width") }
+                Slider(value: configuration.layout.maximumWidth, in: 80...1200) { Text("Maximum width") }
+                Slider(value: configuration.layout.horizontalPadding, in: 0...80) { Text("Horizontal padding") }
+                Slider(value: configuration.layout.verticalPadding, in: 0...80) { Text("Vertical padding") }
+                Slider(value: configuration.layout.spacing, in: 0...60) { Text("Content spacing") }
+                Slider(value: configuration.layout.cornerRadius, in: 0...120) { Text("Corner radius") }
+                Slider(value: configuration.layout.offsetX, in: -500...500) { Text("X offset") }
+                Slider(value: configuration.layout.offsetY, in: -500...500) { Text("Y offset") }
+                Slider(value: configuration.layout.edgeMargin, in: 0...120) { Text("Screen / edge margin") }
+                Toggle("Compact mode", isOn: configuration.layout.compact)
+            }
         }
 
         Section("Components") {
@@ -640,57 +663,73 @@ private struct ContextMusicSettings: View {
                     Stepper("Segments / dots: \(configuration.wrappedValue.segments)", value: configuration.segments, in: 2...64)
                 }
             }
-            Slider(value: configuration.iconSize, in: 8...96) { Text("Icon size") }
-            Slider(value: configuration.textSize, in: 8...64) { Text("Text size") }
+            if !isNotchTarget {
+                Slider(value: configuration.iconSize, in: 8...96) { Text("Icon size") }
+                Slider(value: configuration.textSize, in: 8...64) { Text("Text size") }
+            }
         }
 
         Section("Appearance") {
-            Picker("Background", selection: configuration.appearance.background) {
-                ForEach(HaloHUDBackgroundStyle.allCases) { style in
-                    Text(style.title + ((style == .image || style == .video) ? " · unavailable" : ""))
-                        .tag(style)
-                        .disabled(style == .image || style == .video)
+            if isNotchTarget {
+                Text("Notch HUD reuses the existing Closed Notch surface. It does not draw its own background, border, shadow, glow, blur or vertical shape, so the HUD stays visually inside closed mode.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Picker("Background", selection: configuration.appearance.background) {
+                    ForEach(HaloHUDBackgroundStyle.allCases) { style in
+                        Text(style.title + ((style == .image || style == .video) ? " · unavailable" : ""))
+                            .tag(style)
+                            .disabled(style == .image || style == .video)
+                    }
                 }
+                if configuration.wrappedValue.appearance.background == .image || configuration.wrappedValue.appearance.background == .video {
+                    Text("This saved HUD uses an asset-backed background type from the model, but HUD asset-path persistence is not connected yet. Halo renders a styled fallback until that provider is implemented.").font(.caption).foregroundStyle(.orange)
+                }
+                Slider(value: configuration.appearance.backgroundOpacity, in: 0...1) { Text("Background opacity") }
+                Slider(value: configuration.appearance.blur, in: 0...60) { Text("Blur") }
+                if configuration.wrappedValue.appearance.background == .glass { Slider(value: configuration.appearance.glassIntensity, in: 0...1) { Text("Glass intensity") } }
+                Toggle("Border", isOn: configuration.appearance.border)
+                if configuration.wrappedValue.appearance.border { Slider(value: configuration.appearance.borderOpacity, in: 0...1) { Text("Border opacity") } }
+                Toggle("Shadow", isOn: configuration.appearance.shadow)
+                Toggle("Glow", isOn: configuration.appearance.glow)
+                Toggle("Noise", isOn: configuration.appearance.noise)
             }
-            if configuration.wrappedValue.appearance.background == .image || configuration.wrappedValue.appearance.background == .video {
-                Text("This saved HUD uses an asset-backed background type from the model, but HUD asset-path persistence is not connected yet. Halo renders a styled fallback until that provider is implemented.").font(.caption).foregroundStyle(.orange)
-            }
-            Slider(value: configuration.appearance.backgroundOpacity, in: 0...1) { Text("Background opacity") }
-            Slider(value: configuration.appearance.blur, in: 0...60) { Text("Blur") }
-            if configuration.wrappedValue.appearance.background == .glass { Slider(value: configuration.appearance.glassIntensity, in: 0...1) { Text("Glass intensity") } }
-            Toggle("Border", isOn: configuration.appearance.border)
-            if configuration.wrappedValue.appearance.border { Slider(value: configuration.appearance.borderOpacity, in: 0...1) { Text("Border opacity") } }
-            Toggle("Shadow", isOn: configuration.appearance.shadow)
-            Toggle("Glow", isOn: configuration.appearance.glow)
-            Toggle("Noise", isOn: configuration.appearance.noise)
         }
 
         Section("Dynamic Colors") {
             colorSource("Primary", binding: configuration.appearance.primary)
             colorSource("Secondary", binding: configuration.appearance.secondary)
             colorSource("Progress", binding: configuration.appearance.progress)
-            colorSource("Border", binding: configuration.appearance.borderColor)
-            colorSource("Glow", binding: configuration.appearance.glowColor)
+            if !isNotchTarget {
+                colorSource("Border", binding: configuration.appearance.borderColor)
+                colorSource("Glow", binding: configuration.appearance.glowColor)
+            }
             Text("Album Artwork uses the current media palette when available. Wallpaper sampling is reserved in the model but is not connected yet and therefore falls back to the system accent.").font(.caption).foregroundStyle(.secondary)
         }
 
         Section("Animation") {
-            Picker("Entrance", selection: configuration.animation.entrance) { ForEach(HaloHUDEntranceAnimation.allCases) { Text($0.title).tag($0) } }
-            Picker("Exit", selection: configuration.animation.exit) { ForEach(HaloHUDExitAnimation.allCases) { Text($0.title).tag($0) } }
+            if isNotchTarget {
+                Text("Notch HUD uses horizontal expand/collapse only. Vertical slide, morph and scale directions are intentionally ignored so the HUD never leaves the closed-notch strip.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Picker("Entrance", selection: configuration.animation.entrance) { ForEach(HaloHUDEntranceAnimation.allCases) { Text($0.title).tag($0) } }
+                Picker("Exit", selection: configuration.animation.exit) { ForEach(HaloHUDExitAnimation.allCases) { Text($0.title).tag($0) } }
+            }
             Slider(value: configuration.animation.entranceDuration, in: 0...1.5) { Text("Entrance duration") }
             Slider(value: configuration.animation.exitDuration, in: 0...1.5) { Text("Exit duration") }
-            if configuration.wrappedValue.animation.entrance == .spring {
+            if !isNotchTarget && configuration.wrappedValue.animation.entrance == .spring {
                 Slider(value: configuration.animation.springDamping, in: 0.1...1) { Text("Spring damping") }
                 Slider(value: configuration.animation.springStiffness, in: 20...600) { Text("Spring stiffness") }
             }
             Picker("Progress animation", selection: configuration.animation.progress) { ForEach(HaloHUDProgressAnimation.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
-            Slider(value: configuration.animation.intensity, in: 0...1) { Text("Animation intensity") }
+            if !isNotchTarget { Slider(value: configuration.animation.intensity, in: 0...1) { Text("Animation intensity") } }
         }
 
         Section("Behaviour") {
             Slider(value: configuration.behavior.displayDuration, in: 0.2...6) { Text("Display duration") }
             Picker("Repeated events", selection: configuration.behavior.interrupt) { ForEach(HaloHUDInterruptBehavior.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
-            Picker("Collision behaviour", selection: configuration.behavior.collision) { ForEach(HaloHUDCollisionBehavior.allCases) { Text($0.title).tag($0) } }
+            if !isNotchTarget {
+                Picker("Collision behaviour", selection: configuration.behavior.collision) { ForEach(HaloHUDCollisionBehavior.allCases) { Text($0.title).tag($0) } }
+            }
             Text("Restart replays the entrance and restarts the dismissal timer. Continue updates the value without extending the current lifetime. Blend updates in place and extends the dismissal timer.").font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -849,6 +888,8 @@ private struct HaloHUDStudioPreview: View {
     private var event: HaloHUDEvent { HaloHUDEvent.preview(kind: kind, value: value) }
     private var rawSize: CGSize {
         switch configuration.presentation.target {
+        case .notch:
+            return CGSize(width: max(48, configuration.presentation.resolvedNotch.width), height: 40)
         case .screenEdge:
             let length = max(40, configuration.presentation.screenEdgeLength)
             let thickness = max(1, configuration.presentation.screenEdgeThickness)
@@ -874,6 +915,15 @@ private struct HaloHUDStudioPreview: View {
                     .frame(maxWidth: .infinity, minHeight: 52)
             case .menuBar:
                 menuBarPreview
+            case .notch:
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.black)
+                    HaloHUDRenderView(event: event, configuration: configuration, palette: [.accent], visible: true)
+                }
+                .frame(width: rawSize.width, height: rawSize.height)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .scaleEffect(previewScale)
+                .frame(width: rawSize.width * previewScale, height: rawSize.height * previewScale)
             default:
                 HaloHUDRenderView(event: event, configuration: configuration, palette: [.accent], visible: true)
                     .frame(width: rawSize.width, height: rawSize.height)
