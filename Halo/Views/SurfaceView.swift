@@ -361,9 +361,11 @@ private struct ContextMusicView: View {
 
     private func publishPreferredSize() {
         let next = preferredSurfaceSize
-        if let current = surfaceState.contextPreferredSize,
-           abs(current.width - next.width) < 1, abs(current.height - next.height) < 1 { return }
-        surfaceState.contextPreferredSize = next
+        DispatchQueue.main.async { [surfaceState] in
+            if let current = surfaceState.contextPreferredSize,
+               abs(current.width - next.width) < 1, abs(current.height - next.height) < 1 { return }
+            surfaceState.contextPreferredSize = next
+        }
     }
 
     private var preferredSurfaceSize: CGSize {
