@@ -17,7 +17,7 @@ struct SettingsView: View {
     @State private var renamingProfile: UUID?
     @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
-    private let sections = ["General", "Appearance", "Modules", "Widgets", "Closed notch", "Context notch interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
+    private let sections = ["General", "Appearance", "Modules", "Widgets", "Closed notch", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -69,7 +69,7 @@ struct SettingsView: View {
         case "Appearance": return "paintpalette"
         case "Modules": return "square.grid.2x2"
         case "Widgets": return "slider.horizontal.3"
-        case "Context notch interface": return "rectangle.stack"
+        case "Context Notch Interface": return "rectangle.stack"
         case "HUD": return "rectangle.inset.filled.and.person.filled"
         case "Closed notch": return "rectangle.topthird.inset.filled"
         case "Media & Files": return "play.rectangle"
@@ -175,7 +175,7 @@ struct SettingsView: View {
                     return true
                 }
             }
-        case "Context notch interface": ContextMusicSettings(layout: $workspace.settings.layout)
+        case "Context Notch Interface": ContextInterfaceLibraryView(layout: $workspace.settings.layout)
         case "Media & Files":
             Section("Media source") {
                 Picker("Source", selection: Binding(
@@ -379,6 +379,143 @@ struct SettingsView: View {
     private func moveUp(_ module: ModuleID) {
         let order = profile.layout.normalizedOrder()
         if let index = order.firstIndex(of: module), index > 0 { profile.layout.move(module, before: order[index - 1]) }
+    }
+}
+
+private enum ContextInterfaceSelection: String, Identifiable {
+    case music
+    var id: String { rawValue }
+}
+
+private struct ContextInterfaceLibraryView: View {
+    @Binding var layout: WorkspaceLayout
+    @State private var selection: ContextInterfaceSelection?
+
+    private var musicEnabled: Bool { layout.contextMusic?.enabled ?? false }
+
+    @ViewBuilder var body: some View {
+        if selection == .music {
+            Section {
+                HStack(spacing: 12) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) { selection = nil }
+                    } label: {
+                        Label("All CI", systemImage: "chevron.left")
+                    }
+                    Spacer()
+                    Label("Music CI", systemImage: "music.note")
+                        .font(.headline)
+                }
+            }
+            ContextMusicSettings(layout: $layout)
+        } else {
+            Section {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Context Notch Interfaces").font(.title2.bold())
+                    Text("CI changes what Halo becomes when the notch opens. Choose an interface to configure its content, behaviour and visual style.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+
+            Section("Available CI") {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 14)], alignment: .leading, spacing: 14) {
+                    ContextInterfaceCard(enabled: musicEnabled) {
+                        withAnimation(.easeInOut(duration: 0.18)) { selection = .music }
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+
+            Section {
+                Label("More Context Interfaces can be added here without changing the editor flow.", systemImage: "rectangle.stack.badge.plus")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct ContextInterfaceCard: View {
+    let enabled: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.black.opacity(0.94))
+                    HStack(spacing: 14) {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(LinearGradient(colors: [Color.accentColor.opacity(0.95), Color.accentColor.opacity(0.35)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 62, height: 62)
+                            .overlay(Image(systemName: "music.note").font(.title2.weight(.semibold)).foregroundStyle(.white))
+                        VStack(alignment: .leading, spacing: 7) {
+                            RoundedRectangle(cornerRadius: 3).fill(Color.white.opacity(0.9)).frame(width: 96, height: 7)
+                            RoundedRectangle(cornerRadius: 3).fill(Color.white.opacity(0.42)).frame(width: 68, height: 5)
+                            HStack(spacing: 7) {
+                                Image(systemName: "backward.fill")
+                                Image(systemName: "play.fill")
+                                Image(systemName: "forward.fill")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.88))
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(16)
+                }
+                .frame(height: 112)
+
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Music CI").font(.headline)
+                        Text("Now Playing").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(enabled ? "Enabled" : "Available")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background((enabled ? Color.green : Color.secondary).opacity(0.12), in: Capsule())
+                        .foregroundStyle(enabled ? Color.green : Color.secondary)
+                }
+
+                Text("A playback-aware interface for artwork, controls, lyrics, visualizers and song-reactive colors.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+
+                HStack {
+                    Label(layoutSummary, systemImage: "rectangle.3.group")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Label("Edit", systemImage: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(hovered ? 0.075 : 0.045), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(hovered ? Color.accentColor.opacity(0.42) : Color.primary.opacity(0.08), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovered)
+    }
+
+    private var layoutSummary: String {
+        let mode = ContextMusicOptions().resolvedLayoutMode
+        return mode.title
     }
 }
 
