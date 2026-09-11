@@ -506,6 +506,7 @@ final class DemoMarketingStudio {
 
     private weak var workspace: WorkspaceStore?
     private var window: NSWindow?
+    private var lastPlaybackUpdate = Date()
 
     var isEnabled: Bool { UserDefaults.standard.bool(forKey: Self.enabledKey) }
 
@@ -541,6 +542,7 @@ final class DemoMarketingStudio {
 
     func attach(workspace: WorkspaceStore) {
         self.workspace = workspace
+        lastPlaybackUpdate = Date()
         show()
         if isEnabled { apply(to: workspace) }
     }
@@ -549,13 +551,13 @@ final class DemoMarketingStudio {
         guard let workspace else { return }
         if window == nil {
             let panel = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 450, height: 800),
+                contentRect: NSRect(x: 0, y: 0, width: 470, height: 840),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered,
                 defer: false
             )
             panel.title = "Halo · Marketing Demo Studio"
-            panel.contentMinSize = NSSize(width: 410, height: 620)
+            panel.contentMinSize = NSSize(width: 430, height: 640)
             panel.isReleasedWhenClosed = false
             panel.contentView = NSHostingView(rootView: DemoMarketingView(workspace: workspace))
             panel.center()
@@ -565,8 +567,21 @@ final class DemoMarketingStudio {
         window?.makeKeyAndOrderFront(nil)
     }
 
+    func advancePlaybackClock() {
+        let defaults = UserDefaults.standard
+        let now = Date()
+        let delta = min(5, max(0, now.timeIntervalSince(lastPlaybackUpdate)))
+        lastPlaybackUpdate = now
+        guard isEnabled, defaults.bool(forKey: Self.playingKey) else { return }
+        let duration = max(1, defaults.double(forKey: Self.durationKey))
+        let current = max(0, defaults.double(forKey: Self.positionKey))
+        let next = (current + delta).truncatingRemainder(dividingBy: duration)
+        defaults.set(next, forKey: Self.positionKey)
+    }
+
     func apply(to workspace: WorkspaceStore) {
         guard isEnabled else { return }
+        advancePlaybackClock()
         let defaults = UserDefaults.standard
         workspace.media.applyDemoSnapshot(
             title: defaults.string(forKey: Self.titleKey) ?? "Neon Afterglow",
@@ -580,6 +595,7 @@ final class DemoMarketingStudio {
     }
 
     func clear(from workspace: WorkspaceStore) {
+        lastPlaybackUpdate = Date()
         workspace.media.disconnect()
         workspace.system.refresh()
     }
@@ -609,9 +625,11 @@ final class DemoMarketingStudio {
 
     func handleMediaCommand(_ command: String, media: MediaService) {
         let defaults = UserDefaults.standard
+        advancePlaybackClock()
         switch command {
         case "playpause":
             defaults.set(!defaults.bool(forKey: Self.playingKey), forKey: Self.playingKey)
+            lastPlaybackUpdate = Date()
         case "next track":
             setPreset(index: 1)
         case "previous track":
@@ -644,6 +662,7 @@ final class DemoMarketingStudio {
             defaults.set(72.0, forKey: Self.positionKey)
         }
         defaults.set(true, forKey: Self.playingKey)
+        lastPlaybackUpdate = Date()
     }
 
     func appleEventDescriptor(for script: String) -> NSAppleEventDescriptor? {
@@ -653,7 +672,7 @@ final class DemoMarketingStudio {
 
         if lower.contains("raw data of artwork 1 of current track") {
             return descriptorList([
-                NSAppleEventDescriptor(string: "halo-demo-track"),
+                NSAppleEventDescriptor(string: "halo-demo-\(artworkRevision)"),
                 NSAppleEventDescriptor(descriptorType: 0x74647461, data: artworkData())
             ])
         }
@@ -666,7 +685,13 @@ final class DemoMarketingStudio {
             if let range = lower.range(of: "set player position to ") {
                 let suffix = lower[range.upperBound...]
                 let number = suffix.prefix { $0.isNumber || $0 == "." || $0 == "-" }
-                if let value = Double(number) { defaults.set(max(0, value), forKey: Self.positionKey) }
+                if let value = Double(number) {
+                    let duration = max(1, defaults.double(forKey: Self.durationKey))
+                    defaults.set(min(duration, max(0, value)), forKey: Self.positionKey)
+                    lastPlaybackUpdate = Date()
+                }
+            } else {
+                advancePlaybackClock()
             }
             let duration = max(1, defaults.double(forKey: Self.durationKey))
             let position = min(duration, max(0, defaults.double(forKey: Self.positionKey)))
@@ -678,11 +703,18 @@ final class DemoMarketingStudio {
                 NSAppleEventDescriptor(string: defaults.string(forKey: Self.titleKey) ?? "Neon Afterglow"),
                 NSAppleEventDescriptor(string: defaults.string(forKey: Self.artistKey) ?? "Luma Vale"),
                 NSAppleEventDescriptor(boolean: defaults.bool(forKey: Self.playingKey)),
-                NSAppleEventDescriptor(string: "halo-demo-track")
+                NSAppleEventDescriptor(string: "halo-demo-\(artworkRevision)")
             ])
         }
 
         return nil
+    }
+
+    private var artworkRevision: String {
+        let defaults = UserDefaults.standard
+        let style = defaults.string(forKey: Self.artworkStyleKey) ?? "Neon"
+        let title = defaults.string(forKey: Self.titleKey) ?? "Neon Afterglow"
+        return (style + "-" + title).replacingOccurrences(of: " ", with: "-")
     }
 
     private func descriptorList(_ items: [NSAppleEventDescriptor?]) -> NSAppleEventDescriptor {
@@ -691,8 +723,23 @@ final class DemoMarketingStudio {
         return list
     }
 
+    func artworkPreview(style: String) -> NSImage {
+        makeArtwork(style: style, title: UserDefaults.standard.string(forKey: Self.titleKey) ?? "Neon Afterglow")
+    }
+
     private func artworkData() -> Data {
-        let style = UserDefaults.standard.string(forKey: Self.artworkStyleKey) ?? "Neon"
+        let defaults = UserDefaults.standard
+        let image = makeArtwork(style: defaults.string(forKey: Self.artworkStyleKey) ?? "Neon",
+                                title: defaults.string(forKey: Self.titleKey) ?? "Neon Afterglow")
+        guard let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:]) else {
+            return image.tiffRepresentation ?? Data()
+        }
+        return png
+    }
+
+    private func makeArtwork(style: String, title: String) -> NSImage {
         let size = NSSize(width: 640, height: 640)
         let image = NSImage(size: size)
         image.lockFocus()
@@ -717,7 +764,6 @@ final class DemoMarketingStudio {
         let glow = NSBezierPath(ovalIn: NSRect(x: 170, y: 170, width: 300, height: 300))
         NSColor.white.withAlphaComponent(0.12).setFill(); glow.fill()
 
-        let title = UserDefaults.standard.string(forKey: Self.titleKey) ?? "Neon Afterglow"
         let mark = title.split(separator: " ").prefix(2).compactMap { $0.first }.map(String.init).joined()
         let paragraph = NSMutableParagraphStyle(); paragraph.alignment = .center
         let attributes: [NSAttributedString.Key: Any] = [
@@ -727,7 +773,7 @@ final class DemoMarketingStudio {
             .kern: 8
         ]
         NSString(string: mark.isEmpty ? "H" : mark).draw(in: NSRect(x: 0, y: 260, width: size.width, height: 120), withAttributes: attributes)
-        return image.tiffRepresentation ?? Data()
+        return image
     }
 }
 
@@ -753,6 +799,7 @@ private struct DemoMarketingView: View {
     @State private var activityDetail = "Deep work · 18 min remaining"
     @State private var activityProgress = 0.64
     @State private var hudValue = 0.72
+    private let playbackTimer = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Form {
@@ -770,18 +817,44 @@ private struct DemoMarketingView: View {
                 TextField("Track title", text: $title)
                 TextField("Artist", text: $artist)
                 TextField("Album", text: $album)
-                Picker("Artwork", selection: $artworkStyle) {
-                    Text("Neon").tag("Neon"); Text("Sunset").tag("Sunset"); Text("Ocean").tag("Ocean")
+
+                Text("Cover art").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    ForEach(["Neon", "Sunset", "Ocean"], id: \.self) { style in
+                        Button {
+                            artworkStyle = style
+                            workspace.media.disconnect()
+                            DispatchQueue.main.async { apply() }
+                        } label: {
+                            VStack(spacing: 5) {
+                                Image(nsImage: DemoMarketingStudio.shared.artworkPreview(style: style))
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 74, height: 74)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .stroke(artworkStyle == style ? Color.accentColor : Color.white.opacity(0.14), lineWidth: artworkStyle == style ? 2 : 1)
+                                    }
+                                Text(style).font(.caption2)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+
                 Toggle("Playing", isOn: $playing)
                 HStack {
-                    Text("Position"); Spacer(); Text("\(Int(position))s / \(Int(duration))s").monospacedDigit().foregroundStyle(.secondary)
+                    Text("Position"); Spacer(); Text("\(formatTime(position)) / \(formatTime(duration))").monospacedDigit().foregroundStyle(.secondary)
                 }
                 SwiftUI.Slider(value: $position, in: 0...max(1, duration))
                 HStack {
-                    Text("Duration"); Spacer(); Text("\(Int(duration))s").monospacedDigit().foregroundStyle(.secondary)
+                    Text("Track length"); Spacer(); Text(formatTime(duration)).monospacedDigit().foregroundStyle(.secondary)
                 }
                 SwiftUI.Slider(value: $duration, in: 30...420, step: 1)
+                Text("The playhead advances automatically while Playing is enabled and loops back to 0:00 at the end of the track.")
+                    .font(.caption2).foregroundStyle(.secondary)
+
                 Text("Synced lyrics (LRC)").font(.caption).foregroundStyle(.secondary)
                 TextEditor(text: $lyrics).font(.system(.caption, design: .monospaced)).frame(minHeight: 90)
                 HStack {
@@ -848,8 +921,12 @@ private struct DemoMarketingView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minWidth: 410, minHeight: 620)
+        .frame(minWidth: 430, minHeight: 640)
         .onAppear { if enabled { apply() } }
+        .onReceive(playbackTimer) { _ in
+            guard enabled else { return }
+            DemoMarketingStudio.shared.advancePlaybackClock()
+        }
         .onChange(of: title) { _ in if enabled { apply() } }
         .onChange(of: artist) { _ in if enabled { apply() } }
         .onChange(of: album) { _ in if enabled { apply() } }
@@ -866,5 +943,10 @@ private struct DemoMarketingView: View {
 
     private func previewHUD(_ kind: String) {
         NotificationCenter.default.post(name: .init("HaloHUDPreview"), object: nil, userInfo: ["kind": kind, "value": hudValue])
+    }
+
+    private func formatTime(_ seconds: Double) -> String {
+        let total = max(0, Int(seconds.rounded(.down)))
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
