@@ -175,14 +175,36 @@ final class BluetoothStateService: ObservableObject {
     func refresh() {
         let nextPoweredOn = IOBluetoothHostController.default()?.powerState == kBluetoothHCIPowerStateON
         let raw = (IOBluetoothDevice.pairedDevices() ?? []).compactMap { $0 as? IOBluetoothDevice }
-        let nextDevices = raw.map { device -> BluetoothDeviceSnapshot in
-            let address = device.addressString ?? ""
-            let name = device.name ?? device.nameOrAddress ?? (address.isEmpty ? "Bluetooth device" : address)
-            return BluetoothDeviceSnapshot(id: address.isEmpty ? name : address,
-                                           name: name,
-                                           address: address,
-                                           connected: device.isConnected())
-        }.sorted {
+
+        // IOBluetooth can occasionally return duplicate paired-device objects for the same
+        // physical address. Build the snapshot set through a merge dictionary so duplicate
+        // addresses never reach SwiftUI IDs or Dictionary(uniqueKeysWithValues:).
+        var mergedByID: [String: BluetoothDeviceSnapshot] = [:]
+        for (index, device) in raw.enumerated() {
+            let rawAddress = (device.addressString ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedAddress = rawAddress.lowercased()
+            let rawName = (device.name ?? device.nameOrAddress ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = rawName.isEmpty ? (rawAddress.isEmpty ? "Bluetooth device" : rawAddress) : rawName
+            let fallbackName = name.lowercased()
+            let id = normalizedAddress.isEmpty ? "name:\(fallbackName.isEmpty ? String(index) : fallbackName)" : normalizedAddress
+            let snapshot = BluetoothDeviceSnapshot(id: id,
+                                                   name: name,
+                                                   address: rawAddress,
+                                                   connected: device.isConnected())
+
+            if let existing = mergedByID[id] {
+                let existingLooksLikeAddress = !existing.address.isEmpty && existing.name.caseInsensitiveCompare(existing.address) == .orderedSame
+                let preferIncomingName = existing.name == "Bluetooth device" || (existingLooksLikeAddress && name.caseInsensitiveCompare(rawAddress) != .orderedSame)
+                mergedByID[id] = BluetoothDeviceSnapshot(id: id,
+                                                         name: preferIncomingName ? name : existing.name,
+                                                         address: existing.address.isEmpty ? rawAddress : existing.address,
+                                                         connected: existing.connected || snapshot.connected)
+            } else {
+                mergedByID[id] = snapshot
+            }
+        }
+
+        let nextDevices = Array(mergedByID.values).sorted {
             if $0.connected != $1.connected { return $0.connected && !$1.connected }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
@@ -194,8 +216,10 @@ final class BluetoothStateService: ObservableObject {
             return
         }
 
-        let previousByID = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
-        let nextByID = Dictionary(uniqueKeysWithValues: nextDevices.map { ($0.id, $0) })
+        // Keep these dictionaries tolerant too. The service now publishes unique IDs, but this
+        // also protects state restored from an older in-memory snapshot if a duplicate slipped in.
+        let previousByID = Dictionary(devices.map { ($0.id, $0) }, uniquingKeysWith: mergeSnapshots)
+        let nextByID = Dictionary(nextDevices.map { ($0.id, $0) }, uniquingKeysWith: mergeSnapshots)
 
         if poweredOn != nextPoweredOn {
             emit(BluetoothConnectionEvent(kind: nextPoweredOn ? .poweredOn : .poweredOff, deviceName: nil))
@@ -216,6 +240,15 @@ final class BluetoothStateService: ObservableObject {
 
         poweredOn = nextPoweredOn
         devices = nextDevices
+    }
+
+    private func mergeSnapshots(_ current: BluetoothDeviceSnapshot, _ incoming: BluetoothDeviceSnapshot) -> BluetoothDeviceSnapshot {
+        let currentLooksLikeAddress = !current.address.isEmpty && current.name.caseInsensitiveCompare(current.address) == .orderedSame
+        let incomingHasBetterName = current.name == "Bluetooth device" || (currentLooksLikeAddress && incoming.name.caseInsensitiveCompare(incoming.address) != .orderedSame)
+        return BluetoothDeviceSnapshot(id: current.id,
+                                       name: incomingHasBetterName ? incoming.name : current.name,
+                                       address: current.address.isEmpty ? incoming.address : current.address,
+                                       connected: current.connected || incoming.connected)
     }
 
     private func emit(_ event: BluetoothConnectionEvent) {
