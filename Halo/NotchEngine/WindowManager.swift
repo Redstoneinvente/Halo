@@ -57,7 +57,6 @@ final class SurfaceAnimator {
 
     private func syncClosedGeometry(state: SurfaceState, frame: CGRect, cameraFrame: CGRect?) {
         if state.compactWidth != frame.width { state.compactWidth = frame.width }
-        if state.compactHeight != frame.height { state.compactHeight = frame.height }
         if state.viewport.size != frame.size { state.viewport.size = frame.size }
 
         let nextOcclusion: CGRect?
@@ -193,7 +192,6 @@ final class WindowManager {
     private struct HUDNotchExpansion {
         var side: HaloHUDNotchSide
         var width: Double
-        var height: Double
         var screenFrame: CGRect
         var kind: HaloHUDEventKind
         var collision: HaloHUDCollisionBehavior
@@ -303,7 +301,7 @@ final class WindowManager {
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
 
         // Mirror the providers that can present HUD events so notch expansion follows the real
-        // HUD lifetime even though the HUD renderer remains its own overlay panel.
+        // HUD lifetime while the HUD content is constrained to the closed-notch strip.
         store.workspace.system.$battery.compactMap { $0 }.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.triggerHUDNotch(kind: .batteryStatus) }.store(in: &subscriptions)
         store.workspace.system.$charging.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
@@ -416,11 +414,10 @@ final class WindowManager {
 
         let width = min(configuration.layout.maximumWidth,
                         max(configuration.layout.minimumWidth, configuration.layout.width))
-        let height = max(24, configuration.layout.height)
         let repeatedContinue = hudNotchExpansion?.kind == kind &&
             configuration.behavior.interrupt == .continue && hudNotchHideWork != nil
 
-        hudNotchExpansion = HUDNotchExpansion(side: side, width: width, height: height,
+        hudNotchExpansion = HUDNotchExpansion(side: side, width: width,
                                               screenFrame: screen.frame, kind: kind,
                                               collision: configuration.behavior.collision,
                                               persistent: persistent)
@@ -561,7 +558,8 @@ final class WindowManager {
             let leftFree = items.left == .none || ((items.left == .media || items.left == .visualizer) && !playing)
             if rightFree { side = .right }
             else if leftFree { side = .left }
-            else { side = .right }
+            else { side = .right
+            }
         }
         return (side, badgeWidth, minimumSideWidth)
     }
@@ -784,19 +782,6 @@ final class WindowManager {
         return (leftFull, rightFull, left.decoration, right.decoration)
     }
 
-    private func hudAdjustedClosedFrame(_ base: CGRect, geometry: SurfaceGeometry) -> CGRect {
-        guard let hud = hudNotchExpansion,
-              hud.screenFrame.equalTo(geometry.screen),
-              geometry.attachedToNotch || geometry.style == .notch || geometry.style == .simulated else { return base }
-        let targetHeight = min(geometry.visible.height - 16, max(base.height, hud.height))
-        guard targetHeight > base.height + 0.5 else { return base }
-        var result = base
-        let top = base.maxY
-        result.size.height = targetHeight
-        result.origin.y = top - targetHeight
-        return result
-    }
-
     private func refreshDynamicWidths() {
         activityExpiry?.cancel()
         if let next = store.workspace.activities.map({ $0.created.addingTimeInterval(12) }).filter({ $0 > Date() }).min() {
@@ -820,7 +805,6 @@ final class WindowManager {
             }
 
             var target = geometry.frame(expanded: false)
-            target = hudAdjustedClosedFrame(target, geometry: geometry)
             if geometry.style == .detached {
                 target.origin.x = host.panel.frame.midX - target.width / 2
                 target.origin.y = host.panel.frame.maxY - target.height
@@ -925,8 +909,7 @@ final class WindowManager {
 
     private func targetFrame(host: Host, expanded: Bool) -> CGRect {
         guard let geometry = host.geometry else { return .zero }
-        if expanded { return adjustedExpandedFrame(host: host, requested: host.state.contextPreferredSize) }
-        return hudAdjustedClosedFrame(geometry.frame(expanded: false), geometry: geometry)
+        return expanded ? adjustedExpandedFrame(host: host, requested: host.state.contextPreferredSize) : geometry.frame(expanded: false)
     }
 
     private func reconcile() {
@@ -955,7 +938,7 @@ final class WindowManager {
             configureDynamicWidth(host)
             let baseDashboardWidth = host.geometry!.frame(expanded: true).width
             if host.state.contextPreferredSize == nil && host.state.dashboardWidth != baseDashboardWidth { host.state.dashboardWidth = baseDashboardWidth }
-            if host.state.compactHeight != host.geometry!.compactHeight && hudNotchExpansion == nil { host.state.compactHeight = host.geometry!.compactHeight }
+            if host.state.compactHeight != host.geometry!.compactHeight { host.state.compactHeight = host.geometry!.compactHeight }
             if host.state.compactWidth != host.geometry!.compactWidth { host.state.compactWidth = host.geometry!.compactWidth }
             if host.state.closedOcclusion != host.geometry!.closedCameraOcclusion { host.state.closedOcclusion = host.geometry!.closedCameraOcclusion }
             host.panel.isMovableByWindowBackground = theme.style == .detached
@@ -968,7 +951,6 @@ final class WindowManager {
             if host.targetFrame != target {
                 host.targetFrame = target; host.animator.cancel()
                 if host.state.viewport.size != target.size { host.state.viewport.size = target.size }
-                if !host.state.expanded && host.state.compactHeight != target.height { host.state.compactHeight = target.height }
                 host.panel.alphaValue = 1
                 if host.panel.frame != target { host.panel.setFrame(target, display: false) }
                 NotificationCenter.default.post(name: .init("HaloPanelGeometryChanged"), object: host.panel,
