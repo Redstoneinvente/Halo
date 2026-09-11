@@ -4,7 +4,16 @@ import UserNotifications
 
 @MainActor
 final class WorkspaceStore: ObservableObject, LiveActivityProvider {
-    @Published var settings: WorkspaceSettings { didSet { schedulePersistence(); updateHotkey(); if oldValue.mediaApp != settings.mediaApp { media.disconnect() }; updateArtworkPreference(); hudEngine?.configurationDidChange(); queueScheduleEvaluation() } }
+    static let systemAudioSource = "com.redstoneinvente.halo.system-audio"
+
+    @Published var settings: WorkspaceSettings { didSet {
+        schedulePersistence()
+        updateHotkey()
+        if oldValue.mediaApp != settings.mediaApp || oldValue.automaticMedia != settings.automaticMedia { media.disconnect() }
+        updateArtworkPreference()
+        hudEngine?.configurationDidChange()
+        queueScheduleEvaluation()
+    } }
     @Published private(set) var scheduledProfileID: UUID?
     var effectiveLayout: WorkspaceLayout { settings.profiles.first { $0.id == scheduledProfileID }?.layout ?? settings.layout }
     var scheduledTheme: Theme? { settings.profiles.first { $0.id == scheduledProfileID }?.theme }
@@ -69,8 +78,11 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
                 layout.closedNotch?.albumBackgroundColor == true
         })
     }
+    private var isAutomaticMediaSource: Bool { settings.automaticMedia ?? true }
+    private var isSystemAudioOnly: Bool { !isAutomaticMediaSource && settings.mediaApp == Self.systemAudioSource }
     private var wantsSystemAudioFallback: Bool {
-        guard settings.automaticMedia ?? true else { return false }
+        if isSystemAudioOnly { return true }
+        guard isAutomaticMediaSource else { return false }
         let layout = effectiveLayout
         let contextUsesMedia = layout.contextMusic?.enabled == true
         let moduleUsesMedia = layout.enabled.contains(.media)
@@ -80,10 +92,21 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             closed?.artworkOptions?.enabled == true || closed?.reactiveBackground?.enabled == true
         return contextUsesMedia || moduleUsesMedia || closedUsesMedia
     }
+    func refreshMediaSource() {
+        media.disconnect()
+        pollMedia()
+    }
     private func pollMedia() {
         if systemAudioFallback == nil { systemAudioFallback = SystemAudioMediaFallback(media: media) }
         systemAudioFallback?.setEnabled(wantsSystemAudioFallback)
-        media.poll(app: settings.mediaApp, automatic: settings.automaticMedia ?? true)
+
+        if isSystemAudioOnly {
+            systemAudioFallback?.refresh()
+            return
+        }
+
+        let preferred = settings.mediaApp == Self.systemAudioSource ? "com.apple.Music" : settings.mediaApp
+        media.poll(app: preferred, automatic: isAutomaticMediaSource)
         systemAudioFallback?.refresh()
     }
     private func disableLegacyHUDRenderer() {
@@ -210,7 +233,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         UNUserNotificationCenter.current().getNotificationSettings { status in
             guard status.authorizationStatus == .authorized else { return }
             let content = UNMutableNotificationContent(); content.title = title; content.sound = .default
-            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+            UNUserNotificationCenter.current().add(UNUserNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         }
     }
     func refreshApps() {
@@ -269,7 +292,8 @@ private final class SystemAudioMediaFallback {
     func refresh() {
         guard enabled, let media else { return }
 
-        // Rich player metadata wins; system audio is the universal fallback for everything else.
+        // Rich Apple Music / Spotify metadata wins in Automatic mode. System Audio owns the
+        // presentation only when no rich provider is actively playing, or when System Audio is forced.
         if media.connectedApp != nil && media.isPlaying {
             ownsFallback = false
             return
@@ -305,8 +329,8 @@ private final class SystemAudioMediaFallback {
         guard ownsFallback, let media else { ownsFallback = false; return }
         if media.connectedApp == nil {
             media.isPlaying = false
-            media.title = "Connect a player"
-            media.artist = "Apple Music, Spotify, or system audio"
+            media.title = "System Audio"
+            media.artist = "Waiting for audio from your Mac"
         }
         ownsFallback = false
     }
