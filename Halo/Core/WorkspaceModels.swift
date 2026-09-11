@@ -495,6 +495,29 @@ struct HaloHUDLayoutConfiguration: Codable, Equatable {
     var edgeMargin = 28.0
     var compact = false
 }
+struct HaloHUDNotchConfiguration: Codable, Equatable {
+    var width = 180.0
+    var horizontalPadding = 8.0
+    var spacing = 7.0
+    var horizontalOffset = 0.0
+    var iconSize = 16.0
+    var textSize = 12.0
+    var progressWidth = 84.0
+
+    func validated() throws -> HaloHUDNotchConfiguration {
+        let numbers = [width, horizontalPadding, spacing, horizontalOffset, iconSize, textSize, progressWidth]
+        guard numbers.allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        var result = self
+        result.width = min(600, max(48, width))
+        result.horizontalPadding = min(40, max(0, horizontalPadding))
+        result.spacing = min(32, max(0, spacing))
+        result.horizontalOffset = min(300, max(-300, horizontalOffset))
+        result.iconSize = min(32, max(8, iconSize))
+        result.textSize = min(24, max(8, textSize))
+        result.progressWidth = min(220, max(20, progressWidth))
+        return result
+    }
+}
 struct HaloHUDColorConfiguration: Codable, Equatable {
     var source: HaloHUDDynamicColorSource = .systemAccent
     var hue = 0.59
@@ -537,11 +560,13 @@ struct HaloHUDBehaviorConfiguration: Codable, Equatable {
 struct HaloHUDPresentationConfiguration: Codable, Equatable {
     var target: HaloHUDPresentationTarget = .floating
     var notchSide: HaloHUDNotchSide = .automatic
+    var notch: HaloHUDNotchConfiguration?
     var floatingPosition: HaloHUDFloatingPosition = .top
     var screenEdge: HaloHUDScreenEdge = .right
     var displayTarget: HaloHUDDisplayTarget = .mouse
     var screenEdgeLength = 220.0
     var screenEdgeThickness = 6.0
+    var resolvedNotch: HaloHUDNotchConfiguration { notch ?? HaloHUDNotchConfiguration() }
 }
 struct HaloHUDConfiguration: Codable, Equatable {
     var presentation = HaloHUDPresentationConfiguration()
@@ -647,6 +672,7 @@ extension HaloHUDConfiguration {
         result.behavior.displayDuration = min(10, max(0.2, behavior.displayDuration))
         result.presentation.screenEdgeLength = min(1600, max(40, presentation.screenEdgeLength))
         result.presentation.screenEdgeThickness = min(48, max(1, presentation.screenEdgeThickness))
+        if let notch = presentation.notch { result.presentation.notch = try notch.validated() }
         return result
     }
 
@@ -661,7 +687,7 @@ extension HaloHUDConfiguration {
         var c = HaloHUDConfiguration(); c.appearance.primary.source = .albumArtwork; c.appearance.progress.source = .albumArtwork; c.appearance.glow = true; c.animation.entrance = .morph; c.animation.exit = .morphBack; return c
     }
     static func compactPreset() -> HaloHUDConfiguration {
-        var c = minimalPreset(); c.presentation.target = .notch; c.presentation.notchSide = .automatic; c.behavior.collision = .push; return c
+        var c = minimalPreset(); c.presentation.target = .notch; c.presentation.notchSide = .automatic; c.presentation.notch = HaloHUDNotchConfiguration(); c.behavior.collision = .push; return c
     }
     static func classicPreset() -> HaloHUDConfiguration { nativePreset() }
     static func cyberPreset() -> HaloHUDConfiguration {
