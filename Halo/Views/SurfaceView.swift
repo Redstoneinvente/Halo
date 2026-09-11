@@ -558,10 +558,17 @@ struct SurfaceView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var state: SurfaceState
     @ObservedObject var workspace: WorkspaceStore
+    @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
+    @AppStorage("HaloContextMusicUseFullNotchArea") private var contextMusicUsesFullNotchArea = false
+    @AppStorage("HaloContextMusicKeepClosedNotchContents") private var contextMusicKeepsClosedContents = false
     private var theme: Theme { state.theme }
     private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.effectiveLayout }
     private var contextOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
     private var contextMusicActive: Bool { contextOptions.enabled && workspace.media.isPlaying }
+    private var contextOwnsFullSurface: Bool { state.expanded && contextMusicActive && contextMusicUsesFullNotchArea }
+    private var keepsClosedContentsWhileExpanded: Bool {
+        contextMusicActive ? contextMusicKeepsClosedContents : keepClosedContentsWhenOpen
+    }
     private var closedBackgroundOptions: ClosedNotchOptions {
         var value = layout.closedNotch ?? ClosedNotchOptions()
         if var artwork = value.artworkOptions, artwork.usesBackgroundArtwork, artwork.mode != .background {
@@ -592,79 +599,102 @@ struct SurfaceView: View {
     @State private var targeted = false
     private var accent: Color { Color(hue: theme.tint, saturation: 0.65, brightness: 1) }
     var body: some View {
-        VStack(spacing: 0) {
-            Group {
-              if !state.expanded && (state.compactWidth < 48 || state.compactHeight < 16) {
-                Circle().fill(store.deadline == nil ? accent : .green).frame(width: 6, height: 6)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-              } else if !state.expanded {
-                ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
-              } else { HStack {
-                Circle().fill(store.deadline == nil ? accent : .green).frame(width: 7, height: 7)
-                Spacer()
-                Image(systemName: state.pinned ? "pin.fill" : "chevron.up").font(.system(size: 9, weight: .bold))
-              } }
-            }
-            .padding(.horizontal, !state.expanded ? 0 : max(16, layout.appearance.surface.shoulder + 8))
-            .frame(height: state.expanded ? max(40, state.compactHeight) : state.compactHeight)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if state.expanded && state.pinned { return }
-                state.expanded.toggle()
-            }
-            .accessibilityLabel("Toggle Halo dashboard")
-            .accessibilityAddTraits(.isButton)
-            if state.expanded {
-                if contextMusicActive {
-                    ContextMusicView(media: workspace.media, options: contextOptions,
-                                     visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .transition(.opacity.combined(with: .scale(scale: 0.985)))
-                } else {
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Your space, within reach.").font(.headline)
-                                Text("HALO / PERSONAL WORKSPACE").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(accent)
+        ZStack(alignment: .top) {
+            VStack(spacing: 0) {
+                if !contextOwnsFullSurface {
+                    Group {
+                      if !state.expanded && (state.compactWidth < 48 || state.compactHeight < 16) {
+                        Circle().fill(store.deadline == nil ? accent : .green).frame(width: 6, height: 6)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                      } else if !state.expanded {
+                        ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
+                      } else if keepsClosedContentsWhileExpanded {
+                        ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
+                      } else { HStack {
+                        Circle().fill(store.deadline == nil ? accent : .green).frame(width: 7, height: 7)
+                        Spacer()
+                        Image(systemName: state.pinned ? "pin.fill" : "chevron.up").font(.system(size: 9, weight: .bold))
+                      } }
+                    }
+                    .padding(.horizontal, (!state.expanded || keepsClosedContentsWhileExpanded) ? 0 : max(16, layout.appearance.surface.shoulder + 8))
+                    .frame(height: state.expanded ? max(40, state.compactHeight) : state.compactHeight)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if state.expanded && state.pinned { return }
+                        state.expanded.toggle()
+                    }
+                    .accessibilityLabel("Toggle Halo dashboard")
+                    .accessibilityAddTraits(.isButton)
+                }
+                if state.expanded {
+                    if contextMusicActive {
+                        if !contextMusicUsesFullNotchArea {
+                            ContextMusicView(media: workspace.media, options: contextOptions,
+                                             visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Your space, within reach.").font(.headline)
+                                    Text("HALO / PERSONAL WORKSPACE").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(accent)
+                                }
+                                Spacer()
+                                Button { state.pinned.toggle() } label: { Image(systemName: state.pinned ? "pin.fill" : "pin") }
+                                    .help("Keep expanded").accessibilityLabel("Keep expanded")
                             }
-                            Spacer()
-                            Button { state.pinned.toggle() } label: { Image(systemName: state.pinned ? "pin.fill" : "pin") }
-                                .help("Keep expanded").accessibilityLabel("Keep expanded")
-                        }
-                        if layout.horizontalWidgets ?? false {
-                            if layout.horizontalPages ?? false {
-                                VStack(spacing: 8) {
-                                    if !modules.isEmpty {
-                                        let index = min(page, modules.count - 1)
-                                        horizontalWidget(modules[index])
-                                        HStack {
-                                            Button { page = max(0, index - 1) } label: { Image(systemName: "chevron.left") }
-                                                .disabled(index == 0).accessibilityLabel("Previous widget")
-                                            Spacer()
-                                            Text("\(modules[index].title) · \(index + 1) / \(modules.count)").font(.caption)
-                                            Spacer()
-                                            Button { page = min(modules.count - 1, index + 1) } label: { Image(systemName: "chevron.right") }
-                                                .disabled(index == modules.count - 1).accessibilityLabel("Next widget")
-                                        }
-                                    } else { Text("Enable widgets in Settings → Modules.").foregroundStyle(.secondary) }
-                                }
-                            } else { ScrollView(.horizontal) {
-                                LazyHStack(alignment: .top, spacing: layout.appearance.spacing) {
-                                    widgetCards(horizontal: true)
-                                }
-                            } }
-                        } else {
-                            ScrollView {
-                                LazyVStack(spacing: layout.appearance.spacing) {
-                                    widgetCards(horizontal: false)
+                            if layout.horizontalWidgets ?? false {
+                                if layout.horizontalPages ?? false {
+                                    VStack(spacing: 8) {
+                                        if !modules.isEmpty {
+                                            let index = min(page, modules.count - 1)
+                                            horizontalWidget(modules[index])
+                                            HStack {
+                                                Button { page = max(0, index - 1) } label: { Image(systemName: "chevron.left") }
+                                                    .disabled(index == 0).accessibilityLabel("Previous widget")
+                                                Spacer()
+                                                Text("\(modules[index].title) · \(index + 1) / \(modules.count)").font(.caption)
+                                                Spacer()
+                                                Button { page = min(modules.count - 1, index + 1) } label: { Image(systemName: "chevron.right") }
+                                                    .disabled(index == modules.count - 1).accessibilityLabel("Next widget")
+                                            }
+                                        } else { Text("Enable widgets in Settings → Modules.").foregroundStyle(.secondary) }
+                                    }
+                                } else { ScrollView(.horizontal) {
+                                    LazyHStack(alignment: .top, spacing: layout.appearance.spacing) {
+                                        widgetCards(horizontal: true)
+                                    }
+                                } }
+                            } else {
+                                ScrollView {
+                                    LazyVStack(spacing: layout.appearance.spacing) {
+                                        widgetCards(horizontal: false)
+                                    }
                                 }
                             }
-                        }
-                        HStack {
-                            Spacer()
-                            Button("Settings") { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) }
-                        }
-                    }.padding(.horizontal, max(20, layout.appearance.surface.shoulder + 12)).padding(.vertical, 20).frame(width: state.dashboardWidth).transition(.opacity)
+                            HStack {
+                                Spacer()
+                                Button("Settings") { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) }
+                            }
+                        }.padding(.horizontal, max(20, layout.appearance.surface.shoulder + 12)).padding(.vertical, 20).frame(width: state.dashboardWidth).transition(.opacity)
+                    }
+                }
+            }
+
+            if contextOwnsFullSurface {
+                ContextMusicView(media: workspace.media, options: contextOptions,
+                                 visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                    .zIndex(2)
+
+                if contextMusicKeepsClosedContents {
+                    ClosedNotchView(store: store, workspace: workspace, layout: layout,
+                                    occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
+                        .frame(height: max(40, state.compactHeight))
+                        .zIndex(3)
                 }
             }
         }
@@ -684,6 +714,7 @@ struct SurfaceView: View {
         .buttonStyle(.borderless)
         .contextMenu {
             Button(state.pinned ? "Unpin" : "Keep open") { state.pinned.toggle() }
+            Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
             ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }
@@ -815,6 +846,8 @@ private struct ContextMusicView: View {
     let visualizer: VisualizerOptions
     @ObservedObject var surfaceState: SurfaceState
     @AppStorage("HaloContextVisualizerFullWidth") private var visualizerFullWidth = false
+    @AppStorage("HaloContextMusicUseFullNotchArea") private var usesFullNotchArea = false
+    @AppStorage("HaloContextMusicKeepClosedNotchContents") private var keepsClosedNotchContents = false
     @State private var artwork: NSImage?
     @State private var playbackPosition = 0.0
     @State private var playbackDuration = 0.0
@@ -826,6 +859,15 @@ private struct ContextMusicView: View {
     @State private var vinylLastTick = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var safeInset: Double { max(18, options.resolvedSpacing * 1.25) }
+    private var contentTopInset: Double {
+        guard usesFullNotchArea else { return max(16, safeInset * 0.75) }
+        if keepsClosedNotchContents { return max(16, surfaceState.compactHeight + max(6, options.resolvedSpacing * 0.5)) }
+        return max(16, surfaceState.compactHeight * 0.68)
+    }
+    private var controlsTopInset: Double {
+        if usesFullNotchArea && keepsClosedNotchContents { return max(12, surfaceState.compactHeight + 6) }
+        return max(12, safeInset * 0.65)
+    }
     private var artworkKey: String {
         "\(media.connectedApp ?? "")|\(media.title)|\(media.artist)|\(options.resolvedForegroundArtwork.rawValue)|\(options.usesArtworkBackground)"
     }
@@ -836,7 +878,8 @@ private struct ContextMusicView: View {
          String(options.artworkSize), String(options.showTitle), String(options.showArtist), String(options.showControls),
          String(options.showVisualizer), String(options.showsLyrics), options.resolvedLyricDisplay.rawValue,
          String(options.resolvedLyricFontSize), options.resolvedVisualizerStyle.rawValue,
-         String(options.resolvedSpacing), String(options.resolvedControlSize), String(visualizerFullWidth)].joined(separator: "|")
+         String(options.resolvedSpacing), String(options.resolvedControlSize), String(visualizerFullWidth),
+         String(usesFullNotchArea), String(keepsClosedNotchContents)].joined(separator: "|")
     }
     private var songColors: [Color] { media.artworkColors.map(\.color) }
     private var primarySongColor: Color { songColors.first ?? options.textColor.color }
@@ -861,14 +904,24 @@ private struct ContextMusicView: View {
                     }
                 }
                 .padding(.horizontal, safeInset)
-                .padding(.top, max(16, safeInset * 0.75))
+                .padding(.top, contentTopInset)
                 .padding(.bottom, max(10, safeInset * 0.55))
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: options.resolvedCornerRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: usesFullNotchArea ? 0 : options.resolvedCornerRadius, style: .continuous))
             .overlay(alignment: .topTrailing) {
                 HStack(spacing: 12) {
+                    Button {
+                        if !surfaceState.pinned { surfaceState.expanded = false }
+                    } label: {
+                        Image(systemName: "chevron.up").font(.system(size: 12, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(effectiveControlColor)
+                    .disabled(surfaceState.pinned)
+                    .help(surfaceState.pinned ? "Unpin Halo before closing" : "Close Halo")
+                    .accessibilityLabel("Close Halo")
                     Button { surfaceState.pinned.toggle() } label: {
                         Image(systemName: surfaceState.pinned ? "pin.fill" : "pin").font(.system(size: 12, weight: .semibold))
                     }
@@ -876,6 +929,17 @@ private struct ContextMusicView: View {
                     .foregroundStyle(effectiveControlColor)
                     .help(surfaceState.pinned ? "Allow Halo to close" : "Keep Halo open")
                     .accessibilityLabel(surfaceState.pinned ? "Unpin Halo" : "Keep Halo open")
+                    Menu {
+                        Toggle("Use full notch area", isOn: $usesFullNotchArea)
+                        Toggle("Keep closed-notch contents visible", isOn: $keepsClosedNotchContents)
+                        Divider()
+                        Text(usesFullNotchArea ? "CI owns the whole expanded surface" : "CI starts below the notch strip")
+                    } label: {
+                        Image(systemName: "rectangle.inset.filled.and.person.filled").font(.system(size: 12, weight: .semibold))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .foregroundStyle(effectiveControlColor)
+                    .help("Context interface layout")
                     Button { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) } label: {
                         Image(systemName: "gearshape.fill").font(.system(size: 12, weight: .semibold))
                     }
@@ -883,7 +947,7 @@ private struct ContextMusicView: View {
                     .foregroundStyle(effectiveControlColor)
                     .help("Open Halo settings")
                 }
-                .padding(.top, max(12, safeInset * 0.65))
+                .padding(.top, controlsTopInset)
                 .padding(.trailing, safeInset)
             }
             .foregroundStyle(effectiveTextColor)
