@@ -134,7 +134,10 @@ struct SurfaceGeometry {
             width = Geometry.width(screenWidth: visible.width, requested: max(appearance.compactWidth, requested))
         }
         let height = max(1, min(visible.height - 16, expanded ? appearance.expandedHeight + max(40, compactHeight) : compactHeight))
-        var x = visible.midX - width / 2
+        // A real notch belongs to the physical display, not to visibleFrame. Using screen.midX
+        // keeps the camera cutout fixed even when the Dock changes visibleFrame asymmetrically.
+        let horizontalCenter = attachedToNotch && physicalNotchWidth > 0 ? screen.midX : visible.midX
+        var x = horizontalCenter - width / 2
         var y = (attachedToNotch ? screen.maxY : visible.maxY - 8) - height
         if !expanded { x += activeCompactCenterOffset ?? 0 }
         switch style {
@@ -153,27 +156,50 @@ struct SurfaceGeometry {
     }
 }
 enum SurfaceMotion {
+    /// A C2-continuous easing curve. Compared with classic smoothstep it has softer
+    /// acceleration and braking, which matters when the window is changing both width
+    /// and height at the same time.
+    private static func smootherstep(_ t: Double) -> Double {
+        t * t * t * (t * (t * 6 - 15) + 10)
+    }
+
     static func progress(_ fraction: Double, transition: SurfaceTransition, preset: AnimationPreset, damping: Double) -> Double {
         let t = min(1, max(0, fraction))
         if t == 0 || t == 1 { return t }
         if transition == .instant || preset == .none { return 1 }
+
         if transition == .spring {
-            let zeta = min(0.99, max(0.4, damping))
-            let omega = 12.0
-            let frequency = omega * sqrt(1 - zeta * zeta)
-            return 1 - exp(-zeta * omega * t) * (cos(frequency * t) + zeta / sqrt(1 - zeta * zeta) * sin(frequency * t))
+            // The old under-damped curve could overshoot the final window size and then
+            // visibly snap back on the last frame. For a notch, that reads as jitter rather
+            // than a pleasant spring. Use a normalized critically-damped response instead:
+            // it keeps the soft spring character but is monotonic and lands exactly at 1.
+            let settledDamping = min(1, max(0.4, damping))
+            let response = 7.0 + (1.0 - settledDamping) * 4.0
+            let value = 1 - exp(-response * t) * (1 + response * t)
+            let end = 1 - exp(-response) * (1 + response)
+            return min(1, max(0, value / max(0.0001, end)))
         }
-        // Closed-notch live resizing uses resize + snappy. Give that path a symmetric
-        // smootherstep curve so left/right width changes accelerate and settle gently
-        // instead of jumping most of the distance in the first few frames.
+
+        // Closed-notch live resizing uses resize + snappy. Keep it responsive, but use
+        // the same C2-continuous curve so power events, Live Activities and media width
+        // changes settle without a visible step at either end.
         if transition == .resize && preset == .snappy {
-            return t * t * t * (t * (t * 6 - 15) + 10)
+            return smootherstep(t)
         }
+
         switch preset {
-        case .snappy: return 1 - pow(1 - t, 4)
-        case .minimal: return t
-        case .dynamic, .elastic: return 1 - pow(1 - t, 3)
-        default: return t * t * (3 - 2 * t)
+        case .snappy:
+            // Preserve the fast feel without the abrupt quartic launch used previously.
+            let eased = 1 - pow(1 - t, 3)
+            return 0.30 * eased + 0.70 * smootherstep(t)
+        case .minimal:
+            return t
+        case .dynamic, .elastic:
+            // Keep these lively, while still smoothing the first and last frame.
+            let eased = 1 - pow(1 - t, 3)
+            return 0.45 * eased + 0.55 * smootherstep(t)
+        default:
+            return smootherstep(t)
         }
     }
 }
