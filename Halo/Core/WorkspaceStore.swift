@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import UserNotifications
+import Darwin
 
 @MainActor
 final class WorkspaceStore: ObservableObject, LiveActivityProvider {
@@ -273,12 +274,82 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     }
 }
 
+private struct MediaRemoteNowPlayingSnapshot {
+    let title: String
+    let artist: String
+    let album: String
+    let playing: Bool
+    let duration: Double?
+    let elapsed: Double?
+}
+
+private final class MediaRemoteNowPlayingReader {
+    static let shared = MediaRemoteNowPlayingReader()
+
+    private typealias InfoCallback = @convention(block) (CFDictionary?) -> Void
+    private typealias GetInfoFunction = @convention(c) (DispatchQueue, InfoCallback) -> Void
+
+    private let handle: UnsafeMutableRawPointer?
+    private let getInfo: GetInfoFunction?
+
+    private init() {
+        handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW)
+        if let handle, let symbol = dlsym(handle, "MRMediaRemoteGetNowPlayingInfo") {
+            getInfo = unsafeBitCast(symbol, to: GetInfoFunction.self)
+        } else {
+            getInfo = nil
+        }
+    }
+
+    deinit {
+        if let handle { dlclose(handle) }
+    }
+
+    func fetch(_ completion: @escaping (MediaRemoteNowPlayingSnapshot?) -> Void) {
+        guard let getInfo else { completion(nil); return }
+        let callback: InfoCallback = { dictionary in
+            guard let dictionary else { completion(nil); return }
+            let info = dictionary as NSDictionary
+
+            func firstString(_ keys: [String]) -> String? {
+                for key in keys {
+                    if let value = info[key] as? String, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return value }
+                }
+                return nil
+            }
+            func firstDouble(_ keys: [String]) -> Double? {
+                for key in keys {
+                    if let value = info[key] as? NSNumber { return value.doubleValue }
+                    if let value = info[key] as? Double { return value }
+                }
+                return nil
+            }
+
+            guard let title = firstString(["kMRMediaRemoteNowPlayingInfoTitle", "title"]) else {
+                completion(nil)
+                return
+            }
+            let artist = firstString(["kMRMediaRemoteNowPlayingInfoArtist", "artist"]) ?? ""
+            let album = firstString(["kMRMediaRemoteNowPlayingInfoAlbum", "album"]) ?? ""
+            let duration = firstDouble(["kMRMediaRemoteNowPlayingInfoDuration", "duration"])
+            let elapsed = firstDouble(["kMRMediaRemoteNowPlayingInfoElapsedTime", "elapsedTime"])
+            let rate = firstDouble(["kMRMediaRemoteNowPlayingInfoPlaybackRate", "playbackRate"])
+            completion(MediaRemoteNowPlayingSnapshot(title: title, artist: artist, album: album,
+                                                     playing: (rate ?? 0) > 0.001,
+                                                     duration: duration, elapsed: elapsed))
+        }
+        getInfo(DispatchQueue.global(qos: .utility), callback)
+    }
+}
+
 @MainActor
 private final class SystemAudioMediaFallback {
     private weak var media: MediaService?
     private var enabled = false
     private var ownsFallback = false
     private var lastHeard = Date.distantPast
+    private var lastRemoteMetadata = Date.distantPast
+    private var remoteRequestInFlight = false
 
     init(media: MediaService) { self.media = media }
 
@@ -292,37 +363,74 @@ private final class SystemAudioMediaFallback {
     func refresh() {
         guard enabled, let media else { return }
 
-        // Rich Apple Music / Spotify metadata wins in Automatic mode. System Audio owns the
-        // presentation only when no rich provider is actively playing, or when System Audio is forced.
+        // Rich Apple Music / Spotify metadata wins in Automatic mode. MediaRemote is used only
+        // when Halo is on the System Audio path (or when no rich provider is actively playing).
         if media.connectedApp != nil && media.isPlaying {
             ownsFallback = false
             return
         }
 
-        let snapshot = AudioSpectrumService.shared.snapshot()
-        let audibleNow = snapshot.available && snapshot.overall > 0.045
+        requestMediaRemoteMetadata()
+
+        let audioSnapshot = AudioSpectrumService.shared.snapshot()
+        let audibleNow = audioSnapshot.available && audioSnapshot.overall > 0.045
         if audibleNow { lastHeard = Date() }
         let withinReleaseWindow = Date().timeIntervalSince(lastHeard) < 2.75
+        let remoteMetadataFresh = Date().timeIntervalSince(lastRemoteMetadata) < 5.0
         let systemAudioPlaying = audibleNow || (ownsFallback && withinReleaseWindow)
 
-        guard systemAudioPlaying else {
-            clearIfOwned()
+        if systemAudioPlaying {
+            if media.connectedApp == nil {
+                if !remoteMetadataFresh {
+                    media.title = "System Audio"
+                    media.artist = "Playing from your Mac"
+                }
+                media.isPlaying = true
+                media.error = nil
+                ownsFallback = true
+            }
             return
         }
 
-        if media.connectedApp == nil {
-            media.title = "System Audio"
-            media.artist = "Playing from your Mac"
-            media.isPlaying = true
-            media.error = nil
-            ownsFallback = true
+        // Keep fresh MediaRemote metadata visible while paused, but do not mark the source as playing.
+        if ownsFallback && remoteMetadataFresh && media.connectedApp == nil {
+            media.isPlaying = false
+            return
         }
+
+        clearIfOwned()
     }
 
     func stop() {
         enabled = false
         AudioSpectrumService.shared.setActive(false)
         clearIfOwned()
+    }
+
+    private func requestMediaRemoteMetadata() {
+        guard !remoteRequestInFlight else { return }
+        remoteRequestInFlight = true
+        MediaRemoteNowPlayingReader.shared.fetch { [weak self] snapshot in
+            Task { @MainActor in
+                guard let self else { return }
+                self.remoteRequestInFlight = false
+                guard self.enabled, let media = self.media, media.connectedApp == nil, let snapshot else { return }
+
+                self.lastRemoteMetadata = Date()
+                self.ownsFallback = true
+                media.title = snapshot.title
+                if !snapshot.artist.isEmpty {
+                    media.artist = snapshot.artist
+                } else if !snapshot.album.isEmpty {
+                    media.artist = snapshot.album
+                } else {
+                    media.artist = "System Audio"
+                }
+                let audibleNow = AudioSpectrumService.shared.snapshot().available && AudioSpectrumService.shared.snapshot().overall > 0.045
+                media.isPlaying = snapshot.playing || audibleNow
+                media.error = nil
+            }
+        }
     }
 
     private func clearIfOwned() {
