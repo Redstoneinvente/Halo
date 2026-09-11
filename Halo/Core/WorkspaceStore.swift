@@ -233,7 +233,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         UNUserNotificationCenter.current().getNotificationSettings { status in
             guard status.authorizationStatus == .authorized else { return }
             let content = UNMutableNotificationContent(); content.title = title; content.sound = .default
-            UNUserNotificationCenter.current().add(UNUserNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         }
     }
     func refreshApps() {
