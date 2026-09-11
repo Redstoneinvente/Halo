@@ -219,7 +219,7 @@ struct SettingsView: View {
             }
             Toggle("Keep shelf references between launches", isOn: $workspace.settings.persistShelf).onChange(of: workspace.settings.persistShelf) { _ in store.persistFiles() }
             Picker("Remove shelf references after", selection: $workspace.settings.shelfRetentionMinutes) { Text("Manually").tag(0); Text("5 minutes").tag(5); Text("30 minutes").tag(30); Text("1 hour").tag(60) }
-            Text("Up to 100 references. Pinned items do not expire. Saved references keep their original retention age after relaunch. Removing a shelf item never deletes its original.")
+            Text("Up to 100 references. Pinned items do not expire. Saved references keep their original retention age after relaunch. Removing a shelf item never deletes its original.").font(.caption)
             Button("Clear shelf references") { store.clearShelf() }
         case "Profiles": ProfileLibraryView(store: store, workspace: workspace)
         case "Automation":
@@ -515,6 +515,20 @@ private struct ContextMusicSettings: View {
             configuration.wrappedValue = updated
         })
     }
+    private var verticalNotchExpansion: Binding<Bool> {
+        Binding(get: { notchConfiguration.wrappedValue.usesVerticalExpansion }, set: { enabled in
+            var value = notchConfiguration.wrappedValue
+            value.expandVertically = enabled
+            notchConfiguration.wrappedValue = value
+        })
+    }
+    private var verticalNotchHeight: Binding<Double> {
+        Binding(get: { notchConfiguration.wrappedValue.resolvedVerticalHeight }, set: { height in
+            var value = notchConfiguration.wrappedValue
+            value.verticalHeight = height
+            notchConfiguration.wrappedValue = value
+        })
+    }
     private var isNotchTarget: Bool { configuration.wrappedValue.presentation.target == .notch }
 
     var body: some View {
@@ -601,8 +615,14 @@ private struct ContextMusicSettings: View {
             switch configuration.wrappedValue.presentation.target {
             case .notch:
                 Picker("Notch side", selection: configuration.presentation.notchSide) { ForEach(HaloHUDNotchSide.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
-                Picker("Collision", selection: configuration.behavior.collision) { ForEach(HaloHUDCollisionBehavior.allCases) { Text($0.title).tag($0) } }
-                Text("Notch HUD is rendered inside Halo's closed-notch strip. It can expand the chosen side horizontally, but it never increases closed-notch height or moves below the closed area.").font(.caption).foregroundStyle(.secondary)
+                Toggle("Expand notch vertically", isOn: verticalNotchExpansion)
+                if verticalNotchExpansion.wrappedValue {
+                    Slider(value: verticalNotchHeight, in: 56...220) { Text("Vertical HUD height") }
+                    Text("Vertical mode keeps the normal closed-notch width and grows the surface downward for the HUD instead of reserving extra left/right wing width.").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Picker("Collision", selection: configuration.behavior.collision) { ForEach(HaloHUDCollisionBehavior.allCases) { Text($0.title).tag($0) } }
+                    Text("Horizontal mode expands the chosen notch side outward without changing the closed-notch height.").font(.caption).foregroundStyle(.secondary)
+                }
                 Divider()
                 Text("Notch HUD customization").font(.headline)
                 Slider(value: notchConfiguration.width, in: 48...600) { Text("HUD width") }
@@ -631,7 +651,7 @@ private struct ContextMusicSettings: View {
 
         Section("Layout") {
             if isNotchTarget {
-                Text("The Notch target always uses a compact horizontal HUD inside the current Closed Notch height. Generic height, vertical padding, Y offset, corner radius and panel layout settings do not apply here.")
+                Text(verticalNotchExpansion.wrappedValue ? "The Notch target keeps its compact HUD styling while the closed surface grows to the Vertical HUD height. Generic floating height, vertical padding, Y offset and panel layout settings do not apply here." : "The Notch target uses a compact horizontal HUD inside the current Closed Notch height. Generic height, vertical padding, Y offset, corner radius and panel layout settings do not apply here.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 Picker("Layout", selection: configuration.layout.style) { ForEach(HaloHUDLayoutStyle.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
@@ -671,7 +691,7 @@ private struct ContextMusicSettings: View {
 
         Section("Appearance") {
             if isNotchTarget {
-                Text("Notch HUD reuses the existing Closed Notch surface. It does not draw its own background, border, shadow, glow, blur or vertical shape, so the HUD stays visually inside closed mode.")
+                Text("Notch HUD reuses the existing Closed Notch surface. It does not draw its own background, border, shadow, glow or blur, so the HUD stays visually integrated with closed mode.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 Picker("Background", selection: configuration.appearance.background) {
@@ -708,7 +728,7 @@ private struct ContextMusicSettings: View {
 
         Section("Animation") {
             if isNotchTarget {
-                Text("Notch HUD uses horizontal expand/collapse only. Vertical slide, morph and scale directions are intentionally ignored so the HUD never leaves the closed-notch strip.")
+                Text(verticalNotchExpansion.wrappedValue ? "Vertical notch mode animates the closed surface height while keeping it anchored to the physical top edge." : "Horizontal notch mode resizes the chosen wing while staying inside the closed-notch strip.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 Picker("Entrance", selection: configuration.animation.entrance) { ForEach(HaloHUDEntranceAnimation.allCases) { Text($0.title).tag($0) } }
@@ -889,7 +909,8 @@ private struct HaloHUDStudioPreview: View {
     private var rawSize: CGSize {
         switch configuration.presentation.target {
         case .notch:
-            return CGSize(width: max(48, configuration.presentation.resolvedNotch.width), height: 40)
+            let notch = configuration.presentation.resolvedNotch
+            return CGSize(width: max(48, notch.width), height: notch.usesVerticalExpansion ? notch.resolvedVerticalHeight : 40)
         case .screenEdge:
             let length = max(40, configuration.presentation.screenEdgeLength)
             let thickness = max(1, configuration.presentation.screenEdgeThickness)
