@@ -1,4 +1,5 @@
 import Foundation
+import IOBluetooth
 
 struct DailyWindow: Codable, Equatable {
     var startMinute = 9 * 60
@@ -84,5 +85,145 @@ enum PlayerSelection {
         let playing = snapshots.filter(\.playing)
         let candidates = playing.isEmpty ? snapshots : playing
         return candidates.first { $0.app == current } ?? candidates.first { $0.app == preferred } ?? candidates.first
+    }
+}
+
+// MARK: - Bluetooth context state
+
+struct BluetoothDeviceSnapshot: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let address: String
+    let connected: Bool
+}
+
+enum BluetoothConnectionEventKind: Equatable {
+    case connected
+    case disconnected
+    case poweredOn
+    case poweredOff
+}
+
+struct BluetoothConnectionEvent: Identifiable, Equatable {
+    let id = UUID()
+    let kind: BluetoothConnectionEventKind
+    let deviceName: String?
+    let date = Date()
+
+    var title: String {
+        switch kind {
+        case .connected: return "Bluetooth connected"
+        case .disconnected: return "Bluetooth disconnected"
+        case .poweredOn: return "Bluetooth on"
+        case .poweredOff: return "Bluetooth off"
+        }
+    }
+
+    var detail: String {
+        switch kind {
+        case .connected, .disconnected: return deviceName ?? "Bluetooth device"
+        case .poweredOn: return "Ready for devices"
+        case .poweredOff: return "Connections unavailable"
+        }
+    }
+
+    var symbol: String {
+        switch kind {
+        case .connected: return "wave.3.right.circle.fill"
+        case .disconnected: return "wave.3.right.circle"
+        case .poweredOn: return "wave.3.right"
+        case .poweredOff: return "wave.3.right.slash"
+        }
+    }
+}
+
+@MainActor
+final class BluetoothStateService: ObservableObject {
+    static let shared = BluetoothStateService()
+
+    @Published private(set) var poweredOn = false
+    @Published private(set) var devices: [BluetoothDeviceSnapshot] = []
+    @Published private(set) var lastEvent: BluetoothConnectionEvent?
+
+    var connectedDevices: [BluetoothDeviceSnapshot] { devices.filter(\.connected) }
+    var pairedDevices: [BluetoothDeviceSnapshot] { devices }
+
+    private var timer: Timer?
+    private var primed = false
+    private var clearEventWork: DispatchWorkItem?
+
+    private init() {}
+
+    func start() {
+        guard timer == nil else { return }
+        refresh()
+        timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
+        }
+        if let timer { RunLoop.main.add(timer, forMode: .common) }
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        clearEventWork?.cancel()
+        clearEventWork = nil
+    }
+
+    func refresh() {
+        let nextPoweredOn = (IOBluetoothHostController.default()?.powerState.rawValue ?? 0) == 1
+        let raw = (IOBluetoothDevice.pairedDevices() ?? []).compactMap { $0 as? IOBluetoothDevice }
+        let nextDevices = raw.map { device -> BluetoothDeviceSnapshot in
+            let address = device.addressString ?? ""
+            let name = device.name ?? device.nameOrAddress ?? (address.isEmpty ? "Bluetooth device" : address)
+            return BluetoothDeviceSnapshot(id: address.isEmpty ? name : address,
+                                           name: name,
+                                           address: address,
+                                           connected: device.isConnected())
+        }.sorted {
+            if $0.connected != $1.connected { return $0.connected && !$1.connected }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+
+        guard primed else {
+            poweredOn = nextPoweredOn
+            devices = nextDevices
+            primed = true
+            return
+        }
+
+        let previousByID = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
+        let nextByID = Dictionary(uniqueKeysWithValues: nextDevices.map { ($0.id, $0) })
+
+        if poweredOn != nextPoweredOn {
+            emit(BluetoothConnectionEvent(kind: nextPoweredOn ? .poweredOn : .poweredOff, deviceName: nil))
+        }
+
+        let newlyConnected = nextDevices.first { device in
+            device.connected && previousByID[device.id]?.connected != true
+        }
+        let newlyDisconnected = devices.first { device in
+            device.connected && nextByID[device.id]?.connected != true
+        }
+
+        if let newlyConnected {
+            emit(BluetoothConnectionEvent(kind: .connected, deviceName: newlyConnected.name))
+        } else if let newlyDisconnected {
+            emit(BluetoothConnectionEvent(kind: .disconnected, deviceName: newlyDisconnected.name))
+        }
+
+        poweredOn = nextPoweredOn
+        devices = nextDevices
+    }
+
+    private func emit(_ event: BluetoothConnectionEvent) {
+        lastEvent = event
+        clearEventWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard self?.lastEvent?.id == event.id else { return }
+            self?.lastEvent = nil
+        }
+        clearEventWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: work)
     }
 }
