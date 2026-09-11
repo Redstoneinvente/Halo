@@ -134,7 +134,10 @@ struct SurfaceGeometry {
             width = Geometry.width(screenWidth: visible.width, requested: max(appearance.compactWidth, requested))
         }
         let height = max(1, min(visible.height - 16, expanded ? appearance.expandedHeight + max(40, compactHeight) : compactHeight))
-        var x = visible.midX - width / 2
+        // A real notch belongs to the physical display, not to visibleFrame. Using screen.midX
+        // keeps the camera cutout fixed even when the Dock changes visibleFrame asymmetrically.
+        let horizontalCenter = attachedToNotch && physicalNotchWidth > 0 ? screen.midX : visible.midX
+        var x = horizontalCenter - width / 2
         var y = (attachedToNotch ? screen.maxY : visible.maxY - 8) - height
         if !expanded { x += activeCompactCenterOffset ?? 0 }
         switch style {
