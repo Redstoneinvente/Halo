@@ -11,6 +11,7 @@ struct SettingsView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
     @AppStorage("onboarded") private var onboarded = false
+    @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
     @State private var section: String? = "General"
     @State private var search = ""
     @State private var profileName = "My profile"
@@ -111,6 +112,8 @@ struct SettingsView: View {
         case "Schedules": ScheduleSettingsView(workspace: workspace)
         case "Appearance":
             Section("Expanded dashboard") {
+                Toggle("Keep closed-notch contents visible when opened", isOn: $keepClosedContentsWhenOpen)
+                Text("Keeps the normal Closed Notch widgets and media visible in the top strip when Halo's regular dashboard is open. Context Interfaces use their own setting.").font(.caption).foregroundStyle(.secondary)
                 Toggle("Horizontal widget layout", isOn: Binding(get: { workspace.settings.layout.horizontalWidgets ?? false }, set: { workspace.settings.layout.horizontalWidgets = $0 }))
                 if workspace.settings.layout.horizontalWidgets ?? false {
                     Picker("Navigation", selection: Binding(get: { workspace.settings.layout.horizontalPages ?? false }, set: { workspace.settings.layout.horizontalPages = $0 })) {
@@ -521,6 +524,8 @@ private struct ContextInterfaceCard: View {
 
 private struct ContextMusicSettings: View {
     @Binding var layout: WorkspaceLayout
+    @AppStorage("HaloContextMusicUseFullNotchArea") private var useFullNotchArea = false
+    @AppStorage("HaloContextMusicKeepClosedNotchContents") private var keepClosedNotchContents = false
     private var options: Binding<ContextMusicOptions> { Binding(get: { layout.contextMusic ?? ContextMusicOptions() }, set: { layout.contextMusic = $0 }) }
     private var layoutMode: Binding<ContextMusicLayoutMode> { Binding(get: { options.wrappedValue.resolvedLayoutMode }, set: { options.wrappedValue.layoutMode = $0 }) }
     private var foregroundArtwork: Binding<ContextArtworkPresentation> {
@@ -558,6 +563,15 @@ private struct ContextMusicSettings: View {
             Toggle("Artist", isOn: options.showArtist)
             Toggle("Playback controls", isOn: options.showControls)
             Toggle("Visualizer", isOn: options.showVisualizer)
+        }
+
+        Section("CI surface") {
+            Toggle("Use full notch area", isOn: $useFullNotchArea)
+            Text(useFullNotchArea ? "Music CI owns the entire expanded Halo surface, including the area normally reserved for the top notch strip." : "Music CI starts below the notch/top strip, preserving the current expanded layout.")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("Keep closed-notch contents visible", isOn: $keepClosedNotchContents)
+            Text("Controls whether the Closed Notch contents remain visible while Music CI is active. This setting is independent from the normal opened-notch Appearance setting.")
+                .font(.caption).foregroundStyle(.secondary)
         }
 
         Section("Lyrics") {
