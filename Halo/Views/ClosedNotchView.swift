@@ -5,6 +5,16 @@ import AVFoundation
 
 enum ClosedNotchSide { case left, right }
 
+struct HaloScreenFrameEnvironmentKey: EnvironmentKey {
+    static let defaultValue = CGRect.zero
+}
+extension EnvironmentValues {
+    var haloScreenFrame: CGRect {
+        get { self[HaloScreenFrameEnvironmentKey.self] }
+        set { self[HaloScreenFrameEnvironmentKey.self] = newValue }
+    }
+}
+
 private enum PowerEventKind { case charging, low, charged }
 private struct PowerEventInfo {
     let kind: PowerEventKind
@@ -102,10 +112,16 @@ private struct MediaGestureModifier: ViewModifier {
 struct ClosedNotchView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
+    @ObservedObject private var hudBridge = HaloHUDNotchBridge.shared
+    @Environment(\.haloScreenFrame) private var haloScreenFrame
     let layout: WorkspaceLayout
     let occlusion: CGRect?
     let referenceWidth: CGFloat
     private var options: ClosedNotchOptions { layout.closedNotch ?? ClosedNotchOptions() }
+    private var activeHUD: HaloHUDNotchPresentation? {
+        guard let hud = hudBridge.presentation, hud.screenFrame.equalTo(haloScreenFrame) else { return nil }
+        return hud
+    }
     private var activeActivity: LiveActivity? {
         workspace.activities.first { activity in
             (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(12) > Date()
@@ -141,12 +157,21 @@ struct ClosedNotchView: View {
         let intersection = camera.intersection(CGRect(x: 0, y: 0, width: width, height: max(1, height)))
         return intersection.isNull || intersection.isEmpty ? nil : intersection
     }
+    private func hud(for side: ClosedNotchSide) -> HaloHUDNotchPresentation? {
+        guard let hud = activeHUD else { return nil }
+        switch hud.side {
+        case .left: return side == .left ? hud : nil
+        case .right: return side == .right ? hud : nil
+        case .full: return hud
+        case .automatic: return side == .right ? hud : nil
+        }
+    }
     private func slot(_ item: ClosedNotchItem, decoration: SideDecoration?, side: ClosedNotchSide, width: CGFloat, height: CGFloat) -> some View {
         Group {
             if width >= 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin + 8 {
                 ClosedNotchSlot(item: item, decoration: decoration, side: side, availableHeight: height, availableWidth: width,
                                 options: options, clock: layout.widgetStyle(for: .clock), store: store, workspace: workspace,
-                                media: workspace.media, system: workspace.system)
+                                media: workspace.media, system: workspace.system, hud: hud(for: side))
             }
         }.frame(width: max(0, width)).clipped()
     }
@@ -164,6 +189,7 @@ struct ClosedNotchSlot: View {
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject var media: MediaService
     @ObservedObject var system: SystemService
+    let hud: HaloHUDNotchPresentation?
     private let elementSpacing = 6.0
     private var activeActivity: LiveActivity? {
         workspace.activities.first { activity in
@@ -228,9 +254,41 @@ struct ClosedNotchSlot: View {
         if options.albumTextColor == true, media.isPlaying, let album = media.artworkColors.first { return album.color }
         return options.color.color
     }
+    private var hudCollision: HaloHUDCollisionBehavior? { hud?.configuration.behavior.collision }
+    private var hudNotch: HaloHUDNotchConfiguration? { hud?.configuration.presentation.resolvedNotch }
+    private var hudRequestedWidth: Double {
+        guard let hud, let notch = hudNotch else { return 0 }
+        return hud.side == .full ? max(24, notch.width / 2) : max(24, notch.width)
+    }
+    private var hudElementWidth: Double { min(max(24, hudRequestedWidth), max(24, innerWidth)) }
+    private var hudPushesContent: Bool {
+        guard hud != nil else { return false }
+        return hudCollision == .push || hudCollision == .queue || hudCollision == .showExternally
+    }
+    private var hudReservedWidth: Double { hudPushesContent ? hudElementWidth + elementSpacing : 0 }
+    private var hudHorizontalOffset: Double {
+        guard let offset = hudNotch?.horizontalOffset else { return 0 }
+        return side == .left ? -offset : offset
+    }
+    private var hudElementConfiguration: HaloHUDConfiguration? {
+        guard let hud else { return nil }
+        var configuration = hud.configuration
+        if hud.side == .full {
+            if side == .left {
+                configuration.components.value = false
+                configuration.components.percentage = false
+                configuration.components.progress = false
+            } else {
+                configuration.components.icon = false
+                configuration.components.label = false
+                configuration.components.deviceName = false
+            }
+        }
+        return configuration
+    }
     private var visualizerOptions: VisualizerOptions {
         var v = options.visualizer ?? VisualizerOptions()
-        v.width = min(v.width, max(1, innerWidth - decorationSize - (decorationSize > 0 ? elementSpacing : 0)))
+        v.width = min(v.width, max(1, innerWidth - mediaSiblingFootprint))
         v.height = min(v.height, innerHeight)
         return v
     }
@@ -264,6 +322,7 @@ struct ClosedNotchSlot: View {
         if decorationSize > 0 { widths.append(decorationSize) }
         if artworkFootprint > 0 { widths.append(artworkFootprint) }
         if powerFootprint > 0 { widths.append(powerFootprint) }
+        if hudReservedWidth > 0 { widths.append(hudElementWidth) }
         return widths.reduce(0, +) + Double(widths.count) * elementSpacing
     }
     private var closedMediaWidth: Double {
@@ -282,8 +341,9 @@ struct ClosedNotchSlot: View {
         if decorationSize > 0 { occupied += decorationSize; siblingCount += 1 }
         if artworkFootprint > 0 { occupied += artworkFootprint; siblingCount += 1 }
         if powerFootprint > 0 { occupied += powerFootprint; siblingCount += 1 }
+        if hudReservedWidth > 0 { occupied += hudElementWidth; siblingCount += 1 }
         if siblingCount > 0 { occupied += Double(siblingCount) * elementSpacing }
-        return max(32, innerWidth - occupied)
+        return max(24, innerWidth - occupied)
     }
     private var renderedArtworkOptions: ClosedArtworkOptions {
         var value = artwork
@@ -291,17 +351,24 @@ struct ClosedNotchSlot: View {
         return value
     }
     var body: some View {
-        HStack(spacing: elementSpacing) {
-            if side == .left {
-                decorationElement
-                artworkElement
-                contentElement
-                powerElement
+        Group {
+            if hud != nil && hudCollision == .replace {
+                hudOnlyRow
+            } else if hud != nil && hudCollision == .overlay {
+                ZStack(alignment: side == .left ? .trailing : .leading) {
+                    standardRow
+                    hudOnlyRow
+                }
             } else {
-                powerElement
-                contentElement
-                artworkElement
-                decorationElement
+                HStack(spacing: elementSpacing) {
+                    if side == .left {
+                        standardElements
+                        hudElement
+                    } else {
+                        hudElement
+                        standardElements
+                    }
+                }
             }
         }
         .font(.system(size: textSize))
@@ -314,7 +381,38 @@ struct ClosedNotchSlot: View {
         .padding(side == .left ? .leading : .trailing, options.contentOuterMargin)
         .frame(width: availableWidth, height: availableHeight, alignment: .center)
         .clipped()
-        .modifier(MediaGestureModifier(media: media, options: closedMediaOptions, enabled: isMusicItem))
+        .modifier(MediaGestureModifier(media: media, options: closedMediaOptions, enabled: isMusicItem && hudCollision != .replace))
+    }
+    private var standardRow: some View {
+        HStack(spacing: elementSpacing) { standardElements }
+            .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
+    }
+    private var hudOnlyRow: some View {
+        HStack(spacing: 0) { hudElement }
+            .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
+    }
+    @ViewBuilder private var standardElements: some View {
+        if side == .left {
+            decorationElement
+            artworkElement
+            contentElement
+            powerElement
+        } else {
+            powerElement
+            contentElement
+            artworkElement
+            decorationElement
+        }
+    }
+    @ViewBuilder private var hudElement: some View {
+        if let hud, let configuration = hudElementConfiguration {
+            HaloHUDRenderView(event: hud.event, configuration: configuration, palette: media.artworkColors, visible: true)
+                .frame(width: hudElementWidth, height: innerHeight)
+                .offset(x: hudHorizontalOffset)
+                .id(hud.event.id)
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                .layoutPriority(4)
+        }
     }
     @ViewBuilder private var decorationElement: some View {
         if let decoration, decorationSize > 0 {
