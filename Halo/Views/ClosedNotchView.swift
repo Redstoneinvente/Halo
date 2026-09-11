@@ -122,6 +122,11 @@ struct ClosedNotchView: View {
         guard let hud = hudBridge.presentation, hud.screenFrame.equalTo(haloScreenFrame) else { return nil }
         return hud
     }
+    private var verticalHUD: HaloHUDNotchPresentation? {
+        guard let hud = activeHUD,
+              hud.configuration.presentation.resolvedNotch.usesVerticalExpansion else { return nil }
+        return hud
+    }
     private var activeActivity: LiveActivity? {
         workspace.activities.first { activity in
             (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(12) > Date()
@@ -141,15 +146,40 @@ struct ClosedNotchView: View {
     var body: some View {
         GeometryReader { proxy in
             let reservation = cameraReservation(width: proxy.size.width, height: proxy.size.height)
-            let leftWidth = reservation?.minX ?? proxy.size.width / 2
-            let rightWidth = reservation.map { proxy.size.width - $0.maxX } ?? proxy.size.width / 2
-            let items = resolvedItems
-            HStack(spacing: 0) {
-                slot(items.left, decoration: options.leftDecoration, side: .left, width: leftWidth, height: proxy.size.height)
-                if let reservation { Color.clear.frame(width: reservation.width) }
-                slot(items.right, decoration: options.rightDecoration, side: .right, width: rightWidth, height: proxy.size.height)
-            }.frame(height: proxy.size.height)
+            if let hud = verticalHUD {
+                verticalHUDContent(hud, size: proxy.size, reservation: reservation)
+            } else {
+                let leftWidth = reservation?.minX ?? proxy.size.width / 2
+                let rightWidth = reservation.map { proxy.size.width - $0.maxX } ?? proxy.size.width / 2
+                let items = resolvedItems
+                HStack(spacing: 0) {
+                    slot(items.left, decoration: options.leftDecoration, side: .left, width: leftWidth, height: proxy.size.height)
+                    if let reservation { Color.clear.frame(width: reservation.width) }
+                    slot(items.right, decoration: options.rightDecoration, side: .right, width: rightWidth, height: proxy.size.height)
+                }.frame(height: proxy.size.height)
+            }
         }.foregroundStyle(options.color.color)
+    }
+    private func verticalHUDContent(_ hud: HaloHUDNotchPresentation, size: CGSize, reservation: CGRect?) -> some View {
+        let notch = hud.configuration.presentation.resolvedNotch
+        let cameraHeight = min(size.height, max(reservation?.height ?? 0, occlusion?.height ?? 0))
+        let availableHeight = max(1, size.height - cameraHeight)
+        let horizontalInset = CGFloat(max(4, options.contentPaddingX + options.contentOuterMargin))
+        let maximumWidth = max(24, size.width - horizontalInset * 2)
+        let hudWidth = min(maximumWidth, max(48, CGFloat(notch.width)))
+        let maxOffset = max(0, (size.width - hudWidth) / 2)
+        let horizontalOffset = min(maxOffset, max(-maxOffset, CGFloat(notch.horizontalOffset)))
+        var configuration = hud.configuration
+        configuration.presentation.notchSide = .full
+        configuration.behavior.collision = .replace
+        return HaloHUDRenderView(event: hud.event, configuration: configuration,
+                                 palette: workspace.media.artworkColors, visible: true)
+            .frame(width: hudWidth, height: availableHeight)
+            .position(x: size.width / 2 + horizontalOffset,
+                      y: cameraHeight + availableHeight / 2)
+            .id(hud.event.id)
+            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            .clipped()
     }
     private func cameraReservation(width: CGFloat, height: CGFloat) -> CGRect? {
         guard var camera = occlusion else { return nil }
