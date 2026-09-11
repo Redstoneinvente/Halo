@@ -27,6 +27,7 @@ final class AppStore: ObservableObject {
             configuration = saved
         } else { configuration = Configuration() }
         workspace.applyTheme = { [weak self] theme in self?.configuration.theme = theme }
+        EnvironmentalInterfaceManager.shared.start(workspace: workspace)
         if workspace.settings.persistShelf {
             files = (defaults.stringArray(forKey: "shelf.paths") ?? []).map { URL(fileURLWithPath: $0) }.filter { FileManager.default.fileExists(atPath: $0.path) }
             let savedDates = (defaults.dictionary(forKey: "shelf.addedAt") as? [String: Date]) ?? [:]
