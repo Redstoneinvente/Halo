@@ -37,6 +37,9 @@ struct Appearance: Codable, Equatable {
     var backgroundSchedule: [TimedBackground]?
     var surface = SurfaceOptions()
     var background: BackgroundKind = .gradient
+    var solidColor: WidgetColor?
+    var gradientStartColor: WidgetColor?
+    var gradientEndColor: WidgetColor?
     var assetPath = ""
     var blur = 0.0
     var saturation = 1.0
@@ -48,7 +51,7 @@ struct Appearance: Codable, Equatable {
     var pauseVideoOnBattery = true
     init() {}
     private enum CodingKeys: String, CodingKey {
-        case grain, backgroundSchedule, surface, background, assetPath, blur, saturation, brightness, expandedHeight, compactWidth, spacing, animation, pauseVideoOnBattery
+        case grain, backgroundSchedule, surface, background, solidColor, gradientStartColor, gradientEndColor, assetPath, blur, saturation, brightness, expandedHeight, compactWidth, spacing, animation, pauseVideoOnBattery
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -56,6 +59,9 @@ struct Appearance: Codable, Equatable {
         backgroundSchedule = try c.decodeIfPresent([TimedBackground].self, forKey: .backgroundSchedule)
         surface = try c.decodeIfPresent(SurfaceOptions.self, forKey: .surface) ?? SurfaceOptions()
         background = try c.decodeIfPresent(BackgroundKind.self, forKey: .background) ?? .gradient
+        solidColor = try c.decodeIfPresent(WidgetColor.self, forKey: .solidColor)
+        gradientStartColor = try c.decodeIfPresent(WidgetColor.self, forKey: .gradientStartColor)
+        gradientEndColor = try c.decodeIfPresent(WidgetColor.self, forKey: .gradientEndColor)
         assetPath = try c.decodeIfPresent(String.self, forKey: .assetPath) ?? ""
         blur = try c.decodeIfPresent(Double.self, forKey: .blur) ?? 0
         saturation = try c.decodeIfPresent(Double.self, forKey: .saturation) ?? 1
@@ -120,6 +126,9 @@ struct ThemeArchive: Codable {
         appearance.compactWidth = min(640, max(16, appearance.compactWidth))
         appearance.surface = try appearance.surface.validated()
         appearance.spacing = min(28, max(4, appearance.spacing))
+        appearance.solidColor = try appearance.solidColor?.validated()
+        appearance.gradientStartColor = try appearance.gradientStartColor?.validated()
+        appearance.gradientEndColor = try appearance.gradientEndColor?.validated()
         appearance.assetPath = ""
         if appearance.background == .video || appearance.background == .image { appearance.background = .gradient }
         appearance.grain = try appearance.grain?.validated()
