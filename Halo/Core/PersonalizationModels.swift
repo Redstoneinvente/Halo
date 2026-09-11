@@ -232,6 +232,7 @@ final class BluetoothStateService: ObservableObject {
         connectionError = nil
 
         let deviceID = device.id
+        let deviceName = device.name
         DispatchQueue.global(qos: .userInitiated).async {
             let status = Self.performConnectionChange(deviceID: deviceID, shouldConnect: shouldConnect)
             DispatchQueue.main.async { [weak self] in
@@ -240,8 +241,8 @@ final class BluetoothStateService: ObservableObject {
                 self.refresh()
                 if status != kIOReturnSuccess {
                     self.connectionError = shouldConnect
-                        ? "Could not connect to \(device.name) (Bluetooth error \(status))."
-                        : "Could not disconnect \(device.name) (Bluetooth error \(status))."
+                        ? "Could not connect to \(deviceName) (Bluetooth error \(status))."
+                        : "Could not disconnect \(deviceName) (Bluetooth error \(status))."
                 }
             }
         }
@@ -249,7 +250,7 @@ final class BluetoothStateService: ObservableObject {
 
     nonisolated private static func performConnectionChange(deviceID: String, shouldConnect: Bool) -> IOReturn {
         let raw = (IOBluetoothDevice.pairedDevices() ?? []).compactMap { $0 as? IOBluetoothDevice }
-        guard let device = raw.first(where: { matches($0, id: deviceID) }) else { return kIOReturnNotFound }
+        guard let device = raw.first(where: { matches($0, id: deviceID) }) else { return kIOReturnNoDevice }
         if shouldConnect {
             if device.isConnected() { return kIOReturnSuccess }
             return device.openConnection()
@@ -450,6 +451,7 @@ struct ContextBluetoothSettings: View {
     @AppStorage("HaloContextBluetoothUseFullNotchArea") private var useFullNotchArea = false
     @AppStorage("HaloContextBluetoothKeepClosedNotchContents") private var keepClosedNotchContents = false
     @AppStorage("HaloContextBluetoothPriority") private var priority = 50.0
+    @AppStorage("HaloContextMusicPriority") private var musicPriority = 60.0
     @AppStorage("HaloBluetoothClosedNotchEvents") private var closedNotchEvents = true
     @AppStorage("HaloBluetoothClosedNotchConnected") private var showConnectedEvent = true
     @AppStorage("HaloBluetoothClosedNotchDisconnected") private var showDisconnectedEvent = true
@@ -471,8 +473,12 @@ struct ContextBluetoothSettings: View {
                 .disabled(!enabled)
             Toggle("Show CI for connection changes", isOn: $showOnChanges)
                 .disabled(!enabled)
-            Slider(value: $priority, in: 0...100, step: 1) { Text("CI priority") }
-            Text("When multiple Context Interfaces are eligible, the one with the highest priority owns Halo. Equal priorities prefer Music CI, then Bluetooth CI.")
+        }
+
+        Section("CI priority") {
+            Slider(value: $priority, in: 0...100, step: 1) { Text("Bluetooth CI priority") }
+            Slider(value: $musicPriority, in: 0...100, step: 1) { Text("Music CI priority") }
+            Text("When multiple Context Interfaces are eligible, the highest priority owns Halo. Equal priorities prefer Music CI, then Bluetooth CI. Music defaults to 60 and Bluetooth to 50.")
                 .font(.caption).foregroundStyle(.secondary)
         }
 
