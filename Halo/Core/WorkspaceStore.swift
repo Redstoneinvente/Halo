@@ -60,6 +60,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     let audio = AudioService()
     let media = MediaService()
     let capture = CaptureService()
+    let bluetooth = BluetoothStateService.shared
     @Published var stopwatchStart: Date?
     @Published var stopwatchElapsed: TimeInterval = 0
     func toggleStopwatch() {
@@ -150,6 +151,18 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         if hudEngine == nil { hudEngine = HaloHUDEngine(workspace: self); hudEngine?.start() }
         evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey()
         pollMedia()
+
+        bluetooth.$lastEvent
+            .compactMap { $0 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] event in
+                guard let self,
+                      (self.defaults.object(forKey: "HaloBluetoothClosedNotchEvents") as? Bool ?? true) else { return }
+                self.publish(event.title, detail: event.detail)
+            }
+            .store(in: &subscriptions)
+        bluetooth.start()
+
         ticker = Timer.publish(every: 2, on: .main, in: .common).autoconnect().sink { [weak self] _ in
             guard let self else { return }
             self.tick += 1
@@ -167,7 +180,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didWakeNotification] {
             NSWorkspace.shared.notificationCenter.publisher(for: name).receive(on: RunLoop.main).sink { [weak self] _ in
                 self?.refreshApps(); self?.evaluateRules(); self?.evaluateSchedules(); self?.hudEngine?.configurationDidChange()
-                self?.pollMedia()
+                self?.pollMedia(); self?.bluetooth.refresh()
             }.store(in: &subscriptions)
         }
         for name in ["com.apple.Music.playerInfo", "com.spotify.client.PlaybackStateChanged"] {
@@ -178,7 +191,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.evaluateRules(); self?.hudEngine?.configurationDidChange() }.store(in: &subscriptions)
     }
-    func stop() { pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); systemAudioFallback?.stop(); systemAudioFallback = nil; hudEngine?.stop(); hudEngine = nil; hotkey.stop(); clipboard.reset(); media.disconnect() }
+    func stop() { pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); bluetooth.stop(); systemAudioFallback?.stop(); systemAudioFallback = nil; hudEngine?.stop(); hudEngine = nil; hotkey.stop(); clipboard.reset(); media.disconnect() }
     private func schedulePersistence() {
         pendingSave?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.persist() }
