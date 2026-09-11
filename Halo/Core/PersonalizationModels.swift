@@ -232,7 +232,6 @@ final class BluetoothStateService: ObservableObject {
         connectionError = nil
 
         let deviceID = device.id
-        let deviceName = device.name
         DispatchQueue.global(qos: .userInitiated).async {
             let status = Self.performConnectionChange(deviceID: deviceID, shouldConnect: shouldConnect)
             DispatchQueue.main.async { [weak self] in
@@ -241,8 +240,8 @@ final class BluetoothStateService: ObservableObject {
                 self.refresh()
                 if status != kIOReturnSuccess {
                     self.connectionError = shouldConnect
-                        ? "Could not connect to \(deviceName) (Bluetooth error \(status))."
-                        : "Could not disconnect \(deviceName) (Bluetooth error \(status))."
+                        ? "Could not connect to \(device.name) (Bluetooth error \(status))."
+                        : "Could not disconnect \(device.name) (Bluetooth error \(status))."
                 }
             }
         }
@@ -250,7 +249,7 @@ final class BluetoothStateService: ObservableObject {
 
     nonisolated private static func performConnectionChange(deviceID: String, shouldConnect: Bool) -> IOReturn {
         let raw = (IOBluetoothDevice.pairedDevices() ?? []).compactMap { $0 as? IOBluetoothDevice }
-        guard let device = raw.first(where: { matches($0, id: deviceID) }) else { return kIOReturnNoDevice }
+        guard let device = raw.first(where: { matches($0, id: deviceID) }) else { return kIOReturnNotFound }
         if shouldConnect {
             if device.isConnected() { return kIOReturnSuccess }
             return device.openConnection()
@@ -354,7 +353,7 @@ final class BluetoothStateService: ObservableObject {
             self?.lastEvent = nil
         }
         clearEventWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
     }
 }
 
@@ -452,19 +451,6 @@ struct ContextBluetoothSettings: View {
     @AppStorage("HaloContextBluetoothKeepClosedNotchContents") private var keepClosedNotchContents = false
     @AppStorage("HaloContextBluetoothPriority") private var priority = 50.0
     @AppStorage("HaloContextMusicPriority") private var musicPriority = 60.0
-    @AppStorage("HaloBluetoothClosedNotchEvents") private var closedNotchEvents = true
-    @AppStorage("HaloBluetoothClosedNotchConnected") private var showConnectedEvent = true
-    @AppStorage("HaloBluetoothClosedNotchDisconnected") private var showDisconnectedEvent = true
-    @AppStorage("HaloBluetoothClosedNotchPoweredOn") private var showPoweredOnEvent = true
-    @AppStorage("HaloBluetoothClosedNotchPoweredOff") private var showPoweredOffEvent = true
-    @AppStorage("HaloBluetoothClosedNotchSide") private var closedNotchSide = BluetoothClosedNotchSide.automatic.rawValue
-    @AppStorage("HaloBluetoothClosedNotchLayout") private var closedNotchLayout = BluetoothClosedNotchLayout.stacked.rawValue
-    @AppStorage("HaloBluetoothClosedNotchAccent") private var closedNotchAccent = BluetoothClosedNotchAccent.blue.rawValue
-    @AppStorage("HaloBluetoothClosedNotchShowIcon") private var closedNotchShowIcon = true
-    @AppStorage("HaloBluetoothClosedNotchShowLabel") private var closedNotchShowLabel = true
-    @AppStorage("HaloBluetoothClosedNotchShowDevice") private var closedNotchShowDevice = true
-    @AppStorage("HaloBluetoothClosedNotchDuration") private var closedNotchDuration = 10.0
-    @AppStorage("HaloBluetoothClosedNotchIconSize") private var closedNotchIconSize = 16.0
 
     var body: some View {
         Section("Bluetooth Context Interface") {
@@ -496,33 +482,11 @@ struct ContextBluetoothSettings: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
 
-        Section("Closed Notch states") {
-            Toggle("Show Bluetooth connection states", isOn: $closedNotchEvents)
-            Group {
-                Toggle("Device connected", isOn: $showConnectedEvent)
-                Toggle("Device disconnected", isOn: $showDisconnectedEvent)
-                Toggle("Bluetooth turned on", isOn: $showPoweredOnEvent)
-                Toggle("Bluetooth turned off", isOn: $showPoweredOffEvent)
-                Picker("Preferred side", selection: $closedNotchSide) {
-                    ForEach(BluetoothClosedNotchSide.allCases) { Text($0.title).tag($0.rawValue) }
-                }
-                Picker("Layout", selection: $closedNotchLayout) {
-                    ForEach(BluetoothClosedNotchLayout.allCases) { Text($0.title).tag($0.rawValue) }
-                }
-                Picker("Accent", selection: $closedNotchAccent) {
-                    ForEach(BluetoothClosedNotchAccent.allCases) { Text($0.title).tag($0.rawValue) }
-                }
-                Toggle("Show event icon", isOn: $closedNotchShowIcon)
-                Toggle("Show event label", isOn: $closedNotchShowLabel)
-                Toggle("Show device / detail", isOn: $closedNotchShowDevice)
-                Slider(value: $closedNotchDuration, in: 2...20, step: 1) { Text("Visible duration") }
-                if closedNotchShowIcon {
-                    Slider(value: $closedNotchIconSize, in: 10...30, step: 1) { Text("Event icon size") }
-                }
-            }
-            .disabled(!closedNotchEvents)
-            Text("Bluetooth events temporarily occupy the chosen Closed Notch side, then your normal configured content returns automatically.")
-                .font(.caption).foregroundStyle(.secondary)
+        Section("Closed Notch Bluetooth states") {
+            Label("Configure Bluetooth connect/disconnect and power-state events under Settings → Closed notch → Bluetooth events.",
+                  systemImage: "rectangle.topthird.inset.filled")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
 
         Section("Live status") {
