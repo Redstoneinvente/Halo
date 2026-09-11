@@ -252,10 +252,19 @@ struct ResolvedSurfaceBackground: View {
         ZStack {
             Color.black.opacity(reduceTransparency ? 1 : theme.opacity)
             switch appearance.background {
-            case .solid: EmptyView()
+            case .solid:
+                (appearance.solidColor?.color ?? Color.black)
+                    .opacity(reduceTransparency ? 1 : theme.opacity)
             case .glass: EmptyView()
             case .gradient:
-                LinearGradient(colors: [Color(hue: theme.tint, saturation: 0.7, brightness: 0.35), .black], startPoint: .bottomLeading, endPoint: .topTrailing)
+                LinearGradient(
+                    colors: [
+                        appearance.gradientStartColor?.color ?? Color(hue: theme.tint, saturation: 0.7, brightness: 0.35),
+                        appearance.gradientEndColor?.color ?? Color.black
+                    ],
+                    startPoint: .bottomLeading,
+                    endPoint: .topTrailing
+                )
             case .image:
                 CachedBackgroundImage(path: appearance.assetPath)
             case .video:
