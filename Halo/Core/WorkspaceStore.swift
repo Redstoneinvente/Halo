@@ -87,10 +87,6 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         systemAudioFallback?.refresh()
     }
     private func disableLegacyHUDRenderer() {
-        // HaloHUDEngine is the only HUD renderer now. Keep the old controller inert so it cannot
-        // draw a second overlay or ignore the new per-event enable/disable state. The legacy
-        // replacement toggles remain untouched because the new engine still uses them to decide
-        // whether hardware keys can safely suppress the native macOS HUD.
         if defaults.object(forKey: HaloHUDKeys.enabled) as? Bool != false {
             defaults.set(false, forKey: HaloHUDKeys.enabled)
         }
@@ -273,7 +269,7 @@ private final class SystemAudioMediaFallback {
     func refresh() {
         guard enabled, let media else { return }
 
-        // Apple Music and Spotify remain the rich providers whenever they are actively playing.
+        // Rich player metadata wins; system audio is the universal fallback for everything else.
         if media.connectedApp != nil && media.isPlaying {
             ownsFallback = false
             return
@@ -290,8 +286,6 @@ private final class SystemAudioMediaFallback {
             return
         }
 
-        // Do not pretend we have metadata that ScreenCaptureKit cannot universally provide.
-        // The existing UI/visualizers can still react because they already observe media.isPlaying.
         if media.connectedApp == nil {
             media.title = "System Audio"
             media.artist = "Playing from your Mac"
