@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 @MainActor enum GeometryPreview {
     static func update(expanded: Bool, editing: Bool, display: NSScreen? = nil) {
@@ -121,7 +122,7 @@ struct HaloContour: Shape {
             Button("Reset offsets") { appearance.surface.offsets = SurfaceOffsets() }
         }
         Section("Context interface position") {
-            Text("These offsets apply only to the Context Music interface. They do not move the normal opened dashboard. Positive X moves right; positive Y moves down.").font(.caption).foregroundStyle(.secondary)
+            Text("These offsets apply only to Context Interfaces. They do not move the normal opened dashboard. Positive X moves right; positive Y moves down.").font(.caption).foregroundStyle(.secondary)
             PreciseSlider(title: "Context X", value: $contextOffsetX, range: -1000...1000, step: 1, suffix: "pt")
             PreciseSlider(title: "Context Y", value: $contextOffsetY, range: -1000...1000, step: 1, suffix: "pt")
             Button("Reset context position") { contextOffsetX = 0; contextOffsetY = 0 }
@@ -156,12 +157,14 @@ struct HaloContour: Shape {
 
     private var backgroundStyleControls: some View {
         Section("Background style") {
-            HStack(spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 10) {
                 backgroundStyleButton(.solid, title: "Solid", symbol: "circle.fill")
                 backgroundStyleButton(.gradient, title: "Gradient", symbol: "circle.lefthalf.filled")
                 backgroundStyleButton(.glass, title: "Glass", symbol: "square.on.square")
+                backgroundStyleButton(.image, title: "Image", symbol: "photo.fill")
+                backgroundStyleButton(.video, title: "Video", symbol: "film.fill")
             }
-            Text("Pick a look visually here. Image and video backgrounds are still chosen from the Background file controls below.")
+            Text("Choose the background type visually. Image and Video keep a local file reference and can be changed below.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -230,6 +233,28 @@ struct HaloContour: Shape {
                     appearance.gradientEndColor = nil
                 }
             }
+        } else if appearance.background == .image || appearance.background == .video {
+            Section(appearance.background == .image ? "Image background" : "Video background") {
+                HStack(spacing: 12) {
+                    Image(systemName: appearance.background == .image ? "photo.fill" : "film.fill")
+                        .font(.system(size: 24, weight: .medium))
+                        .frame(width: 46, height: 46)
+                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(appearance.assetPath.isEmpty ? "No file selected" : URL(fileURLWithPath: appearance.assetPath).lastPathComponent)
+                            .font(.callout.weight(.medium)).lineLimit(1)
+                        Text(appearance.background == .image ? "Use a local image as Halo's surface background." : "Use a muted, looping local video as Halo's surface background.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                Button(appearance.assetPath.isEmpty ? "Choose file…" : "Change file…") {
+                    chooseBackgroundFile(for: appearance.background)
+                }
+                if !appearance.assetPath.isEmpty {
+                    Button("Clear selected file", role: .destructive) { appearance.assetPath = "" }
+                }
+            }
         }
     }
 
@@ -265,8 +290,10 @@ struct HaloContour: Shape {
             return AnyShapeStyle(LinearGradient(colors: [gradientStartColor, gradientEndColor], startPoint: .bottomLeading, endPoint: .topTrailing))
         case .glass:
             return AnyShapeStyle(LinearGradient(colors: [Color.white.opacity(0.24), Color.white.opacity(0.05)], startPoint: .topLeading, endPoint: .bottomTrailing))
-        default:
-            return AnyShapeStyle(Color.black.opacity(0.65))
+        case .image:
+            return AnyShapeStyle(LinearGradient(colors: [Color.indigo.opacity(0.72), Color.blue.opacity(0.34)], startPoint: .topLeading, endPoint: .bottomTrailing))
+        case .video:
+            return AnyShapeStyle(LinearGradient(colors: [Color.purple.opacity(0.66), Color.black.opacity(0.74)], startPoint: .topLeading, endPoint: .bottomTrailing))
         }
     }
 
@@ -289,6 +316,17 @@ struct HaloContour: Shape {
     private func widgetColor(from color: Color) -> WidgetColor {
         guard let rgb = NSColor(color).usingColorSpace(.deviceRGB) else { return .accent }
         return WidgetColor(red: Double(rgb.redComponent), green: Double(rgb.greenComponent), blue: Double(rgb.blueComponent))
+    }
+
+    private func chooseBackgroundFile(for kind: BackgroundKind) {
+        guard kind == .image || kind == .video else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = kind == .image ? [.image] : [.movie]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        appearance.assetPath = url.path
+        appearance.background = kind
     }
 
     private func offsetControl(_ title: String, key: WritableKeyPath<SurfaceOffsets, Double>, expanded: Bool) -> some View {
