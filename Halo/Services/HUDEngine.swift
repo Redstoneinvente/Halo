@@ -544,6 +544,15 @@ final class HaloHUDEngine {
         return NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main ?? NSScreen.screens.first
     }
 
+    private func closedNotchAppearance(for screen: NSScreen) -> Appearance {
+        let id = WindowManager.displayID(screen)
+        if let override = workspace.settings.displays.first(where: { $0.id == id && $0.enabled }),
+           let layout = override.layout {
+            return layout.appearance
+        }
+        return workspace.effectiveLayout.appearance
+    }
+
     private func position(_ panel: NSPanel, configuration: HaloHUDConfiguration) {
         guard let screen = screen(for: configuration) else { return }
         let visible = screen.visibleFrame, full = screen.frame, margin = CGFloat(max(0, configuration.layout.edgeMargin))
@@ -562,12 +571,23 @@ final class HaloHUDEngine {
         case .nearCursor:
             let mouse = NSEvent.mouseLocation; x = mouse.x + 18; y = mouse.y - height - 18
         case .notch:
+            let appearance = closedNotchAppearance(for: screen)
+            let notch = configuration.presentation.resolvedNotch
             let physicalWidth: CGFloat = {
                 if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea { return max(0, right.minX - left.maxX) }
                 return screen.safeAreaInsets.top > 0 ? 190 : 0
             }()
-            let side = resolvedNotchSide(configuration.presentation.notchSide); y = full.maxY - height
-            switch side { case .left: x = full.midX - physicalWidth / 2 - width; case .right: x = full.midX + physicalWidth / 2; case .full, .automatic: x = full.midX - width / 2 }
+            width = CGFloat(notch.width)
+            height = CGFloat(min(100, max(16, appearance.surface.compactHeight)))
+            let offsets = appearance.surface.offsets ?? SurfaceOffsets()
+            let side = resolvedNotchSide(configuration.presentation.notchSide)
+            y = full.maxY - height - CGFloat(offsets.closedY)
+            switch side {
+            case .left: x = full.midX - physicalWidth / 2 - width
+            case .right: x = full.midX + physicalWidth / 2
+            case .full, .automatic: x = full.midX - width / 2
+            }
+            x += CGFloat(offsets.closedX + notch.horizontalOffset)
         default:
             switch configuration.presentation.floatingPosition {
             case .topLeft: x = visible.minX + margin; y = visible.maxY - height - margin
@@ -579,8 +599,18 @@ final class HaloHUDEngine {
             case .bottomRight: x = visible.maxX - width - margin; y = visible.minY + margin
             }
         }
-        x += CGFloat(configuration.layout.offsetX); y -= CGFloat(configuration.layout.offsetY)
-        x = min(visible.maxX - width - 2, max(visible.minX + 2, x)); y = min(full.maxY - height, max(visible.minY + 2, y))
+        if configuration.presentation.target != .notch {
+            x += CGFloat(configuration.layout.offsetX)
+            y -= CGFloat(configuration.layout.offsetY)
+        }
+        x = min(visible.maxX - width - 2, max(visible.minX + 2, x))
+        if configuration.presentation.target == .notch {
+            let appearance = closedNotchAppearance(for: screen)
+            let closedY = CGFloat((appearance.surface.offsets ?? SurfaceOffsets()).closedY)
+            y = full.maxY - height - closedY
+        } else {
+            y = min(full.maxY - height, max(visible.minY + 2, y))
+        }
         panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
     }
 
@@ -687,6 +717,11 @@ struct HaloHUDRenderView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
+    private var isClosedNotchTarget: Bool { configuration.presentation.target == .notch }
+    private var notch: HaloHUDNotchConfiguration { configuration.presentation.resolvedNotch }
+    private var effectiveIconSize: Double { isClosedNotchTarget ? notch.iconSize : configuration.iconSize }
+    private var effectiveTextSize: Double { isClosedNotchTarget ? notch.textSize : configuration.textSize }
+    private var effectiveSpacing: Double { isClosedNotchTarget ? notch.spacing : configuration.layout.spacing }
     private var progress: Double { min(1, max(0, event.progress ?? 0)) }
     private var accent: Color { resolvedColor(configuration.appearance.primary) }
     private var secondaryColor: Color { resolvedColor(configuration.appearance.secondary) }
@@ -707,20 +742,25 @@ struct HaloHUDRenderView: View {
     var body: some View {
         Group {
             if configuration.presentation.target == .screenEdge { edgeContent }
+            else if isClosedNotchTarget { compact }
             else if configuration.layout.style == .vertical { vertical }
             else if configuration.layout.style == .compact || configuration.layout.compact { compact }
             else { horizontal }
         }
-        .padding(.horizontal, configuration.presentation.target == .screenEdge ? 0 : configuration.layout.horizontalPadding)
-        .padding(.vertical, configuration.presentation.target == .screenEdge ? 0 : configuration.layout.verticalPadding)
+        .padding(.horizontal,
+                 configuration.presentation.target == .screenEdge ? 0 :
+                    isClosedNotchTarget ? notch.horizontalPadding : configuration.layout.horizontalPadding)
+        .padding(.vertical,
+                 configuration.presentation.target == .screenEdge || isClosedNotchTarget ? 0 : configuration.layout.verticalPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { background }
         .overlay { noiseOverlay }
         .clipShape(RoundedRectangle(cornerRadius: effectiveCornerRadius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: effectiveCornerRadius, style: .continuous)
-            .stroke(borderColor.opacity(configuration.appearance.border ? configuration.appearance.borderOpacity : 0), lineWidth: contrast == .increased ? 1.5 : 1))
-        .shadow(color: configuration.appearance.shadow ? .black.opacity(0.32) : .clear, radius: 16, y: 7)
-        .shadow(color: configuration.appearance.glow ? glowColor.opacity(0.58) : .clear, radius: configuration.appearance.glow ? 14 : 0)
+            .stroke(borderColor.opacity(!isClosedNotchTarget && configuration.appearance.border ? configuration.appearance.borderOpacity : 0), lineWidth: contrast == .increased ? 1.5 : 1))
+        .shadow(color: !isClosedNotchTarget && configuration.appearance.shadow ? .black.opacity(0.32) : .clear, radius: 16, y: 7)
+        .shadow(color: !isClosedNotchTarget && configuration.appearance.glow ? glowColor.opacity(0.58) : .clear, radius: !isClosedNotchTarget && configuration.appearance.glow ? 14 : 0)
+        .clipped()
         .scaleEffect(x: visible ? 1 : hiddenScale.width, y: visible ? 1 : hiddenScale.height)
         .offset(hiddenOffset)
         .opacity(visible ? 1 : hiddenOpacity)
@@ -732,13 +772,14 @@ struct HaloHUDRenderView: View {
     }
 
     private var effectiveCornerRadius: Double {
-        configuration.presentation.target == .screenEdge ? min(configuration.layout.cornerRadius, 8) : configuration.layout.cornerRadius
+        if isClosedNotchTarget { return 0 }
+        return configuration.presentation.target == .screenEdge ? min(configuration.layout.cornerRadius, 8) : configuration.layout.cornerRadius
     }
 
     private var horizontal: some View {
-        HStack(spacing: configuration.layout.spacing) {
+        HStack(spacing: effectiveSpacing) {
             icon
-            VStack(alignment: .leading, spacing: max(3, configuration.layout.spacing * 0.45)) {
+            VStack(alignment: .leading, spacing: max(3, effectiveSpacing * 0.45)) {
                 header
                 progressView
             }
@@ -746,7 +787,7 @@ struct HaloHUDRenderView: View {
     }
 
     private var vertical: some View {
-        VStack(spacing: configuration.layout.spacing) {
+        VStack(spacing: effectiveSpacing) {
             icon
             header
             progressView
@@ -754,14 +795,18 @@ struct HaloHUDRenderView: View {
     }
 
     private var compact: some View {
-        HStack(spacing: max(5, configuration.layout.spacing * 0.7)) {
+        HStack(spacing: max(3, effectiveSpacing)) {
             icon
             if configuration.components.label { Text(event.primaryText).lineLimit(1) }
             if configuration.components.deviceName, let deviceText { Text(deviceText).foregroundStyle(secondaryColor).lineLimit(1) }
             valueText
-            if configuration.components.progress { progressView.frame(maxWidth: 150) }
+            if configuration.components.progress {
+                progressView.frame(maxWidth: isClosedNotchTarget ? notch.progressWidth : 150)
+            }
         }
-        .font(.system(size: configuration.textSize, weight: .semibold, design: .rounded))
+        .font(.system(size: effectiveTextSize, weight: .semibold, design: .rounded))
+        .minimumScaleFactor(isClosedNotchTarget ? 0.65 : 1)
+        .lineLimit(1)
     }
 
     private var edgeContent: some View {
@@ -783,9 +828,9 @@ struct HaloHUDRenderView: View {
     @ViewBuilder private var icon: some View {
         if configuration.components.icon {
             Image(systemName: event.icon)
-                .font(.system(size: configuration.iconSize, weight: .semibold))
+                .font(.system(size: effectiveIconSize, weight: .semibold))
                 .foregroundStyle(accent)
-                .frame(minWidth: configuration.iconSize * 1.2)
+                .frame(minWidth: effectiveIconSize * 1.2)
         }
     }
 
@@ -794,18 +839,18 @@ struct HaloHUDRenderView: View {
             VStack(alignment: .leading, spacing: 1) {
                 if configuration.components.label {
                     Text(event.primaryText)
-                        .font(.system(size: configuration.textSize, weight: .semibold, design: .rounded))
+                        .font(.system(size: effectiveTextSize, weight: .semibold, design: .rounded))
                         .foregroundStyle(accent)
                         .lineLimit(1)
                 }
                 if configuration.components.deviceName, let deviceText {
                     Text(deviceText)
-                        .font(.system(size: max(9, configuration.textSize * 0.72)))
+                        .font(.system(size: max(8, effectiveTextSize * 0.72)))
                         .foregroundStyle(secondaryColor)
                         .lineLimit(1)
                 } else if configuration.components.label, let secondary = event.secondaryText, !secondary.isEmpty {
                     Text(secondary)
-                        .font(.system(size: max(9, configuration.textSize * 0.72)))
+                        .font(.system(size: max(8, effectiveTextSize * 0.72)))
                         .foregroundStyle(secondaryColor)
                         .lineLimit(1)
                 }
@@ -819,7 +864,7 @@ struct HaloHUDRenderView: View {
         let text = HaloHUDRenderFormatting.valueText(event: event, configuration: configuration)
         if !text.isEmpty {
             Text(text)
-                .font(.system(size: configuration.textSize, weight: .bold, design: .rounded))
+                .font(.system(size: effectiveTextSize, weight: .bold, design: .rounded))
                 .foregroundStyle(accent)
                 .monospacedDigit()
         }
@@ -856,10 +901,10 @@ struct HaloHUDRenderView: View {
                     Circle().trim(from: 0.12, to: 0.88).stroke(inactiveColor, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(90))
                     Circle().trim(from: 0.12, to: 0.12 + progress * 0.76).stroke(progressColor, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(90))
                     Text("\(Int((progress * 100).rounded()))").font(.system(size: 9, weight: .bold, design: .rounded)).foregroundStyle(accent)
-                }.frame(width: 40, height: 40)
+                }.frame(width: isClosedNotchTarget ? 30 : 40, height: isClosedNotchTarget ? 30 : 40)
             case .numberOnly:
                 Text("\(Int((progress * 100).rounded()))")
-                    .font(.system(size: configuration.textSize * 1.2, weight: .bold, design: .rounded))
+                    .font(.system(size: effectiveTextSize * 1.2, weight: .bold, design: .rounded))
                     .foregroundStyle(progressColor)
             case .iconFill:
                 ZStack {
@@ -867,7 +912,7 @@ struct HaloHUDRenderView: View {
                     Image(systemName: event.icon).foregroundStyle(progressColor).mask(alignment: .bottom) {
                         GeometryReader { p in Rectangle().frame(height: p.size.height * progress).frame(maxHeight: .infinity, alignment: .bottom) }
                     }
-                }.font(.system(size: max(24, configuration.iconSize)))
+                }.font(.system(size: isClosedNotchTarget ? effectiveIconSize : max(24, effectiveIconSize)))
             case .glow:
                 GeometryReader { p in
                     ZStack(alignment: .leading) {
@@ -887,25 +932,25 @@ struct HaloHUDRenderView: View {
                     ForEach(0..<18, id: \.self) { i in
                         Capsule()
                             .fill(progressColor.opacity(Double(i + 1) / 18 <= progress ? 1 : 0.18))
-                            .frame(width: 3, height: 4 + 13 * abs(sin(Double(i) * 0.82)))
+                            .frame(width: 3, height: isClosedNotchTarget ? 3 + 9 * abs(sin(Double(i) * 0.82)) : 4 + 13 * abs(sin(Double(i) * 0.82)))
                     }
-                }.frame(height: 20)
+                }.frame(height: isClosedNotchTarget ? 14 : 20)
             }
         }
     }
 
     private func circularProgress(trimStart: Double, trimLength: Double) -> some View {
         ZStack {
-            Circle().stroke(inactiveColor, lineWidth: 5)
+            Circle().stroke(inactiveColor, lineWidth: isClosedNotchTarget ? 4 : 5)
             Circle()
                 .trim(from: trimStart, to: min(1, trimStart + trimLength))
-                .stroke(progressColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                .stroke(progressColor, style: StrokeStyle(lineWidth: isClosedNotchTarget ? 4 : 5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-        }.frame(width: 36, height: 36)
+        }.frame(width: isClosedNotchTarget ? 30 : 36, height: isClosedNotchTarget ? 30 : 36)
     }
 
     @ViewBuilder private var background: some View {
-        if configuration.presentation.target == .screenEdge {
+        if configuration.presentation.target == .screenEdge || isClosedNotchTarget {
             Color.clear
         } else if reduceTransparency || configuration.appearance.background == .solid {
             Color.black.opacity(max(0.45, configuration.appearance.backgroundOpacity))
@@ -934,7 +979,7 @@ struct HaloHUDRenderView: View {
     }
 
     @ViewBuilder private var noiseOverlay: some View {
-        if configuration.appearance.noise && configuration.presentation.target != .screenEdge {
+        if configuration.appearance.noise && configuration.presentation.target != .screenEdge && !isClosedNotchTarget {
             Canvas { context, size in
                 for index in 0..<96 {
                     let x = pseudoRandom(index * 2 + 1) * size.width
@@ -971,6 +1016,9 @@ struct HaloHUDRenderView: View {
 
     private var hiddenScale: CGSize {
         guard !reduceMotion else { return CGSize(width: 1, height: 1) }
+        if isClosedNotchTarget {
+            return CGSize(width: isExiting ? 0.94 : 0.88, height: 1)
+        }
         if isExiting {
             switch configuration.animation.exit {
             case .fade: return CGSize(width: 1, height: 1)
@@ -992,6 +1040,7 @@ struct HaloHUDRenderView: View {
 
     private var hiddenOffset: CGSize {
         guard !visible, !reduceMotion else { return .zero }
+        if isClosedNotchTarget { return .zero }
         let amount = 18 * max(0.15, configuration.animation.intensity)
         if isExiting {
             switch configuration.animation.exit {
@@ -1013,6 +1062,11 @@ struct HaloHUDRenderView: View {
 
     private var visibilityAnimation: Animation? {
         guard !reduceMotion else { return nil }
+        if isClosedNotchTarget {
+            return isExiting
+                ? .easeInOut(duration: max(0.01, configuration.animation.exitDuration))
+                : .easeOut(duration: max(0.01, configuration.animation.entranceDuration))
+        }
         if isExiting {
             return .easeInOut(duration: max(0.01, configuration.animation.exitDuration))
         }
