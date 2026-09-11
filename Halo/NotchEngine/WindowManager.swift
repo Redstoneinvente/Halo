@@ -54,7 +54,8 @@ final class SurfaceAnimator {
     }
 
     func move(panel: HaloPanel, state: SurfaceState, target: CGRect, options: SurfaceOptions,
-              preset: AnimationPreset, animations: Bool, opening: Bool, style: SurfaceStyle) {
+              preset: AnimationPreset, animations: Bool, opening: Bool, style: SurfaceStyle,
+              liveViewportResize: Bool = true) {
         cancel()
         let transition = opening ? options.opening : options.closing
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -75,6 +76,14 @@ final class SurfaceAnimator {
             publishGeometry(panel: panel, frame: target)
             return
         }
+
+        // Closed-notch dynamic resizing is much smoother when SwiftUI does not recalculate
+        // the entire closed-notch hierarchy for every display refresh. Lay the closed content
+        // out once at its destination size and let the AppKit panel act as the animated mask.
+        if !liveViewportResize, state.viewport.size != target.size {
+            state.viewport.size = target.size
+        }
+
         clock.start(view: view) { [weak self, weak panel, weak state] timestamp in
             guard let self, let panel, let state else { self?.cancel(); return }
             let t = min(1, max(0, timestamp - start) / max(0.01, duration))
@@ -93,8 +102,14 @@ final class SurfaceAnimator {
             }
             if transition == .slide { frame.origin.y += (style == .bottom ? -1 : 1) * 18 * sin(.pi * t) }
             panel.alphaValue = transition == .fade ? initialAlpha + (1 - initialAlpha) * t - 0.3 * sin(.pi * t) : 1
-            if t >= 1 { frame = target; panel.alphaValue = 1; self.cancel() }
-            if state.viewport.size != frame.size { state.viewport.size = frame.size }
+            if t >= 1 {
+                frame = target
+                panel.alphaValue = 1
+                if state.viewport.size != target.size { state.viewport.size = target.size }
+                self.cancel()
+            } else if liveViewportResize, state.viewport.size != frame.size {
+                state.viewport.size = frame.size
+            }
             panel.setFrame(frame, display: false)
             self.publishGeometry(panel: panel, frame: frame)
         }
@@ -476,16 +491,16 @@ final class WindowManager {
             }
             host.targetFrame = target
             var motion = geometry.appearance.surface
-            let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
-            let closed = layout.closedNotch ?? ClosedNotchOptions()
-            let media = closed.mediaOptions ?? ClosedMediaOptions()
-            let adaptiveLyrics = media.textMode == .lyrics && media.usesDynamicLyricWidth
-            let art = closed.artworkOptions ?? ClosedArtworkOptions()
-            let visibleArtwork = store.workspace.media.isPlaying && art.enabled && art.mode != .none && art.mode != .background
-            motion.opening = .resize; motion.closing = .resize; motion.duration = adaptiveLyrics ? 0.20 : 0.34
+            motion.opening = .resize
+            motion.closing = .resize
+            // Closed-notch resizing now respects the user's Appearance animation duration/timing
+            // instead of forcing a separate hard-coded curve. It stays isolated from open/close
+            // transitions because this path runs only while the notch is already closed.
+            motion.duration = min(1.2, max(0.10, motion.duration))
             host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
-                               preset: .smooth, animations: host.state.theme.animations && !host.state.editingGeometry && !visibleArtwork,
-                               opening: true, style: geometry.style)
+                               preset: geometry.appearance.animation,
+                               animations: host.state.theme.animations && !host.state.editingGeometry,
+                               opening: true, style: geometry.style, liveViewportResize: false)
         }
     }
 
@@ -500,10 +515,6 @@ final class WindowManager {
         let base = geometry.frame(expanded: true)
         guard let requested, requested.width.isFinite, requested.height.isFinite else { return base }
 
-        // ContextMusicView estimates the footprint of its visible media elements. Reserve an
-        // additional layout budget here for the view's outer padding, top-right controls and
-        // SwiftUI compression. This prevents the final visible element from being pushed outside
-        // the panel even when several optional blocks are enabled at once.
         let contextHorizontalSafety: CGFloat = 56
         let contextVerticalSafety: CGFloat = 64
         let margin: CGFloat = 12
@@ -521,9 +532,6 @@ final class WindowManager {
             height = min(height, availableHeight)
             frame = CGRect(x: base.midX - width / 2, y: anchorBottom, width: width, height: height)
         default:
-            // Top-attached surfaces stay physically attached to the menu-bar/notch edge. Only
-            // the lower edge moves as the context player grows or shrinks before its independent
-            // context-only offset is applied below.
             let anchorTop = base.maxY
             let bottomLimit = geometry.visible.minY + margin
             let availableHeight = max(minimumHeight, anchorTop - bottomLimit)
@@ -533,14 +541,11 @@ final class WindowManager {
             if geometry.style == .right { frame.origin.x = base.maxX - width }
         }
 
-        // These values are intentionally independent of Appearance.surface.offsets. They move
-        // only the adaptive Context Music panel; the normal expanded dashboard still uses the
-        // regular opened offset from SurfaceGeometry.
         let defaults = UserDefaults.standard
         let contextX = CGFloat(defaults.double(forKey: "HaloContextOffsetX"))
         let contextY = CGFloat(defaults.double(forKey: "HaloContextOffsetY"))
         frame.origin.x += contextX
-        frame.origin.y -= contextY // UI convention: positive Y moves down.
+        frame.origin.y -= contextY
 
         if frame.minX < geometry.visible.minX + margin { frame.origin.x = geometry.visible.minX + margin }
         if frame.maxX > geometry.visible.maxX - margin { frame.origin.x = geometry.visible.maxX - margin - width }
