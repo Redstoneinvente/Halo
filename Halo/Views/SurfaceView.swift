@@ -566,20 +566,33 @@ struct SurfaceView: View {
     @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
     @AppStorage("HaloContextMusicUseFullNotchArea") private var contextMusicUsesFullNotchArea = false
     @AppStorage("HaloContextMusicKeepClosedNotchContents") private var contextMusicKeepsClosedContents = false
+    @AppStorage("HaloContextMusicPriority") private var contextMusicPriority = 60.0
     @AppStorage("HaloContextBluetoothEnabled") private var bluetoothCIEnabled = false
     @AppStorage("HaloContextBluetoothShowWhileConnected") private var bluetoothShowWhileConnected = true
     @AppStorage("HaloContextBluetoothShowOnChanges") private var bluetoothShowOnChanges = true
     @AppStorage("HaloContextBluetoothUseFullNotchArea") private var bluetoothUsesFullNotchArea = false
     @AppStorage("HaloContextBluetoothKeepClosedNotchContents") private var bluetoothKeepsClosedContents = false
+    @AppStorage("HaloContextBluetoothPriority") private var bluetoothPriority = 50.0
     private var theme: Theme { state.theme }
     private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.effectiveLayout }
     private var contextOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
-    private var bluetoothEventPriority: Bool { bluetoothCIEnabled && bluetoothShowOnChanges && bluetooth.lastEvent != nil }
+    private var bluetoothEligible: Bool {
+        guard bluetoothCIEnabled else { return false }
+        return (bluetoothShowOnChanges && bluetooth.lastEvent != nil) ||
+            (bluetoothShowWhileConnected && !bluetooth.connectedDevices.isEmpty)
+    }
     private var activeContext: ActiveContextInterface? {
-        if bluetoothEventPriority { return .bluetooth }
-        if contextOptions.enabled && workspace.media.isPlaying { return .music }
-        if bluetoothCIEnabled && bluetoothShowWhileConnected && !bluetooth.connectedDevices.isEmpty { return .bluetooth }
-        return nil
+        var candidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] = []
+        if contextOptions.enabled && workspace.media.isPlaying {
+            candidates.append((.music, contextMusicPriority, 2))
+        }
+        if bluetoothEligible {
+            candidates.append((.bluetooth, bluetoothPriority, 1))
+        }
+        return candidates.max { lhs, rhs in
+            if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
+            return lhs.tieRank < rhs.tieRank
+        }?.interface
     }
     private var contextMusicActive: Bool { activeContext == .music }
     private var bluetoothContextActive: Bool { activeContext == .bluetooth }
@@ -885,6 +898,7 @@ private struct BluetoothContextView: View {
     @AppStorage("HaloContextBluetoothKeepClosedNotchContents") private var keepsClosedNotchContents = false
     @AppStorage("HaloContextBluetoothShowPaired") private var showPaired = true
     @AppStorage("HaloContextBluetoothShowAddresses") private var showAddresses = false
+    @AppStorage("HaloContextBluetoothPriority") private var priority = 50.0
 
     private var visibleDevices: [BluetoothDeviceSnapshot] {
         showPaired ? bluetooth.pairedDevices : bluetooth.connectedDevices
@@ -915,10 +929,14 @@ private struct BluetoothContextView: View {
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, minHeight: 72)
                         } else {
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 185), spacing: 10)], spacing: 10) {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 225), spacing: 10)], spacing: 10) {
                                 ForEach(visibleDevices) { device in deviceCard(device) }
                             }
                         }
+                    }
+                    if let error = bluetooth.connectionError {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .font(.caption).foregroundStyle(.orange)
                     }
                     HStack {
                         Button("Open Bluetooth Settings") { openBluetoothSettings() }
@@ -944,7 +962,7 @@ private struct BluetoothContextView: View {
                 Circle().fill(Color.blue.opacity(0.20)).frame(width: 42, height: 42)
                 Image(systemName: bluetooth.poweredOn ? "wave.3.right" : "wave.3.right.slash")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(bluetooth.poweredOn ? .blue : .secondary)
+                    .foregroundStyle(bluetooth.poweredOn ? Color.blue : Color.secondary)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text("Bluetooth").font(.title3.bold())
@@ -952,6 +970,7 @@ private struct BluetoothContextView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            Text("P\(Int(priority))").font(.caption2.monospacedDigit()).foregroundStyle(.secondary).help("CI priority")
             Button {
                 if !surfaceState.pinned { surfaceState.expanded = false }
             } label: { Image(systemName: "chevron.up") }
@@ -964,6 +983,8 @@ private struct BluetoothContextView: View {
                 Divider()
                 Toggle("Show paired devices", isOn: $showPaired)
                 Toggle("Show device addresses", isOn: $showAddresses)
+                Divider()
+                Text("CI priority: \(Int(priority))")
             } label: { Image(systemName: "slider.horizontal.3") }
                 .menuStyle(.borderlessButton).frame(width: 24).help("Bluetooth CI options")
             Button { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) } label: { Image(systemName: "gearshape.fill") }
@@ -974,10 +995,10 @@ private struct BluetoothContextView: View {
     private var statusCard: some View {
         HStack(spacing: 12) {
             Image(systemName: bluetooth.poweredOn ? "checkmark.circle.fill" : "power.circle.fill")
-                .font(.system(size: 22)).foregroundStyle(bluetooth.poweredOn ? .green : .secondary)
+                .font(.system(size: 22)).foregroundStyle(bluetooth.poweredOn ? Color.green : Color.secondary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(bluetooth.poweredOn ? "Bluetooth available" : "Bluetooth unavailable").font(.headline)
-                Text(bluetooth.poweredOn ? "Halo is watching paired-device connection state." : "Turn Bluetooth on to see and track devices.")
+                Text(bluetooth.poweredOn ? "Connect or disconnect paired devices directly from the cards below." : "Turn Bluetooth on to see and control devices.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -1009,7 +1030,7 @@ private struct BluetoothContextView: View {
                     .frame(width: 38, height: 38)
                 Image(systemName: deviceSymbol(device.name))
                     .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(device.connected ? .blue : .secondary)
+                    .foregroundStyle(device.connected ? Color.blue : Color.secondary)
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(device.name).font(.callout.weight(.semibold)).lineLimit(1)
@@ -1021,7 +1042,17 @@ private struct BluetoothContextView: View {
                     Text(device.address).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 4)
+            if bluetooth.isChangingConnection(for: device) {
+                ProgressView().controlSize(.small).frame(width: 54)
+            } else {
+                Button(device.connected ? "Disconnect" : "Connect") {
+                    bluetooth.toggleConnection(for: device)
+                }
+                .controlSize(.small)
+                .buttonStyle(.bordered)
+                .disabled(!bluetooth.poweredOn)
+            }
         }
         .padding(10)
         .background(Color.white.opacity(device.connected ? 0.065 : 0.035), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -1044,7 +1075,7 @@ private struct BluetoothContextView: View {
         let rows = Int(ceil(Double(count) / 2.0))
         let eventHeight = bluetooth.lastEvent == nil ? 0.0 : 66.0
         let height = min(620, max(220, 178 + eventHeight + Double(rows) * 64))
-        let next = CGSize(width: 510, height: height)
+        let next = CGSize(width: 560, height: height)
         DispatchQueue.main.async { [surfaceState] in
             if let current = surfaceState.contextPreferredSize,
                abs(current.width - next.width) < 1, abs(current.height - next.height) < 1 { return }
@@ -1067,6 +1098,7 @@ private struct ContextMusicView: View {
     @AppStorage("HaloContextVisualizerFullWidth") private var visualizerFullWidth = false
     @AppStorage("HaloContextMusicUseFullNotchArea") private var usesFullNotchArea = false
     @AppStorage("HaloContextMusicKeepClosedNotchContents") private var keepsClosedNotchContents = false
+    @AppStorage("HaloContextMusicPriority") private var priority = 60.0
     @State private var artwork: NSImage?
     @State private var playbackPosition = 0.0
     @State private var playbackDuration = 0.0
@@ -1131,6 +1163,7 @@ private struct ContextMusicView: View {
             .clipShape(RoundedRectangle(cornerRadius: usesFullNotchArea ? 0 : options.resolvedCornerRadius, style: .continuous))
             .overlay(alignment: .topTrailing) {
                 HStack(spacing: 12) {
+                    Text("P\(Int(priority))").font(.system(size: 9, weight: .semibold, design: .monospaced)).opacity(0.55).help("CI priority")
                     Button {
                         if !surfaceState.pinned { surfaceState.expanded = false }
                     } label: {
@@ -1152,6 +1185,7 @@ private struct ContextMusicView: View {
                         Toggle("Use full notch area", isOn: $usesFullNotchArea)
                         Toggle("Keep closed-notch contents visible", isOn: $keepsClosedNotchContents)
                         Divider()
+                        Text("CI priority: \(Int(priority))")
                         Text(usesFullNotchArea ? "CI owns the whole expanded surface" : "CI starts below the notch strip")
                     } label: {
                         Image(systemName: "rectangle.inset.filled.and.person.filled").font(.system(size: 12, weight: .semibold))
