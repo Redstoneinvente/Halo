@@ -129,6 +129,19 @@ struct ClosedNotchSettingsView: View {
     @Binding var layout: WorkspaceLayout
     @ObservedObject var media: MediaService
     let app: String
+    @AppStorage("HaloBluetoothClosedNotchEvents") private var bluetoothEvents = true
+    @AppStorage("HaloBluetoothClosedNotchConnected") private var bluetoothConnected = true
+    @AppStorage("HaloBluetoothClosedNotchDisconnected") private var bluetoothDisconnected = true
+    @AppStorage("HaloBluetoothClosedNotchPoweredOn") private var bluetoothPoweredOn = true
+    @AppStorage("HaloBluetoothClosedNotchPoweredOff") private var bluetoothPoweredOff = true
+    @AppStorage("HaloBluetoothClosedNotchSide") private var bluetoothSide = BluetoothClosedNotchSide.automatic.rawValue
+    @AppStorage("HaloBluetoothClosedNotchLayout") private var bluetoothLayout = BluetoothClosedNotchLayout.stacked.rawValue
+    @AppStorage("HaloBluetoothClosedNotchAccent") private var bluetoothAccent = BluetoothClosedNotchAccent.blue.rawValue
+    @AppStorage("HaloBluetoothClosedNotchShowIcon") private var bluetoothShowIcon = true
+    @AppStorage("HaloBluetoothClosedNotchShowLabel") private var bluetoothShowLabel = true
+    @AppStorage("HaloBluetoothClosedNotchShowDevice") private var bluetoothShowDevice = true
+    @AppStorage("HaloBluetoothClosedNotchDuration") private var bluetoothDuration = 10.0
+    @AppStorage("HaloBluetoothClosedNotchIconSize") private var bluetoothIconSize = 16.0
     private var options: Binding<ClosedNotchOptions> { Binding(get: { layout.closedNotch ?? ClosedNotchOptions() }, set: { layout.closedNotch = $0 }) }
     private var visualizer: Binding<VisualizerOptions> { Binding(get: { options.wrappedValue.visualizer ?? VisualizerOptions() }, set: { options.wrappedValue.visualizer = $0 }) }
     private var expansion: Binding<ClosedExpansionOptions> { Binding(get: { options.wrappedValue.expansion ?? ClosedExpansionOptions() }, set: { options.wrappedValue.expansion = $0 }) }
@@ -173,6 +186,34 @@ struct ClosedNotchSettingsView: View {
             PreciseSlider(title: "Text size", value: options.fontSize, range: 8...24, step: 1, suffix: "pt")
             ColorPicker("Color", selection: Binding(get: { options.wrappedValue.color.color }, set: { options.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
             Text("Active Halo activities have priority: they use an Activity slot, an inactive side, or temporarily replace the right slot if both sides are occupied.").font(.caption)
+        }
+        Section("Bluetooth events") {
+            Toggle("Show Bluetooth connection states", isOn: $bluetoothEvents)
+            Group {
+                Toggle("Device connected", isOn: $bluetoothConnected)
+                Toggle("Device disconnected", isOn: $bluetoothDisconnected)
+                Toggle("Bluetooth turned on", isOn: $bluetoothPoweredOn)
+                Toggle("Bluetooth turned off", isOn: $bluetoothPoweredOff)
+                Picker("Preferred side", selection: $bluetoothSide) {
+                    ForEach(BluetoothClosedNotchSide.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                Picker("Layout", selection: $bluetoothLayout) {
+                    ForEach(BluetoothClosedNotchLayout.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                Picker("Accent", selection: $bluetoothAccent) {
+                    ForEach(BluetoothClosedNotchAccent.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                Toggle("Show event icon", isOn: $bluetoothShowIcon)
+                Toggle("Show event label", isOn: $bluetoothShowLabel)
+                Toggle("Show device / detail", isOn: $bluetoothShowDevice)
+                PreciseSlider(title: "Visible duration", value: $bluetoothDuration, range: 2...20, step: 1, suffix: "s")
+                if bluetoothShowIcon {
+                    PreciseSlider(title: "Event icon size", value: $bluetoothIconSize, range: 10...30, step: 1, suffix: "pt")
+                }
+            }
+            .disabled(!bluetoothEvents)
+            Text("Bluetooth events can temporarily take the left or right Closed Notch slot. Your normal content returns after the selected duration.")
+                .font(.caption).foregroundStyle(.secondary)
         }
         Section("Closed media text") {
             Picker("Text", selection: mediaOptions.textMode) {
