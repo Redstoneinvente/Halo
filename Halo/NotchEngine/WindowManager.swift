@@ -234,10 +234,7 @@ final class WindowManager {
             return SurfaceRenderConfiguration(appearance: layout.appearance, displays: settings.displays, closedNotch: layout.closedNotch, clock: layout.widgetStyle(for: .clock), horizontalWidgets: layout.horizontalWidgets, horizontalHeight: layout.horizontalHeight)
         }
             .removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.reconcile()
-                self?.refreshActiveHUDNotchConfiguration()
-            }.store(in: &subscriptions)
+            .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloGeometryPreview"))
             .receive(on: DispatchQueue.main).sink { [weak self] note in
                 let editing = (note.userInfo?["editing"] as? Bool) ?? false
@@ -260,18 +257,29 @@ final class WindowManager {
                 self.mediaWidthHint = next
                 self.refreshDynamicWidths()
             }.store(in: &subscriptions)
-        NotificationCenter.default.publisher(for: .init("HaloHUDReplacementKey"))
-            .receive(on: DispatchQueue.main).sink { [weak self] note in
-                guard let key = note.userInfo?["key"] as? Int else { return }
-                self?.handleHUDKey(key)
+
+        HaloHUDNotchBridge.shared.$presentation.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] presentation in
+                guard let self else { return }
+                if let presentation {
+                    let notch = presentation.configuration.presentation.resolvedNotch
+                    let reservedWidth = notch.width + max(12, notch.horizontalPadding * 2) + abs(notch.horizontalOffset)
+                    self.hudNotchExpansion = HUDNotchExpansion(
+                        side: presentation.side,
+                        width: reservedWidth,
+                        screenFrame: presentation.screenFrame,
+                        kind: presentation.event.kind,
+                        collision: presentation.configuration.behavior.collision,
+                        persistent: presentation.persistent
+                    )
+                } else {
+                    self.hudNotchExpansion = nil
+                }
+                self.refreshDynamicWidths()
             }.store(in: &subscriptions)
-        NotificationCenter.default.publisher(for: .init("HaloHUDPreview"))
-            .receive(on: DispatchQueue.main).sink { [weak self] note in self?.handleHUDPreview(note) }.store(in: &subscriptions)
-        NotificationCenter.default.publisher(for: .init("HaloHUDPreviewExit"))
-            .receive(on: DispatchQueue.main).sink { [weak self] _ in self?.clearHUDNotchExpansion() }.store(in: &subscriptions)
 
         store.workspace.$scheduledProfileID.removeDuplicates().receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.reconcile(); self?.refreshActiveHUDNotchConfiguration() }.store(in: &subscriptions)
+            .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.media.$title.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.mediaWidthHint = nil; self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.media.$artist.removeDuplicates().receive(on: DispatchQueue.main)
@@ -299,28 +307,6 @@ final class WindowManager {
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.$activities.receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
-
-        // Mirror the providers that can present HUD events so notch expansion follows the real
-        // HUD lifetime while the HUD content is constrained to the closed-notch strip.
-        store.workspace.system.$battery.compactMap { $0 }.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.triggerHUDNotch(kind: .batteryStatus) }.store(in: &subscriptions)
-        store.workspace.system.$charging.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.triggerHUDNotch(kind: .chargingState) }.store(in: &subscriptions)
-        store.workspace.system.$onBattery.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.triggerHUDNotch(kind: .powerSourceChanged) }.store(in: &subscriptions)
-        store.workspace.media.$title.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                guard self?.store.workspace.media.isPlaying == true else { return }
-                self?.triggerHUDNotch(kind: .mediaChanged)
-            }.store(in: &subscriptions)
-        store.workspace.audio.$selected.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.triggerHUDNotch(kind: .audioOutputChanged) }.store(in: &subscriptions)
-        store.workspace.audio.$devices.map { $0.map(\.id) }.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.triggerHUDNotch(kind: .audioDeviceConnected) }.store(in: &subscriptions)
-
-        hudMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.systemDefined, .flagsChanged]) { [weak self] event in
-            Task { @MainActor in self?.handleHUDObservedEvent(event) }
-        }
         reconcile()
     }
 
@@ -612,26 +598,33 @@ final class WindowManager {
 
             if let hud = hudNotchExpansion, hud.screenFrame.equalTo(geometry.screen) {
                 let hudGap = 6.0
+                let shell = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin + 8
+                func merged(_ existing: Double, _ hudWidth: Double) -> Double {
+                    switch hud.collision {
+                    case .replace:
+                        return hudWidth
+                    case .push, .queue:
+                        return existing > 0 ? existing + hudGap + hudWidth : hudWidth
+                    case .overlay, .showExternally:
+                        return max(existing, hudWidth)
+                    }
+                }
                 switch hud.side {
                 case .left:
-                    leftDemand = hud.collision == .push && leftDemand > 0
-                        ? leftDemand + hudGap + hud.width
-                        : max(leftDemand, hud.width)
+                    leftDemand = merged(leftDemand, hud.width + shell)
+                    leftLive = true
                 case .right:
-                    rightDemand = hud.collision == .push && rightDemand > 0
-                        ? rightDemand + hudGap + hud.width
-                        : max(rightDemand, hud.width)
+                    rightDemand = merged(rightDemand, hud.width + shell)
+                    rightLive = true
                 case .full:
-                    let each = max(0, (hud.width - camera) / 2)
-                    if hud.collision == .push {
-                        leftDemand = leftDemand > 0 ? leftDemand + hudGap + each : max(leftDemand, each)
-                        rightDemand = rightDemand > 0 ? rightDemand + hudGap + each : max(rightDemand, each)
-                    } else {
-                        leftDemand = max(leftDemand, each)
-                        rightDemand = max(rightDemand, each)
-                    }
+                    let half = hud.width / 2 + shell
+                    leftDemand = merged(leftDemand, half)
+                    rightDemand = merged(rightDemand, half)
+                    leftLive = true
+                    rightLive = true
                 case .automatic:
-                    rightDemand = max(rightDemand, hud.width)
+                    rightDemand = merged(rightDemand, hud.width + shell)
+                    rightLive = true
                 }
             }
 
@@ -962,7 +955,9 @@ final class WindowManager {
                                                 userInfo: ["frame": target, "screen": id])
             }
             if existing == nil {
-                let view = NSHostingView(rootView: SurfaceViewportView(viewport: host.state.viewport, content: SurfaceView(store: store, state: host.state, workspace: store.workspace)))
+                let root = SurfaceViewportView(viewport: host.state.viewport, content: SurfaceView(store: store, state: host.state, workspace: store.workspace))
+                    .environment(\.haloScreenFrame, screen.frame)
+                let view = NSHostingView(rootView: root)
                 view.sizingOptions = []
                 host.panel.contentView = view
                 host.subscription = host.state.$expanded.dropFirst().removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self, weak host] expanded in
