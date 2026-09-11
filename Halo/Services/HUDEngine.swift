@@ -486,7 +486,7 @@ final class HaloHUDEngine {
         model.configuration = configuration
         model.palette = workspace.media.artworkColors
         model.sequence += 1
-        position(panel, configuration: configuration)
+        position(panel, event: event, configuration: configuration)
         panel.orderFrontRegardless()
 
         if repeated && !editorPreviewPinned {
@@ -614,11 +614,12 @@ final class HaloHUDEngine {
         return workspace.effectiveLayout.appearance
     }
 
-    private func position(_ panel: NSPanel, configuration: HaloHUDConfiguration) {
+    private func position(_ panel: NSPanel, event: HaloHUDEvent, configuration: HaloHUDConfiguration) {
         guard let screen = screen(for: configuration) else { return }
         let visible = screen.visibleFrame, full = screen.frame, margin = CGFloat(max(0, configuration.layout.edgeMargin))
-        var width = CGFloat(min(configuration.layout.maximumWidth, max(configuration.layout.minimumWidth, configuration.layout.width)))
-        var height = CGFloat(max(24, configuration.layout.height))
+        let resolvedSize = HaloHUDLayoutMetrics.resolvedSize(event: event, configuration: configuration)
+        var width = resolvedSize.width
+        var height = resolvedSize.height
         var x = visible.midX - width / 2, y = visible.maxY - height - margin
         switch configuration.presentation.target {
         case .screenEdge:
@@ -744,14 +745,130 @@ extension HaloHUDEvent {
 enum HaloHUDRenderFormatting {
     static func valueText(event: HaloHUDEvent, configuration: HaloHUDConfiguration) -> String {
         guard let value = event.value else { return "" }
+        if configuration.components.progress && (configuration.progressStyle == .gauge || configuration.progressStyle == .numberOnly) {
+            return ""
+        }
         let progress = min(1, max(0, event.progress ?? 0))
         let display = event.maximumValue == 100 ? Int(value.rounded()) : Int((progress * 100).rounded())
-        switch (configuration.components.value, configuration.components.percentage) {
-        case (true, true): return "\(display) · \(display)%"
-        case (true, false): return "\(display)"
-        case (false, true): return "\(display)%"
-        case (false, false): return ""
+        if configuration.components.percentage { return "\(display)%" }
+        if configuration.components.value { return "\(display)" }
+        return ""
+    }
+}
+
+enum HaloHUDLayoutMetrics {
+    static func resolvedSize(event: HaloHUDEvent, configuration: HaloHUDConfiguration) -> CGSize {
+        switch configuration.presentation.target {
+        case .screenEdge:
+            let length = CGFloat(max(40, configuration.presentation.screenEdgeLength))
+            let thickness = CGFloat(max(1, configuration.presentation.screenEdgeThickness))
+            return (configuration.presentation.screenEdge == .left || configuration.presentation.screenEdge == .right)
+                ? CGSize(width: thickness, height: length)
+                : CGSize(width: length, height: thickness)
+        case .notch:
+            let notch = configuration.presentation.resolvedNotch
+            let height = max(24, max(notch.iconSize * 1.45, notch.textSize * 1.9))
+            return CGSize(width: max(48, notch.width), height: height)
+        case .menuBar:
+            return .zero
+        default:
+            break
         }
+
+        let paddingX = max(0, configuration.layout.horizontalPadding)
+        let paddingY = max(0, configuration.layout.verticalPadding)
+        let spacing = max(0, configuration.layout.spacing)
+        let iconWidth = configuration.components.icon ? max(configuration.iconSize * 1.2, 12) : 0
+        let iconHeight = configuration.components.icon ? max(configuration.iconSize * 1.25, 12) : 0
+        let value = HaloHUDRenderFormatting.valueText(event: event, configuration: configuration)
+        let valueWidth = value.isEmpty ? 0 : textWidth(value, size: configuration.textSize, weight: .bold)
+        let secondary = event.metadata["deviceName"] ?? event.secondaryText ?? ""
+        let labelWidth = configuration.components.label ? textWidth(event.primaryText, size: configuration.textSize, weight: .semibold) : 0
+        let secondaryWidth = configuration.components.deviceName && !secondary.isEmpty
+            ? textWidth(secondary, size: max(8, configuration.textSize * 0.72), weight: .regular)
+            : 0
+        let textBlockWidth = max(labelWidth, secondaryWidth)
+        let hasText = textBlockWidth > 0 || valueWidth > 0
+        let headerGap = textBlockWidth > 0 && valueWidth > 0 ? 8.0 : 0
+        let headerWidth = textBlockWidth + headerGap + valueWidth
+        let headerHeight: Double = {
+            var height = 0.0
+            if configuration.components.label { height += configuration.textSize * 1.25 }
+            if configuration.components.deviceName && !secondary.isEmpty { height += max(8, configuration.textSize * 0.72) * 1.2 + 1 }
+            if height == 0 && valueWidth > 0 { height = configuration.textSize * 1.25 }
+            return height
+        }()
+        let progress = progressFootprint(configuration: configuration)
+        let hasProgress = configuration.components.progress && event.progress != nil
+
+        let natural: CGSize
+        if configuration.layout.style == .vertical && !configuration.layout.compact {
+            var heights: [Double] = []
+            if iconHeight > 0 { heights.append(iconHeight) }
+            if hasText { heights.append(max(headerHeight, configuration.textSize * 1.25)) }
+            if hasProgress { heights.append(progress.height) }
+            let gaps = Double(max(0, heights.count - 1)) * spacing
+            natural = CGSize(
+                width: max(iconWidth, headerWidth, hasProgress ? progress.width : 0) + 2 * paddingX,
+                height: heights.reduce(0, +) + gaps + 2 * paddingY
+            )
+        } else if configuration.layout.style == .compact || configuration.layout.compact {
+            var widths: [Double] = []
+            if iconWidth > 0 { widths.append(iconWidth) }
+            if configuration.components.label { widths.append(labelWidth) }
+            if configuration.components.deviceName && secondaryWidth > 0 { widths.append(secondaryWidth) }
+            if valueWidth > 0 { widths.append(valueWidth) }
+            if hasProgress { widths.append(min(150, progress.width)) }
+            natural = CGSize(
+                width: widths.reduce(0, +) + Double(max(0, widths.count - 1)) * max(3, spacing) + 2 * paddingX,
+                height: max(iconHeight, max(headerHeight, hasProgress ? progress.height : 0)) + 2 * paddingY
+            )
+        } else {
+            let rightWidth = max(headerWidth, hasProgress ? progress.width : 0)
+            let rightHeight = headerHeight + (hasText && hasProgress ? max(3, spacing * 0.45) : 0) + (hasProgress ? progress.height : 0)
+            let gap = iconWidth > 0 && rightWidth > 0 ? spacing : 0
+            natural = CGSize(
+                width: iconWidth + gap + rightWidth + 2 * paddingX,
+                height: max(iconHeight, rightHeight) + 2 * paddingY
+            )
+        }
+
+        let requestedWidth = min(configuration.layout.maximumWidth, max(configuration.layout.minimumWidth, configuration.layout.width))
+        let requestedHeight = max(24, configuration.layout.height)
+        let width = min(configuration.layout.maximumWidth, max(configuration.layout.minimumWidth, max(requestedWidth, Double(natural.width))))
+        let height = max(requestedHeight, Double(natural.height))
+        return CGSize(width: width, height: height)
+    }
+
+    private static func progressFootprint(configuration: HaloHUDConfiguration) -> CGSize {
+        switch configuration.progressStyle {
+        case .ring, .arc:
+            return CGSize(width: 36, height: 36)
+        case .gauge:
+            return CGSize(width: 40, height: 40)
+        case .iconFill:
+            let size = max(24, configuration.iconSize)
+            return CGSize(width: size, height: size)
+        case .numberOnly:
+            return CGSize(width: max(34, configuration.textSize * 2.4), height: max(20, configuration.textSize * 1.5))
+        case .dots:
+            let count = max(2, min(32, configuration.segments))
+            return CGSize(width: Double(count * 5 + max(0, count - 1) * 4), height: 7)
+        case .wave:
+            return CGSize(width: 88, height: 20)
+        case .segmentedBar:
+            return CGSize(width: 120, height: 7)
+        case .minimalLine:
+            return CGSize(width: 120, height: 2)
+        case .bar, .glow:
+            return CGSize(width: 120, height: 7)
+        }
+    }
+
+    private static func textWidth(_ text: String, size: Double, weight: NSFont.Weight) -> Double {
+        guard !text.isEmpty else { return 0 }
+        let font = NSFont.systemFont(ofSize: CGFloat(max(8, size)), weight: weight)
+        return ceil((text as NSString).size(withAttributes: [.font: font]).width)
     }
 }
 
@@ -800,6 +917,13 @@ struct HaloHUDRenderView: View {
         if let detail = event.secondaryText, !detail.isEmpty { return detail }
         return nil
     }
+    private var renderedValueText: String { HaloHUDRenderFormatting.valueText(event: event, configuration: configuration) }
+    private var hasHeaderContent: Bool {
+        configuration.components.label ||
+        (configuration.components.deviceName && deviceText != nil) ||
+        !renderedValueText.isEmpty
+    }
+    private var hasProgressContent: Bool { configuration.components.progress && event.progress != nil }
 
     var body: some View {
         Group {
@@ -814,7 +938,7 @@ struct HaloHUDRenderView: View {
                     isClosedNotchTarget ? notch.horizontalPadding : configuration.layout.horizontalPadding)
         .padding(.vertical,
                  configuration.presentation.target == .screenEdge || isClosedNotchTarget ? 0 : configuration.layout.verticalPadding)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .background { background }
         .overlay { noiseOverlay }
         .clipShape(RoundedRectangle(cornerRadius: effectiveCornerRadius, style: .continuous))
@@ -841,9 +965,12 @@ struct HaloHUDRenderView: View {
     private var horizontal: some View {
         HStack(spacing: effectiveSpacing) {
             icon
-            VStack(alignment: .leading, spacing: max(3, effectiveSpacing * 0.45)) {
-                header
-                progressView
+            if hasHeaderContent || hasProgressContent {
+                VStack(alignment: .leading, spacing: hasHeaderContent && hasProgressContent ? max(3, effectiveSpacing * 0.45) : 0) {
+                    if hasHeaderContent { header }
+                    if hasProgressContent { progressView }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -851,8 +978,8 @@ struct HaloHUDRenderView: View {
     private var vertical: some View {
         VStack(spacing: effectiveSpacing) {
             icon
-            header
-            progressView
+            if hasHeaderContent { header }
+            if hasProgressContent { progressView }
         }
     }
 
@@ -861,8 +988,8 @@ struct HaloHUDRenderView: View {
             icon
             if configuration.components.label { Text(event.primaryText).lineLimit(1) }
             if configuration.components.deviceName, let deviceText { Text(deviceText).foregroundStyle(secondaryColor).lineLimit(1) }
-            valueText
-            if configuration.components.progress {
+            if !renderedValueText.isEmpty { valueText }
+            if hasProgressContent {
                 progressView.frame(maxWidth: isClosedNotchTarget ? notch.progressWidth : 150)
             }
         }
@@ -898,34 +1025,37 @@ struct HaloHUDRenderView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                if configuration.components.label {
-                    Text(event.primaryText)
-                        .font(.system(size: effectiveTextSize, weight: .semibold, design: .rounded))
-                        .foregroundStyle(accent)
-                        .lineLimit(1)
-                }
-                if configuration.components.deviceName, let deviceText {
-                    Text(deviceText)
-                        .font(.system(size: max(8, effectiveTextSize * 0.72)))
-                        .foregroundStyle(secondaryColor)
-                        .lineLimit(1)
-                } else if configuration.components.label, let secondary = event.secondaryText, !secondary.isEmpty {
-                    Text(secondary)
-                        .font(.system(size: max(8, effectiveTextSize * 0.72)))
-                        .foregroundStyle(secondaryColor)
-                        .lineLimit(1)
+            if configuration.components.label || (configuration.components.deviceName && deviceText != nil) {
+                VStack(alignment: .leading, spacing: 1) {
+                    if configuration.components.label {
+                        Text(event.primaryText)
+                            .font(.system(size: effectiveTextSize, weight: .semibold, design: .rounded))
+                            .foregroundStyle(accent)
+                            .lineLimit(1)
+                    }
+                    if configuration.components.deviceName, let deviceText {
+                        Text(deviceText)
+                            .font(.system(size: max(8, effectiveTextSize * 0.72)))
+                            .foregroundStyle(secondaryColor)
+                            .lineLimit(1)
+                    } else if configuration.components.label, let secondary = event.secondaryText, !secondary.isEmpty {
+                        Text(secondary)
+                            .font(.system(size: max(8, effectiveTextSize * 0.72)))
+                            .foregroundStyle(secondaryColor)
+                            .lineLimit(1)
+                    }
                 }
             }
-            Spacer(minLength: 4)
-            valueText
+            if !renderedValueText.isEmpty {
+                Spacer(minLength: 4)
+                valueText
+            }
         }
     }
 
     @ViewBuilder private var valueText: some View {
-        let text = HaloHUDRenderFormatting.valueText(event: event, configuration: configuration)
-        if !text.isEmpty {
-            Text(text)
+        if !renderedValueText.isEmpty {
+            Text(renderedValueText)
                 .font(.system(size: effectiveTextSize, weight: .bold, design: .rounded))
                 .foregroundStyle(accent)
                 .monospacedDigit()
@@ -962,10 +1092,10 @@ struct HaloHUDRenderView: View {
                 ZStack {
                     Circle().trim(from: 0.12, to: 0.88).stroke(inactiveColor, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(90))
                     Circle().trim(from: 0.12, to: 0.12 + progress * 0.76).stroke(progressColor, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(90))
-                    Text("\(Int((progress * 100).rounded()))").font(.system(size: 9, weight: .bold, design: .rounded)).foregroundStyle(accent)
+                    Text("\(Int((progress * 100).rounded()))%").font(.system(size: 9, weight: .bold, design: .rounded)).foregroundStyle(accent)
                 }.frame(width: isClosedNotchTarget ? 30 : 40, height: isClosedNotchTarget ? 30 : 40)
             case .numberOnly:
-                Text("\(Int((progress * 100).rounded()))")
+                Text("\(Int((progress * 100).rounded()))%")
                     .font(.system(size: effectiveTextSize * 1.2, weight: .bold, design: .rounded))
                     .foregroundStyle(progressColor)
             case .iconFill:
