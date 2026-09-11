@@ -57,6 +57,7 @@ final class SurfaceAnimator {
 
     private func syncClosedGeometry(state: SurfaceState, frame: CGRect, cameraFrame: CGRect?) {
         if state.compactWidth != frame.width { state.compactWidth = frame.width }
+        if state.compactHeight != frame.height { state.compactHeight = frame.height }
         if state.viewport.size != frame.size { state.viewport.size = frame.size }
 
         let nextOcclusion: CGRect?
@@ -192,6 +193,8 @@ final class WindowManager {
     private struct HUDNotchExpansion {
         var side: HaloHUDNotchSide
         var width: Double
+        var height: Double
+        var vertical: Bool
         var screenFrame: CGRect
         var kind: HaloHUDEventKind
         var collision: HaloHUDCollisionBehavior
@@ -263,10 +266,13 @@ final class WindowManager {
                 guard let self else { return }
                 if let presentation {
                     let notch = presentation.configuration.presentation.resolvedNotch
-                    let reservedWidth = notch.width + max(12, notch.horizontalPadding * 2) + abs(notch.horizontalOffset)
+                    let vertical = notch.usesVerticalExpansion
+                    let reservedWidth = vertical ? 0 : notch.width + max(12, notch.horizontalPadding * 2) + abs(notch.horizontalOffset)
                     self.hudNotchExpansion = HUDNotchExpansion(
                         side: presentation.side,
                         width: reservedWidth,
+                        height: notch.resolvedVerticalHeight,
+                        vertical: vertical,
                         screenFrame: presentation.screenFrame,
                         kind: presentation.event.kind,
                         collision: presentation.configuration.behavior.collision,
@@ -405,11 +411,14 @@ final class WindowManager {
         case .right: outwardOffset = max(0, notch.horizontalOffset)
         case .full, .automatic: outwardOffset = abs(notch.horizontalOffset)
         }
-        let width = notch.width + outwardOffset
+        let vertical = notch.usesVerticalExpansion
+        let width = vertical ? 0 : notch.width + outwardOffset
         let repeatedContinue = hudNotchExpansion?.kind == kind &&
             configuration.behavior.interrupt == .continue && hudNotchHideWork != nil
 
         hudNotchExpansion = HUDNotchExpansion(side: side, width: width,
+                                              height: notch.resolvedVerticalHeight,
+                                              vertical: vertical,
                                               screenFrame: screen.frame, kind: kind,
                                               collision: configuration.behavior.collision,
                                               persistent: persistent)
@@ -556,6 +565,8 @@ final class WindowManager {
     }
 
     private func configureDynamicWidth(_ host: Host) {
+        guard host.geometry != nil else { return }
+        host.geometry?.activeCompactHeight = nil
         guard let geometry = host.geometry else { return }
         let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
         let options = layout.closedNotch ?? ClosedNotchOptions()
@@ -585,9 +596,11 @@ final class WindowManager {
         let camera = attached ? geometry.physicalNotchWidth : 0
         let baseWidth = max(16, geometry.appearance.compactWidth)
         let autoFit = options.autoFitContent ?? true
+        let verticalHUD = hudNotchExpansion.flatMap { $0.screenFrame.equalTo(geometry.screen) && $0.vertical ? $0 : nil }
 
         guard !host.state.editingGeometry else {
             host.geometry?.activeCompactWidth = nil
+            host.geometry?.activeCompactHeight = nil
             host.geometry?.activeCompactCenterOffset = nil
             return
         }
@@ -596,7 +609,7 @@ final class WindowManager {
             var leftDemand = autoFit ? sides.left : sides.decorationLeft
             var rightDemand = autoFit ? sides.right : sides.decorationRight
 
-            if let hud = hudNotchExpansion, hud.screenFrame.equalTo(geometry.screen) {
+            if let hud = hudNotchExpansion, hud.screenFrame.equalTo(geometry.screen), !hud.vertical {
                 let hudGap = 6.0
                 let shell = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin + 8
                 func merged(_ existing: Double, _ hudWidth: Double) -> Double {
@@ -650,6 +663,11 @@ final class WindowManager {
             host.geometry?.activeCompactWidth = min(geometry.visible.width, requested)
             host.geometry?.activeCompactCenterOffset = nil
         }
+
+        if let verticalHUD {
+            let baseHeight = max(16, geometry.appearance.surface.compactHeight)
+            host.geometry?.activeCompactHeight = min(220, max(baseHeight, verticalHUD.height))
+        }
     }
 
     private func fittedClosedSides(host: Host, layout: WorkspaceLayout,
@@ -660,7 +678,8 @@ final class WindowManager {
         let options = layout.closedNotch ?? ClosedNotchOptions()
         let playing = store.workspace.media.isPlaying
         let activity = activeClosedActivity
-        let size = min(options.fontSize, max(1, geometry.compactHeight - 2 * options.contentPaddingY) / 1.25)
+        let baseCompactHeight = max(16, geometry.appearance.surface.compactHeight)
+        let size = min(options.fontSize, max(1, baseCompactHeight - 2 * options.contentPaddingY) / 1.25)
         let font = NSFont.systemFont(ofSize: size)
         let slotMargins = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
         let elementGap = 6.0
@@ -746,7 +765,7 @@ final class WindowManager {
                     } ?? 0
                 }
             }
-            let ornament = decoration.flatMap { $0.isVisible(playing: playing) ? min($0.size, max(1, geometry.compactHeight - 2 * options.contentPaddingY)) : nil } ?? 0
+            let ornament = decoration.flatMap { $0.isVisible(playing: playing) ? min($0.size, max(1, baseCompactHeight - 2 * options.contentPaddingY)) : nil } ?? 0
             guard content > 0 || ornament > 0 else { return (0, 0) }
             let spacing = content > 0 && ornament > 0 ? elementGap : 0
             return (content + ornament + spacing + slotMargins, ornament > 0 ? ornament + slotMargins : 0)
@@ -789,15 +808,17 @@ final class WindowManager {
         }
         for host in hosts.values {
             let oldWidth = host.geometry?.compactWidth
+            let oldHeight = host.geometry?.compactHeight
             let oldOffset = host.geometry?.activeCompactCenterOffset ?? 0
             configureDynamicWidth(host)
             guard let geometry = host.geometry else { continue }
             let newWidth = geometry.compactWidth
+            let newHeight = geometry.compactHeight
             let newOffset = geometry.activeCompactCenterOffset ?? 0
 
             guard !host.state.expanded else {
                 host.state.compactWidth = newWidth
-                host.state.compactHeight = geometry.compactHeight
+                host.state.compactHeight = newHeight
                 host.state.closedOcclusion = geometry.closedCameraOcclusion
                 continue
             }
@@ -808,12 +829,12 @@ final class WindowManager {
                 target.origin.y = host.panel.frame.maxY - target.height
             }
 
-            let widthChanged = oldWidth != newWidth || oldOffset != newOffset
+            let geometryChanged = oldWidth != newWidth || oldHeight != newHeight || oldOffset != newOffset
             let frameChanged = host.targetFrame.map { old in
                 abs(old.minX - target.minX) >= 0.5 || abs(old.minY - target.minY) >= 0.5 ||
                 abs(old.width - target.width) >= 0.5 || abs(old.height - target.height) >= 0.5
             } ?? true
-            guard widthChanged || frameChanged else { continue }
+            guard geometryChanged || frameChanged else { continue }
 
             let oldLogicalWidth = oldWidth ?? newWidth
             let oldLeft = oldOffset - oldLogicalWidth / 2
