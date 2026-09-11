@@ -96,14 +96,26 @@ extension View {
 private struct HaloSliderWindowProbe: NSViewRepresentable {
     let resolve: (NSWindow?) -> Void
 
+    final class Coordinator {
+        weak var lastWindow: NSWindow?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
-        DispatchQueue.main.async { resolve(view.window) }
+        DispatchQueue.main.async {
+            context.coordinator.lastWindow = view.window
+            resolve(view.window)
+        }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { resolve(nsView.window) }
+        let window = nsView.window
+        guard context.coordinator.lastWindow !== window else { return }
+        context.coordinator.lastWindow = window
+        DispatchQueue.main.async { resolve(window) }
     }
 }
 
