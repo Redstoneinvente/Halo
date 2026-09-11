@@ -45,6 +45,8 @@ final class HaloPanel: NSPanel {
 
 @MainActor
 final class SurfaceAnimator {
+    private enum HorizontalResizeAnchor { case left, right, center }
+
     private let clock = DisplayClock()
     func cancel() { clock.stop() }
 
@@ -54,7 +56,8 @@ final class SurfaceAnimator {
     }
 
     func move(panel: HaloPanel, state: SurfaceState, target: CGRect, options: SurfaceOptions,
-              preset: AnimationPreset, animations: Bool, opening: Bool, style: SurfaceStyle) {
+              preset: AnimationPreset, animations: Bool, opening: Bool, style: SurfaceStyle,
+              liveViewportResize: Bool = true) {
         cancel()
         let transition = opening ? options.opening : options.closing
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -75,6 +78,27 @@ final class SurfaceAnimator {
             publishGeometry(panel: panel, frame: target)
             return
         }
+
+        // Closed-notch dynamic resizing is much smoother when SwiftUI does not recalculate
+        // the entire closed-notch hierarchy for every display refresh. Lay the closed content
+        // out once at its destination size and let the AppKit panel act as the animated mask.
+        if !liveViewportResize, state.viewport.size != target.size {
+            state.viewport.size = target.size
+        }
+
+        // When only one closed-notch wing changes, preserve the opposite panel edge exactly.
+        // This stops the physical notch from appearing to drift while music, power events,
+        // live activities, or lyrics change the width of one side.
+        let horizontalAnchor: HorizontalResizeAnchor = {
+            guard !liveViewportResize, abs(target.width - initial.width) > 0.5 else { return .center }
+            let leftMovement = abs(target.minX - initial.minX)
+            let rightMovement = abs(target.maxX - initial.maxX)
+            let tolerance: CGFloat = 0.75
+            if leftMovement <= tolerance && rightMovement > tolerance { return .left }
+            if rightMovement <= tolerance && leftMovement > tolerance { return .right }
+            return .center
+        }()
+
         clock.start(view: view) { [weak self, weak panel, weak state] timestamp in
             guard let self, let panel, let state else { self?.cancel(); return }
             let t = min(1, max(0, timestamp - start) / max(0.01, duration))
@@ -83,7 +107,13 @@ final class SurfaceAnimator {
             let height = max(1, initial.height + (target.height - initial.height) * p)
             let centerX = initial.midX + (target.midX - initial.midX) * p
             let top = initial.maxY + (target.maxY - initial.maxY) * p
-            var frame = CGRect(x: centerX - width / 2, y: top - height, width: width, height: height)
+            let x: CGFloat
+            switch horizontalAnchor {
+            case .left: x = initial.minX
+            case .right: x = initial.maxX - width
+            case .center: x = centerX - width / 2
+            }
+            var frame = CGRect(x: x, y: top - height, width: width, height: height)
             if style == .bottom { frame.origin.y = target.minY }
             if style == .left { frame.origin.x = target.minX }
             if style == .right { frame.origin.x = target.maxX - width }
@@ -93,8 +123,14 @@ final class SurfaceAnimator {
             }
             if transition == .slide { frame.origin.y += (style == .bottom ? -1 : 1) * 18 * sin(.pi * t) }
             panel.alphaValue = transition == .fade ? initialAlpha + (1 - initialAlpha) * t - 0.3 * sin(.pi * t) : 1
-            if t >= 1 { frame = target; panel.alphaValue = 1; self.cancel() }
-            if state.viewport.size != frame.size { state.viewport.size = frame.size }
+            if t >= 1 {
+                frame = target
+                panel.alphaValue = 1
+                if state.viewport.size != target.size { state.viewport.size = target.size }
+                self.cancel()
+            } else if liveViewportResize, state.viewport.size != frame.size {
+                state.viewport.size = frame.size
+            }
             panel.setFrame(frame, display: false)
             self.publishGeometry(panel: panel, frame: frame)
         }
@@ -242,26 +278,42 @@ final class WindowManager {
     }
 
     private func powerReaction(options: ClosedNotchOptions,
-                               items: (left: ClosedNotchItem, right: ClosedNotchItem)) -> (side: DynamicSide, width: Double)? {
+                               items: (left: ClosedNotchItem, right: ClosedNotchItem))
+        -> (side: DynamicSide, badgeWidth: Double, minimumSideWidth: Double)? {
         let settings = options.powerReaction ?? PowerReactionOptions()
         guard settings.isEnabled, let battery = store.workspace.system.battery else { return nil }
         let style: PowerReactionStyle
-        if battery >= 99 && !store.workspace.system.onBattery { style = settings.charged }
-        else if store.workspace.system.charging { style = settings.charging }
-        else if store.workspace.system.onBattery && battery <= settings.lowThreshold { style = settings.low }
-        else { return nil }
+        let eventLabel: String
+        if battery >= 99 && !store.workspace.system.onBattery {
+            style = settings.charged; eventLabel = "Charged"
+        } else if store.workspace.system.charging {
+            style = settings.charging; eventLabel = "Charging"
+        } else if store.workspace.system.onBattery && battery <= settings.lowThreshold {
+            style = settings.low; eventLabel = "Low battery"
+        } else { return nil }
         guard style != .off else { return nil }
 
         let size = max(10, options.fontSize)
-        let estimated: Double
-        switch style {
-        case .off: estimated = 0
-        case .icon: estimated = size + 6
-        case .percent: estimated = size * 3.3
-        case .iconPercent: estimated = size * 4.4
-        case .label: estimated = size * 7.0
+        let font = NSFont.systemFont(ofSize: size, weight: .regular)
+        func textWidth(_ value: String) -> Double {
+            ceil((value as NSString).size(withAttributes: [.font: font]).width)
         }
-        let width = settings.expandForEvent ? max(estimated, settings.eventWidth) : estimated
+        let iconWidth = max(12, size * 1.05)
+        let labelGap = 4.0
+        let horizontalPadding = 4.0 // PowerEventBadge currently uses 2 pt on each side.
+        let naturalWidth: Double
+        switch style {
+        case .off: naturalWidth = 0
+        case .icon: naturalWidth = iconWidth + horizontalPadding
+        case .percent: naturalWidth = textWidth("100%") + horizontalPadding
+        case .iconPercent: naturalWidth = iconWidth + labelGap + textWidth("100%") + horizontalPadding
+        case .label: naturalWidth = iconWidth + labelGap + textWidth(eventLabel) + horizontalPadding
+        }
+        let badgeWidth = max(18, naturalWidth)
+        // "Power event width" is the minimum total wing width while the event is visible,
+        // not extra blank space added on top of the badge and existing content.
+        let minimumSideWidth = settings.expandForEvent ? max(badgeWidth, settings.eventWidth) : badgeWidth
+
         let side: DynamicSide
         switch settings.side {
         case .left: side = .left
@@ -274,7 +326,7 @@ final class WindowManager {
             else if leftFree { side = .left }
             else { side = .right }
         }
-        return (side, width)
+        return (side, badgeWidth, minimumSideWidth)
     }
 
     private func configureDynamicWidth(_ host: Host) {
@@ -303,6 +355,7 @@ final class WindowManager {
         }
 
         let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
+        let notchLike = attached || geometry.style == .notch || geometry.style == .simulated
         let camera = attached ? geometry.physicalNotchWidth : 0
         let baseWidth = max(16, geometry.appearance.compactWidth)
         let autoFit = options.autoFitContent ?? true
@@ -313,20 +366,23 @@ final class WindowManager {
             return
         }
 
-        if attached {
+        if notchLike {
             let extents = ClosedWingSizing.extents(
                 base: baseWidth, camera: camera,
                 left: autoFit ? sides.left : sides.decorationLeft,
                 right: autoFit ? sides.right : sides.decorationRight,
                 expansion: expansion.enabled ? expansion.width : 0,
                 leftLive: leftLive, rightLive: rightLive)
-            let center = geometry.visible.midX + geometry.offset(expanded: false).width
+            let baseCenter = attached ? geometry.screen.midX : geometry.visible.midX
+            let center = baseCenter + geometry.offset(expanded: false).width
             let leftLimit = max(0, center - camera / 2 - geometry.visible.minX - 12)
             let rightLimit = max(0, geometry.visible.maxX - 12 - center - camera / 2)
             let leftExtent = min(extents.left, leftLimit)
             let rightExtent = min(extents.right, rightLimit)
             let required = camera + leftExtent + rightExtent
-            host.geometry?.activeCompactWidth = max(baseWidth, required)
+            host.geometry?.activeCompactWidth = min(geometry.visible.width, max(baseWidth, required))
+            // The camera/notch remains the anchor. Unequal wings shift only the panel bounds,
+            // so a right-side music expansion does not resize the left wing (and vice versa).
             host.geometry?.activeCompactCenterOffset = (rightExtent - leftExtent) / 2
         } else {
             var requested = baseWidth
@@ -339,7 +395,7 @@ final class WindowManager {
 
     private func fittedClosedSides(host: Host, layout: WorkspaceLayout,
                                    items: (left: ClosedNotchItem, right: ClosedNotchItem),
-                                   power: (side: DynamicSide, width: Double)?) ->
+                                   power: (side: DynamicSide, badgeWidth: Double, minimumSideWidth: Double)?) ->
         (left: Double, right: Double, decorationLeft: Double, decorationRight: Double) {
         guard let geometry = host.geometry else { return (0, 0, 0, 0) }
         let options = layout.closedNotch ?? ClosedNotchOptions()
@@ -348,7 +404,8 @@ final class WindowManager {
         let size = min(options.fontSize, max(1, geometry.compactHeight - 2 * options.contentPaddingY) / 1.25)
         let font = NSFont.systemFont(ofSize: size)
         let slotMargins = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
-        let elementGap = 8.0
+        // Keep the geometry estimator in lockstep with ClosedNotchSlot's HStack spacing.
+        let elementGap = 6.0
 
         var artwork = options.artworkOptions ?? ClosedArtworkOptions()
         if options.artworkOptions == nil, let legacy = options.mediaOptions, legacy.artwork != .none {
@@ -369,7 +426,7 @@ final class WindowManager {
         }()
 
         func textWidth(_ text: String, font: NSFont) -> Double {
-            ceil((text as NSString).size(withAttributes: [.font: font]).width) + 4
+            ceil((text as NSString).size(withAttributes: [.font: font]).width) + 2
         }
         func mediaWidth() -> Double {
             guard playing else { return 0 }
@@ -422,8 +479,13 @@ final class WindowManager {
                 case .activity:
                     content = activity.map {
                         let title = textWidth(String($0.title.prefix(80)), font: font)
-                        let detail = $0.detail.isEmpty ? 0 : textWidth(String($0.detail.prefix(80)), font: NSFont.systemFont(ofSize: max(8, size * 0.78)))
-                        return max(title, detail) + size + ($0.progress == nil ? 5 : 46)
+                        let detailFont = NSFont.systemFont(ofSize: max(8, size * 0.76))
+                        let detail = $0.detail.isEmpty ? 0 : textWidth(String($0.detail.prefix(80)), font: detailFont)
+                        let icon = max(12, size)
+                        let text = max(title, detail)
+                        let progress = $0.progress == nil ? 0 : elementGap + 38
+                        // Matches the view: icon + 6 pt gap + text + optional progress.
+                        return icon + elementGap + text + progress + 2
                     } ?? 0
                 }
             }
@@ -448,9 +510,17 @@ final class WindowManager {
             }
         }
 
-        let leftPower = power?.side == .left ? power!.width + (leftFull > 0 ? elementGap : 0) : 0
-        let rightPower = power?.side == .right ? power!.width + (rightFull > 0 ? elementGap : 0) : 0
-        return (leftFull + leftPower, rightFull + rightPower, left.decoration, right.decoration)
+        if let power {
+            switch power.side {
+            case .left:
+                let withBadge = leftFull > 0 ? leftFull + elementGap + power.badgeWidth : slotMargins + power.badgeWidth
+                leftFull = max(withBadge, power.minimumSideWidth)
+            case .right:
+                let withBadge = rightFull > 0 ? rightFull + elementGap + power.badgeWidth : slotMargins + power.badgeWidth
+                rightFull = max(withBadge, power.minimumSideWidth)
+            }
+        }
+        return (leftFull, rightFull, left.decoration, right.decoration)
     }
 
     private func refreshDynamicWidths() {
@@ -476,16 +546,15 @@ final class WindowManager {
             }
             host.targetFrame = target
             var motion = geometry.appearance.surface
-            let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
-            let closed = layout.closedNotch ?? ClosedNotchOptions()
-            let media = closed.mediaOptions ?? ClosedMediaOptions()
-            let adaptiveLyrics = media.textMode == .lyrics && media.usesDynamicLyricWidth
-            let art = closed.artworkOptions ?? ClosedArtworkOptions()
-            let visibleArtwork = store.workspace.media.isPlaying && art.enabled && art.mode != .none && art.mode != .background
-            motion.opening = .resize; motion.closing = .resize; motion.duration = adaptiveLyrics ? 0.20 : 0.34
+            motion.opening = .resize
+            motion.closing = .resize
+            // Closed-notch resizing respects the user's Appearance animation duration/timing.
+            // This path runs only while Halo is already closed.
+            motion.duration = min(1.2, max(0.10, motion.duration))
             host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
-                               preset: .smooth, animations: host.state.theme.animations && !host.state.editingGeometry && !visibleArtwork,
-                               opening: true, style: geometry.style)
+                               preset: geometry.appearance.animation,
+                               animations: host.state.theme.animations && !host.state.editingGeometry,
+                               opening: true, style: geometry.style, liveViewportResize: false)
         }
     }
 
@@ -500,10 +569,6 @@ final class WindowManager {
         let base = geometry.frame(expanded: true)
         guard let requested, requested.width.isFinite, requested.height.isFinite else { return base }
 
-        // ContextMusicView estimates the footprint of its visible media elements. Reserve an
-        // additional layout budget here for the view's outer padding, top-right controls and
-        // SwiftUI compression. This prevents the final visible element from being pushed outside
-        // the panel even when several optional blocks are enabled at once.
         let contextHorizontalSafety: CGFloat = 56
         let contextVerticalSafety: CGFloat = 64
         let margin: CGFloat = 12
@@ -521,9 +586,6 @@ final class WindowManager {
             height = min(height, availableHeight)
             frame = CGRect(x: base.midX - width / 2, y: anchorBottom, width: width, height: height)
         default:
-            // Top-attached surfaces stay physically attached to the menu-bar/notch edge. Only
-            // the lower edge moves as the context player grows or shrinks before its independent
-            // context-only offset is applied below.
             let anchorTop = base.maxY
             let bottomLimit = geometry.visible.minY + margin
             let availableHeight = max(minimumHeight, anchorTop - bottomLimit)
@@ -533,14 +595,11 @@ final class WindowManager {
             if geometry.style == .right { frame.origin.x = base.maxX - width }
         }
 
-        // These values are intentionally independent of Appearance.surface.offsets. They move
-        // only the adaptive Context Music panel; the normal expanded dashboard still uses the
-        // regular opened offset from SurfaceGeometry.
         let defaults = UserDefaults.standard
         let contextX = CGFloat(defaults.double(forKey: "HaloContextOffsetX"))
         let contextY = CGFloat(defaults.double(forKey: "HaloContextOffsetY"))
         frame.origin.x += contextX
-        frame.origin.y -= contextY // UI convention: positive Y moves down.
+        frame.origin.y -= contextY
 
         if frame.minX < geometry.visible.minX + margin { frame.origin.x = geometry.visible.minX + margin }
         if frame.maxX > geometry.visible.maxX - margin { frame.origin.x = geometry.visible.maxX - margin - width }
