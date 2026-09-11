@@ -555,7 +555,7 @@ struct SurfaceViewportView: View {
 }
 
 private enum ActiveContextInterface: String {
-    case music, bluetooth
+    case music, bluetooth, retro
 }
 
 struct SurfaceView: View {
@@ -573,6 +573,11 @@ struct SurfaceView: View {
     @AppStorage("HaloContextBluetoothUseFullNotchArea") private var bluetoothUsesFullNotchArea = false
     @AppStorage("HaloContextBluetoothKeepClosedNotchContents") private var bluetoothKeepsClosedContents = false
     @AppStorage("HaloContextBluetoothPriority") private var bluetoothPriority = 50.0
+    @AppStorage("HaloContextRetroEnabled") private var retroCIEnabled = false
+    @AppStorage("HaloContextRetroUseFullNotchArea") private var retroUsesFullNotchArea = false
+    @AppStorage("HaloContextRetroKeepClosedNotchContents") private var retroKeepsClosedContents = false
+    @AppStorage("HaloContextRetroPriority") private var retroPriority = 80.0
+    @State private var retroGameRequested = false
     private var theme: Theme { state.theme }
     private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.effectiveLayout }
     private var contextOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
@@ -583,6 +588,9 @@ struct SurfaceView: View {
     }
     private var activeContext: ActiveContextInterface? {
         var candidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] = []
+        if retroCIEnabled && retroGameRequested {
+            candidates.append((.retro, retroPriority, 3))
+        }
         if contextOptions.enabled && workspace.media.isPlaying {
             candidates.append((.music, contextMusicPriority, 2))
         }
@@ -596,11 +604,13 @@ struct SurfaceView: View {
     }
     private var contextMusicActive: Bool { activeContext == .music }
     private var bluetoothContextActive: Bool { activeContext == .bluetooth }
+    private var retroContextActive: Bool { activeContext == .retro }
     private var contextOwnsFullSurface: Bool {
         guard state.expanded else { return false }
         switch activeContext {
         case .music: return contextMusicUsesFullNotchArea
         case .bluetooth: return bluetoothUsesFullNotchArea
+        case .retro: return retroUsesFullNotchArea
         case .none: return false
         }
     }
@@ -608,6 +618,7 @@ struct SurfaceView: View {
         switch activeContext {
         case .music: return contextMusicKeepsClosedContents
         case .bluetooth: return bluetoothKeepsClosedContents
+        case .retro: return retroKeepsClosedContents
         case .none: return keepClosedContentsWhenOpen
         }
     }
@@ -682,6 +693,12 @@ struct SurfaceView: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
                         }
+                    } else if retroContextActive {
+                        if !retroUsesFullNotchArea {
+                            RetroGameContextView(surfaceState: state)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                        }
                     } else {
                         VStack(alignment: .leading, spacing: 16) {
                             HStack {
@@ -738,6 +755,8 @@ struct SurfaceView: View {
                                          visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
                     } else if bluetoothContextActive {
                         BluetoothContextView(bluetooth: bluetooth, surfaceState: state)
+                    } else if retroContextActive {
+                        RetroGameContextView(surfaceState: state)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -771,13 +790,26 @@ struct SurfaceView: View {
             Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
             ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloRetroGameToggle"))) { _ in
+            guard retroCIEnabled else { return }
+            retroGameRequested.toggle()
+            state.collapseTask?.cancel()
+            if retroGameRequested {
+                state.expanded = true
+            } else if !state.pinned {
+                state.expanded = false
+            }
+        }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }
         .onHover { state.hover($0, enabled: store.configuration.hoverToExpand) }
         .onChange(of: targeted) { active in
             if active { state.collapseTask?.cancel(); state.expanded = true }
         }
         .onChange(of: state.expanded) { expanded in
-            if !expanded { state.contextPreferredSize = nil }
+            if !expanded {
+                state.contextPreferredSize = nil
+                retroGameRequested = false
+            }
         }
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $targeted) { providers in
             state.expanded = true
