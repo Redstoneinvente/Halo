@@ -156,9 +156,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             .compactMap { $0 }
             .receive(on: RunLoop.main)
             .sink { [weak self] event in
-                guard let self,
-                      (self.defaults.object(forKey: "HaloBluetoothClosedNotchEvents") as? Bool ?? true) else { return }
-                self.publish(event.title, detail: event.detail)
+                self?.publishBluetoothClosedNotchEvent(event)
             }
             .store(in: &subscriptions)
         bluetooth.start()
@@ -262,6 +260,29 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
         matchedRules = current
         if let selected { apply(selected) }
+    }
+    private func bluetoothClosedNotchEventEnabled(_ kind: BluetoothConnectionEventKind) -> Bool {
+        guard defaults.object(forKey: "HaloBluetoothClosedNotchEvents") as? Bool ?? true else { return false }
+        let key: String
+        switch kind {
+        case .connected: key = "HaloBluetoothClosedNotchConnected"
+        case .disconnected: key = "HaloBluetoothClosedNotchDisconnected"
+        case .poweredOn: key = "HaloBluetoothClosedNotchPoweredOn"
+        case .poweredOff: key = "HaloBluetoothClosedNotchPoweredOff"
+        }
+        return defaults.object(forKey: key) as? Bool ?? true
+    }
+    private func publishBluetoothClosedNotchEvent(_ event: BluetoothConnectionEvent) {
+        guard bluetoothClosedNotchEventEnabled(event.kind) else { return }
+        let activity = LiveActivity(title: event.title, detail: event.detail, progress: nil)
+        activities = [activity] + Array(activities.prefix(19))
+
+        let configured = (defaults.object(forKey: "HaloBluetoothClosedNotchDuration") as? NSNumber)?.doubleValue ?? 10
+        let duration = min(20, max(2, configured))
+        let activityID = activity.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+            self?.activities.removeAll { $0.id == activityID }
+        }
     }
     func publish(_ title: String, detail: String = "", progress: Double? = nil) {
         let activity = LiveActivity(title: title, detail: detail, progress: progress.map { min(1, max(0, $0)) })
