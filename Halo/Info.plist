@@ -4,5 +4,7 @@
 <dict>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon.incs</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.</string>
 </dict>
 </plist>
