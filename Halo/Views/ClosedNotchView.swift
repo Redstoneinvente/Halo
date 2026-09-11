@@ -164,7 +164,7 @@ struct ClosedNotchSlot: View {
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject var media: MediaService
     @ObservedObject var system: SystemService
-    private let elementSpacing = 8.0
+    private let elementSpacing = 6.0
     private var activeActivity: LiveActivity? {
         workspace.activities.first { activity in
             (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(12) > Date()
@@ -243,15 +243,21 @@ struct ClosedNotchSlot: View {
         guard showArtwork else { return 0 }
         return renderedArtworkSize + 2 * artwork.padding + artwork.margin
     }
-    private var powerFootprint: Double {
-        guard showPowerEvent, let event = powerEvent else { return 0 }
+    private var naturalPowerWidth: Double {
+        guard let event = powerEvent else { return 0 }
         switch event.style {
         case .off: return 0
-        case .icon: return textSize + 6
-        case .percent: return textSize * 3.3
-        case .iconPercent: return textSize * 4.4
-        case .label: return textSize * 7.0
+        case .icon: return textSize + 4
+        case .percent: return textSize * 2.7
+        case .iconPercent: return textSize * 3.9
+        case .label: return textSize * 6.2
         }
+    }
+    private var powerFootprint: Double {
+        guard showPowerEvent else { return 0 }
+        let settings = options.powerReaction ?? PowerReactionOptions()
+        let comfortable = min(settings.eventWidth, naturalPowerWidth + 12)
+        return min(max(18, naturalPowerWidth), max(18, min(innerWidth, comfortable)))
     }
     private var mediaSiblingFootprint: Double {
         var widths: [Double] = []
@@ -269,6 +275,15 @@ struct ClosedNotchSlot: View {
     }
     private var mirrorContentWidth: Double {
         max(1, min(112, innerWidth - mediaSiblingFootprint))
+    }
+    private var activityContentWidth: Double {
+        var occupied = 0.0
+        var siblingCount = 0
+        if decorationSize > 0 { occupied += decorationSize; siblingCount += 1 }
+        if artworkFootprint > 0 { occupied += artworkFootprint; siblingCount += 1 }
+        if powerFootprint > 0 { occupied += powerFootprint; siblingCount += 1 }
+        if siblingCount > 0 { occupied += Double(siblingCount) * elementSpacing }
+        return max(32, innerWidth - occupied)
     }
     private var renderedArtworkOptions: ClosedArtworkOptions {
         var value = artwork
@@ -292,7 +307,7 @@ struct ClosedNotchSlot: View {
         .font(.system(size: textSize))
         .minimumScaleFactor(0.65)
         .foregroundStyle(effectiveTextColor)
-        .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: .center)
+        .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
         .padding(.horizontal, options.contentPaddingX)
         .padding(.vertical, options.contentPaddingY)
         .padding(side == .left ? .trailing : .leading, options.contentSideMargin)
@@ -320,7 +335,13 @@ struct ClosedNotchSlot: View {
         if itemIsVisible && !hideMusicContentForArtworkOnly { content }
     }
     @ViewBuilder private var powerElement: some View {
-        if showPowerEvent, let powerEvent { PowerEventBadge(event: powerEvent, options: options.powerReaction ?? PowerReactionOptions()) }
+        if showPowerEvent, let powerEvent {
+            PowerEventBadge(event: powerEvent, options: options.powerReaction ?? PowerReactionOptions())
+                .frame(width: powerFootprint, height: innerHeight,
+                       alignment: side == .left ? .trailing : .leading)
+                .clipped()
+                .layoutPriority(2)
+        }
     }
     @ViewBuilder private var content: some View {
         switch item {
@@ -348,15 +369,34 @@ struct ClosedNotchSlot: View {
         case .files: Label("\(store.files.count)", systemImage: "tray").lineLimit(1)
         case .activity:
             if let activity = activeActivity {
-                HStack(spacing: elementSpacing) {
+                HStack(spacing: 6) {
                     Image(systemName: "waveform.path")
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(activity.title).lineLimit(1)
-                        if !activity.detail.isEmpty { Text(activity.detail).font(.system(size: max(8, textSize * 0.78))).opacity(0.72).lineLimit(1) }
+                        .frame(width: max(12, textSize), alignment: .center)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(activity.title)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        if !activity.detail.isEmpty {
+                            Text(activity.detail)
+                                .font(.system(size: max(8, textSize * 0.76)))
+                                .opacity(0.72)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
                     }
-                    if let progress = activity.progress { ProgressView(value: progress).frame(width: 36) }
+                    .layoutPriority(1)
+                    if let progress = activity.progress {
+                        ProgressView(value: progress)
+                            .controlSize(.mini)
+                            .frame(width: min(38, max(24, activityContentWidth * 0.22)))
+                    }
                 }
+                .frame(width: activityContentWidth,
+                       alignment: side == .left ? .trailing : .leading)
+                .padding(.horizontal, 1)
+                .clipped()
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                .layoutPriority(1)
             }
         }
     }
@@ -421,7 +461,6 @@ private final class MirrorCameraService: ObservableObject {
         let request = generation
         let session = session
         state = .requesting
-        // Serialize start/stop/configuration off the UI thread, including rapid toggles.
         sessionQueue.async {
             if session.inputs.isEmpty {
                 session.beginConfiguration()
@@ -513,7 +552,11 @@ private struct PowerEventBadge: View {
             case .iconPercent: Label("\(event.battery)%", systemImage: event.symbol).monospacedDigit()
             case .label: Label(event.label, systemImage: event.symbol)
             }
-        }.foregroundStyle(powerColor)
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.72)
+        .padding(.horizontal, 2)
+        .foregroundStyle(powerColor)
     }
     private var powerColor: Color {
         guard options.usesDynamicColor else { return options.color.color }
