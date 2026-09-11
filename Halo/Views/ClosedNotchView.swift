@@ -730,13 +730,12 @@ private struct ClosedArtworkView: View {
             artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key)
         }
     }
-    @ViewBuilder private var vinylView: some View {
-        if !reduceMotion && !lowPower {
-            TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !media.isPlaying)) { context in
-                let turns = context.date.timeIntervalSinceReferenceDate * options.vinylRPM / 60
-                vinylDisc.rotationEffect(.degrees(turns * 360))
-            }
-        } else { vinylDisc }
+    private var vinylView: some View {
+        VinylRecordView(artwork: artwork,
+                        size: options.size,
+                        palette: media.artworkColors,
+                        playing: media.isPlaying,
+                        lowPower: lowPower)
     }
     private var vinylDisc: some View {
         ZStack {
