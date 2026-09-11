@@ -554,20 +554,49 @@ struct SurfaceViewportView: View {
     }
 }
 
+private enum ActiveContextInterface: String {
+    case music, bluetooth
+}
+
 struct SurfaceView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var state: SurfaceState
     @ObservedObject var workspace: WorkspaceStore
+    @ObservedObject private var bluetooth = BluetoothStateService.shared
     @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
     @AppStorage("HaloContextMusicUseFullNotchArea") private var contextMusicUsesFullNotchArea = false
     @AppStorage("HaloContextMusicKeepClosedNotchContents") private var contextMusicKeepsClosedContents = false
+    @AppStorage("HaloContextBluetoothEnabled") private var bluetoothCIEnabled = false
+    @AppStorage("HaloContextBluetoothShowWhileConnected") private var bluetoothShowWhileConnected = true
+    @AppStorage("HaloContextBluetoothShowOnChanges") private var bluetoothShowOnChanges = true
+    @AppStorage("HaloContextBluetoothUseFullNotchArea") private var bluetoothUsesFullNotchArea = false
+    @AppStorage("HaloContextBluetoothKeepClosedNotchContents") private var bluetoothKeepsClosedContents = false
     private var theme: Theme { state.theme }
     private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.effectiveLayout }
     private var contextOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
-    private var contextMusicActive: Bool { contextOptions.enabled && workspace.media.isPlaying }
-    private var contextOwnsFullSurface: Bool { state.expanded && contextMusicActive && contextMusicUsesFullNotchArea }
+    private var bluetoothEventPriority: Bool { bluetoothCIEnabled && bluetoothShowOnChanges && bluetooth.lastEvent != nil }
+    private var activeContext: ActiveContextInterface? {
+        if bluetoothEventPriority { return .bluetooth }
+        if contextOptions.enabled && workspace.media.isPlaying { return .music }
+        if bluetoothCIEnabled && bluetoothShowWhileConnected && !bluetooth.connectedDevices.isEmpty { return .bluetooth }
+        return nil
+    }
+    private var contextMusicActive: Bool { activeContext == .music }
+    private var bluetoothContextActive: Bool { activeContext == .bluetooth }
+    private var contextOwnsFullSurface: Bool {
+        guard state.expanded else { return false }
+        switch activeContext {
+        case .music: return contextMusicUsesFullNotchArea
+        case .bluetooth: return bluetoothUsesFullNotchArea
+        case .none: return false
+        }
+    }
     private var keepsClosedContentsWhileExpanded: Bool {
-        contextMusicActive ? contextMusicKeepsClosedContents : keepClosedContentsWhenOpen
+        switch activeContext {
+        case .music: return contextMusicKeepsClosedContents
+        case .bluetooth: return bluetoothKeepsClosedContents
+        case .none: return keepClosedContentsWhenOpen
+        }
     }
     private var closedBackgroundOptions: ClosedNotchOptions {
         var value = layout.closedNotch ?? ClosedNotchOptions()
@@ -634,6 +663,12 @@ struct SurfaceView: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
                         }
+                    } else if bluetoothContextActive {
+                        if !bluetoothUsesFullNotchArea {
+                            BluetoothContextView(bluetooth: bluetooth, surfaceState: state)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                        }
                     } else {
                         VStack(alignment: .leading, spacing: 16) {
                             HStack {
@@ -684,13 +719,19 @@ struct SurfaceView: View {
             }
 
             if contextOwnsFullSurface {
-                ContextMusicView(media: workspace.media, options: contextOptions,
-                                 visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
-                    .zIndex(2)
+                Group {
+                    if contextMusicActive {
+                        ContextMusicView(media: workspace.media, options: contextOptions,
+                                         visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
+                    } else if bluetoothContextActive {
+                        BluetoothContextView(bluetooth: bluetooth, surfaceState: state)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                .zIndex(2)
 
-                if contextMusicKeepsClosedContents {
+                if keepsClosedContentsWhileExpanded {
                     ClosedNotchView(store: store, workspace: workspace, layout: layout,
                                     occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
                         .frame(height: max(40, state.compactHeight))
@@ -721,9 +762,6 @@ struct SurfaceView: View {
         .onHover { state.hover($0, enabled: store.configuration.hoverToExpand) }
         .onChange(of: targeted) { active in
             if active { state.collapseTask?.cancel(); state.expanded = true }
-        }
-        .onChange(of: contextMusicActive) { active in
-            if !active { state.contextPreferredSize = nil }
         }
         .onChange(of: state.expanded) { expanded in
             if !expanded { state.contextPreferredSize = nil }
@@ -837,6 +875,187 @@ struct ShelfFileInfo: View {
         guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]) else { return "Original unavailable" }
         if values.isDirectory == true { return "Folder" }
         return url.pathExtension.uppercased() + " · " + ByteCountFormatter.string(fromByteCount: Int64(values.fileSize ?? 0), countStyle: .file)
+    }
+}
+
+private struct BluetoothContextView: View {
+    @ObservedObject var bluetooth: BluetoothStateService
+    @ObservedObject var surfaceState: SurfaceState
+    @AppStorage("HaloContextBluetoothUseFullNotchArea") private var usesFullNotchArea = false
+    @AppStorage("HaloContextBluetoothKeepClosedNotchContents") private var keepsClosedNotchContents = false
+    @AppStorage("HaloContextBluetoothShowPaired") private var showPaired = true
+    @AppStorage("HaloContextBluetoothShowAddresses") private var showAddresses = false
+
+    private var visibleDevices: [BluetoothDeviceSnapshot] {
+        showPaired ? bluetooth.pairedDevices : bluetooth.connectedDevices
+    }
+    private var connectedCount: Int { bluetooth.connectedDevices.count }
+    private var topInset: Double {
+        if usesFullNotchArea && keepsClosedNotchContents { return max(16, surfaceState.compactHeight + 10) }
+        if usesFullNotchArea { return max(16, surfaceState.compactHeight * 0.68) }
+        return 16
+    }
+    private var sizingKey: String {
+        let deviceKey = visibleDevices.map { "\($0.id):\($0.connected)" }.joined(separator: "|")
+        return "\(bluetooth.poweredOn)|\(deviceKey)|\(bluetooth.lastEvent?.id.uuidString ?? "")|\(usesFullNotchArea)|\(keepsClosedNotchContents)"
+    }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color.blue.opacity(0.20), Color.cyan.opacity(0.08), Color.black.opacity(0.55)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    header
+                    if let event = bluetooth.lastEvent { eventCard(event) }
+                    statusCard
+                    if bluetooth.poweredOn {
+                        if visibleDevices.isEmpty {
+                            Label(showPaired ? "No paired Bluetooth devices" : "No Bluetooth devices connected", systemImage: "wave.3.right")
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, minHeight: 72)
+                        } else {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 185), spacing: 10)], spacing: 10) {
+                                ForEach(visibleDevices) { device in deviceCard(device) }
+                            }
+                        }
+                    }
+                    HStack {
+                        Button("Open Bluetooth Settings") { openBluetoothSettings() }
+                        Button("Refresh") { bluetooth.refresh() }
+                        Spacer()
+                        Text(showPaired ? "Showing paired devices" : "Showing connected devices")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, topInset)
+                .padding(.bottom, 16)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: usesFullNotchArea ? 0 : 18, style: .continuous))
+        .task(id: sizingKey) { publishPreferredSize() }
+        .onDisappear { surfaceState.contextPreferredSize = nil }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(Color.blue.opacity(0.20)).frame(width: 42, height: 42)
+                Image(systemName: bluetooth.poweredOn ? "wave.3.right" : "wave.3.right.slash")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(bluetooth.poweredOn ? .blue : .secondary)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Bluetooth").font(.title3.bold())
+                Text(bluetooth.poweredOn ? (connectedCount == 1 ? "1 device connected" : "\(connectedCount) devices connected") : "Bluetooth is off")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                if !surfaceState.pinned { surfaceState.expanded = false }
+            } label: { Image(systemName: "chevron.up") }
+                .buttonStyle(.plain).disabled(surfaceState.pinned).help("Close Halo")
+            Button { surfaceState.pinned.toggle() } label: { Image(systemName: surfaceState.pinned ? "pin.fill" : "pin") }
+                .buttonStyle(.plain).help(surfaceState.pinned ? "Allow Halo to close" : "Keep Halo open")
+            Menu {
+                Toggle("Use full notch area", isOn: $usesFullNotchArea)
+                Toggle("Keep closed-notch contents visible", isOn: $keepsClosedNotchContents)
+                Divider()
+                Toggle("Show paired devices", isOn: $showPaired)
+                Toggle("Show device addresses", isOn: $showAddresses)
+            } label: { Image(systemName: "slider.horizontal.3") }
+                .menuStyle(.borderlessButton).frame(width: 24).help("Bluetooth CI options")
+            Button { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) } label: { Image(systemName: "gearshape.fill") }
+                .buttonStyle(.plain).help("Open Halo settings")
+        }
+    }
+
+    private var statusCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: bluetooth.poweredOn ? "checkmark.circle.fill" : "power.circle.fill")
+                .font(.system(size: 22)).foregroundStyle(bluetooth.poweredOn ? .green : .secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(bluetooth.poweredOn ? "Bluetooth available" : "Bluetooth unavailable").font(.headline)
+                Text(bluetooth.poweredOn ? "Halo is watching paired-device connection state." : "Turn Bluetooth on to see and track devices.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func eventCard(_ event: BluetoothConnectionEvent) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: event.symbol).font(.system(size: 23, weight: .semibold)).foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.title).font(.headline)
+                Text(event.detail).font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text("Now").font(.caption2.weight(.semibold)).foregroundStyle(.blue)
+        }
+        .padding(13)
+        .background(Color.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).stroke(Color.blue.opacity(0.22)))
+    }
+
+    private func deviceCard(_ device: BluetoothDeviceSnapshot) -> some View {
+        HStack(spacing: 11) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill((device.connected ? Color.blue : Color.secondary).opacity(0.13))
+                    .frame(width: 38, height: 38)
+                Image(systemName: deviceSymbol(device.name))
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(device.connected ? .blue : .secondary)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(device.name).font(.callout.weight(.semibold)).lineLimit(1)
+                HStack(spacing: 5) {
+                    Circle().fill(device.connected ? Color.green : Color.secondary.opacity(0.6)).frame(width: 6, height: 6)
+                    Text(device.connected ? "Connected" : "Paired").font(.caption).foregroundStyle(.secondary)
+                }
+                if showAddresses && !device.address.isEmpty {
+                    Text(device.address).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(Color.white.opacity(device.connected ? 0.065 : 0.035), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.white.opacity(0.07)))
+    }
+
+    private func deviceSymbol(_ name: String) -> String {
+        let value = name.lowercased()
+        if value.contains("airpods") || value.contains("headphone") || value.contains("buds") { return "headphones" }
+        if value.contains("mouse") || value.contains("trackpad") { return "computermouse" }
+        if value.contains("keyboard") { return "keyboard" }
+        if value.contains("controller") || value.contains("gamepad") { return "gamecontroller" }
+        if value.contains("iphone") || value.contains("phone") { return "iphone" }
+        if value.contains("speaker") { return "hifispeaker.fill" }
+        return "wave.3.right"
+    }
+
+    private func publishPreferredSize() {
+        let count = min(6, visibleDevices.count)
+        let rows = Int(ceil(Double(count) / 2.0))
+        let eventHeight = bluetooth.lastEvent == nil ? 0.0 : 66.0
+        let height = min(620, max(220, 178 + eventHeight + Double(rows) * 64))
+        let next = CGSize(width: 510, height: height)
+        DispatchQueue.main.async { [surfaceState] in
+            if let current = surfaceState.contextPreferredSize,
+               abs(current.width - next.width) < 1, abs(current.height - next.height) < 1 { return }
+            surfaceState.contextPreferredSize = next
+        }
+    }
+
+    private func openBluetoothSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings") {
+            NSWorkspace.shared.open(url)
+        }
     }
 }
 
