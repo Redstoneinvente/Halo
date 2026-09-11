@@ -48,37 +48,46 @@ final class SurfaceAnimator {
     private enum HorizontalResizeAnchor { case left, right, center }
 
     private let clock = DisplayClock()
-    private weak var animatedView: NSView?
-
-    func cancel() {
-        clock.stop()
-        if let animatedView { setContentTranslation(0, on: animatedView) }
-        animatedView = nil
-    }
+    func cancel() { clock.stop() }
 
     private func publishGeometry(panel: HaloPanel, frame: CGRect) {
         NotificationCenter.default.post(name: .init("HaloPanelGeometryChanged"), object: panel,
                                         userInfo: ["frame": frame])
     }
 
-    private func setContentTranslation(_ x: CGFloat, on view: NSView) {
-        view.wantsLayer = true
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        view.layer?.masksToBounds = true
-        view.layer?.sublayerTransform = CATransform3DMakeTranslation(x, 0, 0)
-        CATransaction.commit()
+    private func syncClosedGeometry(state: SurfaceState, frame: CGRect, cameraFrame: CGRect?) {
+        if state.compactWidth != frame.width { state.compactWidth = frame.width }
+        if state.viewport.size != frame.size { state.viewport.size = frame.size }
+
+        let nextOcclusion: CGRect?
+        if let cameraFrame {
+            let overlap = cameraFrame.intersection(frame)
+            if overlap.isNull || overlap.isEmpty {
+                nextOcclusion = nil
+            } else {
+                nextOcclusion = CGRect(x: overlap.minX - frame.minX, y: 0,
+                                       width: overlap.width, height: overlap.height)
+            }
+        } else {
+            nextOcclusion = nil
+        }
+        if state.closedOcclusion != nextOcclusion { state.closedOcclusion = nextOcclusion }
     }
 
     func move(panel: HaloPanel, state: SurfaceState, target: CGRect, options: SurfaceOptions,
               preset: AnimationPreset, animations: Bool, opening: Bool, style: SurfaceStyle,
-              liveViewportResize: Bool = true, fixedHorizontalEdge: CGRectEdge? = nil) {
+              liveViewportResize: Bool = true, fixedHorizontalEdge: CGRectEdge? = nil,
+              synchronizeClosedGeometry: Bool = false, closedCameraFrame: CGRect? = nil) {
         cancel()
         let transition = opening ? options.opening : options.closing
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard animations, !reduceMotion, preset != .none, transition != .instant else {
             panel.alphaValue = 1
-            state.viewport.size = target.size
+            if synchronizeClosedGeometry {
+                syncClosedGeometry(state: state, frame: target, cameraFrame: closedCameraFrame)
+            } else {
+                state.viewport.size = target.size
+            }
             panel.setFrame(target, display: false)
             publishGeometry(panel: panel, frame: target)
             return
@@ -88,23 +97,24 @@ final class SurfaceAnimator {
         let start = CACurrentMediaTime()
         let duration = options.duration
         guard let view = panel.contentView else {
-            state.viewport.size = target.size
+            if synchronizeClosedGeometry {
+                syncClosedGeometry(state: state, frame: target, cameraFrame: closedCameraFrame)
+            } else {
+                state.viewport.size = target.size
+            }
             panel.setFrame(target, display: false)
             publishGeometry(panel: panel, frame: target)
             return
         }
-        animatedView = view
 
-        // Closed-notch resizing has an explicit fixed edge. Do not infer this from the current
-        // NSPanel frame: that frame may already be mid-animation or slightly stale when media,
-        // power or activity state changes. The geometry layer knows which wing changed.
+        // Closed-notch resizing gets an explicit stationary edge whenever one logical wing
+        // is unchanged. This is authoritative: we do not infer it from a panel that may already
+        // be partway through another animation.
         let horizontalAnchor: HorizontalResizeAnchor = {
-            if !liveViewportResize {
-                switch fixedHorizontalEdge {
-                case .minXEdge?: return .left
-                case .maxXEdge?: return .right
-                default: break
-                }
+            switch fixedHorizontalEdge {
+            case .minXEdge?: return .left
+            case .maxXEdge?: return .right
+            default: break
             }
             guard !liveViewportResize, abs(target.width - initial.width) > 0.5 else { return .center }
             let leftMovement = abs(target.minX - initial.minX)
@@ -115,35 +125,8 @@ final class SurfaceAnimator {
             return .center
         }()
 
-        // Keep closed content laid out at the larger of the start/end widths. Expansion then
-        // reveals prepared content; contraction clips the existing content. This avoids doing
-        // a full SwiftUI hierarchy relayout every display frame.
-        let presentationSize = liveViewportResize
-            ? initial.size
-            : CGSize(width: max(initial.width, target.width), height: max(initial.height, target.height))
-        if !liveViewportResize, state.viewport.size != presentationSize {
-            state.viewport.size = presentationSize
-        }
-
-        // NSHostingView centers a fixed-width SwiftUI root when that root is wider than the
-        // panel. Counter-translate the rendered sublayers so clipping happens only on the side
-        // that is actually resizing.
-        func contentTranslation(panelWidth: CGFloat, contentWidth: CGFloat) -> CGFloat {
-            let overflow = max(0, contentWidth - panelWidth)
-            switch horizontalAnchor {
-            case .left: return overflow / 2
-            case .right: return -overflow / 2
-            case .center: return 0
-            }
-        }
-        if !liveViewportResize {
-            setContentTranslation(contentTranslation(panelWidth: initial.width, contentWidth: presentationSize.width), on: view)
-        } else {
-            setContentTranslation(0, on: view)
-        }
-
-        clock.start(view: view) { [weak self, weak panel, weak state, weak view] timestamp in
-            guard let self, let panel, let state, let view else { self?.cancel(); return }
+        clock.start(view: view) { [weak self, weak panel, weak state] timestamp in
+            guard let self, let panel, let state else { self?.cancel(); return }
             let t = min(1, max(0, timestamp - start) / max(0.01, duration))
             let p = SurfaceMotion.progress(t, transition: transition, preset: preset, damping: options.damping)
             let width = max(1, initial.width + (target.width - initial.width) * p)
@@ -167,26 +150,26 @@ final class SurfaceAnimator {
             if transition == .slide { frame.origin.y += (style == .bottom ? -1 : 1) * 18 * sin(.pi * t) }
             panel.alphaValue = transition == .fade ? initialAlpha + (1 - initialAlpha) * t - 0.3 * sin(.pi * t) : 1
 
-            if !liveViewportResize {
-                let contracting = target.width < initial.width - 0.5
-                let useFinalLayout = contracting && t >= 0.985
-                let contentWidth = useFinalLayout ? target.width : presentationSize.width
-                if useFinalLayout, state.viewport.size != target.size { state.viewport.size = target.size }
-                self.setContentTranslation(useFinalLayout ? 0 : contentTranslation(panelWidth: width, contentWidth: contentWidth), on: view)
-            }
-
             if t >= 1 {
                 frame = target
                 panel.alphaValue = 1
-                if state.viewport.size != target.size { state.viewport.size = target.size }
-                self.setContentTranslation(0, on: view)
-                self.clock.stop()
-                self.animatedView = nil
+            }
+
+            // For the closed notch, animate the actual SwiftUI viewport with the NSPanel.
+            // More importantly, recompute the camera reservation from the physical screen
+            // notch every frame. That keeps the camera/notch fixed in screen space while the
+            // left and right wings independently change width; there is no centered oversized
+            // content layer that later has to slide back into place.
+            if synchronizeClosedGeometry {
+                self.syncClosedGeometry(state: state, frame: frame, cameraFrame: closedCameraFrame)
             } else if liveViewportResize, state.viewport.size != frame.size {
                 state.viewport.size = frame.size
             }
+
             panel.setFrame(frame, display: false)
             self.publishGeometry(panel: panel, frame: frame)
+
+            if t >= 1 { self.clock.stop() }
         }
     }
 }
@@ -240,8 +223,7 @@ final class WindowManager {
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in
                 // Demo Studio writes playback/marketing knobs into UserDefaults. They are not
-                // geometry preferences; reconciling for them cancels the closed-notch animation
-                // and is the source of the visible jump in the supplied recording.
+                // geometry preferences; reconciling for them cancels the closed-notch animation.
                 guard !UserDefaults.standard.bool(forKey: DemoMarketingStudio.enabledKey) else { return }
                 self?.reconcile()
             }.store(in: &subscriptions)
@@ -311,6 +293,14 @@ final class WindowManager {
         store.workspace.activities.first { activity in
             (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(12) > Date()
         }
+    }
+
+    private func physicalCameraFrame(for geometry: SurfaceGeometry) -> CGRect? {
+        guard geometry.safeAreaTop > 0, geometry.physicalNotchWidth > 0 else { return nil }
+        return CGRect(x: geometry.screen.midX - geometry.physicalNotchWidth / 2,
+                      y: geometry.screen.maxY - geometry.safeAreaTop,
+                      width: geometry.physicalNotchWidth,
+                      height: geometry.safeAreaTop)
     }
 
     private func resolvedClosedItems(_ options: ClosedNotchOptions) -> (left: ClosedNotchItem, right: ClosedNotchItem) {
@@ -593,9 +583,6 @@ final class WindowManager {
             let newOffset = geometry.activeCompactCenterOffset ?? 0
             guard oldWidth != newWidth || oldOffset != newOffset else { continue }
 
-            // Work out which logical panel edge did not move. This is independent of the
-            // NSPanel's current animation frame, so right-wing media growth always keeps minX
-            // fixed and left-wing growth always keeps maxX fixed.
             let oldLogicalWidth = oldWidth ?? newWidth
             let oldLeft = oldOffset - oldLogicalWidth / 2
             let oldRight = oldOffset + oldLogicalWidth / 2
@@ -604,17 +591,21 @@ final class WindowManager {
             let leftDelta = abs(newLeft - oldLeft)
             let rightDelta = abs(newRight - oldRight)
             let fixedEdge: CGRectEdge? = {
+                // Only call an edge "fixed" when the target geometry actually preserves it.
+                // The old fallback picked whichever edge moved less; that made the animator hold
+                // the wrong edge and then snap the whole notch to the real target at the end.
                 let tolerance = 0.75
                 if leftDelta <= tolerance && rightDelta > tolerance { return .minXEdge }
                 if rightDelta <= tolerance && leftDelta > tolerance { return .maxXEdge }
-                if leftDelta + tolerance < rightDelta { return .minXEdge }
-                if rightDelta + tolerance < leftDelta { return .maxXEdge }
                 return nil
             }()
 
-            host.state.compactWidth = newWidth
-            host.state.closedOcclusion = geometry.closedCameraOcclusion
-            guard !host.state.expanded else { continue }
+            guard !host.state.expanded else {
+                host.state.compactWidth = newWidth
+                host.state.closedOcclusion = geometry.closedCameraOcclusion
+                continue
+            }
+
             var target = geometry.frame(expanded: false)
             if geometry.style == .detached {
                 target.origin.x = host.panel.frame.midX - target.width / 2
@@ -628,8 +619,10 @@ final class WindowManager {
             host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
                                preset: geometry.appearance.animation,
                                animations: host.state.theme.animations && !host.state.editingGeometry,
-                               opening: true, style: geometry.style, liveViewportResize: false,
-                               fixedHorizontalEdge: fixedEdge)
+                               opening: true, style: geometry.style, liveViewportResize: true,
+                               fixedHorizontalEdge: fixedEdge,
+                               synchronizeClosedGeometry: true,
+                               closedCameraFrame: physicalCameraFrame(for: geometry))
         }
     }
 
