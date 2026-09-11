@@ -589,7 +589,6 @@ struct ClosedNotchSlot: View {
                     }
                     .frame(width: activityContentWidth,
                            alignment: side == .left ? .trailing : .leading)
-                    .padding(.horizontal, 1)
                     .clipped()
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     .layoutPriority(1)
@@ -639,22 +638,28 @@ private struct BluetoothClosedActivityView: View {
                 textBlock
             case .inline:
                 HStack(spacing: 5) {
-                    if showIcon { eventIcon }
-                    if showLabel { Text(label).fontWeight(.semibold).lineLimit(1) }
-                    if showDevice && !detail.isEmpty {
-                        Text(detail).font(.system(size: max(8, textSize * 0.76))).opacity(0.72).lineLimit(1)
+                    if side == .left {
+                        inlineText
+                        if showIcon { eventIcon }
+                    } else {
+                        if showIcon { eventIcon }
+                        inlineText
                     }
                 }
             case .stacked:
                 HStack(spacing: 6) {
-                    if showIcon { eventIcon }
-                    textBlock
+                    if side == .left {
+                        textBlock
+                        if showIcon { eventIcon }
+                    } else {
+                        if showIcon { eventIcon }
+                        textBlock
+                    }
                 }
             }
         }
         .foregroundStyle(accent)
         .frame(width: availableWidth, alignment: alignment)
-        .padding(.horizontal, 1)
         .clipped()
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
         .layoutPriority(2)
@@ -664,6 +669,22 @@ private struct BluetoothClosedActivityView: View {
         Image(systemName: BluetoothClosedActivity.symbol(for: kind))
             .font(.system(size: clampedIconSize, weight: .semibold))
             .frame(width: max(12, clampedIconSize + 2), alignment: .center)
+    }
+
+    @ViewBuilder private var inlineText: some View {
+        if showLabel {
+            Text(label)
+                .fontWeight(.semibold)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        if showDevice && !detail.isEmpty {
+            Text(detail)
+                .font(.system(size: max(8, textSize * 0.76)))
+                .opacity(0.72)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
     }
 
     @ViewBuilder private var textBlock: some View {
