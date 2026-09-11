@@ -939,8 +939,6 @@ private struct ContextMusicView: View {
             innerHeight = artworkSize + textColumn + (artworkSize > 0 && textColumn > 0 ? spacing * 0.7 : 0)
             width = max(340, min(580, max(380, artworkSize * 2.15)))
         }
-        // WindowManager already contributes the panel-level safety budget and top strip.
-        // Keep this estimate close to the content itself so the player does not accumulate dead space.
         return CGSize(width: width, height: min(700, max(150, innerHeight + 18)))
     }
 
@@ -1216,8 +1214,9 @@ private struct ContextMusicView: View {
     private func playbackLoop() async {
         playbackPosition = 0; playbackDuration = 0
         while !Task.isCancelled {
-            if !isScrubbing, let sample = await ContextMusicArtworkReader.playback(app: media.connectedApp) {
-                playbackPosition = sample.position; playbackDuration = sample.duration
+            if !isScrubbing, let sample = await MediaAssetReader.playbackTime(app: media.connectedApp) {
+                playbackPosition = sample.position
+                playbackDuration = sample.duration
             }
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
@@ -1227,10 +1226,23 @@ private struct ContextMusicView: View {
         lyrics = ""; lyricsLoading = false
         guard options.showsLyrics else { return }
         lyricsLoading = true
-        let duration = playbackDuration > 0 ? playbackDuration : (await ContextMusicArtworkReader.playback(app: media.connectedApp))?.duration
-        lyrics = await ContextMusicArtworkReader.lyrics(app: media.connectedApp, key: lyricKey, title: media.title,
-                                                        artist: media.artist, duration: duration,
-                                                        onlineFallback: options.usesOnlineLyrics)
+
+        let sharedKey = "\(media.connectedApp ?? "")|\(media.title)|\(media.artist)"
+        let initial = await MediaAssetReader.playbackTime(app: media.connectedApp)
+        guard !Task.isCancelled else { return }
+        if playbackDuration <= 0, let initial {
+            playbackPosition = initial.position
+            playbackDuration = initial.duration
+        }
+        let duration = playbackDuration > 0 ? playbackDuration : initial?.duration
+        let loaded = await MediaAssetReader.lyrics(app: media.connectedApp,
+                                                   key: sharedKey,
+                                                   title: media.title,
+                                                   artist: media.artist,
+                                                   duration: duration,
+                                                   onlineFallback: options.usesOnlineLyrics)
+        guard !Task.isCancelled else { return }
+        lyrics = loaded
         lyricsLoading = false
     }
 
