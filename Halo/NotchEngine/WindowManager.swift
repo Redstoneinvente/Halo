@@ -55,15 +55,39 @@ final class SurfaceAnimator {
                                         userInfo: ["frame": frame])
     }
 
+    private func syncClosedGeometry(state: SurfaceState, frame: CGRect, cameraFrame: CGRect?) {
+        if state.compactWidth != frame.width { state.compactWidth = frame.width }
+        if state.viewport.size != frame.size { state.viewport.size = frame.size }
+
+        let nextOcclusion: CGRect?
+        if let cameraFrame {
+            let overlap = cameraFrame.intersection(frame)
+            if overlap.isNull || overlap.isEmpty {
+                nextOcclusion = nil
+            } else {
+                nextOcclusion = CGRect(x: overlap.minX - frame.minX, y: 0,
+                                       width: overlap.width, height: overlap.height)
+            }
+        } else {
+            nextOcclusion = nil
+        }
+        if state.closedOcclusion != nextOcclusion { state.closedOcclusion = nextOcclusion }
+    }
+
     func move(panel: HaloPanel, state: SurfaceState, target: CGRect, options: SurfaceOptions,
               preset: AnimationPreset, animations: Bool, opening: Bool, style: SurfaceStyle,
-              liveViewportResize: Bool = true) {
+              liveViewportResize: Bool = true, fixedHorizontalEdge: CGRectEdge? = nil,
+              synchronizeClosedGeometry: Bool = false, closedCameraFrame: CGRect? = nil) {
         cancel()
         let transition = opening ? options.opening : options.closing
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard animations, !reduceMotion, preset != .none, transition != .instant else {
             panel.alphaValue = 1
-            state.viewport.size = target.size
+            if synchronizeClosedGeometry {
+                syncClosedGeometry(state: state, frame: target, cameraFrame: closedCameraFrame)
+            } else {
+                state.viewport.size = target.size
+            }
             panel.setFrame(target, display: false)
             publishGeometry(panel: panel, frame: target)
             return
@@ -73,23 +97,22 @@ final class SurfaceAnimator {
         let start = CACurrentMediaTime()
         let duration = options.duration
         guard let view = panel.contentView else {
-            state.viewport.size = target.size
+            if synchronizeClosedGeometry {
+                syncClosedGeometry(state: state, frame: target, cameraFrame: closedCameraFrame)
+            } else {
+                state.viewport.size = target.size
+            }
             panel.setFrame(target, display: false)
             publishGeometry(panel: panel, frame: target)
             return
         }
 
-        // Closed-notch dynamic resizing is much smoother when SwiftUI does not recalculate
-        // the entire closed-notch hierarchy for every display refresh. Lay the closed content
-        // out once at its destination size and let the AppKit panel act as the animated mask.
-        if !liveViewportResize, state.viewport.size != target.size {
-            state.viewport.size = target.size
-        }
-
-        // When only one closed-notch wing changes, preserve the opposite panel edge exactly.
-        // This stops the physical notch from appearing to drift while music, power events,
-        // live activities, or lyrics change the width of one side.
         let horizontalAnchor: HorizontalResizeAnchor = {
+            switch fixedHorizontalEdge {
+            case .minXEdge?: return .left
+            case .maxXEdge?: return .right
+            default: break
+            }
             guard !liveViewportResize, abs(target.width - initial.width) > 0.5 else { return .center }
             let leftMovement = abs(target.minX - initial.minX)
             let rightMovement = abs(target.maxX - initial.maxX)
@@ -123,16 +146,22 @@ final class SurfaceAnimator {
             }
             if transition == .slide { frame.origin.y += (style == .bottom ? -1 : 1) * 18 * sin(.pi * t) }
             panel.alphaValue = transition == .fade ? initialAlpha + (1 - initialAlpha) * t - 0.3 * sin(.pi * t) : 1
+
             if t >= 1 {
                 frame = target
                 panel.alphaValue = 1
-                if state.viewport.size != target.size { state.viewport.size = target.size }
-                self.cancel()
+            }
+
+            if synchronizeClosedGeometry {
+                self.syncClosedGeometry(state: state, frame: frame, cameraFrame: closedCameraFrame)
             } else if liveViewportResize, state.viewport.size != frame.size {
                 state.viewport.size = frame.size
             }
+
             panel.setFrame(frame, display: false)
             self.publishGeometry(panel: panel, frame: frame)
+
+            if t >= 1 { self.clock.stop() }
         }
     }
 }
@@ -251,6 +280,14 @@ final class WindowManager {
         store.workspace.activities.first { activity in
             (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(12) > Date()
         }
+    }
+
+    private func physicalCameraFrame(for geometry: SurfaceGeometry) -> CGRect? {
+        guard geometry.safeAreaTop > 0, geometry.physicalNotchWidth > 0 else { return nil }
+        return CGRect(x: geometry.screen.midX - geometry.physicalNotchWidth / 2,
+                      y: geometry.screen.maxY - geometry.safeAreaTop,
+                      width: geometry.physicalNotchWidth,
+                      height: geometry.safeAreaTop)
     }
 
     private func resolvedClosedItems(_ options: ClosedNotchOptions) -> (left: ClosedNotchItem, right: ClosedNotchItem) {
@@ -532,13 +569,33 @@ final class WindowManager {
         }
         for host in hosts.values {
             let oldWidth = host.geometry?.compactWidth
-            let oldOffset = host.geometry?.activeCompactCenterOffset
+            let oldOffset = host.geometry?.activeCompactCenterOffset ?? 0
             configureDynamicWidth(host)
-            guard let geometry = host.geometry,
-                  oldWidth != geometry.compactWidth || oldOffset != geometry.activeCompactCenterOffset else { continue }
-            host.state.compactWidth = geometry.compactWidth
-            host.state.closedOcclusion = geometry.closedCameraOcclusion
-            guard !host.state.expanded else { continue }
+            guard let geometry = host.geometry else { continue }
+            let newWidth = geometry.compactWidth
+            let newOffset = geometry.activeCompactCenterOffset ?? 0
+            guard oldWidth != newWidth || oldOffset != newOffset else { continue }
+
+            let oldLogicalWidth = oldWidth ?? newWidth
+            let oldLeft = oldOffset - oldLogicalWidth / 2
+            let oldRight = oldOffset + oldLogicalWidth / 2
+            let newLeft = newOffset - newWidth / 2
+            let newRight = newOffset + newWidth / 2
+            let leftDelta = abs(newLeft - oldLeft)
+            let rightDelta = abs(newRight - oldRight)
+            let fixedEdge: CGRectEdge? = {
+                let tolerance = 0.75
+                if leftDelta <= tolerance && rightDelta > tolerance { return .minXEdge }
+                if rightDelta <= tolerance && leftDelta > tolerance { return .maxXEdge }
+                return nil
+            }()
+
+            guard !host.state.expanded else {
+                host.state.compactWidth = newWidth
+                host.state.closedOcclusion = geometry.closedCameraOcclusion
+                continue
+            }
+
             var target = geometry.frame(expanded: false)
             if geometry.style == .detached {
                 target.origin.x = host.panel.frame.midX - target.width / 2
@@ -548,13 +605,14 @@ final class WindowManager {
             var motion = geometry.appearance.surface
             motion.opening = .resize
             motion.closing = .resize
-            // Closed-notch resizing respects the user's Appearance animation duration/timing.
-            // This path runs only while Halo is already closed.
             motion.duration = min(1.2, max(0.10, motion.duration))
             host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
                                preset: geometry.appearance.animation,
                                animations: host.state.theme.animations && !host.state.editingGeometry,
-                               opening: true, style: geometry.style, liveViewportResize: false)
+                               opening: true, style: geometry.style, liveViewportResize: true,
+                               fixedHorizontalEdge: fixedEdge,
+                               synchronizeClosedGeometry: true,
+                               closedCameraFrame: physicalCameraFrame(for: geometry))
         }
     }
 
