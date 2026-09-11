@@ -72,7 +72,7 @@ final class SurfaceAnimator {
 
     func move(panel: HaloPanel, state: SurfaceState, target: CGRect, options: SurfaceOptions,
               preset: AnimationPreset, animations: Bool, opening: Bool, style: SurfaceStyle,
-              liveViewportResize: Bool = true) {
+              liveViewportResize: Bool = true, fixedHorizontalEdge: CGRectEdge? = nil) {
         cancel()
         let transition = opening ? options.opening : options.closing
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -95,10 +95,17 @@ final class SurfaceAnimator {
         }
         animatedView = view
 
-        // Determine the physical edge that must remain fixed before changing the SwiftUI
-        // presentation width. One closed-notch wing can then grow without dragging the camera
-        // cutout or the untouched wing sideways.
+        // Closed-notch resizing has an explicit fixed edge. Do not infer this from the current
+        // NSPanel frame: that frame may already be mid-animation or slightly stale when media,
+        // power or activity state changes. The geometry layer knows which wing changed.
         let horizontalAnchor: HorizontalResizeAnchor = {
+            if !liveViewportResize {
+                switch fixedHorizontalEdge {
+                case .minXEdge?: return .left
+                case .maxXEdge?: return .right
+                default: break
+                }
+            }
             guard !liveViewportResize, abs(target.width - initial.width) > 0.5 else { return .center }
             let leftMovement = abs(target.minX - initial.minX)
             let rightMovement = abs(target.maxX - initial.maxX)
@@ -353,7 +360,7 @@ final class WindowManager {
         }
         let iconWidth = max(12, size * 1.05)
         let labelGap = 4.0
-        let horizontalPadding = 4.0 // PowerEventBadge currently uses 2 pt on each side.
+        let horizontalPadding = 4.0
         let naturalWidth: Double
         switch style {
         case .off: naturalWidth = 0
@@ -363,8 +370,6 @@ final class WindowManager {
         case .label: naturalWidth = iconWidth + labelGap + textWidth(eventLabel) + horizontalPadding
         }
         let badgeWidth = max(18, naturalWidth)
-        // "Power event width" is the minimum total wing width while the event is visible,
-        // not extra blank space added on top of the badge and existing content.
         let minimumSideWidth = settings.expandForEvent ? max(badgeWidth, settings.eventWidth) : badgeWidth
 
         let side: DynamicSide
@@ -434,8 +439,6 @@ final class WindowManager {
             let rightExtent = min(extents.right, rightLimit)
             let required = camera + leftExtent + rightExtent
             host.geometry?.activeCompactWidth = min(geometry.visible.width, max(baseWidth, required))
-            // The camera/notch remains the anchor. Unequal wings shift only the panel bounds,
-            // so a right-side music expansion does not resize the left wing (and vice versa).
             host.geometry?.activeCompactCenterOffset = (rightExtent - leftExtent) / 2
         } else {
             var requested = baseWidth
@@ -457,7 +460,6 @@ final class WindowManager {
         let size = min(options.fontSize, max(1, geometry.compactHeight - 2 * options.contentPaddingY) / 1.25)
         let font = NSFont.systemFont(ofSize: size)
         let slotMargins = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
-        // Keep the geometry estimator in lockstep with ClosedNotchSlot's HStack spacing.
         let elementGap = 6.0
 
         var artwork = options.artworkOptions ?? ClosedArtworkOptions()
@@ -537,7 +539,6 @@ final class WindowManager {
                         let icon = max(12, size)
                         let text = max(title, detail)
                         let progress = $0.progress == nil ? 0 : elementGap + 38
-                        // Matches the view: icon + 6 pt gap + text + optional progress.
                         return icon + elementGap + text + progress + 2
                     } ?? 0
                 }
@@ -585,11 +586,33 @@ final class WindowManager {
         }
         for host in hosts.values {
             let oldWidth = host.geometry?.compactWidth
-            let oldOffset = host.geometry?.activeCompactCenterOffset
+            let oldOffset = host.geometry?.activeCompactCenterOffset ?? 0
             configureDynamicWidth(host)
-            guard let geometry = host.geometry,
-                  oldWidth != geometry.compactWidth || oldOffset != geometry.activeCompactCenterOffset else { continue }
-            host.state.compactWidth = geometry.compactWidth
+            guard let geometry = host.geometry else { continue }
+            let newWidth = geometry.compactWidth
+            let newOffset = geometry.activeCompactCenterOffset ?? 0
+            guard oldWidth != newWidth || oldOffset != newOffset else { continue }
+
+            // Work out which logical panel edge did not move. This is independent of the
+            // NSPanel's current animation frame, so right-wing media growth always keeps minX
+            // fixed and left-wing growth always keeps maxX fixed.
+            let oldLogicalWidth = oldWidth ?? newWidth
+            let oldLeft = oldOffset - oldLogicalWidth / 2
+            let oldRight = oldOffset + oldLogicalWidth / 2
+            let newLeft = newOffset - newWidth / 2
+            let newRight = newOffset + newWidth / 2
+            let leftDelta = abs(newLeft - oldLeft)
+            let rightDelta = abs(newRight - oldRight)
+            let fixedEdge: CGRectEdge? = {
+                let tolerance = 0.75
+                if leftDelta <= tolerance && rightDelta > tolerance { return .minXEdge }
+                if rightDelta <= tolerance && leftDelta > tolerance { return .maxXEdge }
+                if leftDelta + tolerance < rightDelta { return .minXEdge }
+                if rightDelta + tolerance < leftDelta { return .maxXEdge }
+                return nil
+            }()
+
+            host.state.compactWidth = newWidth
             host.state.closedOcclusion = geometry.closedCameraOcclusion
             guard !host.state.expanded else { continue }
             var target = geometry.frame(expanded: false)
@@ -601,13 +624,12 @@ final class WindowManager {
             var motion = geometry.appearance.surface
             motion.opening = .resize
             motion.closing = .resize
-            // Closed-notch resizing respects the user's Appearance animation duration/timing.
-            // This path runs only while Halo is already closed.
             motion.duration = min(1.2, max(0.10, motion.duration))
             host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
                                preset: geometry.appearance.animation,
                                animations: host.state.theme.animations && !host.state.editingGeometry,
-                               opening: true, style: geometry.style, liveViewportResize: false)
+                               opening: true, style: geometry.style, liveViewportResize: false,
+                               fixedHorizontalEdge: fixedEdge)
         }
     }
 
