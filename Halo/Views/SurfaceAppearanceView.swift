@@ -74,7 +74,29 @@ struct HaloContour: Shape {
     var screen: NSScreen?
     @AppStorage("HaloContextOffsetX") private var contextOffsetX = 0.0
     @AppStorage("HaloContextOffsetY") private var contextOffsetY = 0.0
+
+    private let solidPresets: [WidgetColor] = [
+        WidgetColor(red: 0.02, green: 0.02, blue: 0.025),
+        WidgetColor(red: 0.06, green: 0.08, blue: 0.12),
+        WidgetColor(red: 0.08, green: 0.06, blue: 0.14),
+        WidgetColor(red: 0.12, green: 0.055, blue: 0.055),
+        WidgetColor(red: 0.045, green: 0.11, blue: 0.095),
+        WidgetColor(red: 0.16, green: 0.16, blue: 0.17)
+    ]
+
+    private let gradientPresets: [(WidgetColor, WidgetColor)] = [
+        (WidgetColor(red: 0.06, green: 0.16, blue: 0.34), WidgetColor(red: 0.01, green: 0.015, blue: 0.03)),
+        (WidgetColor(red: 0.22, green: 0.08, blue: 0.42), WidgetColor(red: 0.02, green: 0.015, blue: 0.08)),
+        (WidgetColor(red: 0.04, green: 0.38, blue: 0.34), WidgetColor(red: 0.02, green: 0.05, blue: 0.12)),
+        (WidgetColor(red: 0.55, green: 0.15, blue: 0.12), WidgetColor(red: 0.16, green: 0.025, blue: 0.10)),
+        (WidgetColor(red: 0.16, green: 0.22, blue: 0.42), WidgetColor(red: 0.23, green: 0.08, blue: 0.28)),
+        (WidgetColor(red: 0.22, green: 0.22, blue: 0.24), WidgetColor(red: 0.015, green: 0.015, blue: 0.02))
+    ]
+
     var body: some View {
+        backgroundStyleControls
+        backgroundColorControls
+
         Section("Closed size") {
             PreciseSlider(title: "Width", value: $appearance.compactWidth, range: 16...640, step: 1, suffix: "pt", onEditingChanged: {
                 GeometryPreview.update(expanded: false, editing: $0, display: screen)
@@ -131,6 +153,144 @@ struct HaloContour: Shape {
             Text("Reduce Motion and the animation-off setting make transitions immediate.").font(.caption).foregroundStyle(.secondary)
         }
     }
+
+    private var backgroundStyleControls: some View {
+        Section("Background style") {
+            HStack(spacing: 10) {
+                backgroundStyleButton(.solid, title: "Solid", symbol: "circle.fill")
+                backgroundStyleButton(.gradient, title: "Gradient", symbol: "circle.lefthalf.filled")
+                backgroundStyleButton(.glass, title: "Glass", symbol: "square.on.square")
+            }
+            Text("Pick a look visually here. Image and video backgrounds are still chosen from the Background file controls below.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var backgroundColorControls: some View {
+        if appearance.background == .solid {
+            Section("Background color") {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(solidColor)
+                    .frame(height: 72)
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.white.opacity(0.12)))
+
+                HStack(spacing: 9) {
+                    ForEach(Array(solidPresets.enumerated()), id: \.offset) { _, preset in
+                        Button { appearance.solidColor = preset } label: {
+                            Circle().fill(preset.color).frame(width: 30, height: 30)
+                                .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Apply color preset")
+                    }
+                }
+
+                ColorPicker("Custom background color", selection: solidColorBinding, supportsOpacity: false)
+                Button("Reset to Halo black") { appearance.solidColor = nil }
+            }
+        } else if appearance.background == .gradient {
+            Section("Gradient") {
+                LinearGradient(colors: [gradientStartColor, gradientEndColor], startPoint: .bottomLeading, endPoint: .topTrailing)
+                    .frame(height: 88)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.12)))
+
+                Text("Presets").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                HStack(spacing: 9) {
+                    ForEach(Array(gradientPresets.enumerated()), id: \.offset) { _, preset in
+                        Button {
+                            appearance.gradientStartColor = preset.0
+                            appearance.gradientEndColor = preset.1
+                        } label: {
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(LinearGradient(colors: [preset.0.color, preset.1.color], startPoint: .bottomLeading, endPoint: .topTrailing))
+                                .frame(width: 48, height: 30)
+                                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color.white.opacity(0.15)))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Apply gradient preset")
+                    }
+                }
+
+                HStack(spacing: 16) {
+                    ColorPicker("Start", selection: gradientStartBinding, supportsOpacity: false)
+                    ColorPicker("End", selection: gradientEndBinding, supportsOpacity: false)
+                    Button {
+                        let start = appearance.gradientStartColor ?? widgetColor(from: gradientStartColor)
+                        let end = appearance.gradientEndColor ?? widgetColor(from: gradientEndColor)
+                        appearance.gradientStartColor = end
+                        appearance.gradientEndColor = start
+                    } label: {
+                        Label("Swap", systemImage: "arrow.left.arrow.right")
+                    }
+                }
+
+                Button("Reset to Halo gradient") {
+                    appearance.gradientStartColor = nil
+                    appearance.gradientEndColor = nil
+                }
+            }
+        }
+    }
+
+    private func backgroundStyleButton(_ kind: BackgroundKind, title: String, symbol: String) -> some View {
+        let selected = appearance.background == kind
+        return Button {
+            appearance.background = kind
+        } label: {
+            VStack(spacing: 7) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(backgroundPreview(for: kind))
+                    Image(systemName: symbol)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+                .frame(height: 48)
+                Text(title).font(.caption.weight(selected ? .semibold : .regular))
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity)
+            .background(selected ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(selected ? Color.accentColor.opacity(0.8) : Color.primary.opacity(0.08), lineWidth: selected ? 1.5 : 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func backgroundPreview(for kind: BackgroundKind) -> AnyShapeStyle {
+        switch kind {
+        case .solid:
+            return AnyShapeStyle(solidColor)
+        case .gradient:
+            return AnyShapeStyle(LinearGradient(colors: [gradientStartColor, gradientEndColor], startPoint: .bottomLeading, endPoint: .topTrailing))
+        case .glass:
+            return AnyShapeStyle(LinearGradient(colors: [Color.white.opacity(0.24), Color.white.opacity(0.05)], startPoint: .topLeading, endPoint: .bottomTrailing))
+        default:
+            return AnyShapeStyle(Color.black.opacity(0.65))
+        }
+    }
+
+    private var solidColor: Color { appearance.solidColor?.color ?? .black }
+    private var gradientStartColor: Color {
+        appearance.gradientStartColor?.color ?? Color(hue: theme.tint, saturation: 0.7, brightness: 0.35)
+    }
+    private var gradientEndColor: Color { appearance.gradientEndColor?.color ?? .black }
+
+    private var solidColorBinding: Binding<Color> {
+        Binding(get: { solidColor }, set: { appearance.solidColor = widgetColor(from: $0) })
+    }
+    private var gradientStartBinding: Binding<Color> {
+        Binding(get: { gradientStartColor }, set: { appearance.gradientStartColor = widgetColor(from: $0) })
+    }
+    private var gradientEndBinding: Binding<Color> {
+        Binding(get: { gradientEndColor }, set: { appearance.gradientEndColor = widgetColor(from: $0) })
+    }
+
+    private func widgetColor(from color: Color) -> WidgetColor {
+        guard let rgb = NSColor(color).usingColorSpace(.deviceRGB) else { return .accent }
+        return WidgetColor(red: Double(rgb.redComponent), green: Double(rgb.greenComponent), blue: Double(rgb.blueComponent))
+    }
+
     private func offsetControl(_ title: String, key: WritableKeyPath<SurfaceOffsets, Double>, expanded: Bool) -> some View {
         let value = Binding<Double>(get: { (appearance.surface.offsets ?? SurfaceOffsets())[keyPath: key] }, set: {
             var offsets = appearance.surface.offsets ?? SurfaceOffsets(); offsets[keyPath: key] = $0; appearance.surface.offsets = offsets
