@@ -633,7 +633,7 @@ private struct EIScenePalette {
 @MainActor
 final class EnvironmentalInterfaceManager {
     static let shared = EnvironmentalInterfaceManager()
-    private final class Host {
+    @MainActor private final class Host {
         let overlay: NSPanel; let haloWindow: NSWindow
         var screenID = ""; var haloFrame = CGRect.zero; var lastResolvedFrame = CGRect.zero
         init(_ haloWindow: NSWindow) {
@@ -659,7 +659,7 @@ final class EnvironmentalInterfaceManager {
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.refreshAll(true) }.store(in: &subscriptions)
         EISettingsStore.shared.$settings.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] _ in self?.refreshAll(true) }.store(in: &subscriptions)
         HaloHUDNotchBridge.shared.$presentation.map { $0 != nil }.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] active in self?.suppressedByHUD = active; self?.refreshAll(true) }.store(in: &subscriptions)
-        NotificationCenter.default.publisher(for: NSWindow.didCloseNotification).receive(on: RunLoop.main).sink { [weak self] note in if let w = note.object as? NSWindow { self?.remove(w) } }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: NSWindow.willCloseNotification).receive(on: RunLoop.main).sink { [weak self] note in if let w = note.object as? NSWindow { self?.remove(w) } }.store(in: &subscriptions)
     }
     func stop() { hosts.values.forEach { $0.overlay.close() }; hosts.removeAll(); subscriptions.removeAll(); EnvironmentalInterfaceEngine.shared.stop(); workspace = nil; started = false }
     private func handleGeometry(_ note: Notification) {
