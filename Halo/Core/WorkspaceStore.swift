@@ -68,12 +68,14 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         else { stopwatchStart = Date() }
     }
     private let hotkey = HotkeyService()
+    private let retroGameHotkey = HotkeyService(identifierID: 2, notificationName: .init("HaloRetroGameToggle"))
     private let defaults: UserDefaults
     private var ticker: AnyCancellable?
     private var subscriptions = Set<AnyCancellable>()
     private var matchedRules = Set<UUID>()
     private var tick = 0
     private var installedHotkey = ""
+    private var installedRetroGameHotkey = ""
     private var pendingSave: DispatchWorkItem?
     private var hudEngine: HaloHUDEngine?
     private var systemAudioFallback: SystemAudioMediaFallback?
@@ -149,7 +151,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         disableLegacyHUDRenderer()
         updateArtworkPreference()
         if hudEngine == nil { hudEngine = HaloHUDEngine(workspace: self); hudEngine?.start() }
-        evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey()
+        evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey(); updateRetroGameHotkey()
         pollMedia()
 
         bluetooth.$lastEvent
@@ -173,7 +175,10 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification, object: defaults)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.disableLegacyHUDRenderer() }
+            .sink { [weak self] _ in
+                self?.disableLegacyHUDRenderer()
+                self?.updateRetroGameHotkey()
+            }
             .store(in: &subscriptions)
         for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didWakeNotification] {
             NSWorkspace.shared.notificationCenter.publisher(for: name).receive(on: RunLoop.main).sink { [weak self] _ in
@@ -189,7 +194,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.evaluateRules(); self?.hudEngine?.configurationDidChange() }.store(in: &subscriptions)
     }
-    func stop() { pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); bluetooth.stop(); systemAudioFallback?.stop(); systemAudioFallback = nil; hudEngine?.stop(); hudEngine = nil; hotkey.stop(); clipboard.reset(); media.disconnect() }
+    func stop() { pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); bluetooth.stop(); systemAudioFallback?.stop(); systemAudioFallback = nil; hudEngine?.stop(); hudEngine = nil; hotkey.stop(); retroGameHotkey.stop(); clipboard.reset(); media.disconnect() }
     private func schedulePersistence() {
         pendingSave?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.persist() }
@@ -206,6 +211,22 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         hotkey.stop()
         if settings.hotkeyEnabled, !hotkey.register(code: settings.hotkeyCode, modifiers: settings.hotkeyModifiers) {
             DispatchQueue.main.async { [weak self] in self?.error = "The global shortcut is unavailable or already used. Choose another shortcut." }
+        }
+    }
+    private func updateRetroGameHotkey() {
+        let ciEnabled = defaults.object(forKey: "HaloContextRetroEnabled") as? Bool ?? false
+        let shortcutEnabled = defaults.object(forKey: "HaloContextRetroShortcutEnabled") as? Bool ?? true
+        let code = defaults.object(forKey: "HaloContextRetroShortcutCode") == nil ? 5 : defaults.integer(forKey: "HaloContextRetroShortcutCode")
+        let modifiers = defaults.object(forKey: "HaloContextRetroShortcutModifiers") == nil ? 2304 : defaults.integer(forKey: "HaloContextRetroShortcutModifiers")
+        let key = "\(ciEnabled)-\(shortcutEnabled)-\(code)-\(modifiers)"
+        guard key != installedRetroGameHotkey else { return }
+        installedRetroGameHotkey = key
+        retroGameHotkey.stop()
+        guard ciEnabled, shortcutEnabled else { return }
+        if !retroGameHotkey.register(code: UInt32(max(0, code)), modifiers: UInt32(max(0, modifiers))) {
+            DispatchQueue.main.async { [weak self] in
+                self?.error = "The Retro Game CI shortcut is unavailable or already used. Choose another shortcut."
+            }
         }
     }
     private func scheduleWinner(at date: Date) -> (UUID, String)? {
