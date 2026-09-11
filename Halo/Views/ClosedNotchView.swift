@@ -164,7 +164,7 @@ struct ClosedNotchSlot: View {
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject var media: MediaService
     @ObservedObject var system: SystemService
-    private let elementSpacing = 8.0
+    private let elementSpacing = 6.0
     private var activeActivity: LiveActivity? {
         workspace.activities.first { activity in
             (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(12) > Date()
@@ -243,15 +243,21 @@ struct ClosedNotchSlot: View {
         guard showArtwork else { return 0 }
         return renderedArtworkSize + 2 * artwork.padding + artwork.margin
     }
-    private var powerFootprint: Double {
-        guard showPowerEvent, let event = powerEvent else { return 0 }
+    private var naturalPowerWidth: Double {
+        guard let event = powerEvent else { return 0 }
         switch event.style {
         case .off: return 0
-        case .icon: return textSize + 6
-        case .percent: return textSize * 3.3
-        case .iconPercent: return textSize * 4.4
-        case .label: return textSize * 7.0
+        case .icon: return textSize + 4
+        case .percent: return textSize * 2.7
+        case .iconPercent: return textSize * 3.9
+        case .label: return textSize * 6.2
         }
+    }
+    private var powerFootprint: Double {
+        guard showPowerEvent else { return 0 }
+        let settings = options.powerReaction ?? PowerReactionOptions()
+        let comfortable = min(settings.eventWidth, naturalPowerWidth + 12)
+        return min(max(18, naturalPowerWidth), max(18, min(innerWidth, comfortable)))
     }
     private var mediaSiblingFootprint: Double {
         var widths: [Double] = []
@@ -269,6 +275,15 @@ struct ClosedNotchSlot: View {
     }
     private var mirrorContentWidth: Double {
         max(1, min(112, innerWidth - mediaSiblingFootprint))
+    }
+    private var activityContentWidth: Double {
+        var occupied = 0.0
+        var siblingCount = 0
+        if decorationSize > 0 { occupied += decorationSize; siblingCount += 1 }
+        if artworkFootprint > 0 { occupied += artworkFootprint; siblingCount += 1 }
+        if powerFootprint > 0 { occupied += powerFootprint; siblingCount += 1 }
+        if siblingCount > 0 { occupied += Double(siblingCount) * elementSpacing }
+        return max(32, innerWidth - occupied)
     }
     private var renderedArtworkOptions: ClosedArtworkOptions {
         var value = artwork
@@ -292,7 +307,7 @@ struct ClosedNotchSlot: View {
         .font(.system(size: textSize))
         .minimumScaleFactor(0.65)
         .foregroundStyle(effectiveTextColor)
-        .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: .center)
+        .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
         .padding(.horizontal, options.contentPaddingX)
         .padding(.vertical, options.contentPaddingY)
         .padding(side == .left ? .trailing : .leading, options.contentSideMargin)
@@ -320,7 +335,13 @@ struct ClosedNotchSlot: View {
         if itemIsVisible && !hideMusicContentForArtworkOnly { content }
     }
     @ViewBuilder private var powerElement: some View {
-        if showPowerEvent, let powerEvent { PowerEventBadge(event: powerEvent, options: options.powerReaction ?? PowerReactionOptions()) }
+        if showPowerEvent, let powerEvent {
+            PowerEventBadge(event: powerEvent, options: options.powerReaction ?? PowerReactionOptions())
+                .frame(width: powerFootprint, height: innerHeight,
+                       alignment: side == .left ? .trailing : .leading)
+                .clipped()
+                .layoutPriority(2)
+        }
     }
     @ViewBuilder private var content: some View {
         switch item {
@@ -348,15 +369,34 @@ struct ClosedNotchSlot: View {
         case .files: Label("\(store.files.count)", systemImage: "tray").lineLimit(1)
         case .activity:
             if let activity = activeActivity {
-                HStack(spacing: elementSpacing) {
+                HStack(spacing: 6) {
                     Image(systemName: "waveform.path")
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(activity.title).lineLimit(1)
-                        if !activity.detail.isEmpty { Text(activity.detail).font(.system(size: max(8, textSize * 0.78))).opacity(0.72).lineLimit(1) }
+                        .frame(width: max(12, textSize), alignment: .center)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(activity.title)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        if !activity.detail.isEmpty {
+                            Text(activity.detail)
+                                .font(.system(size: max(8, textSize * 0.76)))
+                                .opacity(0.72)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
                     }
-                    if let progress = activity.progress { ProgressView(value: progress).frame(width: 36) }
+                    .layoutPriority(1)
+                    if let progress = activity.progress {
+                        ProgressView(value: progress)
+                            .controlSize(.mini)
+                            .frame(width: min(38, max(24, activityContentWidth * 0.22)))
+                    }
                 }
+                .frame(width: activityContentWidth,
+                       alignment: side == .left ? .trailing : .leading)
+                .padding(.horizontal, 1)
+                .clipped()
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                .layoutPriority(1)
             }
         }
     }
@@ -421,7 +461,6 @@ private final class MirrorCameraService: ObservableObject {
         let request = generation
         let session = session
         state = .requesting
-        // Serialize start/stop/configuration off the UI thread, including rapid toggles.
         sessionQueue.async {
             if session.inputs.isEmpty {
                 session.beginConfiguration()
@@ -513,14 +552,17 @@ private struct PowerEventBadge: View {
             case .iconPercent: Label("\(event.battery)%", systemImage: event.symbol).monospacedDigit()
             case .label: Label(event.label, systemImage: event.symbol)
             }
-        }.foregroundStyle(powerColor)
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.72)
+        .padding(.horizontal, 2)
+        .foregroundStyle(powerColor)
     }
     private var powerColor: Color {
         guard options.usesDynamicColor else { return options.color.color }
         let p = min(1, max(0, Double(event.battery) / 100))
         if p <= 0.5 { return interpolate(options.resolvedLowColor, options.resolvedMidColor, p / 0.5).color }
-        return interpolate(options.resolvedMidColor, options.resolvedHighColor, (p - 0.5) / 0.5).color
-    }
+        return interpolate(options.resolvedMidColor, options.resolvedHighColor, (p - 0.5) / 0.5).color }
     private func interpolate(_ a: WidgetColor, _ b: WidgetColor, _ t: Double) -> WidgetColor {
         let u = min(1, max(0, t))
         return WidgetColor(red: a.red + (b.red - a.red) * u, green: a.green + (b.green - a.green) * u, blue: a.blue + (b.blue - a.blue) * u)
@@ -587,20 +629,8 @@ private struct ClosedArtworkView: View {
     private func artworkImage(_ image: NSImage) -> some View { Image(nsImage: image).resizable().scaledToFill().frame(width: options.size, height: options.size).clipped() }
 }
 
-private struct TimedLyricLine: Identifiable {
-    let id: Int
-    let time: Double
-    let text: String
-}
-
-private struct LyricFrame {
-    let current: TimedLyricLine
-    let next: TimedLyricLine?
-    let start: Double
-    let end: Double
-    let wordIndex: Int
-}
-
+private struct TimedLyricLine: Identifiable { let id: Int; let time: Double; let text: String }
+private struct LyricFrame { let current: TimedLyricLine; let next: TimedLyricLine?; let start: Double; let end: Double; let wordIndex: Int }
 private enum LyricTimeline {
     static func parse(_ value: String, duration: Double) -> [TimedLyricLine] {
         var timed: [TimedLyricLine] = []
@@ -618,21 +648,16 @@ private enum LyricTimeline {
             if let close = line.firstIndex(of: "]"), line.first == "[" {
                 let stamp = String(line[line.index(after: line.startIndex)..<close])
                 let text = String(line[line.index(after: close)...]).trimmingCharacters(in: .whitespaces)
-                if let time = timestamp(stamp), !text.isEmpty {
-                    timed.append(TimedLyricLine(id: timed.count, time: max(0, time + sourceOffset), text: text))
-                }
+                if let time = timestamp(stamp), !text.isEmpty { timed.append(TimedLyricLine(id: timed.count, time: max(0, time + sourceOffset), text: text)) }
             }
         }
         guard !timed.isEmpty else { return [] }
-        return timed.sorted { $0.time < $1.time }.enumerated().map {
-            TimedLyricLine(id: $0.offset, time: $0.element.time, text: $0.element.text)
-        }
+        return timed.sorted { $0.time < $1.time }.enumerated().map { TimedLyricLine(id: $0.offset, time: $0.element.time, text: $0.element.text) }
     }
     static func frame(lines: [TimedLyricLine], position: Double, duration: Double) -> LyricFrame? {
         guard !lines.isEmpty else { return nil }
         let index = lines.lastIndex(where: { $0.time <= position + 0.035 }) ?? 0
-        let current = lines[index]
-        let next = index + 1 < lines.count ? lines[index + 1] : nil
+        let current = lines[index]; let next = index + 1 < lines.count ? lines[index + 1] : nil
         let end = max(current.time + 0.35, next?.time ?? (duration > current.time ? duration : current.time + 4))
         let words = current.text.split(whereSeparator: \.isWhitespace)
         let progress = min(0.999, max(0, (position - current.time) / max(0.35, end - current.time)))
@@ -672,49 +697,30 @@ private struct ClosedMediaView: View {
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }
     private var effectiveWidth: Double {
         let available = max(20, availableWidth)
-        if options.overflow == .truncate || options.overflow == .marquee {
-            return min(available, options.resolvedHorizontalSpace)
-        }
+        if options.overflow == .truncate || options.overflow == .marquee { return min(available, options.resolvedHorizontalSpace) }
         return available
     }
     var body: some View {
-        ZStack {
-            mediaText
-                .id(key)
-                .transition(reduceMotion ? .opacity : options.resolvedChangeAnimation.transition)
-        }
-        .frame(width: effectiveWidth)
-        .animation(options.resolvedChangeAnimation == .none ? nil : .easeInOut(duration: options.resolvedChangeAnimationDuration), value: key)
-        .task(id: key + "|\(options.textMode.rawValue)|\(options.usesOnlineLyrics)|\(options.resolvedLyricDisplay.rawValue)") {
-            lyrics = ""; sampledPosition = 0; sampledDuration = 0; sampledAt = Date()
-            guard options.textMode == .lyrics else { return }
-            lyricsLoading = true
-            let initial = await MediaAssetReader.playbackTime(app: media.connectedApp)
-            if let initial {
-                sampledPosition = initial.position
-                sampledDuration = initial.duration
-                sampledAt = initial.observedAt
+        ZStack { mediaText.id(key).transition(reduceMotion ? .opacity : options.resolvedChangeAnimation.transition) }
+            .frame(width: effectiveWidth)
+            .animation(options.resolvedChangeAnimation == .none ? nil : .easeInOut(duration: options.resolvedChangeAnimationDuration), value: key)
+            .task(id: key + "|\(options.textMode.rawValue)|\(options.usesOnlineLyrics)|\(options.resolvedLyricDisplay.rawValue)") {
+                lyrics = ""; sampledPosition = 0; sampledDuration = 0; sampledAt = Date()
+                guard options.textMode == .lyrics else { return }
+                lyricsLoading = true
+                let initial = await MediaAssetReader.playbackTime(app: media.connectedApp)
+                if let initial { sampledPosition = initial.position; sampledDuration = initial.duration; sampledAt = initial.observedAt }
+                lyrics = await MediaAssetReader.lyrics(app: media.connectedApp, key: key, title: media.title, artist: media.artist, duration: initial?.duration, onlineFallback: options.usesOnlineLyrics)
+                lyricsLoading = false
+                await samplePlaybackLoop()
             }
-            lyrics = await MediaAssetReader.lyrics(app: media.connectedApp, key: key, title: media.title,
-                                                   artist: media.artist, duration: initial?.duration,
-                                                   onlineFallback: options.usesOnlineLyrics)
-            lyricsLoading = false
-            await samplePlaybackLoop()
-        }
     }
     private func samplePlaybackLoop() async {
         while !Task.isCancelled && media.isPlaying && options.textMode == .lyrics {
             if let sample = await MediaAssetReader.playbackTime(app: media.connectedApp) {
-                let now = sample.observedAt
-                let predicted = sampledPosition + max(0, now.timeIntervalSince(sampledAt))
-                let drift = sample.position - predicted
-                if sampledDuration == 0 || abs(drift) > 0.10 {
-                    sampledPosition = sample.position
-                } else {
-                    sampledPosition = predicted + drift * 0.88
-                }
-                sampledDuration = sample.duration
-                sampledAt = now
+                let now = sample.observedAt; let predicted = sampledPosition + max(0, now.timeIntervalSince(sampledAt)); let drift = sample.position - predicted
+                sampledPosition = sampledDuration == 0 || abs(drift) > 0.10 ? sample.position : predicted + drift * 0.88
+                sampledDuration = sample.duration; sampledAt = now
             }
             try? await Task.sleep(nanoseconds: lowPower ? 600_000_000 : 250_000_000)
         }
@@ -735,23 +741,16 @@ private struct ClosedMediaView: View {
         }
     }
     @ViewBuilder private func syncedLyricsView(width: Double) -> some View {
-        if lyricsLoading && lyrics.isEmpty {
-            Label("Loading lyrics…", systemImage: "text.quote").lineLimit(1).opacity(0.72)
-        } else if lyrics.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(media.title).lineLimit(1)
-                Text("Synced lyrics unavailable").font(.system(size: max(8, fontSize * 0.82))).opacity(0.65).lineLimit(1)
-            }.frame(maxWidth: width, alignment: .leading)
+        if lyricsLoading && lyrics.isEmpty { Label("Loading lyrics…", systemImage: "text.quote").lineLimit(1).opacity(0.72) }
+        else if lyrics.isEmpty {
+            VStack(alignment: .leading, spacing: 2) { Text(media.title).lineLimit(1); Text("Synced lyrics unavailable").font(.system(size: max(8, fontSize * 0.82))).opacity(0.65).lineLimit(1) }.frame(maxWidth: width, alignment: .leading)
         } else {
             TimelineView(.animation(minimumInterval: lowPower ? 0.24 : 0.06, paused: !media.isPlaying)) { context in
                 let interpolated = sampledPosition + (media.isPlaying ? max(0, context.date.timeIntervalSince(sampledAt)) : 0)
                 let position = max(0, interpolated + options.resolvedLyricSyncOffset)
                 let lines = LyricTimeline.parse(lyrics, duration: sampledDuration)
-                if let frame = LyricTimeline.frame(lines: lines, position: position, duration: sampledDuration) {
-                    lyricPresentation(frame: frame, width: width)
-                } else {
-                    Text("Synced lyrics unavailable").opacity(0.65).lineLimit(1)
-                }
+                if let frame = LyricTimeline.frame(lines: lines, position: position, duration: sampledDuration) { lyricPresentation(frame: frame, width: width) }
+                else { Text("Synced lyrics unavailable").opacity(0.65).lineLimit(1) }
             }
         }
     }
@@ -759,55 +758,33 @@ private struct ClosedMediaView: View {
         switch options.resolvedLyricDisplay {
         case .line:
             if options.lines == 2 {
-                VStack(alignment: .leading, spacing: 2) {
-                    styledText(frame.current.text, width: width)
-                    if let next = frame.next { styledText(next.text, width: width).opacity(0.45) }
-                }
-                .frame(maxWidth: width, alignment: .leading)
-                .background(widthReporter(texts: [frame.current.text, frame.next?.text ?? ""]))
-            } else {
-                inlineText(frame.current.text, width: width)
-                    .background(widthReporter(texts: [frame.current.text]))
-            }
+                VStack(alignment: .leading, spacing: 2) { styledText(frame.current.text, width: width); if let next = frame.next { styledText(next.text, width: width).opacity(0.45) } }
+                    .frame(maxWidth: width, alignment: .leading)
+                    .background(widthReporter(texts: [frame.current.text, frame.next?.text ?? ""]))
+            } else { inlineText(frame.current.text, width: width).background(widthReporter(texts: [frame.current.text])) }
         case .word:
-            let words = frame.current.text.split(whereSeparator: \.isWhitespace).map(String.init)
-            let word = words.indices.contains(frame.wordIndex) ? words[frame.wordIndex] : frame.current.text
-            inlineText(word, width: width)
-                .background(widthReporter(texts: [word]))
+            let words = frame.current.text.split(whereSeparator: \.isWhitespace).map(String.init); let word = words.indices.contains(frame.wordIndex) ? words[frame.wordIndex] : frame.current.text
+            inlineText(word, width: width).background(widthReporter(texts: [word]))
         case .focus:
-            VStack(alignment: .leading, spacing: 2) {
-                focusedLine(frame.current.text, activeWord: frame.wordIndex, width: width)
-                if options.lines == 2, let next = frame.next { styledText(next.text, width: width).opacity(0.35) }
-            }
-            .frame(maxWidth: width, alignment: .leading)
-            .background(widthReporter(texts: options.lines == 2 ? [frame.current.text, frame.next?.text ?? ""] : [frame.current.text]))
+            VStack(alignment: .leading, spacing: 2) { focusedLine(frame.current.text, activeWord: frame.wordIndex, width: width); if options.lines == 2, let next = frame.next { styledText(next.text, width: width).opacity(0.35) } }
+                .frame(maxWidth: width, alignment: .leading)
+                .background(widthReporter(texts: options.lines == 2 ? [frame.current.text, frame.next?.text ?? ""] : [frame.current.text]))
         }
     }
     @ViewBuilder private func widthReporter(texts: [String]) -> some View {
         if options.usesDynamicLyricWidth {
-            let font = NSFont.systemFont(ofSize: fontSize)
-            let natural = texts.filter { !$0.isEmpty }.map { ceil(($0 as NSString).size(withAttributes: [.font: font]).width) }.max() ?? 36
-            let icon = options.showPlaybackIcon ? fontSize + 10 : 0
-            let maxWidth = (options.overflow == .truncate || options.overflow == .marquee) ? options.resolvedHorizontalSpace : 300
+            let font = NSFont.systemFont(ofSize: fontSize); let natural = texts.filter { !$0.isEmpty }.map { ceil(($0 as NSString).size(withAttributes: [.font: font]).width) }.max() ?? 36
+            let icon = options.showPlaybackIcon ? fontSize + 10 : 0; let maxWidth = (options.overflow == .truncate || options.overflow == .marquee) ? options.resolvedHorizontalSpace : 300
             LyricWidthReporter(width: min(maxWidth, max(28, natural + icon + 8)))
         }
     }
     private func focusedLine(_ text: String, activeWord: Int, width: Double) -> some View {
-        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
-        var result = Text("")
-        for (index, word) in words.enumerated() {
-            let piece = Text((index == 0 ? "" : " ") + word)
-                .fontWeight(index == activeWord ? .bold : .regular)
-                .foregroundColor(index == activeWord ? .primary : .secondary)
-            result = result + piece
-        }
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init); var result = Text("")
+        for (index, word) in words.enumerated() { let piece = Text((index == 0 ? "" : " ") + word).fontWeight(index == activeWord ? .bold : .regular).foregroundColor(index == activeWord ? .primary : .secondary); result = result + piece }
         return result.lineLimit(1).minimumScaleFactor(0.5).frame(maxWidth: width, alignment: .leading)
     }
     @ViewBuilder private func inlineText(_ text: String, width: Double) -> some View {
-        HStack(spacing: 6) {
-            if options.showPlaybackIcon { Image(systemName: options.textMode == .lyrics ? "text.quote" : "music.note") }
-            styledText(text, width: width)
-        }.frame(maxWidth: width)
+        HStack(spacing: 6) { if options.showPlaybackIcon { Image(systemName: options.textMode == .lyrics ? "text.quote" : "music.note") }; styledText(text, width: width) }.frame(maxWidth: width)
     }
     @ViewBuilder private func styledText(_ text: String, width: Double) -> some View {
         switch options.overflow {
@@ -881,23 +858,17 @@ enum MediaAssetReader {
                     end tell
                 end timeout
                 """
-                var failure: NSDictionary?; let result = NSAppleScript(source: source)?.executeAndReturnError(&failure)
-                let requestFinished = Date()
-                guard failure == nil,
-                      let position = result?.atIndex(1)?.doubleValue,
-                      let duration = result?.atIndex(2)?.doubleValue,
-                      position >= 0, duration > 0 else { continuation.resume(returning: nil); return }
+                var failure: NSDictionary?; let result = NSAppleScript(source: source)?.executeAndReturnError(&failure); let requestFinished = Date()
+                guard failure == nil, let position = result?.atIndex(1)?.doubleValue, let duration = result?.atIndex(2)?.doubleValue, position >= 0, duration > 0 else { continuation.resume(returning: nil); return }
                 let observedAt = requestStarted.addingTimeInterval(requestFinished.timeIntervalSince(requestStarted) * 0.5)
                 continuation.resume(returning: PlaybackSample(position: position, duration: duration, observedAt: observedAt))
             }
         }
     }
     static func lyrics(app: String?, key: String, title: String, artist: String, duration: Double?, onlineFallback: Bool) async -> String {
-        let durationKey = duration.map { String(Int($0.rounded())) } ?? "unknown"
-        let cacheKey = key + "|duration:" + durationKey
+        let durationKey = duration.map { String(Int($0.rounded())) } ?? "unknown"; let cacheKey = key + "|duration:" + durationKey
         lock.lock(); let cached = lyricsCache[cacheKey]; lock.unlock(); if let cached { return cached }
-        var value = ""
-        if onlineFallback { value = await onlineLyrics(title: title, artist: artist, duration: duration) }
+        var value = ""; if onlineFallback { value = await onlineLyrics(title: title, artist: artist, duration: duration) }
         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, app == "com.apple.Music" { value = await embeddedAppleMusicLyrics() }
         let bounded = String(value.prefix(20_000)); lock.lock(); lyricsCache[cacheKey] = bounded; lock.unlock(); return bounded
     }
@@ -921,11 +892,8 @@ enum MediaAssetReader {
     private struct LRCLyrics: Decodable { let duration: Double?; let plainLyrics: String?; let syncedLyrics: String? }
     private static func onlineLyrics(title: String, artist: String, duration: Double?) async -> String {
         guard !title.isEmpty, !artist.isEmpty else { return "" }
-        var components = URLComponents(string: "https://lrclib.net/api/get")!
-        components.queryItems = [URLQueryItem(name: "track_name", value: title), URLQueryItem(name: "artist_name", value: artist)]
-        if let duration, duration >= 1, duration <= 3600 {
-            components.queryItems?.append(URLQueryItem(name: "duration", value: String(Int(duration.rounded()))))
-        }
+        var components = URLComponents(string: "https://lrclib.net/api/get")!; components.queryItems = [URLQueryItem(name: "track_name", value: title), URLQueryItem(name: "artist_name", value: artist)]
+        if let duration, duration >= 1, duration <= 3600 { components.queryItems?.append(URLQueryItem(name: "duration", value: String(Int(duration.rounded())))) }
         guard let url = components.url else { return "" }
         var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8); request.setValue("Halo/1.0 (https://github.com/Redstoneinvente/Halo)", forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await URLSession.shared.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 1_000_000, let result = try? JSONDecoder().decode(LRCLyrics.self, from: data) else { return "" }
@@ -942,18 +910,10 @@ struct AlbumNotchBackground: View {
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }; private var wantsArtworkBackground: Bool { artworkOptions.enabled && artworkOptions.mode == .background }
     private var active: Bool { media.isPlaying && (reactive.enabled || (options.albumBackgroundColor == true && !colors.isEmpty) || (wantsArtworkBackground && artwork != nil)) }
     var body: some View {
-        Group {
-            if active {
-                if reactive.enabled && !reduceMotion && !system.lowPower {
-                    RefreshTimeline(active: true) { timestamp in reactiveBackground(signal: signal(at: timestamp)) }
-                } else { baseBackground }
-            }
-        }
-        .task(id: key + "|\(wantsArtworkBackground)") { guard media.isPlaying && wantsArtworkBackground else { artwork = nil; return }; artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key) }
-        .task(id: "spectrum|\(media.isPlaying)|\(reactive.enabled)|\(reactive.driver.rawValue)") {
-            AudioSpectrumService.shared.setActive(media.isPlaying && reactive.enabled && reactive.driver != .pulse)
-        }
-        .onDisappear { AudioSpectrumService.shared.setActive(false) }
+        Group { if active { if reactive.enabled && !reduceMotion && !system.lowPower { RefreshTimeline(active: true) { timestamp in reactiveBackground(signal: signal(at: timestamp)) } } else { baseBackground } } }
+            .task(id: key + "|\(wantsArtworkBackground)") { guard media.isPlaying && wantsArtworkBackground else { artwork = nil; return }; artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key) }
+            .task(id: "spectrum|\(media.isPlaying)|\(reactive.enabled)|\(reactive.driver.rawValue)") { AudioSpectrumService.shared.setActive(media.isPlaying && reactive.enabled && reactive.driver != .pulse) }
+            .onDisappear { AudioSpectrumService.shared.setActive(false) }
     }
     private var gradientColors: [Color] { if colors.isEmpty { return [.clear, .clear] }; return colors.count == 1 ? [colors[0], colors[0].opacity(0.72)] : Array(colors.prefix(2)) }
     @ViewBuilder private var baseBackground: some View {
@@ -963,16 +923,9 @@ struct AlbumNotchBackground: View {
     }
     private func signal(at timestamp: Double) -> Double {
         if reactive.driver == .pulse { return (sin(timestamp * reactive.speed * 5.2) + 1) / 2 }
-        let spectrum = AudioSpectrumService.shared.snapshot()
-        guard spectrum.available else { return (sin(timestamp * reactive.speed * 4.1) + 1) * 0.08 + 0.08 }
+        let spectrum = AudioSpectrumService.shared.snapshot(); guard spectrum.available else { return (sin(timestamp * reactive.speed * 4.1) + 1) * 0.08 + 0.08 }
         let raw: Double
-        switch reactive.driver {
-        case .pulse: raw = spectrum.overall
-        case .bass: raw = spectrum.bass
-        case .mids: raw = spectrum.mids
-        case .treble: raw = spectrum.treble
-        case .spectrum: raw = max(spectrum.bass, max(spectrum.mids, spectrum.treble)) * 0.65 + spectrum.overall * 0.35
-        }
+        switch reactive.driver { case .pulse: raw = spectrum.overall; case .bass: raw = spectrum.bass; case .mids: raw = spectrum.mids; case .treble: raw = spectrum.treble; case .spectrum: raw = max(spectrum.bass, max(spectrum.mids, spectrum.treble)) * 0.65 + spectrum.overall * 0.35 }
         return min(1, max(0, raw * reactive.resolvedAudioSensitivity))
     }
     private func reactiveBackground(signal: Double) -> some View {
