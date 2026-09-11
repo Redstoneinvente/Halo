@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import AppKit
 import IOBluetooth
+import Combine
 
 struct DailyWindow: Codable, Equatable {
     var startMinute = 9 * 60
@@ -270,9 +271,6 @@ final class BluetoothStateService: ObservableObject {
         let nextPoweredOn = IOBluetoothHostController.default()?.powerState == kBluetoothHCIPowerStateON
         let raw = (IOBluetoothDevice.pairedDevices() ?? []).compactMap { $0 as? IOBluetoothDevice }
 
-        // IOBluetooth can occasionally return duplicate paired-device objects for the same
-        // physical address. Build the snapshot set through a merge dictionary so duplicate
-        // addresses never reach SwiftUI IDs or Dictionary(uniqueKeysWithValues:).
         var mergedByID: [String: BluetoothDeviceSnapshot] = [:]
         for (index, device) in raw.enumerated() {
             let rawAddress = (device.addressString ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -310,8 +308,6 @@ final class BluetoothStateService: ObservableObject {
             return
         }
 
-        // Keep these dictionaries tolerant too. The service now publishes unique IDs, but this
-        // also protects state restored from an older in-memory snapshot if a duplicate slipped in.
         let previousByID = Dictionary(devices.map { ($0.id, $0) }, uniquingKeysWith: mergeSnapshots)
         let nextByID = Dictionary(nextDevices.map { ($0.id, $0) }, uniquingKeysWith: mergeSnapshots)
 
@@ -580,7 +576,7 @@ struct RetroGameContextInterfaceCard: View {
                         HStack(spacing: 4) {
                             ForEach(0..<12, id: \.self) { index in
                                 Rectangle()
-                                    .fill([1,2,3,7,8,9].contains(index) ? Color.green : Color.green.opacity(0.16))
+                                    .fill([1, 2, 3, 7, 8, 9].contains(index) ? Color.green : Color.green.opacity(0.16))
                                     .frame(width: 8, height: 8)
                             }
                         }
@@ -744,8 +740,8 @@ struct RetroGameContextView: View {
 
     @State private var pongBall = CGPoint(x: 0.5, y: 0.5)
     @State private var pongVelocity = CGVector(dx: 0.012, dy: 0.010)
-    @State private var pongPlayerY = 0.5
-    @State private var pongCPUY = 0.5
+    @State private var pongPlayerY: CGFloat = 0.5
+    @State private var pongCPUY: CGFloat = 0.5
     @State private var pongPlayerScore = 0
     @State private var pongCPUScore = 0
 
@@ -756,7 +752,7 @@ struct RetroGameContextView: View {
     private let snakeRows = 12
     private var game: RetroGameKind { RetroGameKind(rawValue: gameRaw) ?? .snake }
     private var palette: RetroGamePalette { RetroGamePalette(rawValue: paletteRaw) ?? .phosphor }
-    private var topInset: Double {
+    private var topInset: CGFloat {
         if usesFullNotchArea && keepsClosedNotchContents { return max(16, surfaceState.compactHeight + 10) }
         if usesFullNotchArea { return max(14, surfaceState.compactHeight * 0.64) }
         return 14
@@ -839,9 +835,10 @@ struct RetroGameContextView: View {
                     case .pong: drawPong(context: context, size: size)
                     }
                     if scanlines {
-                        var y = 2.0
+                        var y: CGFloat = 2
                         while y < size.height {
-                            let line = Path(CGRect(x: 0, y: y, width: size.width, height: 1))
+                            var line = Path()
+                            line.addRect(CGRect(x: 0, y: y, width: size.width, height: 1))
                             context.fill(line, with: .color(Color.black.opacity(0.22)))
                             y += 4
                         }
@@ -910,23 +907,29 @@ struct RetroGameContextView: View {
     }
 
     private func drawSnake(context: GraphicsContext, size: CGSize) {
-        let cell = floor(min(size.width / Double(snakeColumns), size.height / Double(snakeRows)))
-        let boardWidth = cell * Double(snakeColumns)
-        let boardHeight = cell * Double(snakeRows)
+        let cell = floor(min(size.width / CGFloat(snakeColumns), size.height / CGFloat(snakeRows)))
+        let boardWidth = cell * CGFloat(snakeColumns)
+        let boardHeight = cell * CGFloat(snakeRows)
         let originX = floor((size.width - boardWidth) / 2)
         let originY = floor((size.height - boardHeight) / 2)
         for (index, segment) in snake.enumerated() {
-            let rect = CGRect(x: originX + Double(segment.x) * cell + 1,
-                              y: originY + Double(segment.y) * cell + 1,
+            let rect = CGRect(x: originX + CGFloat(segment.x) * cell + 1,
+                              y: originY + CGFloat(segment.y) * cell + 1,
                               width: max(1, cell - 2), height: max(1, cell - 2))
-            context.fill(Path(rect), with: .color(palette.foreground.opacity(index == 0 ? 1 : 0.78)))
+            var path = Path()
+            path.addRect(rect)
+            context.fill(path, with: .color(palette.foreground.opacity(index == 0 ? 1 : 0.78)))
         }
-        let foodRect = CGRect(x: originX + Double(food.x) * cell + 1,
-                              y: originY + Double(food.y) * cell + 1,
+        let foodRect = CGRect(x: originX + CGFloat(food.x) * cell + 1,
+                              y: originY + CGFloat(food.y) * cell + 1,
                               width: max(1, cell - 2), height: max(1, cell - 2))
-        context.fill(Path(foodRect), with: .color(palette.foreground))
+        var foodPath = Path()
+        foodPath.addRect(foodRect)
+        context.fill(foodPath, with: .color(palette.foreground))
         let center = CGPoint(x: foodRect.midX, y: foodRect.midY)
-        context.fill(Path(ellipseIn: CGRect(x: center.x - 2, y: center.y - 2, width: 4, height: 4)), with: .color(.white.opacity(0.65)))
+        var glint = Path()
+        glint.addEllipse(in: CGRect(x: center.x - 2, y: center.y - 2, width: 4, height: 4))
+        context.fill(glint, with: .color(.white.opacity(0.65)))
     }
 
     private func drawPong(context: GraphicsContext, size: CGSize) {
@@ -937,12 +940,17 @@ struct RetroGameContextView: View {
         let cpu = CGRect(x: floor(size.width * 0.93 - paddleWidth), y: floor(pongCPUY * size.height - paddleHeight / 2), width: paddleWidth, height: paddleHeight)
         let ballSize = max(5, floor(min(size.width, size.height) * 0.035))
         let ball = CGRect(x: floor(pongBall.x * size.width - ballSize / 2), y: floor(pongBall.y * size.height - ballSize / 2), width: ballSize, height: ballSize)
-        context.fill(Path(player), with: .color(fg))
-        context.fill(Path(cpu), with: .color(fg))
-        context.fill(Path(ball), with: .color(fg))
-        var y = 12.0
+        var playerPath = Path(); playerPath.addRect(player)
+        var cpuPath = Path(); cpuPath.addRect(cpu)
+        var ballPath = Path(); ballPath.addRect(ball)
+        context.fill(playerPath, with: .color(fg))
+        context.fill(cpuPath, with: .color(fg))
+        context.fill(ballPath, with: .color(fg))
+        var y: CGFloat = 12
         while y < size.height - 8 {
-            context.fill(Path(CGRect(x: floor(size.width / 2), y: y, width: 2, height: 8)), with: .color(fg.opacity(0.28)))
+            var divider = Path()
+            divider.addRect(CGRect(x: floor(size.width / 2), y: y, width: 2, height: 8))
+            context.fill(divider, with: .color(fg.opacity(0.28)))
             y += 15
         }
     }
@@ -1027,7 +1035,7 @@ struct RetroGameContextView: View {
         if pongBall.x > 1.02 { pongPlayerScore += 1; resetPongBall(towardPlayer: true) }
     }
 
-    private func movePongPlayer(_ amount: Double) {
+    private func movePongPlayer(_ amount: CGFloat) {
         pongPlayerY = min(0.86, max(0.14, pongPlayerY + amount))
     }
 
