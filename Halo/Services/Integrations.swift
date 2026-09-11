@@ -386,21 +386,45 @@ private enum ArtworkReader {
     }
 }
 
-@MainActor
 final class HotkeyService {
     private var hotkey: EventHotKeyRef?
     private var handler: EventHandlerRef?
+    private let identifierID: UInt32
+    private let notificationName: Notification.Name
+
+    init(identifierID: UInt32 = 1, notificationName: Notification.Name = .init("HaloToggle")) {
+        self.identifierID = identifierID
+        self.notificationName = notificationName
+    }
+
     func register(code: UInt32, modifiers: UInt32) -> Bool {
         stop()
         var type = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        let status = InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-            DispatchQueue.main.async { NotificationCenter.default.post(name: .init("HaloToggle"), object: nil) }
+        let userData = Unmanaged.passUnretained(self).toOpaque()
+        let status = InstallEventHandler(GetApplicationEventTarget(), { _, event, userData in
+            guard let event, let userData else { return noErr }
+            let service = Unmanaged<HotkeyService>.fromOpaque(userData).takeUnretainedValue()
+            var identifier = EventHotKeyID()
+            var actualSize: UInt32 = 0
+            let read = GetEventParameter(event,
+                                         EventParamName(kEventParamDirectObject),
+                                         EventParamType(typeEventHotKeyID),
+                                         nil,
+                                         UInt32(MemoryLayout<EventHotKeyID>.size),
+                                         &actualSize,
+                                         &identifier)
+            guard read == noErr, identifier.id == service.identifierID else { return noErr }
+            let name = service.notificationName
+            DispatchQueue.main.async { NotificationCenter.default.post(name: name, object: nil) }
             return noErr
-        }, 1, &type, nil, &handler)
+        }, 1, &type, userData, &handler)
         guard status == noErr else { return false }
-        let identifier = EventHotKeyID(signature: 0x48414C4F, id: 1)
-        return RegisterEventHotKey(code, modifiers, identifier, GetApplicationEventTarget(), 0, &hotkey) == noErr
+        let identifier = EventHotKeyID(signature: 0x48414C4F, id: identifierID)
+        let registered = RegisterEventHotKey(code, modifiers, identifier, GetApplicationEventTarget(), 0, &hotkey) == noErr
+        if !registered { stop() }
+        return registered
     }
+
     func stop() {
         if let hotkey { UnregisterEventHotKey(hotkey) }; hotkey = nil
         if let handler { RemoveEventHandler(handler) }; handler = nil
