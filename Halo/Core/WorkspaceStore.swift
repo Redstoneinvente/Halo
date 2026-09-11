@@ -98,6 +98,11 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         pollMedia()
     }
     private func pollMedia() {
+        if DemoMarketingStudio.shared.isEnabled {
+            systemAudioFallback?.setEnabled(false)
+            DemoMarketingStudio.shared.apply(to: self)
+            return
+        }
         if systemAudioFallback == nil { systemAudioFallback = SystemAudioMediaFallback(media: media) }
         systemAudioFallback?.setEnabled(wantsSystemAudioFallback)
 
@@ -121,6 +126,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         if hudEngine == nil { hudEngine = HaloHUDEngine(workspace: self); hudEngine?.start() }
         evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey()
         pollMedia()
+        DemoMarketingStudio.shared.attach(workspace: self)
         ticker = Timer.publish(every: 2, on: .main, in: .common).autoconnect().sink { [weak self] _ in
             guard let self else { return }
             self.tick += 1
@@ -128,7 +134,11 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             let minute = Int(Date().timeIntervalSince1970 / 60)
             if self.lastScheduleMinute != minute { self.lastScheduleMinute = minute; self.evaluateSchedules() }
             self.clipboard.poll(enabled: self.settings.clipboardEnabled, excluded: self.settings.clipboardExcludedApps)
-            if self.tick % 5 == 0 { self.system.refresh(); self.evaluateRules() }
+            if self.tick % 5 == 0 {
+                if DemoMarketingStudio.shared.isEnabled { DemoMarketingStudio.shared.apply(to: self) }
+                else { self.system.refresh() }
+                self.evaluateRules()
+            }
             if self.tick % 30 == 0, self.settings.layout.enabled.contains(.calendar) { self.calendar.refresh() }
         }
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification, object: defaults)
