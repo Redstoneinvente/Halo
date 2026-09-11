@@ -36,6 +36,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     private var installedHotkey = ""
     private var pendingSave: DispatchWorkItem?
     private var hudEngine: HaloHUDEngine?
+    private var systemAudioFallback: SystemAudioMediaFallback?
     var applyTheme: ((Theme) -> Void)?
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -68,6 +69,23 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
                 layout.closedNotch?.albumBackgroundColor == true
         })
     }
+    private var wantsSystemAudioFallback: Bool {
+        guard settings.automaticMedia ?? true else { return false }
+        let layout = effectiveLayout
+        let contextUsesMedia = layout.contextMusic?.enabled == true
+        let moduleUsesMedia = layout.enabled.contains(.media)
+        let closed = layout.closedNotch
+        let closedUsesMedia = closed?.left == .media || closed?.left == .visualizer ||
+            closed?.right == .media || closed?.right == .visualizer ||
+            closed?.artworkOptions?.enabled == true || closed?.reactiveBackground?.enabled == true
+        return contextUsesMedia || moduleUsesMedia || closedUsesMedia
+    }
+    private func pollMedia() {
+        if systemAudioFallback == nil { systemAudioFallback = SystemAudioMediaFallback(media: media) }
+        systemAudioFallback?.setEnabled(wantsSystemAudioFallback)
+        media.poll(app: settings.mediaApp, automatic: settings.automaticMedia ?? true)
+        systemAudioFallback?.refresh()
+    }
     private func disableLegacyHUDRenderer() {
         // HaloHUDEngine is the only HUD renderer now. Keep the old controller inert so it cannot
         // draw a second overlay or ignore the new per-event enable/disable state. The legacy
@@ -82,11 +100,11 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         updateArtworkPreference()
         if hudEngine == nil { hudEngine = HaloHUDEngine(workspace: self); hudEngine?.start() }
         evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey()
-        media.poll(app: settings.mediaApp, automatic: settings.automaticMedia ?? true)
+        pollMedia()
         ticker = Timer.publish(every: 2, on: .main, in: .common).autoconnect().sink { [weak self] _ in
             guard let self else { return }
             self.tick += 1
-            self.media.poll(app: self.settings.mediaApp, automatic: self.settings.automaticMedia ?? true)
+            self.pollMedia()
             let minute = Int(Date().timeIntervalSince1970 / 60)
             if self.lastScheduleMinute != minute { self.lastScheduleMinute = minute; self.evaluateSchedules() }
             self.clipboard.poll(enabled: self.settings.clipboardEnabled, excluded: self.settings.clipboardExcludedApps)
@@ -100,21 +118,18 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didWakeNotification] {
             NSWorkspace.shared.notificationCenter.publisher(for: name).receive(on: RunLoop.main).sink { [weak self] _ in
                 self?.refreshApps(); self?.evaluateRules(); self?.evaluateSchedules(); self?.hudEngine?.configurationDidChange()
-                if let self { self.media.poll(app: self.settings.mediaApp, automatic: self.settings.automaticMedia ?? true) }
+                self?.pollMedia()
             }.store(in: &subscriptions)
         }
         for name in ["com.apple.Music.playerInfo", "com.spotify.client.PlaybackStateChanged"] {
             DistributedNotificationCenter.default().publisher(for: Notification.Name(name))
                 .debounce(for: .milliseconds(120), scheduler: DispatchQueue.main)
-                .sink { [weak self] _ in
-                    guard let self else { return }
-                    self.media.poll(app: self.settings.mediaApp, automatic: self.settings.automaticMedia ?? true)
-                }.store(in: &subscriptions)
+                .sink { [weak self] _ in self?.pollMedia() }.store(in: &subscriptions)
         }
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.evaluateRules(); self?.hudEngine?.configurationDidChange() }.store(in: &subscriptions)
     }
-    func stop() { pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); hudEngine?.stop(); hudEngine = nil; hotkey.stop(); clipboard.reset(); media.disconnect() }
+    func stop() { pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); systemAudioFallback?.stop(); systemAudioFallback = nil; hudEngine?.stop(); hudEngine = nil; hotkey.stop(); clipboard.reset(); media.disconnect() }
     private func schedulePersistence() {
         pendingSave?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.persist() }
@@ -236,5 +251,69 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         alert.informativeText = "Open this URL? Shortcuts may perform actions configured in the Shortcuts app.\n\n\(command.url)"
         alert.addButton(withTitle: "Open"); alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(url) }
+    }
+}
+
+@MainActor
+private final class SystemAudioMediaFallback {
+    private weak var media: MediaService?
+    private var enabled = false
+    private var ownsFallback = false
+    private var lastHeard = Date.distantPast
+
+    init(media: MediaService) { self.media = media }
+
+    func setEnabled(_ enabled: Bool) {
+        guard self.enabled != enabled else { return }
+        self.enabled = enabled
+        AudioSpectrumService.shared.setActive(enabled)
+        if !enabled { clearIfOwned() }
+    }
+
+    func refresh() {
+        guard enabled, let media else { return }
+
+        // Apple Music and Spotify remain the rich providers whenever they are actively playing.
+        if media.connectedApp != nil && media.isPlaying {
+            ownsFallback = false
+            return
+        }
+
+        let snapshot = AudioSpectrumService.shared.snapshot()
+        let audibleNow = snapshot.available && snapshot.overall > 0.045
+        if audibleNow { lastHeard = Date() }
+        let withinReleaseWindow = Date().timeIntervalSince(lastHeard) < 2.75
+        let systemAudioPlaying = audibleNow || (ownsFallback && withinReleaseWindow)
+
+        guard systemAudioPlaying else {
+            clearIfOwned()
+            return
+        }
+
+        // Do not pretend we have metadata that ScreenCaptureKit cannot universally provide.
+        // The existing UI/visualizers can still react because they already observe media.isPlaying.
+        if media.connectedApp == nil {
+            media.title = "System Audio"
+            media.artist = "Playing from your Mac"
+            media.isPlaying = true
+            media.error = nil
+            ownsFallback = true
+        }
+    }
+
+    func stop() {
+        enabled = false
+        AudioSpectrumService.shared.setActive(false)
+        clearIfOwned()
+    }
+
+    private func clearIfOwned() {
+        guard ownsFallback, let media else { ownsFallback = false; return }
+        if media.connectedApp == nil {
+            media.isPlaying = false
+            media.title = "Connect a player"
+            media.artist = "Apple Music, Spotify, or system audio"
+        }
+        ownsFallback = false
     }
 }
