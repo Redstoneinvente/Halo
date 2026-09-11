@@ -131,6 +131,9 @@ struct SurfaceView: View {
                 if !state.expanded || layout.closedNotch?.applyBackgroundWhenOpened == true {
                     AlbumNotchBackground(options: closedBackgroundOptions, media: workspace.media, system: workspace.system)
                 }
+                if state.expanded && contextMusicActive && contextOptions.usesArtworkBackground {
+                    ContextSurfaceArtworkBackground(media: workspace.media, options: contextOptions)
+                }
             }
         }
         .clipShape(contour)
@@ -265,6 +268,39 @@ struct ShelfFileInfo: View {
     }
 }
 
+private struct ContextSurfaceArtworkBackground: View {
+    @ObservedObject var media: MediaService
+    let options: ContextMusicOptions
+    @State private var artwork: NSImage?
+    private var key: String { "surface|\(media.connectedApp ?? "")|\(media.title)|\(media.artist)" }
+
+    var body: some View {
+        GeometryReader { proxy in
+            Group {
+                if let artwork {
+                    Image(nsImage: artwork)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+                        .scaleEffect(1.06)
+                        .blur(radius: options.resolvedArtworkBackgroundBlur)
+                        .overlay(Color.black.opacity(options.resolvedArtworkBackgroundDim))
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .clipped()
+        }
+        .allowsHitTesting(false)
+        .task(id: key) {
+            artwork = nil
+            let result = await ContextMusicArtworkReader.artwork(app: media.connectedApp, key: key)
+            guard !Task.isCancelled else { return }
+            artwork = result
+        }
+    }
+}
+
 private struct ContextMusicView: View {
     @ObservedObject var media: MediaService
     let options: ContextMusicOptions
@@ -346,7 +382,7 @@ private struct ContextMusicView: View {
         }
         .task(id: artworkKey) {
             artwork = nil
-            let needsArtwork = options.resolvedForegroundArtwork != .none || options.usesArtworkBackground
+            let needsArtwork = options.resolvedForegroundArtwork != .none
             guard needsArtwork else { return }
             let result = await ContextMusicArtworkReader.artwork(app: media.connectedApp, key: artworkKey)
             guard !Task.isCancelled else { return }
@@ -413,16 +449,6 @@ private struct ContextMusicView: View {
                 LinearGradient(colors: Array(songColors.prefix(2)), startPoint: .topLeading, endPoint: .bottomTrailing)
                     .opacity(min(0.78, max(0.16, options.backgroundOpacity)))
                     .blendMode(.plusLighter)
-            }
-            if options.usesArtworkBackground, let artwork {
-                Image(nsImage: artwork)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: size.width, height: size.height)
-                    .clipped()
-                    .blur(radius: options.resolvedArtworkBackgroundBlur)
-                    .overlay(Color.black.opacity(options.resolvedArtworkBackgroundDim))
-                    .allowsHitTesting(false)
             }
         }
         .frame(width: size.width, height: size.height)
