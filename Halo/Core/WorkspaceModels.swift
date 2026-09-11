@@ -617,7 +617,13 @@ struct HaloHUDSettings: Codable, Equatable {
     func isEnabled(_ kind: HaloHUDEventKind) -> Bool { enabled && override(for: kind).enabled }
     func configuration(for kind: HaloHUDEventKind) -> HaloHUDConfiguration {
         let item = override(for: kind)
-        return item.useGlobalSettings ? global : item.configuration
+        var configuration = item.useGlobalSettings ? global : item.configuration
+        if configuration.presentation.target == .notch && configuration.presentation.resolvedNotch.usesVerticalExpansion {
+            // Vertical HUDs own the selected notch wing while active. They should never fall back
+            // externally just because the normal closed-notch slot already contains a widget.
+            configuration.behavior.collision = .replace
+        }
+        return configuration
     }
     mutating func setOverride(_ value: HaloHUDEventOverride, for kind: HaloHUDEventKind) { events[kind.rawValue] = value }
     func validated() throws -> HaloHUDSettings {
