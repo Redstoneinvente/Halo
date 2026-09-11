@@ -103,6 +103,7 @@ struct SurfaceGeometry {
     var appearance: Appearance
     var expandedWidth: Double
     var activeCompactWidth: Double? = nil
+    var activeCompactHeight: Double? = nil
     /// Dynamic horizontal bias for closed mode. Negative grows toward the left, positive toward the right.
     var activeCompactCenterOffset: Double? = nil
     var attachedToNotch: Bool { (style == .notch && safeAreaTop > 0) || style == .simulated }
@@ -112,7 +113,9 @@ struct SurfaceGeometry {
         let requested = max(base, activeCompactWidth ?? 0)
         return Geometry.width(screenWidth: visible.width, requested: max(minimumWidth, requested))
     }
-    var compactHeight: Double { max(16, appearance.surface.compactHeight) }
+    var compactHeight: Double {
+        max(16, appearance.surface.compactHeight, activeCompactHeight ?? 0)
+    }
     var closedCameraOcclusion: CGRect? {
         guard safeAreaTop > 0, physicalNotchWidth > 0 else { return nil }
         let camera = CGRect(x: screen.midX - physicalNotchWidth / 2, y: screen.maxY - safeAreaTop,
