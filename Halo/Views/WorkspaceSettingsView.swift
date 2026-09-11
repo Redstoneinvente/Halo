@@ -271,7 +271,7 @@ struct SettingsView: View {
             Section("Optional permissions") {
                 Button("Allow Calendar (today's events)") { workspace.calendar.requestAccess() }
                 Button("Allow Notifications (timer completion)") { workspace.enableNotifications() }
-                Text("Automation is requested when detecting or controlling Apple Music or Spotify. System Audio uses Screen Recording permission to analyse the Mac's output audio. Screen Recording is also requested when you capture a region. Microphone and Accessibility are not requested. No analytics. Enabling artwork colors downloads Spotify artwork; Apple Music artwork is read from the player. Plugin URLs open only after confirmation.")
+                Text("Automation is requested when detecting or controlling Apple Music or Spotify. System Audio uses Screen Recording permission to analyse the Mac's output audio. Screen Recording is also requested when you capture a region. Microphone and Accessibility are not requested. Bluetooth state is read only when the Bluetooth CI/connection-state features are used. No analytics. Enabling artwork colors downloads Spotify artwork; Apple Music artwork is read from the player. Plugin URLs open only after confirmation.")
                 Text("This direct-distribution build is not sandboxed. Files and notes are stored locally.")
             }
         default: HaloAboutView()
@@ -386,13 +386,14 @@ struct SettingsView: View {
 }
 
 private enum ContextInterfaceSelection: String, Identifiable {
-    case music
+    case music, bluetooth
     var id: String { rawValue }
 }
 
 private struct ContextInterfaceLibraryView: View {
     @Binding var layout: WorkspaceLayout
     @State private var selection: ContextInterfaceSelection?
+    @AppStorage("HaloContextBluetoothEnabled") private var bluetoothEnabled = false
 
     private var musicEnabled: Bool { layout.contextMusic?.enabled ?? false }
 
@@ -411,6 +412,20 @@ private struct ContextInterfaceLibraryView: View {
                 }
             }
             ContextMusicSettings(layout: $layout)
+        } else if selection == .bluetooth {
+            Section {
+                HStack(spacing: 12) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) { selection = nil }
+                    } label: {
+                        Label("All CI", systemImage: "chevron.left")
+                    }
+                    Spacer()
+                    Label("Bluetooth CI", systemImage: "wave.3.right")
+                        .font(.headline)
+                }
+            }
+            ContextBluetoothSettings()
         } else {
             Section {
                 VStack(alignment: .leading, spacing: 7) {
@@ -427,12 +442,15 @@ private struct ContextInterfaceLibraryView: View {
                     ContextInterfaceCard(enabled: musicEnabled) {
                         withAnimation(.easeInOut(duration: 0.18)) { selection = .music }
                     }
+                    BluetoothContextInterfaceCard(enabled: bluetoothEnabled) {
+                        withAnimation(.easeInOut(duration: 0.18)) { selection = .bluetooth }
+                    }
                 }
                 .padding(.vertical, 6)
             }
 
             Section {
-                Label("More Context Interfaces can be added here without changing the editor flow.", systemImage: "rectangle.stack.badge.plus")
+                Label("CI can react to live system context without turning the notch into one giant settings page.", systemImage: "rectangle.stack.badge.plus")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
