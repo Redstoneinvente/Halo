@@ -177,12 +177,46 @@ struct SettingsView: View {
             }
         case "Context notch interface": ContextMusicSettings(layout: $workspace.settings.layout)
         case "Media & Files":
-            Toggle("Automatically detect the playing music app", isOn: Binding(
-                get: { workspace.settings.automaticMedia ?? true },
-                set: { workspace.settings.automaticMedia = $0; workspace.media.disconnect(); workspace.media.poll(app: workspace.settings.mediaApp, automatic: $0) }
-            ))
-            Picker("Preferred player", selection: $workspace.settings.mediaApp) { Text("Apple Music").tag("com.apple.Music"); Text("Spotify").tag("com.spotify.client") }
-            Text("Halo detects playing Apple Music and Spotify automatically, with the preferred player breaking ties when both start together. macOS may ask for Automation permission once per player. If denied, use Retry detection after allowing access in System Settings. Browser playback and other apps are not supported. Disabling automatic detection limits detection to the preferred player.")
+            Section("Media source") {
+                Picker("Source", selection: Binding(
+                    get: {
+                        if workspace.settings.automaticMedia ?? true { return "__automatic__" }
+                        return workspace.settings.mediaApp
+                    },
+                    set: { source in
+                        if source == "__automatic__" {
+                            workspace.settings.automaticMedia = true
+                            if workspace.settings.mediaApp == WorkspaceStore.systemAudioSource {
+                                workspace.settings.mediaApp = "com.apple.Music"
+                            }
+                        } else {
+                            workspace.settings.automaticMedia = false
+                            workspace.settings.mediaApp = source
+                        }
+                        workspace.refreshMediaSource()
+                    }
+                )) {
+                    Text("Automatic").tag("__automatic__")
+                    Text("Apple Music").tag("com.apple.Music")
+                    Text("Spotify").tag("com.spotify.client")
+                    Text("System Audio").tag(WorkspaceStore.systemAudioSource)
+                }
+
+                if !(workspace.settings.automaticMedia ?? true) && workspace.settings.mediaApp == WorkspaceStore.systemAudioSource {
+                    Label(
+                        workspace.media.isPlaying && workspace.media.connectedApp == nil ? "System Audio detected" : "Waiting for System Audio",
+                        systemImage: workspace.media.isPlaying && workspace.media.connectedApp == nil ? "waveform.circle.fill" : "waveform.circle"
+                    )
+                    Text("System Audio listens to your Mac's output through Screen Recording permission. It works with browser video, VLC, games and other apps, and can drive Halo's visualizers, reactive backgrounds and Context Notch. Generic system audio does not provide universal song title, artist, artwork, lyrics, seeking or track controls.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if workspace.settings.automaticMedia ?? true {
+                    Text("Automatic prefers rich Apple Music or Spotify metadata when either is playing, then falls back to System Audio for anything else playing on your Mac. The fallback can drive playback-aware Halo features even when track metadata is unavailable.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("Apple Music and Spotify provide rich metadata, artwork, playback controls and lyrics when available. macOS may ask for Automation permission the first time Halo connects to a player.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Toggle("Keep shelf references between launches", isOn: $workspace.settings.persistShelf).onChange(of: workspace.settings.persistShelf) { _ in store.persistFiles() }
             Picker("Remove shelf references after", selection: $workspace.settings.shelfRetentionMinutes) { Text("Manually").tag(0); Text("5 minutes").tag(5); Text("30 minutes").tag(30); Text("1 hour").tag(60) }
             Text("Up to 100 references. Pinned items do not expire. Saved references keep their original retention age after relaunch. Removing a shelf item never deletes its original.")
@@ -234,7 +268,7 @@ struct SettingsView: View {
             Section("Optional permissions") {
                 Button("Allow Calendar (today's events)") { workspace.calendar.requestAccess() }
                 Button("Allow Notifications (timer completion)") { workspace.enableNotifications() }
-                Text("Automation is requested when detecting or controlling a running supported music player. Screen Recording is requested only when you capture a region. Microphone and Accessibility are not requested. No analytics. Enabling artwork colors downloads Spotify artwork; Apple Music artwork is read from the player. Plugin URLs open only after confirmation.")
+                Text("Automation is requested when detecting or controlling Apple Music or Spotify. System Audio uses Screen Recording permission to analyse the Mac's output audio. Screen Recording is also requested when you capture a region. Microphone and Accessibility are not requested. No analytics. Enabling artwork colors downloads Spotify artwork; Apple Music artwork is read from the player. Plugin URLs open only after confirmation.")
                 Text("This direct-distribution build is not sandboxed. Files and notes are stored locally.")
             }
         default: HaloAboutView()
