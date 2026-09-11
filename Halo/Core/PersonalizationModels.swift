@@ -1,4 +1,6 @@
 import Foundation
+import SwiftUI
+import AppKit
 import IOBluetooth
 
 struct DailyWindow: Codable, Equatable {
@@ -171,7 +173,7 @@ final class BluetoothStateService: ObservableObject {
     }
 
     func refresh() {
-        let nextPoweredOn = (IOBluetoothHostController.default()?.powerState.rawValue ?? 0) == 1
+        let nextPoweredOn = IOBluetoothHostController.default()?.powerState == kBluetoothHCIPowerStateON
         let raw = (IOBluetoothDevice.pairedDevices() ?? []).compactMap { $0 as? IOBluetoothDevice }
         let nextDevices = raw.map { device -> BluetoothDeviceSnapshot in
             let address = device.addressString ?? ""
@@ -225,5 +227,162 @@ final class BluetoothStateService: ObservableObject {
         }
         clearEventWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: work)
+    }
+}
+
+// MARK: - Bluetooth CI settings UI
+
+struct BluetoothContextInterfaceCard: View {
+    let enabled: Bool
+    let action: () -> Void
+    @ObservedObject private var bluetooth = BluetoothStateService.shared
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(LinearGradient(colors: [Color.blue.opacity(0.34), Color.black.opacity(0.96)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    HStack(spacing: 14) {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.blue.opacity(0.20))
+                            .frame(width: 62, height: 62)
+                            .overlay(Image(systemName: bluetooth.poweredOn ? "wave.3.right" : "wave.3.right.slash")
+                                .font(.title2.weight(.semibold)).foregroundStyle(.white))
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(bluetooth.poweredOn ? "Bluetooth On" : "Bluetooth Off")
+                                .font(.headline).foregroundStyle(.white)
+                            Text(bluetooth.poweredOn ? connectedSummary : "Connections unavailable")
+                                .font(.caption).foregroundStyle(.white.opacity(0.64))
+                            HStack(spacing: 5) {
+                                ForEach(Array(bluetooth.connectedDevices.prefix(3))) { device in
+                                    Circle().fill(Color.green).frame(width: 6, height: 6)
+                                        .help(device.name)
+                                }
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }.padding(16)
+                }
+                .frame(height: 112)
+
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Bluetooth CI").font(.headline)
+                        Text("Devices & connections").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(enabled ? "Enabled" : "Available")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background((enabled ? Color.green : Color.secondary).opacity(0.12), in: Capsule())
+                        .foregroundStyle(enabled ? Color.green : Color.secondary)
+                }
+
+                Text("Shows connected and paired devices, Bluetooth power state, and recent connection or disconnection changes.")
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.leading)
+
+                HStack {
+                    Label(bluetooth.poweredOn ? connectedSummary : "Off", systemImage: "wave.3.right")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Spacer()
+                    Label("Edit", systemImage: "chevron.right")
+                        .font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(hovered ? 0.075 : 0.045), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(hovered ? Color.accentColor.opacity(0.42) : Color.primary.opacity(0.08), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovered)
+        .onAppear { bluetooth.start() }
+    }
+
+    private var connectedSummary: String {
+        let count = bluetooth.connectedDevices.count
+        return count == 1 ? "1 connected" : "\(count) connected"
+    }
+}
+
+struct ContextBluetoothSettings: View {
+    @ObservedObject private var bluetooth = BluetoothStateService.shared
+    @AppStorage("HaloContextBluetoothEnabled") private var enabled = false
+    @AppStorage("HaloContextBluetoothShowWhileConnected") private var showWhileConnected = true
+    @AppStorage("HaloContextBluetoothShowOnChanges") private var showOnChanges = true
+    @AppStorage("HaloContextBluetoothShowPaired") private var showPaired = true
+    @AppStorage("HaloContextBluetoothShowAddresses") private var showAddresses = false
+    @AppStorage("HaloContextBluetoothUseFullNotchArea") private var useFullNotchArea = false
+    @AppStorage("HaloContextBluetoothKeepClosedNotchContents") private var keepClosedNotchContents = false
+    @AppStorage("HaloBluetoothClosedNotchEvents") private var closedNotchEvents = true
+
+    var body: some View {
+        Section("Bluetooth Context Interface") {
+            Toggle("Enable Bluetooth CI", isOn: $enabled)
+            Toggle("Show CI while a Bluetooth device is connected", isOn: $showWhileConnected)
+                .disabled(!enabled)
+            Toggle("Show CI for connection changes", isOn: $showOnChanges)
+                .disabled(!enabled)
+            Text("A recent connect, disconnect, Bluetooth-on or Bluetooth-off event temporarily takes CI priority. Otherwise Music CI keeps priority while music is playing, and Bluetooth CI can take over when connected devices remain.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("CI surface") {
+            Toggle("Use full notch area", isOn: $useFullNotchArea)
+            Toggle("Keep closed-notch contents visible", isOn: $keepClosedNotchContents)
+            Text(useFullNotchArea ? "Bluetooth CI can use the entire expanded Halo surface." : "Bluetooth CI starts below the normal notch/top strip.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("Device list") {
+            Toggle("Show paired devices that are disconnected", isOn: $showPaired)
+            Toggle("Show Bluetooth addresses", isOn: $showAddresses)
+            Text("Connected devices are always shown first. Addresses are hidden by default to keep the interface clean.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("Closed Notch states") {
+            Toggle("Show Bluetooth connection states", isOn: $closedNotchEvents)
+            Text("When enabled, connect, disconnect, Bluetooth-on and Bluetooth-off changes appear as temporary Closed Notch activity states without replacing your saved left/right layout.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("Live status") {
+            Label(bluetooth.poweredOn ? "Bluetooth is on" : "Bluetooth is off",
+                  systemImage: bluetooth.poweredOn ? "wave.3.right" : "wave.3.right.slash")
+                .foregroundStyle(bluetooth.poweredOn ? Color.primary : Color.secondary)
+            Text(statusSummary).font(.caption).foregroundStyle(.secondary)
+            ForEach(bluetooth.connectedDevices) { device in
+                HStack {
+                    Circle().fill(Color.green).frame(width: 7, height: 7)
+                    Text(device.name)
+                    Spacer()
+                    Text("Connected").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if let event = bluetooth.lastEvent {
+                Label("\(event.title): \(event.detail)", systemImage: event.symbol)
+                    .font(.caption).foregroundStyle(.blue)
+            }
+            HStack {
+                Button("Refresh") { bluetooth.refresh() }
+                Button("Open Bluetooth Settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings") { NSWorkspace.shared.open(url) }
+                }
+            }
+        }
+        .onAppear { bluetooth.start(); bluetooth.refresh() }
+    }
+
+    private var statusSummary: String {
+        guard bluetooth.poweredOn else { return "Turn Bluetooth on to track device connections." }
+        let connected = bluetooth.connectedDevices.count
+        let paired = bluetooth.pairedDevices.count
+        return "\(connected) connected · \(paired) paired"
     }
 }
