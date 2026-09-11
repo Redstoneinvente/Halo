@@ -197,6 +197,22 @@ final class MediaService: ObservableObject {
         artworkTask?.cancel(); artworkKey = ""; trackID = ""; artworkColors = []
         title = "Connect a player"; artist = "Apple Music or Spotify"
     }
+    func applyDemoSnapshot(title: String, artist: String, playing: Bool) {
+        generation += 1
+        artworkTask?.cancel()
+        connectedApp = "com.apple.Music"
+        self.title = title
+        self.artist = artist
+        self.isPlaying = playing
+        error = nil
+        trackID = "halo-demo-track"
+        artworkKey = "halo-demo-track"
+        artworkColors = [
+            WidgetColor(red: 0.42, green: 0.28, blue: 0.98),
+            WidgetColor(red: 0.95, green: 0.28, blue: 0.62),
+            WidgetColor(red: 0.18, green: 0.72, blue: 0.94)
+        ]
+    }
     private let queue = DispatchQueue(label: "Halo.Media.AppleEvents", qos: .utility)
     func retryDetection(preferred: String) {
         deniedApps.removeAll()
@@ -241,6 +257,10 @@ final class MediaService: ObservableObject {
         requestArtwork(app: snapshot.app)
     }
     func perform(_ command: String, app preferred: String) {
+        if DemoMarketingStudio.shared.isEnabled {
+            DemoMarketingStudio.shared.handleMediaCommand(command, media: self)
+            return
+        }
         let app = command == "refresh" ? preferred : (connectedApp ?? preferred)
         guard ["com.apple.Music", "com.spotify.client"].contains(app),
               ["refresh", "playpause", "next track", "previous track"].contains(command), !busy else { return }
@@ -248,7 +268,7 @@ final class MediaService: ObservableObject {
             error = "Open Apple Music or Spotify to play music."; return
         }
         deniedApps.remove(app)
-        generation += 1 // Ignore an older automatic probe completing behind this command.
+        generation += 1
         artworkTask?.cancel(); artworkKey = ""
         let expectedGeneration = generation
         busy = true
@@ -273,7 +293,6 @@ final class MediaService: ObservableObject {
         guard !trackID.isEmpty else { return }
         let expectedID = trackID
         let expectedGeneration = generation
-        // A separate query runs only on track changes, never for every playback poll.
         queue.async { [weak self] in
             let artwork = app == "com.spotify.client" ? "artwork url of current track" : "raw data of artwork 1 of current track"
             let source = """
@@ -341,7 +360,6 @@ private struct MediaProbe {
     }
 }
 
-/// Bounded network reads and small image samples; no artwork decoding in view bodies.
 private enum ArtworkReader {
     static func palette(data: Data?, urlString: String?) async -> [WidgetColor] {
         var imageData = data
