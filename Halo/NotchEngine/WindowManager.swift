@@ -95,9 +95,9 @@ final class SurfaceAnimator {
         }
         animatedView = view
 
-        // Work out which edge is supposed to remain physically fixed before changing the
-        // SwiftUI presentation width. This matters for a real MacBook notch: growing the
-        // left music wing must never make the camera/right wing drift, and vice versa.
+        // Determine the physical edge that must remain fixed before changing the SwiftUI
+        // presentation width. One closed-notch wing can then grow without dragging the camera
+        // cutout or the untouched wing sideways.
         let horizontalAnchor: HorizontalResizeAnchor = {
             guard !liveViewportResize, abs(target.width - initial.width) > 0.5 else { return .center }
             let leftMovement = abs(target.minX - initial.minX)
@@ -108,10 +108,9 @@ final class SurfaceAnimator {
             return .center
         }()
 
-        // Keep the closed-notch content laid out at the larger of the start/end widths.
-        // Expansions reveal already-laid-out content; contractions clip the existing content.
-        // That avoids an expensive full SwiftUI relayout at every display refresh without
-        // making the whole surface jump to the destination geometry at animation start.
+        // Keep closed content laid out at the larger of the start/end widths. Expansion then
+        // reveals prepared content; contraction clips the existing content. This avoids doing
+        // a full SwiftUI hierarchy relayout every display frame.
         let presentationSize = liveViewportResize
             ? initial.size
             : CGSize(width: max(initial.width, target.width), height: max(initial.height, target.height))
@@ -119,9 +118,9 @@ final class SurfaceAnimator {
             state.viewport.size = presentationSize
         }
 
-        // NSHostingView centers a fixed-width SwiftUI root when it is wider than the panel.
-        // Counter-translate its sublayers so the content is clipped from the changing edge,
-        // not from both sides. This is the piece that keeps the physical notch stationary.
+        // NSHostingView centers a fixed-width SwiftUI root when that root is wider than the
+        // panel. Counter-translate the rendered sublayers so clipping happens only on the side
+        // that is actually resizing.
         func contentTranslation(panelWidth: CGFloat, contentWidth: CGFloat) -> CGFloat {
             let overflow = max(0, contentWidth - panelWidth)
             switch horizontalAnchor {
@@ -162,9 +161,6 @@ final class SurfaceAnimator {
             panel.alphaValue = transition == .fade ? initialAlpha + (1 - initialAlpha) * t - 0.3 * sin(.pi * t) : 1
 
             if !liveViewportResize {
-                // On a contraction, switch to the final compact layout only once the panel is
-                // visually at the destination. The remaining difference at this point is below
-                // a pixel for the smooth curves, so there is no end-of-animation content snap.
                 let contracting = target.width < initial.width - 0.5
                 let useFinalLayout = contracting && t >= 0.985
                 let contentWidth = useFinalLayout ? target.width : presentationSize.width
@@ -236,9 +232,9 @@ final class WindowManager {
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in
-                // Demo Studio stores its knobs in UserDefaults. Those values are not surface
-                // configuration and must not run the heavyweight reconcile path, which would
-                // cancel an in-flight closed-notch animation and snap the panel to a new frame.
+                // Demo Studio writes playback/marketing knobs into UserDefaults. They are not
+                // geometry preferences; reconciling for them cancels the closed-notch animation
+                // and is the source of the visible jump in the supplied recording.
                 guard !UserDefaults.standard.bool(forKey: DemoMarketingStudio.enabledKey) else { return }
                 self?.reconcile()
             }.store(in: &subscriptions)
@@ -335,29 +331,42 @@ final class WindowManager {
     }
 
     private func powerReaction(options: ClosedNotchOptions,
-                               items: (left: ClosedNotchItem, right: ClosedNotchItem)) -> (side: DynamicSide, width: Double)? {
+                               items: (left: ClosedNotchItem, right: ClosedNotchItem))
+        -> (side: DynamicSide, badgeWidth: Double, minimumSideWidth: Double)? {
         let settings = options.powerReaction ?? PowerReactionOptions()
         guard settings.isEnabled, let battery = store.workspace.system.battery else { return nil }
         let style: PowerReactionStyle
-        if battery >= 99 && !store.workspace.system.onBattery { style = settings.charged }
-        else if store.workspace.system.charging { style = settings.charging }
-        else if store.workspace.system.onBattery && battery <= settings.lowThreshold { style = settings.low }
-        else { return nil }
+        let eventLabel: String
+        if battery >= 99 && !store.workspace.system.onBattery {
+            style = settings.charged; eventLabel = "Charged"
+        } else if store.workspace.system.charging {
+            style = settings.charging; eventLabel = "Charging"
+        } else if store.workspace.system.onBattery && battery <= settings.lowThreshold {
+            style = settings.low; eventLabel = "Low battery"
+        } else { return nil }
         guard style != .off else { return nil }
 
         let size = max(10, options.fontSize)
-        let estimated: Double
-        switch style {
-        case .off: estimated = 0
-        case .icon: estimated = size + 4
-        case .percent: estimated = size * 2.7
-        case .iconPercent: estimated = size * 3.9
-        case .label: estimated = size * 6.2
+        let font = NSFont.systemFont(ofSize: size, weight: .regular)
+        func textWidth(_ value: String) -> Double {
+            ceil((value as NSString).size(withAttributes: [.font: font]).width)
         }
-        // eventWidth is the minimum total wing width for the event, not blank space that
-        // gets added on top of the badge. fittedClosedSides applies that minimum after the
-        // ordinary content has been measured.
-        let width = estimated
+        let iconWidth = max(12, size * 1.05)
+        let labelGap = 4.0
+        let horizontalPadding = 4.0 // PowerEventBadge currently uses 2 pt on each side.
+        let naturalWidth: Double
+        switch style {
+        case .off: naturalWidth = 0
+        case .icon: naturalWidth = iconWidth + horizontalPadding
+        case .percent: naturalWidth = textWidth("100%") + horizontalPadding
+        case .iconPercent: naturalWidth = iconWidth + labelGap + textWidth("100%") + horizontalPadding
+        case .label: naturalWidth = iconWidth + labelGap + textWidth(eventLabel) + horizontalPadding
+        }
+        let badgeWidth = max(18, naturalWidth)
+        // "Power event width" is the minimum total wing width while the event is visible,
+        // not extra blank space added on top of the badge and existing content.
+        let minimumSideWidth = settings.expandForEvent ? max(badgeWidth, settings.eventWidth) : badgeWidth
+
         let side: DynamicSide
         switch settings.side {
         case .left: side = .left
@@ -370,7 +379,7 @@ final class WindowManager {
             else if leftFree { side = .left }
             else { side = .right }
         }
-        return (side, width)
+        return (side, badgeWidth, minimumSideWidth)
     }
 
     private func configureDynamicWidth(_ host: Host) {
@@ -399,6 +408,7 @@ final class WindowManager {
         }
 
         let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
+        let notchLike = attached || geometry.style == .notch || geometry.style == .simulated
         let camera = attached ? geometry.physicalNotchWidth : 0
         let baseWidth = max(16, geometry.appearance.compactWidth)
         let autoFit = options.autoFitContent ?? true
@@ -409,28 +419,24 @@ final class WindowManager {
             return
         }
 
-        if attached {
-            // A physical notch is the immutable anchor. Each side receives its own extent;
-            // never mirror a one-sided media/activity expansion onto the opposite wing.
-            let baseSide = max(0, (baseWidth - camera) / 2)
-            let minimumLiveWing = expansion.enabled ? max(baseSide, expansion.width - camera - baseSide) : baseSide
-            let leftRequested = autoFit ? sides.left : sides.decorationLeft
-            let rightRequested = autoFit ? sides.right : sides.decorationRight
-            let leftExtent = max(leftRequested, leftLive ? minimumLiveWing : baseSide)
-            let rightExtent = max(rightRequested, rightLive ? minimumLiveWing : baseSide)
-
-            // Keep the actual screen camera center fixed. visibleFrame can be asymmetrical
-            // because of the Dock, so its midX is not a safe anchor for the hardware notch.
-            let cameraCenter = geometry.screen.midX + geometry.offset(expanded: false).width
-            let leftLimit = max(0, cameraCenter - camera / 2 - geometry.screen.minX - 12)
-            let rightLimit = max(0, geometry.screen.maxX - 12 - cameraCenter - camera / 2)
-            let fittedLeft = min(leftExtent, leftLimit)
-            let fittedRight = min(rightExtent, rightLimit)
-            let required = camera + fittedLeft + fittedRight
-            host.geometry?.activeCompactWidth = max(baseWidth, required)
-            // SurfaceGeometry.frame starts centered on screen.midX. Biasing by half the wing
-            // difference makes its left/right edges exactly cameraCenter±camera/2±extent.
-            host.geometry?.activeCompactCenterOffset = (fittedRight - fittedLeft) / 2
+        if notchLike {
+            let extents = ClosedWingSizing.extents(
+                base: baseWidth, camera: camera,
+                left: autoFit ? sides.left : sides.decorationLeft,
+                right: autoFit ? sides.right : sides.decorationRight,
+                expansion: expansion.enabled ? expansion.width : 0,
+                leftLive: leftLive, rightLive: rightLive)
+            let baseCenter = attached ? geometry.screen.midX : geometry.visible.midX
+            let center = baseCenter + geometry.offset(expanded: false).width
+            let leftLimit = max(0, center - camera / 2 - geometry.visible.minX - 12)
+            let rightLimit = max(0, geometry.visible.maxX - 12 - center - camera / 2)
+            let leftExtent = min(extents.left, leftLimit)
+            let rightExtent = min(extents.right, rightLimit)
+            let required = camera + leftExtent + rightExtent
+            host.geometry?.activeCompactWidth = min(geometry.visible.width, max(baseWidth, required))
+            // The camera/notch remains the anchor. Unequal wings shift only the panel bounds,
+            // so a right-side music expansion does not resize the left wing (and vice versa).
+            host.geometry?.activeCompactCenterOffset = (rightExtent - leftExtent) / 2
         } else {
             var requested = baseWidth
             if autoFit { requested = max(requested, sides.left + sides.right) }
@@ -442,7 +448,7 @@ final class WindowManager {
 
     private func fittedClosedSides(host: Host, layout: WorkspaceLayout,
                                    items: (left: ClosedNotchItem, right: ClosedNotchItem),
-                                   power: (side: DynamicSide, width: Double)?) ->
+                                   power: (side: DynamicSide, badgeWidth: Double, minimumSideWidth: Double)?) ->
         (left: Double, right: Double, decorationLeft: Double, decorationRight: Double) {
         guard let geometry = host.geometry else { return (0, 0, 0, 0) }
         let options = layout.closedNotch ?? ClosedNotchOptions()
@@ -451,8 +457,7 @@ final class WindowManager {
         let size = min(options.fontSize, max(1, geometry.compactHeight - 2 * options.contentPaddingY) / 1.25)
         let font = NSFont.systemFont(ofSize: size)
         let slotMargins = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
-        // This must match ClosedNotchSlot.elementSpacing exactly or the panel reserves a
-        // different gap from the view it contains, which is especially visible for power.
+        // Keep the geometry estimator in lockstep with ClosedNotchSlot's HStack spacing.
         let elementGap = 6.0
 
         var artwork = options.artworkOptions ?? ClosedArtworkOptions()
@@ -474,7 +479,7 @@ final class WindowManager {
         }()
 
         func textWidth(_ text: String, font: NSFont) -> Double {
-            ceil((text as NSString).size(withAttributes: [.font: font]).width) + 4
+            ceil((text as NSString).size(withAttributes: [.font: font]).width) + 2
         }
         func mediaWidth() -> Double {
             guard playing else { return 0 }
@@ -527,12 +532,13 @@ final class WindowManager {
                 case .activity:
                     content = activity.map {
                         let title = textWidth(String($0.title.prefix(80)), font: font)
-                        let detail = $0.detail.isEmpty ? 0 : textWidth(String($0.detail.prefix(80)), font: NSFont.systemFont(ofSize: max(8, size * 0.76)))
+                        let detailFont = NSFont.systemFont(ofSize: max(8, size * 0.76))
+                        let detail = $0.detail.isEmpty ? 0 : textWidth(String($0.detail.prefix(80)), font: detailFont)
                         let icon = max(12, size)
                         let text = max(title, detail)
-                        let progress = $0.progress == nil ? 0 : min(38, max(24, (text + icon + 6) * 0.22))
-                        let gaps = 6.0 + (progress > 0 ? 6.0 : 0)
-                        return icon + text + progress + gaps
+                        let progress = $0.progress == nil ? 0 : elementGap + 38
+                        // Matches the view: icon + 6 pt gap + text + optional progress.
+                        return icon + elementGap + text + progress + 2
                     } ?? 0
                 }
             }
@@ -557,20 +563,16 @@ final class WindowManager {
             }
         }
 
-        func addingPower(to current: Double, on side: DynamicSide) -> Double {
-            guard let power, power.side == side else { return current }
-            let badgeCluster = power.width + (current > 0 ? elementGap : 0)
-            var result = current + badgeCluster
-            let settings = options.powerReaction ?? PowerReactionOptions()
-            if settings.expandForEvent {
-                // Treat the setting as a minimum overall wing width. If the existing content
-                // already provides most of that room, only add what is actually missing.
-                result = max(result, settings.eventWidth)
+        if let power {
+            switch power.side {
+            case .left:
+                let withBadge = leftFull > 0 ? leftFull + elementGap + power.badgeWidth : slotMargins + power.badgeWidth
+                leftFull = max(withBadge, power.minimumSideWidth)
+            case .right:
+                let withBadge = rightFull > 0 ? rightFull + elementGap + power.badgeWidth : slotMargins + power.badgeWidth
+                rightFull = max(withBadge, power.minimumSideWidth)
             }
-            return result
         }
-        leftFull = addingPower(to: leftFull, on: .left)
-        rightFull = addingPower(to: rightFull, on: .right)
         return (leftFull, rightFull, left.decoration, right.decoration)
     }
 
@@ -599,8 +601,8 @@ final class WindowManager {
             var motion = geometry.appearance.surface
             motion.opening = .resize
             motion.closing = .resize
-            // Closed-notch resizing respects the same timing controls as Appearance, while
-            // SurfaceAnimator keeps a one-sided resize anchored to the opposite physical edge.
+            // Closed-notch resizing respects the user's Appearance animation duration/timing.
+            // This path runs only while Halo is already closed.
             motion.duration = min(1.2, max(0.10, motion.duration))
             host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
                                preset: geometry.appearance.animation,
