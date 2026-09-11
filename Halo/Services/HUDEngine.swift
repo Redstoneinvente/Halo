@@ -15,6 +15,25 @@ final class HaloHUDRuntimeState: ObservableObject {
     @Published var sequence = 0
 }
 
+struct HaloHUDNotchPresentation: Equatable {
+    let event: HaloHUDEvent
+    let configuration: HaloHUDConfiguration
+    let side: HaloHUDNotchSide
+    let screenFrame: CGRect
+    let persistent: Bool
+}
+
+/// One source of truth for an active HUD that is presented by the closed notch.
+/// WindowManager sizes the actual Halo surface from this state and ClosedNotchView renders it.
+final class HaloHUDNotchBridge: ObservableObject {
+    static let shared = HaloHUDNotchBridge()
+    @Published private(set) var presentation: HaloHUDNotchPresentation?
+    private init() {}
+
+    func present(_ value: HaloHUDNotchPresentation) { presentation = value }
+    func dismiss() { presentation = nil }
+}
+
 /// Callback-visible replacement state is deliberately isolated from MainActor because a CGEventTap
 /// must decide synchronously whether an event is passed through to macOS.
 private final class HaloHUDTapState {
@@ -210,6 +229,7 @@ final class HaloHUDEngine {
         if let previewExitObserver { NotificationCenter.default.removeObserver(previewExitObserver) }
         if let replacementObserver { NotificationCenter.default.removeObserver(replacementObserver) }
         if let tapReenableObserver { NotificationCenter.default.removeObserver(tapReenableObserver) }
+        HaloHUDNotchBridge.shared.dismiss()
         panel?.orderOut(nil); panel = nil
         removeMenuPresentation()
     }
@@ -219,9 +239,8 @@ final class HaloHUDEngine {
         if model.visible && !editorPreviewPinned {
             let settings = resolvedSettings
             guard settings.isEnabled(model.event.kind) else { hide(immediate: true); return }
-            model.configuration = resolvedConfiguration(for: model.event, settings: settings)
-            model.palette = workspace.media.artworkColors
-            if let panel { position(panel, configuration: model.configuration) }
+            let next = resolvedConfiguration(for: model.event, settings: settings)
+            route(model.event, configuration: next, depth: 0)
         }
     }
 
@@ -242,7 +261,6 @@ final class HaloHUDEngine {
         workspace.audio.refresh()
         var replacement = Set<Int>()
         let defaults = UserDefaults.standard
-        // Native suppression remains explicitly opt-in and is enabled only after a writable backend probe.
         if settings.isEnabled(.volume), defaults.bool(forKey: "HaloHUDReplaceVolume"), workspace.audio.canSetVolume { replacement.formUnion([0, 1]) }
         if settings.isEnabled(.mute), defaults.bool(forKey: "HaloHUDReplaceVolume"), workspace.audio.canSetVolume { replacement.insert(7) }
         if settings.isEnabled(.displayBrightness), defaults.bool(forKey: "HaloHUDReplaceBrightness"), displayBrightness.canSet() { replacement.formUnion([2, 3]) }
@@ -358,7 +376,7 @@ final class HaloHUDEngine {
         }.store(in: &subscriptions)
         workspace.audio.$devices.map { $0.map(\.id) }.removeDuplicates().receive(on: RunLoop.main).dropFirst().sink { [weak self] ids in
             guard let self else { return }
-            self.emit(HaloHUDEvent(kind: .audioDeviceConnected, icon: "hifispeaker.fill", primaryText: "Audio Devices", secondaryText: "\(ids.count) available"))
+            self.emit(HaloHUDEvent(kind: .audioDeviceConnected, icon: "hifispeaker.fill", primaryText: "Audio Devices", secondaryText: "\(ids.count) available", metadata: ["deviceName": "\(ids.count) available"]))
         }.store(in: &subscriptions)
     }
 
@@ -408,25 +426,61 @@ final class HaloHUDEngine {
             guard let screen = screen(for: configuration), screen.safeAreaInsets.top > 0 else { routeFallback(event, configuration: configuration, depth: depth); return }
             let side = resolvedNotchSide(configuration.presentation.notchSide)
             if configuration.behavior.collision == .showExternally && notchOccupied(side) { routeFallback(event, configuration: configuration, depth: depth); return }
-            showPanel(event, configuration: configuration)
+            var resolved = configuration
+            resolved.presentation.notchSide = side
+            showNotch(event, configuration: resolved, screen: screen)
         case .floating, .nearCursor, .screenEdge: showPanel(event, configuration: configuration)
         }
     }
+
     private func routeFallback(_ event: HaloHUDEvent, configuration: HaloHUDConfiguration, depth: Int) {
         var fallback = configuration; fallback.presentation.target = configuration.behavior.fallbackTarget
         if fallback.presentation.target == .notch || fallback.presentation.target == .disabled { fallback.presentation.target = .floating }
         route(event, configuration: fallback, depth: depth + 1)
     }
 
+    private func shouldQueue(_ event: HaloHUDEvent, configuration: HaloHUDConfiguration) -> Bool {
+        guard model.visible, model.event.kind != event.kind,
+              configuration.behavior.collision == .queue, !editorPreviewPinned else { return false }
+        if queue.count < 12 { queue.append((event, configuration)) }
+        return true
+    }
+
+    private func showNotch(_ event: HaloHUDEvent, configuration: HaloHUDConfiguration, screen: NSScreen) {
+        if shouldQueue(event, configuration: configuration) { return }
+        removeMenuPresentation()
+        panel?.orderOut(nil)
+
+        let repeated = model.visible && model.event.kind == event.kind && model.configuration.presentation.target == .notch
+        let previousHideWork = hideWork
+        model.event = event
+        model.configuration = configuration
+        model.palette = workspace.media.artworkColors
+        model.sequence += 1
+        model.isExiting = false
+        model.visible = true
+
+        HaloHUDNotchBridge.shared.present(HaloHUDNotchPresentation(
+            event: event,
+            configuration: configuration,
+            side: configuration.presentation.notchSide,
+            screenFrame: screen.frame,
+            persistent: editorPreviewPinned
+        ))
+
+        guard !editorPreviewPinned else { hideWork?.cancel(); return }
+        if repeated && configuration.behavior.interrupt == .continue, previousHideWork != nil { return }
+        if repeated && configuration.behavior.interrupt == .restart { hideWork?.cancel() }
+        scheduleHide(configuration.behavior.displayDuration)
+    }
+
     private func showPanel(_ event: HaloHUDEvent, configuration: HaloHUDConfiguration) {
         guard let panel else { return }
+        if shouldQueue(event, configuration: configuration) { return }
         removeMenuPresentation()
-        if model.visible, model.event.kind != event.kind, configuration.behavior.collision == .queue, !editorPreviewPinned {
-            if queue.count < 12 { queue.append((event, configuration)) }
-            return
-        }
+        HaloHUDNotchBridge.shared.dismiss()
 
-        let repeated = model.visible && model.event.kind == event.kind
+        let repeated = model.visible && model.event.kind == event.kind && model.configuration.presentation.target != .notch
         let previousHideWork = hideWork
         model.event = event
         model.configuration = configuration
@@ -467,10 +521,7 @@ final class HaloHUDEngine {
         }
 
         guard !editorPreviewPinned else { hideWork?.cancel(); return }
-        if repeated && configuration.behavior.interrupt == .continue, previousHideWork != nil {
-            // Continue means update the currently visible HUD without extending its lifetime.
-            return
-        }
+        if repeated && configuration.behavior.interrupt == .continue, previousHideWork != nil { return }
         scheduleHide(configuration.behavior.displayDuration)
     }
 
@@ -483,40 +534,50 @@ final class HaloHUDEngine {
 
     private func hide(immediate: Bool) {
         hideWork?.cancel(); hideWork = nil
-        guard let panel else { return }
+        let wasNotch = model.configuration.presentation.target == .notch
         if immediate {
             model.isExiting = false
             model.visible = false
-            panel.orderOut(nil)
+            if wasNotch { HaloHUDNotchBridge.shared.dismiss() }
+            panel?.orderOut(nil)
             presentNext()
             return
         }
         model.isExiting = true
         model.visible = false
         let delay = min(2, max(0, model.configuration.animation.exitDuration))
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak panel] in
-            guard let self, let panel, !self.model.visible else { return }
-            panel.orderOut(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, !self.model.visible else { return }
+            if wasNotch { HaloHUDNotchBridge.shared.dismiss() }
+            self.panel?.orderOut(nil)
             self.model.isExiting = false
             self.presentNext()
         }
     }
-    private func presentNext() { guard !queue.isEmpty else { return }; let next = queue.removeFirst(); showPanel(next.0, configuration: next.1) }
+
+    private func presentNext() {
+        guard !queue.isEmpty else { return }
+        let next = queue.removeFirst()
+        route(next.0, configuration: next.1, depth: 0)
+    }
 
     private func showMenuBar(_ event: HaloHUDEvent, configuration: HaloHUDConfiguration) {
         hideWork?.cancel(); hideWork = nil
+        HaloHUDNotchBridge.shared.dismiss()
+        model.event = event
+        model.configuration = configuration
         model.visible = false
         panel?.orderOut(nil)
         if menuItem == nil { menuItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength) }
         guard let button = menuItem?.button else { return }
         button.image = configuration.components.icon ? NSImage(systemSymbolName: event.icon, accessibilityDescription: event.primaryText) : nil
         let valueText = HaloHUDRenderFormatting.valueText(event: event, configuration: configuration)
-        if configuration.components.label && (configuration.components.value || configuration.components.percentage), !valueText.isEmpty {
+        if configuration.components.label && !valueText.isEmpty {
             button.title = " \(event.primaryText) · \(valueText)"
         } else if configuration.components.label {
             button.title = " \(event.primaryText)"
-        } else if configuration.components.value || configuration.components.percentage {
-            button.title = valueText.isEmpty ? "" : " \(valueText)"
+        } else if !valueText.isEmpty {
+            button.title = " \(valueText)"
         } else {
             button.title = ""
         }
@@ -631,8 +692,6 @@ final class HaloHUDEngine {
 }
 
 extension HaloHUDEvent {
-    /// Studio previews use payloads shaped like their real providers instead of forcing every event
-    /// into a fake 0...1 progress event.
     static func preview(kind: HaloHUDEventKind, value: Double) -> HaloHUDEvent {
         let p = min(1, max(0, value))
         switch kind {
@@ -684,10 +743,15 @@ extension HaloHUDEvent {
 
 enum HaloHUDRenderFormatting {
     static func valueText(event: HaloHUDEvent, configuration: HaloHUDConfiguration) -> String {
-        guard configuration.components.value || configuration.components.percentage, let value = event.value else { return "" }
+        guard let value = event.value else { return "" }
         let progress = min(1, max(0, event.progress ?? 0))
         let display = event.maximumValue == 100 ? Int(value.rounded()) : Int((progress * 100).rounded())
-        return configuration.components.percentage ? "\(display)%" : "\(display)"
+        switch (configuration.components.value, configuration.components.percentage) {
+        case (true, true): return "\(display) · \(display)%"
+        case (true, false): return "\(display)"
+        case (false, true): return "\(display)%"
+        case (false, false): return ""
+        }
     }
 }
 
@@ -704,8 +768,6 @@ private struct HaloHUDRuntimeView: View {
     }
 }
 
-/// The single visual renderer used by the real HUD and HUD Studio. Keeping this pure means the
-/// editor cannot silently drift away from what is actually drawn on screen.
 struct HaloHUDRenderView: View {
     let event: HaloHUDEvent
     let configuration: HaloHUDConfiguration
@@ -735,7 +797,7 @@ struct HaloHUDRenderView: View {
     }
     private var deviceText: String? {
         if let value = event.metadata["deviceName"], !value.isEmpty { return value }
-        if [.audioInputChanged, .audioOutputChanged, .audioDeviceConnected].contains(event.kind) { return event.secondaryText }
+        if let detail = event.secondaryText, !detail.isEmpty { return detail }
         return nil
     }
 
@@ -968,8 +1030,6 @@ struct HaloHUDRenderView: View {
                     .overlay(Color.black.opacity(max(0, configuration.appearance.backgroundOpacity - 0.45)))
                     .blur(radius: configuration.appearance.blur * 0.025)
             case .image, .video:
-                // Asset-backed HUD backgrounds are not persisted by the current HUD model yet.
-                // Use an explicit styled fallback rather than pretending an absent asset is loaded.
                 LinearGradient(colors: [accent.opacity(0.32), secondaryColor.opacity(0.18), .black.opacity(0.82)], startPoint: .topLeading, endPoint: .bottomTrailing)
                     .blur(radius: configuration.appearance.blur * 0.08)
             case .solid:
@@ -1016,9 +1076,7 @@ struct HaloHUDRenderView: View {
 
     private var hiddenScale: CGSize {
         guard !reduceMotion else { return CGSize(width: 1, height: 1) }
-        if isClosedNotchTarget {
-            return CGSize(width: isExiting ? 0.94 : 0.88, height: 1)
-        }
+        if isClosedNotchTarget { return CGSize(width: isExiting ? 0.94 : 0.88, height: 1) }
         if isExiting {
             switch configuration.animation.exit {
             case .fade: return CGSize(width: 1, height: 1)
@@ -1067,9 +1125,7 @@ struct HaloHUDRenderView: View {
                 ? .easeInOut(duration: max(0.01, configuration.animation.exitDuration))
                 : .easeOut(duration: max(0.01, configuration.animation.entranceDuration))
         }
-        if isExiting {
-            return .easeInOut(duration: max(0.01, configuration.animation.exitDuration))
-        }
+        if isExiting { return .easeInOut(duration: max(0.01, configuration.animation.exitDuration)) }
         if configuration.animation.entrance == .spring {
             let stiffness = max(20, configuration.animation.springStiffness)
             let damping = max(1, 2 * sqrt(stiffness) * configuration.animation.springDamping)
