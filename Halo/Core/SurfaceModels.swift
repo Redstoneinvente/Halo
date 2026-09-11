@@ -114,7 +114,7 @@ struct SurfaceGeometry {
         return Geometry.width(screenWidth: visible.width, requested: max(minimumWidth, requested))
     }
     var compactHeight: Double {
-        max(16, appearance.surface.compactHeight, activeCompactHeight ?? 0)
+        max(16, max(appearance.surface.compactHeight, activeCompactHeight ?? 0))
     }
     var closedCameraOcclusion: CGRect? {
         guard safeAreaTop > 0, physicalNotchWidth > 0 else { return nil }
