@@ -506,7 +506,10 @@ final class DemoMarketingStudio {
 
     private weak var workspace: WorkspaceStore?
     private var window: NSWindow?
-    private var lastPlaybackUpdate = Date()
+    private var playbackAnchorDate = Date()
+    private var playbackAnchorPosition = 34.0
+    private var previewCache: [String: NSImage] = [:]
+    private var pngCache: [String: Data] = [:]
 
     var isEnabled: Bool { UserDefaults.standard.bool(forKey: Self.enabledKey) }
 
@@ -537,12 +540,14 @@ final class DemoMarketingStudio {
             Self.onBatteryKey: false,
             Self.lowPowerKey: false
         ])
+        playbackAnchorPosition = UserDefaults.standard.double(forKey: Self.positionKey)
+        playbackAnchorDate = Date()
         DemoAppleScriptBridge.install()
     }
 
     func attach(workspace: WorkspaceStore) {
         self.workspace = workspace
-        lastPlaybackUpdate = Date()
+        syncPlaybackAnchor(to: UserDefaults.standard.double(forKey: Self.positionKey))
         show()
         if isEnabled { apply(to: workspace) }
     }
@@ -567,21 +572,25 @@ final class DemoMarketingStudio {
         window?.makeKeyAndOrderFront(nil)
     }
 
-    func advancePlaybackClock() {
+    func currentPlaybackPosition(at now: Date = Date()) -> Double {
         let defaults = UserDefaults.standard
-        let now = Date()
-        let delta = min(5, max(0, now.timeIntervalSince(lastPlaybackUpdate)))
-        lastPlaybackUpdate = now
-        guard isEnabled, defaults.bool(forKey: Self.playingKey) else { return }
         let duration = max(1, defaults.double(forKey: Self.durationKey))
-        let current = max(0, defaults.double(forKey: Self.positionKey))
-        let next = (current + delta).truncatingRemainder(dividingBy: duration)
-        defaults.set(next, forKey: Self.positionKey)
+        guard defaults.bool(forKey: Self.playingKey) else {
+            return min(duration, max(0, playbackAnchorPosition))
+        }
+        let elapsed = max(0, now.timeIntervalSince(playbackAnchorDate))
+        return (playbackAnchorPosition + elapsed).truncatingRemainder(dividingBy: duration)
+    }
+
+    func syncPlaybackAnchor(to position: Double) {
+        let duration = max(1, UserDefaults.standard.double(forKey: Self.durationKey))
+        playbackAnchorPosition = min(duration, max(0, position))
+        playbackAnchorDate = Date()
+        UserDefaults.standard.set(playbackAnchorPosition, forKey: Self.positionKey)
     }
 
     func apply(to workspace: WorkspaceStore) {
         guard isEnabled else { return }
-        advancePlaybackClock()
         let defaults = UserDefaults.standard
         workspace.media.applyDemoSnapshot(
             title: defaults.string(forKey: Self.titleKey) ?? "Neon Afterglow",
@@ -595,7 +604,7 @@ final class DemoMarketingStudio {
     }
 
     func clear(from workspace: WorkspaceStore) {
-        lastPlaybackUpdate = Date()
+        syncPlaybackAnchor(to: currentPlaybackPosition())
         workspace.media.disconnect()
         workspace.system.refresh()
     }
@@ -625,11 +634,13 @@ final class DemoMarketingStudio {
 
     func handleMediaCommand(_ command: String, media: MediaService) {
         let defaults = UserDefaults.standard
-        advancePlaybackClock()
+        let current = currentPlaybackPosition()
         switch command {
         case "playpause":
-            defaults.set(!defaults.bool(forKey: Self.playingKey), forKey: Self.playingKey)
-            lastPlaybackUpdate = Date()
+            let wasPlaying = defaults.bool(forKey: Self.playingKey)
+            syncPlaybackAnchor(to: current)
+            defaults.set(!wasPlaying, forKey: Self.playingKey)
+            playbackAnchorDate = Date()
         case "next track":
             setPreset(index: 1)
         case "previous track":
@@ -652,17 +663,17 @@ final class DemoMarketingStudio {
             defaults.set("Halo Nights", forKey: Self.albumKey)
             defaults.set("Neon", forKey: Self.artworkStyleKey)
             defaults.set(188.0, forKey: Self.durationKey)
-            defaults.set(34.0, forKey: Self.positionKey)
+            syncPlaybackAnchor(to: 34.0)
         } else {
             defaults.set("Glass Horizon", forKey: Self.titleKey)
             defaults.set("Aster & Co.", forKey: Self.artistKey)
             defaults.set("Refractions", forKey: Self.albumKey)
             defaults.set("Ocean", forKey: Self.artworkStyleKey)
             defaults.set(214.0, forKey: Self.durationKey)
-            defaults.set(72.0, forKey: Self.positionKey)
+            syncPlaybackAnchor(to: 72.0)
         }
         defaults.set(true, forKey: Self.playingKey)
-        lastPlaybackUpdate = Date()
+        playbackAnchorDate = Date()
     }
 
     func appleEventDescriptor(for script: String) -> NSAppleEventDescriptor? {
@@ -672,7 +683,7 @@ final class DemoMarketingStudio {
 
         if lower.contains("raw data of artwork 1 of current track") {
             return descriptorList([
-                NSAppleEventDescriptor(string: "halo-demo-\(artworkRevision)"),
+                NSAppleEventDescriptor(string: "halo-demo-track"),
                 NSAppleEventDescriptor(descriptorType: 0x74647461, data: artworkData())
             ])
         }
@@ -685,16 +696,10 @@ final class DemoMarketingStudio {
             if let range = lower.range(of: "set player position to ") {
                 let suffix = lower[range.upperBound...]
                 let number = suffix.prefix { $0.isNumber || $0 == "." || $0 == "-" }
-                if let value = Double(number) {
-                    let duration = max(1, defaults.double(forKey: Self.durationKey))
-                    defaults.set(min(duration, max(0, value)), forKey: Self.positionKey)
-                    lastPlaybackUpdate = Date()
-                }
-            } else {
-                advancePlaybackClock()
+                if let value = Double(number) { syncPlaybackAnchor(to: value) }
             }
             let duration = max(1, defaults.double(forKey: Self.durationKey))
-            let position = min(duration, max(0, defaults.double(forKey: Self.positionKey)))
+            let position = currentPlaybackPosition()
             return descriptorList([NSAppleEventDescriptor(double: position), NSAppleEventDescriptor(double: duration)])
         }
 
@@ -703,7 +708,7 @@ final class DemoMarketingStudio {
                 NSAppleEventDescriptor(string: defaults.string(forKey: Self.titleKey) ?? "Neon Afterglow"),
                 NSAppleEventDescriptor(string: defaults.string(forKey: Self.artistKey) ?? "Luma Vale"),
                 NSAppleEventDescriptor(boolean: defaults.bool(forKey: Self.playingKey)),
-                NSAppleEventDescriptor(string: "halo-demo-\(artworkRevision)")
+                NSAppleEventDescriptor(string: "halo-demo-track")
             ])
         }
 
@@ -714,7 +719,7 @@ final class DemoMarketingStudio {
         let defaults = UserDefaults.standard
         let style = defaults.string(forKey: Self.artworkStyleKey) ?? "Neon"
         let title = defaults.string(forKey: Self.titleKey) ?? "Neon Afterglow"
-        return (style + "-" + title).replacingOccurrences(of: " ", with: "-")
+        return style + "|" + title
     }
 
     private func descriptorList(_ items: [NSAppleEventDescriptor?]) -> NSAppleEventDescriptor {
@@ -724,18 +729,25 @@ final class DemoMarketingStudio {
     }
 
     func artworkPreview(style: String) -> NSImage {
-        makeArtwork(style: style, title: UserDefaults.standard.string(forKey: Self.titleKey) ?? "Neon Afterglow")
+        let title = UserDefaults.standard.string(forKey: Self.titleKey) ?? "Neon Afterglow"
+        let key = style + "|" + title
+        if let cached = previewCache[key] { return cached }
+        let image = makeArtwork(style: style, title: title)
+        previewCache[key] = image
+        return image
     }
 
     private func artworkData() -> Data {
+        let key = artworkRevision
+        if let cached = pngCache[key] { return cached }
         let defaults = UserDefaults.standard
-        let image = makeArtwork(style: defaults.string(forKey: Self.artworkStyleKey) ?? "Neon",
-                                title: defaults.string(forKey: Self.titleKey) ?? "Neon Afterglow")
+        let image = artworkPreview(style: defaults.string(forKey: Self.artworkStyleKey) ?? "Neon")
         guard let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
-              let png = bitmap.representation(using: .png, properties: [:]) else {
+              let png = bitmap.representation(using: .png, properties: [.compressionFactor: 0.92]) else {
             return image.tiffRepresentation ?? Data()
         }
+        pngCache[key] = png
         return png
     }
 
@@ -745,34 +757,106 @@ final class DemoMarketingStudio {
         image.lockFocus()
         defer { image.unlockFocus() }
 
-        let colors: [NSColor]
+        let canvas = NSRect(origin: .zero, size: size)
+        let inset = canvas.insetBy(dx: 26, dy: 26)
+
         switch style {
-        case "Sunset": colors = [NSColor(calibratedRed: 0.99, green: 0.32, blue: 0.42, alpha: 1), NSColor(calibratedRed: 0.96, green: 0.62, blue: 0.22, alpha: 1), NSColor(calibratedRed: 0.32, green: 0.08, blue: 0.34, alpha: 1)]
-        case "Ocean": colors = [NSColor(calibratedRed: 0.05, green: 0.13, blue: 0.30, alpha: 1), NSColor(calibratedRed: 0.08, green: 0.67, blue: 0.78, alpha: 1), NSColor(calibratedRed: 0.24, green: 0.35, blue: 0.94, alpha: 1)]
-        default: colors = [NSColor(calibratedRed: 0.13, green: 0.07, blue: 0.30, alpha: 1), NSColor(calibratedRed: 0.51, green: 0.22, blue: 0.96, alpha: 1), NSColor(calibratedRed: 0.95, green: 0.24, blue: 0.60, alpha: 1)]
+        case "Sunset":
+            NSGradient(colors: [
+                NSColor(calibratedRed: 0.10, green: 0.04, blue: 0.16, alpha: 1),
+                NSColor(calibratedRed: 0.64, green: 0.12, blue: 0.28, alpha: 1),
+                NSColor(calibratedRed: 0.98, green: 0.50, blue: 0.24, alpha: 1)
+            ])?.draw(in: canvas, angle: 88)
+            let sun = NSBezierPath(ovalIn: NSRect(x: 170, y: 204, width: 300, height: 300))
+            NSColor(calibratedRed: 1.0, green: 0.82, blue: 0.55, alpha: 0.92).setFill(); sun.fill()
+            for y in stride(from: 214.0, through: 408.0, by: 24.0) {
+                NSColor(calibratedWhite: 0.08, alpha: 0.32).setFill()
+                NSBezierPath(rect: NSRect(x: 150, y: y, width: 340, height: 8)).fill()
+            }
+            let horizon = NSBezierPath()
+            horizon.move(to: NSPoint(x: 0, y: 170)); horizon.line(to: NSPoint(x: 640, y: 170)); horizon.line(to: NSPoint(x: 640, y: 0)); horizon.line(to: NSPoint(x: 0, y: 0)); horizon.close()
+            NSColor(calibratedRed: 0.04, green: 0.02, blue: 0.07, alpha: 0.86).setFill(); horizon.fill()
+            for i in 0..<5 {
+                let y = CGFloat(120 - i * 18)
+                let wave = NSBezierPath()
+                wave.move(to: NSPoint(x: 0, y: y))
+                wave.curve(to: NSPoint(x: 640, y: y - 5), controlPoint1: NSPoint(x: 180, y: y + 28), controlPoint2: NSPoint(x: 430, y: y - 30))
+                NSColor.white.withAlphaComponent(0.08 + CGFloat(i) * 0.015).setStroke(); wave.lineWidth = 2; wave.stroke()
+            }
+        case "Ocean":
+            NSGradient(colors: [
+                NSColor(calibratedRed: 0.015, green: 0.055, blue: 0.15, alpha: 1),
+                NSColor(calibratedRed: 0.02, green: 0.31, blue: 0.48, alpha: 1),
+                NSColor(calibratedRed: 0.09, green: 0.74, blue: 0.72, alpha: 1)
+            ])?.draw(in: canvas, angle: -58)
+            for i in 0..<7 {
+                let path = NSBezierPath()
+                let y = CGFloat(110 + i * 44)
+                path.move(to: NSPoint(x: -30, y: y))
+                path.curve(to: NSPoint(x: 680, y: y + CGFloat((i % 2) * 10 - 5)), controlPoint1: NSPoint(x: 170, y: y + 62), controlPoint2: NSPoint(x: 420, y: y - 54))
+                NSColor.white.withAlphaComponent(0.055 + CGFloat(i) * 0.014).setStroke(); path.lineWidth = CGFloat(2 + i % 3); path.stroke()
+            }
+            let moon = NSBezierPath(ovalIn: NSRect(x: 390, y: 365, width: 132, height: 132))
+            NSColor.white.withAlphaComponent(0.92).setFill(); moon.fill()
+            let cut = NSBezierPath(ovalIn: NSRect(x: 425, y: 390, width: 126, height: 126))
+            NSColor(calibratedRed: 0.03, green: 0.23, blue: 0.34, alpha: 1).setFill(); cut.fill()
+            for i in 0..<26 {
+                let x = CGFloat((i * 97) % 610 + 15)
+                let y = CGFloat((i * 151) % 600 + 20)
+                NSColor.white.withAlphaComponent(i % 4 == 0 ? 0.72 : 0.34).setFill()
+                NSBezierPath(ovalIn: NSRect(x: x, y: y, width: i % 4 == 0 ? 3 : 1.5, height: i % 4 == 0 ? 3 : 1.5)).fill()
+            }
+        default:
+            NSGradient(colors: [
+                NSColor(calibratedRed: 0.025, green: 0.018, blue: 0.075, alpha: 1),
+                NSColor(calibratedRed: 0.18, green: 0.045, blue: 0.38, alpha: 1),
+                NSColor(calibratedRed: 0.76, green: 0.10, blue: 0.48, alpha: 1)
+            ])?.draw(in: canvas, angle: -35)
+            NSGraphicsContext.saveGraphicsState()
+            let glowShadow = NSShadow(); glowShadow.shadowColor = NSColor(calibratedRed: 0.64, green: 0.28, blue: 1, alpha: 0.85); glowShadow.shadowBlurRadius = 36; glowShadow.set()
+            for i in 0..<4 {
+                let r = CGFloat(470 - i * 72)
+                let ring = NSBezierPath(ovalIn: NSRect(x: (640 - r) / 2, y: (640 - r) / 2 + CGFloat(i * 8), width: r, height: r))
+                NSColor(calibratedRed: 0.78, green: 0.30, blue: 1, alpha: 0.11 + CGFloat(i) * 0.045).setStroke(); ring.lineWidth = CGFloat(7 - i); ring.stroke()
+            }
+            NSGraphicsContext.restoreGraphicsState()
+            let slash = NSBezierPath()
+            slash.move(to: NSPoint(x: 80, y: 160)); slash.line(to: NSPoint(x: 560, y: 470))
+            NSColor.white.withAlphaComponent(0.15).setStroke(); slash.lineWidth = 2; slash.stroke()
+            for i in 0..<18 {
+                let x = CGFloat((i * 71) % 560 + 38)
+                let y = CGFloat((i * 123) % 540 + 50)
+                NSColor.white.withAlphaComponent(i % 3 == 0 ? 0.42 : 0.17).setFill()
+                NSBezierPath(ovalIn: NSRect(x: x, y: y, width: i % 3 == 0 ? 4 : 2, height: i % 3 == 0 ? 4 : 2)).fill()
+            }
         }
-        NSGradient(colors: colors)?.draw(in: NSRect(origin: .zero, size: size), angle: -38)
 
-        for i in 0..<5 {
-            let inset = CGFloat(62 + i * 58)
-            let path = NSBezierPath(ovalIn: NSRect(x: inset, y: inset, width: size.width - inset * 2, height: size.height - inset * 2))
-            NSColor.white.withAlphaComponent(0.08 + CGFloat(i) * 0.018).setStroke()
-            path.lineWidth = 3
-            path.stroke()
-        }
+        NSColor.black.withAlphaComponent(0.12).setStroke()
+        let border = NSBezierPath(roundedRect: inset, xRadius: 42, yRadius: 42); border.lineWidth = 2; border.stroke()
 
-        let glow = NSBezierPath(ovalIn: NSRect(x: 170, y: 170, width: 300, height: 300))
-        NSColor.white.withAlphaComponent(0.12).setFill(); glow.fill()
+        let subtitle = style.uppercased() + " / HALO SESSION"
+        let subtitleStyle = NSMutableParagraphStyle(); subtitleStyle.alignment = .left
+        NSString(string: subtitle).draw(in: NSRect(x: 48, y: 54, width: 540, height: 28), withAttributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 14, weight: .semibold),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.62),
+            .paragraphStyle: subtitleStyle,
+            .kern: 2.6
+        ])
 
-        let mark = title.split(separator: " ").prefix(2).compactMap { $0.first }.map(String.init).joined()
-        let paragraph = NSMutableParagraphStyle(); paragraph.alignment = .center
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 86, weight: .bold),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.92),
-            .paragraphStyle: paragraph,
-            .kern: 8
-        ]
-        NSString(string: mark.isEmpty ? "H" : mark).draw(in: NSRect(x: 0, y: 260, width: size.width, height: 120), withAttributes: attributes)
+        let titleStyle = NSMutableParagraphStyle(); titleStyle.alignment = .left
+        let displayTitle = title.isEmpty ? "HALO" : title
+        NSString(string: displayTitle).draw(in: NSRect(x: 46, y: 92, width: 530, height: 150), withAttributes: [
+            .font: NSFont.systemFont(ofSize: displayTitle.count > 18 ? 52 : 64, weight: .bold),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.96),
+            .paragraphStyle: titleStyle,
+            .kern: -1.2
+        ])
+
+        NSString(string: "REDSTONEINVENTE / DEMO EDITION").draw(in: NSRect(x: 48, y: 558, width: 530, height: 26), withAttributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.45),
+            .kern: 1.8
+        ])
         return image
     }
 }
@@ -799,15 +883,16 @@ private struct DemoMarketingView: View {
     @State private var activityDetail = "Deep work · 18 min remaining"
     @State private var activityProgress = 0.64
     @State private var hudValue = 0.72
-    private let playbackTimer = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Form {
             Section("Marketing Demo") {
                 Toggle("Enable dummy data", isOn: $enabled)
                     .onChange(of: enabled) { value in
-                        if value { apply() }
-                        else { DemoMarketingStudio.shared.clear(from: workspace) }
+                        if value {
+                            DemoMarketingStudio.shared.syncPlaybackAnchor(to: position)
+                            apply()
+                        } else { DemoMarketingStudio.shared.clear(from: workspace) }
                     }
                 Text("This panel exists only on the Demo branch. Music metadata, artwork, lyrics, playback progress and system state are synthetic and repeatable for capture.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -819,24 +904,25 @@ private struct DemoMarketingView: View {
                 TextField("Album", text: $album)
 
                 Text("Cover art").font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
                     ForEach(["Neon", "Sunset", "Ocean"], id: \.self) { style in
                         Button {
                             artworkStyle = style
                             workspace.media.disconnect()
                             DispatchQueue.main.async { apply() }
                         } label: {
-                            VStack(spacing: 5) {
+                            VStack(spacing: 6) {
                                 Image(nsImage: DemoMarketingStudio.shared.artworkPreview(style: style))
                                     .resizable()
                                     .scaledToFill()
-                                    .frame(width: 74, height: 74)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .frame(width: 92, height: 92)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                                     .overlay {
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
                                             .stroke(artworkStyle == style ? Color.accentColor : Color.white.opacity(0.14), lineWidth: artworkStyle == style ? 2 : 1)
                                     }
-                                Text(style).font(.caption2)
+                                    .shadow(radius: artworkStyle == style ? 8 : 2)
+                                Text(style).font(.caption2).fontWeight(artworkStyle == style ? .semibold : .regular)
                             }
                         }
                         .buttonStyle(.plain)
@@ -844,27 +930,46 @@ private struct DemoMarketingView: View {
                 }
 
                 Toggle("Playing", isOn: $playing)
-                HStack {
-                    Text("Position"); Spacer(); Text("\(formatTime(position)) / \(formatTime(duration))").monospacedDigit().foregroundStyle(.secondary)
+                    .onChange(of: playing) { _ in
+                        DemoMarketingStudio.shared.syncPlaybackAnchor(to: DemoMarketingStudio.shared.currentPlaybackPosition())
+                        apply()
+                    }
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    HStack {
+                        Text("Position")
+                        Spacer()
+                        Text("\(formatTime(DemoMarketingStudio.shared.currentPlaybackPosition())) / \(formatTime(duration))")
+                            .monospacedDigit().foregroundStyle(.secondary)
+                    }
                 }
-                SwiftUI.Slider(value: $position, in: 0...max(1, duration))
+                SwiftUI.Slider(value: Binding(
+                    get: { position },
+                    set: { newValue in
+                        position = newValue
+                        DemoMarketingStudio.shared.syncPlaybackAnchor(to: newValue)
+                    }
+                ), in: 0...max(1, duration))
                 HStack {
                     Text("Track length"); Spacer(); Text(formatTime(duration)).monospacedDigit().foregroundStyle(.secondary)
                 }
                 SwiftUI.Slider(value: $duration, in: 30...420, step: 1)
-                Text("The playhead advances automatically while Playing is enabled and loops back to 0:00 at the end of the track.")
+                Text("The playhead is calculated from a lightweight clock, so it advances and loops without continuously writing to UserDefaults or forcing Halo to redraw.")
                     .font(.caption2).foregroundStyle(.secondary)
 
                 Text("Synced lyrics (LRC)").font(.caption).foregroundStyle(.secondary)
                 TextEditor(text: $lyrics).font(.system(.caption, design: .monospaced)).frame(minHeight: 90)
                 HStack {
                     Button("Hero preset") {
-                        title = "Neon Afterglow"; artist = "Luma Vale"; album = "Halo Nights"; artworkStyle = "Neon"; duration = 188; position = 34; playing = true; apply()
+                        title = "Neon Afterglow"; artist = "Luma Vale"; album = "Halo Nights"; artworkStyle = "Neon"; duration = 188; position = 34; playing = true
+                        DemoMarketingStudio.shared.syncPlaybackAnchor(to: 34); apply()
                     }
                     Button("Ambient preset") {
-                        title = "Glass Horizon"; artist = "Aster & Co."; album = "Refractions"; artworkStyle = "Ocean"; duration = 214; position = 72; playing = true; apply()
+                        title = "Glass Horizon"; artist = "Aster & Co."; album = "Refractions"; artworkStyle = "Ocean"; duration = 214; position = 72; playing = true
+                        DemoMarketingStudio.shared.syncPlaybackAnchor(to: 72); apply()
                     }
-                    Button("Paused") { playing = false; apply() }
+                    Button("Paused") {
+                        position = DemoMarketingStudio.shared.currentPlaybackPosition(); DemoMarketingStudio.shared.syncPlaybackAnchor(to: position); playing = false; apply()
+                    }
                 }
                 Button("Prepare Context Music hero") {
                     if !enabled { enabled = true }
@@ -922,18 +1027,18 @@ private struct DemoMarketingView: View {
         }
         .formStyle(.grouped)
         .frame(minWidth: 430, minHeight: 640)
-        .onAppear { if enabled { apply() } }
-        .onReceive(playbackTimer) { _ in
-            guard enabled else { return }
-            DemoMarketingStudio.shared.advancePlaybackClock()
+        .onAppear {
+            DemoMarketingStudio.shared.syncPlaybackAnchor(to: position)
+            if enabled { apply() }
         }
         .onChange(of: title) { _ in if enabled { apply() } }
         .onChange(of: artist) { _ in if enabled { apply() } }
         .onChange(of: album) { _ in if enabled { apply() } }
         .onChange(of: artworkStyle) { _ in if enabled { apply() } }
-        .onChange(of: playing) { _ in if enabled { apply() } }
-        .onChange(of: position) { _ in if enabled { apply() } }
-        .onChange(of: duration) { _ in if enabled { apply() } }
+        .onChange(of: duration) { _ in
+            DemoMarketingStudio.shared.syncPlaybackAnchor(to: min(duration, DemoMarketingStudio.shared.currentPlaybackPosition()))
+            if enabled { apply() }
+        }
     }
 
     private func apply() {
