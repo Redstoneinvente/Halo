@@ -461,9 +461,24 @@ private enum DemoAppleScriptBridge {
 
 private extension NSAppleScript {
     @objc func halo_demoExecuteAndReturnError(_ errorInfo: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) -> NSAppleEventDescriptor {
-        if DemoMarketingStudio.shared.isEnabled,
-           let source = self.source,
-           let descriptor = DemoMarketingStudio.shared.appleEventDescriptor(for: source) {
+        guard UserDefaults.standard.bool(forKey: DemoMarketingStudio.enabledKey), let source = self.source else {
+            return halo_demoExecuteAndReturnError(errorInfo)
+        }
+
+        let descriptor: NSAppleEventDescriptor?
+        if Thread.isMainThread {
+            descriptor = MainActor.assumeIsolated {
+                DemoMarketingStudio.shared.appleEventDescriptor(for: source)
+            }
+        } else {
+            descriptor = DispatchQueue.main.sync {
+                MainActor.assumeIsolated {
+                    DemoMarketingStudio.shared.appleEventDescriptor(for: source)
+                }
+            }
+        }
+
+        if let descriptor {
             errorInfo?.pointee = nil
             return descriptor
         }
@@ -670,9 +685,9 @@ final class DemoMarketingStudio {
         return nil
     }
 
-    private func descriptorList(_ items: [NSAppleEventDescriptor]) -> NSAppleEventDescriptor {
+    private func descriptorList(_ items: [NSAppleEventDescriptor?]) -> NSAppleEventDescriptor {
         let list = NSAppleEventDescriptor.list()
-        for (index, item) in items.enumerated() { list.insert(item, at: index + 1) }
+        for (index, item) in items.compactMap({ $0 }).enumerated() { list.insert(item, at: index + 1) }
         return list
     }
 
