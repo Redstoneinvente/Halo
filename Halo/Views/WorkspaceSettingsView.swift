@@ -524,7 +524,12 @@ private struct ContextMusicSettings: View {
     private var options: Binding<ContextMusicOptions> { Binding(get: { layout.contextMusic ?? ContextMusicOptions() }, set: { layout.contextMusic = $0 }) }
     private var layoutMode: Binding<ContextMusicLayoutMode> { Binding(get: { options.wrappedValue.resolvedLayoutMode }, set: { options.wrappedValue.layoutMode = $0 }) }
     private var foregroundArtwork: Binding<ContextArtworkPresentation> {
-        Binding(get: { options.wrappedValue.resolvedForegroundArtwork }, set: { options.wrappedValue.foregroundArtwork = $0; options.wrappedValue.showArtwork = $0 != .none })
+        Binding(get: { options.wrappedValue.resolvedForegroundArtwork }, set: { value in
+            var updated = options.wrappedValue
+            updated.foregroundArtwork = value
+            updated.showArtwork = value != .none
+            options.wrappedValue = updated
+        })
     }
     private var artworkBackground: Binding<Bool> { Binding(get: { options.wrappedValue.usesArtworkBackground }, set: { options.wrappedValue.artworkBackground = $0 }) }
     private var contentAlignment: Binding<ContextContentAlignment> { Binding(get: { options.wrappedValue.resolvedContentAlignment }, set: { options.wrappedValue.contentAlignment = $0 }) }
