@@ -163,7 +163,7 @@ final class AudioService: ObservableObject {
     func setVolume(_ value: Float32) {
         guard canSetVolume else { return }
         var clamped = min(1, max(0, value))
-        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar, mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar, mScope: kAudioObjectPropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
         if AudioObjectSetPropertyData(selected, &address, 0, nil, UInt32(MemoryLayout<Float32>.size), &clamped) == noErr { volume = clamped }
         else { error = "This output doesn't allow software volume control." }
     }
@@ -405,12 +405,12 @@ final class HotkeyService {
             guard let event, let userData else { return noErr }
             let service = Unmanaged<HotkeyService>.fromOpaque(userData).takeUnretainedValue()
             var identifier = EventHotKeyID()
-            var actualSize: UInt32 = 0
+            var actualSize = 0
             let read = GetEventParameter(event,
                                          EventParamName(kEventParamDirectObject),
                                          EventParamType(typeEventHotKeyID),
                                          nil,
-                                         UInt32(MemoryLayout<EventHotKeyID>.size),
+                                         MemoryLayout<EventHotKeyID>.size,
                                          &actualSize,
                                          &identifier)
             guard read == noErr, identifier.id == service.identifierID else { return noErr }
