@@ -503,9 +503,14 @@ struct HaloHUDNotchConfiguration: Codable, Equatable {
     var iconSize = 16.0
     var textSize = 12.0
     var progressWidth = 84.0
+    var expandVertically: Bool?
+    var verticalHeight: Double?
+
+    var usesVerticalExpansion: Bool { expandVertically ?? false }
+    var resolvedVerticalHeight: Double { min(220, max(56, verticalHeight ?? 92)) }
 
     func validated() throws -> HaloHUDNotchConfiguration {
-        let numbers = [width, horizontalPadding, spacing, horizontalOffset, iconSize, textSize, progressWidth]
+        let numbers = [width, horizontalPadding, spacing, horizontalOffset, iconSize, textSize, progressWidth, verticalHeight ?? 92]
         guard numbers.allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var result = self
         result.width = min(600, max(48, width))
@@ -515,6 +520,7 @@ struct HaloHUDNotchConfiguration: Codable, Equatable {
         result.iconSize = min(32, max(8, iconSize))
         result.textSize = min(24, max(8, textSize))
         result.progressWidth = min(220, max(20, progressWidth))
+        if verticalHeight != nil { result.verticalHeight = resolvedVerticalHeight }
         return result
     }
 }
