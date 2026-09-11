@@ -57,6 +57,7 @@ final class SurfaceAnimator {
 
     private func syncClosedGeometry(state: SurfaceState, frame: CGRect, cameraFrame: CGRect?) {
         if state.compactWidth != frame.width { state.compactWidth = frame.width }
+        if state.compactHeight != frame.height { state.compactHeight = frame.height }
         if state.viewport.size != frame.size { state.viewport.size = frame.size }
 
         let nextOcclusion: CGRect?
@@ -189,8 +190,22 @@ final class WindowManager {
     }
 
     private enum DynamicSide { case left, right }
+    private struct HUDNotchExpansion {
+        var side: HaloHUDNotchSide
+        var width: Double
+        var height: Double
+        var screenFrame: CGRect
+        var kind: HaloHUDEventKind
+        var collision: HaloHUDCollisionBehavior
+        var persistent: Bool
+    }
+
     private var activityExpiry: DispatchWorkItem?
     private var mediaWidthHint: Double?
+    private var hudNotchExpansion: HUDNotchExpansion?
+    private var hudNotchHideWork: DispatchWorkItem?
+    private var hudMonitor: Any?
+    private var lastHUDCapsLock = false
     private let store: AppStore
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
@@ -221,7 +236,10 @@ final class WindowManager {
             return SurfaceRenderConfiguration(appearance: layout.appearance, displays: settings.displays, closedNotch: layout.closedNotch, clock: layout.widgetStyle(for: .clock), horizontalWidgets: layout.horizontalWidgets, horizontalHeight: layout.horizontalHeight)
         }
             .removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+            .sink { [weak self] _ in
+                self?.reconcile()
+                self?.refreshActiveHUDNotchConfiguration()
+            }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloGeometryPreview"))
             .receive(on: DispatchQueue.main).sink { [weak self] note in
                 let editing = (note.userInfo?["editing"] as? Bool) ?? false
@@ -244,8 +262,18 @@ final class WindowManager {
                 self.mediaWidthHint = next
                 self.refreshDynamicWidths()
             }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: .init("HaloHUDReplacementKey"))
+            .receive(on: DispatchQueue.main).sink { [weak self] note in
+                guard let key = note.userInfo?["key"] as? Int else { return }
+                self?.handleHUDKey(key)
+            }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: .init("HaloHUDPreview"))
+            .receive(on: DispatchQueue.main).sink { [weak self] note in self?.handleHUDPreview(note) }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: .init("HaloHUDPreviewExit"))
+            .receive(on: DispatchQueue.main).sink { [weak self] _ in self?.clearHUDNotchExpansion() }.store(in: &subscriptions)
+
         store.workspace.$scheduledProfileID.removeDuplicates().receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+            .sink { [weak self] _ in self?.reconcile(); self?.refreshActiveHUDNotchConfiguration() }.store(in: &subscriptions)
         store.workspace.media.$title.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.mediaWidthHint = nil; self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.media.$artist.removeDuplicates().receive(on: DispatchQueue.main)
@@ -273,6 +301,28 @@ final class WindowManager {
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.$activities.receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+
+        // Mirror the providers that can present HUD events so notch expansion follows the real
+        // HUD lifetime even though the HUD renderer remains its own overlay panel.
+        store.workspace.system.$battery.compactMap { $0 }.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.triggerHUDNotch(kind: .batteryStatus) }.store(in: &subscriptions)
+        store.workspace.system.$charging.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.triggerHUDNotch(kind: .chargingState) }.store(in: &subscriptions)
+        store.workspace.system.$onBattery.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.triggerHUDNotch(kind: .powerSourceChanged) }.store(in: &subscriptions)
+        store.workspace.media.$title.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard self?.store.workspace.media.isPlaying == true else { return }
+                self?.triggerHUDNotch(kind: .mediaChanged)
+            }.store(in: &subscriptions)
+        store.workspace.audio.$selected.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.triggerHUDNotch(kind: .audioOutputChanged) }.store(in: &subscriptions)
+        store.workspace.audio.$devices.map { $0.map(\.id) }.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.triggerHUDNotch(kind: .audioDeviceConnected) }.store(in: &subscriptions)
+
+        hudMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.systemDefined, .flagsChanged]) { [weak self] event in
+            Task { @MainActor in self?.handleHUDObservedEvent(event) }
+        }
         reconcile()
     }
 
@@ -288,6 +338,158 @@ final class WindowManager {
                       y: geometry.screen.maxY - geometry.safeAreaTop,
                       width: geometry.physicalNotchWidth,
                       height: geometry.safeAreaTop)
+    }
+
+    private func hudScreen(for configuration: HaloHUDConfiguration) -> NSScreen? {
+        switch configuration.presentation.displayTarget {
+        case .builtIn:
+            return NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main ?? NSScreen.screens.first
+        case .main:
+            return NSScreen.main ?? NSScreen.screens.first
+        case .active:
+            return NSScreen.main ?? hudMouseScreen()
+        case .mouse:
+            return hudMouseScreen()
+        }
+    }
+
+    private func hudMouseScreen() -> NSScreen? {
+        let mouse = NSEvent.mouseLocation
+        return NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main ?? NSScreen.screens.first
+    }
+
+    private func resolvedHUDNotchSide(_ requested: HaloHUDNotchSide) -> HaloHUDNotchSide {
+        guard requested == .automatic else { return requested }
+        let closed = store.workspace.effectiveLayout.closedNotch ?? ClosedNotchOptions()
+        let leftBusy = closed.left != .none
+        let rightBusy = closed.right != .none
+        if !rightBusy { return .right }
+        if !leftBusy { return .left }
+        return .right
+    }
+
+    private func hudNotchOccupied(_ side: HaloHUDNotchSide) -> Bool {
+        let closed = store.workspace.effectiveLayout.closedNotch ?? ClosedNotchOptions()
+        switch side {
+        case .left: return closed.left != .none
+        case .right: return closed.right != .none
+        case .full: return closed.left != .none || closed.right != .none
+        case .automatic: return false
+        }
+    }
+
+    private func resolvedHUDConfiguration(kind: HaloHUDEventKind) -> HaloHUDConfiguration? {
+        let settings = store.workspace.effectiveLayout.hud ?? HaloHUDSettings()
+        guard settings.enabled, settings.isEnabled(kind) else { return nil }
+        var configuration = settings.configuration(for: kind)
+        let bundle = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        if let rule = settings.appRules.first(where: { $0.enabled && !$0.bundleIdentifier.isEmpty && $0.bundleIdentifier == bundle }) {
+            configuration.presentation.target = rule.target
+        }
+        return configuration
+    }
+
+    private func triggerHUDNotch(kind: HaloHUDEventKind, suppliedConfiguration: HaloHUDConfiguration? = nil,
+                                 persistent: Bool = false) {
+        let configuration: HaloHUDConfiguration
+        if let suppliedConfiguration {
+            configuration = suppliedConfiguration
+        } else if let resolved = resolvedHUDConfiguration(kind: kind) {
+            configuration = resolved
+        } else {
+            if hudNotchExpansion?.kind == kind { clearHUDNotchExpansion() }
+            return
+        }
+
+        guard configuration.presentation.target == .notch,
+              let screen = hudScreen(for: configuration),
+              screen.safeAreaInsets.top > 0 else {
+            if hudNotchExpansion?.kind == kind { clearHUDNotchExpansion() }
+            return
+        }
+
+        let side = resolvedHUDNotchSide(configuration.presentation.notchSide)
+        if configuration.behavior.collision == .showExternally && hudNotchOccupied(side) {
+            if hudNotchExpansion?.kind == kind { clearHUDNotchExpansion() }
+            return
+        }
+
+        let width = min(configuration.layout.maximumWidth,
+                        max(configuration.layout.minimumWidth, configuration.layout.width))
+        let height = max(24, configuration.layout.height)
+        let repeatedContinue = hudNotchExpansion?.kind == kind &&
+            configuration.behavior.interrupt == .continue && hudNotchHideWork != nil
+
+        hudNotchExpansion = HUDNotchExpansion(side: side, width: width, height: height,
+                                              screenFrame: screen.frame, kind: kind,
+                                              collision: configuration.behavior.collision,
+                                              persistent: persistent)
+        refreshDynamicWidths()
+
+        if persistent {
+            hudNotchHideWork?.cancel(); hudNotchHideWork = nil
+            return
+        }
+        if repeatedContinue { return }
+        hudNotchHideWork?.cancel()
+        let delay = min(12, max(0.2, configuration.behavior.displayDuration + configuration.animation.exitDuration))
+        let work = DispatchWorkItem { [weak self] in self?.clearHUDNotchExpansion() }
+        hudNotchHideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func clearHUDNotchExpansion() {
+        hudNotchHideWork?.cancel(); hudNotchHideWork = nil
+        guard hudNotchExpansion != nil else { return }
+        hudNotchExpansion = nil
+        refreshDynamicWidths()
+    }
+
+    private func refreshActiveHUDNotchConfiguration() {
+        guard let active = hudNotchExpansion else { return }
+        triggerHUDNotch(kind: active.kind, persistent: active.persistent)
+    }
+
+    private func handleHUDKey(_ key: Int) {
+        switch key {
+        case 0, 1: triggerHUDNotch(kind: .volume)
+        case 7: triggerHUDNotch(kind: .mute)
+        case 2, 3: triggerHUDNotch(kind: .displayBrightness)
+        case 21, 22, 23: triggerHUDNotch(kind: .keyboardBrightness)
+        default: break
+        }
+    }
+
+    private func handleHUDObservedEvent(_ event: NSEvent) {
+        if event.type == .flagsChanged {
+            let caps = event.modifierFlags.contains(.capsLock)
+            guard caps != lastHUDCapsLock else { return }
+            lastHUDCapsLock = caps
+            triggerHUDNotch(kind: .capsLock)
+            return
+        }
+        guard event.type == .systemDefined, event.subtype.rawValue == 8 else { return }
+        let data = event.data1
+        let key = (data & 0xFFFF0000) >> 16
+        let keyState = ((data & 0xFFFF) & 0xFF00) >> 8
+        guard keyState == 0xA else { return }
+        handleHUDKey(key)
+    }
+
+    private func handleHUDPreview(_ note: Notification) {
+        let raw = note.userInfo?["kind"] as? String ?? "volume"
+        let kind: HaloHUDEventKind
+        switch raw {
+        case "brightness": kind = .displayBrightness
+        case "keyboard": kind = .keyboardBrightness
+        default: kind = HaloHUDEventKind(rawValue: raw) ?? .volume
+        }
+        let persistent = note.userInfo?["persistent"] as? Bool ?? false
+        if let configuration = note.userInfo?["configuration"] as? HaloHUDConfiguration {
+            triggerHUDNotch(kind: kind, suppliedConfiguration: configuration, persistent: persistent)
+        } else {
+            triggerHUDNotch(kind: kind, persistent: persistent)
+        }
     }
 
     private func resolvedClosedItems(_ options: ClosedNotchOptions) -> (left: ClosedNotchItem, right: ClosedNotchItem) {
@@ -337,7 +539,7 @@ final class WindowManager {
         }
         let iconWidth = max(12, size * 1.05)
         let labelGap = 4.0
-        let horizontalPadding = 4.0 // PowerEventBadge currently uses 2 pt on each side.
+        let horizontalPadding = 4.0
         let naturalWidth: Double
         switch style {
         case .off: naturalWidth = 0
@@ -347,8 +549,6 @@ final class WindowManager {
         case .label: naturalWidth = iconWidth + labelGap + textWidth(eventLabel) + horizontalPadding
         }
         let badgeWidth = max(18, naturalWidth)
-        // "Power event width" is the minimum total wing width while the event is visible,
-        // not extra blank space added on top of the badge and existing content.
         let minimumSideWidth = settings.expandForEvent ? max(badgeWidth, settings.eventWidth) : badgeWidth
 
         let side: DynamicSide
@@ -404,10 +604,38 @@ final class WindowManager {
         }
 
         if notchLike {
+            var leftDemand = autoFit ? sides.left : sides.decorationLeft
+            var rightDemand = autoFit ? sides.right : sides.decorationRight
+
+            if let hud = hudNotchExpansion, hud.screenFrame.equalTo(geometry.screen) {
+                let hudGap = 6.0
+                switch hud.side {
+                case .left:
+                    leftDemand = hud.collision == .push && leftDemand > 0
+                        ? leftDemand + hudGap + hud.width
+                        : max(leftDemand, hud.width)
+                case .right:
+                    rightDemand = hud.collision == .push && rightDemand > 0
+                        ? rightDemand + hudGap + hud.width
+                        : max(rightDemand, hud.width)
+                case .full:
+                    let each = max(0, (hud.width - camera) / 2)
+                    if hud.collision == .push {
+                        leftDemand = leftDemand > 0 ? leftDemand + hudGap + each : max(leftDemand, each)
+                        rightDemand = rightDemand > 0 ? rightDemand + hudGap + each : max(rightDemand, each)
+                    } else {
+                        leftDemand = max(leftDemand, each)
+                        rightDemand = max(rightDemand, each)
+                    }
+                case .automatic:
+                    rightDemand = max(rightDemand, hud.width)
+                }
+            }
+
             let extents = ClosedWingSizing.extents(
                 base: baseWidth, camera: camera,
-                left: autoFit ? sides.left : sides.decorationLeft,
-                right: autoFit ? sides.right : sides.decorationRight,
+                left: leftDemand,
+                right: rightDemand,
                 expansion: expansion.enabled ? expansion.width : 0,
                 leftLive: leftLive, rightLive: rightLive)
             let baseCenter = attached ? geometry.screen.midX : geometry.visible.midX
@@ -418,8 +646,6 @@ final class WindowManager {
             let rightExtent = min(extents.right, rightLimit)
             let required = camera + leftExtent + rightExtent
             host.geometry?.activeCompactWidth = min(geometry.visible.width, max(baseWidth, required))
-            // The camera/notch remains the anchor. Unequal wings shift only the panel bounds,
-            // so a right-side music expansion does not resize the left wing (and vice versa).
             host.geometry?.activeCompactCenterOffset = (rightExtent - leftExtent) / 2
         } else {
             var requested = baseWidth
@@ -441,7 +667,6 @@ final class WindowManager {
         let size = min(options.fontSize, max(1, geometry.compactHeight - 2 * options.contentPaddingY) / 1.25)
         let font = NSFont.systemFont(ofSize: size)
         let slotMargins = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
-        // Keep the geometry estimator in lockstep with ClosedNotchSlot's HStack spacing.
         let elementGap = 6.0
 
         var artwork = options.artworkOptions ?? ClosedArtworkOptions()
@@ -521,7 +746,6 @@ final class WindowManager {
                         let icon = max(12, size)
                         let text = max(title, detail)
                         let progress = $0.progress == nil ? 0 : elementGap + 38
-                        // Matches the view: icon + 6 pt gap + text + optional progress.
                         return icon + elementGap + text + progress + 2
                     } ?? 0
                 }
@@ -560,6 +784,19 @@ final class WindowManager {
         return (leftFull, rightFull, left.decoration, right.decoration)
     }
 
+    private func hudAdjustedClosedFrame(_ base: CGRect, geometry: SurfaceGeometry) -> CGRect {
+        guard let hud = hudNotchExpansion,
+              hud.screenFrame.equalTo(geometry.screen),
+              geometry.attachedToNotch || geometry.style == .notch || geometry.style == .simulated else { return base }
+        let targetHeight = min(geometry.visible.height - 16, max(base.height, hud.height))
+        guard targetHeight > base.height + 0.5 else { return base }
+        var result = base
+        let top = base.maxY
+        result.size.height = targetHeight
+        result.origin.y = top - targetHeight
+        return result
+    }
+
     private func refreshDynamicWidths() {
         activityExpiry?.cancel()
         if let next = store.workspace.activities.map({ $0.created.addingTimeInterval(12) }).filter({ $0 > Date() }).min() {
@@ -574,7 +811,27 @@ final class WindowManager {
             guard let geometry = host.geometry else { continue }
             let newWidth = geometry.compactWidth
             let newOffset = geometry.activeCompactCenterOffset ?? 0
-            guard oldWidth != newWidth || oldOffset != newOffset else { continue }
+
+            guard !host.state.expanded else {
+                host.state.compactWidth = newWidth
+                host.state.compactHeight = geometry.compactHeight
+                host.state.closedOcclusion = geometry.closedCameraOcclusion
+                continue
+            }
+
+            var target = geometry.frame(expanded: false)
+            target = hudAdjustedClosedFrame(target, geometry: geometry)
+            if geometry.style == .detached {
+                target.origin.x = host.panel.frame.midX - target.width / 2
+                target.origin.y = host.panel.frame.maxY - target.height
+            }
+
+            let widthChanged = oldWidth != newWidth || oldOffset != newOffset
+            let frameChanged = host.targetFrame.map { old in
+                abs(old.minX - target.minX) >= 0.5 || abs(old.minY - target.minY) >= 0.5 ||
+                abs(old.width - target.width) >= 0.5 || abs(old.height - target.height) >= 0.5
+            } ?? true
+            guard widthChanged || frameChanged else { continue }
 
             let oldLogicalWidth = oldWidth ?? newWidth
             let oldLeft = oldOffset - oldLogicalWidth / 2
@@ -590,17 +847,6 @@ final class WindowManager {
                 return nil
             }()
 
-            guard !host.state.expanded else {
-                host.state.compactWidth = newWidth
-                host.state.closedOcclusion = geometry.closedCameraOcclusion
-                continue
-            }
-
-            var target = geometry.frame(expanded: false)
-            if geometry.style == .detached {
-                target.origin.x = host.panel.frame.midX - target.width / 2
-                target.origin.y = host.panel.frame.maxY - target.height
-            }
             host.targetFrame = target
             var motion = geometry.appearance.surface
             motion.opening = .resize
@@ -616,7 +862,15 @@ final class WindowManager {
         }
     }
 
-    func stop() { activityExpiry?.cancel(); hosts.values.forEach { $0.stop() }; hosts.removeAll(); subscriptions.removeAll() }
+    func stop() {
+        activityExpiry?.cancel()
+        hudNotchHideWork?.cancel(); hudNotchHideWork = nil
+        if let hudMonitor { NSEvent.removeMonitor(hudMonitor); self.hudMonitor = nil }
+        hosts.values.forEach { $0.stop() }
+        hosts.removeAll()
+        subscriptions.removeAll()
+    }
+
     func toggleAll() {
         let expand = !hosts.values.contains { $0.state.expanded }
         hosts.values.forEach { $0.state.collapseTask?.cancel(); $0.state.expanded = expand }
@@ -671,7 +925,8 @@ final class WindowManager {
 
     private func targetFrame(host: Host, expanded: Bool) -> CGRect {
         guard let geometry = host.geometry else { return .zero }
-        return expanded ? adjustedExpandedFrame(host: host, requested: host.state.contextPreferredSize) : geometry.frame(expanded: false)
+        if expanded { return adjustedExpandedFrame(host: host, requested: host.state.contextPreferredSize) }
+        return hudAdjustedClosedFrame(geometry.frame(expanded: false), geometry: geometry)
     }
 
     private func reconcile() {
@@ -700,7 +955,7 @@ final class WindowManager {
             configureDynamicWidth(host)
             let baseDashboardWidth = host.geometry!.frame(expanded: true).width
             if host.state.contextPreferredSize == nil && host.state.dashboardWidth != baseDashboardWidth { host.state.dashboardWidth = baseDashboardWidth }
-            if host.state.compactHeight != host.geometry!.compactHeight { host.state.compactHeight = host.geometry!.compactHeight }
+            if host.state.compactHeight != host.geometry!.compactHeight && hudNotchExpansion == nil { host.state.compactHeight = host.geometry!.compactHeight }
             if host.state.compactWidth != host.geometry!.compactWidth { host.state.compactWidth = host.geometry!.compactWidth }
             if host.state.closedOcclusion != host.geometry!.closedCameraOcclusion { host.state.closedOcclusion = host.geometry!.closedCameraOcclusion }
             host.panel.isMovableByWindowBackground = theme.style == .detached
@@ -713,6 +968,7 @@ final class WindowManager {
             if host.targetFrame != target {
                 host.targetFrame = target; host.animator.cancel()
                 if host.state.viewport.size != target.size { host.state.viewport.size = target.size }
+                if !host.state.expanded && host.state.compactHeight != target.height { host.state.compactHeight = target.height }
                 host.panel.alphaValue = 1
                 if host.panel.frame != target { host.panel.setFrame(target, display: false) }
                 NotificationCenter.default.post(name: .init("HaloPanelGeometryChanged"), object: host.panel,
