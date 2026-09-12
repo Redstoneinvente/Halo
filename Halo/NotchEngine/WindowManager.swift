@@ -791,7 +791,7 @@ final class WindowManager {
             }
         }
 
-        func itemFont(_ style: ClosedNotchWidgetStyle?, digits: Bool = false) -> (NSFont, Double, Double) {
+        func resolvedItemFont(_ style: ClosedNotchWidgetStyle?, digits: Bool = false) -> (NSFont, Double, Double) {
             let itemSize = min(style?.fontSize ?? size, max(7, innerHeight))
             let weight = nsWeight(style?.weight ?? .regular)
             let resolved: NSFont
@@ -808,7 +808,7 @@ final class WindowManager {
         func mediaWidth(_ widget: ClosedNotchWidgetStyle?) -> Double {
             guard playing else { return 0 }
             let media = options.mediaOptions ?? ClosedMediaOptions()
-            let (mediaFont, mediaSize, mediaGap) = itemFont(widget)
+            let (mediaFont, mediaSize, mediaGap) = resolvedItemFont(widget)
             let title = textWidth(String(store.workspace.media.title.prefix(120)), font: mediaFont)
             let artistValue = store.workspace.media.artist.isEmpty ? store.workspace.media.title : store.workspace.media.artist
             let artist = textWidth(String(artistValue.prefix(120)), font: mediaFont)
@@ -909,8 +909,8 @@ final class WindowManager {
         func itemWidth(_ side: DynamicSide, _ item: ClosedNotchItem) -> Double {
             if isArtworkOnly(side, item: item) { return 0 }
             let widget = options.widgetStyle(for: item)
-            let (itemFont, itemSize, itemGap) = itemFont(widget)
-            let digitItemFont = itemFont(widget, digits: true).0
+            let (itemFont, itemSize, itemGap) = resolvedItemFont(widget)
+            let digitItemFont = resolvedItemFont(widget, digits: true).0
             let showIcon = widget?.showIcon ?? true
             let showText = widget?.showText ?? true
             let iconWidth = showIcon ? max(12, min(widget?.iconSize ?? itemSize + 2, innerHeight) + 2) : 0
