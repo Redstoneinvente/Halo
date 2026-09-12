@@ -1,0 +1,39 @@
+name: One-time Drop CI v3 redesign
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-time-drop-ci-v3.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  redesign:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply Drop CI redesign
+        run: |
+          python3 Scripts/one_time_drop_ci_v3.py
+          xcrun swiftc -parse Halo/NotchEngine/DisplayClock.swift
+          xcrun swiftc -parse Halo/Views/WorkspaceSettingsView.swift
+          git diff --check
+
+      - name: Build Halo
+        run: |
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build
+
+      - name: Commit redesign
+        run: |
+          git config user.name "Redstoneinvente"
+          git config user.email "45894815+Redstoneinvente@users.noreply.github.com"
+          git add Halo/NotchEngine/DisplayClock.swift Halo/Views/WorkspaceSettingsView.swift
+          git rm Scripts/one_time_drop_ci_v3.py .github/workflows/one-time-drop-ci-v3.yml
+          git commit -m "Redesign Drop CI studio and zones"
+          git push origin main
