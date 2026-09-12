@@ -150,9 +150,10 @@ final class AppStore: ObservableObject {
     }
 }
 
-// MARK: - EI ownership, roaming and cozy opened state
+// MARK: - EI ownership, roaming and opened state
 
 enum EIPetVisualStyle: String, Codable, CaseIterable, Identifiable {
+    /// Kept only so old preference archives decode. EI v2 resolves this to `.smooth` immediately.
     case pixel = "Pixel"
     case smooth = "Smooth Vector"
     case illustrated = "Illustrated"
@@ -173,7 +174,7 @@ struct EIOpenPreferences: Codable, Equatable {
     var screenEdges = true
     var shortcutKey: UInt32 = 14
     var shortcutModifiers: UInt32 = 2304
-    var petVisual: EIPetVisualStyle = .pixel
+    var petVisual: EIPetVisualStyle = .smooth
     var roomStyle: EIRoomStyle = .warm
     var room = WidgetColor(red: 0.15, green: 0.10, blue: 0.10)
     var accent = WidgetColor(red: 0.96, green: 0.60, blue: 0.27)
@@ -197,9 +198,12 @@ final class EIOpenPreferencesStore: ObservableObject {
     }
 
     private init() {
-        value = (defaults.data(forKey: key)
+        var loaded = (defaults.data(forKey: key)
             .flatMap { try? JSONDecoder().decode(EIOpenPreferences.self, from: $0) })
             .flatMap { $0.version == 1 ? $0 : nil } ?? EIOpenPreferences()
+        if loaded.petVisual == .pixel { loaded.petVisual = .smooth }
+        value = loaded
+        if let data = try? JSONEncoder().encode(loaded) { defaults.set(data, forKey: key) }
     }
 
     private func schedulePersist(_ snapshot: EIOpenPreferences) {
@@ -283,9 +287,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
             .store(in: &bag)
         NotificationCenter.default.publisher(for: .init("HaloEnvironmentalInterfaceToggle"))
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                DispatchQueue.main.async { self?.toggleNow() }
-            }
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.toggleNow() } }
             .store(in: &bag)
         NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)
             .receive(on: RunLoop.main)
@@ -335,7 +337,9 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.deferRefresh(animatedRoaming: false) }
             .store(in: &bag)
-        Timer.publish(every: 6, on: .main, in: .common).autoconnect()
+
+        // Resident pets may roam, but position changes should be moments, not constant motion.
+        Timer.publish(every: 28, on: .main, in: .common).autoconnect()
             .sink { [weak self] _ in
                 guard let self else { return }
                 self.step &+= 1
@@ -349,15 +353,11 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
     }
 
     func open(editor: Bool = false) {
-        DispatchQueue.main.async { [weak self] in
-            self?.openNow(editor: editor)
-        }
+        DispatchQueue.main.async { [weak self] in self?.openNow(editor: editor) }
     }
 
     func close() {
-        DispatchQueue.main.async { [weak self] in
-            self?.closeNow()
-        }
+        DispatchQueue.main.async { [weak self] in self?.closeNow() }
     }
 
     private func openNow(editor: Bool) {
@@ -366,9 +366,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
         guard !requested else { return }
         requested = true
         expandedByEI = surfaces.isEmpty || surfaces.values.allSatisfy { $0.frame.height <= 82 }
-        if expandedByEI {
-            NotificationCenter.default.post(name: .init("HaloToggle"), object: nil)
-        }
+        if expandedByEI { NotificationCenter.default.post(name: .init("HaloToggle"), object: nil) }
         refreshPlacements()
         roaming(false)
     }
@@ -385,9 +383,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
         refreshPlacements()
         roaming(true)
         if shouldCollapse {
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .init("HaloToggle"), object: nil)
-            }
+            DispatchQueue.main.async { NotificationCenter.default.post(name: .init("HaloToggle"), object: nil) }
         }
     }
 
@@ -452,9 +448,8 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
         }?.0
     }
 
-    /// Each CI exposes a different safe silhouette. These regions are deliberately conservative:
-    /// EI may decorate edges and corners, but should not overlap player controls, Bluetooth rows,
-    /// or the Retro game board.
+    /// Each CI exposes a different safe silhouette. EI can decorate edges and corners but never
+    /// occupies the primary control region advertised by the active Context Interface.
     private func publishPlacement(for surface: SurfaceSnapshot) {
         guard !surface.screenID.isEmpty, surface.frame.width > 80, surface.frame.height > 82,
               let owner = activeCI() else {
@@ -509,8 +504,16 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
     private func roaming(_ animated: Bool) {
         let settings = EISettingsStore.shared.settings
         let prefs = EIOpenPreferencesStore.shared.value
-        guard settings.mode == .pet, prefs.roam,
-              EnvironmentalInterfaceEngine.shared.currentReaction == nil,
+        let engine = EnvironmentalInterfaceEngine.shared
+
+        // Hidden is the dominant Pet state. Roaming is only a presentation option for a resident
+        // idle pet; reactions are rendered by EI's normal notch-aware ambient surface instead.
+        guard settings.mode == .pet,
+              settings.petResident,
+              prefs.roam,
+              engine.shouldRender,
+              engine.currentReaction == nil,
+              engine.behaviourState != .hidden,
               !requested else {
             roam.values.forEach { $0.panel.orderOut(nil) }
             return
@@ -529,7 +532,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
             host.model.walking = host.frame != .zero && abs(frame.midX - host.frame.midX) > 20
             if animated, host.frame != .zero {
                 NSAnimationContext.runAnimationGroup({ context in
-                    context.duration = 2.1
+                    context.duration = 2.8
                     context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                     host.panel.animator().setFrame(frame, display: false)
                 }, completionHandler: { Task { @MainActor in host.model.walking = false } })
