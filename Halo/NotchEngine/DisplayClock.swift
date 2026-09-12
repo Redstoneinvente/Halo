@@ -327,15 +327,18 @@ private enum HaloDropZoneLayoutResolver {
 
         let padding = max(8, CGFloat(configuration.boardPadding))
         let gap = max(2, CGFloat(configuration.zoneSpacing))
-        let top = headerHeight + padding
-        let availableWidth = max(1, size.width - padding * 2)
-        let availableHeight = max(1, size.height - top - footerHeight - padding)
+        // Reserve a real visual safety margin for card strokes and hover shadows.
+        let edgeSafety: CGFloat = 8
+        let horizontalInset = padding + edgeSafety
+        let top = headerHeight + padding + edgeSafety
+        let availableWidth = max(1, size.width - horizontalInset * 2)
+        let availableHeight = max(1, size.height - top - footerHeight - padding - edgeSafety)
         let rect = CGRect(
-            x: padding,
+            x: horizontalInset,
             y: top,
             width: availableWidth,
             height: availableHeight
-        ).intersection(CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4))
+        )
 
         func grid(columns requested: Int) -> [CGRect] {
             let columns = max(1, min(count, requested))
