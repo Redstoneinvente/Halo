@@ -219,6 +219,12 @@ final class EIOpenPreferencesStore: ObservableObject {
     @Published var right = true
     @Published var walking = false
 }
+
+@MainActor final class EINotchPeekModel: ObservableObject {
+    @Published var motion: HaloCompanionMotion = .peekEyes
+    @Published var notchWidth: CGFloat = 180
+    @Published var notchHeight: CGFloat = 32
+}
 @MainActor final class EIOpenUI: ObservableObject {
     static let shared = EIOpenUI()
     @Published var editing = false
@@ -256,6 +262,27 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
         }
     }
 
+    @MainActor private final class PeekHost {
+        let panel: NSPanel
+        let model: EINotchPeekModel
+        init() {
+            model = EINotchPeekModel()
+            panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            panel.backgroundColor = .clear
+            panel.isOpaque = false
+            panel.hasShadow = false
+            panel.hidesOnDeactivate = false
+            panel.isReleasedWhenClosed = false
+            panel.becomesKeyOnlyIfNeeded = true
+            panel.ignoresMouseEvents = true
+            panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 4)
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
+            let view = NSHostingView(rootView: EIPhysicalNotchPetPeek(model: model))
+            view.sizingOptions = []
+            panel.contentView = view
+        }
+    }
+
     private enum Route { case notchL, notchR, menuL, menuR, left, right, bottom }
     private enum CIIdentifier: String { case music, bluetooth, retro }
 
@@ -265,6 +292,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
     private var expandedByEI = false
     private var surfaces: [ObjectIdentifier: SurfaceSnapshot] = [:]
     private var roam: [String: RoamHost] = [:]
+    private var peekHosts: [String: PeekHost] = [:]
     private var bag = Set<AnyCancellable>()
     private var step = 0
     private var shortcut = ""
@@ -307,6 +335,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
                     self?.hotkeyUpdate()
                     self?.refreshPlacements()
                     self?.roaming(true)
+                    self?.refreshNotchPeek()
                 }
             }
             .store(in: &bag)
@@ -318,6 +347,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
                     if settings.mode == .off, self.requested { self.closeNow() }
                     self.refreshPlacements()
                     self.roaming(true)
+                    self.refreshNotchPeek()
                 }
             }
             .store(in: &bag)
@@ -350,6 +380,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
         hotkeyUpdate()
         refreshPlacements()
         roaming(false)
+        refreshNotchPeek()
     }
 
     func open(editor: Bool = false) {
@@ -369,6 +400,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
         if expandedByEI { NotificationCenter.default.post(name: .init("HaloToggle"), object: nil) }
         refreshPlacements()
         roaming(false)
+        refreshNotchPeek()
     }
 
     private func closeNow() {
@@ -382,6 +414,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
         expandedByEI = false
         refreshPlacements()
         roaming(true)
+        refreshNotchPeek()
         if shouldCollapse {
             DispatchQueue.main.async { NotificationCenter.default.post(name: .init("HaloToggle"), object: nil) }
         }
@@ -396,6 +429,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             self?.refreshPlacements()
             self?.roaming(animatedRoaming)
+            self?.refreshNotchPeek()
         }
     }
 
@@ -418,6 +452,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
         surfaces[id] = snapshot
         publishPlacement(for: snapshot)
         roaming(false)
+        refreshNotchPeek()
     }
 
     private func refreshPlacements() {
@@ -499,6 +534,77 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
             )
         }
         EIPlacementRegistry.shared.set(context, for: surface.screenID)
+    }
+
+    private func activePeekMotion() -> HaloCompanionMotion? {
+        let settings = EISettingsStore.shared.settings
+        let engine = EnvironmentalInterfaceEngine.shared
+        guard settings.mode == .pet, engine.shouldRender,
+              let kind = engine.currentReaction?.kind else { return nil }
+        switch kind {
+        case .petPeekEyes: return .peekEyes
+        case .petPeekEars: return .peekEars
+        case .petPeekUnder: return .peek
+        case .petPeekLeft: return .peekLeft
+        case .petPeekRight: return .peekRight
+        case .petPawFirst: return .paw
+        case .petTailFirst: return .tail
+        default: return nil
+        }
+    }
+
+    private func targetPeekScreen() -> NSScreen? {
+        let notched = NSScreen.screens.filter { $0.safeAreaInsets.top > 0 }
+        guard !notched.isEmpty else { return nil }
+
+        if requested {
+            let ordered = surfaces.values.sorted { lhs, rhs in lhs.frame.height > rhs.frame.height }
+            for snapshot in ordered where !snapshot.screenID.isEmpty {
+                if let screen = notched.first(where: { WindowManager.displayID($0) == snapshot.screenID }) {
+                    return screen
+                }
+            }
+        }
+        if let main = NSScreen.main, main.safeAreaInsets.top > 0 { return main }
+        return notched.first
+    }
+
+    private func notchGeometry(for screen: NSScreen) -> CGSize {
+        let height = max(22, screen.safeAreaInsets.top)
+        if let left = screen.auxiliaryTopLeftArea,
+           let right = screen.auxiliaryTopRightArea,
+           right.minX > left.maxX {
+            return CGSize(width: max(92, right.minX - left.maxX), height: height)
+        }
+        return CGSize(width: 180, height: height)
+    }
+
+    private func refreshNotchPeek() {
+        guard let motion = activePeekMotion(), let screen = targetPeekScreen() else {
+            peekHosts.values.forEach { $0.panel.orderOut(nil) }
+            return
+        }
+
+        let id = WindowManager.displayID(screen)
+        let host = peekHosts[id] ?? PeekHost()
+        peekHosts[id] = host
+        let notch = notchGeometry(for: screen)
+        if host.model.motion != motion { host.model.motion = motion }
+        if abs(host.model.notchWidth - notch.width) > 0.5 { host.model.notchWidth = notch.width }
+        if abs(host.model.notchHeight - notch.height) > 0.5 { host.model.notchHeight = notch.height }
+
+        let zoom = min(1.6, max(0.7, CGFloat(EISettingsStore.shared.settings.petScale)))
+        let spriteSize = min(168, max(116, notch.width * 0.78)) * zoom
+        let width = max(360, notch.width + spriteSize * 1.55)
+        let height = max(150, notch.height + spriteSize * 0.88)
+        let frame = CGRect(x: screen.frame.midX - width / 2,
+                           y: screen.frame.maxY - height,
+                           width: width,
+                           height: height)
+        if host.panel.frame != frame { host.panel.setFrame(frame, display: false) }
+
+        for (otherID, other) in peekHosts where otherID != id { other.panel.orderOut(nil) }
+        host.panel.orderFrontRegardless()
     }
 
     private func roaming(_ animated: Bool) {
