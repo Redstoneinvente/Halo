@@ -6,5 +6,11 @@
 	<string>AppIcon.incs</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.</string>
+	<key>HaloFirebaseAPIKey</key>
+	<string></string>
+	<key>HaloLicenseSeatPublishableKey</key>
+	<string></string>
+	<key>HaloLicenseSeatProductSlug</key>
+	<string>halo</string>
 </dict>
 </plist>

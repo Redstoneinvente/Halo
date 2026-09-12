@@ -18,7 +18,7 @@ struct SettingsView: View {
     @State private var renamingProfile: UUID?
     @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
-    private let sections = ["General", "Appearance", "Modules", "Widgets", "Closed notch", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
+    private let sections = ["General", "Account & License", "Appearance", "Modules", "Widgets", "Closed notch", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -67,6 +67,7 @@ struct SettingsView: View {
     private func sectionIcon(_ name: String) -> String {
         switch name {
         case "General": return "gearshape"
+        case "Account & License": return "person.crop.circle.badge.checkmark"
         case "Appearance": return "paintpalette"
         case "Modules": return "square.grid.2x2"
         case "Widgets": return "slider.horizontal.3"
@@ -109,6 +110,7 @@ struct SettingsView: View {
                     Text("Option + Command").tag(UInt32(2304)); Text("Control + Option").tag(UInt32(6144)); Text("Control + Shift").tag(UInt32(4608))
                 }
             }
+        case "Account & License": HaloAccountLicenseSettingsView()
         case "Schedules": ScheduleSettingsView(workspace: workspace)
         case "Appearance":
             Section("Expanded dashboard") {
@@ -1194,6 +1196,109 @@ private struct HaloAboutView: View {
         Section("Find out more") {
             Link(destination: HaloAboutContent.website) { Label("Visit Halo’s website", systemImage: "globe") }
             Link(destination: HaloAboutContent.support) { Label("Buy me a coffee", systemImage: "cup.and.saucer.fill") }
+        }
+    }
+}
+
+// MARK: - Halo Account & License settings
+
+@MainActor
+private struct HaloAccountLicenseSettingsView: View {
+    @ObservedObject private var account = HaloAccountManager.shared
+    @ObservedObject private var license = HaloLicenseManager.shared
+    @State private var email = ""
+    @State private var password = ""
+    @State private var licenseKey = ""
+    @State private var creatingAccount = false
+
+    var body: some View {
+        Section("Halo account") {
+            if !account.isConfigured {
+                Label("Firebase configuration needed", systemImage: "wrench.and.screwdriver")
+                Text("Set HaloFirebaseAPIKey in Info.plist (or the HALO build environment) and enable Email/Password Authentication in Firebase. Halo will then restore sessions automatically from Keychain.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if account.isSignedIn {
+                LabeledContent("Signed in as", value: account.email.isEmpty ? "Halo user" : account.email)
+                if !account.userID.isEmpty {
+                    LabeledContent("Account ID", value: String(account.userID.prefix(12)) + "…")
+                }
+                LabeledContent("Email", value: account.emailVerified ? "Verified" : "Not verified")
+                HStack {
+                    Button("Sign Out") { account.signOut() }
+                    if account.isBusy { ProgressView().controlSize(.small) }
+                }
+            } else {
+                Picker("Mode", selection: $creatingAccount) {
+                    Text("Sign In").tag(false)
+                    Text("Create Account").tag(true)
+                }.pickerStyle(.segmented)
+                TextField("Email", text: $email)
+                    .textContentType(.emailAddress)
+                SecureField("Password", text: $password)
+                    .textContentType(creatingAccount ? .newPassword : .password)
+                HStack {
+                    Button(creatingAccount ? "Create Halo Account" : "Sign In") {
+                        Task {
+                            if creatingAccount { await account.signUp(email: email, password: password) }
+                            else { await account.signIn(email: email, password: password) }
+                            if account.isSignedIn { password = "" }
+                        }
+                    }
+                    .disabled(account.isBusy || email.isEmpty || password.isEmpty)
+                    if !creatingAccount {
+                        Button("Forgot Password?") { Task { await account.resetPassword(email: email) } }
+                            .disabled(account.isBusy || email.isEmpty)
+                    }
+                    if account.isBusy { ProgressView().controlSize(.small) }
+                }
+            }
+            if let notice = account.notice { Text(notice).font(.caption).foregroundStyle(.secondary) }
+            if let error = account.errorMessage { Text(error).font(.caption).foregroundStyle(.red) }
+        }
+
+        Section("License") {
+            if !license.isConfigured {
+                Label("LicenseSeat configuration needed", systemImage: "key.horizontal")
+                Text("Set HaloLicenseSeatPublishableKey and HaloLicenseSeatProductSlug. Use a LicenseSeat publishable client key (pk_), never a secret sk_ key in the Mac app.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                HStack {
+                    Label(license.state.title, systemImage: license.state.isValid ? "checkmark.seal.fill" : "key.horizontal")
+                    Spacer()
+                    if license.isBusy { ProgressView().controlSize(.small) }
+                }
+                if !license.licenseHint.isEmpty { LabeledContent("License", value: license.licenseHint) }
+
+                if license.state.isValid {
+                    HStack {
+                        Button("Validate Now") { Task { await license.validate() } }.disabled(license.isBusy)
+                        Button("Deactivate This Mac", role: .destructive) { Task { await license.deactivate() } }.disabled(license.isBusy)
+                    }
+                } else {
+                    SecureField("License key", text: $licenseKey)
+                    HStack {
+                        Button("Activate License") {
+                            Task {
+                                await license.activate(licenseKey)
+                                if license.state.isValid { licenseKey = "" }
+                            }
+                        }
+                        .disabled(license.isBusy || licenseKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        if !license.licenseHint.isEmpty {
+                            Button("Clear Local License", role: .destructive) { license.clearLocalLicense() }
+                                .disabled(license.isBusy)
+                        }
+                    }
+                }
+            }
+            if let notice = license.notice { Text(notice).font(.caption).foregroundStyle(.secondary) }
+            if let error = license.errorMessage { Text(error).font(.caption).foregroundStyle(.red) }
+        }
+
+        Section("How access works") {
+            Text("Your Halo account and your software license are separate credentials. Firebase handles identity and session recovery; LicenseSeat handles the purchased license and device seat. Halo stores the Firebase refresh token, the activated license key, and its stable installation fingerprint in macOS Keychain.")
+                .font(.caption).foregroundStyle(.secondary)
+            Link("Manage LicenseSeat account", destination: URL(string: "https://licenseseat.com")!)
         }
     }
 }
