@@ -26,8 +26,6 @@ final class ShelfPreview: NSObject {
 
 // MARK: - Environmental Interface
 
-/// EI is deliberately independent from CI. CI decides what the opened notch does;
-/// EI adds ambient life around/inside it and can coexist with any CI.
 enum EIMode: String, Codable, CaseIterable, Identifiable {
     case off = "Off", pet = "Pet", plant = "Plant", simulation = "Simulation"
     var id: String { rawValue }
@@ -160,7 +158,6 @@ struct EIEnvironment: Equatable {
 
 enum EIEnvironmentBridge {
     @MainActor static func updateWeather(_ weather: EIWeatherState?) { EnvironmentalInterfaceEngine.shared.updateWeather(weather) }
-    /// Allows CI/features to expose semantic reactions such as buildStarted/buildSucceeded/buildFailed without app coupling.
     @MainActor static func emit(_ name: String) { EnvironmentalInterfaceEngine.shared.emitExternalEvent(name) }
 }
 
@@ -178,6 +175,7 @@ final class EIPlacementRegistry {
     static let shared = EIPlacementRegistry()
     private var contexts: [String: EIPlacementContext] = [:]
     func set(_ context: EIPlacementContext?, for screenID: String) {
+        guard contexts[screenID] != context else { return }
         if let context { contexts[screenID] = context } else { contexts.removeValue(forKey: screenID) }
         NotificationCenter.default.post(name: .init("HaloEIPlacementChanged"), object: nil, userInfo: ["screen": screenID])
     }
@@ -481,29 +479,30 @@ struct PixelDisplayRenderer: View {
         }.drawingGroup(opaque: false, colorMode: .linear)
     }
     private func pixels(_ scale: CGFloat, _ origin: CGPoint) -> some View {
-        Canvas(rendersAsynchronously: true) { c, _ in
-            if let bg = scene.background { c.fill(Path(CGRect(x: origin.x, y: origin.y, width: CGFloat(scene.columns) * scale, height: CGFloat(scene.rows) * scale)), with: .color(bg)) }
-            for p in scene.pixels {
-                c.fill(Path(CGRect(x: origin.x + CGFloat(p.x) * scale, y: origin.y + CGFloat(p.y) * scale, width: CGFloat(p.width) * scale, height: CGFloat(p.height) * scale)), with: .color(p.color.opacity(p.opacity)))
+        Canvas(rendersAsynchronously: true) { context, _ in
+            if let bg = scene.background { var p = Path(); p.addRect(CGRect(x: origin.x, y: origin.y, width: CGFloat(scene.columns) * scale, height: CGFloat(scene.rows) * scale)); context.fill(p, with: .color(bg)) }
+            for pixel in scene.pixels {
+                var p = Path(); p.addRect(CGRect(x: origin.x + CGFloat(pixel.x) * scale, y: origin.y + CGFloat(pixel.y) * scale, width: CGFloat(pixel.width) * scale, height: CGFloat(pixel.height) * scale))
+                context.fill(p, with: .color(pixel.color.opacity(pixel.opacity)))
             }
         }
     }
     private func grid(_ scale: CGFloat, _ origin: CGPoint, _ size: CGSize) -> some View {
-        Canvas { c, _ in
+        Canvas { context, _ in
             guard scale >= 3 else { return }; let color = Color.black.opacity(preset == .crt ? 0.14 : 0.075)
-            for x in 0...scene.columns { let v = origin.x + CGFloat(x) * scale; var p = Path(); p.move(to: CGPoint(x: v, y: origin.y)); p.addLine(to: CGPoint(x: v, y: origin.y + size.height)); c.stroke(p, with: .color(color), lineWidth: 0.5) }
-            for y in 0...scene.rows { let v = origin.y + CGFloat(y) * scale; var p = Path(); p.move(to: CGPoint(x: origin.x, y: v)); p.addLine(to: CGPoint(x: origin.x + size.width, y: v)); c.stroke(p, with: .color(color), lineWidth: 0.5) }
+            for x in 0...scene.columns { let value = origin.x + CGFloat(x) * scale; var p = Path(); p.move(to: CGPoint(x: value, y: origin.y)); p.addLine(to: CGPoint(x: value, y: origin.y + size.height)); context.stroke(p, with: .color(color), lineWidth: 0.5) }
+            for y in 0...scene.rows { let value = origin.y + CGFloat(y) * scale; var p = Path(); p.move(to: CGPoint(x: origin.x, y: value)); p.addLine(to: CGPoint(x: origin.x + size.width, y: value)); context.stroke(p, with: .color(color), lineWidth: 0.5) }
         }.allowsHitTesting(false)
     }
     private func scanline(_ scale: CGFloat, _ origin: CGPoint, _ size: CGSize) -> some View {
-        Canvas { c, _ in var y = origin.y + max(2, scale * 2); while y < origin.y + size.height { c.fill(Path(CGRect(x: origin.x, y: y, width: size.width, height: max(0.5, scale * 0.16))), with: .color(Color.black.opacity(preset == .crt ? 0.22 : 0.10))); y += max(2, scale * 2) } }.allowsHitTesting(false)
+        Canvas { context, _ in var y = origin.y + max(2, scale * 2); while y < origin.y + size.height { var p = Path(); p.addRect(CGRect(x: origin.x, y: y, width: size.width, height: max(0.5, scale * 0.16))); context.fill(p, with: .color(Color.black.opacity(preset == .crt ? 0.22 : 0.10))); y += max(2, scale * 2) } }.allowsHitTesting(false)
     }
 }
 
 private struct EIScenePalette {
     var foreground: Color; var secondary: Color; var highlight: Color; var dark: Color
-    static func resolve(_ s: EISettings, _ primary: Color, _ secondary: Color) -> EIScenePalette {
-        switch s.displayPreset {
+    static func resolve(_ settings: EISettings, _ primary: Color, _ secondary: Color) -> EIScenePalette {
+        switch settings.displayPreset {
         case .monochrome: return .init(foreground: Color(red: 0.5, green: 1, blue: 0.56), secondary: Color(red: 0.23, green: 0.62, blue: 0.31), highlight: Color(red: 0.78, green: 1, blue: 0.7), dark: Color(red: 0.04, green: 0.11, blue: 0.05))
         case .lcd: return .init(foreground: primary.opacity(0.92), secondary: secondary.opacity(0.86), highlight: .white.opacity(0.92), dark: .black.opacity(0.7))
         case .crt: return .init(foreground: primary, secondary: secondary, highlight: .white, dark: .black.opacity(0.85))
@@ -512,104 +511,114 @@ private struct EIScenePalette {
     }
 }
 
-@MainActor private struct EIPetView: View {
-    @ObservedObject var engine: EnvironmentalInterfaceEngine; let settings: EISettings
+@MainActor
+private struct EIPetView: View {
+    @ObservedObject var engine: EnvironmentalInterfaceEngine
+    @ObservedObject private var preferences = EIOpenPreferencesStore.shared
+    let settings: EISettings
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: engine.currentReaction == nil ? 0.22 : 1.0 / 30.0, paused: engine.currentReaction == nil && !settings.petResident)) { t in
-            let phase = t.date.timeIntervalSinceReferenceDate
-            PixelDisplayRenderer(scene: scene(t.date, phase), preset: settings.displayPreset, pixelGrid: settings.pixelGrid, glow: settings.pixelGlow, scanlines: settings.scanlines, ghosting: settings.ghosting, brightnessVariation: settings.brightnessVariation, phase: phase)
+        GeometryReader { proxy in
+            HaloCompanionSprite(
+                kind: settings.petKind,
+                style: preferences.value.petVisual,
+                size: min(proxy.size.width, proxy.size.height * 1.28),
+                primary: settings.petPrimaryColor.color,
+                accent: settings.petAccentColor.color,
+                motion: motion,
+                facingRight: facingRight,
+                displayPreset: settings.displayPreset,
+                pixelGrid: settings.pixelGrid,
+                pixelGlow: settings.pixelGlow,
+                scanlines: settings.scanlines,
+                ghosting: settings.ghosting,
+                brightnessVariation: settings.brightnessVariation
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
-        .contextMenu { if settings.petInteraction { Button("Pat") { engine.interact(.petPat) }; Button("Give snack") { engine.interact(.petSnack) }; Button("Say hi") { engine.interact(.petGreet) } } }
+        .contextMenu {
+            if settings.petInteraction {
+                Button("Pat") { engine.interact(.petPat) }
+                Button("Give snack") { engine.interact(.petSnack) }
+                Button("Say hi") { engine.interact(.petGreet) }
+                Divider()
+                Button("Open EI") { EnvironmentalInterfaceOwnershipController.shared.open() }
+            }
+        }
         .onTapGesture { if settings.petInteraction { engine.interact(.petPat) } }
     }
-    private func scene(_ date: Date, _ phase: Double) -> EIPixelScene {
-        let kind = engine.currentReaction?.kind ?? .petLookAround, progress = engine.currentReaction?.progress(at: date) ?? 0.5
-        let p = EIScenePalette.resolve(settings, settings.petPrimaryColor.color, settings.petAccentColor.color)
-        var a: [EIPixel] = []; var dx = 0, dy = 0; var sleeping = false; var crouch = false; var left = false
-        switch kind {
-        case .petPeekUnder: dy = Int((1 - sin(progress * .pi)) * 5)
-        case .petPeekLeft: dx = -2; dy = Int((1 - sin(progress * .pi)) * 3)
-        case .petPeekRight: dx = 2; left = true; dy = Int((1 - sin(progress * .pi)) * 3)
-        case .petDance: dx = Int(round(sin(phase * 9) * 2)); dy = -Int(abs(sin(phase * 9)).rounded())
-        case .petSleep: sleeping = true; crouch = true; dy = 2
-        case .petCoffee: crouch = progress > 0.55
-        default: dx = Int(round(sin(phase * 0.8) * 0.7))
+
+    private var motion: HaloCompanionMotion {
+        switch engine.currentReaction?.kind {
+        case .petDance?: return .dance
+        case .petSleep?: return .sleep
+        case .petSnack?: return .snack
+        case .petGreet?: return .greet
+        case .petCelebrate?: return .celebrate
+        case .petPeekLeft?, .petPeekRight?, .petPeekUnder?: return .peek
+        case .petLookAround?: return .look
+        default: return .idle
         }
-        if settings.petHidesWhenApproached, let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }), abs(NSEvent.mouseLocation.x - screen.frame.midX) < 120 { dy += 3 }
-        let bx = 10 + dx, by = 9 + dy, bh = crouch ? 3 : 4, hx = bx + (left ? -3 : 8)
-        a += [.init(x: bx, y: by, width: 10, height: bh, color: p.foreground), .init(x: hx, y: by - 4, width: 6, height: 5, color: p.foreground)]
-        switch settings.petKind {
-        case .cat: a += [.init(x: hx, y: by - 5, width: 2, height: 2, color: p.foreground), .init(x: hx + 4, y: by - 5, width: 2, height: 2, color: p.foreground)]
-        case .dog: a += [.init(x: hx - 1, y: by - 3, width: 2, height: 3, color: p.secondary), .init(x: hx + 5, y: by - 3, width: 2, height: 3, color: p.secondary)]
-        case .fox: a += [.init(x: hx, y: by - 6, width: 2, height: 3, color: p.foreground), .init(x: hx + 4, y: by - 6, width: 2, height: 3, color: p.foreground), .init(x: hx + 2, y: by, width: 2, height: 1, color: p.secondary)]
+    }
+
+    private var facingRight: Bool {
+        switch engine.currentReaction?.kind {
+        case .petPeekLeft?: return true
+        case .petPeekRight?: return false
+        default: return true
         }
-        var eyeShift = 0
-        if settings.petLooksAtCursor, let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) { eyeShift = NSEvent.mouseLocation.x < screen.frame.midX ? -1 : 1 }
-        a.append(.init(x: max(hx, min(hx + 5, hx + 3 + eyeShift)), y: by - 2, color: p.dark))
-        if !sleeping { a += [.init(x: bx + 2, y: by + bh, width: 2, height: 2, color: p.foreground), .init(x: bx + 7, y: by + bh, width: 2, height: 2, color: p.foreground)] }
-        let tail = left ? bx + 9 : bx, dir = left ? 1 : -1, wave = Int(round(sin(phase * 2.2)))
-        a += [.init(x: tail + dir * 2, y: by + 1, width: 2, height: 1, color: p.foreground), .init(x: tail + dir * 3, y: by + wave, width: 1, height: 2, color: p.foreground)]
-        switch kind {
-        case .petCoffee: a += [.init(x: bx - 4, y: by + 1, width: 3, height: 3, color: settings.petAccentColor.color), .init(x: bx - 3, y: by - 1, color: p.highlight, opacity: 0.65)]
-        case .petUmbrella: a += [.init(x: bx + 2, y: by - 8, width: 8, color: settings.petAccentColor.color), .init(x: bx + 3, y: by - 9, width: 6, color: settings.petAccentColor.color), .init(x: bx + 6, y: by - 7, height: 8, color: p.highlight)]
-        case .petSleep: a += [.init(x: bx + 12, y: by - 4, width: 2, color: p.highlight, opacity: 0.65), .init(x: bx + 14, y: by - 6, width: 2, color: p.highlight, opacity: 0.45)]
-        case .petSnack: a.append(.init(x: bx - 3, y: by + 2, width: 2, height: 2, color: settings.petAccentColor.color))
-        case .petGreet, .petCelebrate: a.append(.init(x: bx + 9, y: by + Int(round(sin(phase * 7))), width: 2, color: p.highlight))
-        default: break
-        }
-        return .init(columns: 32, rows: 18, pixels: a)
     }
 }
 
 @MainActor private struct EIPlantView: View {
     @ObservedObject var engine: EnvironmentalInterfaceEngine; let settings: EISettings
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.14, paused: false)) { t in
-            let phase = t.date.timeIntervalSinceReferenceDate
+        TimelineView(.animation(minimumInterval: 0.14, paused: false)) { timeline in
+            let phase = timeline.date.timeIntervalSinceReferenceDate
             PixelDisplayRenderer(scene: scene(phase), preset: settings.displayPreset, pixelGrid: settings.pixelGrid, glow: settings.pixelGlow, scanlines: settings.scanlines, ghosting: settings.ghosting, brightnessVariation: settings.brightnessVariation, phase: phase)
         }.allowsHitTesting(false)
     }
     private func scene(_ phase: Double) -> EIPixelScene {
         let growth = min(1, engine.persistentState.plant.growth + engine.persistentState.plant.bonusGrowth), stage = growth < 0.22 ? 1 : growth < 0.52 ? 2 : growth < 0.82 ? 3 : 4
-        let p = EIScenePalette.resolve(settings, settings.plantColor.color, settings.plantPotColor.color), reaction = engine.currentReaction?.kind
+        let palette = EIScenePalette.resolve(settings, settings.plantColor.color, settings.plantPotColor.color), reaction = engine.currentReaction?.kind
         let strength = reaction == .plantSway ? 1.8 : engine.environment.isMusicPlaying ? 0.55 : 0.25, sway = Int(round(sin(phase * (reaction == .plantSway ? 3 : 1.1)) * strength))
-        var a: [EIPixel] = [.init(x: 9, y: 14, width: 8, height: 3, color: settings.plantPotColor.color), .init(x: 10, y: 17, width: 6, color: settings.plantPotColor.color.opacity(0.75))]
-        if settings.plantKind == .bonsai { a += [.init(x: 11, y: 8, width: 3, height: 7, color: settings.plantPotColor.color), .init(x: 9, y: 6, width: 4, height: 2, color: settings.plantPotColor.color)] } else { a.append(.init(x: 12, y: 7, width: 2, height: 8, color: p.foreground)) }
-        if stage >= 1 { a += [.init(x: 9 + sway, y: 10, width: 4, height: 2, color: p.foreground), .init(x: 14 + sway, y: 9, width: 4, height: 2, color: p.foreground)] }
-        if stage >= 2 { a += [.init(x: 7 + sway, y: 7, width: 6, height: 2, color: p.foreground), .init(x: 14 + sway, y: 6, width: 5, height: 2, color: p.foreground)] }
-        if stage >= 3 { a += [.init(x: 8 + sway, y: 4, width: 5, height: 2, color: p.secondary), .init(x: 14 + sway, y: 3, width: 5, height: 2, color: p.secondary), .init(x: 12 + sway, y: 2, width: 3, height: 2, color: p.foreground)] }
-        if stage >= 4 || reaction == .plantBloom || (settings.plantKind == .flower && stage >= 3) { a += [.init(x: 12 + sway, y: 0, width: 3, height: 3, color: p.highlight), .init(x: 13 + sway, y: 1, color: settings.plantPotColor.color)] }
-        if reaction == .plantRain || engine.environment.weather?.isRaining == true { a += [.init(x: 5, y: 2, height: 2, color: .cyan.opacity(0.72)), .init(x: 20, y: 5, height: 2, color: .cyan.opacity(0.72))] }
-        if engine.environment.timeOfDay == .night || reaction == .plantNight { a += [.init(x: 20, y: 1, width: 2, height: 2, color: .white.opacity(0.65)), .init(x: 21, y: 0, color: .white.opacity(0.35))] }
-        return .init(columns: 26, rows: 19, pixels: a)
+        var pixels: [EIPixel] = [.init(x: 9, y: 14, width: 8, height: 3, color: settings.plantPotColor.color), .init(x: 10, y: 17, width: 6, color: settings.plantPotColor.color.opacity(0.75))]
+        if settings.plantKind == .bonsai { pixels += [.init(x: 11, y: 8, width: 3, height: 7, color: settings.plantPotColor.color), .init(x: 9, y: 6, width: 4, height: 2, color: settings.plantPotColor.color)] } else { pixels.append(.init(x: 12, y: 7, width: 2, height: 8, color: palette.foreground)) }
+        if stage >= 1 { pixels += [.init(x: 9 + sway, y: 10, width: 4, height: 2, color: palette.foreground), .init(x: 14 + sway, y: 9, width: 4, height: 2, color: palette.foreground)] }
+        if stage >= 2 { pixels += [.init(x: 7 + sway, y: 7, width: 6, height: 2, color: palette.foreground), .init(x: 14 + sway, y: 6, width: 5, height: 2, color: palette.foreground)] }
+        if stage >= 3 { pixels += [.init(x: 8 + sway, y: 4, width: 5, height: 2, color: palette.secondary), .init(x: 14 + sway, y: 3, width: 5, height: 2, color: palette.secondary), .init(x: 12 + sway, y: 2, width: 3, height: 2, color: palette.foreground)] }
+        if stage >= 4 || reaction == .plantBloom || (settings.plantKind == .flower && stage >= 3) { pixels += [.init(x: 12 + sway, y: 0, width: 3, height: 3, color: palette.highlight), .init(x: 13 + sway, y: 1, color: settings.plantPotColor.color)] }
+        if reaction == .plantRain || engine.environment.weather?.isRaining == true { pixels += [.init(x: 5, y: 2, height: 2, color: .cyan.opacity(0.72)), .init(x: 20, y: 5, height: 2, color: .cyan.opacity(0.72))] }
+        if engine.environment.timeOfDay == .night || reaction == .plantNight { pixels += [.init(x: 20, y: 1, width: 2, height: 2, color: .white.opacity(0.65)), .init(x: 21, y: 0, color: .white.opacity(0.35))] }
+        return .init(columns: 26, rows: 19, pixels: pixels)
     }
 }
 
 @MainActor private struct EICityView: View {
     @ObservedObject var engine: EnvironmentalInterfaceEngine; let settings: EISettings
     var body: some View {
-        TimelineView(.animation(minimumInterval: engine.environment.isMusicPlaying ? 1.0 / 15.0 : 0.12, paused: false)) { t in
-            let phase = t.date.timeIntervalSinceReferenceDate
+        TimelineView(.animation(minimumInterval: engine.environment.isMusicPlaying ? 1.0 / 15.0 : 0.12, paused: false)) { timeline in
+            let phase = timeline.date.timeIntervalSinceReferenceDate
             PixelDisplayRenderer(scene: scene(phase), preset: settings.displayPreset, pixelGrid: settings.pixelGrid, glow: settings.pixelGlow, scanlines: settings.scanlines, ghosting: settings.ghosting, brightnessVariation: settings.brightnessVariation, phase: phase)
         }.allowsHitTesting(false)
     }
     private func scene(_ phase: Double) -> EIPixelScene {
         let accent = settings.simulationAccentColor.color, night = engine.environment.timeOfDay == .night || engine.currentReaction?.kind == .cityNight
-        let p = EIScenePalette.resolve(settings, night ? Color(red: 0.27, green: 0.54, blue: 0.96) : accent, night ? Color(red: 0.72, green: 0.58, blue: 0.24) : .white.opacity(0.72))
+        let palette = EIScenePalette.resolve(settings, night ? Color(red: 0.27, green: 0.54, blue: 0.96) : accent, night ? Color(red: 0.72, green: 0.58, blue: 0.24) : .white.opacity(0.72))
         let seed = engine.persistentState.simulation.seed, heights = [7 + seed % 3, 11 + (seed / 3) % 4, 8 + (seed / 7) % 5, 13 + (seed / 11) % 3, 9 + (seed / 13) % 4, 6 + (seed / 17) % 5]
-        var a: [EIPixel] = [], x = 2
-        for (index, h) in heights.enumerated() {
-            let w = index.isMultiple(of: 2) ? 8 : 7, y = 18 - h
-            a.append(.init(x: x, y: y, width: w, height: h, color: p.dark.opacity(0.82)))
-            for wy in stride(from: y + 2, to: 17, by: 3) { for wx in stride(from: x + 2, to: x + w - 1, by: 3) { if night ? ((wx + wy + seed + index) % 3 != 0) : ((wx + wy + index) % 5 == 0) { a.append(.init(x: wx, y: wy, color: p.secondary, opacity: night ? 0.92 : 0.45)) } } }
-            x += w + 2
+        var pixels: [EIPixel] = [], x = 2
+        for (index, height) in heights.enumerated() {
+            let width = index.isMultiple(of: 2) ? 8 : 7, y = 18 - height
+            pixels.append(.init(x: x, y: y, width: width, height: height, color: palette.dark.opacity(0.82)))
+            for wy in stride(from: y + 2, to: 17, by: 3) { for wx in stride(from: x + 2, to: x + width - 1, by: 3) { if night ? ((wx + wy + seed + index) % 3 != 0) : ((wx + wy + index) % 5 == 0) { pixels.append(.init(x: wx, y: wy, color: palette.secondary, opacity: night ? 0.92 : 0.45)) } } }
+            x += width + 2
         }
-        a.append(.init(x: 0, y: 18, width: 64, height: 2, color: p.foreground.opacity(0.45)))
+        pixels.append(.init(x: 0, y: 18, width: 64, height: 2, color: palette.foreground.opacity(0.45)))
         let speed = engine.currentReaction?.kind == .cityBusy ? 8.0 : 4.0, car = Int((phase * speed).truncatingRemainder(dividingBy: 60))
-        a += [.init(x: car, y: 17, width: 4, color: p.highlight), .init(x: (64 - car + 64) % 64, y: 19, width: 3, color: p.secondary)]
-        if engine.environment.isMusicPlaying || engine.currentReaction?.kind == .cityMusic { let pulse = Int(abs(sin(phase * 5)) * 3); a.append(.init(x: 27, y: 11 - pulse, width: 5, height: 1 + pulse, color: accent.opacity(0.74))) }
-        if engine.environment.weather?.isRaining == true || engine.currentReaction?.kind == .cityRain { let shift = Int((phase * 8).truncatingRemainder(dividingBy: 4)); for rx in stride(from: 3, to: 62, by: 7) { a.append(.init(x: rx, y: (rx + shift) % 9, height: 2, color: .cyan.opacity(0.56))) } }
-        return .init(columns: 64, rows: 20, pixels: a)
+        pixels += [.init(x: car, y: 17, width: 4, color: palette.highlight), .init(x: (64 - car + 64) % 64, y: 19, width: 3, color: palette.secondary)]
+        if engine.environment.isMusicPlaying || engine.currentReaction?.kind == .cityMusic { let pulse = Int(abs(sin(phase * 5)) * 3); pixels.append(.init(x: 27, y: 11 - pulse, width: 5, height: 1 + pulse, color: accent.opacity(0.74))) }
+        if engine.environment.weather?.isRaining == true || engine.currentReaction?.kind == .cityRain { let shift = Int((phase * 8).truncatingRemainder(dividingBy: 4)); for rx in stride(from: 3, to: 62, by: 7) { pixels.append(.init(x: rx, y: (rx + shift) % 9, height: 2, color: .cyan.opacity(0.56))) } }
+        return .init(columns: 64, rows: 20, pixels: pixels)
     }
 }
 
@@ -628,7 +637,7 @@ private struct EIScenePalette {
     }
 }
 
-// MARK: Overlay manager
+// MARK: Ambient EI manager
 
 @MainActor
 final class EnvironmentalInterfaceManager {
@@ -658,8 +667,10 @@ final class EnvironmentalInterfaceManager {
             .merge(with: NotificationCenter.default.publisher(for: .init("HaloEIPlacementChanged")))
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.refreshAll(true) }.store(in: &subscriptions)
         EISettingsStore.shared.$settings.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] _ in self?.refreshAll(true) }.store(in: &subscriptions)
+        EIOpenPreferencesStore.shared.$value.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] _ in self?.refreshAll(true) }.store(in: &subscriptions)
+        EnvironmentalInterfaceOwnershipController.shared.$requested.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] _ in self?.refreshAll(true) }.store(in: &subscriptions)
         HaloHUDNotchBridge.shared.$presentation.map { $0 != nil }.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] active in self?.suppressedByHUD = active; self?.refreshAll(true) }.store(in: &subscriptions)
-        NotificationCenter.default.publisher(for: NSWindow.willCloseNotification).receive(on: RunLoop.main).sink { [weak self] note in if let w = note.object as? NSWindow { self?.remove(w) } }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: NSWindow.willCloseNotification).receive(on: RunLoop.main).sink { [weak self] note in if let window = note.object as? NSWindow { self?.remove(window) } }.store(in: &subscriptions)
     }
     func stop() { hosts.values.forEach { $0.overlay.close() }; hosts.removeAll(); subscriptions.removeAll(); EnvironmentalInterfaceEngine.shared.stop(); workspace = nil; started = false }
     private func handleGeometry(_ note: Notification) {
@@ -668,16 +679,19 @@ final class EnvironmentalInterfaceManager {
         if let id = note.userInfo?["screen"] as? String { host.screenID = id }
         host.haloFrame = frame; refresh(host, false); updateExpanded()
     }
-    private func remove(_ window: NSWindow) { if let h = hosts.removeValue(forKey: ObjectIdentifier(window)) { h.overlay.close() }; updateExpanded() }
+    private func remove(_ window: NSWindow) { if let host = hosts.removeValue(forKey: ObjectIdentifier(window)) { host.overlay.close() }; updateExpanded() }
     private func refreshAll(_ animated: Bool) { hosts.values.forEach { refresh($0, animated) }; updateExpanded() }
     private func updateExpanded() { EnvironmentalInterfaceEngine.shared.setAnyHaloSurfaceExpanded(hosts.values.contains { $0.haloFrame.height > 82 }) }
     private func refresh(_ host: Host, _ animated: Bool) {
         let settings = EISettingsStore.shared.settings, engine = EnvironmentalInterfaceEngine.shared
-        guard !suppressedByHUD, settings.mode != .off, engine.shouldRender, host.haloFrame.width > 1, host.haloFrame.height > 1 else { host.overlay.orderOut(nil); return }
+        guard !suppressedByHUD,
+              !EnvironmentalInterfaceOwnershipController.shared.isRequested,
+              settings.mode != .off, engine.shouldRender,
+              host.haloFrame.width > 1, host.haloFrame.height > 1 else { host.overlay.orderOut(nil); return }
         let frame = resolvedFrame(host, settings, engine.currentReaction); guard frame.width >= 24, frame.height >= 20 else { host.overlay.orderOut(nil); return }
         host.overlay.ignoresMouseEvents = !(settings.mode == .pet && settings.petInteraction)
         if animated, host.lastResolvedFrame != .zero, host.lastResolvedFrame != frame {
-            NSAnimationContext.runAnimationGroup { c in c.duration = 0.18; c.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut); host.overlay.animator().setFrame(frame, display: false) }
+            NSAnimationContext.runAnimationGroup { context in context.duration = 0.18; context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut); host.overlay.animator().setFrame(frame, display: false) }
         } else { host.overlay.setFrame(frame, display: false) }
         host.lastResolvedFrame = frame; host.overlay.orderFrontRegardless()
     }
@@ -686,19 +700,19 @@ final class EnvironmentalInterfaceManager {
         let size: CGSize
         switch settings.mode {
         case .off: return .zero
-        case .pet: let s = CGFloat(settings.petScale); size = CGSize(width: (compact ? 76 : 102) * s, height: (compact ? 38 : 58) * s)
+        case .pet: let scale = CGFloat(settings.petScale); size = CGSize(width: (compact ? 76 : 102) * scale, height: (compact ? 38 : 58) * scale)
         case .plant: size = CGSize(width: compact ? 62 : 88, height: compact ? 40 : 66)
         case .simulation: size = CGSize(width: min(compact ? 78 : 220, max(64, halo.width * (compact ? 0.38 : 0.46))), height: compact ? min(30, halo.height) : 68)
         }
-        if let context = EIPlacementRegistry.shared.context(for: host.screenID), !context.availableRegions.isEmpty, let r = chooseRegion(context, size) {
-            return CGRect(x: halo.minX + r.minX, y: halo.minY + r.minY, width: min(size.width, r.width), height: min(size.height, r.height))
+        if let context = EIPlacementRegistry.shared.context(for: host.screenID), !context.availableRegions.isEmpty, let region = chooseRegion(context, size) {
+            return CGRect(x: halo.minX + region.minX, y: halo.minY + region.minY, width: min(size.width, region.width), height: min(size.height, region.height))
         }
         if settings.mode == .simulation { return CGRect(x: halo.maxX - size.width - (compact ? 3 : 10), y: compact ? halo.minY : halo.minY + 8, width: size.width, height: min(size.height, halo.height)) }
         var edge = preferredEdge(reaction?.kind, compact)
         if !compact, EnvironmentalInterfaceEngine.shared.environment.activeCI != nil, reaction?.kind != .petPeekLeft, reaction?.kind != .petPeekRight { edge = .underNotch }
         switch edge {
         case .left, .bottomLeft: return CGRect(x: halo.minX + (compact ? 3 : 10), y: compact ? halo.minY : halo.minY + 8, width: min(size.width, halo.width / (compact ? 2.1 : 1.3)), height: min(size.height, halo.height))
-        case .right, .bottomRight: let w = min(size.width, halo.width / (compact ? 2.1 : 1.3)); return CGRect(x: halo.maxX - w - (compact ? 3 : 10), y: compact ? halo.minY : halo.minY + 8, width: w, height: min(size.height, halo.height))
+        case .right, .bottomRight: let width = min(size.width, halo.width / (compact ? 2.1 : 1.3)); return CGRect(x: halo.maxX - width - (compact ? 3 : 10), y: compact ? halo.minY : halo.minY + 8, width: width, height: min(size.height, halo.height))
         case .underNotch: return CGRect(x: halo.midX - min(size.width, halo.width) / 2, y: compact ? halo.minY : halo.maxY - min(halo.height, size.height + 42), width: min(size.width, halo.width), height: min(size.height, halo.height))
         }
     }
@@ -707,7 +721,7 @@ final class EnvironmentalInterfaceManager {
     }
     private func chooseRegion(_ context: EIPlacementContext, _ size: CGSize) -> CGRect? {
         let ranked = context.availableRegions.sorted { a, b in let af = a.width >= size.width && a.height >= size.height, bf = b.width >= size.width && b.height >= size.height; return af == bf ? a.width * a.height > b.width * b.height : af && !bf }
-        return ranked.first(where: { r in r.width >= min(24, size.width) && r.height >= min(20, size.height) && !context.contentExclusionRegions.contains(where: { ex in let i = ex.intersection(r); return !i.isNull && i.width * i.height > r.width * r.height * 0.45 }) }) ?? ranked.first
+        return ranked.first(where: { region in region.width >= min(24, size.width) && region.height >= min(20, size.height) && !context.contentExclusionRegions.contains(where: { exclusion in let intersection = exclusion.intersection(region); return !intersection.isNull && intersection.width * intersection.height > region.width * region.height * 0.45 }) }) ?? ranked.first
     }
 }
 
@@ -717,63 +731,196 @@ final class EnvironmentalInterfaceManager {
 struct EnvironmentalInterfaceSettingsView: View {
     @ObservedObject private var store = EISettingsStore.shared
     @ObservedObject private var engine = EnvironmentalInterfaceEngine.shared
+    @ObservedObject private var preferences = EIOpenPreferencesStore.shared
+    @ObservedObject private var ownership = EnvironmentalInterfaceOwnershipController.shared
+
     var body: some View {
         Section("Environmental Interface") {
-            Picker("Environmental Interface", selection: binding(\.mode)) { ForEach(EIMode.allCases) { Label($0.rawValue, systemImage: $0.symbol).tag($0) } }.pickerStyle(.segmented)
-            Text("EI adds ambient life around the notch without replacing Context Interfaces. CI and EI can run at the same time.").font(.caption).foregroundStyle(.secondary)
+            Picker("Environmental Interface", selection: binding(\.mode)) {
+                ForEach(EIMode.allCases) { Label($0.rawValue, systemImage: $0.symbol).tag($0) }
+            }.pickerStyle(.segmented)
+            Text("EI can live ambiently around Halo or explicitly own the opened notch. Context Interfaces always have first ownership priority, then EI, then the normal Halo dashboard.")
+                .font(.caption).foregroundStyle(.secondary)
         }
+
         if store.settings.mode != .off {
+            Section("Ownership & shortcut") {
+                HStack {
+                    Button(ownership.isRequested ? "Close EI" : "Open EI") {
+                        ownership.isRequested ? ownership.close() : ownership.open()
+                    }
+                    Button("Open EI Studio") { ownership.open(editor: true) }
+                }
+                Toggle("Enable EI shortcut", isOn: pref(\.shortcutEnabled))
+                if preferences.value.shortcutEnabled {
+                    Picker("Key", selection: pref(\.shortcutKey)) {
+                        Text("E").tag(UInt32(14)); Text("I").tag(UInt32(34)); Text("P").tag(UInt32(35)); Text("J").tag(UInt32(38))
+                    }
+                    Picker("Modifiers", selection: pref(\.shortcutModifiers)) {
+                        Text("Option + Command").tag(UInt32(2304)); Text("Control + Option").tag(UInt32(6144)); Text("Control + Shift").tag(UInt32(4608))
+                    }
+                    Text("Current shortcut: \(shortcutDescription). Press it again to return to the normal opened notch.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Label("CI always overrides an opened EI while that CI is eligible.", systemImage: "arrow.up.to.line")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Activity") {
                 Picker("Activity level", selection: binding(\.activityLevel)) { ForEach(EIActivityLevel.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
                 Text(activityDescription).font(.caption).foregroundStyle(.secondary)
             }
+
             Section("Environmental inputs") {
                 Toggle("Time of day", isOn: input(\.timeOfDay)); Toggle("User activity", isOn: input(\.userActivity)); Toggle("Long work sessions", isOn: input(\.longWorkSessions))
-                if store.settings.inputs.longWorkSessions { Slider(value: binding(\.longWorkThresholdMinutes), in: 30...240, step: 5) { Text("Long work threshold") }; Text("Long-session reactions begin around \(Int(store.settings.longWorkThresholdMinutes)) minutes and remain occasional.").font(.caption).foregroundStyle(.secondary) }
+                if store.settings.inputs.longWorkSessions {
+                    Slider(value: binding(\.longWorkThresholdMinutes), in: 30...240, step: 5) { Text("Long work threshold") }
+                    Text("Long-session reactions begin around \(Int(store.settings.longWorkThresholdMinutes)) minutes and remain occasional.").font(.caption).foregroundStyle(.secondary)
+                }
                 Toggle("Idle state", isOn: input(\.idleState)); Toggle("Music / playback", isOn: input(\.musicPlayback)); Toggle("Weather, when available", isOn: input(\.weather)); Toggle("Active application", isOn: input(\.activeApplication)); Toggle("Context Interface state", isOn: input(\.ciState)); Toggle("System events", isOn: input(\.systemEvents))
                 Text("EI uses only high-level state needed for reactions; it does not inspect documents, messages, browsing data or typed content.").font(.caption).foregroundStyle(.secondary)
             }
-            Section("Pixel display") {
-                Picker("Display style", selection: binding(\.displayPreset)) { ForEach(EIPixelDisplayPreset.allCases) { Text($0.rawValue).tag($0) } }
-                Toggle("Pixel grid", isOn: binding(\.pixelGrid)); Toggle("Pixel glow", isOn: binding(\.pixelGlow)); Toggle("Scanlines", isOn: binding(\.scanlines)); Toggle("LCD persistence / ghosting", isOn: binding(\.ghosting)); Toggle("Subtle brightness variation", isOn: binding(\.brightnessVariation))
-                Text("Scenes render on a deliberately low logical pixel grid and scale as discrete cells rather than filtering high-resolution artwork.").font(.caption).foregroundStyle(.secondary)
+
+            if store.settings.mode != .pet || preferences.value.petVisual == .pixel {
+                Section("Pixel display") {
+                    Picker("Display style", selection: binding(\.displayPreset)) { ForEach(EIPixelDisplayPreset.allCases) { Text($0.rawValue).tag($0) } }
+                    Toggle("Pixel grid", isOn: binding(\.pixelGrid)); Toggle("Pixel glow", isOn: binding(\.pixelGlow)); Toggle("Scanlines", isOn: binding(\.scanlines)); Toggle("LCD persistence / ghosting", isOn: binding(\.ghosting)); Toggle("Subtle brightness variation", isOn: binding(\.brightnessVariation))
+                    Text("Pixel scenes render on a deliberately low logical grid and scale as discrete cells rather than filtering high-resolution artwork.").font(.caption).foregroundStyle(.secondary)
+                }
             }
+
             modeSettings
+
+            if store.settings.mode == .pet || store.settings.mode == .plant {
+                cozySettings
+            }
+
             Section("Live environment") {
-                LabeledContent("Time") { Text(engine.environment.timeOfDay.rawValue.capitalized) }; LabeledContent("Idle") { Text(duration(engine.environment.idleDuration)) }; LabeledContent("Work session") { Text(duration(engine.environment.activityDuration)) }; LabeledContent("Music") { Text(engine.environment.isMusicPlaying ? "Playing" : "Not playing") }; LabeledContent("Active CI") { Text(engine.environment.activeCI?.name ?? "None") }
+                LabeledContent("Time") { Text(engine.environment.timeOfDay.rawValue.capitalized) }
+                LabeledContent("Idle") { Text(duration(engine.environment.idleDuration)) }
+                LabeledContent("Work session") { Text(duration(engine.environment.activityDuration)) }
+                LabeledContent("Music") { Text(engine.environment.isMusicPlaying ? "Playing" : "Not playing") }
+                LabeledContent("Active CI") { Text(engine.environment.activeCI?.name ?? "None") }
                 if let weather = engine.environment.weather { LabeledContent("Weather") { Text(weather.condition) } }
             }
-            Section { Button("Reset EI settings") { store.reset() }; Text("When EI is Off its rendering and behaviour loop stop entirely. Hidden Pet mode also drops to a low-frequency environment check.").font(.caption).foregroundStyle(.secondary) }
+
+            Section {
+                Button("Reset EI settings") { store.reset() }
+                Text("When EI is Off its rendering and behaviour loop stop entirely. Hidden Pet mode also drops to a low-frequency environment check.").font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
+
     @ViewBuilder private var modeSettings: some View {
         switch store.settings.mode {
-        case .off: EmptyView()
+        case .off:
+            EmptyView()
         case .pet:
             Section("Pet") {
-                Picker("Companion", selection: binding(\.petKind)) { ForEach(EIPetKind.allCases) { Text($0.rawValue).tag($0) } }; Slider(value: binding(\.petScale), in: 0.7...1.6, step: 0.05) { Text("Pet size") }
-                Toggle("Allow click / reaction menu", isOn: binding(\.petInteraction)); Toggle("Look toward cursor", isOn: binding(\.petLooksAtCursor)); Toggle("Hide a little when approached", isOn: binding(\.petHidesWhenApproached)); Toggle("Occasionally carry tiny objects", isOn: binding(\.petOccasionalObjects)); Toggle("Keep pet quietly resident", isOn: binding(\.petResident))
-                ColorPicker("Pet color", selection: color(\.petPrimaryColor), supportsOpacity: false); ColorPicker("Accent / objects", selection: color(\.petAccentColor), supportsOpacity: false)
-                HStack { Button("Preview peek") { engine.preview(.petPeekUnder) }; Button("Preview coffee") { engine.preview(.petCoffee, duration: 5) }; Button("Preview dance") { engine.preview(.petDance, duration: 6) }; Button("Preview sleep") { engine.preview(.petSleep, duration: 6) } }
+                Picker("Companion", selection: binding(\.petKind)) { ForEach(EIPetKind.allCases) { Text($0.rawValue).tag($0) } }
+                Picker("Visual style", selection: pref(\.petVisual)) { ForEach(EIPetVisualStyle.allCases) { Text($0.rawValue).tag($0) } }
+                Slider(value: binding(\.petScale), in: 0.7...1.6, step: 0.05) { Text("Pet size") }
+                ColorPicker("Pet color", selection: color(\.petPrimaryColor), supportsOpacity: false)
+                ColorPicker("Accent / objects", selection: color(\.petAccentColor), supportsOpacity: false)
+                Toggle("Allow interactions", isOn: binding(\.petInteraction))
+                Toggle("Look toward cursor", isOn: binding(\.petLooksAtCursor))
+                Toggle("Hide a little when approached", isOn: binding(\.petHidesWhenApproached))
+                Toggle("Occasionally carry tiny objects", isOn: binding(\.petOccasionalObjects))
+                Toggle("Keep pet quietly resident around Halo", isOn: binding(\.petResident))
+                Divider()
+                Toggle("Allow pet to roam outside Halo", isOn: pref(\.roam))
+                Toggle("Walk through the menu bar", isOn: pref(\.menuBar)).disabled(!preferences.value.roam)
+                Toggle("Peek from screen edges", isOn: pref(\.screenEdges)).disabled(!preferences.value.roam)
+                HStack {
+                    Button("Pat") { engine.interact(.petPat) }
+                    Button("Snack") { engine.interact(.petSnack) }
+                    Button("Hello") { engine.interact(.petGreet) }
+                    Button("Dance") { engine.preview(.petDance, duration: 6) }
+                }
+                .disabled(!store.settings.petInteraction)
                 Text("The companion never dies, starves, becomes permanently unhappy, shames you, or requires daily interaction.").font(.caption).foregroundStyle(.secondary)
             }
         case .plant:
             Section("Plant") {
-                Picker("Plant", selection: binding(\.plantKind)) { ForEach(EIPlantKind.allCases) { Text($0.rawValue).tag($0) } }; ColorPicker("Plant color", selection: color(\.plantColor), supportsOpacity: false); ColorPicker("Pot color", selection: color(\.plantPotColor), supportsOpacity: false)
-                ProgressView(value: min(1, engine.persistentState.plant.growth + engine.persistentState.plant.bonusGrowth)); Text("Growth is deliberately slow and persists between launches. Work sessions can create small positive moments, never mandatory progression.").font(.caption).foregroundStyle(.secondary)
-                HStack { Button("Preview sway") { engine.preview(.plantSway, duration: 6) }; Button("Preview rain") { engine.preview(.plantRain, duration: 6) }; Button("Preview bloom") { engine.preview(.plantBloom, duration: 7) } }
+                Picker("Plant", selection: binding(\.plantKind)) { ForEach(EIPlantKind.allCases) { Text($0.rawValue).tag($0) } }
+                ColorPicker("Plant color", selection: color(\.plantColor), supportsOpacity: false)
+                ColorPicker("Pot color", selection: color(\.plantPotColor), supportsOpacity: false)
+                ProgressView(value: min(1, engine.persistentState.plant.growth + engine.persistentState.plant.bonusGrowth))
+                HStack {
+                    Button("Water") { engine.preview(.plantRain, duration: 5) }
+                    Button("Touch") { engine.preview(.plantPerk, duration: 3) }
+                    Button("Sun") { engine.preview(.plantBloom, duration: 6) }
+                    Button("Sway") { engine.preview(.plantSway, duration: 6) }
+                }
+                Text("Growth is deliberately slow and persists between launches. Interactions create small positive moments; none are mandatory.").font(.caption).foregroundStyle(.secondary)
             }
         case .simulation:
             Section("Simulation") {
-                Picker("World", selection: binding(\.simulationKind)) { ForEach(EISimulationKind.allCases) { Text($0.rawValue).tag($0) } }; ColorPicker("City accent", selection: color(\.simulationAccentColor), supportsOpacity: false)
+                Picker("World", selection: binding(\.simulationKind)) { ForEach(EISimulationKind.allCases) { Text($0.rawValue).tag($0) } }
+                ColorPicker("City accent", selection: color(\.simulationAccentColor), supportsOpacity: false)
                 Text("The first world is one polished horizontal tiny city: persistent layout seed, traffic, window lights, day/night state, rain and music activity.").font(.caption).foregroundStyle(.secondary)
                 HStack { Button("Preview traffic") { engine.preview(.cityTraffic, duration: 7) }; Button("Preview rain") { engine.preview(.cityRain, duration: 8) }; Button("Preview night") { engine.preview(.cityNight, duration: 8) } }
             }
         }
     }
-    private var activityDescription: String { switch store.settings.activityLevel { case .subtle: return "Rare moments; easy to forget about until EI quietly surprises you."; case .balanced: return "Occasional context-aware moments without constant movement."; case .expressive: return "More frequent reactions while still yielding to important UI." } }
-    private func binding<T>(_ kp: WritableKeyPath<EISettings, T>) -> Binding<T> { Binding(get: { store.settings[keyPath: kp] }, set: { var v = store.settings; v[keyPath: kp] = $0; store.settings = v }) }
-    private func input(_ kp: WritableKeyPath<EIInputSettings, Bool>) -> Binding<Bool> { Binding(get: { store.settings.inputs[keyPath: kp] }, set: { var v = store.settings; v.inputs[keyPath: kp] = $0; store.settings = v }) }
-    private func color(_ kp: WritableKeyPath<EISettings, WidgetColor>) -> Binding<Color> { Binding(get: { store.settings[keyPath: kp].color }, set: { var v = store.settings; v[keyPath: kp] = WidgetColor($0); store.settings = v }) }
-    private func duration(_ value: TimeInterval) -> String { let s = max(0, Int(value.rounded())); if s < 60 { return "\(s)s" }; let m = s / 60; return m < 60 ? "\(m)m" : "\(m / 60)h \(m % 60)m" }
+
+    private var cozySettings: some View {
+        Section("Owned EI environment") {
+            Picker("Room style", selection: pref(\.roomStyle)) { ForEach(EIRoomStyle.allCases) { Text($0.rawValue).tag($0) } }
+            ColorPicker("Room color", selection: prefColor(\.room), supportsOpacity: false)
+            ColorPicker("Accent light", selection: prefColor(\.accent), supportsOpacity: false)
+            ColorPicker("Floor", selection: prefColor(\.floor), supportsOpacity: false)
+            Toggle("Window", isOn: pref(\.window))
+            Toggle("Lamp", isOn: pref(\.lamp))
+            Toggle("Rug", isOn: pref(\.rug))
+            Toggle("Wall shelf", isOn: pref(\.shelf))
+            Toggle("Room plants", isOn: pref(\.roomPlants))
+            Text("These options customize the cozy full-notch environment shown when you explicitly open Pet or Plant EI.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var activityDescription: String {
+        switch store.settings.activityLevel {
+        case .subtle: return "Rare moments; easy to forget about until EI quietly surprises you."
+        case .balanced: return "Occasional context-aware moments without constant movement."
+        case .expressive: return "More frequent reactions while still yielding to important UI."
+        }
+    }
+
+    private var shortcutDescription: String {
+        let modifiers: String
+        switch preferences.value.shortcutModifiers {
+        case 6144: modifiers = "⌃⌥"
+        case 4608: modifiers = "⌃⇧"
+        default: modifiers = "⌥⌘"
+        }
+        let key: String
+        switch preferences.value.shortcutKey {
+        case 34: key = "I"
+        case 35: key = "P"
+        case 38: key = "J"
+        default: key = "E"
+        }
+        return modifiers + key
+    }
+
+    private func binding<T>(_ keyPath: WritableKeyPath<EISettings, T>) -> Binding<T> {
+        Binding(get: { store.settings[keyPath: keyPath] }, set: { var value = store.settings; value[keyPath: keyPath] = $0; store.settings = value })
+    }
+    private func input(_ keyPath: WritableKeyPath<EIInputSettings, Bool>) -> Binding<Bool> {
+        Binding(get: { store.settings.inputs[keyPath: keyPath] }, set: { var value = store.settings; value.inputs[keyPath: keyPath] = $0; store.settings = value })
+    }
+    private func color(_ keyPath: WritableKeyPath<EISettings, WidgetColor>) -> Binding<Color> {
+        Binding(get: { store.settings[keyPath: keyPath].color }, set: { var value = store.settings; value[keyPath: keyPath] = WidgetColor($0); store.settings = value })
+    }
+    private func pref<T>(_ keyPath: WritableKeyPath<EIOpenPreferences, T>) -> Binding<T> {
+        Binding(get: { preferences.value[keyPath: keyPath] }, set: { var value = preferences.value; value[keyPath: keyPath] = $0; preferences.value = value })
+    }
+    private func prefColor(_ keyPath: WritableKeyPath<EIOpenPreferences, WidgetColor>) -> Binding<Color> {
+        Binding(get: { preferences.value[keyPath: keyPath].color }, set: { var value = preferences.value; value[keyPath: keyPath] = WidgetColor($0); preferences.value = value })
+    }
+    private func duration(_ value: TimeInterval) -> String {
+        let seconds = max(0, Int(value.rounded())); if seconds < 60 { return "\(seconds)s" }
+        let minutes = seconds / 60; return minutes < 60 ? "\(minutes)m" : "\(minutes / 60)h \(minutes % 60)m"
+    }
 }
