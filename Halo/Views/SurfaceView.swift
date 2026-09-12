@@ -555,7 +555,7 @@ struct SurfaceViewportView: View {
 }
 
 private enum ActiveContextInterface: String {
-    case music, bluetooth, retro
+    case drop, music, bluetooth, retro
 }
 
 struct SurfaceView: View {
@@ -567,6 +567,10 @@ struct SurfaceView: View {
     @AppStorage("HaloContextMusicUseFullNotchArea") private var contextMusicUsesFullNotchArea = false
     @AppStorage("HaloContextMusicKeepClosedNotchContents") private var contextMusicKeepsClosedContents = false
     @AppStorage("HaloContextMusicPriority") private var contextMusicPriority = 60.0
+    @AppStorage("HaloContextDropEnabled") private var dropCIEnabled = true
+    @AppStorage("HaloContextDropUseFullNotchArea") private var dropUsesFullNotchArea = true
+    @AppStorage("HaloContextDropKeepClosedNotchContents") private var dropKeepsClosedContents = false
+    @AppStorage("HaloContextDropPriority") private var dropPriority = 100.0
     @AppStorage("HaloContextBluetoothEnabled") private var bluetoothCIEnabled = false
     @AppStorage("HaloContextBluetoothShowWhileConnected") private var bluetoothShowWhileConnected = true
     @AppStorage("HaloContextBluetoothShowOnChanges") private var bluetoothShowOnChanges = true
@@ -588,6 +592,9 @@ struct SurfaceView: View {
     }
     private var activeContext: ActiveContextInterface? {
         var candidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] = []
+        if dropCIEnabled && state.dropTargeted {
+            candidates.append((.drop, dropPriority, 4))
+        }
         if retroCIEnabled && retroGameRequested {
             candidates.append((.retro, retroPriority, 3))
         }
@@ -602,12 +609,14 @@ struct SurfaceView: View {
             return lhs.tieRank < rhs.tieRank
         }?.interface
     }
+    private var dropContextActive: Bool { activeContext == .drop }
     private var contextMusicActive: Bool { activeContext == .music }
     private var bluetoothContextActive: Bool { activeContext == .bluetooth }
     private var retroContextActive: Bool { activeContext == .retro }
     private var contextOwnsFullSurface: Bool {
         guard state.expanded else { return false }
         switch activeContext {
+        case .drop: return dropUsesFullNotchArea
         case .music: return contextMusicUsesFullNotchArea
         case .bluetooth: return bluetoothUsesFullNotchArea
         case .retro: return retroUsesFullNotchArea
@@ -616,6 +625,7 @@ struct SurfaceView: View {
     }
     private var keepsClosedContentsWhileExpanded: Bool {
         switch activeContext {
+        case .drop: return dropKeepsClosedContents
         case .music: return contextMusicKeepsClosedContents
         case .bluetooth: return bluetoothKeepsClosedContents
         case .retro: return retroKeepsClosedContents
@@ -649,7 +659,6 @@ struct SurfaceView: View {
     }
     @State private var page = 0
     private var modules: [ModuleID] { layout.normalizedOrder().filter { layout.enabled.contains($0) } }
-    @State private var targeted = false
     private var accent: Color { Color(hue: theme.tint, saturation: 0.65, brightness: 1) }
     var body: some View {
         ZStack(alignment: .top) {
@@ -680,7 +689,13 @@ struct SurfaceView: View {
                     .accessibilityAddTraits(.isButton)
                 }
                 if state.expanded {
-                    if contextMusicActive {
+                    if dropContextActive {
+                        if !dropUsesFullNotchArea {
+                            DropContextView(itemCount: state.dropItemCount, surfaceState: state)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                        }
+                    } else if contextMusicActive {
                         if !contextMusicUsesFullNotchArea {
                             ContextMusicView(media: workspace.media, options: contextOptions,
                                              visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
@@ -750,7 +765,9 @@ struct SurfaceView: View {
 
             if contextOwnsFullSurface {
                 Group {
-                    if contextMusicActive {
+                    if dropContextActive {
+                        DropContextView(itemCount: state.dropItemCount, surfaceState: state)
+                    } else if contextMusicActive {
                         ContextMusicView(media: workspace.media, options: contextOptions,
                                          visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
                     } else if bluetoothContextActive {
@@ -782,7 +799,7 @@ struct SurfaceView: View {
         }
         .clipShape(contour)
         .contentShape(contour)
-        .overlay(contour.stroke(targeted ? accent : .white.opacity(0.12), lineWidth: 1))
+        .overlay(contour.stroke(state.dropTargeted ? accent : .white.opacity(0.12), lineWidth: state.dropTargeted ? 1.6 : 1))
         .foregroundStyle(.white).preferredColorScheme(.dark)
         .buttonStyle(.borderless)
         .contextMenu {
@@ -802,8 +819,11 @@ struct SurfaceView: View {
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }
         .onHover { state.hover($0, enabled: store.configuration.hoverToExpand) }
-        .onChange(of: targeted) { active in
-            if active { state.collapseTask?.cancel(); state.expanded = true }
+        .onChange(of: state.dropTargeted) { active in
+            if active {
+                state.collapseTask?.cancel()
+                state.expanded = true
+            }
         }
         .onChange(of: state.expanded) { expanded in
             if !expanded {
@@ -811,17 +831,23 @@ struct SurfaceView: View {
                 retroGameRequested = false
             }
         }
-        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $targeted) { providers in
-            state.expanded = true
-            for provider in providers {
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    guard let url else { return }
-                    Task { @MainActor in store.addFiles([url]) }
-                }
+        .onDrop(of: [UTType.fileURL.identifier], delegate: HaloFileDropDelegate(
+            targeted: $state.dropTargeted,
+            itemCount: $state.dropItemCount,
+            perform: acceptFileDrop
+        ))
+    }
+
+    private func acceptFileDrop(_ providers: [NSItemProvider]) {
+        state.expanded = true
+        for provider in providers {
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                Task { @MainActor in store.addFiles([url]) }
             }
-            return !providers.isEmpty
         }
     }
+
     private func horizontalWidget(_ module: ModuleID) -> some View {
         GeometryReader { proxy in
             WidgetCard(style: layout.widgetStyle(for: module), availableHeight: proxy.size.height) {
@@ -838,6 +864,142 @@ struct SurfaceView: View {
                     BuiltinOrIntegrationWidget(module: module, store: store)
                 }
             }
+        }
+    }
+}
+
+private struct HaloFileDropDelegate: DropDelegate {
+    @Binding var targeted: Bool
+    @Binding var itemCount: Int
+    let perform: ([NSItemProvider]) -> Void
+
+    private func providers(_ info: DropInfo) -> [NSItemProvider] {
+        info.itemProviders(for: [UTType.fileURL.identifier])
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        !providers(info).isEmpty
+    }
+
+    func dropEntered(info: DropInfo) {
+        let values = providers(info)
+        targeted = !values.isEmpty
+        itemCount = values.count
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        let values = providers(info)
+        targeted = !values.isEmpty
+        itemCount = values.count
+        return DropProposal(operation: .copy)
+    }
+
+    func dropExited(info: DropInfo) {
+        targeted = false
+        itemCount = 0
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let values = providers(info)
+        guard !values.isEmpty else {
+            targeted = false
+            itemCount = 0
+            return false
+        }
+        targeted = false
+        itemCount = 0
+        perform(values)
+        return true
+    }
+}
+
+private struct DropContextView: View {
+    let itemCount: Int
+    @ObservedObject var surfaceState: SurfaceState
+    @AppStorage("HaloContextDropUseFullNotchArea") private var usesFullNotchArea = true
+    @AppStorage("HaloContextDropKeepClosedNotchContents") private var keepsClosedNotchContents = false
+    @AppStorage("HaloContextDropPriority") private var priority = 100.0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    private var count: Int { max(1, itemCount) }
+    private var topInset: Double {
+        if usesFullNotchArea && keepsClosedNotchContents { return max(24, surfaceState.compactHeight + 14) }
+        if usesFullNotchArea { return max(22, surfaceState.compactHeight * 0.72) }
+        return 22
+    }
+    private var preferredSize: CGSize { CGSize(width: 520, height: 270 + max(0, topInset - 22)) }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color.accentColor.opacity(0.24), Color.blue.opacity(0.10), Color.black.opacity(0.72)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+
+            VStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(Color.accentColor.opacity(0.14))
+                        .frame(width: 84, height: 84)
+                        .scaleEffect(pulse && !reduceMotion ? 1.08 : 0.96)
+                    Circle()
+                        .stroke(Color.accentColor.opacity(0.42), style: StrokeStyle(lineWidth: 1.5, dash: [5, 5]))
+                        .frame(width: 84, height: 84)
+                    Image(systemName: count == 1 ? "doc.fill.badge.plus" : "doc.on.doc.fill")
+                        .font(.system(size: 31, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+
+                VStack(spacing: 5) {
+                    Text("Drop into Halo")
+                        .font(.system(size: 23, weight: .bold, design: .rounded))
+                    Text(count == 1 ? "Release to add this item to File Shelf" : "Release to add \(count) items to File Shelf")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 8) {
+                    dropCapability("Original stays untouched", symbol: "lock.shield")
+                    dropCapability("Quick Look", symbol: "eye")
+                    dropCapability("Pin later", symbol: "pin")
+                }
+
+                HStack(spacing: 5) {
+                    Circle().fill(Color.green).frame(width: 6, height: 6)
+                    Text("Ready to copy references · CI priority \(Int(priority))")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, topInset)
+            .padding(.bottom, 22)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: usesFullNotchArea ? 0 : 20, style: .continuous))
+        .task { publishPreferredSize() }
+        .onChange(of: itemCount) { _ in publishPreferredSize() }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.72).repeatForever(autoreverses: true)) { pulse = true }
+        }
+        .onDisappear { surfaceState.contextPreferredSize = nil }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Drop \(count) item\(count == 1 ? "" : "s") into Halo")
+    }
+
+    private func dropCapability(_ title: String, symbol: String) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.system(size: 9, weight: .semibold))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(Color.white.opacity(0.07), in: Capsule())
+    }
+
+    private func publishPreferredSize() {
+        let next = preferredSize
+        DispatchQueue.main.async { [surfaceState] in
+            if let current = surfaceState.contextPreferredSize,
+               abs(current.width - next.width) < 1, abs(current.height - next.height) < 1 { return }
+            surfaceState.contextPreferredSize = next
         }
     }
 }

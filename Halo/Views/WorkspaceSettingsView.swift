@@ -501,20 +501,35 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 }
 
 private enum ContextInterfaceSelection: String, Identifiable {
-    case music, bluetooth, retro
+    case drop, music, bluetooth, retro
     var id: String { rawValue }
 }
 
 private struct ContextInterfaceLibraryView: View {
     @Binding var layout: WorkspaceLayout
     @State private var selection: ContextInterfaceSelection?
+    @AppStorage("HaloContextDropEnabled") private var dropEnabled = true
     @AppStorage("HaloContextBluetoothEnabled") private var bluetoothEnabled = false
     @AppStorage("HaloContextRetroEnabled") private var retroEnabled = false
 
     private var musicEnabled: Bool { layout.contextMusic?.enabled ?? false }
 
     @ViewBuilder var body: some View {
-        if selection == .music {
+        if selection == .drop {
+            Section {
+                HStack(spacing: 12) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) { selection = nil }
+                    } label: {
+                        Label("All CI", systemImage: "chevron.left")
+                    }
+                    Spacer()
+                    Label("Drop CI", systemImage: "tray.and.arrow.down.fill")
+                        .font(.headline)
+                }
+            }
+            ContextDropSettings()
+        } else if selection == .music {
             Section {
                 HStack(spacing: 12) {
                     Button {
@@ -569,6 +584,9 @@ private struct ContextInterfaceLibraryView: View {
 
             Section("Available CI") {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 14)], alignment: .leading, spacing: 14) {
+                    DropContextInterfaceCard(enabled: dropEnabled) {
+                        withAnimation(.easeInOut(duration: 0.18)) { selection = .drop }
+                    }
                     ContextInterfaceCard(enabled: musicEnabled) {
                         withAnimation(.easeInOut(duration: 0.18)) { selection = .music }
                     }
@@ -587,6 +605,102 @@ private struct ContextInterfaceLibraryView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+private struct DropContextInterfaceCard: View {
+    let enabled: Bool
+    let action: () -> Void
+    @AppStorage("HaloContextDropPriority") private var priority = 100.0
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(LinearGradient(colors: [Color.accentColor.opacity(0.24), Color.black.opacity(0.92)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.45), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+                        .padding(15)
+                    VStack(spacing: 7) {
+                        Image(systemName: "tray.and.arrow.down.fill")
+                            .font(.system(size: 30, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                        Text("DROP FILES HERE")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.78))
+                    }
+                }
+                .frame(height: 112)
+
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Drop CI").font(.headline)
+                        Text("Files & Folders").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(enabled ? "Enabled" : "Available")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background((enabled ? Color.green : Color.secondary).opacity(0.12), in: Capsule())
+                        .foregroundStyle(enabled ? Color.green : Color.secondary)
+                }
+
+                Text("Turns Halo into a focused drop target while a Finder item is hovering over the notch.")
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.leading)
+
+                HStack {
+                    Label("File Shelf", systemImage: "tray")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Text("Priority \(Int(priority))")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Spacer()
+                    Label("Edit", systemImage: "chevron.right")
+                        .font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(hovered ? 0.075 : 0.045), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(hovered ? Color.accentColor.opacity(0.42) : Color.primary.opacity(0.08), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovered)
+    }
+}
+
+private struct ContextDropSettings: View {
+    @AppStorage("HaloContextDropEnabled") private var enabled = true
+    @AppStorage("HaloContextDropUseFullNotchArea") private var usesFullNotchArea = true
+    @AppStorage("HaloContextDropKeepClosedNotchContents") private var keepsClosedNotchContents = false
+    @AppStorage("HaloContextDropPriority") private var priority = 100.0
+
+    var body: some View {
+        Section("Drag & Drop Context Interface") {
+            Toggle("Enable Drop CI", isOn: $enabled)
+            Text("When a file or folder is dragged over Halo, the opened notch becomes a dedicated drop target. Release to add a reference to File Shelf; Halo never moves or deletes the original.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("CI priority") {
+            Slider(value: $priority, in: 0...100, step: 1) { Text("Drop CI priority") }
+            Text("Drop CI defaults to the highest priority because the drag is an immediate user action. You can lower it if another Context Interface should remain visible during a drag.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("CI surface") {
+            Toggle("Use full notch area", isOn: $usesFullNotchArea)
+            Toggle("Keep closed-notch contents visible", isOn: $keepsClosedNotchContents)
+            Text("Full area gives the drop target the clearest visual feedback. Keeping closed contents visible reserves the top strip while you drag.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("What happens after dropping") {
+            Label("Files and folders are added to File Shelf as references.", systemImage: "tray.full")
+            Label("Originals remain in their current location.", systemImage: "lock.shield")
+            Label("Use Quick Look, pin, reveal, open or share from the Shelf widget.", systemImage: "eye")
         }
     }
 }

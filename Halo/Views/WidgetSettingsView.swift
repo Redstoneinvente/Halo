@@ -142,6 +142,8 @@ struct ClosedNotchSettingsView: View {
     @AppStorage("HaloBluetoothClosedNotchShowDevice") private var bluetoothShowDevice = true
     @AppStorage("HaloBluetoothClosedNotchDuration") private var bluetoothDuration = 10.0
     @AppStorage("HaloBluetoothClosedNotchIconSize") private var bluetoothIconSize = 16.0
+    @State private var selectedClosedWidget: ClosedNotchItem = .clock
+    @State private var closedWidgetFonts: [String] = []
     private var options: Binding<ClosedNotchOptions> { Binding(get: { layout.closedNotch ?? ClosedNotchOptions() }, set: { layout.closedNotch = $0 }) }
     private var visualizer: Binding<VisualizerOptions> { Binding(get: { options.wrappedValue.visualizer ?? VisualizerOptions() }, set: { options.wrappedValue.visualizer = $0 }) }
     private var expansion: Binding<ClosedExpansionOptions> { Binding(get: { options.wrappedValue.expansion ?? ClosedExpansionOptions() }, set: { options.wrappedValue.expansion = $0 }) }
@@ -160,6 +162,29 @@ struct ClosedNotchSettingsView: View {
     }
     private var reactive: Binding<ReactiveBackgroundOptions> { Binding(get: { options.wrappedValue.reactiveBackground ?? ReactiveBackgroundOptions() }, set: { options.wrappedValue.reactiveBackground = $0 }) }
     private var power: Binding<PowerReactionOptions> { Binding(get: { options.wrappedValue.powerReaction ?? PowerReactionOptions() }, set: { options.wrappedValue.powerReaction = $0 }) }
+    private var closedWidgetStyle: Binding<ClosedNotchWidgetStyle> {
+        Binding(get: {
+            options.wrappedValue.widgetStyle(for: selectedClosedWidget) ?? inheritedClosedWidgetStyle(selectedClosedWidget)
+        }, set: { newValue in
+            var updated = options.wrappedValue
+            updated.setWidgetStyle(newValue, for: selectedClosedWidget)
+            options.wrappedValue = updated
+        })
+    }
+    private func inheritedClosedWidgetStyle(_ item: ClosedNotchItem) -> ClosedNotchWidgetStyle {
+        var value = ClosedNotchWidgetStyle()
+        value.fontSize = options.wrappedValue.fontSize
+        value.textColor = options.wrappedValue.color
+        value.accentColor = options.wrappedValue.color
+        if item == .clock {
+            let source = layout.widgetStyle(for: .clock)
+            value.fontFamily = source.fontFamily
+            value.customFont = source.customFont
+            value.weight = source.weight
+            value.clock = source.clock
+        }
+        return value
+    }
     var body: some View {
         Section("Opened background") {
             Toggle("Apply these background effects when opened", isOn: Binding(get: { options.wrappedValue.applyBackgroundWhenOpened ?? false }, set: { options.wrappedValue.applyBackgroundWhenOpened = $0 }))
@@ -186,6 +211,92 @@ struct ClosedNotchSettingsView: View {
             PreciseSlider(title: "Text size", value: options.fontSize, range: 8...24, step: 1, suffix: "pt")
             ColorPicker("Color", selection: Binding(get: { options.wrappedValue.color.color }, set: { options.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
             Text("Active Halo activities have priority: they use an Activity slot, an inactive side, or temporarily replace the right slot if both sides are occupied.").font(.caption)
+        }
+        Section("Widget customization") {
+            Picker("Customize", selection: $selectedClosedWidget) {
+                ForEach(ClosedNotchItem.allCases.filter { $0 != .none }) { item in
+                    Text(item.title).tag(item)
+                }
+            }
+            Text("Each Closed Notch widget can have its own typography, colors, chrome, spacing and placement. Media, Visualizer and Live Activity keep their specialised controls below as well.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            Group {
+                Picker("Font", selection: closedWidgetStyle.fontFamily) {
+                    ForEach(WidgetFontFamily.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+                }
+                if closedWidgetStyle.wrappedValue.fontFamily == .custom {
+                    SearchableStringPicker(title: "Installed font", selection: closedWidgetStyle.customFont,
+                        values: closedWidgetFonts.contains(closedWidgetStyle.wrappedValue.customFont)
+                            ? closedWidgetFonts : [closedWidgetStyle.wrappedValue.customFont] + closedWidgetFonts)
+                        .onAppear { if closedWidgetFonts.isEmpty { closedWidgetFonts = NSFontManager.shared.availableFontFamilies.sorted() } }
+                }
+                Picker("Weight", selection: closedWidgetStyle.weight) {
+                    ForEach(WidgetFontWeight.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+                }
+                PreciseSlider(title: "Text size", value: closedWidgetStyle.fontSize, range: 7...32, step: 1, suffix: "pt")
+                ColorPicker("Text color", selection: Binding(get: { closedWidgetStyle.wrappedValue.textColor.color }, set: { closedWidgetStyle.wrappedValue.textColor = WidgetColor($0) }), supportsOpacity: false)
+                ColorPicker("Accent / icon color", selection: Binding(get: { closedWidgetStyle.wrappedValue.accentColor.color }, set: { closedWidgetStyle.wrappedValue.accentColor = WidgetColor($0) }), supportsOpacity: false)
+                PreciseSlider(title: "Opacity", value: closedWidgetStyle.opacity, range: 0.1...1, step: 0.05, decimals: 2)
+            }
+
+            if [.timer, .battery, .files, .activity].contains(selectedClosedWidget) {
+                Divider()
+                Toggle("Show icon", isOn: closedWidgetStyle.showIcon)
+                Toggle("Show text", isOn: closedWidgetStyle.showText)
+                if closedWidgetStyle.wrappedValue.showIcon {
+                    PreciseSlider(title: "Icon size", value: closedWidgetStyle.iconSize, range: 7...36, step: 1, suffix: "pt")
+                }
+                PreciseSlider(title: "Icon / text spacing", value: closedWidgetStyle.spacing, range: 0...24, step: 1, suffix: "pt")
+            }
+
+            if selectedClosedWidget == .clock {
+                Divider()
+                Toggle("24-hour time", isOn: closedWidgetStyle.clock.twentyFourHour)
+                Toggle("Show seconds", isOn: closedWidgetStyle.clock.showSeconds)
+                SearchableStringPicker(title: "Time zone", selection: closedWidgetStyle.clock.timeZone,
+                    values: [""] + TimeZone.knownTimeZoneIdentifiers, emptyLabel: "System time zone")
+            }
+
+            if selectedClosedWidget == .date {
+                Divider()
+                Picker("Date style", selection: closedWidgetStyle.dateStyle) {
+                    ForEach(ClosedNotchDateStyle.allCases) { style in Text(style.title).tag(style) }
+                }
+            }
+
+            if selectedClosedWidget == .activity {
+                Divider()
+                Toggle("Show activity detail", isOn: closedWidgetStyle.activityShowDetail)
+                Toggle("Show progress", isOn: closedWidgetStyle.activityShowProgress)
+                Text("Bluetooth event contents still use the dedicated Bluetooth controls below; this section styles their overall widget chrome and placement.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Divider()
+            Text("Widget chrome").font(.headline)
+            ColorPicker("Background color", selection: Binding(get: { closedWidgetStyle.wrappedValue.backgroundColor.color }, set: { closedWidgetStyle.wrappedValue.backgroundColor = WidgetColor($0) }), supportsOpacity: false)
+            PreciseSlider(title: "Background opacity", value: closedWidgetStyle.backgroundOpacity, range: 0...1, step: 0.05, decimals: 2)
+            PreciseSlider(title: "Inner padding", value: closedWidgetStyle.padding, range: 0...24, step: 1, suffix: "pt")
+            PreciseSlider(title: "Corner radius", value: closedWidgetStyle.cornerRadius, range: 0...32, step: 1, suffix: "pt")
+
+            Divider()
+            Text("Sizing & placement").font(.headline)
+            PreciseSlider(title: "Reserved width (0 = automatic)", value: closedWidgetStyle.width, range: 0...420, step: 1, suffix: "pt")
+            Picker("Alignment", selection: closedWidgetStyle.alignment) {
+                ForEach(ClosedNotchWidgetAlignment.allCases) { alignment in Text(alignment.title).tag(alignment) }
+            }
+            PreciseSlider(title: "Horizontal offset", value: closedWidgetStyle.horizontalOffset, range: -160...160, step: 1, suffix: "pt")
+            PreciseSlider(title: "Vertical offset", value: closedWidgetStyle.verticalOffset, range: -80...80, step: 1, suffix: "pt")
+            Text("Positive X moves right; positive Y moves down. Halo's content-fit width accounts for outward offsets so a customized widget does not get clipped.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            Button("Reset \(selectedClosedWidget.title) customization") {
+                var updated = options.wrappedValue
+                updated.resetWidgetStyle(for: selectedClosedWidget)
+                options.wrappedValue = updated
+            }
+            .disabled(options.wrappedValue.widgetStyle(for: selectedClosedWidget) == nil)
         }
         Section("Bluetooth events") {
             Toggle("Show Bluetooth connection states", isOn: $bluetoothEvents)
@@ -360,7 +471,7 @@ struct ClosedNotchSettingsView: View {
         }
         Button("Reset closed content") { layout.closedNotch = ClosedNotchOptions() }
     }
-    private func itemPicker(_ title: String, _ value: Binding<ClosedNotchItem>) -> some View { Picker(title, selection: value) { ForEach(ClosedNotchItem.allCases) { Text($0.rawValue.capitalized).tag($0) } } }
+    private func itemPicker(_ title: String, _ value: Binding<ClosedNotchItem>) -> some View { Picker(title, selection: value) { ForEach(ClosedNotchItem.allCases) { Text($0.title).tag($0) } } }
     private func gesturePicker(_ title: String, _ value: Binding<MediaGestureAction>) -> some View {
         Picker(title, selection: value) {
             Text("None").tag(MediaGestureAction.none); Text("Play / Pause").tag(MediaGestureAction.playPause); Text("Next track").tag(MediaGestureAction.next); Text("Previous track").tag(MediaGestureAction.previous); Text("Open player").tag(MediaGestureAction.openPlayer)

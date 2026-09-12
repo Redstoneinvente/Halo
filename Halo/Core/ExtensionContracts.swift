@@ -39,7 +39,7 @@ struct SignedLicense: Codable {
 
 // MARK: - Surface ownership router
 
-private enum RoutedContextInterface: String { case music, bluetooth, retro }
+private enum RoutedContextInterface: String { case drop, music, bluetooth, retro }
 
 /// CI -> EI -> normal Halo. The normal SurfaceView remains alive behind EI so CI-local state
 /// continues receiving events, but EI becomes the visible owner and receives CI-style sizing.
@@ -58,6 +58,8 @@ struct HaloSurfaceRouter: View {
     @ObservedObject private var license = HaloLicenseManager.shared
 
     @AppStorage("HaloContextMusicPriority") private var musicPriority = 60.0
+    @AppStorage("HaloContextDropEnabled") private var dropEnabled = true
+    @AppStorage("HaloContextDropPriority") private var dropPriority = 100.0
     @AppStorage("HaloContextBluetoothEnabled") private var bluetoothEnabled = false
     @AppStorage("HaloContextBluetoothShowWhileConnected") private var bluetoothWhileConnected = true
     @AppStorage("HaloContextBluetoothShowOnChanges") private var bluetoothOnChanges = true
@@ -71,6 +73,7 @@ struct HaloSurfaceRouter: View {
 
     private var activeCI: RoutedContextInterface? {
         var candidates: [(RoutedContextInterface, Double, Int)] = []
+        if dropEnabled && state.dropTargeted { candidates.append((.drop, dropPriority, 4)) }
         if retroEnabled && engine.retroGameRequested { candidates.append((.retro, retroPriority, 3)) }
         if musicOptions.enabled && workspace.media.isPlaying { candidates.append((.music, musicPriority, 2)) }
         let bluetoothEligible = bluetoothEnabled &&

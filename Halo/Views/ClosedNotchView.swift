@@ -291,6 +291,18 @@ struct ClosedNotchSlot: View {
     private var elementSpacing: Double { layoutMetrics.elementSpacing }
     private var activeActivity: LiveActivity? { activity }
     private var innerHeight: Double { layoutMetrics.contentHeight }
+    private var widgetStyle: ClosedNotchWidgetStyle? { options.widgetStyle(for: item) }
+    private var widgetElementSpacing: Double { widgetStyle?.spacing ?? elementSpacing }
+    private var widgetTextSize: Double { min(widgetStyle?.fontSize ?? textSize, max(7, innerHeight)) }
+    private var widgetShowsIcon: Bool { widgetStyle?.showIcon ?? true }
+    private var widgetShowsText: Bool { widgetStyle?.showText ?? true }
+    private var widgetIconSize: Double { min(widgetStyle?.iconSize ?? max(12, widgetTextSize + 2), innerHeight) }
+    private var widgetTextColor: Color { widgetStyle?.textColor.color ?? effectiveTextColor }
+    private var widgetAccentColor: Color { widgetStyle?.accentColor.color ?? widgetTextColor }
+    private var widgetBodyWidthLimit: Double {
+        guard let widgetStyle, widgetStyle.width > 0 else { return innerWidth }
+        return max(12, min(innerWidth, widgetStyle.width) - 2 * widgetStyle.padding)
+    }
     private var innerWidth: Double { max(1, availableWidth - slotCameraInset - slotOuterInset) }
     private var isMusicItem: Bool { item == .media || item == .visualizer }
     private var itemIsVisible: Bool {
@@ -399,7 +411,7 @@ struct ClosedNotchSlot: View {
     }
     private var visualizerOptions: VisualizerOptions {
         var v = options.visualizer ?? VisualizerOptions()
-        v.width = min(v.width, max(1, innerWidth - mediaSiblingFootprint))
+        v.width = min(v.width, max(1, min(widgetBodyWidthLimit, innerWidth - mediaSiblingFootprint)))
         v.height = min(v.height, innerHeight)
         return v
     }
@@ -446,14 +458,14 @@ struct ClosedNotchSlot: View {
         return widths.reduce(0, +) + Double(widths.count) * elementSpacing
     }
     private var closedMediaWidth: Double {
-        let remaining = max(24, innerWidth - mediaSiblingFootprint)
+        let remaining = max(24, min(widgetBodyWidthLimit, innerWidth - mediaSiblingFootprint))
         if closedMediaOptions.overflow == .truncate || closedMediaOptions.overflow == .marquee {
             return min(remaining, closedMediaOptions.resolvedHorizontalSpace)
         }
         return remaining
     }
     private var mirrorContentWidth: Double {
-        max(1, min(112, innerWidth - mediaSiblingFootprint))
+        max(1, min(widgetBodyWidthLimit, min(112, innerWidth - mediaSiblingFootprint)))
     }
     private var activityContentWidth: Double {
         var occupied = 0.0
@@ -463,7 +475,7 @@ struct ClosedNotchSlot: View {
         if powerFootprint > 0 { occupied += powerFootprint; siblingCount += 1 }
         if hudReservedWidth > 0 { occupied += hudElementWidth; siblingCount += 1 }
         if siblingCount > 0 { occupied += Double(siblingCount) * elementSpacing }
-        return max(24, innerWidth - occupied)
+        return max(24, min(widgetBodyWidthLimit, innerWidth - occupied))
     }
     private var renderedArtworkOptions: ClosedArtworkOptions {
         var value = artwork
@@ -551,7 +563,24 @@ struct ClosedNotchSlot: View {
         }
     }
     @ViewBuilder private var contentElement: some View {
-        if itemIsVisible && !hideMusicContentForArtworkOnly { content }
+        if itemIsVisible && !hideMusicContentForArtworkOnly {
+            if let widgetStyle {
+                content
+                    .font(closedWidgetFont(widgetStyle))
+                    .foregroundStyle(widgetTextColor)
+                    .tint(widgetAccentColor)
+                    .padding(widgetStyle.padding)
+                    .frame(width: widgetStyle.width > 0 ? min(widgetStyle.width, innerWidth) : nil,
+                           maxHeight: innerHeight,
+                           alignment: resolvedWidgetAlignment(widgetStyle.alignment))
+                    .background(widgetStyle.backgroundColor.color.opacity(widgetStyle.backgroundOpacity),
+                                in: RoundedRectangle(cornerRadius: widgetStyle.cornerRadius, style: .continuous))
+                    .opacity(widgetStyle.opacity)
+                    .offset(x: widgetStyle.horizontalOffset, y: widgetStyle.verticalOffset)
+            } else {
+                content
+            }
+        }
     }
     @ViewBuilder private var powerElement: some View {
         if rendersPowerEvent, let powerEvent {
@@ -570,22 +599,39 @@ struct ClosedNotchSlot: View {
     @ViewBuilder private var content: some View {
         switch item {
         case .none: EmptyView()
-        case .clock: WidgetClock(style: compactClock, compact: true)
-        case .date: TimelineView(.periodic(from: .now, by: 60)) { context in Text(context.date, format: .dateTime.month().day()).lineLimit(1) }
+        case .clock:
+            WidgetClock(style: compactClock, compact: true)
+        case .date:
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                Text(formattedClosedDate(context.date)).lineLimit(1)
+            }
         case .timer:
-            if let deadline = store.deadline { Text(deadline, style: .timer).monospacedDigit().lineLimit(1) }
-            else { compactLabel(symbol: "timer", text: store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready") }
+            if let deadline = store.deadline {
+                if widgetStyle != nil {
+                    HStack(spacing: widgetElementSpacing) {
+                        if widgetShowsIcon { Image(systemName: "timer").font(.system(size: widgetIconSize)).foregroundStyle(widgetAccentColor) }
+                        if widgetShowsText { Text(deadline, style: .timer).monospacedDigit().lineLimit(1) }
+                    }
+                } else {
+                    Text(deadline, style: .timer).monospacedDigit().lineLimit(1)
+                }
+            } else {
+                compactLabel(symbol: "timer", text: store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready")
+            }
         case .battery:
-            if let battery = system.battery { compactLabel(symbol: system.charging ? "battery.100.bolt" : "battery.100", text: "\(battery)%") }
-            else { Image(systemName: "powerplug").frame(width: max(12, textSize + 2), alignment: .center) }
+            if let battery = system.battery {
+                compactLabel(symbol: system.charging ? "battery.100.bolt" : "battery.100", text: "\(battery)%")
+            } else if widgetShowsIcon {
+                Image(systemName: "powerplug").font(.system(size: widgetIconSize)).foregroundStyle(widgetAccentColor)
+            }
         case .media:
             if media.isPlaying {
-                ClosedMediaView(media: media, options: closedMediaOptions, fontSize: textSize, availableWidth: closedMediaWidth, lowPower: system.lowPower)
+                ClosedMediaView(media: media, options: closedMediaOptions, fontSize: widgetTextSize, availableWidth: closedMediaWidth, lowPower: system.lowPower)
                     .frame(width: closedMediaWidth)
                     .layoutPriority(1)
             }
         case .visualizer:
-            if media.isPlaying { PlaybackVisualizer(kind: options.animation, playing: true, enabled: options.animate && !system.lowPower, options: visualizerOptions, palette: media.artworkColors, fallback: effectiveTextColor) }
+            if media.isPlaying { PlaybackVisualizer(kind: options.animation, playing: true, enabled: options.animate && !system.lowPower, options: visualizerOptions, palette: media.artworkColors, fallback: widgetAccentColor) }
         case .mirror:
             MirrorWidgetView()
                 .frame(width: mirrorContentWidth, height: innerHeight)
@@ -598,25 +644,32 @@ struct ClosedNotchSlot: View {
                                                 textSize: textSize, availableWidth: activityContentWidth,
                                                 inheritedColor: effectiveTextColor, spacing: elementSpacing)
                 } else {
-                    HStack(spacing: elementSpacing) {
-                        Image(systemName: "waveform.path")
-                            .frame(width: max(12, textSize), alignment: .center)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(activity.title)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            if !activity.detail.isEmpty {
-                                Text(activity.detail)
-                                    .font(.system(size: max(8, textSize * 0.76)))
-                                    .opacity(0.72)
+                    HStack(spacing: widgetElementSpacing) {
+                        if widgetShowsIcon {
+                            Image(systemName: "waveform.path")
+                                .font(.system(size: widgetIconSize))
+                                .foregroundStyle(widgetAccentColor)
+                                .frame(width: max(12, widgetIconSize + 2), alignment: .center)
+                        }
+                        if widgetShowsText {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(activity.title)
                                     .lineLimit(1)
                                     .truncationMode(.tail)
+                                if (widgetStyle?.activityShowDetail ?? true) && !activity.detail.isEmpty {
+                                    Text(activity.detail)
+                                        .font(.system(size: max(7, widgetTextSize * 0.76)))
+                                        .opacity(0.72)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                }
                             }
+                            .layoutPriority(1)
                         }
-                        .layoutPriority(1)
-                        if let progress = activity.progress {
+                        if (widgetStyle?.activityShowProgress ?? true), let progress = activity.progress {
                             ProgressView(value: progress)
                                 .controlSize(.mini)
+                                .tint(widgetAccentColor)
                                 .frame(width: min(38, max(24, activityContentWidth * 0.22)))
                         }
                     }
@@ -630,13 +683,64 @@ struct ClosedNotchSlot: View {
         }
     }
     private func compactLabel(symbol: String, text: String) -> some View {
-        HStack(spacing: elementSpacing) {
-            Image(systemName: symbol)
-                .frame(width: max(12, textSize + 2), alignment: .center)
-            Text(text).monospacedDigit().lineLimit(1)
+        HStack(spacing: widgetElementSpacing) {
+            if widgetShowsIcon {
+                Image(systemName: symbol)
+                    .font(.system(size: widgetIconSize))
+                    .foregroundStyle(widgetAccentColor)
+                    .frame(width: max(12, widgetIconSize + 2), alignment: .center)
+            }
+            if widgetShowsText { Text(text).monospacedDigit().lineLimit(1) }
         }
     }
-    private var compactClock: WidgetStyle { var value = clock; value.fontSize = textSize; value.textColor = WidgetColor(effectiveTextColor); return value }
+
+    private func closedWidgetFont(_ value: ClosedNotchWidgetStyle) -> Font {
+        var style = WidgetStyle()
+        style.fontFamily = value.fontFamily
+        style.customFont = value.customFont
+        style.weight = value.weight
+        style.fontSize = widgetTextSize
+        return style.font()
+    }
+
+    private func resolvedWidgetAlignment(_ value: ClosedNotchWidgetAlignment) -> Alignment {
+        switch value {
+        case .automatic: return side == .left ? .trailing : .leading
+        case .leading: return .leading
+        case .center: return .center
+        case .trailing: return .trailing
+        }
+    }
+
+    private func formattedClosedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        switch widgetStyle?.dateStyle ?? .monthDay {
+        case .monthDay: formatter.setLocalizedDateFormatFromTemplate("MMM d")
+        case .numeric: formatter.setLocalizedDateFormatFromTemplate("MM/dd")
+        case .weekday: formatter.setLocalizedDateFormatFromTemplate("EEEE")
+        case .weekdayMonthDay: formatter.setLocalizedDateFormatFromTemplate("EEE MMM d")
+        }
+        return formatter.string(from: date)
+    }
+
+    private var compactClock: WidgetStyle {
+        var value = clock
+        if let widgetStyle {
+            value.fontFamily = widgetStyle.fontFamily
+            value.customFont = widgetStyle.customFont
+            value.weight = widgetStyle.weight
+            value.fontSize = widgetTextSize
+            value.textColor = widgetStyle.textColor
+            value.accentColor = widgetStyle.accentColor
+            value.clock = widgetStyle.clock
+            value.showTitle = false
+        } else {
+            value.fontSize = textSize
+            value.textColor = WidgetColor(effectiveTextColor)
+        }
+        return value
+    }
 }
 
 private struct BluetoothClosedActivityView: View {

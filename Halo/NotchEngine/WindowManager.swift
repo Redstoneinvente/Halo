@@ -22,6 +22,10 @@ final class SurfaceState: ObservableObject {
     @Published var theme = Theme()
     @Published var layoutOverride: WorkspaceLayout?
     @Published var contextPreferredSize: CGSize?
+    /// Per-surface drag state. Keeping this on SurfaceState means multi-display drag CIs only
+    /// activate on the display currently underneath the dragged file/folder.
+    @Published var dropTargeted = false
+    @Published var dropItemCount = 0
     var collapseTask: Task<Void, Never>?
     var editingGeometry = false
     func hover(_ inside: Bool, enabled: Bool) {
@@ -777,12 +781,37 @@ final class WindowManager {
             ceil((text as NSString).size(withAttributes: [.font: font]).width) + 2
         }
 
-        func mediaWidth() -> Double {
+        func nsWeight(_ weight: WidgetFontWeight) -> NSFont.Weight {
+            switch weight {
+            case .light: return .light
+            case .regular: return .regular
+            case .medium: return .medium
+            case .semibold: return .semibold
+            case .bold: return .bold
+            }
+        }
+
+        func itemFont(_ style: ClosedNotchWidgetStyle?, digits: Bool = false) -> (NSFont, Double, Double) {
+            let itemSize = min(style?.fontSize ?? size, max(7, innerHeight))
+            let weight = nsWeight(style?.weight ?? .regular)
+            let resolved: NSFont
+            if let style, style.fontFamily == .custom, let custom = NSFont(name: style.customFont, size: itemSize) {
+                resolved = custom
+            } else if digits || style?.fontFamily == .monospaced {
+                resolved = NSFont.monospacedDigitSystemFont(ofSize: itemSize, weight: weight)
+            } else {
+                resolved = NSFont.systemFont(ofSize: itemSize, weight: weight)
+            }
+            return (resolved, itemSize, style?.spacing ?? elementGap)
+        }
+
+        func mediaWidth(_ widget: ClosedNotchWidgetStyle?) -> Double {
             guard playing else { return 0 }
             let media = options.mediaOptions ?? ClosedMediaOptions()
-            let title = textWidth(String(store.workspace.media.title.prefix(120)), font: font)
+            let (mediaFont, mediaSize, mediaGap) = itemFont(widget)
+            let title = textWidth(String(store.workspace.media.title.prefix(120)), font: mediaFont)
             let artistValue = store.workspace.media.artist.isEmpty ? store.workspace.media.title : store.workspace.media.artist
-            let artist = textWidth(String(artistValue.prefix(120)), font: font)
+            let artist = textWidth(String(artistValue.prefix(120)), font: mediaFont)
             let adaptive = media.textMode == .lyrics && media.usesDynamicLyricWidth && mediaWidthHint != nil
 
             let usesInlineIcon: Bool = {
@@ -798,7 +827,7 @@ final class WindowManager {
                     }
                 }
             }()
-            let icon = usesInlineIcon ? max(12, size + 2) + elementGap : 0
+            let icon = usesInlineIcon ? max(12, mediaSize + 2) + mediaGap : 0
 
             let naturalText: Double
             switch media.textMode {
@@ -807,7 +836,7 @@ final class WindowManager {
             case .titleArtist:
                 naturalText = media.lines == 2
                     ? max(title, artist)
-                    : title + (store.workspace.media.artist.isEmpty ? 0 : artist + textWidth(" · ", font: font))
+                    : title + (store.workspace.media.artist.isEmpty ? 0 : artist + textWidth(" · ", font: mediaFont))
             case .lyrics:
                 naturalText = adaptive ? max(28, mediaWidthHint!) : max(90, min(220, title + artist * 0.35))
             }
@@ -879,43 +908,79 @@ final class WindowManager {
 
         func itemWidth(_ side: DynamicSide, _ item: ClosedNotchItem) -> Double {
             if isArtworkOnly(side, item: item) { return 0 }
-            switch item {
-            case .none: return 0
-            case .clock:
-                let style = layout.widgetStyle(for: .clock)
-                let clockFont = style.fontFamily == .custom
-                    ? NSFont(name: style.customFont, size: size) ?? font
-                    : NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
-                let template = "88:88" + (style.clock.showSeconds ? ":88" : "") + (style.clock.twentyFourHour ? "" : " PM")
-                return textWidth(template, font: clockFont) * 1.04
-            case .date:
-                return textWidth("Sep 28", font: font)
-            case .timer:
-                if store.deadline != nil { return textWidth("88:88:88", font: digitFont) }
-                let label = store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready"
-                return max(12, size + 2) + elementGap + textWidth(label, font: font)
-            case .battery:
-                guard let battery = store.workspace.system.battery else { return max(12, size + 2) }
-                return max(12, size + 2) + elementGap + textWidth("\(battery)%", font: digitFont)
-            case .media:
-                return mediaWidth()
-            case .visualizer:
-                return playing ? (options.visualizer ?? VisualizerOptions()).width : 0
-            case .mirror:
-                return 112
-            case .files:
-                return max(12, size + 2) + elementGap + textWidth(String(store.files.count), font: digitFont)
-            case .activity:
-                guard let activity else { return 0 }
-                if let bluetooth = bluetoothActivityWidth(activity) { return min(240, max(0, bluetooth)) }
-                let title = textWidth(String(activity.title.prefix(80)), font: font)
-                let detailFont = NSFont.systemFont(ofSize: max(8, size * 0.76))
-                let detail = activity.detail.isEmpty ? 0 : textWidth(String(activity.detail.prefix(80)), font: detailFont)
-                let icon = max(12, size)
-                let text = max(title, detail)
-                let progress = activity.progress == nil ? 0 : elementGap + 38
-                return min(240, icon + elementGap + text + progress + 2)
+            let widget = options.widgetStyle(for: item)
+            let (itemFont, itemSize, itemGap) = itemFont(widget)
+            let digitItemFont = itemFont(widget, digits: true).0
+            let showIcon = widget?.showIcon ?? true
+            let showText = widget?.showText ?? true
+            let iconWidth = showIcon ? max(12, min(widget?.iconSize ?? itemSize + 2, innerHeight) + 2) : 0
+
+            func iconAndText(_ text: String, font: NSFont = itemFont) -> Double {
+                let textPart = showText ? textWidth(text, font: font) : 0
+                if iconWidth > 0 && textPart > 0 { return iconWidth + itemGap + textPart }
+                return max(iconWidth, textPart)
             }
+
+            let raw: Double
+            switch item {
+            case .none:
+                raw = 0
+            case .clock:
+                let baseClock = layout.widgetStyle(for: .clock)
+                let clock = widget?.clock ?? baseClock.clock
+                let clockFont: NSFont
+                if let widget {
+                    clockFont = itemFont
+                } else if baseClock.fontFamily == .custom {
+                    clockFont = NSFont(name: baseClock.customFont, size: size) ?? font
+                } else {
+                    clockFont = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
+                }
+                let template = "88:88" + (clock.showSeconds ? ":88" : "") + (clock.twentyFourHour ? "" : " PM")
+                raw = textWidth(template, font: clockFont) * 1.04
+            case .date:
+                raw = showText ? textWidth(widget?.dateStyle.measurementTemplate ?? "Sep 28", font: itemFont) : 0
+            case .timer:
+                if store.deadline != nil {
+                    if widget == nil { raw = textWidth("88:88:88", font: digitFont) }
+                    else { raw = iconAndText("88:88:88", font: digitItemFont) }
+                } else {
+                    let label = store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready"
+                    raw = iconAndText(label)
+                }
+            case .battery:
+                guard let battery = store.workspace.system.battery else { raw = iconWidth; break }
+                raw = iconAndText("\(battery)%", font: digitItemFont)
+            case .media:
+                raw = mediaWidth(widget)
+            case .visualizer:
+                raw = playing ? (options.visualizer ?? VisualizerOptions()).width : 0
+            case .mirror:
+                raw = 112
+            case .files:
+                raw = iconAndText(String(store.files.count), font: digitItemFont)
+            case .activity:
+                guard let activity else { raw = 0; break }
+                if let bluetooth = bluetoothActivityWidth(activity) {
+                    raw = min(240, max(0, bluetooth))
+                } else {
+                    let title = showText ? textWidth(String(activity.title.prefix(80)), font: itemFont) : 0
+                    let detailFont = NSFont.systemFont(ofSize: max(7, itemSize * 0.76))
+                    let detail = showText && (widget?.activityShowDetail ?? true) && !activity.detail.isEmpty
+                        ? textWidth(String(activity.detail.prefix(80)), font: detailFont) : 0
+                    let text = max(title, detail)
+                    let progress = (widget?.activityShowProgress ?? true) && activity.progress != nil ? itemGap + 38 : 0
+                    var total = max(iconWidth, text)
+                    if iconWidth > 0 && text > 0 { total = iconWidth + itemGap + text }
+                    raw = min(240, total + progress + 2)
+                }
+            }
+
+            guard raw > 0 else { return 0 }
+            guard let widget else { return raw }
+            let chromed = widget.width > 0 ? widget.width : raw + 2 * widget.padding
+            let outwardOffset = side == .left ? max(0, -widget.horizontalOffset) : max(0, widget.horizontalOffset)
+            return min(440, max(0, chromed + outwardOffset))
         }
 
         func decorationWidth(_ decoration: SideDecoration?) -> Double {
