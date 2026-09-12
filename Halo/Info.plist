@@ -4,13 +4,11 @@
 <dict>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon.incs</string>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.</string>
 	<key>HaloFirebaseAPIKey</key>
-	<string></string>
-	<key>HaloLicenseSeatPublishableKey</key>
-	<string></string>
+	<string>AIzaSyCgnmkWeqSd0EUVeVgeQKP5xChjKowdOnU</string>
 	<key>HaloLicenseSeatProductSlug</key>
-	<string>halo</string>
+	<string>halo-macos-notch-utility</string>
+	<key>HaloLicenseSeatPublishableKey</key>
+	<string>pk_live_27Vr5DhqgNjh8Mn2fuFMZ26wApJqhkMvA</string>
 </dict>
 </plist>

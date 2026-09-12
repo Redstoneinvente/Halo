@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		F84A0AB13055599200E8B51E /* halo-pets-v2 in Resources */ = {isa = PBXBuildFile; fileRef = F84A0AB03055599200E8B51E /* halo-pets-v2 */; };
 		0000000000000000000000C8 /* App/HaloApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000064 /* App/HaloApp.swift */; };
 		0000000000000000000000C9 /* Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000065 /* Core/Models.swift */; };
 		0000000000000000000000CA /* Core/AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000066 /* Core/AppStore.swift */; };
@@ -45,23 +44,7 @@
 		F84A0A87305545C500E8B51E /* dog.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A85305545C500E8B51E /* dog.png */; };
 		F84A0A88305545C500E8B51E /* fox.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A86305545C500E8B51E /* fox.png */; };
 		F84A0A89305545C500E8B51E /* cat.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A84305545C500E8B51E /* cat.png */; };
-		F84A0A9F3055599200E8B51E /* notch-interaction.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A933055599200E8B51E /* notch-interaction.png */; };
-		F84A0AA03055599200E8B51E /* emotion-interaction.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A8B3055599200E8B51E /* emotion-interaction.png */; };
-		F84A0AA13055599200E8B51E /* context-activities.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A963055599200E8B51E /* context-activities.png */; };
-		F84A0AA23055599200E8B51E /* locomotion-idle.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A983055599200E8B51E /* locomotion-idle.png */; };
-		F84A0AA33055599200E8B51E /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A9D3055599200E8B51E /* README.md */; };
-		F84A0AA43055599200E8B51E /* locomotion-idle.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A8C3055599200E8B51E /* locomotion-idle.png */; };
-		F84A0AA53055599200E8B51E /* locomotion-idle.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A923055599200E8B51E /* locomotion-idle.png */; };
-		F84A0AA63055599200E8B51E /* context-activities.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A8A3055599200E8B51E /* context-activities.png */; };
-		F84A0AA73055599200E8B51E /* rest-natural.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A943055599200E8B51E /* rest-natural.png */; };
-		F84A0AA83055599200E8B51E /* notch-interaction.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A8D3055599200E8B51E /* notch-interaction.png */; };
-		F84A0AA93055599200E8B51E /* notch-interaction.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A993055599200E8B51E /* notch-interaction.png */; };
-		F84A0AAA3055599200E8B51E /* context-activities.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A903055599200E8B51E /* context-activities.png */; };
-		F84A0AAB3055599200E8B51E /* rest-natural.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A8E3055599200E8B51E /* rest-natural.png */; };
-		F84A0AAC3055599200E8B51E /* emotion-interaction.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A913055599200E8B51E /* emotion-interaction.png */; };
-		F84A0AAD3055599200E8B51E /* emotion-interaction.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A973055599200E8B51E /* emotion-interaction.png */; };
-		F84A0AAE3055599200E8B51E /* rest-natural.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A9A3055599200E8B51E /* rest-natural.png */; };
-		F84A0AAF3055599200E8B51E /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A9C3055599200E8B51E /* manifest.json */; };
+		F84A0AB13055599200E8B51E /* Halo/Halo Icons/Pets/halo-pets-v2 in Resources */ = {isa = PBXBuildFile; fileRef = F84A0AB03055599200E8B51E /* Halo/Halo Icons/Pets/halo-pets-v2 */; };
 		F8614B61305322E600D4943C /* AppIcon 2.icns in Resources */ = {isa = PBXBuildFile; fileRef = F8614B60305322E600D4943C /* AppIcon 2.icns */; };
 		F8614B693053262D00D4943C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F8614B683053262D00D4943C /* Assets.xcassets */; };
 		F8614B6B3053275D00D4943C /* Halo_AppIcon_Transparent.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6A3053275D00D4943C /* Halo_AppIcon_Transparent.png */; };
@@ -134,6 +117,7 @@
 		F84A0A9A3055599200E8B51E /* rest-natural.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "rest-natural.png"; sourceTree = "<group>"; };
 		F84A0A9C3055599200E8B51E /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = manifest.json; sourceTree = "<group>"; };
 		F84A0A9D3055599200E8B51E /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		F84A0AB03055599200E8B51E /* Halo/Halo Icons/Pets/halo-pets-v2 */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Halo/Halo Icons/Pets/halo-pets-v2"; sourceTree = SOURCE_ROOT; };
 		F8614B60305322E600D4943C /* AppIcon 2.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = "AppIcon 2.icns"; sourceTree = "<group>"; };
 		F8614B623053239E00D4943C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		F8614B633053242D00D4943C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -150,7 +134,6 @@
 		F8614B743053291B00D4943C /* icon_256x256@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_256x256@2x.png"; sourceTree = "<group>"; };
 		F8614B753053291B00D4943C /* icon_512x512.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_512x512.png; sourceTree = "<group>"; };
 		F8614B763053291B00D4943C /* icon_512x512@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_512x512@2x.png"; sourceTree = "<group>"; };
-		F84A0AB03055599200E8B51E /* halo-pets-v2 */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Halo/Halo Icons/Pets/halo-pets-v2"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -185,6 +168,7 @@
 				000000000000000000000130 /* Halo/Halo.entitlements */,
 				F8614B633053242D00D4943C /* Info.plist */,
 				000000000000000000000004 /* Products */,
+				F84A0AB030555B9A00E8B51E /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};
@@ -293,6 +277,14 @@
 			path = "halo-pets-v2";
 			sourceTree = "<group>";
 		};
+		F84A0AB030555B9A00E8B51E /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				F84A0AB03055599200E8B51E /* Halo/Halo Icons/Pets/halo-pets-v2 */,
+			);
+			name = "Recovered References";
+			sourceTree = "<group>";
+		};
 		F8614B773053291B00D4943C /* Halo Icons */ = {
 			isa = PBXGroup;
 			children = (
@@ -380,7 +372,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F84A0AB13055599200E8B51E /* halo-pets-v2 in Resources */,
+				F84A0AB13055599200E8B51E /* Halo/Halo Icons/Pets/halo-pets-v2 in Resources */,
 				F8614B693053262D00D4943C /* Assets.xcassets in Resources */,
 				F8614B61305322E600D4943C /* AppIcon 2.icns in Resources */,
 				F8614B783053291B00D4943C /* icon_128x128@2x.png in Resources */,
@@ -497,6 +489,7 @@
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Halo shows today's schedule and meeting links. It does not modify events.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Halo reads today's calendar events when you enable Calendar.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
@@ -528,6 +521,7 @@
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Halo shows today's schedule and meeting links. It does not modify events.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Halo reads today's calendar events when you enable Calendar.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
