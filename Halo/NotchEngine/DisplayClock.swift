@@ -685,14 +685,16 @@ private struct HaloDropZoneBoardView: View {
             let veryCompact = compact || proxy.size.height < 78 || proxy.size.width < 105
             VStack(alignment: .leading, spacing: veryCompact ? 4 : 7) {
                 HStack(alignment: .center, spacing: 8) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: veryCompact ? 8 : 10, style: .continuous)
-                            .fill(zone.color.color.opacity(active ? 0.22 : 0.11))
-                        Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
-                            .font(.system(size: veryCompact ? 13 : 16, weight: .semibold))
-                            .foregroundStyle(active ? Color.white : zone.color.color)
+                    if configuration.showIcons {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: veryCompact ? 8 : 10, style: .continuous)
+                                .fill(zone.color.color.opacity(active ? 0.22 : 0.11))
+                            Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
+                                .font(.system(size: veryCompact ? 13 : 16, weight: .semibold))
+                                .foregroundStyle(active ? Color.white : zone.color.color)
+                        }
+                        .frame(width: veryCompact ? 28 : 34, height: veryCompact ? 28 : 34)
                     }
-                    .frame(width: veryCompact ? 28 : 34, height: veryCompact ? 28 : 34)
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text(zone.title.isEmpty ? zone.action.rawValue : zone.title)
@@ -1359,6 +1361,7 @@ private final class HaloGlobalFileDragMonitor {
     func start() {
         guard globalMonitor == nil, localMonitor == nil else { return }
         HaloDropZoneStudioWindowController.shared.installMenuItem()
+        lastCompletedPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
 
         let mask: NSEvent.EventTypeMask = [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
