@@ -16,6 +16,7 @@ enum HaloDropZoneLayout: String, Codable, CaseIterable, Identifiable {
     case spotlight = "Spotlight"
 
     var id: String { rawValue }
+
     var symbol: String {
         switch self {
         case .adaptive: return "square.grid.2x2"
@@ -39,6 +40,7 @@ enum HaloDropZoneAcceptance: String, Codable, CaseIterable, Identifiable {
     case archives = "Archives"
 
     var id: String { rawValue }
+
     var symbol: String {
         switch self {
         case .all: return "square.stack.3d.up"
@@ -54,14 +56,13 @@ enum HaloDropZoneAcceptance: String, Codable, CaseIterable, Identifiable {
     func accepts(_ url: URL) -> Bool {
         guard url.isFileURL else { return false }
         let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
-        let isDirectory = values?.isDirectory == true
+        let directory = values?.isDirectory == true
         switch self {
         case .all: return true
-        case .files: return !isDirectory
-        case .folders: return isDirectory
+        case .files: return !directory
+        case .folders: return directory
         case .images, .video, .audio, .archives:
-            guard !isDirectory,
-                  let type = UTType(filenameExtension: url.pathExtension) else { return false }
+            guard !directory, let type = UTType(filenameExtension: url.pathExtension) else { return false }
             switch self {
             case .images: return type.conforms(to: .image)
             case .video: return type.conforms(to: .movie)
@@ -94,6 +95,7 @@ enum HaloDropZoneAction: String, Codable, CaseIterable, Identifiable {
     case trash = "Move to Trash"
 
     var id: String { rawValue }
+
     var symbol: String {
         switch self {
         case .shelf: return "tray.and.arrow.down.fill"
@@ -115,21 +117,8 @@ enum HaloDropZoneAction: String, Codable, CaseIterable, Identifiable {
         case .trash: return "trash.fill"
         }
     }
+
     var isDestructive: Bool { self == .rename || self == .trash }
-    var parameterTitle: String? {
-        switch self {
-        case .rename: return "Rename template"
-        case .copyFolder: return "Destination folder"
-        default: return nil
-        }
-    }
-    var parameterHint: String {
-        switch self {
-        case .rename: return "Use {name}, {ext} and {date}. Example: {name}-edited"
-        case .copyFolder: return "Choose a folder below."
-        default: return ""
-        }
-    }
 }
 
 struct HaloDropZone: Codable, Equatable, Identifiable {
@@ -154,29 +143,44 @@ struct HaloDropZone: Codable, Equatable, Identifiable {
             WidgetColor(red: 0.72, green: 0.44, blue: 0.95),
             WidgetColor(red: 0.85, green: 0.34, blue: 0.28)
         ]
+
         let acceptance: HaloDropZoneAcceptance
         let subtitle: String
         let parameter: String
         switch action {
-        case .shelf: acceptance = .all; subtitle = "Keep a reference in Halo"; parameter = ""
-        case .quickLook: acceptance = .all; subtitle = "Preview without opening"; parameter = ""
-        case .compress: acceptance = .all; subtitle = "Create a ZIP beside it"; parameter = ""
-        case .copyPath: acceptance = .all; subtitle = "Copy paths to clipboard"; parameter = ""
-        case .convertPNG: acceptance = .images; subtitle = "Create a PNG copy"; parameter = ""
-        case .convertJPEG: acceptance = .images; subtitle = "Create a JPEG copy"; parameter = ""
-        case .extract: acceptance = .archives; subtitle = "Extract into a new folder"; parameter = ""
-        case .rename: acceptance = .all; subtitle = "Rename with a template"; parameter = "{name}-renamed"
-        case .copyFolder: acceptance = .all; subtitle = "Copy to a chosen folder"; parameter = ""
-        case .trash: acceptance = .all; subtitle = "Move originals to Trash"; parameter = ""
-        default: acceptance = .all; subtitle = action.rawValue; parameter = ""
+        case .shelf:
+            acceptance = .all; subtitle = "Keep a reference in Halo"; parameter = ""
+        case .quickLook:
+            acceptance = .all; subtitle = "Preview without opening"; parameter = ""
+        case .compress:
+            acceptance = .all; subtitle = "Create a ZIP beside it"; parameter = ""
+        case .copyPath:
+            acceptance = .all; subtitle = "Copy paths to clipboard"; parameter = ""
+        case .convertPNG:
+            acceptance = .images; subtitle = "Create a PNG copy"; parameter = ""
+        case .convertJPEG:
+            acceptance = .images; subtitle = "Create a JPEG copy"; parameter = ""
+        case .extract:
+            acceptance = .archives; subtitle = "Extract ZIP archive"; parameter = ""
+        case .rename:
+            acceptance = .all; subtitle = "Rename with a template"; parameter = "{name}-renamed"
+        case .copyFolder:
+            acceptance = .all; subtitle = "Copy to a chosen folder"; parameter = ""
+        case .trash:
+            acceptance = .all; subtitle = "Move originals to Trash"; parameter = ""
+        default:
+            acceptance = .all; subtitle = action.rawValue; parameter = ""
         }
-        return HaloDropZone(title: action.rawValue,
-                            subtitle: subtitle,
-                            symbol: action.symbol,
-                            action: action,
-                            accepts: acceptance,
-                            color: palette[index % palette.count],
-                            parameter: parameter)
+
+        return HaloDropZone(
+            title: action.rawValue,
+            subtitle: subtitle,
+            symbol: action.symbol,
+            action: action,
+            accepts: acceptance,
+            color: palette[index % palette.count],
+            parameter: parameter
+        )
     }
 }
 
@@ -216,16 +220,6 @@ struct HaloDropZoneConfiguration: Codable, Equatable {
             zones[index].parameter = String(zones[index].parameter.prefix(500))
         }
     }
-
-    var preferredSize: CGSize {
-        let count = zones.count
-        switch count {
-        case 0...2: return CGSize(width: 520, height: 260)
-        case 3...4: return CGSize(width: 570, height: 310)
-        case 5...6: return CGSize(width: 650, height: 350)
-        default: return CGSize(width: 720, height: 390)
-        }
-    }
 }
 
 @MainActor
@@ -253,9 +247,10 @@ final class HaloDropZoneSettingsStore: ObservableObject {
     func addZone() {
         guard configuration.zones.count < 8 else { return }
         var next = configuration
-        let suggested: [HaloDropZoneAction] = [.shelf, .quickLook, .compress, .copyPath, .convertPNG, .duplicate, .copyDownloads, .rename]
-        let action = suggested[next.zones.count % suggested.count]
-        next.zones.append(.preset(action, index: next.zones.count))
+        let suggestions: [HaloDropZoneAction] = [
+            .shelf, .quickLook, .compress, .copyPath, .convertPNG, .duplicate, .copyDownloads, .rename
+        ]
+        next.zones.append(.preset(suggestions[next.zones.count % suggestions.count], index: next.zones.count))
         next.normalize()
         configuration = next
     }
@@ -277,61 +272,71 @@ final class HaloDropZoneSettingsStore: ObservableObject {
     }
 
     private func persist() {
-        var normalized = configuration
-        normalized.normalize()
-        guard let data = try? JSONEncoder().encode(normalized) else { return }
+        var next = configuration
+        next.normalize()
+        guard let data = try? JSONEncoder().encode(next) else { return }
         defaults.set(data, forKey: key)
     }
 }
 
 private enum HaloDropZoneLayoutResolver {
-    static let headerHeight: CGFloat = 62
-    static let footerHeight: CGFloat = 26
+    private static let headerHeight: CGFloat = 58
+    private static let footerHeight: CGFloat = 22
 
     static func frames(size: CGSize, configuration: HaloDropZoneConfiguration) -> [CGRect] {
         let count = configuration.zones.count
-        guard count > 0, size.width > 40, size.height > 80 else { return [] }
+        guard count > 0, size.width > 80, size.height > 100 else { return [] }
+
         let padding = CGFloat(configuration.boardPadding)
         let gap = CGFloat(configuration.zoneSpacing)
         let top = headerHeight + padding
         let availableHeight = max(20, size.height - top - footerHeight - padding)
-        let rect = CGRect(x: padding, y: top,
-                          width: max(20, size.width - padding * 2),
-                          height: availableHeight)
+        let rect = CGRect(
+            x: padding,
+            y: top,
+            width: max(20, size.width - padding * 2),
+            height: availableHeight
+        )
 
-        func grid(columns requestedColumns: Int) -> [CGRect] {
-            let columns = max(1, min(count, requestedColumns))
+        func grid(columns requested: Int) -> [CGRect] {
+            let columns = max(1, min(count, requested))
             let rows = max(1, Int(ceil(Double(count) / Double(columns))))
             let cellWidth = max(1, (rect.width - gap * CGFloat(columns - 1)) / CGFloat(columns))
             let cellHeight = max(1, (rect.height - gap * CGFloat(rows - 1)) / CGFloat(rows))
             return (0..<count).map { index in
                 let column = index % columns
                 let row = index / columns
-                return CGRect(x: rect.minX + CGFloat(column) * (cellWidth + gap),
-                              y: rect.minY + CGFloat(row) * (cellHeight + gap),
-                              width: cellWidth, height: cellHeight)
+                return CGRect(
+                    x: rect.minX + CGFloat(column) * (cellWidth + gap),
+                    y: rect.minY + CGFloat(row) * (cellHeight + gap),
+                    width: cellWidth,
+                    height: cellHeight
+                )
             }
         }
 
         switch configuration.layout {
-        case .horizontal: return grid(columns: count)
-        case .vertical: return grid(columns: 1)
-        case .twoColumns: return grid(columns: 2)
-        case .threeColumns: return grid(columns: 3)
-        case .fourColumns: return grid(columns: 4)
+        case .horizontal:
+            return grid(columns: count)
+        case .vertical:
+            return grid(columns: 1)
+        case .twoColumns:
+            return grid(columns: 2)
+        case .threeColumns:
+            return grid(columns: 3)
+        case .fourColumns:
+            return grid(columns: 4)
         case .adaptive:
-            let columns: Int
             switch count {
-            case 1: columns = 1
-            case 2: columns = 2
-            case 3...4: columns = 2
-            case 5...6: columns = 3
-            default: columns = 4
+            case 1: return grid(columns: 1)
+            case 2: return grid(columns: 2)
+            case 3...4: return grid(columns: 2)
+            case 5...6: return grid(columns: 3)
+            default: return grid(columns: 4)
             }
-            return grid(columns: columns)
         case .spotlight:
             guard count > 1 else { return [rect] }
-            let leftWidth = rect.width * 0.46
+            let leftWidth = rect.width * 0.44
             let rightX = rect.minX + leftWidth + gap
             let rightWidth = max(1, rect.maxX - rightX)
             let remaining = count - 1
@@ -343,46 +348,49 @@ private enum HaloDropZoneLayoutResolver {
             for position in 0..<remaining {
                 let column = position % rightColumns
                 let row = position / rightColumns
-                result.append(CGRect(x: rightX + CGFloat(column) * (cellWidth + gap),
-                                     y: rect.minY + CGFloat(row) * (cellHeight + gap),
-                                     width: cellWidth, height: cellHeight))
+                result.append(CGRect(
+                    x: rightX + CGFloat(column) * (cellWidth + gap),
+                    y: rect.minY + CGFloat(row) * (cellHeight + gap),
+                    width: cellWidth,
+                    height: cellHeight
+                ))
             }
             return result
         }
     }
 
-    static func index(at appKitPoint: CGPoint, size: CGSize, configuration: HaloDropZoneConfiguration) -> Int? {
-        let point = CGPoint(x: appKitPoint.x, y: size.height - appKitPoint.y)
-        return frames(size: size, configuration: configuration).firstIndex { $0.contains(point) }
+    static func index(at localAppKitPoint: CGPoint, size: CGSize, configuration: HaloDropZoneConfiguration) -> Int? {
+        let swiftUIPoint = CGPoint(x: localAppKitPoint.x, y: size.height - localAppKitPoint.y)
+        return frames(size: size, configuration: configuration).firstIndex { $0.contains(swiftUIPoint) }
     }
-}
-
-@MainActor
-private final class HaloDropZoneOverlayModel: ObservableObject {
-    @Published var hoveredZone: Int?
-    @Published var itemCount = 1
-    @Published var result: String?
 }
 
 @MainActor
 private protocol HaloGlobalDropTarget: AnyObject {
     var dragStateHandler: ((Bool, Int) -> Void)? { get }
-    var dropHandler: (([URL]) -> Void)? { get }
+    var dropHandler: (([URL]) -> Void)? { get set }
 }
 
 extension HaloDropHostingView: HaloGlobalDropTarget {}
 
 @MainActor
 private enum HaloDropZoneActionExecutor {
-    static func perform(zone: HaloDropZone, urls: [URL], target: any HaloGlobalDropTarget) -> String {
+    static func perform(
+        zone: HaloDropZone,
+        urls: [URL],
+        shelfHandler: (([URL]) -> Void)?,
+        closeHandler: () -> Void
+    ) -> String {
         let accepted = urls.filter { zone.accepts.accepts($0) }
-        guard !accepted.isEmpty else { return "Nothing matched this zone's \(zone.accepts.rawValue.lowercased()) filter." }
+        guard !accepted.isEmpty else {
+            return "Nothing matched this zone's \(zone.accepts.rawValue.lowercased()) filter."
+        }
 
         let outcome: String
         do {
             switch zone.action {
             case .shelf:
-                target.dropHandler?(accepted)
+                shelfHandler?(accepted)
                 outcome = accepted.count == 1 ? "Added to Shelf" : "Added \(accepted.count) items to Shelf"
             case .quickLook:
                 let process = Process()
@@ -397,40 +405,40 @@ private enum HaloDropZoneActionExecutor {
                 NSWorkspace.shared.activateFileViewerSelecting(accepted)
                 outcome = "Revealed in Finder"
             case .copyPath:
-                writeTextToPasteboard(accepted.map(\.path).joined(separator: "\n"))
-                outcome = "Copied path\(accepted.count == 1 ? "" : "s")"
+                writeText(accepted.map(\.path).joined(separator: "\n"))
+                outcome = accepted.count == 1 ? "Copied path" : "Copied paths"
             case .copyName:
-                writeTextToPasteboard(accepted.map(\.lastPathComponent).joined(separator: "\n"))
-                outcome = "Copied file name\(accepted.count == 1 ? "" : "s")"
+                writeText(accepted.map(\.lastPathComponent).joined(separator: "\n"))
+                outcome = accepted.count == 1 ? "Copied name" : "Copied names"
             case .copyURL:
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()
                 pasteboard.writeObjects(accepted.map { $0 as NSURL })
-                outcome = "Copied file URL\(accepted.count == 1 ? "" : "s")"
+                outcome = accepted.count == 1 ? "Copied file URL" : "Copied file URLs"
             case .duplicate:
                 try accepted.forEach { url in
-                    let destination = uniqueSibling(for: url, suffix: " copy")
-                    try FileManager.default.copyItem(at: url, to: destination)
+                    try FileManager.default.copyItem(at: url, to: uniqueSibling(for: url, suffix: " copy"))
                 }
                 outcome = accepted.count == 1 ? "Created duplicate" : "Created \(accepted.count) duplicates"
             case .rename:
-                let template = zone.parameter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "{name}-renamed" : zone.parameter
-                try accepted.forEach { url in try rename(url, template: template) }
+                let template = zone.parameter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "{name}-renamed" : zone.parameter
+                try accepted.forEach { try rename($0, template: template) }
                 outcome = accepted.count == 1 ? "Renamed item" : "Renamed \(accepted.count) items"
             case .compress:
-                try accepted.forEach { url in try launchDittoCompress(url) }
+                try accepted.forEach { try launchDittoCompress($0) }
                 outcome = accepted.count == 1 ? "Compression started" : "Started \(accepted.count) ZIP jobs"
             case .extract:
                 let archives = accepted.filter { $0.pathExtension.lowercased() == "zip" }
                 guard !archives.isEmpty else { return "Extract currently supports ZIP files." }
-                try archives.forEach { url in try launchDittoExtract(url) }
+                try archives.forEach { try launchDittoExtract($0) }
                 outcome = archives.count == 1 ? "Extraction started" : "Started \(archives.count) extraction jobs"
             case .convertPNG:
-                let converted = try convertImages(accepted, type: .png)
-                outcome = converted == 1 ? "Created PNG copy" : "Created \(converted) PNG copies"
+                let count = try convertImages(accepted, output: .png)
+                outcome = count == 1 ? "Created PNG copy" : "Created \(count) PNG copies"
             case .convertJPEG:
-                let converted = try convertImages(accepted, type: .jpeg)
-                outcome = converted == 1 ? "Created JPEG copy" : "Created \(converted) JPEG copies"
+                let count = try convertImages(accepted, output: .jpeg)
+                outcome = count == 1 ? "Created JPEG copy" : "Created \(count) JPEG copies"
             case .copyDesktop:
                 let folder = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
                 try copy(accepted, to: folder)
@@ -440,9 +448,9 @@ private enum HaloDropZoneActionExecutor {
                 try copy(accepted, to: folder)
                 outcome = "Copied to Downloads"
             case .copyFolder:
-                let trimmed = zone.parameter.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { return "Choose a destination folder in Drop Zone Studio first." }
-                let folder = URL(fileURLWithPath: trimmed, isDirectory: true)
+                let path = zone.parameter.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !path.isEmpty else { return "Choose a destination folder in Drop Zone Studio first." }
+                let folder = URL(fileURLWithPath: path, isDirectory: true)
                 var isDirectory: ObjCBool = false
                 guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
                     return "The configured destination folder is unavailable."
@@ -450,8 +458,12 @@ private enum HaloDropZoneActionExecutor {
                 try copy(accepted, to: folder)
                 outcome = "Copied to \(folder.lastPathComponent)"
             case .wallpaper:
-                guard let image = accepted.first(where: { HaloDropZoneAcceptance.images.accepts($0) }) else { return "Wallpaper needs an image." }
-                for screen in NSScreen.screens { try? NSWorkspace.shared.setDesktopImageURL(image, for: screen, options: [:]) }
+                guard let image = accepted.first(where: { HaloDropZoneAcceptance.images.accepts($0) }) else {
+                    return "Wallpaper needs an image."
+                }
+                for screen in NSScreen.screens {
+                    try? NSWorkspace.shared.setDesktopImageURL(image, for: screen, options: [:])
+                }
                 outcome = "Wallpaper updated"
             case .trash:
                 NSWorkspace.shared.recycle(accepted, completionHandler: nil)
@@ -462,16 +474,16 @@ private enum HaloDropZoneActionExecutor {
         }
 
         if zone.action != .shelf && zone.alsoAddToShelf {
-            target.dropHandler?(accepted)
+            shelfHandler?(accepted)
         } else if zone.action != .shelf {
-            target.dragStateHandler?(false, 0)
+            closeHandler()
         }
         return outcome
     }
 
     private enum ImageOutput { case png, jpeg }
 
-    private static func writeTextToPasteboard(_ text: String) {
+    private static func writeText(_ text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
@@ -479,9 +491,9 @@ private enum HaloDropZoneActionExecutor {
 
     private static func uniqueSibling(for url: URL, suffix: String, forcedExtension: String? = nil) -> URL {
         let directory = url.deletingLastPathComponent()
-        let originalExtension = forcedExtension ?? url.pathExtension
+        let ext = forcedExtension ?? url.pathExtension
         let stem = url.deletingPathExtension().lastPathComponent + suffix
-        return uniqueURL(in: directory, stem: stem, extension: originalExtension)
+        return uniqueURL(in: directory, stem: stem, extension: ext)
     }
 
     private static func uniqueURL(in directory: URL, stem: String, extension ext: String) -> URL {
@@ -512,9 +524,11 @@ private enum HaloDropZoneActionExecutor {
         let directory = url.deletingLastPathComponent()
         var destination = directory.appendingPathComponent(name)
         if FileManager.default.fileExists(atPath: destination.path) {
-            destination = uniqueURL(in: directory,
-                                    stem: destination.deletingPathExtension().lastPathComponent,
-                                    extension: destination.pathExtension)
+            destination = uniqueURL(
+                in: directory,
+                stem: destination.deletingPathExtension().lastPathComponent,
+                extension: destination.pathExtension
+            )
         }
         try FileManager.default.moveItem(at: url, to: destination)
     }
@@ -545,157 +559,189 @@ private enum HaloDropZoneActionExecutor {
 
     private static func copy(_ urls: [URL], to folder: URL) throws {
         for url in urls {
-            let base = url.deletingPathExtension().lastPathComponent
-            let ext = url.pathExtension
-            let destination = uniqueURL(in: folder, stem: base, extension: ext)
+            let destination = uniqueURL(
+                in: folder,
+                stem: url.deletingPathExtension().lastPathComponent,
+                extension: url.pathExtension
+            )
             try FileManager.default.copyItem(at: url, to: destination)
         }
     }
 
-    private static func convertImages(_ urls: [URL], type: ImageOutput) throws -> Int {
-        var count = 0
+    private static func convertImages(_ urls: [URL], output: ImageOutput) throws -> Int {
+        var converted = 0
         for url in urls {
             guard HaloDropZoneAcceptance.images.accepts(url),
                   let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                   let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { continue }
-            let ext = type == .png ? "png" : "jpg"
+
+            let ext = output == .png ? "png" : "jpg"
             let destination = uniqueSibling(for: url, suffix: " converted", forcedExtension: ext)
-            let uti = type == .png ? UTType.png.identifier : UTType.jpeg.identifier
-            guard let writer = CGImageDestinationCreateWithURL(destination as CFURL, uti as CFString, 1, nil) else { continue }
-            let properties: CFDictionary? = type == .jpeg
+            let identifier = output == .png ? UTType.png.identifier : UTType.jpeg.identifier
+            guard let writer = CGImageDestinationCreateWithURL(destination as CFURL, identifier as CFString, 1, nil) else { continue }
+            let properties: CFDictionary? = output == .jpeg
                 ? [kCGImageDestinationLossyCompressionQuality: 0.92] as CFDictionary
                 : nil
             CGImageDestinationAddImage(writer, image, properties)
-            if CGImageDestinationFinalize(writer) { count += 1 }
+            if CGImageDestinationFinalize(writer) { converted += 1 }
         }
-        if count == 0 { throw CocoaError(.fileReadUnsupportedScheme) }
-        return count
+        if converted == 0 { throw CocoaError(.fileReadUnsupportedScheme) }
+        return converted
     }
+}
+
+// MARK: - Embedded Drop CI board
+
+@MainActor
+private final class HaloDropZoneRuntimeModel: ObservableObject {
+    @Published var hoveredZone: Int?
+    @Published var itemCount = 1
+    @Published var result: String?
 }
 
 @MainActor
 private struct HaloDropZoneBoardView: View {
     @ObservedObject var settings: HaloDropZoneSettingsStore
-    @ObservedObject var model: HaloDropZoneOverlayModel
+    @ObservedObject var model: HaloDropZoneRuntimeModel
 
     var body: some View {
         GeometryReader { proxy in
             let configuration = settings.configuration
             let frames = HaloDropZoneLayoutResolver.frames(size: proxy.size, configuration: configuration)
+            let compactMode = configuration.zones.count > 4 || proxy.size.height < 250
+
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .fill(Color.black.opacity(configuration.backgroundOpacity))
                     .overlay(
-                        LinearGradient(colors: [Color.accentColor.opacity(0.18), Color.clear, Color.black.opacity(0.24)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing)
-                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        LinearGradient(
+                            colors: [Color.accentColor.opacity(0.18), Color.clear, Color.black.opacity(0.20)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     )
-                    .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color.white.opacity(0.11), lineWidth: 1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(Color.white.opacity(0.11), lineWidth: 1)
+                    )
+                    .padding(3)
 
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(configuration.headerTitle.isEmpty ? "Drop into Halo" : configuration.headerTitle)
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                        Text(configuration.headerSubtitle.isEmpty ? "Choose an action" : configuration.headerSubtitle)
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                        Text(model.result ?? (configuration.headerSubtitle.isEmpty ? "Choose an action" : configuration.headerSubtitle))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(model.result == nil ? Color.secondary : Color.green)
+                            .lineLimit(1)
                     }
                     Spacer()
                     Label("\(model.itemCount)", systemImage: model.itemCount == 1 ? "doc.fill" : "doc.on.doc.fill")
-                        .font(.caption.bold())
-                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
                         .background(Color.white.opacity(0.08), in: Capsule())
                 }
-                .padding(.horizontal, max(14, configuration.boardPadding + 4))
-                .padding(.top, 14)
+                .padding(.horizontal, max(13, configuration.boardPadding + 3))
+                .padding(.top, 12)
 
                 if configuration.zones.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "rectangle.stack.badge.plus").font(.title)
+                    VStack(spacing: 7) {
+                        Image(systemName: "rectangle.stack.badge.plus").font(.title2)
                         Text("No Drop zones configured").font(.headline)
-                        Text("Open Halo → Drop Zone Studio… from the menu to add up to 8 zones.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Open Drop Zone Studio to add up to 8 zones.")
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
                     .frame(width: proxy.size.width, height: proxy.size.height)
                 } else {
                     ForEach(Array(configuration.zones.enumerated()), id: \.element.id) { index, zone in
                         if frames.indices.contains(index) {
                             let frame = frames[index]
-                            zoneCard(zone, active: model.hoveredZone == index, configuration: configuration)
-                                .frame(width: frame.width, height: frame.height)
-                                .position(x: frame.midX, y: frame.midY)
+                            zoneCard(
+                                zone,
+                                active: model.hoveredZone == index,
+                                configuration: configuration,
+                                compact: compactMode
+                            )
+                            .frame(width: frame.width, height: frame.height)
+                            .position(x: frame.midX, y: frame.midY)
                         }
                     }
                 }
 
-                HStack {
-                    if let result = model.result {
-                        Label(result, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                    } else if let hovered = model.hoveredZone, configuration.zones.indices.contains(hovered) {
-                        let zone = configuration.zones[hovered]
-                        Label("Release for \(zone.action.rawValue)", systemImage: zone.action.symbol)
-                            .foregroundStyle(zone.color.color)
-                    } else {
-                        Text("Move over a zone, then release")
-                    }
-                    Spacer()
-                    Text("\(configuration.zones.count)/8 zones · \(configuration.layout.rawValue)")
+                HStack(spacing: 5) {
+                    Circle().fill(model.hoveredZone == nil ? Color.secondary : Color.green).frame(width: 5, height: 5)
+                    Text(model.hoveredZone == nil ? "Move onto a zone, then release" : "Release to run this zone")
+                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
                 }
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, max(14, configuration.boardPadding + 4))
-                .frame(width: proxy.size.width, height: HaloDropZoneLayoutResolver.footerHeight, alignment: .center)
-                .position(x: proxy.size.width / 2, y: proxy.size.height - HaloDropZoneLayoutResolver.footerHeight / 2)
+                .position(x: proxy.size.width / 2, y: max(12, proxy.size.height - 10))
             }
             .foregroundStyle(.white)
         }
     }
 
-    private func zoneCard(_ zone: HaloDropZone, active: Bool, configuration: HaloDropZoneConfiguration) -> some View {
-        VStack(spacing: 7) {
+    private func zoneCard(
+        _ zone: HaloDropZone,
+        active: Bool,
+        configuration: HaloDropZoneConfiguration,
+        compact: Bool
+    ) -> some View {
+        VStack(spacing: compact ? 3 : 6) {
             if configuration.showIcons {
                 Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
-                    .font(.system(size: active ? 26 : 23, weight: .semibold))
+                    .font(.system(size: compact ? 17 : (active ? 24 : 21), weight: .semibold))
                     .foregroundStyle(zone.color.color)
             }
             Text(zone.title.isEmpty ? zone.action.rawValue : zone.title)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .multilineTextAlignment(.center).lineLimit(2)
-            if configuration.showSubtitles && !zone.subtitle.isEmpty {
-                Text(zone.subtitle).font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center).lineLimit(2)
+                .font(.system(size: compact ? 10 : 12, weight: .bold, design: .rounded))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+            if configuration.showSubtitles && !compact && !zone.subtitle.isEmpty {
+                Text(zone.subtitle)
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
             }
-            if configuration.showActionBadges {
+            if configuration.showActionBadges && !compact {
                 Label(zone.accepts.rawValue, systemImage: zone.accepts.symbol)
-                    .font(.system(size: 8, weight: .semibold))
-                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .font(.system(size: 7, weight: .semibold))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
                     .background(Color.white.opacity(0.07), in: Capsule())
             }
         }
-        .padding(8)
+        .padding(compact ? 5 : 7)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(zone.color.color.opacity(active ? 0.18 + configuration.highlightStrength * 0.18 : 0.07),
-                    in: RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous)
-            .stroke(zone.color.color.opacity(active ? configuration.highlightStrength : 0.23), lineWidth: active ? 2 : 1))
+        .background(
+            zone.color.color.opacity(active ? 0.17 + configuration.highlightStrength * 0.18 : 0.065),
+            in: RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous)
+                .stroke(zone.color.color.opacity(active ? configuration.highlightStrength : 0.22), lineWidth: active ? 2 : 1)
+        )
         .scaleEffect(active ? 1.018 : 1)
-        .shadow(color: zone.color.color.opacity(active ? 0.22 : 0), radius: 12)
-        .animation(.easeOut(duration: 0.11), value: active)
+        .shadow(color: zone.color.color.opacity(active ? 0.22 : 0), radius: 9)
+        .animation(.easeOut(duration: 0.10), value: active)
     }
 }
 
 @MainActor
 private final class HaloDropZoneHostView: NSView {
-    private let model: HaloDropZoneOverlayModel
+    private let model: HaloDropZoneRuntimeModel
     private let settings = HaloDropZoneSettingsStore.shared
-    private weak var target: (any HaloGlobalDropTarget)?
     private let hosting: NSHostingView<HaloDropZoneBoardView>
+    var onDrop: (([URL], NSPoint) -> Void)?
 
-    init(model: HaloDropZoneOverlayModel, target: any HaloGlobalDropTarget) {
+    init(model: HaloDropZoneRuntimeModel) {
         self.model = model
-        self.target = target
         hosting = NSHostingView(rootView: HaloDropZoneBoardView(settings: settings, model: model))
         super.init(frame: .zero)
         registerForDraggedTypes([.fileURL])
+        autoresizingMask = [.width, .height]
         hosting.sizingOptions = []
         hosting.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hosting)
@@ -710,18 +756,13 @@ private final class HaloDropZoneHostView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(target: any HaloGlobalDropTarget, itemCount: Int) {
-        self.target = target
-        model.itemCount = max(1, itemCount)
-    }
-
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        updateHover(sender)
+        update(sender)
         return .copy
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        updateHover(sender)
+        update(sender)
         return .copy
     }
 
@@ -731,80 +772,100 @@ private final class HaloDropZoneHostView: NSView {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         let urls = fileURLs(sender)
-        guard !urls.isEmpty,
-              let index = model.hoveredZone,
-              settings.configuration.zones.indices.contains(index),
-              let target else { return false }
-        let zone = settings.configuration.zones[index]
-        let result = HaloDropZoneActionExecutor.perform(zone: zone, urls: urls, target: target)
-        model.result = result
-        HaloDropZoneOverlayController.shared.completeDrop(result: result)
+        guard !urls.isEmpty else { return false }
+        let local = convert(sender.draggingLocation, from: nil)
+        onDrop?(urls, local)
         return true
     }
 
-    private func updateHover(_ sender: NSDraggingInfo) {
-        let configuration = settings.configuration
-        let index = HaloDropZoneLayoutResolver.index(at: sender.draggingLocation, size: bounds.size, configuration: configuration)
-        if model.hoveredZone != index { model.hoveredZone = index }
-        let count = sender.draggingPasteboard.pasteboardItems?.filter { $0.availableType(from: [.fileURL]) != nil }.count ?? 1
-        model.itemCount = max(1, count)
+    private func update(_ sender: NSDraggingInfo) {
+        let local = convert(sender.draggingLocation, from: nil)
+        model.hoveredZone = HaloDropZoneLayoutResolver.index(
+            at: local,
+            size: bounds.size,
+            configuration: settings.configuration
+        )
+        let count = sender.draggingPasteboard.pasteboardItems?.reduce(into: 0) { result, item in
+            if item.availableType(from: [.fileURL]) != nil { result += 1 }
+        } ?? 0
+        if count > 0 { model.itemCount = count }
     }
 
     private func fileURLs(_ sender: NSDraggingInfo) -> [URL] {
-        let objects = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) ?? []
+        let objects = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) ?? []
         return objects.compactMap { ($0 as? NSURL).map { $0 as URL } }
     }
 }
 
 @MainActor
-private final class HaloDropZoneOverlayController {
-    static let shared = HaloDropZoneOverlayController()
-    private let model = HaloDropZoneOverlayModel()
-    private let settings = HaloDropZoneSettingsStore.shared
-    private var panel: NSPanel?
-    private var hostView: HaloDropZoneHostView?
-    private weak var target: (any HaloGlobalDropTarget)?
-    private var syncTimer: Timer?
-    private(set) var dropHandled = false
+private final class HaloEmbeddedDropZoneController {
+    static let shared = HaloEmbeddedDropZoneController()
 
-    var isVisible: Bool { panel?.isVisible == true }
+    private let model = HaloDropZoneRuntimeModel()
+    private let settings = HaloDropZoneSettingsStore.shared
+    private weak var target: (any HaloGlobalDropTarget)?
+    private var targetView: NSView?
+    private var hostView: HaloDropZoneHostView?
+    private var originalDropHandler: (([URL]) -> Void)?
+    private(set) var dropHandled = false
 
     func begin(target: any HaloGlobalDropTarget, itemCount: Int) {
         dropHandled = false
         model.result = nil
         model.itemCount = max(1, itemCount)
-        self.target = target
 
-        if panel == nil {
-            let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            panel.isReleasedWhenClosed = false
-            panel.backgroundColor = .clear
-            panel.isOpaque = false
-            panel.hasShadow = true
-            panel.hidesOnDeactivate = false
-            panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 3)
-            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-            let host = HaloDropZoneHostView(model: model, target: target)
-            panel.contentView = host
-            self.panel = panel
-            self.hostView = host
-        } else {
-            hostView?.update(target: target, itemCount: itemCount)
+        let sameTarget = self.target === target
+        if !sameTarget {
+            restoreParentDropHandler()
+            hostView?.removeFromSuperview()
+            hostView = nil
+            targetView = nil
+            self.target = target
+            originalDropHandler = target.dropHandler
+            target.dropHandler = { [weak self] urls in
+                self?.handleParentDrop(urls)
+            }
         }
 
-        syncFrame()
-        panel?.orderFrontRegardless()
-        startSyncing()
+        guard let view = target as? NSView else { return }
+        targetView = view
+
+        let host: HaloDropZoneHostView
+        if let existing = hostView {
+            host = existing
+        } else {
+            let created = HaloDropZoneHostView(model: model)
+            created.onDrop = { [weak self] urls, point in self?.handleDrop(urls, localPoint: point) }
+            hostView = created
+            host = created
+        }
+
+        if host.superview !== view {
+            host.removeFromSuperview()
+            host.frame = view.bounds
+            view.addSubview(host, positioned: .above, relativeTo: nil)
+        }
+        host.frame = view.bounds
+        view.addSubview(host, positioned: .above, relativeTo: nil)
     }
 
     func containsScreenPoint(_ point: NSPoint) -> Bool {
-        panel?.isVisible == true && (panel?.frame.contains(point) ?? false)
+        guard let view = targetView, let window = view.window else { return false }
+        let windowPoint = window.convertPoint(fromScreen: point)
+        let local = view.convert(windowPoint, from: nil)
+        return view.bounds.contains(local)
     }
 
     func completeDrop(result: String) {
         dropHandled = true
         model.result = result
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.62) { [weak self] in self?.dismiss() }
+        model.hoveredZone = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.62) { [weak self] in
+            self?.dismiss()
+        }
     }
 
     func cancelIfNeeded() {
@@ -813,49 +874,57 @@ private final class HaloDropZoneOverlayController {
     }
 
     func dismiss() {
-        syncTimer?.invalidate(); syncTimer = nil
-        panel?.orderOut(nil)
+        restoreParentDropHandler()
+        hostView?.removeFromSuperview()
+        hostView = nil
+        targetView = nil
+        target = nil
+        originalDropHandler = nil
         model.hoveredZone = nil
         model.result = nil
-        target = nil
         dropHandled = false
     }
 
-    private func startSyncing() {
-        guard syncTimer == nil else { return }
-        let timer = Timer(timeInterval: 0.04, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.syncFrame() }
+    private func handleParentDrop(_ urls: [URL]) {
+        guard let view = targetView, let window = view.window else {
+            originalDropHandler?(urls)
+            return
         }
-        timer.tolerance = 0.01
-        syncTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
+        let windowPoint = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        let local = view.convert(windowPoint, from: nil)
+        handleDrop(urls, localPoint: local)
     }
 
-    private func syncFrame() {
-        guard let target,
-              let targetView = target as? NSView,
-              let targetWindow = targetView.window,
-              let panel else { return }
-        let screen = targetWindow.screen ?? NSScreen.main
-        guard let screen else { return }
-        let requested = settings.configuration.preferredSize
-        let width = min(requested.width, max(360, screen.visibleFrame.width - 24))
-        let height = min(requested.height, max(220, screen.visibleFrame.height - 24))
-        var frame: CGRect
-        if targetWindow.frame.midY < screen.frame.midY {
-            frame = CGRect(x: targetWindow.frame.midX - width / 2,
-                           y: targetWindow.frame.minY,
-                           width: width, height: height)
-        } else {
-            frame = CGRect(x: targetWindow.frame.midX - width / 2,
-                           y: targetWindow.frame.maxY - height,
-                           width: width, height: height)
+    private func handleDrop(_ urls: [URL], localPoint: NSPoint) {
+        guard let target else {
+            originalDropHandler?(urls)
+            return
         }
-        let visible = screen.visibleFrame.insetBy(dx: 8, dy: 8)
-        frame.origin.x = min(max(frame.origin.x, visible.minX), max(visible.minX, visible.maxX - frame.width))
-        frame.origin.y = min(max(frame.origin.y, visible.minY), max(visible.minY, visible.maxY - frame.height))
-        if panel.frame != frame { panel.setFrame(frame, display: false) }
-        hostView?.update(target: target, itemCount: model.itemCount)
+
+        let index = HaloDropZoneLayoutResolver.index(
+            at: localPoint,
+            size: targetView?.bounds.size ?? .zero,
+            configuration: settings.configuration
+        )
+
+        guard let index, settings.configuration.zones.indices.contains(index) else {
+            originalDropHandler?(urls)
+            completeDrop(result: "Added to Shelf")
+            return
+        }
+
+        let zone = settings.configuration.zones[index]
+        let result = HaloDropZoneActionExecutor.perform(
+            zone: zone,
+            urls: urls,
+            shelfHandler: originalDropHandler,
+            closeHandler: { [weak target] in target?.dragStateHandler?(false, 0) }
+        )
+        completeDrop(result: result)
+    }
+
+    private func restoreParentDropHandler() {
+        target?.dropHandler = originalDropHandler
     }
 }
 
@@ -874,7 +943,10 @@ final class HaloDropZoneStudioWindowController: NSObject {
             return
         }
         let identifier = NSUserInterfaceItemIdentifier("HaloDropZoneStudioMenuItem")
-        if menu.items.contains(where: { $0.identifier == identifier }) { menuInstalled = true; return }
+        if menu.items.contains(where: { $0.identifier == identifier }) {
+            menuInstalled = true
+            return
+        }
         menu.addItem(.separator())
         let item = NSMenuItem(title: "Drop Zone Studio…", action: #selector(openFromMenu), keyEquivalent: "8")
         item.keyEquivalentModifierMask = [.command, .option]
@@ -893,9 +965,12 @@ final class HaloDropZoneStudioWindowController: NSObject {
             return
         }
         let controller = NSHostingController(rootView: HaloDropZoneStudioView())
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 820, height: 760),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                              backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: CGRect(x: 0, y: 0, width: 820, height: 760),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
         window.title = "Halo · Drop Zone Studio"
         window.contentViewController = controller
         window.isReleasedWhenClosed = false
@@ -913,10 +988,11 @@ private struct HaloDropZoneStudioView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 14) {
+            HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Drop Zone Studio").font(.title2.bold())
-                    Text("Build up to 8 live action zones for Drop CI.").font(.caption).foregroundStyle(.secondary)
+                    Text("These zones appear inside Drop CI while you drag.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Reset Defaults") { store.reset() }
@@ -928,53 +1004,55 @@ private struct HaloDropZoneStudioView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    GroupBox("Live preview") {
-                        HaloDropZoneStudioPreview(configuration: store.configuration)
-                            .frame(height: min(330, max(230, store.configuration.preferredSize.height * 0.74)))
+                    GroupBox("Drop CI preview") {
+                        HaloDropZoneStaticPreview(configuration: store.configuration)
+                            .frame(height: 260)
                             .padding(.vertical, 6)
                     }
 
-                    GroupBox("Board layout") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Picker("Layout", selection: configurationBinding(\.layout)) {
-                                ForEach(HaloDropZoneLayout.allCases) { Label($0.rawValue, systemImage: $0.symbol).tag($0) }
+                    GroupBox("Layout") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Picker("Zone layout", selection: configurationBinding(\.layout)) {
+                                ForEach(HaloDropZoneLayout.allCases) {
+                                    Label($0.rawValue, systemImage: $0.symbol).tag($0)
+                                }
                             }
-                            Picker("Zones", selection: zoneCountBinding) {
+                            Picker("Number of zones", selection: zoneCountBinding) {
                                 ForEach(0...8, id: \.self) { Text("\($0)").tag($0) }
                             }
                             HStack {
-                                slider("Board padding", \.boardPadding, 0...28, "pt")
-                                slider("Zone spacing", \.zoneSpacing, 2...24, "pt")
+                                valueSlider("Padding", \.boardPadding, 0...28)
+                                valueSlider("Spacing", \.zoneSpacing, 2...24)
                             }
                             HStack {
-                                slider("Corner radius", \.cornerRadius, 6...36, "pt")
-                                slider("Background", \.backgroundOpacity, 0.45...1, "")
+                                valueSlider("Corner radius", \.cornerRadius, 6...36)
+                                valueSlider("Background", \.backgroundOpacity, 0.45...1)
                             }
-                            slider("Hover highlight", \.highlightStrength, 0.15...1, "")
+                            valueSlider("Hover highlight", \.highlightStrength, 0.15...1)
                             Toggle("Show icons", isOn: configurationBinding(\.showIcons))
                             Toggle("Show subtitles", isOn: configurationBinding(\.showSubtitles))
-                            Toggle("Show filter badges", isOn: configurationBinding(\.showActionBadges))
-                            TextField("Header title", text: configurationBinding(\.headerTitle))
-                            TextField("Header subtitle", text: configurationBinding(\.headerSubtitle))
-                        }.padding(.vertical, 4)
+                            Toggle("Show type badges", isOn: configurationBinding(\.showActionBadges))
+                            TextField("Header", text: configurationBinding(\.headerTitle))
+                            TextField("Instruction", text: configurationBinding(\.headerSubtitle))
+                        }
+                        .padding(.vertical, 4)
                     }
 
                     GroupBox("Zones") {
-                        VStack(spacing: 12) {
+                        VStack(spacing: 10) {
                             if store.configuration.zones.isEmpty {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "rectangle.stack.badge.plus").font(.title2)
-                                    Text("No zones yet").font(.headline)
-                                    Button("Add first zone") { store.addZone() }
-                                }.frame(maxWidth: .infinity).padding(24)
+                                Button("Add first zone") { store.addZone() }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(20)
                             }
                             ForEach(Array(store.configuration.zones.enumerated()), id: \.element.id) { index, _ in
                                 zoneEditor(index)
                             }
-                        }.padding(.vertical, 4)
+                        }
+                        .padding(.vertical, 4)
                     }
 
-                    Text("Tip: Rename and Move to Trash change the original item. Halo never assigns those actions by default; they only run when you deliberately configure a zone and drop onto it.")
+                    Text("Rename and Move to Trash change the original item. Halo never assigns them by default.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .padding(18)
@@ -985,35 +1063,45 @@ private struct HaloDropZoneStudioView: View {
     private func zoneEditor(_ index: Int) -> some View {
         let zone = zoneBinding(index)
         return DisclosureGroup {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 9) {
                 HStack {
                     TextField("Zone title", text: zone.title)
                     TextField("SF Symbol", text: zone.symbol).frame(width: 180)
                 }
                 TextField("Subtitle", text: zone.subtitle)
                 Picker("Action", selection: zone.action) {
-                    ForEach(HaloDropZoneAction.allCases) { action in
-                        Label(action.rawValue, systemImage: action.symbol).tag(action)
+                    ForEach(HaloDropZoneAction.allCases) {
+                        Label($0.rawValue, systemImage: $0.symbol).tag($0)
                     }
                 }
                 Picker("Accept", selection: zone.accepts) {
-                    ForEach(HaloDropZoneAcceptance.allCases) { filter in
-                        Label(filter.rawValue, systemImage: filter.symbol).tag(filter)
+                    ForEach(HaloDropZoneAcceptance.allCases) {
+                        Label($0.rawValue, systemImage: $0.symbol).tag($0)
                     }
                 }
-                ColorPicker("Zone color", selection: Binding(get: { zone.wrappedValue.color.color }, set: { color in
-                    var next = zone.wrappedValue; next.color = WidgetColor(color); zone.wrappedValue = next
-                }), supportsOpacity: false)
+                ColorPicker(
+                    "Zone color",
+                    selection: Binding(
+                        get: { zone.wrappedValue.color.color },
+                        set: { color in
+                            var next = zone.wrappedValue
+                            next.color = WidgetColor(color)
+                            zone.wrappedValue = next
+                        }
+                    ),
+                    supportsOpacity: false
+                )
+
                 if zone.wrappedValue.action == .rename {
                     TextField("Rename template", text: zone.parameter)
-                    Text(zone.wrappedValue.action.parameterHint).font(.caption).foregroundStyle(.secondary)
+                    Text("Use {name}, {ext}, and {date}.").font(.caption).foregroundStyle(.secondary)
                 } else if zone.wrappedValue.action == .copyFolder {
                     HStack {
                         TextField("Destination folder", text: zone.parameter)
                         Button("Choose…") { chooseFolder(for: index) }
                     }
-                    Text(zone.wrappedValue.action.parameterHint).font(.caption).foregroundStyle(.secondary)
                 }
+
                 if zone.wrappedValue.action != .shelf {
                     Toggle("Also add accepted items to File Shelf", isOn: zone.alsoAddToShelf)
                 }
@@ -1025,52 +1113,63 @@ private struct HaloDropZoneStudioView: View {
                     Button { store.moveZone(from: index, by: -1) } label: { Label("Earlier", systemImage: "arrow.up") }
                         .disabled(index == 0)
                     Button { store.moveZone(from: index, by: 1) } label: { Label("Later", systemImage: "arrow.down") }
-                        .disabled(index >= store.configuration.zones.count - 1)
+                        .disabled(index == store.configuration.zones.count - 1)
                     Spacer()
-                    Button(role: .destructive) { store.removeZone(at: index) } label: { Label("Remove Zone", systemImage: "trash") }
+                    Button(role: .destructive) { store.removeZone(at: index) } label: {
+                        Label("Remove", systemImage: "trash")
+                    }
                 }
-            }.padding(.top, 8)
+            }
+            .padding(.top, 8)
         } label: {
-            HStack(spacing: 10) {
+            HStack {
                 Image(systemName: zone.wrappedValue.symbol.isEmpty ? zone.wrappedValue.action.symbol : zone.wrappedValue.symbol)
-                    .foregroundStyle(zone.wrappedValue.color.color).frame(width: 22)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(zone.wrappedValue.title.isEmpty ? zone.wrappedValue.action.rawValue : zone.wrappedValue.title).font(.headline)
-                    Text("\(zone.wrappedValue.action.rawValue) · \(zone.wrappedValue.accepts.rawValue)").font(.caption).foregroundStyle(.secondary)
-                }
+                    .foregroundStyle(zone.wrappedValue.color.color)
+                    .frame(width: 22)
+                Text(zone.wrappedValue.title.isEmpty ? zone.wrappedValue.action.rawValue : zone.wrappedValue.title)
+                    .font(.headline)
                 Spacer()
-                Text("Zone \(index + 1)").font(.caption2).foregroundStyle(.secondary)
+                Text(zone.wrappedValue.action.rawValue).font(.caption).foregroundStyle(.secondary)
             }
         }
-        .padding(12)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var zoneCountBinding: Binding<Int> {
-        Binding(get: { store.configuration.zones.count }, set: { requested in
-            let count = min(8, max(0, requested))
-            while store.configuration.zones.count < count { store.addZone() }
-            while store.configuration.zones.count > count { store.removeZone(at: store.configuration.zones.count - 1) }
-        })
+        Binding(
+            get: { store.configuration.zones.count },
+            set: { requested in
+                let count = min(8, max(0, requested))
+                while store.configuration.zones.count < count { store.addZone() }
+                while store.configuration.zones.count > count {
+                    store.removeZone(at: store.configuration.zones.count - 1)
+                }
+            }
+        )
     }
 
     private func configurationBinding<T>(_ keyPath: WritableKeyPath<HaloDropZoneConfiguration, T>) -> Binding<T> {
-        Binding(get: { store.configuration[keyPath: keyPath] }, set: { value in
-            var next = store.configuration
-            next[keyPath: keyPath] = value
-            next.normalize()
-            store.configuration = next
-        })
+        Binding(
+            get: { store.configuration[keyPath: keyPath] },
+            set: { value in
+                var next = store.configuration
+                next[keyPath: keyPath] = value
+                next.normalize()
+                store.configuration = next
+            }
+        )
     }
 
     private func zoneBinding(_ index: Int) -> Binding<HaloDropZone> {
-        Binding(get: { store.configuration.zones[index] }, set: { value in
-            guard store.configuration.zones.indices.contains(index) else { return }
-            var next = store.configuration
-            next.zones[index] = value
-            next.normalize()
-            store.configuration = next
-        })
+        Binding(
+            get: { store.configuration.zones[index] },
+            set: { value in
+                guard store.configuration.zones.indices.contains(index) else { return }
+                var next = store.configuration
+                next.zones[index] = value
+                next.normalize()
+                store.configuration = next
+            }
+        )
     }
 
     private func chooseFolder(for index: Int) {
@@ -1079,75 +1178,74 @@ private struct HaloDropZoneStudioView: View {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            var zone = store.configuration.zones[index]
-            zone.parameter = url.path
             var next = store.configuration
-            next.zones[index] = zone
+            next.zones[index].parameter = url.path
             store.configuration = next
         }
     }
 
-    private func slider(_ title: String, _ keyPath: WritableKeyPath<HaloDropZoneConfiguration, Double>, _ range: ClosedRange<Double>, _ suffix: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack { Text(title); Spacer(); Text(String(format: "%.1f%@", store.configuration[keyPath: keyPath], suffix)).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+    private func valueSlider(
+        _ title: String,
+        _ keyPath: WritableKeyPath<HaloDropZoneConfiguration, Double>,
+        _ range: ClosedRange<Double>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(String(format: "%.1f", store.configuration[keyPath: keyPath]))
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
             SwiftUI.Slider(value: configurationBinding(keyPath), in: range)
         }
     }
 }
 
 @MainActor
-private struct HaloDropZoneStudioPreview: View {
+private struct HaloDropZoneStaticPreview: View {
     let configuration: HaloDropZoneConfiguration
-    @StateObject private var model = HaloDropZoneOverlayModel()
-
-    var body: some View {
-        HaloDropZoneBoardStaticPreview(configuration: configuration, hovered: configuration.zones.isEmpty ? nil : 0)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-}
-
-@MainActor
-private struct HaloDropZoneBoardStaticPreview: View {
-    let configuration: HaloDropZoneConfiguration
-    let hovered: Int?
 
     var body: some View {
         GeometryReader { proxy in
             let frames = HaloDropZoneLayoutResolver.frames(size: proxy.size, configuration: configuration)
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.black.opacity(configuration.backgroundOpacity))
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.black.opacity(configuration.backgroundOpacity))
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(configuration.headerTitle).font(.headline)
                         Text(configuration.headerSubtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer()
-                    Text("PREVIEW").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
-                }.padding(12)
+                    Text("DROP CI").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+                }
+                .padding(12)
+
                 ForEach(Array(configuration.zones.enumerated()), id: \.element.id) { index, zone in
                     if frames.indices.contains(index) {
                         let frame = frames[index]
-                        VStack(spacing: 5) {
-                            if configuration.showIcons { Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol).foregroundStyle(zone.color.color) }
+                        VStack(spacing: 4) {
+                            if configuration.showIcons {
+                                Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
+                                    .foregroundStyle(zone.color.color)
+                            }
                             Text(zone.title).font(.caption.bold()).lineLimit(1)
-                            if configuration.showSubtitles { Text(zone.subtitle).font(.system(size: 8)).foregroundStyle(.secondary).lineLimit(1) }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(zone.color.color.opacity(index == hovered ? 0.18 : 0.06), in: RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous).stroke(zone.color.color.opacity(index == hovered ? 0.75 : 0.22)))
+                        .background(zone.color.color.opacity(index == 0 ? 0.18 : 0.06), in: RoundedRectangle(cornerRadius: configuration.cornerRadius))
+                        .overlay(RoundedRectangle(cornerRadius: configuration.cornerRadius).stroke(zone.color.color.opacity(index == 0 ? 0.72 : 0.22)))
                         .frame(width: frame.width, height: frame.height)
                         .position(x: frame.midX, y: frame.midY)
                     }
                 }
-            }.foregroundStyle(.white)
+            }
+            .foregroundStyle(.white)
         }
     }
 }
 
-// MARK: - Global drag monitor
+// MARK: - Global file-drag monitor
 
-/// Summons Drop CI as soon as a system file drag begins instead of waiting for
-/// the pointer to physically enter Halo's NSDraggingDestination.
 @MainActor
 private final class HaloGlobalFileDragMonitor {
     static let shared = HaloGlobalFileDragMonitor()
@@ -1255,33 +1353,36 @@ private final class HaloGlobalFileDragMonitor {
         guard let target = targetForDrag(at: point) else { return }
         if let activeTarget, activeTarget !== target {
             activeTarget.dragStateHandler?(false, 0)
+            HaloEmbeddedDropZoneController.shared.dismiss()
         }
         activeTarget = target
         target.dragStateHandler?(true, max(1, count))
-        HaloDropZoneOverlayController.shared.begin(target: target, itemCount: max(1, count))
+        HaloEmbeddedDropZoneController.shared.begin(target: target, itemCount: max(1, count))
     }
 
     private func targetForDrag(at point: NSPoint) -> (any HaloGlobalDropTarget)? {
-        let haloPanels = NSApp.windows.compactMap { $0 as? HaloPanel }
-        if let panel = haloPanels.first(where: { panel in
+        let panels = NSApp.windows.compactMap { $0 as? HaloPanel }
+        if let panel = panels.first(where: { panel in
             guard let screen = panel.screen else { return false }
             return screen.frame.contains(point)
         }), let target = panel.contentView as? any HaloGlobalDropTarget {
             return target
         }
-        return haloPanels.compactMap { $0.contentView as? any HaloGlobalDropTarget }.first
+        return panels.compactMap { $0.contentView as? any HaloGlobalDropTarget }.first
     }
 
     private func finishAfterDropOpportunity() {
         guard !deferredFinishPending else { return }
-        let point = NSEvent.mouseLocation
-        if HaloDropZoneOverlayController.shared.containsScreenPoint(point) {
+        if HaloEmbeddedDropZoneController.shared.containsScreenPoint(NSEvent.mouseLocation) {
             deferredFinishPending = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) { [weak self] in
                 guard let self else { return }
                 self.deferredFinishPending = false
-                if !HaloDropZoneOverlayController.shared.dropHandled { self.finishDrag() }
-                else { self.resetSessionState() }
+                if HaloEmbeddedDropZoneController.shared.dropHandled {
+                    self.resetSessionState()
+                } else {
+                    self.finishDrag()
+                }
             }
         } else {
             finishDrag()
@@ -1291,7 +1392,7 @@ private final class HaloGlobalFileDragMonitor {
     private func finishDrag() {
         guard activeTarget != nil || sawMouseDrag else { return }
         activeTarget?.dragStateHandler?(false, 0)
-        HaloDropZoneOverlayController.shared.cancelIfNeeded()
+        HaloEmbeddedDropZoneController.shared.cancelIfNeeded()
         resetSessionState()
     }
 
@@ -1303,6 +1404,8 @@ private final class HaloGlobalFileDragMonitor {
         lastCompletedPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
     }
 }
+
+// MARK: - Display clock
 
 /// Active animation only. AppKit tracks the view's display, including display moves.
 @MainActor final class DisplayClock: NSObject {
@@ -1317,13 +1420,19 @@ private final class HaloGlobalFileDragMonitor {
     }
 
     func start(view: NSView, tick: @escaping (CFTimeInterval) -> Void) {
-        stop(); self.tick = tick
-        requestedRate = FrameRatePolicy.target(maximum: view.window?.screen?.maximumFramesPerSecond ?? 60,
-                                               lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+        stop()
+        self.tick = tick
+        requestedRate = FrameRatePolicy.target(
+            maximum: view.window?.screen?.maximumFramesPerSecond ?? 60,
+            lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled
+        )
         if #available(macOS 14.0, *) {
             let link = view.displayLink(target: self, selector: #selector(displayTick(_:)))
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: Float(min(60, requestedRate)),
-                                                           maximum: Float(requestedRate), preferred: Float(requestedRate))
+            link.preferredFrameRateRange = CAFrameRateRange(
+                minimum: Float(min(60, requestedRate)),
+                maximum: Float(requestedRate),
+                preferred: Float(requestedRate)
+            )
             nativeLink = link
             link.add(to: .main, forMode: .common)
         } else {
@@ -1331,14 +1440,24 @@ private final class HaloGlobalFileDragMonitor {
                 Task { @MainActor [weak self] in self?.tick?(CACurrentMediaTime()) }
             }
             timer.tolerance = 0
-            fallback = timer; RunLoop.main.add(timer, forMode: .common)
+            fallback = timer
+            RunLoop.main.add(timer, forMode: .common)
         }
     }
+
     @available(macOS 14.0, *)
-    @objc private func displayTick(_ link: CADisplayLink) { tick?(link.targetTimestamp) }
+    @objc private func displayTick(_ link: CADisplayLink) {
+        tick?(link.targetTimestamp)
+    }
+
     func stop() {
-        if #available(macOS 14.0, *), let link = nativeLink as? CADisplayLink { link.invalidate() }
-        nativeLink = nil; fallback?.invalidate(); fallback = nil; tick = nil
+        if #available(macOS 14.0, *), let link = nativeLink as? CADisplayLink {
+            link.invalidate()
+        }
+        nativeLink = nil
+        fallback?.invalidate()
+        fallback = nil
+        tick = nil
     }
 }
 
@@ -1346,48 +1465,83 @@ struct RefreshTimeline<Content: View>: View {
     let active: Bool
     @ViewBuilder var content: (CFTimeInterval) -> Content
     @State private var time = CACurrentMediaTime()
+
     var body: some View {
-        content(time).background {
-            RefreshPulse(active: active) { time = $0 }.allowsHitTesting(false).accessibilityHidden(true)
-        }
+        content(time)
+            .background {
+                RefreshPulse(active: active) { time = $0 }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
     }
 }
+
 private struct RefreshPulse: NSViewRepresentable {
     let active: Bool
     let tick: (CFTimeInterval) -> Void
+
     final class PulseView: NSView {
         let clock = DisplayClock()
         var active = false
         var running = false
         var tick: ((CFTimeInterval) -> Void)?
         var screenObserver: NSObjectProtocol?
+
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
             screenObserver = nil
             if let window {
-                screenObserver = NotificationCenter.default.addObserver(forName: NSWindow.didChangeScreenNotification, object: window, queue: .main) { [weak self] _ in
+                screenObserver = NotificationCenter.default.addObserver(
+                    forName: NSWindow.didChangeScreenNotification,
+                    object: window,
+                    queue: .main
+                ) { [weak self] _ in
                     Task { @MainActor [weak self] in self?.restart() }
                 }
             }
             restart()
         }
-        override func viewDidChangeBackingProperties() { super.viewDidChangeBackingProperties(); restart() }
-        func restart() { clock.stop(); running = false; update() }
+
+        override func viewDidChangeBackingProperties() {
+            super.viewDidChangeBackingProperties()
+            restart()
+        }
+
+        func restart() {
+            clock.stop()
+            running = false
+            update()
+        }
+
         func update() {
             let shouldRun = active && window != nil
-            guard shouldRun != running else { return }; running = shouldRun
-            if shouldRun { clock.start(view: self) { [weak self] in self?.tick?($0) } }
-            else { clock.stop() }
+            guard shouldRun != running else { return }
+            running = shouldRun
+            if shouldRun {
+                clock.start(view: self) { [weak self] in self?.tick?($0) }
+            } else {
+                clock.stop()
+            }
         }
     }
+
     func makeNSView(context: Context) -> PulseView { PulseView() }
+
     func updateNSView(_ view: PulseView, context: Context) {
-        view.tick = tick; view.active = active; view.update()
+        view.tick = tick
+        view.active = active
+        view.update()
     }
+
     static func dismantleNSView(_ view: PulseView, coordinator: ()) {
-        view.clock.stop(); view.tick = nil
-        if let observer = view.screenObserver { NotificationCenter.default.removeObserver(observer) }; view.screenObserver = nil
+        view.clock.stop()
+        view.tick = nil
+        if let observer = view.screenObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        view.screenObserver = nil
     }
 }
