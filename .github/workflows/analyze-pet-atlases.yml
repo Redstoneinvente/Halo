@@ -19,5 +19,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: pet-atlas-analysis
-          path: /tmp/pet-atlas-analysis
-          # row-aware component assignment preview
+          path: |
+            /tmp/pet-atlas-analysis
+            Halo/Halo Icons/Pets/halo-pets-v2
