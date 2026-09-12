@@ -1233,9 +1233,7 @@ private struct HaloAccountLicenseSettingsView: View {
                     Text("Create Account").tag(true)
                 }.pickerStyle(.segmented)
                 TextField("Email", text: $email)
-                    .textContentType(.emailAddress)
                 SecureField("Password", text: $password)
-                    .textContentType(creatingAccount ? .newPassword : .password)
                 HStack {
                     Button(creatingAccount ? "Create Halo Account" : "Sign In") {
                         Task {
