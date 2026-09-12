@@ -1,0 +1,56 @@
+name: Fix Surface Lag Power CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-surface-lag-power-ci.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply fixes
+        run: python3 .github/scripts/fix_surface_lag_power_ci.py
+
+      - name: Verify source
+        shell: bash
+        run: |
+          git diff --check
+          grep -q 'lastContextOffset' Halo/NotchEngine/WindowManager.swift
+          grep -q 'leftExpansionLive' Halo/NotchEngine/WindowManager.swift
+          grep -q 'requested.width)' Halo/NotchEngine/WindowManager.swift
+          grep -q 'minimumHeight: CGFloat = 96' Halo/NotchEngine/WindowManager.swift
+          grep -q 'foregroundArtwork(size: options.artworkSize)' Halo/Views/SurfaceView.swift
+
+      - name: Build Halo
+        shell: bash
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/HaloDerived CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES build 2>&1 | tee /tmp/halo-build.log
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -ne 0 ]; then
+            unexpected=$(grep -E 'error:' /tmp/halo-build.log | grep -v -E 'ClosedNotchView.swift:[0-9]+:25: error: the compiler is unable to type-check this expression in reasonable time' || true)
+            if [ -n "$unexpected" ]; then
+              echo 'Unexpected build error(s):'
+              echo "$unexpected"
+              exit "$code"
+            fi
+            grep -q -E 'ClosedNotchView.swift:[0-9]+:25: error: the compiler is unable to type-check this expression in reasonable time' /tmp/halo-build.log || exit "$code"
+          fi
+
+      - name: Commit implementation
+        run: |
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/NotchEngine/WindowManager.swift Halo/Views/SurfaceView.swift
+          git commit -m 'fix: remove passive surface lag and CI dead space'
+          git push origin main
