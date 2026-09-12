@@ -1,0 +1,97 @@
+name: One-time Drop CI follow-up
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/one-time-drop-ci-followup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Apply hardening
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Halo/NotchEngine/DisplayClock.swift')
+          s = p.read_text()
+
+          old = '''        guard globalMonitor == nil, localMonitor == nil else { return }
+              HaloDropZoneStudioWindowController.shared.installMenuItem()
+
+              let mask: NSEvent.EventTypeMask = [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+          '''
+          new = '''        guard globalMonitor == nil, localMonitor == nil else { return }
+              HaloDropZoneStudioWindowController.shared.installMenuItem()
+              lastCompletedPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
+
+              let mask: NSEvent.EventTypeMask = [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+          '''
+          if s.count(old) != 1:
+              raise SystemExit(f'baseline marker count: {s.count(old)}')
+          s = s.replace(old, new, 1)
+
+          old = '''                    ZStack {
+                              RoundedRectangle(cornerRadius: veryCompact ? 8 : 10, style: .continuous)
+                                  .fill(zone.color.color.opacity(active ? 0.22 : 0.11))
+                              Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
+                                  .font(.system(size: veryCompact ? 13 : 16, weight: .semibold))
+                                  .foregroundStyle(active ? Color.white : zone.color.color)
+                          }
+                          .frame(width: veryCompact ? 28 : 34, height: veryCompact ? 28 : 34)
+          '''
+          new = '''                    if configuration.showIcons {
+                              ZStack {
+                                  RoundedRectangle(cornerRadius: veryCompact ? 8 : 10, style: .continuous)
+                                      .fill(zone.color.color.opacity(active ? 0.22 : 0.11))
+                                  Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
+                                      .font(.system(size: veryCompact ? 13 : 16, weight: .semibold))
+                                      .foregroundStyle(active ? Color.white : zone.color.color)
+                              }
+                              .frame(width: veryCompact ? 28 : 34, height: veryCompact ? 28 : 34)
+                          }
+          '''
+          if s.count(old) != 1:
+              raise SystemExit(f'live icon marker count: {s.count(old)}')
+          s = s.replace(old, new, 1)
+
+          old = '''                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                      .fill(zone.color.color.opacity(index == 0 ? 0.22 : 0.10))
+                                      .frame(width: compact ? 25 : 30, height: compact ? 25 : 30)
+                                      .overlay(Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol).font(.system(size: compact ? 11 : 14, weight: .semibold)).foregroundStyle(zone.color.color))
+          '''
+          new = '''                            if configuration.showIcons {
+                                      RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                          .fill(zone.color.color.opacity(index == 0 ? 0.22 : 0.10))
+                                          .frame(width: compact ? 25 : 30, height: compact ? 25 : 30)
+                                          .overlay(Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol).font(.system(size: compact ? 11 : 14, weight: .semibold)).foregroundStyle(zone.color.color))
+                                  }
+          '''
+          if s.count(old) != 1:
+              raise SystemExit(f'preview icon marker count: {s.count(old)}')
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+          xcrun swiftc -parse Halo/NotchEngine/DisplayClock.swift
+          git diff --check
+      - name: Commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/one-time-drop-ci-followup.yml
+          git config user.name 'Redstoneinvente'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add -A
+          git commit -m 'Harden Drop CI drag detection'
+          git push origin HEAD:main
