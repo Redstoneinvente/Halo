@@ -58,7 +58,6 @@ struct HaloCompanionSprite: View {
                 brightnessVariation: brightnessVariation,
                 phase: phase
             )
-            .interpolation(.none)
         case .smooth:
             vectorCompanion(phase: phase, outlined: false)
         case .illustrated:
