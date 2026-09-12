@@ -113,17 +113,29 @@ final class EISettingsStore: ObservableObject {
     static let shared = EISettingsStore()
     private let defaults: UserDefaults
     private let key = "HaloEnvironmentalInterface.v1"
-    @Published var settings: EISettings { didSet { persist() } }
+    private var pendingPersist: DispatchWorkItem?
+
+    @Published var settings: EISettings {
+        didSet { schedulePersist(settings.normalized()) }
+    }
+
     private init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         if let data = defaults.data(forKey: key), let saved = try? JSONDecoder().decode(EISettings.self, from: data), saved.version == 1 {
             settings = saved.normalized()
         } else { settings = EISettings() }
     }
+
     func reset() { settings = EISettings() }
-    private func persist() {
-        guard let data = try? JSONEncoder().encode(settings.normalized()) else { return }
-        defaults.set(data, forKey: key)
+
+    private func schedulePersist(_ snapshot: EISettings) {
+        pendingPersist?.cancel()
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        let defaults = self.defaults
+        let key = self.key
+        let work = DispatchWorkItem { defaults.set(data, forKey: key) }
+        pendingPersist = work
+        DispatchQueue.main.async(execute: work)
     }
 }
 
@@ -242,9 +254,19 @@ final class EnvironmentalInterfaceEngine: ObservableObject {
 
     func start(workspace: WorkspaceStore) {
         self.workspace = workspace
-        guard !started else { settingsDidChange(settingsStore.settings); return }
+        guard !started else {
+            let current = settingsStore.settings
+            DispatchQueue.main.async { [weak self] in self?.settingsDidChange(current) }
+            return
+        }
         started = true
-        settingsStore.$settings.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] in self?.settingsDidChange($0) }.store(in: &subscriptions)
+        settingsStore.$settings
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] value in
+                DispatchQueue.main.async { self?.settingsDidChange(value) }
+            }
+            .store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloRetroGameToggle")).receive(on: RunLoop.main).sink { [weak self] _ in
             guard let self, self.defaults.object(forKey: "HaloContextRetroEnabled") as? Bool ?? false else { return }
             self.retroGameRequested.toggle(); self.refreshNow()
@@ -254,7 +276,9 @@ final class EnvironmentalInterfaceEngine: ObservableObject {
             self.emit(EIEvent(kind: .systemWoke, date: Date()), force: true)
         }.store(in: &subscriptions)
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification).receive(on: RunLoop.main).sink { [weak self] _ in self?.refreshNow() }.store(in: &subscriptions)
-        refreshPlantProgress(); settingsDidChange(settingsStore.settings)
+        refreshPlantProgress()
+        let initial = settingsStore.settings
+        DispatchQueue.main.async { [weak self] in self?.settingsDidChange(initial) }
     }
     func stop() { loopTask?.cancel(); loopTask = nil; subscriptions.removeAll(); persistState(); started = false; workspace = nil }
     func setAnyHaloSurfaceExpanded(_ value: Bool) { guard anyHaloSurfaceExpanded != value else { return }; anyHaloSurfaceExpanded = value; refreshNow() }
@@ -657,22 +681,39 @@ final class EnvironmentalInterfaceManager {
     private weak var workspace: WorkspaceStore?
     private var hosts: [ObjectIdentifier: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
-    private var started = false, suppressedByHUD = false
+    private var started = false
+    private var suppressedByHUD = false
+    private var ownedSurfaceActive = false
+
     func start(workspace: WorkspaceStore) {
         self.workspace = workspace; EnvironmentalInterfaceEngine.shared.start(workspace: workspace)
-        guard !started else { refreshAll(false); return }; started = true
+        guard !started else { deferRefreshAll(false); return }; started = true
         NotificationCenter.default.publisher(for: .init("HaloPanelGeometryChanged")).receive(on: RunLoop.main).sink { [weak self] in self?.handleGeometry($0) }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloEIVisibilityChanged"))
             .merge(with: NotificationCenter.default.publisher(for: .init("HaloEIReactionChanged")))
             .merge(with: NotificationCenter.default.publisher(for: .init("HaloEIPlacementChanged")))
-            .receive(on: RunLoop.main).sink { [weak self] _ in self?.refreshAll(true) }.store(in: &subscriptions)
-        EISettingsStore.shared.$settings.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] _ in self?.refreshAll(true) }.store(in: &subscriptions)
-        EIOpenPreferencesStore.shared.$value.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] _ in self?.refreshAll(true) }.store(in: &subscriptions)
-        EnvironmentalInterfaceOwnershipController.shared.$requested.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] _ in self?.refreshAll(true) }.store(in: &subscriptions)
-        HaloHUDNotchBridge.shared.$presentation.map { $0 != nil }.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] active in self?.suppressedByHUD = active; self?.refreshAll(true) }.store(in: &subscriptions)
+            .receive(on: RunLoop.main).sink { [weak self] _ in self?.deferRefreshAll(true) }.store(in: &subscriptions)
+        EISettingsStore.shared.$settings.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] _ in self?.deferRefreshAll(true) }.store(in: &subscriptions)
+        EIOpenPreferencesStore.shared.$value.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] _ in self?.deferRefreshAll(true) }.store(in: &subscriptions)
+        EnvironmentalInterfaceOwnershipController.shared.$requested.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] _ in self?.deferRefreshAll(true) }.store(in: &subscriptions)
+        HaloHUDNotchBridge.shared.$presentation.map { $0 != nil }.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] active in
+            DispatchQueue.main.async { self?.suppressedByHUD = active; self?.refreshAll(true) }
+        }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: NSWindow.willCloseNotification).receive(on: RunLoop.main).sink { [weak self] note in if let window = note.object as? NSWindow { self?.remove(window) } }.store(in: &subscriptions)
     }
+
+    func setOwnedSurfaceActive(_ active: Bool) {
+        guard ownedSurfaceActive != active else { return }
+        ownedSurfaceActive = active
+        deferRefreshAll(true)
+    }
+
     func stop() { hosts.values.forEach { $0.overlay.close() }; hosts.removeAll(); subscriptions.removeAll(); EnvironmentalInterfaceEngine.shared.stop(); workspace = nil; started = false }
+
+    private func deferRefreshAll(_ animated: Bool) {
+        DispatchQueue.main.async { [weak self] in self?.refreshAll(animated) }
+    }
+
     private func handleGeometry(_ note: Notification) {
         guard let halo = note.object as? NSWindow, let frame = note.userInfo?["frame"] as? CGRect else { return }
         let key = ObjectIdentifier(halo), host = hosts[key] ?? Host(halo); hosts[key] = host
@@ -681,11 +722,14 @@ final class EnvironmentalInterfaceManager {
     }
     private func remove(_ window: NSWindow) { if let host = hosts.removeValue(forKey: ObjectIdentifier(window)) { host.overlay.close() }; updateExpanded() }
     private func refreshAll(_ animated: Bool) { hosts.values.forEach { refresh($0, animated) }; updateExpanded() }
-    private func updateExpanded() { EnvironmentalInterfaceEngine.shared.setAnyHaloSurfaceExpanded(hosts.values.contains { $0.haloFrame.height > 82 }) }
+    private func updateExpanded() {
+        let expanded = hosts.values.contains { $0.haloFrame.height > 82 }
+        DispatchQueue.main.async { EnvironmentalInterfaceEngine.shared.setAnyHaloSurfaceExpanded(expanded) }
+    }
     private func refresh(_ host: Host, _ animated: Bool) {
         let settings = EISettingsStore.shared.settings, engine = EnvironmentalInterfaceEngine.shared
         guard !suppressedByHUD,
-              !EnvironmentalInterfaceOwnershipController.shared.isRequested,
+              !ownedSurfaceActive,
               settings.mode != .off, engine.shouldRender,
               host.haloFrame.width > 1, host.haloFrame.height > 1 else { host.overlay.orderOut(nil); return }
         let frame = resolvedFrame(host, settings, engine.currentReaction); guard frame.width >= 24, frame.height >= 20 else { host.overlay.orderOut(nil); return }
@@ -739,7 +783,7 @@ struct EnvironmentalInterfaceSettingsView: View {
             Picker("Environmental Interface", selection: binding(\.mode)) {
                 ForEach(EIMode.allCases) { Label($0.rawValue, systemImage: $0.symbol).tag($0) }
             }.pickerStyle(.segmented)
-            Text("EI can live ambiently around Halo or explicitly own the opened notch. Context Interfaces always have first ownership priority, then EI, then the normal Halo dashboard.")
+            Text("EI can live ambiently around Halo or open as its own Halo surface. Context Interfaces always have first ownership priority, then EI, then the normal Halo dashboard.")
                 .font(.caption).foregroundStyle(.secondary)
         }
 
@@ -759,10 +803,10 @@ struct EnvironmentalInterfaceSettingsView: View {
                     Picker("Modifiers", selection: pref(\.shortcutModifiers)) {
                         Text("Option + Command").tag(UInt32(2304)); Text("Control + Option").tag(UInt32(6144)); Text("Control + Shift").tag(UInt32(4608))
                     }
-                    Text("Current shortcut: \(shortcutDescription). Press it again to return to the normal opened notch.")
+                    Text("Current shortcut: \(shortcutDescription). Press it again to close the EI surface.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Label("CI always overrides an opened EI while that CI is eligible.", systemImage: "arrow.up.to.line")
+                Label("CI always overrides EI while that CI is eligible; EI resumes when the CI releases the surface.", systemImage: "arrow.up.to.line")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -865,7 +909,7 @@ struct EnvironmentalInterfaceSettingsView: View {
     }
 
     private var cozySettings: some View {
-        Section("Owned EI environment") {
+        Section("EI surface environment") {
             Picker("Room style", selection: pref(\.roomStyle)) { ForEach(EIRoomStyle.allCases) { Text($0.rawValue).tag($0) } }
             ColorPicker("Room color", selection: prefColor(\.room), supportsOpacity: false)
             ColorPicker("Accent light", selection: prefColor(\.accent), supportsOpacity: false)
@@ -875,7 +919,7 @@ struct EnvironmentalInterfaceSettingsView: View {
             Toggle("Rug", isOn: pref(\.rug))
             Toggle("Wall shelf", isOn: pref(\.shelf))
             Toggle("Room plants", isOn: pref(\.roomPlants))
-            Text("These options customize the cozy full-notch environment shown when you explicitly open Pet or Plant EI.").font(.caption).foregroundStyle(.secondary)
+            Text("These options customize the dedicated EI surface shown when you open Pet or Plant EI.").font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -905,19 +949,39 @@ struct EnvironmentalInterfaceSettingsView: View {
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<EISettings, T>) -> Binding<T> {
-        Binding(get: { store.settings[keyPath: keyPath] }, set: { var value = store.settings; value[keyPath: keyPath] = $0; store.settings = value })
+        Binding(get: { store.settings[keyPath: keyPath] }, set: { newValue in
+            var value = store.settings
+            value[keyPath: keyPath] = newValue
+            DispatchQueue.main.async { store.settings = value }
+        })
     }
     private func input(_ keyPath: WritableKeyPath<EIInputSettings, Bool>) -> Binding<Bool> {
-        Binding(get: { store.settings.inputs[keyPath: keyPath] }, set: { var value = store.settings; value.inputs[keyPath: keyPath] = $0; store.settings = value })
+        Binding(get: { store.settings.inputs[keyPath: keyPath] }, set: { newValue in
+            var value = store.settings
+            value.inputs[keyPath: keyPath] = newValue
+            DispatchQueue.main.async { store.settings = value }
+        })
     }
     private func color(_ keyPath: WritableKeyPath<EISettings, WidgetColor>) -> Binding<Color> {
-        Binding(get: { store.settings[keyPath: keyPath].color }, set: { var value = store.settings; value[keyPath: keyPath] = WidgetColor($0); store.settings = value })
+        Binding(get: { store.settings[keyPath: keyPath].color }, set: { newValue in
+            var value = store.settings
+            value[keyPath: keyPath] = WidgetColor(newValue)
+            DispatchQueue.main.async { store.settings = value }
+        })
     }
     private func pref<T>(_ keyPath: WritableKeyPath<EIOpenPreferences, T>) -> Binding<T> {
-        Binding(get: { preferences.value[keyPath: keyPath] }, set: { var value = preferences.value; value[keyPath: keyPath] = $0; preferences.value = value })
+        Binding(get: { preferences.value[keyPath: keyPath] }, set: { newValue in
+            var value = preferences.value
+            value[keyPath: keyPath] = newValue
+            DispatchQueue.main.async { preferences.value = value }
+        })
     }
     private func prefColor(_ keyPath: WritableKeyPath<EIOpenPreferences, WidgetColor>) -> Binding<Color> {
-        Binding(get: { preferences.value[keyPath: keyPath].color }, set: { var value = preferences.value; value[keyPath: keyPath] = WidgetColor($0); preferences.value = value })
+        Binding(get: { preferences.value[keyPath: keyPath].color }, set: { newValue in
+            var value = preferences.value
+            value[keyPath: keyPath] = WidgetColor(newValue)
+            DispatchQueue.main.async { preferences.value = value }
+        })
     }
     private func duration(_ value: TimeInterval) -> String {
         let seconds = max(0, Int(value.rounded())); if seconds < 60 { return "\(seconds)s" }
