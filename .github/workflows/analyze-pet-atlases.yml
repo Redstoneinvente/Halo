@@ -1,0 +1,22 @@
+name: Analyze Pet Atlases
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/analyze-pet-atlases.yml
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m pip install pillow
+      - run: python3 .github/scripts/analyze_pet_sheets.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pet-atlas-analysis
+          path: /tmp/pet-atlas-analysis
