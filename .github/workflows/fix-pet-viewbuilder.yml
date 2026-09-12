@@ -1,0 +1,36 @@
+name: Fix Pet ViewBuilder
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-pet-viewbuilder.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply fix
+        run: python3 .github/scripts/fix_pet_viewbuilder.py
+      - name: Verify source changes
+        run: |
+          grep -q 'centralRevealSize' Halo/Core/ExtensionContracts.swift
+          git diff --check
+      - name: Build Halo
+        run: |
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build
+      - name: Commit source fix
+        run: |
+          git config user.name "Doshagyasing Gowardun"
+          git config user.email "45894815+Redstoneinvente@users.noreply.github.com"
+          git add Halo/Core/ExtensionContracts.swift
+          if ! git diff --cached --quiet; then
+            git commit -m "fix: resolve pet reveal ViewBuilder compile error"
+            git push origin main
+          fi
