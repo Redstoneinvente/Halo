@@ -4,14 +4,12 @@ PROJECT_PATH = 'Halo.xcodeproj'
 project = Xcodeproj::Project.open(PROJECT_PATH)
 target = project.targets.find { |t| t.name == 'Halo' } or abort 'Halo target not found'
 
-# ---- Source files ---------------------------------------------------------
+# Halo's Xcode group is intentionally flat: source references keep paths such as Core/Foo.swift.
 halo = project.main_group.children.find { |g| g.respond_to?(:display_name) && g.display_name == 'Halo' } or abort 'Halo group not found'
-core = halo.children.find { |g| g.respond_to?(:display_name) && g.display_name == 'Core' } or abort 'Core group not found'
-views = halo.children.find { |g| g.respond_to?(:display_name) && g.display_name == 'Views' } or abort 'Views group not found'
 
-def ensure_source(project, target, group, filename)
-  ref = group.files.find { |f| f.path == filename || f.display_name == filename }
-  ref ||= group.new_reference(filename)
+def ensure_source(project, target, group, relative_path)
+  ref = group.files.find { |f| f.path == relative_path }
+  ref ||= group.new_reference(relative_path)
   unless target.source_build_phase.files.any? { |bf| bf.file_ref == ref }
     bf = project.new(Xcodeproj::Project::Object::PBXBuildFile)
     bf.file_ref = ref
@@ -19,8 +17,8 @@ def ensure_source(project, target, group, filename)
   end
 end
 
-ensure_source(project, target, core, 'AccountLicenseManager.swift')
-ensure_source(project, target, views, 'AccountLicenseSettingsView.swift')
+ensure_source(project, target, halo, 'Core/AccountLicenseManager.swift')
+ensure_source(project, target, halo, 'Views/AccountLicenseSettingsView.swift')
 
 # ---- Swift packages ------------------------------------------------------
 def ensure_package(project, target, url, version, products)
@@ -56,8 +54,7 @@ ensure_package(project, target,
   'https://github.com/firebase/firebase-ios-sdk.git',
   '12.11.0', ['FirebaseCore', 'FirebaseAuth'])
 
-# Keep credentials out of source control. Developers can set these build settings
-# locally/through CI; Info.plist only receives their substituted values.
+# Credentials stay outside source control. These are deliberately empty defaults.
 target.build_configurations.each do |config|
   config.build_settings['HALO_LICENSESEAT_API_KEY'] ||= ''
   config.build_settings['HALO_LICENSESEAT_PRODUCT_SLUG'] ||= ''
@@ -84,12 +81,12 @@ settings.sub!(
   'private let sections = ["General", "Account", "Appearance",'
 ) unless settings.include?('"General", "Account", "Appearance"')
 settings.sub!(
-  '        case "General": return "gearshape"\n',
-  '        case "General": return "gearshape"\n        case "Account": return "person.crop.circle.badge.checkmark"\n'
+  "        case \"General\": return \"gearshape\"\n",
+  "        case \"General\": return \"gearshape\"\n        case \"Account\": return \"person.crop.circle.badge.checkmark\"\n"
 ) unless settings.include?('case "Account": return')
 settings.sub!(
-  '        case "Schedules": ScheduleSettingsView(workspace: workspace)\n',
-  '        case "Account": AccountLicenseSettingsView()\n        case "Schedules": ScheduleSettingsView(workspace: workspace)\n'
+  "        case \"Schedules\": ScheduleSettingsView(workspace: workspace)\n",
+  "        case \"Account\": AccountLicenseSettingsView()\n        case \"Schedules\": ScheduleSettingsView(workspace: workspace)\n"
 ) unless settings.include?('case "Account": AccountLicenseSettingsView()')
 File.write(settings_path, settings)
 
@@ -113,7 +110,8 @@ end
 existing = `#{buddy} -c 'Print :keychain-access-groups' '#{entitlements}' 2>/dev/null`
 unless existing.include?('$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)')
   index = existing.lines.count { |line| line.strip.start_with?('$(') }
-  abort 'Unable to add Firebase keychain group' unless system(buddy, '-c', "Add :keychain-access-groups:#{index} string $(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)", entitlements)
+  value = '$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)'
+  abort 'Unable to add Firebase keychain group' unless system(buddy, '-c', "Add :keychain-access-groups:#{index} string #{value}", entitlements)
 end
 
 puts 'Firebase account + LicenseSeat integration applied'
