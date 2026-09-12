@@ -3,12 +3,12 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleIconFile</key>
-	<string>AppIcon.incs</string>
+	<string>AppIcon</string>
 	<key>HaloFirebaseAPIKey</key>
 	<string>$(HALO_FIREBASE_API_KEY)</string>
 	<key>HaloLicenseSeatProductSlug</key>
-	<string>$(HALO_LICENSESEAT_PUBLISHABLE_KEY)</string>
-	<key>HaloLicenseSeatPublishableKey</key>
 	<string>$(HALO_LICENSESEAT_PRODUCT_SLUG)</string>
+	<key>HaloLicenseSeatPublishableKey</key>
+	<string>$(HALO_LICENSESEAT_PUBLISHABLE_KEY)</string>
 </dict>
 </plist>

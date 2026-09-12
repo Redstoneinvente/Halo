@@ -134,6 +134,7 @@
 		F8614B743053291B00D4943C /* icon_256x256@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_256x256@2x.png"; sourceTree = "<group>"; };
 		F8614B753053291B00D4943C /* icon_512x512.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_512x512.png; sourceTree = "<group>"; };
 		F8614B763053291B00D4943C /* icon_512x512@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_512x512@2x.png"; sourceTree = "<group>"; };
+		A11C0F1A0000000000000001 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Halo/Config/Base.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -324,9 +325,6 @@
 			);
 			dependencies = (
 			);
-			fileSystemSynchronizedGroups = (
-				F84A0AB1305582E700E8B51E /* Config */,
-			);
 			name = Halo;
 			productName = Halo;
 			productReference = 000000000000000000000006 /* Halo.app */;
@@ -479,6 +477,7 @@
 		};
 		00000000000000000000000E /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A11C0F1A0000000000000001 /* Base.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
@@ -511,6 +510,7 @@
 		};
 		00000000000000000000000F /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A11C0F1A0000000000000001 /* Base.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
