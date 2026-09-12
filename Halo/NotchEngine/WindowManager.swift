@@ -524,7 +524,8 @@ final class WindowManager {
     }
 
     private func powerReaction(options: ClosedNotchOptions,
-                               items: (left: ClosedNotchItem, right: ClosedNotchItem))
+                               items: (left: ClosedNotchItem, right: ClosedNotchItem),
+                               compactHeight: Double)
         -> (side: DynamicSide, badgeWidth: Double, minimumSideWidth: Double)? {
         let settings = options.powerReaction ?? PowerReactionOptions()
         guard settings.isEnabled, let battery = store.workspace.system.battery else { return nil }
@@ -539,37 +540,57 @@ final class WindowManager {
         } else { return nil }
         guard style != .off else { return nil }
 
-        let size = max(10, options.fontSize)
-        let font = NSFont.systemFont(ofSize: size, weight: .regular)
-        func textWidth(_ value: String) -> Double {
-            ceil((value as NSString).size(withAttributes: [.font: font]).width)
-        }
-        let iconWidth = max(12, size * 1.05)
-        let labelGap = 4.0
-        let horizontalPadding = 4.0
-        let naturalWidth: Double
-        switch style {
-        case .off: naturalWidth = 0
-        case .icon: naturalWidth = iconWidth + horizontalPadding
-        case .percent: naturalWidth = textWidth("100%") + horizontalPadding
-        case .iconPercent: naturalWidth = iconWidth + labelGap + textWidth("100%") + horizontalPadding
-        case .label: naturalWidth = iconWidth + labelGap + textWidth(eventLabel) + horizontalPadding
-        }
-        let badgeWidth = max(18, naturalWidth)
-        let minimumSideWidth = settings.expandForEvent ? max(badgeWidth, settings.eventWidth) : badgeWidth
-
+        let playing = store.workspace.media.isPlaying
         let side: DynamicSide
         switch settings.side {
         case .left: side = .left
         case .right: side = .right
         case .automatic:
-            let playing = store.workspace.media.isPlaying
             let rightFree = items.right == .none || ((items.right == .media || items.right == .visualizer) && !playing)
             let leftFree = items.left == .none || ((items.left == .media || items.left == .visualizer) && !playing)
             if rightFree { side = .right }
             else if leftFree { side = .left }
             else { side = .right }
         }
+
+        let innerHeight = max(1, compactHeight - 2 * options.contentPaddingY)
+        let baseSize = min(options.fontSize, innerHeight / 1.25)
+        let size = min(baseSize, max(9, innerHeight * 0.46))
+        let normalFont = NSFont.systemFont(ofSize: size, weight: .semibold)
+        let digitFont = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .semibold)
+        func textWidth(_ value: String, font: NSFont) -> Double {
+            ceil((value as NSString).size(withAttributes: [.font: font]).width)
+        }
+        let iconWidth = max(12, size + 2)
+        let labelGap = 4.0
+        let horizontalInset = 2.0
+        let naturalWidth: Double
+        switch style {
+        case .off: naturalWidth = 0
+        case .icon: naturalWidth = iconWidth + horizontalInset
+        case .percent: naturalWidth = textWidth("\(battery)%", font: digitFont) + horizontalInset
+        case .iconPercent:
+            naturalWidth = iconWidth + labelGap + textWidth("\(battery)%", font: digitFont) + horizontalInset
+        case .label:
+            naturalWidth = iconWidth + labelGap + textWidth(eventLabel, font: normalFont) + horizontalInset
+        }
+        let badgeWidth = max(16, naturalWidth)
+
+        func itemIsVisible(_ item: ClosedNotchItem) -> Bool {
+            switch item {
+            case .none: return false
+            case .media, .visualizer: return playing
+            case .activity: return activeClosedActivity != nil
+            default: return true
+            }
+        }
+        let targetItem = side == .left ? items.left : items.right
+        let targetDecoration = side == .left ? options.leftDecoration : options.rightDecoration
+        let hasSibling = itemIsVisible(targetItem) || (targetDecoration?.isVisible(playing: playing) ?? false)
+        let minimumSideWidth = settings.expandForEvent && !hasSibling
+            ? max(badgeWidth, settings.eventWidth)
+            : badgeWidth
+
         return (side, badgeWidth, minimumSideWidth)
     }
 
@@ -581,7 +602,8 @@ final class WindowManager {
         let options = layout.closedNotch ?? ClosedNotchOptions()
         let expansion = options.expansion ?? ClosedExpansionOptions()
         let items = resolvedClosedItems(options)
-        let power = powerReaction(options: options, items: items)
+        let power = powerReaction(options: options, items: items,
+                                  compactHeight: geometry.appearance.surface.compactHeight)
         let sides = fittedClosedSides(host: host, layout: layout, items: items, power: power)
         var leftLive = sideHasLiveReason(item: items.left, decoration: options.leftDecoration)
         var rightLive = sideHasLiveReason(item: items.right, decoration: options.rightDecoration)

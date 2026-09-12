@@ -343,6 +343,17 @@ struct ClosedNotchSlot: View {
         return min(decoration.size, min(innerHeight, itemIsVisible ? innerWidth / 3 : innerWidth))
     }
     private var textSize: Double { min(options.fontSize, innerHeight / 1.25) }
+    private var powerTextSize: Double { min(textSize, max(9, innerHeight * 0.46)) }
+    private var powerIconWidth: Double { max(12, powerTextSize + 2) }
+    private var powerSlotMargins: Double {
+        2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
+    }
+    private func powerTextWidth(_ value: String, monospaced: Bool = false) -> Double {
+        let font = monospaced
+            ? NSFont.monospacedDigitSystemFont(ofSize: powerTextSize, weight: .semibold)
+            : NSFont.systemFont(ofSize: powerTextSize, weight: .semibold)
+        return ceil((value as NSString).size(withAttributes: [.font: font]).width)
+    }
     private var effectiveTextColor: Color {
         if options.albumTextColor == true, media.isPlaying, let album = media.artworkColors.first { return album.color }
         return options.color.color
@@ -396,19 +407,30 @@ struct ClosedNotchSlot: View {
     }
     private var naturalPowerWidth: Double {
         guard let event = powerEvent else { return 0 }
+        let gap = 4.0
+        let inset = 2.0
         switch event.style {
         case .off: return 0
-        case .icon: return textSize + 4
-        case .percent: return textSize * 2.7
-        case .iconPercent: return textSize * 3.9
-        case .label: return textSize * 6.2
+        case .icon: return powerIconWidth + inset
+        case .percent: return powerTextWidth("\(event.battery)%", monospaced: true) + inset
+        case .iconPercent:
+            return powerIconWidth + gap + powerTextWidth("\(event.battery)%", monospaced: true) + inset
+        case .label:
+            return powerIconWidth + gap + powerTextWidth(event.label) + inset
         }
+    }
+    private var powerUsesEventContainer: Bool {
+        guard showPowerEvent else { return false }
+        let settings = options.powerReaction ?? PowerReactionOptions()
+        return settings.expandForEvent && !itemIsVisible && decorationSize <= 0 && artworkFootprint <= 0
     }
     private var powerFootprint: Double {
         guard showPowerEvent else { return 0 }
+        let natural = max(16, naturalPowerWidth)
+        guard powerUsesEventContainer else { return min(innerWidth, natural) }
         let settings = options.powerReaction ?? PowerReactionOptions()
-        let comfortable = min(settings.eventWidth, naturalPowerWidth + 12)
-        return min(max(18, naturalPowerWidth), max(18, min(innerWidth, comfortable)))
+        let targetContentWidth = max(natural, settings.eventWidth - powerSlotMargins)
+        return min(innerWidth, targetContentWidth)
     }
     private var mediaSiblingFootprint: Double {
         var widths: [Double] = []
@@ -527,11 +549,17 @@ struct ClosedNotchSlot: View {
     }
     @ViewBuilder private var powerElement: some View {
         if showPowerEvent, let powerEvent {
-            PowerEventBadge(event: powerEvent, options: options.powerReaction ?? PowerReactionOptions())
-                .frame(width: powerFootprint, height: innerHeight,
-                       alignment: side == .left ? .trailing : .leading)
-                .clipped()
-                .layoutPriority(2)
+            PowerEventBadge(
+                event: powerEvent,
+                options: options.powerReaction ?? PowerReactionOptions(),
+                side: side,
+                textSize: powerTextSize,
+                centered: powerUsesEventContainer
+            )
+            .frame(width: powerFootprint, height: innerHeight,
+                   alignment: powerUsesEventContainer ? .center : (side == .left ? .trailing : .leading))
+            .clipped()
+            .layoutPriority(2)
         }
     }
     @ViewBuilder private var content: some View {
@@ -846,21 +874,66 @@ private struct MirrorWidgetView: View {
 private struct PowerEventBadge: View {
     let event: PowerEventInfo
     let options: PowerReactionOptions
+    let side: ClosedNotchSide
+    let textSize: Double
+    let centered: Bool
+
+    private var contentAlignment: Alignment {
+        centered ? .center : (side == .left ? .trailing : .leading)
+    }
+    private var iconWidth: Double { max(12, textSize + 2) }
+
     var body: some View {
         Group {
             switch event.style {
-            case .off: EmptyView()
-            case .icon: Image(systemName: event.symbol)
-            case .percent: Text("\(event.battery)%").monospacedDigit()
-            case .iconPercent: Label("\(event.battery)%", systemImage: event.symbol).monospacedDigit()
-            case .label: Label(event.label, systemImage: event.symbol)
+            case .off:
+                EmptyView()
+            case .icon:
+                powerIcon
+            case .percent:
+                percentage
+            case .iconPercent:
+                HStack(spacing: 4) {
+                    if side == .left {
+                        percentage
+                        powerIcon
+                    } else {
+                        powerIcon
+                        percentage
+                    }
+                }
+            case .label:
+                HStack(spacing: 4) {
+                    if side == .left {
+                        Text(event.label)
+                        powerIcon
+                    } else {
+                        powerIcon
+                        Text(event.label)
+                    }
+                }
             }
         }
+        .font(.system(size: textSize, weight: .semibold))
         .lineLimit(1)
-        .minimumScaleFactor(0.72)
-        .padding(.horizontal, 2)
+        .minimumScaleFactor(0.82)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: contentAlignment)
+        .padding(.horizontal, 1)
         .foregroundStyle(powerColor)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(event.label), \(event.battery) percent")
     }
+
+    private var powerIcon: some View {
+        Image(systemName: event.symbol)
+            .font(.system(size: textSize, weight: .semibold))
+            .frame(width: iconWidth, height: max(12, textSize + 2), alignment: .center)
+    }
+
+    private var percentage: some View {
+        Text("\(event.battery)%").monospacedDigit()
+    }
+
     private var powerColor: Color {
         guard options.usesDynamicColor else { return options.color.color }
         let p = min(1, max(0, Double(event.battery) / 100))
