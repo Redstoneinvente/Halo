@@ -666,7 +666,7 @@ private final class HaloDropZoneRuntimeModel: ObservableObject {
 }
 
 @MainActor
-private struct HaloDropCIBackgroundView: View {
+struct HaloDropCIBackgroundView: View {
     let configuration: HaloDropZoneConfiguration
 
     @ViewBuilder var body: some View {
@@ -709,17 +709,8 @@ private struct HaloDropZoneBoardView: View {
             let dense = configuration.zones.count >= 6 || proxy.size.height < 260
 
             ZStack(alignment: .topLeading) {
-                HaloDropCIBackgroundView(configuration: configuration)
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    .allowsHitTesting(false)
-
-                LinearGradient(
-                    colors: [Color.white.opacity(0.045), Color.clear],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .allowsHitTesting(false)
+                Color.clear
+                    .contentShape(Rectangle())
 
                 header(configuration: configuration)
                     .padding(.horizontal, max(14, configuration.boardPadding + 4))
@@ -749,10 +740,6 @@ private struct HaloDropZoneBoardView: View {
                 .foregroundStyle(model.hoveredZone == nil ? Color.white.opacity(0.36) : Color.white.opacity(0.70))
                 .position(x: proxy.size.width / 2, y: max(12, proxy.size.height - 11))
             }
-            .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.white.opacity(0.075), lineWidth: 1)
-            )
             .foregroundStyle(.white)
         }
     }

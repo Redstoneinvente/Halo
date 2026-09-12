@@ -858,9 +858,6 @@ private struct DropContextView: View {
     @ObservedObject private var dropZones = HaloDropZoneSettingsStore.shared
     @AppStorage("HaloContextDropUseFullNotchArea") private var usesFullNotchArea = true
     @AppStorage("HaloContextDropKeepClosedNotchContents") private var keepsClosedNotchContents = false
-    @AppStorage("HaloContextDropPriority") private var priority = 100.0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulse = false
 
     private var count: Int { max(1, itemCount) }
     private var topInset: Double {
@@ -895,68 +892,15 @@ private struct DropContextView: View {
     }
 
     var body: some View {
-        ZStack {
-            LinearGradient(colors: [Color.accentColor.opacity(0.24), Color.blue.opacity(0.10), Color.black.opacity(0.72)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-
-            VStack(spacing: 16) {
-                ZStack {
-                    Circle()
-                        .fill(Color.accentColor.opacity(0.14))
-                        .frame(width: 84, height: 84)
-                        .scaleEffect(pulse && !reduceMotion ? 1.08 : 0.96)
-                    Circle()
-                        .stroke(Color.accentColor.opacity(0.42), style: StrokeStyle(lineWidth: 1.5, dash: [5, 5]))
-                        .frame(width: 84, height: 84)
-                    Image(systemName: count == 1 ? "doc.fill.badge.plus" : "doc.on.doc.fill")
-                        .font(.system(size: 31, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                }
-
-                VStack(spacing: 5) {
-                    Text("Drop into Halo")
-                        .font(.system(size: 23, weight: .bold, design: .rounded))
-                    Text(count == 1 ? "Release to add this item to File Shelf" : "Release to add \(count) items to File Shelf")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 8) {
-                    dropCapability("Original stays untouched", symbol: "lock.shield")
-                    dropCapability("Quick Look", symbol: "eye")
-                    dropCapability("Pin later", symbol: "pin")
-                }
-
-                HStack(spacing: 5) {
-                    Circle().fill(Color.green).frame(width: 6, height: 6)
-                    Text("Ready to copy references · CI priority \(Int(priority))")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 28)
-            .padding(.top, topInset)
-            .padding(.bottom, 22)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: usesFullNotchArea ? 0 : 20, style: .continuous))
-        .task { publishPreferredSize() }
-        .onChange(of: itemCount) { _ in publishPreferredSize() }
-        .onChange(of: dropZones.configuration) { _ in publishPreferredSize() }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.72).repeatForever(autoreverses: true)) { pulse = true }
-        }
-        .onDisappear { surfaceState.contextPreferredSize = nil }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Drop \(count) item\(count == 1 ? "" : "s") into Halo")
-    }
-
-    private func dropCapability(_ title: String, symbol: String) -> some View {
-        Label(title, systemImage: symbol)
-            .font(.system(size: 9, weight: .semibold))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(Color.white.opacity(0.07), in: Capsule())
+        HaloDropCIBackgroundView(configuration: dropZones.configuration)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: usesFullNotchArea ? 0 : 20, style: .continuous))
+            .task { publishPreferredSize() }
+            .onChange(of: itemCount) { _ in publishPreferredSize() }
+            .onChange(of: dropZones.configuration) { _ in publishPreferredSize() }
+            .onDisappear { surfaceState.contextPreferredSize = nil }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Drop CI background for \(count) item\(count == 1 ? "" : "s")")
     }
 
     private func publishPreferredSize() {
