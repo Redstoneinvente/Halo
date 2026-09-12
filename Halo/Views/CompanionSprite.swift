@@ -1,16 +1,440 @@
 import SwiftUI
 import AppKit
+import ImageIO
 
-// MARK: - Premium EI vector content
+// MARK: - Canonical EI pet sprite content
 
 /// Semantic companion motions shared by ambient EI, the owned EI surface and roaming pets.
-enum HaloCompanionMotion: String, CaseIterable {
-    case hidden, peekEyes, peekEars, peek, observe, idle, walk, look, greet, celebrate
+/// The visual renderer below maps these behaviours onto the supplied canonical sprite artwork.
+enum HaloCompanionMotion: String, CaseIterable, Identifiable {
+    case hidden, peekEyes, peekEars, peek, peekLeft, peekRight, observe, idle, walk, look, greet, celebrate
     case sleep, snack, dance, stretch, groom, playful, affectionate, tired, excited, paw, tail
+    case resting, curious, happy, coffee, working, umbrella, entering, leaving
+    var id: String { rawValue }
 }
 
-/// Smooth, resolution-independent companion artwork. Legacy pixel-display arguments remain only
-/// for source compatibility; EI v2 never routes through a pixel renderer.
+enum HaloPetPose: String, CaseIterable, Identifiable, Hashable {
+    case idle, sitting, standing, walking, lying, sleeping, stretching, grooming, lookingAround
+    case peekBottom, peekLeft, peekRight, pawsOnEdge, headOnEdge, hiddenPeek
+    case playful, curious, tired, happy, dance, working, umbrella
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .lookingAround: return "Looking Around"
+        case .peekBottom: return "Peek Bottom"
+        case .peekLeft: return "Peek Left"
+        case .peekRight: return "Peek Right"
+        case .pawsOnEdge: return "Paws on Edge"
+        case .headOnEdge: return "Head on Edge"
+        case .hiddenPeek: return "Hidden Peek"
+        default:
+            return rawValue.replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression).capitalized
+        }
+    }
+
+    var fallbacks: [HaloPetPose] {
+        switch self {
+        case .idle: return [.sitting, .standing]
+        case .sitting: return [.idle, .standing]
+        case .standing: return [.idle, .sitting]
+        case .walking: return [.standing, .idle]
+        case .lying: return [.sleeping, .idle]
+        case .sleeping: return [.lying, .tired, .idle]
+        case .stretching: return [.standing, .idle]
+        case .grooming: return [.sitting, .idle]
+        case .lookingAround: return [.curious, .idle]
+        case .peekBottom: return [.headOnEdge, .hiddenPeek, .curious]
+        case .peekLeft: return [.peekBottom, .headOnEdge]
+        case .peekRight: return [.peekBottom, .headOnEdge]
+        case .pawsOnEdge: return [.headOnEdge, .peekBottom]
+        case .headOnEdge: return [.peekBottom, .hiddenPeek]
+        case .hiddenPeek: return [.headOnEdge, .peekBottom]
+        case .playful: return [.happy, .curious, .idle]
+        case .curious: return [.lookingAround, .idle]
+        case .tired: return [.lying, .sleeping, .idle]
+        case .happy: return [.playful, .idle]
+        case .dance: return [.happy, .playful, .idle]
+        case .working: return [.sitting, .idle]
+        case .umbrella: return [.standing, .idle]
+        }
+    }
+}
+
+/// Runtime manifest built from the canonical sprite sheet. The source sheet always wins; aliases
+/// only provide graceful behaviour when a sheet genuinely lacks a requested state.
+final class HaloPetAssetManifest: @unchecked Sendable {
+    let species: String
+    let resourceName: String
+    let columns: Int
+    let rows: Int
+    let detectedAssetCount: Int
+    let assets: [HaloPetPose: CGImage]
+    let orderedAssets: [(HaloPetPose, CGImage)]
+
+    init(species: String, resourceName: String, columns: Int, rows: Int,
+         detectedAssetCount: Int, assets: [HaloPetPose: CGImage], orderedAssets: [(HaloPetPose, CGImage)]) {
+        self.species = species
+        self.resourceName = resourceName
+        self.columns = columns
+        self.rows = rows
+        self.detectedAssetCount = detectedAssetCount
+        self.assets = assets
+        self.orderedAssets = orderedAssets
+    }
+
+    func image(for pose: HaloPetPose) -> CGImage? {
+        if let exact = assets[pose] { return exact }
+        for fallback in pose.fallbacks {
+            if let image = assets[fallback] { return image }
+        }
+        return orderedAssets.first?.1
+    }
+}
+
+@MainActor
+final class HaloPetAssetStore: ObservableObject {
+    static let shared = HaloPetAssetStore()
+
+    @Published private(set) var revision = 0
+    private var manifests: [String: HaloPetAssetManifest] = [:]
+    private var loading = Set<String>()
+
+    func manifest(for kind: EIPetKind) -> HaloPetAssetManifest? { manifests[kind.rawValue] }
+    func image(for kind: EIPetKind, pose: HaloPetPose) -> CGImage? { manifests[kind.rawValue]?.image(for: pose) }
+
+    func load(_ kind: EIPetKind) {
+        let key = kind.rawValue
+        guard manifests[key] == nil, !loading.contains(key) else { return }
+        let resource: (String, String)
+        switch kind {
+        case .cat: resource = ("Cat", "png")
+        case .dog: resource = ("Dog", "jpg")
+        case .fox: resource = ("Fox", "jpg")
+        }
+        guard let url = Bundle.main.url(forResource: resource.0, withExtension: resource.1) else { return }
+        loading.insert(key)
+        Task { [weak self] in
+            let manifest = await Task.detached(priority: .utility) {
+                HaloPetSpriteSheetDecoder.decode(url: url, species: key, resourceName: "\(resource.0).\(resource.1)")
+            }.value
+            guard let self else { return }
+            self.loading.remove(key)
+            if let manifest { self.manifests[key] = manifest }
+            self.revision &+= 1
+        }
+    }
+}
+
+private enum HaloPetSpriteSheetDecoder {
+    private struct RGB {
+        var r: Int
+        var g: Int
+        var b: Int
+    }
+
+    private struct GridChoice {
+        var columns: Int
+        var rows: Int
+        var activeCells: [Int]
+        var score: Double
+    }
+
+    private struct PixelBuffer {
+        let width: Int
+        let height: Int
+        var pixels: [UInt8]
+        let hasUsefulAlpha: Bool
+        let background: RGB
+
+        init?(image: CGImage) {
+            width = image.width
+            height = image.height
+            guard width > 0, height > 0 else { return nil }
+            var bytes = [UInt8](repeating: 0, count: width * height * 4)
+            guard let context = CGContext(data: &bytes, width: width, height: height,
+                                          bitsPerComponent: 8, bytesPerRow: width * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            context.translateBy(x: 0, y: CGFloat(height))
+            context.scaleBy(x: 1, y: -1)
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            pixels = bytes
+
+            var alphaSeen = false
+            let alphaStep = max(1, (width * height) / 4096)
+            for pixel in stride(from: 0, to: width * height, by: alphaStep) {
+                if Int(bytes[pixel * 4 + 3]) < 245 { alphaSeen = true; break }
+            }
+            hasUsefulAlpha = alphaSeen
+
+            let samples = [
+                (0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1),
+                (width / 2, 0), (width / 2, height - 1), (0, height / 2), (width - 1, height / 2)
+            ]
+            var rs = 0, gs = 0, bs = 0, count = 0
+            for (x, y) in samples {
+                let i = (y * width + x) * 4
+                if bytes[i + 3] > 8 {
+                    rs += Int(bytes[i]); gs += Int(bytes[i + 1]); bs += Int(bytes[i + 2]); count += 1
+                }
+            }
+            background = count > 0 ? RGB(r: rs / count, g: gs / count, b: bs / count) : RGB(r: 255, g: 255, b: 255)
+        }
+
+        func isForeground(x: Int, y: Int) -> Bool {
+            guard x >= 0, y >= 0, x < width, y < height else { return false }
+            let i = (y * width + x) * 4
+            let a = Int(pixels[i + 3])
+            if hasUsefulAlpha { return a > 24 }
+            let dr = Int(pixels[i]) - background.r
+            let dg = Int(pixels[i + 1]) - background.g
+            let db = Int(pixels[i + 2]) - background.b
+            return dr * dr + dg * dg + db * db > 34 * 34
+        }
+
+        func occupancy(x: Int, y: Int, width cellWidth: Int, height cellHeight: Int) -> Double {
+            let strideBy = max(1, min(cellWidth, cellHeight) / 42)
+            var foreground = 0
+            var total = 0
+            let maxY = min(height, y + cellHeight)
+            let maxX = min(width, x + cellWidth)
+            var yy = max(0, y)
+            while yy < maxY {
+                var xx = max(0, x)
+                while xx < maxX {
+                    total += 1
+                    if isForeground(x: xx, y: yy) { foreground += 1 }
+                    xx += strideBy
+                }
+                yy += strideBy
+            }
+            return total == 0 ? 0 : Double(foreground) / Double(total)
+        }
+
+        func extractedSprite(x: Int, y: Int, width cellWidth: Int, height cellHeight: Int) -> CGImage? {
+            let insetX = max(1, Int(Double(cellWidth) * 0.018))
+            let insetY = max(1, Int(Double(cellHeight) * 0.018))
+            let x0 = max(0, x + insetX)
+            let y0 = max(0, y + insetY)
+            let x1 = min(width, x + cellWidth - insetX)
+            let y1 = min(height, y + cellHeight - insetY)
+            guard x1 > x0, y1 > y0 else { return nil }
+            let w = x1 - x0, h = y1 - y0
+            var out = [UInt8](repeating: 0, count: w * h * 4)
+            for row in 0..<h {
+                let sourceStart = ((y0 + row) * width + x0) * 4
+                let destinationStart = row * w * 4
+                out[destinationStart..<(destinationStart + w * 4)] = pixels[sourceStart..<(sourceStart + w * 4)]
+            }
+
+            if !hasUsefulAlpha {
+                removeBorderConnectedBackground(&out, width: w, height: h, reference: background)
+            }
+
+            guard let main = mainContentRect(out, width: w, height: h) else { return nil }
+            let padX = max(2, Int(Double(main.width) * 0.045))
+            let padY = max(2, Int(Double(main.height) * 0.045))
+            let left = max(0, main.x - padX)
+            let top = max(0, main.y - padY)
+            let right = min(w, main.x + main.width + padX)
+            let bottom = min(h, main.y + main.height + padY)
+            return makeImage(out, sourceWidth: w, x: left, y: top, width: right - left, height: bottom - top)
+        }
+
+        private func removeBorderConnectedBackground(_ bytes: inout [UInt8], width w: Int, height h: Int, reference: RGB) {
+            guard w > 2, h > 2 else { return }
+            var visited = [Bool](repeating: false, count: w * h)
+            var queue = [Int]()
+            queue.reserveCapacity(w * 2 + h * 2)
+
+            func nearBackground(_ index: Int) -> Bool {
+                let p = index * 4
+                let dr = Int(bytes[p]) - reference.r
+                let dg = Int(bytes[p + 1]) - reference.g
+                let db = Int(bytes[p + 2]) - reference.b
+                return dr * dr + dg * dg + db * db <= 48 * 48
+            }
+            func seed(_ index: Int) {
+                guard !visited[index], nearBackground(index) else { return }
+                visited[index] = true; queue.append(index)
+            }
+            for x in 0..<w { seed(x); seed((h - 1) * w + x) }
+            for y in 0..<h { seed(y * w); seed(y * w + w - 1) }
+
+            var head = 0
+            while head < queue.count {
+                let index = queue[head]; head += 1
+                let x = index % w, y = index / w
+                let neighbours = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+                for (nx, ny) in neighbours where nx >= 0 && ny >= 0 && nx < w && ny < h {
+                    let next = ny * w + nx
+                    guard !visited[next], nearBackground(next) else { continue }
+                    visited[next] = true; queue.append(next)
+                }
+            }
+            for index in 0..<(w * h) where visited[index] { bytes[index * 4 + 3] = 0 }
+
+            var fringe = [Int]()
+            for index in 0..<(w * h) where !visited[index] {
+                let x = index % w, y = index / w
+                if (x > 0 && visited[index - 1]) || (x + 1 < w && visited[index + 1]) ||
+                   (y > 0 && visited[index - w]) || (y + 1 < h && visited[index + w]) {
+                    fringe.append(index)
+                }
+            }
+            for index in fringe { bytes[index * 4 + 3] = min(bytes[index * 4 + 3], 190) }
+        }
+
+        private func mainContentRect(_ bytes: [UInt8], width w: Int, height h: Int) -> (x: Int, y: Int, width: Int, height: Int)? {
+            let minimumRowPixels = max(2, w / 180)
+            var rowCounts = [Int](repeating: 0, count: h)
+            for y in 0..<h {
+                var count = 0
+                for x in 0..<w where bytes[(y * w + x) * 4 + 3] > 20 { count += 1 }
+                rowCounts[y] = count
+            }
+
+            var best: (start: Int, end: Int, score: Double)?
+            var start: Int? = nil
+            var gap = 0
+            var running = 0
+            for y in 0...h {
+                let active = y < h && rowCounts[y] >= minimumRowPixels
+                if active {
+                    if start == nil { start = y }
+                    gap = 0; running += rowCounts[y]
+                } else if start != nil {
+                    gap += 1
+                    if gap <= 2 && y < h { continue }
+                    let end = max(start!, y - gap)
+                    let span = max(1, end - start! + 1)
+                    let score = Double(running) * sqrt(Double(span))
+                    if best == nil || score > best!.score { best = (start!, end, score) }
+                    start = nil; gap = 0; running = 0
+                }
+            }
+            guard let run = best else { return nil }
+            let y0 = max(0, run.start - 2), y1 = min(h - 1, run.end + 2)
+            var minX = w, maxX = -1
+            for y in y0...y1 {
+                for x in 0..<w where bytes[(y * w + x) * 4 + 3] > 20 {
+                    minX = min(minX, x); maxX = max(maxX, x)
+                }
+            }
+            guard maxX >= minX else { return nil }
+            return (minX, y0, maxX - minX + 1, y1 - y0 + 1)
+        }
+
+        private func makeImage(_ bytes: [UInt8], sourceWidth: Int, x: Int, y: Int, width w: Int, height h: Int) -> CGImage? {
+            guard w > 0, h > 0 else { return nil }
+            var cropped = [UInt8](repeating: 0, count: w * h * 4)
+            for row in 0..<h {
+                let sourceStart = ((y + row) * sourceWidth + x) * 4
+                let destinationStart = row * w * 4
+                cropped[destinationStart..<(destinationStart + w * 4)] = bytes[sourceStart..<(sourceStart + w * 4)]
+            }
+            guard let provider = CGDataProvider(data: Data(cropped) as CFData) else { return nil }
+            return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
+                           space: CGColorSpaceCreateDeviceRGB(),
+                           bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                           provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        }
+    }
+
+    static func decode(url: URL, species: String, resourceName: String) -> HaloPetAssetManifest? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 2400,
+                kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary),
+              let buffer = PixelBuffer(image: image) else { return nil }
+
+        let poses = HaloPetPose.allCases
+        guard let grid = chooseGrid(buffer: buffer, expected: poses.count) else { return nil }
+        let cellWidth = buffer.width / grid.columns
+        let cellHeight = buffer.height / grid.rows
+        var mapped: [HaloPetPose: CGImage] = [:]
+        var ordered: [(HaloPetPose, CGImage)] = []
+
+        for (pose, cellIndex) in zip(poses, grid.activeCells.prefix(poses.count)) {
+            let column = cellIndex % grid.columns
+            let row = cellIndex / grid.columns
+            guard let sprite = buffer.extractedSprite(x: column * cellWidth, y: row * cellHeight,
+                                                      width: cellWidth, height: cellHeight) else { continue }
+            mapped[pose] = sprite
+            ordered.append((pose, sprite))
+        }
+        guard !ordered.isEmpty else { return nil }
+        return HaloPetAssetManifest(species: species, resourceName: resourceName,
+                                    columns: grid.columns, rows: grid.rows,
+                                    detectedAssetCount: grid.activeCells.count,
+                                    assets: mapped, orderedAssets: ordered)
+    }
+
+    private static func chooseGrid(buffer: PixelBuffer, expected: Int) -> GridChoice? {
+        var best: GridChoice?
+        for columns in 3...7 {
+            for rows in 3...7 {
+                let cellWidth = buffer.width / columns
+                let cellHeight = buffer.height / rows
+                guard cellWidth >= 80, cellHeight >= 80 else { continue }
+                var active: [Int] = []
+                var occupancies: [Double] = []
+                for row in 0..<rows {
+                    for column in 0..<columns {
+                        let ratio = buffer.occupancy(x: column * cellWidth, y: row * cellHeight,
+                                                     width: cellWidth, height: cellHeight)
+                        if ratio > 0.018 && ratio < 0.92 {
+                            active.append(row * columns + column)
+                            occupancies.append(ratio)
+                        }
+                    }
+                }
+                guard active.count >= 8 else { continue }
+                let countPenalty = Double(abs(active.count - expected)) * 30
+                let aspect = Double(cellWidth) / Double(cellHeight)
+                let aspectPenalty = abs(log(max(0.05, aspect))) * 9
+                let overDense = occupancies.reduce(0.0) { $0 + max(0, $1 - 0.72) * 30 }
+                let score = 1000 - countPenalty - aspectPenalty - overDense
+                if best == nil || score > best!.score {
+                    best = GridChoice(columns: columns, rows: rows, activeCells: active, score: score)
+                }
+            }
+        }
+        return best
+    }
+}
+
+@MainActor
+final class HaloPetDebugState: ObservableObject {
+    static let shared = HaloPetDebugState()
+    @Published var forcedMotion: HaloCompanionMotion?
+    @Published var showAssets = false
+    private var playTask: Task<Void, Never>?
+
+    func force(_ motion: HaloCompanionMotion?) {
+        playTask?.cancel(); playTask = nil; forcedMotion = motion
+    }
+
+    func playAll() {
+        playTask?.cancel()
+        playTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for motion in HaloCompanionMotion.allCases where motion != .hidden {
+                guard !Task.isCancelled else { return }
+                self.forcedMotion = motion
+                try? await Task.sleep(nanoseconds: 1_150_000_000)
+            }
+            if !Task.isCancelled { self.forcedMotion = nil }
+        }
+    }
+}
+
+/// Asset-backed pet renderer. The supplied Cat/Dog/Fox sheets are the source of truth; this view
+/// only adds transforms, masking, timing and subtle secondary motion to make those drawings live.
 struct HaloCompanionSprite: View {
     let kind: EIPetKind
     let style: EIPetVisualStyle
@@ -20,7 +444,7 @@ struct HaloCompanionSprite: View {
     var motion: HaloCompanionMotion = .idle
     var facingRight = true
 
-    // Legacy compatibility only.
+    // Legacy call-site compatibility. Canonical pets intentionally ignore old pixel/vector styling.
     var displayPreset: EIPixelDisplayPreset = .clean
     var pixelGrid = false
     var pixelGlow = true
@@ -28,370 +452,240 @@ struct HaloCompanionSprite: View {
     var ghosting = false
     var brightnessVariation = false
 
+    @ObservedObject private var assets = HaloPetAssetStore.shared
+    @ObservedObject private var debug = HaloPetDebugState.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var activePose: HaloPetPose = .idle
+    @State private var previousPose: HaloPetPose?
+    @State private var blend = 1.0
+    @State private var hoverPoint: CGPoint?
+
+    private var resolvedMotion: HaloCompanionMotion { debug.forcedMotion ?? motion }
+    private var targetPose: HaloPetPose {
+        switch resolvedMotion {
+        case .hidden: return .hiddenPeek
+        case .peekEyes, .peekEars: return .hiddenPeek
+        case .peek: return .peekBottom
+        case .peekLeft: return .peekLeft
+        case .peekRight: return .peekRight
+        case .observe, .look: return .lookingAround
+        case .idle: return .idle
+        case .walk, .entering, .leaving: return .walking
+        case .greet, .celebrate, .affectionate, .excited, .happy: return .happy
+        case .sleep: return .sleeping
+        case .snack, .playful: return .playful
+        case .dance: return .dance
+        case .stretch: return .stretching
+        case .groom: return .grooming
+        case .tired: return .tired
+        case .paw: return .pawsOnEdge
+        case .tail, .curious: return .curious
+        case .resting: return .lying
+        case .coffee, .working: return .working
+        case .umbrella: return .umbrella
+        }
+    }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: reduceMotion ? 0.22 : animationInterval, paused: false)) { timeline in
-            GeometryReader { proxy in
-                let phase = timeline.date.timeIntervalSinceReferenceDate
-                companion(in: proxy.size, phase: phase)
-                    .scaleEffect(x: facingRight ? 1 : -1, y: 1)
-                    .offset(y: verticalOffset(phase))
-                    .rotationEffect(.degrees(bodyRotation(phase)))
-                    .opacity(motion == .hidden ? 0 : 1)
+        Group {
+            if resolvedMotion == .hidden {
+                Color.clear
+            } else if assets.image(for: kind, pose: activePose) == nil {
+                Color.clear
+            } else {
+                TimelineView(.animation(minimumInterval: updateInterval, paused: reduceMotion)) { timeline in
+                    let phase = timeline.date.timeIntervalSinceReferenceDate
+                    ZStack {
+                        if let previousPose, let image = assets.image(for: kind, pose: previousPose) {
+                            sprite(image, phase: phase).opacity(1 - blend)
+                        }
+                        if let image = assets.image(for: kind, pose: activePose) {
+                            sprite(image, phase: phase).opacity(blend)
+                        }
+                    }
+                }
             }
         }
-        .frame(width: size, height: size * 0.82)
+        .frame(width: size, height: size * 0.90)
+        .contentShape(Rectangle())
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let point): hoverPoint = point
+            case .ended: hoverPoint = nil
+            }
+        }
+        .task(id: kind.rawValue) { assets.load(kind) }
+        .onAppear { activePose = targetPose }
+        .onChange(of: targetPose) { transition(to: $0) }
         .accessibilityLabel("\(kind.rawValue) companion")
     }
 
-    private var animationInterval: Double {
-        switch motion {
-        case .walk, .dance, .celebrate, .playful, .excited: return 1.0 / 36.0
-        case .greet, .snack, .peek, .observe, .paw, .tail, .stretch, .groom: return 1.0 / 28.0
-        default: return 1.0 / 18.0
+    private var updateInterval: Double {
+        if reduceMotion { return 0.28 }
+        switch resolvedMotion {
+        case .walk, .dance, .playful, .excited, .entering, .leaving: return 1.0 / 36.0
+        case .sleep, .resting: return 1.0 / 10.0
+        default: return 1.0 / 24.0
         }
     }
 
-    private var renderedStyle: EIPetVisualStyle { style == .pixel ? .smooth : style }
-
-    @ViewBuilder
-    private func companion(in available: CGSize, phase: Double) -> some View {
-        let s = min(available.width, available.height / 0.82)
-        let blink = blinkAmount(phase)
-        let look = eyeLook(phase)
-        let breathing: CGFloat = reduceMotion ? 1 : 1 + CGFloat(sin(phase * 1.35)) * 0.012
-        let legSwing = reduceMotion || motion != .walk ? 0 : sin(phase * 9.0) * 10
-        let fill = companionGradient(primary)
-        let faceFill = companionGradient(faceColor)
-        let outline = renderedStyle == .minimal ? primary.opacity(0.78) : Color.white.opacity(0.07)
-        let outlineWidth = renderedStyle == .minimal ? max(1.2, s * 0.012) : max(0.6, s * 0.006)
-        let reveal = revealAmount
-
-        ZStack {
-            Ellipse()
-                .fill(Color.black.opacity(motion == .sleep ? 0.27 : 0.18))
-                .frame(width: s * 0.52, height: s * 0.07)
-                .blur(radius: s * 0.016)
-                .offset(x: -s * 0.03, y: s * 0.29)
-
-            CompanionTailShape(kind: kind)
-                .stroke(tailGradient, style: StrokeStyle(lineWidth: tailWidth(s), lineCap: .round, lineJoin: .round))
-                .frame(width: s * 0.40, height: s * 0.48)
-                .rotationEffect(.degrees(tailMotion(phase)), anchor: .bottomLeading)
-                .offset(x: -s * 0.31, y: s * 0.055)
-                .opacity(motion == .peekEyes || motion == .peekEars ? 0 : 1)
-
-            Capsule(style: .continuous)
-                .fill(fill)
-                .overlay(Capsule().stroke(outline, lineWidth: outlineWidth))
-                .frame(width: s * 0.13, height: s * 0.27)
-                .rotationEffect(.degrees(-legSwing), anchor: .top)
-                .offset(x: -s * 0.16, y: s * 0.22)
-
-            Ellipse()
-                .fill(fill)
-                .overlay(Ellipse().stroke(outline, lineWidth: outlineWidth))
-                .frame(width: s * 0.58, height: s * (motion == .sleep ? 0.31 : 0.36))
-                .scaleEffect(x: motion == .stretch ? 1.16 : 1,
-                             y: motion == .sleep ? 0.78 : breathing,
-                             anchor: .bottom)
-                .offset(x: -s * 0.05, y: s * (motion == .sleep ? 0.16 : 0.11))
-
-            speciesChest(s)
-
-            Capsule(style: .continuous)
-                .fill(faceFill)
-                .overlay(Capsule().stroke(outline, lineWidth: outlineWidth))
-                .frame(width: s * 0.12, height: s * 0.255)
-                .rotationEffect(.degrees(frontLegAngle(phase)), anchor: .top)
-                .offset(x: s * 0.11, y: s * 0.235)
-
-            head(size: s, phase: phase, fill: faceFill, outline: outline,
-                 outlineWidth: outlineWidth, blink: blink, look: look)
-                .offset(x: s * 0.205, y: -s * 0.07 + headYOffset(phase))
-
-            accessory(size: s, phase: phase)
-        }
-        .frame(width: s, height: s * 0.82)
-        .drawingGroup(opaque: false, colorMode: .linear)
-        .offset(y: (1 - reveal) * s * 0.42)
-        .mask(alignment: .bottom) {
-            Rectangle().frame(height: max(1, s * 0.82 * reveal), alignment: .bottom)
-        }
-    }
-
-    private var faceColor: Color {
-        switch kind {
-        case .cat: return primary.opacity(0.98)
-        case .dog: return primary.opacity(0.96)
-        case .fox: return Color(red: 0.93, green: 0.39, blue: 0.16).mixed(with: primary, amount: 0.22)
-        }
+    private func sprite(_ image: CGImage, phase: Double) -> some View {
+        let breathing = reduceMotion ? 1.0 : 1.0 + sin(phase * breathingSpeed) * breathingAmount
+        let bob = reduceMotion ? 0.0 : bobOffset(phase)
+        let hover = cursorOffset
+        return Image(decorative: image, scale: 1, orientation: .up)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .scaleEffect(x: facingRight ? 1 : -1, y: breathing, anchor: .bottom)
+            .offset(x: hover.width, y: bob + hover.height + revealOffset)
+            .mask(alignment: .top) {
+                Rectangle().frame(height: max(1, size * 0.90 * revealAmount), alignment: .top)
+            }
+            .shadow(color: Color.black.opacity(resolvedMotion == .sleep ? 0.14 : 0.20), radius: max(1, size * 0.018), y: max(1, size * 0.012))
     }
 
     private var revealAmount: CGFloat {
-        switch motion {
-        case .hidden: return 0
-        case .peekEyes: return 0.23
-        case .peekEars: return 0.34
-        case .peek, .paw, .tail: return 0.58
+        switch resolvedMotion {
+        case .peekEyes: return 0.25
+        case .peekEars: return 0.18
+        case .peek, .peekLeft, .peekRight: return 0.62
+        case .paw: return 0.72
+        case .entering: return 0.84
+        case .leaving: return 0.70
         default: return 1
         }
     }
 
-    private func companionGradient(_ base: Color) -> LinearGradient {
-        let top: Color
-        switch renderedStyle {
-        case .illustrated: top = base.mixed(with: .white, amount: 0.22)
-        case .minimal: top = base.opacity(0.18)
-        default: top = base.mixed(with: .white, amount: 0.10)
-        }
-        let bottom = renderedStyle == .minimal ? base.opacity(0.08) : base.mixed(with: .black, amount: 0.18)
-        return LinearGradient(colors: [top, base, bottom], startPoint: .topLeading, endPoint: .bottomTrailing)
+    private var revealOffset: CGFloat {
+        let hidden = 1 - revealAmount
+        return hidden > 0 ? hidden * size * 0.32 : 0
     }
 
-    private var tailGradient: LinearGradient {
-        LinearGradient(colors: [faceColor.mixed(with: .white, amount: 0.08), faceColor.mixed(with: .black, amount: 0.22)],
-                       startPoint: .top, endPoint: .bottom)
+    private var breathingSpeed: Double {
+        resolvedMotion == .sleep ? 0.72 : (kind == .dog ? 1.32 : kind == .fox ? 0.92 : 1.06)
     }
 
-    private func tailWidth(_ s: CGFloat) -> CGFloat {
-        switch kind { case .fox: return s * 0.12; case .cat: return s * 0.072; case .dog: return s * 0.083 }
+    private var breathingAmount: CGFloat {
+        if resolvedMotion == .sleep { return 0.009 }
+        return kind == .dog ? 0.006 : 0.0045
     }
 
-    private func verticalOffset(_ phase: Double) -> CGFloat {
-        guard !reduceMotion else { return 0 }
-        switch motion {
-        case .walk: return -CGFloat(abs(sin(phase * 9.0))) * 2.2
-        case .dance, .celebrate, .excited: return -CGFloat(abs(sin(phase * 6.8))) * 4.4
-        case .peek, .peekEyes, .peekEars: return CGFloat(sin(phase * 1.7)) * 0.8
-        case .sleep: return 2
-        default: return CGFloat(sin(phase * 1.15)) * 0.7
-        }
-    }
-
-    private func bodyRotation(_ phase: Double) -> Double {
-        guard !reduceMotion else { return 0 }
-        switch motion {
-        case .dance: return sin(phase * 5.6) * 5.5
-        case .celebrate, .excited: return sin(phase * 7.2) * 3.2
-        case .look, .observe: return sin(phase * 0.8) * 1.8
-        default: return 0
-        }
-    }
-
-    private func blinkAmount(_ phase: Double) -> CGFloat {
-        if motion == .sleep || motion == .tired { return 0.08 }
-        let cycle = phase.truncatingRemainder(dividingBy: 5.7)
-        if cycle > 5.30 && cycle < 5.46 { return 0.10 }
-        if cycle > 2.18 && cycle < 2.28 { return 0.16 }
-        return 1
-    }
-
-    private func eyeLook(_ phase: Double) -> CGFloat {
-        guard motion.isCurious else { return 0 }
-        return CGFloat(sin(phase * 0.72)) * 0.52
-    }
-
-    private func tailMotion(_ phase: Double) -> Double {
-        guard !reduceMotion else { return 0 }
-        let speed: Double
-        let amplitude: Double
-        switch motion {
-        case .greet, .excited, .affectionate: speed = kind == .dog ? 8.5 : 4.8; amplitude = kind == .dog ? 25 : 12
-        case .dance, .playful: speed = 6.0; amplitude = 18
-        case .sleep: speed = 0.65; amplitude = 2.4
-        default: speed = kind == .fox ? 1.05 : 1.65; amplitude = kind == .fox ? 5 : 8
-        }
-        return sin(phase * speed - 0.55) * amplitude
-    }
-
-    private func earMotion(_ phase: Double) -> Double {
-        guard !reduceMotion else { return 0 }
-        if motion.isCurious { return sin(phase * 1.9) * 7 }
-        if motion == .excited || motion == .greet { return sin(phase * 5.2) * 5 }
-        return sin(phase * 0.75) * 1.8
-    }
-
-    private func headYOffset(_ phase: Double) -> CGFloat {
-        guard !reduceMotion else { return 0 }
-        switch motion {
-        case .groom: return CGFloat(sin(phase * 2.8)) * 4 + 5
-        case .sleep: return 8
-        case .stretch: return 3
-        case .dance: return CGFloat(sin(phase * 5.4 - 0.25)) * 3
-        default: return CGFloat(sin(phase * 1.2 - 0.18)) * 0.7
-        }
-    }
-
-    private func frontLegAngle(_ phase: Double) -> Double {
-        guard !reduceMotion else { return 0 }
-        switch motion {
-        case .walk: return sin(phase * 9.0) * 12
-        case .greet, .paw, .affectionate: return -34 + sin(phase * 5.5) * 12
-        case .groom: return -48 + sin(phase * 3.4) * 6
-        case .stretch: return 28
-        default: return 0
-        }
-    }
-
-    @ViewBuilder
-    private func head(size s: CGFloat, phase: Double, fill: LinearGradient, outline: Color,
-                      outlineWidth: CGFloat, blink: CGFloat, look: CGFloat) -> some View {
-        ZStack {
-            ears(size: s, fill: fill, outline: outline, outlineWidth: outlineWidth, phase: phase)
-                .offset(y: -s * 0.135)
-
-            Ellipse()
-                .fill(fill)
-                .overlay(Ellipse().stroke(outline, lineWidth: outlineWidth))
-                .frame(width: s * (kind == .dog ? 0.38 : kind == .fox ? 0.36 : 0.35),
-                       height: s * (kind == .dog ? 0.33 : kind == .fox ? 0.31 : 0.32))
-
-            if kind == .fox {
-                FoxCheekShape().fill(Color.white.opacity(0.82))
-                    .frame(width: s * 0.27, height: s * 0.13)
-                    .offset(x: s * 0.045, y: s * 0.075)
-            }
-            if kind == .dog {
-                Ellipse().fill(Color.white.opacity(0.20))
-                    .frame(width: s * 0.20, height: s * 0.12)
-                    .offset(x: s * 0.055, y: s * 0.075)
-            }
-
-            HStack(spacing: s * 0.075) {
-                CompanionEye(blink: blink, look: look, size: s, iris: eyeColor)
-                CompanionEye(blink: blink, look: look, size: s, iris: eyeColor)
-            }
-            .offset(y: -s * 0.012)
-
-            VStack(spacing: s * 0.008) {
-                RoundedRectangle(cornerRadius: s * 0.02, style: .continuous)
-                    .fill(kind == .cat ? accent.mixed(with: .pink, amount: 0.25) : Color.black.opacity(0.74))
-                    .frame(width: s * 0.052, height: s * 0.035)
-                CompanionMouthShape()
-                    .stroke(Color.black.opacity(0.43), style: StrokeStyle(lineWidth: max(0.8, s * 0.008), lineCap: .round))
-                    .frame(width: s * 0.075, height: s * 0.038)
-            }
-            .offset(x: s * 0.055, y: s * 0.073)
-        }
-        .frame(width: s * 0.42, height: s * 0.40)
-        .rotationEffect(.degrees(headTilt(phase)))
-    }
-
-    @ViewBuilder
-    private func ears(size s: CGFloat, fill: LinearGradient, outline: Color,
-                      outlineWidth: CGFloat, phase: Double) -> some View {
-        let movement = earMotion(phase)
-        switch kind {
-        case .dog:
-            HStack(spacing: s * 0.17) {
-                CompanionFloppyEarShape().fill(accent.mixed(with: primary, amount: 0.35))
-                    .overlay(CompanionFloppyEarShape().stroke(outline, lineWidth: outlineWidth))
-                    .frame(width: s * 0.13, height: s * 0.20)
-                    .rotationEffect(.degrees(17 + movement), anchor: .top)
-                CompanionFloppyEarShape().fill(accent.mixed(with: primary, amount: 0.35))
-                    .overlay(CompanionFloppyEarShape().stroke(outline, lineWidth: outlineWidth))
-                    .frame(width: s * 0.13, height: s * 0.20)
-                    .scaleEffect(x: -1, y: 1)
-                    .rotationEffect(.degrees(-17 - movement), anchor: .top)
-            }
-        case .cat, .fox:
-            HStack(spacing: s * (kind == .fox ? 0.105 : 0.09)) {
-                CompanionEarShape().fill(fill)
-                    .overlay(CompanionEarShape().stroke(outline, lineWidth: outlineWidth))
-                    .overlay(CompanionEarShape().fill(accent.opacity(kind == .fox ? 0.40 : 0.28)).scaleEffect(0.55).offset(y: s * 0.012))
-                    .frame(width: s * 0.15, height: s * (kind == .fox ? 0.20 : 0.17))
-                    .rotationEffect(.degrees(-4 + movement), anchor: .bottom)
-                CompanionEarShape().fill(fill)
-                    .overlay(CompanionEarShape().stroke(outline, lineWidth: outlineWidth))
-                    .overlay(CompanionEarShape().fill(accent.opacity(kind == .fox ? 0.40 : 0.28)).scaleEffect(0.55).offset(y: s * 0.012))
-                    .frame(width: s * 0.15, height: s * (kind == .fox ? 0.20 : 0.17))
-                    .rotationEffect(.degrees(4 - movement * 0.7), anchor: .bottom)
-            }
-        }
-    }
-
-    private var eyeColor: Color {
-        switch kind {
-        case .cat: return Color(red: 0.65, green: 0.82, blue: 0.38)
-        case .dog: return Color(red: 0.45, green: 0.29, blue: 0.17)
-        case .fox: return Color(red: 0.68, green: 0.56, blue: 0.30)
-        }
-    }
-
-    private func headTilt(_ phase: Double) -> Double {
-        guard !reduceMotion else { return 0 }
-        if kind == .dog && motion.isCurious { return 8 + sin(phase * 0.8) * 5 }
-        if kind == .fox && motion == .observe { return sin(phase * 0.55) * 4 }
-        if motion.isCurious { return 4 + sin(phase * 0.8) * 3 }
-        return 0
-    }
-
-    @ViewBuilder
-    private func speciesChest(_ s: CGFloat) -> some View {
-        if kind == .fox {
-            CompanionChestShape().fill(Color.white.opacity(0.78))
-                .frame(width: s * 0.20, height: s * 0.22)
-                .offset(x: s * 0.13, y: s * 0.12)
-        } else if kind == .dog {
-            CompanionChestShape().fill(Color.white.opacity(0.16))
-                .frame(width: s * 0.18, height: s * 0.20)
-                .offset(x: s * 0.12, y: s * 0.13)
-        }
-    }
-
-    @ViewBuilder
-    private func accessory(size s: CGFloat, phase: Double) -> some View {
-        switch motion {
-        case .sleep:
-            Text("z").font(.system(size: s * 0.105, weight: .semibold, design: .rounded))
-                .foregroundStyle(accent.opacity(0.48)).offset(x: s * 0.33, y: -s * 0.23)
-        case .snack:
-            RoundedRectangle(cornerRadius: s * 0.018, style: .continuous).fill(accent)
-                .frame(width: s * 0.085, height: s * 0.055).rotationEffect(.degrees(18))
-                .offset(x: s * 0.39, y: s * 0.11)
-        case .celebrate:
-            Image(systemName: "sparkles").font(.system(size: s * 0.13, weight: .medium))
-                .foregroundStyle(accent.opacity(0.86)).offset(x: s * 0.33, y: -s * 0.22)
-                .scaleEffect(0.85 + CGFloat(abs(sin(phase * 4.8))) * 0.18)
-        case .affectionate:
-            Image(systemName: "heart.fill").font(.system(size: s * 0.095, weight: .medium))
-                .foregroundStyle(Color.pink.opacity(0.78)).offset(x: s * 0.34, y: -s * 0.20)
-        case .tired:
-            CupShape().fill(accent.opacity(0.88)).frame(width: s * 0.10, height: s * 0.08)
-                .offset(x: s * 0.33, y: s * 0.13)
-        case .playful:
-            Circle().fill(accent.opacity(0.92)).frame(width: s * 0.075, height: s * 0.075)
-                .offset(x: s * 0.39 + CGFloat(sin(phase * 5.2)) * s * 0.035, y: s * 0.18)
+    private func bobOffset(_ phase: Double) -> CGFloat {
+        switch resolvedMotion {
+        case .walk, .entering, .leaving:
+            return -CGFloat(abs(sin(phase * (kind == .dog ? 8.8 : 7.6)))) * (kind == .dog ? 2.2 : 1.6)
+        case .dance:
+            return -CGFloat(abs(sin(phase * (kind == .dog ? 6.8 : 5.3)))) * (kind == .dog ? 3.0 : 1.8)
+        case .excited, .greet:
+            return -CGFloat(abs(sin(phase * 5.8))) * (kind == .dog ? 2.4 : 1.1)
+        case .sleep, .resting:
+            return CGFloat(sin(phase * 0.72)) * 0.35
         default:
-            EmptyView()
+            return CGFloat(sin(phase * 0.92)) * 0.45
+        }
+    }
+
+    private var cursorOffset: CGSize {
+        guard let point = hoverPoint,
+              [.observe, .look, .curious, .peek, .peekLeft, .peekRight].contains(resolvedMotion) else { return .zero }
+        let nx = min(1, max(-1, (point.x / max(1, size) - 0.5) * 2))
+        let ny = min(1, max(-1, (point.y / max(1, size * 0.90) - 0.5) * 2))
+        return CGSize(width: nx * min(2.4, size * 0.018), height: ny * min(1.3, size * 0.010))
+    }
+
+    private func transition(to pose: HaloPetPose) {
+        guard pose != activePose else { return }
+        if reduceMotion {
+            previousPose = nil; activePose = pose; blend = 1
+            return
+        }
+        previousPose = activePose
+        activePose = pose
+        blend = 0
+        withAnimation(.easeInOut(duration: transitionDuration)) { blend = 1 }
+        let expectedPrevious = previousPose
+        DispatchQueue.main.asyncAfter(deadline: .now() + transitionDuration + 0.05) {
+            if previousPose == expectedPrevious && blend >= 0.99 { previousPose = nil }
+        }
+    }
+
+    private var transitionDuration: Double {
+        switch resolvedMotion {
+        case .peek, .peekLeft, .peekRight, .peekEyes, .peekEars: return 0.28
+        case .sleep, .resting, .stretch: return 0.42
+        case .walk, .entering, .leaving: return 0.20
+        default: return 0.24
         }
     }
 }
 
-private extension HaloCompanionMotion {
-    var isCurious: Bool { self == .look || self == .observe || self == .peek || self == .peekEyes || self == .peekEars }
-}
+#if DEBUG
+@MainActor
+struct HaloPetDebugPanel: View {
+    @ObservedObject private var settings = EISettingsStore.shared
+    @ObservedObject private var debug = HaloPetDebugState.shared
+    @ObservedObject private var assets = HaloPetAssetStore.shared
 
-private struct CompanionEye: View {
-    let blink: CGFloat
-    let look: CGFloat
-    let size: CGFloat
-    let iris: Color
+    private let primaryMotions: [HaloCompanionMotion] = [
+        .hidden, .peek, .idle, .walk, .sleep, .playful, .curious, .tired, .happy,
+        .dance, .coffee, .working, .umbrella
+    ]
+
     var body: some View {
-        ZStack {
-            Capsule(style: .continuous).fill(Color.white.opacity(0.92))
-                .frame(width: size * 0.065, height: max(1.2, size * 0.072 * blink))
-            Circle().fill(iris).frame(width: size * 0.030, height: size * 0.030)
-                .overlay(Circle().fill(Color.black.opacity(0.82)).frame(width: size * 0.014, height: size * 0.014))
-                .overlay(Circle().fill(Color.white.opacity(0.88)).frame(width: size * 0.007, height: size * 0.007).offset(x: -size * 0.006, y: -size * 0.006))
-                .offset(x: look * size * 0.013)
-                .opacity(blink < 0.3 ? 0 : 1)
+        DisclosureGroup("Pet Debug") {
+            VStack(alignment: .leading, spacing: 8) {
+                Picker("Pet", selection: $settings.settings.petKind) {
+                    ForEach(EIPetKind.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 5)], spacing: 5) {
+                    ForEach(primaryMotions) { motion in
+                        Button(motion.rawValue) { debug.force(motion) }
+                            .font(.caption2)
+                    }
+                }
+                HStack {
+                    Button("Play All Behaviours") { debug.playAll() }
+                    Button("Release") { debug.force(nil) }
+                }
+                HStack {
+                    Button("User Return") { debug.force(.greet) }
+                    Button("Long Work") { debug.force(.coffee) }
+                    Button("Late Night") { debug.force(.sleep) }
+                    Button("Music") { debug.force(.dance) }
+                    Button("Rain") { debug.force(.umbrella) }
+                }
+                .font(.caption2)
+
+                if let manifest = assets.manifest(for: settings.settings.petKind) {
+                    Text("\(manifest.resourceName) · detected \(manifest.detectedAssetCount) · grid \(manifest.columns)×\(manifest.rows) · mapped \(manifest.assets.count)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Toggle("Inspect extracted poses", isOn: $debug.showAssets)
+                    if debug.showAssets {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 5)], spacing: 7) {
+                            ForEach(HaloPetPose.allCases) { pose in
+                                if let image = manifest.image(for: pose) {
+                                    VStack(spacing: 2) {
+                                        Image(decorative: image, scale: 1, orientation: .up)
+                                            .resizable().scaledToFit().frame(height: 52)
+                                        Text(pose.title).font(.system(size: 7)).lineLimit(1)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Text("Loading canonical pet sheet…").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 6)
+            .task(id: settings.settings.petKind.rawValue) { assets.load(settings.settings.petKind) }
         }
-        .frame(width: size * 0.07, height: size * 0.08)
     }
 }
+#endif
 
 // MARK: - Premium plant renderer
 

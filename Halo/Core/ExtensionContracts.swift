@@ -359,14 +359,16 @@ private struct EIQuickEditor: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 11) {
                     if settings.settings.mode == .pet {
-                        Picker("Pet style", selection: petStyleBinding) {
-                            Text("Soft Vector").tag(EIPetVisualStyle.smooth)
-                            Text("Illustrated Vector").tag(EIPetVisualStyle.illustrated)
-                            Text("Minimal Vector").tag(EIPetVisualStyle.minimal)
-                        }
+                        Label("Canonical pet artwork", systemImage: "photo.on.rectangle.angled")
+                            .font(.caption.weight(.semibold))
+                        Text("Cat, Dog and Fox use their supplied sprite sheets. Halo animates the artwork without redrawing the characters.")
+                            .font(.caption2).foregroundStyle(.secondary)
                         Toggle("Roam outside notch", isOn: binding(\.roam))
                         Toggle("Walk in menu bar", isOn: binding(\.menuBar)).disabled(!preferences.value.roam)
                         Toggle("Peek from screen edges", isOn: binding(\.screenEdges)).disabled(!preferences.value.roam)
+#if DEBUG
+                        HaloPetDebugPanel()
+#endif
                     }
 
                     if settings.settings.mode == .pet || settings.settings.mode == .plant {
@@ -503,16 +505,21 @@ private struct EIPetAvatar: View {
         switch kind {
         case .petPeekEyes: return .peekEyes
         case .petPeekEars: return .peekEars
-        case .petPeekUnder, .petPeekLeft, .petPeekRight: return .peek
+        case .petPeekUnder: return .peek
+        case .petPeekLeft: return .peekLeft
+        case .petPeekRight: return .peekRight
         case .petPawFirst: return .paw
         case .petTailFirst: return .tail
-        case .petObserve, .petRainWatch: return .observe
+        case .petObserve: return .observe
+        case .petRainWatch: return .umbrella
         case .petLookAround, .petUnimpressed: return .look
         case .petStretch: return .stretch
         case .petGroom: return .groom
-        case .petCurlUp, .petSleep, .petLaptopSleep: return .sleep
+        case .petCurlUp, .petSleep: return .sleep
+        case .petLaptopSleep: return .working
         case .petPlay, .petChase, .petToy: return .playful
-        case .petCoffee, .petYawn: return .tired
+        case .petCoffee: return .coffee
+        case .petYawn: return .tired
         case .petDance: return .dance
         case .petCelebrate: return .celebrate
         case .petGreet, .petCall: return .greet
