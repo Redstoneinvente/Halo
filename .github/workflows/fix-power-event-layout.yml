@@ -18,7 +18,27 @@ jobs:
           fetch-depth: 0
 
       - name: Apply power event fix
-        run: python3 .github/scripts/fix_power_event_layout.py
+        shell: bash
+        run: |
+          python3 .github/scripts/fix_power_event_layout.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('Halo/NotchEngine/WindowManager.swift')
+          text = path.read_text()
+          text = text.replace(
+              'private func powerReaction(options: ClosedNotchOptions,\n                               items: (left: ClosedNotchItem, right: ClosedNotchItem))',
+              'private func powerReaction(options: ClosedNotchOptions,\n                               items: (left: ClosedNotchItem, right: ClosedNotchItem),\n                               compactHeight: Double)'
+          )
+          text = text.replace(
+              'let innerHeight = max(1, options.surface.compactHeight - 2 * options.contentPaddingY)',
+              'let innerHeight = max(1, compactHeight - 2 * options.contentPaddingY)'
+          )
+          text = text.replace(
+              'let power = powerReaction(options: options, items: items)',
+              'let power = powerReaction(options: options, items: items,\n                                  compactHeight: geometry.appearance.surface.compactHeight)'
+          )
+          path.write_text(text)
+          PY
 
       - name: Verify source
         shell: bash
@@ -28,6 +48,8 @@ jobs:
           grep -q 'let centered: Bool' Halo/Views/ClosedNotchView.swift
           grep -q 'NSFont.monospacedDigitSystemFont' Halo/NotchEngine/WindowManager.swift
           grep -q 'settings.expandForEvent && !hasSibling' Halo/NotchEngine/WindowManager.swift
+          grep -q 'compactHeight: geometry.appearance.surface.compactHeight' Halo/NotchEngine/WindowManager.swift
+          ! grep -q 'options.surface.compactHeight' Halo/NotchEngine/WindowManager.swift
 
       - name: Build Halo
         shell: bash
