@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F84A0AB13055599200E8B51E /* halo-pets-v2 in Resources */ = {isa = PBXBuildFile; fileRef = F84A0AB03055599200E8B51E /* halo-pets-v2 */; };
 		0000000000000000000000C8 /* App/HaloApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000064 /* App/HaloApp.swift */; };
 		0000000000000000000000C9 /* Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000065 /* Core/Models.swift */; };
 		0000000000000000000000CA /* Core/AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000066 /* Core/AppStore.swift */; };
@@ -149,6 +150,7 @@
 		F8614B743053291B00D4943C /* icon_256x256@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_256x256@2x.png"; sourceTree = "<group>"; };
 		F8614B753053291B00D4943C /* icon_512x512.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_512x512.png; sourceTree = "<group>"; };
 		F8614B763053291B00D4943C /* icon_512x512@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_512x512@2x.png"; sourceTree = "<group>"; };
+		F84A0AB03055599200E8B51E /* halo-pets-v2 */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Halo/Halo Icons/Pets/halo-pets-v2"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -378,23 +380,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F84A0A9F3055599200E8B51E /* notch-interaction.png in Resources */,
-				F84A0AA03055599200E8B51E /* emotion-interaction.png in Resources */,
-				F84A0AA13055599200E8B51E /* context-activities.png in Resources */,
-				F84A0AA23055599200E8B51E /* locomotion-idle.png in Resources */,
-				F84A0AA33055599200E8B51E /* README.md in Resources */,
-				F84A0AA43055599200E8B51E /* locomotion-idle.png in Resources */,
-				F84A0AA53055599200E8B51E /* locomotion-idle.png in Resources */,
-				F84A0AA63055599200E8B51E /* context-activities.png in Resources */,
-				F84A0AA73055599200E8B51E /* rest-natural.png in Resources */,
-				F84A0AA83055599200E8B51E /* notch-interaction.png in Resources */,
-				F84A0AA93055599200E8B51E /* notch-interaction.png in Resources */,
-				F84A0AAA3055599200E8B51E /* context-activities.png in Resources */,
-				F84A0AAB3055599200E8B51E /* rest-natural.png in Resources */,
-				F84A0AAC3055599200E8B51E /* emotion-interaction.png in Resources */,
-				F84A0AAD3055599200E8B51E /* emotion-interaction.png in Resources */,
-				F84A0AAE3055599200E8B51E /* rest-natural.png in Resources */,
-				F84A0AAF3055599200E8B51E /* manifest.json in Resources */,
+				F84A0AB13055599200E8B51E /* halo-pets-v2 in Resources */,
 				F8614B693053262D00D4943C /* Assets.xcassets in Resources */,
 				F8614B61305322E600D4943C /* AppIcon 2.icns in Resources */,
 				F8614B783053291B00D4943C /* icon_128x128@2x.png in Resources */,
