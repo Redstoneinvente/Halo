@@ -299,7 +299,7 @@ private struct EIPlantCozy: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 20, paused: false)) { timeline in
             let phase = timeline.date.timeIntervalSinceReferenceDate
-            let growth = min(1, engine.persistentState.plant.growth + engine.persistentState.plant.bonusGrowth)
+            let growth = CGFloat(min(1, engine.persistentState.plant.growth + engine.persistentState.plant.bonusGrowth))
             ZStack(alignment: .bottom) {
                 Ellipse().fill(Color.black.opacity(0.22)).frame(width: size * 0.60, height: size * 0.12).offset(y: size * 0.04)
                 RoundedRectangle(cornerRadius: 10)
