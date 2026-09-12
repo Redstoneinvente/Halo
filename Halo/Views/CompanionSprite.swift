@@ -141,7 +141,8 @@ final class HaloPetAssetStore: ObservableObject {
     private var loadingSpecies: String?
 
     func library(for kind: EIPetKind) -> HaloPetV2Library? {
-        library?.species == kind.rawValue ? library : nil
+        let species = kind.rawValue.lowercased()
+        return library?.species.lowercased() == species ? library : nil
     }
 
     func load(_ kind: EIPetKind) {
@@ -163,9 +164,15 @@ final class HaloPetAssetStore: ObservableObject {
                 return HaloPetV2Library(species: species, manifest: manifest, rootURL: root)
             }.value
             guard let self else { return }
-            self.loadingSpecies = nil
-            self.library = decoded
-            self.revision &+= 1
+            // Publish on the next main-run-loop turn. Completing a decode can coincide with a
+            // SwiftUI update pass; deferring ObservableObject publication avoids undefined
+            // "Publishing changes from within view updates" behaviour.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.loadingSpecies = nil
+                self.library = decoded
+                self.revision &+= 1
+            }
         }
     }
 }
