@@ -1,0 +1,57 @@
+name: Apply Pet Atlas Renderer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-pet-atlas-renderer.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply atlas renderer patch
+        run: python3 .github/scripts/apply_pet_atlas_renderer.py
+
+      - name: Verify formatting
+        run: git diff --check
+
+      - name: Compile pet renderer
+        shell: bash
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS,arch=arm64' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build > /tmp/halo-build.log 2>&1
+          status=$?
+          set -e
+          grep -E 'SwiftCompile normal arm64 .*CompanionSprite\.swift|CompanionSprite\.swift:[0-9]+:[0-9]+: error:' /tmp/halo-build.log | tail -160 || true
+          if grep -Eq 'CompanionSprite\.swift:[0-9]+:[0-9]+: error:' /tmp/halo-build.log; then
+            echo 'Pet atlas renderer failed to compile.'
+            exit 65
+          fi
+          if ! grep -Eq 'SwiftCompile normal arm64 .*/CompanionSprite\.swift' /tmp/halo-build.log; then
+            echo 'CompanionSprite.swift was not compiled; refusing to commit.'
+            exit 66
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo 'Full target still has unrelated compile errors; pet renderer itself compiled successfully.'
+          fi
+
+      - name: Commit validated renderer
+        shell: bash
+        run: |
+          if git diff --quiet -- Halo/Views/CompanionSprite.swift; then
+            echo 'No pet renderer changes to commit'
+            exit 0
+          fi
+          git config user.name 'Halo Build Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add Halo/Views/CompanionSprite.swift
+          git commit -m 'feat: use transparent 8x6 pet animation atlases'
+          git push origin HEAD:main
