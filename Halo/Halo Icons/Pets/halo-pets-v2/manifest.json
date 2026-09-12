@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "cellSize": { "width": 200, "height": 200 },
+  "columns": 8,
+  "generatedKeyframesPerAnimation": 8,
+  "atlases": {
+    "locomotion-idle": [
+      { "id": "standingIdle", "row": 0, "playbackFrames": 8, "loop": true },
+      { "id": "sittingIdle", "row": 1, "playbackFrames": 8, "loop": true },
+      { "id": "walkRight", "row": 2, "playbackFrames": 8, "loop": true, "mirrorForLeft": true },
+      { "id": "runRight", "row": 3, "playbackFrames": 8, "loop": true, "mirrorForLeft": true },
+      { "id": "standToSit", "row": 4, "playbackFrames": 8, "reverseAs": "sitToStand" },
+      { "id": "lookAround", "row": 5, "playbackFrames": 8, "loop": true }
+    ],
+    "rest-natural": [
+      { "id": "settleToSleep", "row": 0, "playbackFrames": 12 },
+      { "id": "sleepLoop", "row": 1, "playbackFrames": 8, "loop": true },
+      { "id": "wakeToStretch", "row": 2, "playbackFrames": 12 },
+      { "id": "yawn", "row": 3, "playbackFrames": 8 },
+      { "id": "groomScratch", "row": 4, "playbackFrames": 8 },
+      { "id": "eatSnack", "row": 5, "playbackFrames": 12 },
+      { "id": "drinkWater", "row": 6, "playbackFrames": 12 }
+    ],
+    "emotion-interaction": [
+      { "id": "happyExcited", "row": 0, "playbackFrames": 8 },
+      { "id": "celebrate", "row": 1, "playbackFrames": 12 },
+      { "id": "sayHi", "row": 2, "playbackFrames": 8 },
+      { "id": "cursorTracking", "row": 3, "playbackFrames": 8, "frameSelectedByCursor": true },
+      { "id": "pawAtCursor", "row": 4, "playbackFrames": 8 },
+      { "id": "affection", "row": 5, "playbackFrames": 8 },
+      { "id": "surprised", "row": 6, "playbackFrames": 8 },
+      { "id": "concerned", "row": 7, "playbackFrames": 8 }
+    ],
+    "notch-interaction": [
+      { "id": "eyesPeekUp", "row": 0, "playbackFrames": 8 },
+      { "id": "headPeekUp", "row": 1, "playbackFrames": 8 },
+      { "id": "pawsOnLedge", "row": 2, "playbackFrames": 8 },
+      { "id": "headRestOnLedge", "row": 3, "playbackFrames": 8, "loop": true },
+      { "id": "peekFromLeft", "row": 4, "playbackFrames": 8 },
+      { "id": "peekFromRight", "row": 5, "playbackFrames": 8 },
+      { "id": "climbOntoLedge", "row": 6, "playbackFrames": 12 },
+      { "id": "dropBehindLedge", "row": 7, "playbackFrames": 8 },
+      { "id": "tailReveal", "row": 8, "playbackFrames": 8 },
+      { "id": "hangingOverEdge", "row": 9, "playbackFrames": 8, "loop": true }
+    ],
+    "context-activities": [
+      { "id": "playWithBall", "row": 0, "playbackFrames": 12 },
+      { "id": "chaseBallRight", "row": 1, "playbackFrames": 12, "mirrorForLeft": true },
+      { "id": "coffeeSipLoop", "row": 2, "playbackFrames": 8, "loop": true },
+      { "id": "enterLeftToCoffee", "row": 3, "playbackFrames": 16 },
+      { "id": "enterRightToCoffee", "row": 4, "playbackFrames": 16 },
+      { "id": "tinyLaptopWorking", "row": 5, "playbackFrames": 8, "loop": true },
+      { "id": "laptopToSleep", "row": 6, "playbackFrames": 12 },
+      { "id": "sleepingAtLaptop", "row": 7, "playbackFrames": 8, "loop": true },
+      { "id": "umbrellaIdle", "row": 8, "playbackFrames": 8, "loop": true },
+      { "id": "rainSeekShelter", "row": 9, "playbackFrames": 12 }
+    ]
+  }
+}
