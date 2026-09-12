@@ -210,11 +210,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - First-run setup
 
 private enum HaloSetupPage: Int, CaseIterable {
-    case welcome, method, manual, guided, displays, review
+    case welcome, method, manual, guided, displayMode, displays, review
 }
 
 private enum HaloSetupMethod: String {
     case manual, guided
+}
+
+private enum HaloSetupDisplayMode: String {
+    case shared, independent
 }
 
 private enum HaloSetupUseCase: String, CaseIterable, Identifiable {
@@ -323,6 +327,7 @@ private struct HaloSetupDisplayDraft: Identifiable {
     let id: String
     let name: String
     let isNotched: Bool
+    let isMain: Bool
     var enabled: Bool
     var theme: Theme
     var layout: WorkspaceLayout
@@ -335,6 +340,7 @@ private struct HaloFirstRunSetupView: View {
 
     @State private var page: HaloSetupPage = .welcome
     @State private var method: HaloSetupMethod?
+    @State private var displayMode: HaloSetupDisplayMode?
     @State private var guidedQuestion = 0
     @State private var useCase: HaloSetupUseCase = .everyday
     @State private var priority: HaloSetupPriority = .balanced
@@ -344,6 +350,13 @@ private struct HaloFirstRunSetupView: View {
     @State private var displayDrafts: [HaloSetupDisplayDraft]
     @State private var selectedDisplay = 0
     @State private var generatedProfile: Profile?
+    @State private var didFinish = false
+
+    private let initialTheme: Theme
+    private let initialLayout: WorkspaceLayout
+    private let initialDisplays: [DisplayOverride]
+    private let initialHover: Bool
+    private let initialAllDisplays: Bool
 
     private let moduleChoices: [ModuleID] = [.clock, .timer, .shelf, .media, .audio, .calendar, .notes, .system, .launcher, .capture]
     private let surfaceChoices: [SurfaceStyle] = [.notch, .pill, .island, .shelf, .menuBar, .simulated]
@@ -351,20 +364,35 @@ private struct HaloFirstRunSetupView: View {
     init(store: AppStore, onComplete: @escaping () -> Void) {
         self.store = store
         self.onComplete = onComplete
+        initialTheme = store.configuration.theme
+        initialLayout = store.workspace.settings.layout
+        initialDisplays = store.workspace.settings.displays
+        initialHover = store.configuration.hoverToExpand
+        initialAllDisplays = store.configuration.allDisplays
         _manualHover = State(initialValue: store.configuration.hoverToExpand)
-        let drafts = NSScreen.screens.map { screen -> HaloSetupDisplayDraft in
+
+        let screens = NSScreen.screens
+        let mainID = (NSScreen.main ?? screens.first).map(WindowManager.displayID)
+        let drafts = screens.map { screen -> HaloSetupDisplayDraft in
             let id = WindowManager.displayID(screen)
             let saved = store.workspace.settings.displays.first { $0.id == id }
-            var theme = saved?.theme ?? store.configuration.theme
+            let linkedProfile = saved?.profileID.flatMap { profileID in
+                store.workspace.settings.profiles.first { $0.id == profileID }
+            }
+            var theme = linkedProfile?.theme ?? saved?.theme ?? store.configuration.theme
             if saved == nil, screen.safeAreaInsets.top <= 0, theme.style == .notch { theme.style = .pill }
             return HaloSetupDisplayDraft(
                 id: id,
                 name: screen.localizedName,
                 isNotched: screen.safeAreaInsets.top > 0,
+                isMain: id == mainID,
                 enabled: saved?.enabled ?? true,
                 theme: theme,
-                layout: saved?.layout ?? store.workspace.settings.layout
+                layout: linkedProfile?.layout ?? saved?.layout ?? store.workspace.settings.layout
             )
+        }.sorted { lhs, rhs in
+            if lhs.isMain != rhs.isMain { return lhs.isMain }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
         _displayDrafts = State(initialValue: drafts)
     }
@@ -400,6 +428,9 @@ private struct HaloFirstRunSetupView: View {
         }
         .foregroundStyle(.white)
         .frame(minWidth: 900, minHeight: 640)
+        .onDisappear {
+            if !didFinish { restoreInitialState() }
+        }
     }
 
     private var setupHeader: some View {
@@ -445,7 +476,7 @@ private struct HaloFirstRunSetupView: View {
         case .welcome: return 0
         case .method: return 1
         case .manual, .guided: return 2
-        case .displays: return 3
+        case .displayMode, .displays: return 3
         case .review: return 4
         }
     }
@@ -457,6 +488,7 @@ private struct HaloFirstRunSetupView: View {
         case .method: methodPage
         case .manual: manualPage
         case .guided: guidedPage
+        case .displayMode: displayModePage
         case .displays: guidedDisplaysPage
         case .review: reviewPage
         }
@@ -584,12 +616,89 @@ private struct HaloFirstRunSetupView: View {
         .buttonStyle(.plain)
     }
 
+    private var displayModePage: some View {
+        VStack(spacing: 26) {
+            VStack(spacing: 7) {
+                Text("How should your displays work together?")
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                Text("Your main display is always the global Halo. Secondary displays can mirror it or become their own profiles.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .multilineTextAlignment(.center)
+            }
+
+            HStack(spacing: 18) {
+                displayModeCard(
+                    .shared,
+                    title: "Same profile everywhere",
+                    detail: "One global Halo across every display. Change the global profile later and every display follows automatically.",
+                    symbol: "rectangle.on.rectangle",
+                    badge: "Simple"
+                )
+                displayModeCard(
+                    .independent,
+                    title: "Customize secondary displays",
+                    detail: "The main display keeps the global profile. Every secondary display gets its own saved profile and can look or behave differently.",
+                    symbol: "display.2",
+                    badge: "Independent"
+                )
+            }
+            .frame(maxWidth: 820)
+        }
+        .padding(46)
+    }
+
+    private func displayModeCard(_ value: HaloSetupDisplayMode, title: String, detail: String, symbol: String, badge: String) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                displayMode = value
+                prepareDisplayMode()
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Image(systemName: symbol).font(.system(size: 28, weight: .semibold))
+                    Spacer()
+                    Text(badge.uppercased())
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .tracking(0.6)
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(Color.white.opacity(0.08), in: Capsule())
+                }
+                Spacer()
+                Text(title).font(.system(size: 21, weight: .bold, design: .rounded))
+                Text(detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Text(value == .shared ? "Global profile on all displays" : "Global main · own secondary profiles")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.5))
+                    Spacer()
+                    Image(systemName: displayMode == value ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 17, weight: .semibold))
+                }
+            }
+            .padding(22)
+            .frame(width: 380, height: 255, alignment: .leading)
+            .background(displayMode == value ? Color.white.opacity(0.12) : Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(displayMode == value ? Color.white.opacity(0.42) : Color.white.opacity(0.08), lineWidth: displayMode == value ? 1.5 : 1))
+        }
+        .buttonStyle(.plain)
+    }
+
     private var manualPage: some View {
         VStack(spacing: 18) {
-            pageHeading("Tune the essentials", "Start with the things that most change how Halo feels. The deeper controls stay in Settings.")
-            displaySelector
-            if displayDrafts.indices.contains(selectedDisplay) {
-                manualEditor(index: selectedDisplay)
+            pageHeading(
+                displayMode == .independent ? "Tune each Halo" : "Tune your global Halo",
+                displayMode == .independent
+                    ? "The main display edits the global profile. Secondary displays are independent and update live as you change them."
+                    : "These changes are live and every connected display follows the same global profile."
+            )
+            if displayMode == .independent { displaySelector }
+            if displayDrafts.indices.contains(activeDisplayIndex) {
+                manualEditor(index: activeDisplayIndex)
             }
         }
         .padding(.horizontal, 38)
@@ -602,13 +711,18 @@ private struct HaloFirstRunSetupView: View {
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) { selectedDisplay = index }
                 } label: {
-                    HStack(spacing: 7) {
+                    HStack(spacing: 8) {
                         Image(systemName: displayDrafts[index].isNotched ? "laptopcomputer" : "display")
-                        Text(displayDrafts[index].name)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(displayDrafts[index].name)
+                            Text(displayDrafts[index].isMain ? "Global profile" : "Own profile")
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.48))
+                        }
                         if !displayDrafts[index].enabled { Image(systemName: "minus.circle.fill").opacity(0.55) }
                     }
                     .font(.system(size: 11, weight: .semibold))
-                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .padding(.horizontal, 12).padding(.vertical, 7)
                     .background(selectedDisplay == index ? Color.white.opacity(0.16) : Color.white.opacity(0.055), in: Capsule())
                     .overlay(Capsule().stroke(Color.white.opacity(selectedDisplay == index ? 0.28 : 0.07), lineWidth: 1))
                 }
@@ -623,7 +737,13 @@ private struct HaloFirstRunSetupView: View {
             setupPanel {
                 VStack(alignment: .leading, spacing: 15) {
                     sectionLabel("Surface", "rectangle.roundedtop")
-                    Toggle("Use Halo on this display", isOn: displayBinding(index, \.enabled))
+                    if displayDrafts[index].isMain {
+                        Label(displayMode == .shared ? "Global profile · shared across all displays" : "Main display · global profile", systemImage: "globe")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.62))
+                    } else {
+                        Toggle("Use Halo on this display", isOn: displayBinding(index, \.enabled))
+                    }
                     Picker("Style", selection: themeBinding(index, \.style)) {
                         ForEach(surfaceChoices) { style in Text(style.rawValue).tag(style) }
                     }
@@ -633,7 +753,7 @@ private struct HaloFirstRunSetupView: View {
                     Slider(value: appearanceBinding(index, \.expandedHeight), in: 280...720, step: 10) {
                         Text("Open height")
                     }
-                    Toggle("Expand when I hover", isOn: $manualHover)
+                    Toggle("Expand when I hover", isOn: liveHoverBinding)
                 }
             }
             .frame(width: 330)
@@ -657,6 +777,7 @@ private struct HaloFirstRunSetupView: View {
                 Button {
                     if enabled { displayDrafts[index].layout.enabled.remove(module) }
                     else { displayDrafts[index].layout.enabled.insert(module) }
+                    applyLivePreview()
                 } label: {
                     HStack(spacing: 7) {
                         Image(systemName: module.symbol)
@@ -717,25 +838,25 @@ private struct HaloFirstRunSetupView: View {
         if guidedQuestion == 0 {
             choiceGrid {
                 ForEach(HaloSetupUseCase.allCases) { option in
-                    guidedChoice(option.title, option.detail, option.symbol, selected: useCase == option) { useCase = option }
+                    guidedChoice(option.title, option.detail, option.symbol, selected: useCase == option) { useCase = option; refreshGuidedPreview() }
                 }
             }
         } else if guidedQuestion == 1 {
             choiceGrid {
                 ForEach(HaloSetupPriority.allCases) { option in
-                    guidedChoice(option.title, option.detail, option.symbol, selected: priority == option) { priority = option }
+                    guidedChoice(option.title, option.detail, option.symbol, selected: priority == option) { priority = option; refreshGuidedPreview() }
                 }
             }
         } else if guidedQuestion == 2 {
             choiceGrid {
                 ForEach(HaloSetupDensity.allCases) { option in
-                    guidedChoice(option.title, option.detail, option.symbol, selected: density == option) { density = option }
+                    guidedChoice(option.title, option.detail, option.symbol, selected: density == option) { density = option; refreshGuidedPreview() }
                 }
             }
         } else {
             choiceGrid {
                 ForEach(HaloSetupMotion.allCases) { option in
-                    guidedChoice(option.title, option.detail, option.symbol, selected: motion == option) { motion = option }
+                    guidedChoice(option.title, option.detail, option.symbol, selected: motion == option) { motion = option; refreshGuidedPreview() }
                 }
             }
         }
@@ -775,22 +896,32 @@ private struct HaloFirstRunSetupView: View {
 
     private var guidedDisplaysPage: some View {
         VStack(spacing: 18) {
-            pageHeading(displayDrafts.count > 1 ? "Make each display feel right" : "Place Halo on your display",
-                        displayDrafts.count > 1 ? "Halo can use a different surface on every connected display." : "We picked a starting point based on your answers. Tweak it if you want.")
-            displaySelector
-            if displayDrafts.indices.contains(selectedDisplay) {
+            pageHeading(
+                displayMode == .independent ? "Fine-tune each display" : "Fine-tune the shared profile",
+                displayMode == .independent
+                    ? "Your main display stays global. Secondary display profiles can now diverge, and every change previews live."
+                    : "Every connected display follows this same global profile. Changes preview immediately."
+            )
+            if displayMode == .independent { displaySelector }
+            if displayDrafts.indices.contains(activeDisplayIndex) {
+                let index = activeDisplayIndex
                 setupPanel {
                     VStack(alignment: .leading, spacing: 16) {
-                        Toggle("Use Halo on \(displayDrafts[selectedDisplay].name)", isOn: displayBinding(selectedDisplay, \.enabled))
-                        Picker("Surface", selection: themeBinding(selectedDisplay, \.style)) {
+                        if displayDrafts[index].isMain {
+                            Label(displayMode == .shared ? "Global profile · all displays" : "Main display · global profile", systemImage: "globe")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.62))
+                        } else {
+                            Toggle("Use Halo on \(displayDrafts[index].name)", isOn: displayBinding(index, \.enabled))
+                        }
+                        Picker("Surface", selection: themeBinding(index, \.style)) {
                             ForEach(surfaceChoices) { style in Text(style.rawValue).tag(style) }
                         }
-                        Slider(value: themeBinding(selectedDisplay, \.width), in: 340...640, step: 10) {
-                            Text("Open width")
-                        }
+                        Slider(value: themeBinding(index, \.width), in: 340...640, step: 10) { Text("Open width") }
+                        Slider(value: appearanceBinding(index, \.expandedHeight), in: 280...720, step: 10) { Text("Open height") }
                         HStack(spacing: 8) {
-                            Image(systemName: displayDrafts[selectedDisplay].isNotched ? "camera.metering.center.weighted" : "display")
-                            Text(displayDrafts[selectedDisplay].isNotched ? "Halo detected a physical notch and chose a native notch surface." : "Halo detected an external/non-notched display and chose a floating surface.")
+                            Image(systemName: displayDrafts[index].isNotched ? "camera.metering.center.weighted" : "display")
+                            Text(displayDrafts[index].isNotched ? "Halo detected a physical notch on this display." : "This display has no physical notch; choose the surface that feels best here.")
                                 .font(.system(size: 10))
                                 .foregroundStyle(.white.opacity(0.5))
                         }
@@ -809,7 +940,7 @@ private struct HaloFirstRunSetupView: View {
 
             HStack(spacing: 14) {
                 reviewCard("Setup", method == .guided ? "Personalized profile" : "Manual essentials", method == .guided ? "wand.and.stars" : "slider.horizontal.3")
-                reviewCard("Displays", "\(displayDrafts.filter(\.enabled).count) enabled", "display.2")
+                reviewCard("Displays", displayMode == .independent ? "Independent profiles" : "Shared global profile", "display.2")
                 reviewCard("Interaction", manualHover ? "Hover to expand" : "Click to expand", "cursorarrow.rays")
             }
             .frame(maxWidth: 760)
@@ -919,6 +1050,7 @@ private struct HaloFirstRunSetupView: View {
     private var canAdvance: Bool {
         switch page {
         case .method: return method != nil
+        case .displayMode: return displayMode != nil
         case .manual, .displays, .review: return hasEnabledDisplay
         default: return true
         }
@@ -930,7 +1062,16 @@ private struct HaloFirstRunSetupView: View {
             case .welcome:
                 page = .method
             case .method:
-                page = method == .guided ? .guided : .manual
+                if method == .guided {
+                    refreshGuidedPreview()
+                    page = .guided
+                } else if displayDrafts.count > 1 {
+                    page = .displayMode
+                } else {
+                    displayMode = .shared
+                    prepareDisplayMode()
+                    page = .manual
+                }
             case .manual:
                 generatedProfile = nil
                 page = .review
@@ -939,8 +1080,12 @@ private struct HaloFirstRunSetupView: View {
                     guidedQuestion += 1
                 } else {
                     buildGuidedDrafts()
-                    page = .displays
+                    if displayDrafts.count > 1 { page = .displayMode }
+                    else { displayMode = .shared; prepareDisplayMode(); page = .displays }
                 }
+            case .displayMode:
+                prepareDisplayMode()
+                page = method == .guided ? .displays : .manual
             case .displays:
                 page = .review
             case .review:
@@ -954,13 +1099,16 @@ private struct HaloFirstRunSetupView: View {
             switch page {
             case .welcome: break
             case .method: page = .welcome
-            case .manual: page = .method
+            case .manual: page = displayDrafts.count > 1 ? .displayMode : .method
             case .guided:
                 if guidedQuestion > 0 { guidedQuestion -= 1 }
                 else { page = .method }
+            case .displayMode:
+                if method == .guided { guidedQuestion = 3; page = .guided }
+                else { page = .method }
             case .displays:
-                guidedQuestion = 3
-                page = .guided
+                if displayDrafts.count > 1 { page = .displayMode }
+                else { guidedQuestion = 3; page = .guided }
             case .review:
                 page = method == .guided ? .displays : .manual
             }
@@ -968,14 +1116,40 @@ private struct HaloFirstRunSetupView: View {
     }
 
     private func buildGuidedDrafts() {
+        refreshGuidedPreview()
+        if displayMode == .independent { prepareDisplayMode() }
+    }
+
+    private func refreshGuidedPreview() {
         let profile = makeGuidedProfile()
         generatedProfile = profile
         manualHover = true
-        for index in displayDrafts.indices {
-            displayDrafts[index].layout = profile.layout
-            displayDrafts[index].theme = profile.theme
-            displayDrafts[index].theme.style = displayDrafts[index].isNotched ? .notch : .pill
+        guard displayDrafts.indices.contains(mainDraftIndex) else { return }
+        displayDrafts[mainDraftIndex].layout = profile.layout
+        displayDrafts[mainDraftIndex].theme = profile.theme
+        if displayMode != .independent {
+            for index in displayDrafts.indices where index != mainDraftIndex {
+                displayDrafts[index].layout = profile.layout
+                displayDrafts[index].theme = profile.theme
+            }
         }
+        applyLivePreview()
+    }
+
+    private func prepareDisplayMode() {
+        guard let displayMode, displayDrafts.indices.contains(mainDraftIndex) else { return }
+        let globalTheme = displayDrafts[mainDraftIndex].theme
+        let globalLayout = displayDrafts[mainDraftIndex].layout
+        for index in displayDrafts.indices where index != mainDraftIndex {
+            displayDrafts[index].enabled = true
+            displayDrafts[index].theme = globalTheme
+            displayDrafts[index].layout = globalLayout
+            if displayMode == .independent, !displayDrafts[index].isNotched, displayDrafts[index].theme.style == .notch {
+                displayDrafts[index].theme.style = .pill
+            }
+        }
+        selectedDisplay = mainDraftIndex
+        applyLivePreview()
     }
 
     private func makeGuidedProfile() -> Profile {
@@ -1063,39 +1237,100 @@ private struct HaloFirstRunSetupView: View {
         }
     }
 
-    private func commitSetup() {
-        guard let primary = displayDrafts.first(where: { $0.enabled }) else { return }
+    private var mainDraftIndex: Int {
+        displayDrafts.firstIndex(where: { $0.isMain }) ?? 0
+    }
 
+    private var activeDisplayIndex: Int {
+        displayMode == .independent ? selectedDisplay : mainDraftIndex
+    }
+
+    private var liveHoverBinding: Binding<Bool> {
+        Binding(get: { manualHover }, set: { value in
+            manualHover = value
+            applyLivePreview()
+        })
+    }
+
+    private func applyLivePreview() {
+        guard displayDrafts.indices.contains(mainDraftIndex) else { return }
+        let main = displayDrafts[mainDraftIndex]
         store.configuration.hoverToExpand = manualHover
         store.configuration.allDisplays = displayDrafts.count > 1
-        store.configuration.theme = primary.theme
-        store.workspace.settings.layout = primary.layout
+        store.configuration.theme = main.theme
+        store.workspace.settings.layout = main.layout
 
         let currentIDs = Set(displayDrafts.map(\.id))
-        let preserved = store.workspace.settings.displays.filter { !currentIDs.contains($0.id) }
-        let overrides = displayDrafts.map { draft in
-            DisplayOverride(id: draft.id, enabled: draft.enabled, theme: draft.theme, layout: draft.layout)
-        }
-        store.workspace.settings.displays = preserved + overrides
-
-        var profile: Profile
-        if method == .guided {
-            profile = generatedProfile ?? makeGuidedProfile()
-            profile.theme = primary.theme
-            profile.layout = primary.layout
+        let preserved = initialDisplays.filter { !currentIDs.contains($0.id) }
+        if displayMode == .independent {
+            var overrides = displayDrafts.filter { !$0.isMain }.map { draft in
+                DisplayOverride(id: draft.id, enabled: draft.enabled, theme: draft.theme, layout: draft.layout, profileID: nil)
+            }
+            if !main.enabled {
+                overrides.append(DisplayOverride(id: main.id, enabled: false, theme: main.theme, layout: nil, profileID: nil))
+            }
+            store.workspace.settings.displays = preserved + overrides
         } else {
-            profile = Profile(name: "My Halo", theme: primary.theme, layout: primary.layout)
-            profile.description = "Halo Setup Profile"
-            profile.icon = "slider.horizontal.3"
+            store.workspace.settings.displays = preserved
         }
+    }
 
-        if let index = store.workspace.settings.profiles.firstIndex(where: { $0.description == "Halo Setup Profile" }) {
+    private func restoreInitialState() {
+        store.configuration.hoverToExpand = initialHover
+        store.configuration.allDisplays = initialAllDisplays
+        store.configuration.theme = initialTheme
+        store.workspace.settings.layout = initialLayout
+        store.workspace.settings.displays = initialDisplays
+    }
+
+    private func upsertOnboardingProfile(_ value: Profile, marker: String) -> UUID {
+        var profile = value
+        profile.description = marker
+        if let index = store.workspace.settings.profiles.firstIndex(where: { $0.description == marker }) {
             profile.id = store.workspace.settings.profiles[index].id
             store.workspace.settings.profiles[index] = profile
+            return profile.id
+        }
+        store.workspace.settings.profiles.append(profile)
+        return profile.id
+    }
+
+    private func commitSetup() {
+        guard displayDrafts.indices.contains(mainDraftIndex) else { return }
+        let main = displayDrafts[mainDraftIndex]
+        applyLivePreview()
+
+        var globalProfile: Profile
+        if method == .guided {
+            globalProfile = generatedProfile ?? makeGuidedProfile()
+            globalProfile.theme = main.theme
+            globalProfile.layout = main.layout
         } else {
-            store.workspace.settings.profiles.append(profile)
+            globalProfile = Profile(name: "My Halo", theme: main.theme, layout: main.layout)
+            globalProfile.icon = "slider.horizontal.3"
+        }
+        _ = upsertOnboardingProfile(globalProfile, marker: "Halo Setup Profile")
+
+        let currentIDs = Set(displayDrafts.map(\.id))
+        let preserved = initialDisplays.filter { !currentIDs.contains($0.id) }
+        if displayMode == .independent {
+            var overrides: [DisplayOverride] = []
+            for draft in displayDrafts where !draft.isMain {
+                var profile = Profile(name: "\(draft.name) Halo", theme: draft.theme, layout: draft.layout)
+                profile.icon = draft.isNotched ? "laptopcomputer" : "display"
+                let marker = "Halo Display Profile:\(draft.id)"
+                let profileID = upsertOnboardingProfile(profile, marker: marker)
+                overrides.append(DisplayOverride(id: draft.id, enabled: draft.enabled, theme: draft.theme, layout: nil, profileID: profileID))
+            }
+            if !main.enabled {
+                overrides.append(DisplayOverride(id: main.id, enabled: false, theme: main.theme, layout: nil, profileID: nil))
+            }
+            store.workspace.settings.displays = preserved + overrides
+        } else {
+            store.workspace.settings.displays = preserved
         }
 
+        didFinish = true
         store.flushConfiguration()
         onComplete()
     }
@@ -1103,21 +1338,36 @@ private struct HaloFirstRunSetupView: View {
     private func displayBinding<T>(_ index: Int, _ keyPath: WritableKeyPath<HaloSetupDisplayDraft, T>) -> Binding<T> {
         Binding(
             get: { displayDrafts[index][keyPath: keyPath] },
-            set: { displayDrafts[index][keyPath: keyPath] = $0 }
+            set: { value in
+                displayDrafts[index][keyPath: keyPath] = value
+                applyLivePreview()
+            }
         )
     }
 
     private func themeBinding<T>(_ index: Int, _ keyPath: WritableKeyPath<Theme, T>) -> Binding<T> {
         Binding(
             get: { displayDrafts[index].theme[keyPath: keyPath] },
-            set: { displayDrafts[index].theme[keyPath: keyPath] = $0 }
+            set: { value in
+                displayDrafts[index].theme[keyPath: keyPath] = value
+                if displayMode == .shared, index == mainDraftIndex {
+                    for other in displayDrafts.indices where other != mainDraftIndex { displayDrafts[other].theme[keyPath: keyPath] = value }
+                }
+                applyLivePreview()
+            }
         )
     }
 
     private func appearanceBinding<T>(_ index: Int, _ keyPath: WritableKeyPath<Appearance, T>) -> Binding<T> {
         Binding(
             get: { displayDrafts[index].layout.appearance[keyPath: keyPath] },
-            set: { displayDrafts[index].layout.appearance[keyPath: keyPath] = $0 }
+            set: { value in
+                displayDrafts[index].layout.appearance[keyPath: keyPath] = value
+                if displayMode == .shared, index == mainDraftIndex {
+                    for other in displayDrafts.indices where other != mainDraftIndex { displayDrafts[other].layout.appearance[keyPath: keyPath] = value }
+                }
+                applyLivePreview()
+            }
         )
     }
 }

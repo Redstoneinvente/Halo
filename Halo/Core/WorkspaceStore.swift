@@ -32,13 +32,19 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
                 oldLayout?.closedNotch != newLayout?.closedNotch ||
                 oldLayout?.enabled != newLayout?.enabled
         }()
-        if baseArtworkInputsChanged || activeProfileArtworkInputsChanged { updateArtworkPreference() }
+        let displayProfileInputsChanged: Bool = {
+            let ids = Set(settings.displays.compactMap(\.profileID))
+            return ids.contains { id in
+                oldValue.profiles.first(where: { $0.id == id })?.layout != settings.profiles.first(where: { $0.id == id })?.layout
+            }
+        }()
+        if baseArtworkInputsChanged || activeProfileArtworkInputsChanged || displayProfileInputsChanged { updateArtworkPreference() }
 
         let activeProfileHUDChanged: Bool = {
             guard let id = scheduledProfileID else { return false }
             return oldValue.profiles.first(where: { $0.id == id })?.layout.hud != settings.profiles.first(where: { $0.id == id })?.layout.hud
         }()
-        if oldValue.layout.hud != settings.layout.hud || oldValue.displays != settings.displays || activeProfileHUDChanged {
+        if oldValue.layout.hud != settings.layout.hud || oldValue.displays != settings.displays || activeProfileHUDChanged || displayProfileInputsChanged {
             hudEngine?.configurationDidChange()
         }
 
@@ -90,7 +96,12 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
     }
     private func updateArtworkPreference() {
-        let layouts = [effectiveLayout] + settings.displays.compactMap { $0.enabled ? $0.layout : nil }
+        let displayLayouts = settings.displays.compactMap { item -> WorkspaceLayout? in
+            guard item.enabled else { return nil }
+            if let profileID = item.profileID, let profile = settings.profiles.first(where: { $0.id == profileID }) { return profile.layout }
+            return item.layout
+        }
+        let layouts = [effectiveLayout] + displayLayouts
         media.setArtworkEnabled(layouts.contains { layout in
             let context = layout.contextMusic
             let contextNeedsPalette = context?.enabled == true && (

@@ -236,7 +236,14 @@ final class WindowManager {
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.$settings.map { [store] settings in
             let layout = settings.profiles.first { $0.id == store.workspace.scheduledProfileID }?.layout ?? settings.layout
-            return SurfaceRenderConfiguration(appearance: layout.appearance, displays: settings.displays, closedNotch: layout.closedNotch, clock: layout.widgetStyle(for: .clock), horizontalWidgets: layout.horizontalWidgets, horizontalHeight: layout.horizontalHeight)
+            let resolvedDisplays = settings.displays.map { item -> DisplayOverride in
+                guard let profileID = item.profileID, let profile = settings.profiles.first(where: { $0.id == profileID }) else { return item }
+                var resolved = item
+                resolved.theme = profile.theme
+                resolved.layout = profile.layout
+                return resolved
+            }
+            return SurfaceRenderConfiguration(appearance: layout.appearance, displays: resolvedDisplays, closedNotch: layout.closedNotch, clock: layout.widgetStyle(for: .clock), horizontalWidgets: layout.horizontalWidgets, horizontalHeight: layout.horizontalHeight)
         }
             .removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
@@ -943,13 +950,17 @@ final class WindowManager {
             let id = Self.displayID(screen)
             let override = store.workspace.settings.displays.first { $0.id == id }
             guard override?.enabled != false else { continue }
+            let displayProfile = override?.profileID.flatMap { profileID in
+                store.workspace.settings.profiles.first { $0.id == profileID }
+            }
             active.insert(id)
             let existing = hosts[id]
             let host = existing ?? Host()
-            var theme = override?.theme ?? store.workspace.scheduledTheme ?? store.configuration.theme
+            var theme = displayProfile?.theme ?? override?.theme ?? store.workspace.scheduledTheme ?? store.configuration.theme
             if store.configuration.simulateNotch && theme.style == .notch { theme.style = .simulated }
-            var appearance = override?.layout?.appearance ?? store.workspace.effectiveLayout.appearance
-            let effectiveLayout = override?.layout ?? store.workspace.effectiveLayout
+            let displayLayout = displayProfile?.layout ?? override?.layout
+            var appearance = displayLayout?.appearance ?? store.workspace.effectiveLayout.appearance
+            let effectiveLayout = displayLayout ?? store.workspace.effectiveLayout
             if effectiveLayout.horizontalWidgets ?? false {
                 let requested = effectiveLayout.horizontalHeight ?? 260
                 appearance.expandedHeight = requested.isFinite ? min(500, max(200, requested)) : 260
@@ -958,7 +969,7 @@ final class WindowManager {
             let previousOffset = host.geometry?.offset(expanded: host.state.expanded) ?? .zero
             host.geometry = Self.geometry(screen: screen, theme: theme, appearance: appearance)
             if host.state.theme != theme { host.state.theme = theme }
-            if host.state.layoutOverride != override?.layout { host.state.layoutOverride = override?.layout }
+            if host.state.layoutOverride != displayLayout { host.state.layoutOverride = displayLayout }
             configureDynamicWidth(host)
             let baseDashboardWidth = host.geometry!.frame(expanded: true).width
             if host.state.contextPreferredSize == nil && host.state.dashboardWidth != baseDashboardWidth { host.state.dashboardWidth = baseDashboardWidth }

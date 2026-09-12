@@ -69,10 +69,15 @@ struct HaloContour: Shape {
     }
 }
 
+enum SurfaceAppearanceScope {
+    case all, background, geometry, motion
+}
+
 @MainActor struct SurfaceAppearanceControls: View {
     @Binding var appearance: Appearance
     let theme: Theme
     var screen: NSScreen?
+    var scope: SurfaceAppearanceScope = .all
     @AppStorage("HaloContextOffsetX") private var contextOffsetX = 0.0
     @AppStorage("HaloContextOffsetY") private var contextOffsetY = 0.0
 
@@ -95,63 +100,70 @@ struct HaloContour: Shape {
     ]
 
     var body: some View {
-        backgroundStyleControls
-        backgroundColorControls
+        if scope == .all || scope == .background {
+            backgroundStyleControls
+            backgroundColorControls
+        }
 
-        Section("Closed size") {
-            PreciseSlider(title: "Width", value: $appearance.compactWidth, range: 16...640, step: 1, suffix: "pt", onEditingChanged: {
-                GeometryPreview.update(expanded: false, editing: $0, display: screen)
-            })
-            PreciseSlider(title: "Height", value: $appearance.surface.compactHeight, range: 16...100, step: 1, suffix: "pt", onEditingChanged: {
-                GeometryPreview.update(expanded: false, editing: $0, display: screen)
-            })
-            if let screen {
-                let geometry = WindowManager.geometry(screen: screen, theme: theme, appearance: appearance)
-                Text("Effective closed size: \(Int(geometry.compactWidth)) × \(Int(geometry.compactHeight)) pt.").font(.caption)
-                if geometry.attachedToNotch {
-                    Text("16 × 16 pt is allowed. The physical camera cutout stays unchanged; a positive vertical offset moves Halo below it.").font(.caption).foregroundStyle(.secondary)
+        if scope == .all || scope == .geometry {
+            Section("Closed size") {
+                PreciseSlider(title: "Width", value: $appearance.compactWidth, range: 16...640, step: 1, suffix: "pt", onEditingChanged: {
+                    GeometryPreview.update(expanded: false, editing: $0, display: screen)
+                })
+                PreciseSlider(title: "Height", value: $appearance.surface.compactHeight, range: 16...100, step: 1, suffix: "pt", onEditingChanged: {
+                    GeometryPreview.update(expanded: false, editing: $0, display: screen)
+                })
+                if let screen {
+                    let geometry = WindowManager.geometry(screen: screen, theme: theme, appearance: appearance)
+                    Text("Effective closed size: \(Int(geometry.compactWidth)) × \(Int(geometry.compactHeight)) pt.").font(.caption)
+                    if geometry.attachedToNotch {
+                        Text("16 × 16 pt is allowed. The physical camera cutout stays unchanged; a positive vertical offset moves Halo below it.").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
-        }
-        Section("Position offsets") {
-            Text("Positive X moves right; positive Y moves down. Each state has independent offsets.").font(.caption)
-            offsetControl("Opened X", key: \.openedX, expanded: true)
-            offsetControl("Opened Y", key: \.openedY, expanded: true)
-            offsetControl("Closed X", key: \.closedX, expanded: false)
-            offsetControl("Closed Y", key: \.closedY, expanded: false)
-            Button("Reset offsets") { appearance.surface.offsets = SurfaceOffsets() }
-        }
-        Section("Context interface position") {
-            Text("These offsets apply only to Context Interfaces. They do not move the normal opened dashboard. Positive X moves right; positive Y moves down.").font(.caption).foregroundStyle(.secondary)
-            PreciseSlider(title: "Context X", value: $contextOffsetX, range: -1000...1000, step: 1, suffix: "pt")
-            PreciseSlider(title: "Context Y", value: $contextOffsetY, range: -1000...1000, step: 1, suffix: "pt")
-            Button("Reset context position") { contextOffsetX = 0; contextOffsetY = 0 }
-        }
-        Section("Shape") {
-            Toggle("Use surface style contour", isOn: Binding(get: { appearance.surface.useStyleContour ?? true }, set: { appearance.surface.useStyleContour = $0 }))
-            Text("Turn off to use a custom contour below.").font(.caption)
-            Picker("Contour", selection: Binding(get: { appearance.surface.shape }, set: { appearance.surface.shape = $0; appearance.surface.useStyleContour = false })) { ForEach(SurfaceShapeKind.allCases) { Text($0.rawValue).tag($0) } }
-            if appearance.surface.shape == .asymmetric {
-                PreciseSlider(title: "Top corners", value: $appearance.surface.topRadius, range: 0...64, step: 1, suffix: "pt")
-                PreciseSlider(title: "Bottom corners", value: $appearance.surface.bottomRadius, range: 0...64, step: 1, suffix: "pt")
+            Section("Position offsets") {
+                Text("Positive X moves right; positive Y moves down. Each state has independent offsets.").font(.caption)
+                offsetControl("Opened X", key: \.openedX, expanded: true)
+                offsetControl("Opened Y", key: \.openedY, expanded: true)
+                offsetControl("Closed X", key: \.closedX, expanded: false)
+                offsetControl("Closed Y", key: \.closedY, expanded: false)
+                Button("Reset offsets") { appearance.surface.offsets = SurfaceOffsets() }
             }
-            if [.scoop, .chamfer, .tapered].contains(appearance.surface.shape) {
-                PreciseSlider(title: "Shoulder / cut depth", value: $appearance.surface.shoulder, range: 0...48, step: 1, suffix: "pt")
+            Section("Context interface position") {
+                Text("These offsets apply only to Context Interfaces. They do not move the normal opened dashboard. Positive X moves right; positive Y moves down.").font(.caption).foregroundStyle(.secondary)
+                PreciseSlider(title: "Context X", value: $contextOffsetX, range: -1000...1000, step: 1, suffix: "pt")
+                PreciseSlider(title: "Context Y", value: $contextOffsetY, range: -1000...1000, step: 1, suffix: "pt")
+                Button("Reset context position") { contextOffsetX = 0; contextOffsetY = 0 }
             }
-            HaloContour(kind: appearance.surface.shape, radius: theme.cornerRadius, topRadius: appearance.surface.topRadius,
-                        bottomRadius: appearance.surface.bottomRadius, shoulder: appearance.surface.shoulder)
-                .fill(Color(hue: theme.tint, saturation: 0.6, brightness: 0.5)).frame(height: 80)
-                .accessibilityLabel("\(appearance.surface.shape.rawValue) preview")
+            Section("Shape") {
+                Toggle("Use surface style contour", isOn: Binding(get: { appearance.surface.useStyleContour ?? true }, set: { appearance.surface.useStyleContour = $0 }))
+                Text("Turn off to use a custom contour below.").font(.caption)
+                Picker("Contour", selection: Binding(get: { appearance.surface.shape }, set: { appearance.surface.shape = $0; appearance.surface.useStyleContour = false })) { ForEach(SurfaceShapeKind.allCases) { Text($0.rawValue).tag($0) } }
+                if appearance.surface.shape == .asymmetric {
+                    PreciseSlider(title: "Top corners", value: $appearance.surface.topRadius, range: 0...64, step: 1, suffix: "pt")
+                    PreciseSlider(title: "Bottom corners", value: $appearance.surface.bottomRadius, range: 0...64, step: 1, suffix: "pt")
+                }
+                if [.scoop, .chamfer, .tapered].contains(appearance.surface.shape) {
+                    PreciseSlider(title: "Shoulder / cut depth", value: $appearance.surface.shoulder, range: 0...48, step: 1, suffix: "pt")
+                }
+                HaloContour(kind: appearance.surface.shape, radius: theme.cornerRadius, topRadius: appearance.surface.topRadius,
+                            bottomRadius: appearance.surface.bottomRadius, shoulder: appearance.surface.shoulder)
+                    .fill(Color(hue: theme.tint, saturation: 0.6, brightness: 0.5)).frame(height: 80)
+                    .accessibilityLabel("\(appearance.surface.shape.rawValue) preview")
+            }
         }
-        Section("Transitions") {
-            Picker("Opening", selection: $appearance.surface.opening) { ForEach(SurfaceTransition.allCases) { Text($0.rawValue).tag($0) } }
-            Picker("Closing", selection: $appearance.surface.closing) { ForEach(SurfaceTransition.allCases) { Text($0.rawValue).tag($0) } }
-            PreciseSlider(title: "Duration", value: $appearance.surface.duration, range: 0.1...1.2, step: 0.05, suffix: "s", decimals: 2)
-            if appearance.surface.opening == .spring || appearance.surface.closing == .spring {
-                PreciseSlider(title: "Spring damping", value: $appearance.surface.damping, range: 0.4...1, step: 0.05, decimals: 2)
-                Text("Lower damping adds bounce; higher damping settles sooner.").font(.caption)
+
+        if scope == .all || scope == .motion {
+            Section("Transitions") {
+                Picker("Opening", selection: $appearance.surface.opening) { ForEach(SurfaceTransition.allCases) { Text($0.rawValue).tag($0) } }
+                Picker("Closing", selection: $appearance.surface.closing) { ForEach(SurfaceTransition.allCases) { Text($0.rawValue).tag($0) } }
+                PreciseSlider(title: "Duration", value: $appearance.surface.duration, range: 0.1...1.2, step: 0.05, suffix: "s", decimals: 2)
+                if appearance.surface.opening == .spring || appearance.surface.closing == .spring {
+                    PreciseSlider(title: "Spring damping", value: $appearance.surface.damping, range: 0.4...1, step: 0.05, decimals: 2)
+                    Text("Lower damping adds bounce; higher damping settles sooner.").font(.caption)
+                }
+                Text("Reduce Motion and the animation-off setting make transitions immediate.").font(.caption).foregroundStyle(.secondary)
             }
-            Text("Reduce Motion and the animation-off setting make transitions immediate.").font(.caption).foregroundStyle(.secondary)
         }
     }
 

@@ -78,6 +78,8 @@ struct DisplayOverride: Codable, Identifiable, Equatable {
     var enabled = true
     var theme = Theme()
     var layout: WorkspaceLayout?
+    // When set, this display follows the saved profile live instead of keeping a copied layout.
+    var profileID: UUID?
 }
 struct WorkspaceLayout: Codable, Equatable {
     var contextMusic: ContextMusicOptions?

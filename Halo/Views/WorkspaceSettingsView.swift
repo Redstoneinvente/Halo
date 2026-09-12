@@ -112,49 +112,7 @@ struct SettingsView: View {
             }
         case "Account & License": HaloAccountLicenseSettingsView()
         case "Schedules": ScheduleSettingsView(workspace: workspace)
-        case "Appearance":
-            Section("Expanded dashboard") {
-                Toggle("Keep closed-notch contents visible when opened", isOn: $keepClosedContentsWhenOpen)
-                Text("Keeps the normal Closed Notch widgets and media visible in the top strip when Halo's regular dashboard is open. Context Interfaces use their own setting.").font(.caption).foregroundStyle(.secondary)
-                Toggle("Horizontal widget layout", isOn: Binding(get: { workspace.settings.layout.horizontalWidgets ?? false }, set: { workspace.settings.layout.horizontalWidgets = $0 }))
-                if workspace.settings.layout.horizontalWidgets ?? false {
-                    Picker("Navigation", selection: Binding(get: { workspace.settings.layout.horizontalPages ?? false }, set: { workspace.settings.layout.horizontalPages = $0 })) {
-                        Text("Scroll").tag(false); Text("Pages").tag(true)
-                    }.pickerStyle(.segmented)
-                    Slider(value: Binding(get: { workspace.settings.layout.horizontalHeight ?? 260 }, set: { workspace.settings.layout.horizontalHeight = $0 }), in: 200...500) { Text("Horizontal dashboard height") }
-                }
-                Text("Arrange widgets in a sideways-scrolling row. Turn off for the original vertical layout. Widget order and customizations apply to both.").font(.caption).foregroundStyle(.secondary)
-            }
-            Picker("Surface", selection: $store.configuration.theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
-            Slider(value: $store.configuration.theme.width, in: 340...640, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Expanded width") }
-            Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 280...800, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Expanded height") }
-            SurfaceAppearanceControls(appearance: $workspace.settings.layout.appearance, theme: store.configuration.theme, screen: NSScreen.screens.first)
-            Slider(value: $store.configuration.theme.cornerRadius, in: 0...48) { Text("Corner radius") }
-            Slider(value: $workspace.settings.layout.appearance.spacing, in: 4...28) { Text("Module spacing") }
-            Slider(value: $store.configuration.theme.tint, in: 0...1) { Text("Accent hue") }
-            Slider(value: $store.configuration.theme.opacity, in: 0.5...1) { Text("Opacity") }
-            Section("Background") {
-                Picker("Type", selection: Binding(get: { workspace.settings.layout.appearance.background.rawValue }, set: { if let v = BackgroundKind(rawValue: $0) { workspace.settings.layout.appearance.background = v } })) {
-                    ForEach(BackgroundKind.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0.rawValue) }
-                }
-                Button("Choose image or video…") { workspace.chooseBackground() }
-                Text(workspace.settings.layout.appearance.assetPath.isEmpty ? "No background file selected" : URL(fileURLWithPath: workspace.settings.layout.appearance.assetPath).lastPathComponent).font(.caption)
-                if workspace.settings.layout.appearance.background == .glass {
-                    Text("Glass blurs the desktop behind Halo. Opacity adjusts its tint; macOS controls the backdrop blur. Reduce Transparency replaces glass with a solid background.").font(.caption)
-                } else {
-                    Slider(value: $workspace.settings.layout.appearance.blur, in: 0...20) { Text("Blur") }
-                    Slider(value: $workspace.settings.layout.appearance.saturation, in: 0...2) { Text("Saturation") }
-                    Slider(value: $workspace.settings.layout.appearance.brightness, in: -0.5...0.5) { Text("Brightness") }
-                }
-                GrainSettingsView(options: Binding(get: { workspace.settings.layout.appearance.grain ?? GrainOptions() }, set: { workspace.settings.layout.appearance.grain = $0 }))
-                Toggle("Pause video on battery", isOn: $workspace.settings.layout.appearance.pauseVideoOnBattery)
-                Text("Video is muted, loops, and pauses when collapsed. Large videos and blur increase GPU use. Background files are referenced in place.").font(.caption)
-            }
-            Toggle("Animate expansion", isOn: $store.configuration.theme.animations)
-            Picker("Animation timing", selection: Binding(get: { workspace.settings.layout.appearance.animation.rawValue }, set: { if let v = AnimationPreset(rawValue: $0) { workspace.settings.layout.appearance.animation = v } })) {
-                ForEach(AnimationPreset.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0.rawValue) }
-            }
-            HStack { Button("Import theme…") { store.importTheme() }; Button("Export theme…") { store.exportTheme() }; Button("Reset") { store.configuration.theme = Theme(); workspace.settings.layout.appearance = Appearance() } }
+        case "Appearance": AppearanceSettingsPane(store: store, workspace: workspace)
         case "Widgets": WidgetSettingsView(layout: $workspace.settings.layout)
         case "Closed notch": ClosedNotchSettingsView(layout: $workspace.settings.layout, media: workspace.media, app: workspace.settings.mediaApp)
         case "HUD": HaloHUDWorkspaceSettingsView(layout: $workspace.settings.layout, profileNames: workspace.settings.profiles.map(\.name))
@@ -240,25 +198,7 @@ struct SettingsView: View {
             }
             Button("Add rule") { if let profile = workspace.settings.profiles.first { workspace.settings.rules.append(AutomationRule(profileID: profile.id)) } }.disabled(workspace.settings.profiles.isEmpty)
             Text("Values: app bundle ID; battery percentage; charging true/false; display count; local hour 0–23. Rules do not restore the previous profile.").font(.caption)
-        case "Displays":
-            Toggle("Show on all displays", isOn: $store.configuration.allDisplays)
-            ForEach(NSScreen.screens, id: \.localizedName) { screen in
-                let id = WindowManager.displayID(screen)
-                Section(screen.localizedName) {
-                    if let index = workspace.settings.displays.firstIndex(where: { $0.id == id }) {
-                        Toggle("Show Halo here", isOn: $workspace.settings.displays[index].enabled)
-                        Picker("Style", selection: $workspace.settings.displays[index].theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
-                        Slider(value: $workspace.settings.displays[index].theme.width, in: 340...640, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0, display: screen) }) { Text("Width") }
-                        Slider(value: $workspace.settings.displays[index].theme.tint, in: 0...1) { Text("Accent") }
-                        Menu("Use a profile on this display") { ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.settings.displays[index].theme = profile.theme; workspace.settings.displays[index].layout = profile.layout } } }
-                        Button("Follow global modules and background") { workspace.settings.displays[index].layout = nil }
-                        if workspace.settings.displays[index].layout != nil {
-                            SurfaceAppearanceControls(appearance: Binding(get: { workspace.settings.displays[index].layout?.appearance ?? workspace.settings.layout.appearance }, set: { workspace.settings.displays[index].layout?.appearance = $0 }), theme: workspace.settings.displays[index].theme, screen: screen)
-                        } else { Button("Customize closed size, shape and transitions here") { workspace.settings.displays[index].layout = workspace.settings.layout } }
-                        Button("Use global theme") { workspace.settings.displays.removeAll { $0.id == id } }
-                    } else { Button("Customize this display") { workspace.settings.displays.append(DisplayOverride(id: id, theme: store.configuration.theme)) } }
-                }
-            }
+        case "Displays": DisplaySettingsPane(store: store, workspace: workspace)
         case "Plugins":
             Text("Declarative plugins add URL commands to the launcher. Each command requires confirmation. Native executable plugins are not loaded.")
             Button("Import plugin manifest…") { workspace.importPlugin() }
@@ -277,6 +217,179 @@ struct SettingsView: View {
                 Text("This direct-distribution build is not sandboxed. Files and notes are stored locally.")
             }
         default: HaloAboutView()
+        }
+    }
+}
+
+private enum HaloAppearancePage: String, CaseIterable, Identifiable {
+    case basics = "Basics"
+    case surface = "Surface"
+    case background = "Background"
+    case motion = "Motion"
+    var id: String { rawValue }
+}
+
+@MainActor private struct AppearanceSettingsPane: View {
+    @ObservedObject var store: AppStore
+    @ObservedObject var workspace: WorkspaceStore
+    @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
+    @State private var page: HaloAppearancePage = .basics
+
+    var body: some View {
+        Picker("Appearance area", selection: $page) {
+            ForEach(HaloAppearancePage.allCases) { Text($0.rawValue).tag($0) }
+        }
+        .pickerStyle(.segmented)
+
+        switch page {
+        case .basics: basics
+        case .surface: surface
+        case .background: background
+        case .motion: motion
+        }
+    }
+
+    @ViewBuilder private var basics: some View {
+        Section("Expanded dashboard") {
+            Toggle("Keep closed-notch contents visible when opened", isOn: $keepClosedContentsWhenOpen)
+            Text("Keeps the normal Closed Notch widgets and media visible in the top strip when Halo's regular dashboard is open. Context Interfaces use their own setting.").font(.caption).foregroundStyle(.secondary)
+            Toggle("Horizontal widget layout", isOn: Binding(get: { workspace.settings.layout.horizontalWidgets ?? false }, set: { workspace.settings.layout.horizontalWidgets = $0 }))
+            if workspace.settings.layout.horizontalWidgets ?? false {
+                Picker("Navigation", selection: Binding(get: { workspace.settings.layout.horizontalPages ?? false }, set: { workspace.settings.layout.horizontalPages = $0 })) {
+                    Text("Scroll").tag(false); Text("Pages").tag(true)
+                }.pickerStyle(.segmented)
+                Slider(value: Binding(get: { workspace.settings.layout.horizontalHeight ?? 260 }, set: { workspace.settings.layout.horizontalHeight = $0 }), in: 200...500) { Text("Horizontal dashboard height") }
+            }
+            Text("Arrange widgets in a sideways-scrolling row. Turn off for the original vertical layout. Widget order and customizations apply to both.").font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Surface basics") {
+            Picker("Surface", selection: $store.configuration.theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
+            Slider(value: $store.configuration.theme.width, in: 340...640, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Expanded width") }
+            Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 280...800, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Expanded height") }
+            Slider(value: $store.configuration.theme.cornerRadius, in: 0...48) { Text("Corner radius") }
+            Slider(value: $workspace.settings.layout.appearance.spacing, in: 4...28) { Text("Module spacing") }
+            Slider(value: $store.configuration.theme.tint, in: 0...1) { Text("Accent hue") }
+            Slider(value: $store.configuration.theme.opacity, in: 0.5...1) { Text("Opacity") }
+        }
+    }
+
+    @ViewBuilder private var surface: some View {
+        SurfaceAppearanceControls(
+            appearance: $workspace.settings.layout.appearance,
+            theme: store.configuration.theme,
+            screen: NSScreen.main ?? NSScreen.screens.first,
+            scope: .geometry
+        )
+    }
+
+    @ViewBuilder private var background: some View {
+        SurfaceAppearanceControls(
+            appearance: $workspace.settings.layout.appearance,
+            theme: store.configuration.theme,
+            screen: NSScreen.main ?? NSScreen.screens.first,
+            scope: .background
+        )
+        Section("Background effects") {
+            if workspace.settings.layout.appearance.background == .glass {
+                Text("Glass blurs the desktop behind Halo. Opacity adjusts its tint; macOS controls the backdrop blur. Reduce Transparency replaces glass with a solid background.").font(.caption)
+            } else {
+                Slider(value: $workspace.settings.layout.appearance.blur, in: 0...20) { Text("Blur") }
+                Slider(value: $workspace.settings.layout.appearance.saturation, in: 0...2) { Text("Saturation") }
+                Slider(value: $workspace.settings.layout.appearance.brightness, in: -0.5...0.5) { Text("Brightness") }
+            }
+            GrainSettingsView(options: Binding(get: { workspace.settings.layout.appearance.grain ?? GrainOptions() }, set: { workspace.settings.layout.appearance.grain = $0 }))
+            Toggle("Pause video on battery", isOn: $workspace.settings.layout.appearance.pauseVideoOnBattery)
+            Text("Video is muted, loops, and pauses when collapsed. Large videos and blur increase GPU use. Background files are referenced in place.").font(.caption)
+        }
+    }
+
+    @ViewBuilder private var motion: some View {
+        Section("Animation") {
+            Toggle("Animate expansion", isOn: $store.configuration.theme.animations)
+            Picker("Animation timing", selection: Binding(get: { workspace.settings.layout.appearance.animation.rawValue }, set: { if let v = AnimationPreset(rawValue: $0) { workspace.settings.layout.appearance.animation = v } })) {
+                ForEach(AnimationPreset.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0.rawValue) }
+            }
+        }
+        SurfaceAppearanceControls(
+            appearance: $workspace.settings.layout.appearance,
+            theme: store.configuration.theme,
+            screen: NSScreen.main ?? NSScreen.screens.first,
+            scope: .motion
+        )
+        Section("Theme tools") {
+            HStack {
+                Button("Import theme…") { store.importTheme() }
+                Button("Export theme…") { store.exportTheme() }
+                Button("Reset") { store.configuration.theme = Theme(); workspace.settings.layout.appearance = Appearance() }
+            }
+        }
+    }
+}
+
+@MainActor private struct DisplaySettingsPane: View {
+    @ObservedObject var store: AppStore
+    @ObservedObject var workspace: WorkspaceStore
+
+    var body: some View {
+        Toggle("Show on all displays", isOn: $store.configuration.allDisplays)
+        ForEach(NSScreen.screens, id: \.localizedName) { screen in
+            let id = WindowManager.displayID(screen)
+            Section(screen.localizedName) {
+                if let index = workspace.settings.displays.firstIndex(where: { $0.id == id }) {
+                    Toggle("Show Halo here", isOn: $workspace.settings.displays[index].enabled)
+                    if let profileID = workspace.settings.displays[index].profileID,
+                       let profile = workspace.settings.profiles.first(where: { $0.id == profileID }) {
+                        Picker("Display profile", selection: Binding(
+                            get: { workspace.settings.displays[index].profileID ?? profileID },
+                            set: { workspace.settings.displays[index].profileID = $0 }
+                        )) {
+                            ForEach(workspace.settings.profiles) { Text($0.name).tag($0.id) }
+                        }
+                        Text("This display follows \(profile.name) live. Editing that profile updates this display too.").font(.caption).foregroundStyle(.secondary)
+                        Button("Customize this display instead") {
+                            workspace.settings.displays[index].theme = profile.theme
+                            workspace.settings.displays[index].layout = profile.layout
+                            workspace.settings.displays[index].profileID = nil
+                        }
+                        Button("Follow global profile") { workspace.settings.displays.removeAll { $0.id == id } }
+                    } else {
+                        Picker("Style", selection: $workspace.settings.displays[index].theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
+                        Slider(value: $workspace.settings.displays[index].theme.width, in: 340...640, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0, display: screen) }) { Text("Width") }
+                        Slider(value: $workspace.settings.displays[index].theme.tint, in: 0...1) { Text("Accent") }
+                        Menu("Use a profile on this display") {
+                            ForEach(workspace.settings.profiles) { profile in
+                                Button(profile.name) {
+                                    workspace.settings.displays[index].profileID = profile.id
+                                    workspace.settings.displays[index].theme = profile.theme
+                                    workspace.settings.displays[index].layout = nil
+                                }
+                            }
+                        }
+                        Button("Follow global modules and background") {
+                            workspace.settings.displays[index].profileID = nil
+                            workspace.settings.displays[index].layout = nil
+                        }
+                        if workspace.settings.displays[index].layout != nil {
+                            SurfaceAppearanceControls(
+                                appearance: Binding(
+                                    get: { workspace.settings.displays[index].layout?.appearance ?? workspace.settings.layout.appearance },
+                                    set: { workspace.settings.displays[index].layout?.appearance = $0 }
+                                ),
+                                theme: workspace.settings.displays[index].theme,
+                                screen: screen,
+                                scope: .geometry
+                            )
+                        } else {
+                            Button("Customize closed size, shape and position here") {
+                                workspace.settings.displays[index].layout = workspace.settings.layout
+                            }
+                        }
+                        Button("Use global theme") { workspace.settings.displays.removeAll { $0.id == id } }
+                    }
+                } else {
+                    Button("Customize this display") { workspace.settings.displays.append(DisplayOverride(id: id, theme: store.configuration.theme)) }
+                }
+            }
         }
     }
 }
