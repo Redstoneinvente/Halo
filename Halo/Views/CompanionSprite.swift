@@ -854,12 +854,9 @@ private struct ArcShape: Shape {
 
 private extension Color {
     func mixed(with other: Color, amount: CGFloat) -> Color {
-        let a = max(0, min(1, amount))
+        let fraction = max(0, min(1, amount))
         let lhs = NSColor(self).usingColorSpace(.deviceRGB) ?? .white
         let rhs = NSColor(other).usingColorSpace(.deviceRGB) ?? .white
-        return Color(red: lhs.redComponent * (1 - a) + rhs.redComponent * a,
-                     green: lhs.greenComponent * (1 - a) + rhs.greenComponent * a,
-                     blue: lhs.blueComponent * (1 - a) + rhs.blueComponent * a,
-                     opacity: lhs.alphaComponent * (1 - a) + rhs.alphaComponent * a)
+        return Color(nsColor: lhs.blended(withFraction: fraction, of: rhs) ?? lhs)
     }
 }
