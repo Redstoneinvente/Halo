@@ -225,11 +225,21 @@ struct EIOpenSurface: View {
             ZStack(alignment: .bottom) {
                 EIHabitatDetails(preferences: preferences.value, environment: engine.environment)
                     .allowsHitTesting(false)
-                EIPetAvatar(size: min(220, max(120, size.height * 0.58)), walking: false)
-                    .offset(y: -max(8, size.height * 0.055))
-                    .onTapGesture { engine.interact(.petPat) }
+
+                if let peekMotion = physicalNotchPeekMotion {
+                    EIPhysicalNotchPetPeek(surfaceState: surfaceState, motion: peekMotion)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                        .zIndex(12)
+                } else {
+                    EIPetAvatar(size: min(220, max(120, size.height * 0.58)), walking: false)
+                        .offset(y: -max(8, size.height * 0.055))
+                        .onTapGesture { engine.interact(.petPat) }
+                        .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                }
                 petActions.padding(.bottom, 13)
             }
+            .animation(.easeInOut(duration: 0.20), value: physicalNotchPeekMotion != nil)
         case .plant:
             ZStack(alignment: .bottom) {
                 EIHabitatDetails(preferences: preferences.value, environment: engine.environment)
@@ -255,6 +265,20 @@ struct EIOpenSurface: View {
                     .padding(.top, 28)
                 cityActions.padding(.bottom, 12)
             }
+        }
+    }
+
+    private var physicalNotchPeekMotion: HaloCompanionMotion? {
+        guard let kind = engine.currentReaction?.kind else { return nil }
+        switch kind {
+        case .petPeekEyes: return .peekEyes
+        case .petPeekEars: return .peekEars
+        case .petPeekUnder: return .peek
+        case .petPeekLeft: return .peekLeft
+        case .petPeekRight: return .peekRight
+        case .petPawFirst: return .paw
+        case .petTailFirst: return .tail
+        default: return nil
         }
     }
 
@@ -445,6 +469,101 @@ private struct EIQuickEditor: View {
 }
 
 // MARK: - Roaming pet
+
+@MainActor
+private struct EIPhysicalNotchPetPeek: View {
+    @ObservedObject var surfaceState: SurfaceState
+    let motion: HaloCompanionMotion
+    @ObservedObject private var preferences = EIOpenPreferencesStore.shared
+    @ObservedObject private var settings = EISettingsStore.shared
+
+    var body: some View {
+        GeometryReader { proxy in
+            let hardwareWidth = resolvedNotchWidth(in: proxy.size)
+            let hardwareHeight = resolvedNotchHeight()
+            let spriteSize = min(164, max(112, hardwareWidth * 0.82))
+            let center = CGPoint(x: horizontalCenter(in: proxy.size, notchWidth: hardwareWidth, spriteSize: spriteSize),
+                                 y: verticalCenter(notchHeight: hardwareHeight, spriteSize: spriteSize))
+
+            HaloCompanionSprite(kind: settings.settings.petKind,
+                                style: preferences.value.petVisual == .pixel ? .smooth : preferences.value.petVisual,
+                                size: spriteSize,
+                                primary: settings.settings.petPrimaryColor.color,
+                                accent: settings.settings.petAccentColor.color,
+                                motion: motion,
+                                facingRight: motion != .peekRight)
+                .position(center)
+                .mask {
+                    physicalNotchVisibilityMask(size: proxy.size,
+                                                notchWidth: hardwareWidth,
+                                                notchHeight: hardwareHeight)
+                }
+                .shadow(color: .black.opacity(0.16), radius: 5, y: 2)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func resolvedNotchWidth(in size: CGSize) -> CGFloat {
+        if let occlusion = surfaceState.closedOcclusion, occlusion.width > 20 {
+            return min(size.width * 0.72, max(90, occlusion.width))
+        }
+        return min(210, max(140, size.width * 0.34))
+    }
+
+    private func resolvedNotchHeight() -> CGFloat {
+        if let occlusion = surfaceState.closedOcclusion, occlusion.height > 8 {
+            return min(54, max(22, occlusion.height))
+        }
+        return 32
+    }
+
+    private func horizontalCenter(in size: CGSize, notchWidth: CGFloat, spriteSize: CGFloat) -> CGFloat {
+        switch motion {
+        case .peekLeft:
+            return size.width / 2 - notchWidth / 2 - spriteSize * 0.20
+        case .peekRight:
+            return size.width / 2 + notchWidth / 2 + spriteSize * 0.20
+        case .tail:
+            return size.width / 2 + notchWidth * 0.22
+        default:
+            return size.width / 2
+        }
+    }
+
+    private func verticalCenter(notchHeight: CGFloat, spriteSize: CGFloat) -> CGFloat {
+        switch motion {
+        case .peekLeft, .peekRight:
+            return max(notchHeight * 0.70, spriteSize * 0.25)
+        case .peekEyes:
+            return notchHeight + spriteSize * 0.20
+        case .peekEars:
+            return notchHeight + spriteSize * 0.24
+        case .paw:
+            return notchHeight + spriteSize * 0.30
+        case .tail:
+            return notchHeight + spriteSize * 0.18
+        default:
+            return notchHeight + spriteSize * 0.28
+        }
+    }
+
+    /// Visible pixels are the actual screen around the camera housing. The central top rectangle is
+    /// removed from the mask, so the pet can genuinely travel behind the MacBook's physical notch.
+    @ViewBuilder
+    private func physicalNotchVisibilityMask(size: CGSize, notchWidth: CGFloat, notchHeight: CGFloat) -> some View {
+        let sideWidth = max(0, (size.width - notchWidth) / 2)
+        ZStack(alignment: .topLeading) {
+            Rectangle()
+                .frame(width: size.width, height: max(0, size.height - notchHeight))
+                .offset(y: notchHeight)
+            Rectangle().frame(width: sideWidth, height: notchHeight)
+            Rectangle()
+                .frame(width: sideWidth, height: notchHeight)
+                .offset(x: sideWidth + notchWidth)
+        }
+    }
+}
 
 @MainActor
 struct EIRoamingPetView: View {

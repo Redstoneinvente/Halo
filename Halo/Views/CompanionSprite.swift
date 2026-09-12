@@ -93,29 +93,33 @@ final class HaloPetV2Library: @unchecked Sendable {
             let atlasURL = rootURL.appendingPathComponent(species).appendingPathComponent("\(atlasName).png")
             guard let source = CGImageSourceCreateWithURL(atlasURL as CFURL, nil),
                   let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
-            let rows = max(1, definitions.map(\.row).max().map { $0 + 1 } ?? 1)
             let columns = max(1, manifest.columns)
+            let cellWidth = max(1, manifest.cellSize.width)
+            let cellHeight = max(1, manifest.cellSize.height)
+            let expectedWidth = columns * cellWidth
+            guard image.width >= expectedWidth else { return nil }
 
             for definition in definitions {
                 guard let animation = HaloPetAnimation(rawValue: definition.id) else { continue }
+                let authoredTop = definition.row * cellHeight
+                guard authoredTop >= 0, authoredTop + cellHeight <= image.height else { continue }
+
                 var frames: [CGImage] = []
                 frames.reserveCapacity(manifest.generatedKeyframesPerAnimation)
                 for column in 0..<manifest.generatedKeyframesPerAnimation {
-                    // Normalized cell boundaries keep slicing robust even if a future export is not
-                    // exactly 200 px per cell. Atlas rows are authored top-to-bottom and CGImage
-                    // cropping here uses the same top-left raster convention.
-                    let nx0 = CGFloat(column) / CGFloat(columns)
-                    let nx1 = CGFloat(column + 1) / CGFloat(columns)
-                    let ny0 = CGFloat(definition.row) / CGFloat(rows)
-                    let ny1 = CGFloat(definition.row + 1) / CGFloat(rows)
-                    let x0 = Int((nx0 * CGFloat(image.width)).rounded(.down))
-                    let x1 = Int((nx1 * CGFloat(image.width)).rounded(.down))
-                    let y0 = Int((ny0 * CGFloat(image.height)).rounded(.down))
-                    let y1 = Int((ny1 * CGFloat(image.height)).rounded(.down))
-                    let rect = CGRect(x: x0, y: y0, width: max(1, x1 - x0), height: max(1, y1 - y0))
-                    guard let frame = image.cropping(to: rect) else { return nil }
+                    let x = column * cellWidth
+                    guard x + cellWidth <= image.width else { break }
+
+                    // The manifest is authored top-to-bottom, while CGImage crop rectangles use
+                    // Core Graphics' bottom-origin image space. Convert the authored row explicitly.
+                    // Using the fixed 200x200 manifest cell is also important: dividing by the PNG's
+                    // total height makes a single export-padding pixel corrupt every row below it.
+                    let y = image.height - authoredTop - cellHeight
+                    let rect = CGRect(x: x, y: y, width: cellWidth, height: cellHeight)
+                    guard let frame = image.cropping(to: rect) else { continue }
                     frames.append(frame)
                 }
+                guard !frames.isEmpty else { continue }
                 result[animation] = HaloPetAnimationClip(
                     animation: animation,
                     frames: frames,
@@ -368,31 +372,10 @@ struct HaloCompanionSprite: View {
             .interpolation(.high)
             .scaledToFit()
             .scaleEffect(x: mirror ? -1 : 1, y: 1, anchor: .center)
-            .mask(alignment: notchMaskAlignment(for: animation)) {
-                Rectangle()
-                    .frame(width: size, height: size * 0.92 * notchRevealAmount(for: animation))
-            }
+            // Notch interaction sheets already contain the authored body reveal. Do not crop them
+            // a second time here: the real physical-notch host supplies the hardware occlusion mask.
             .shadow(color: Color.black.opacity(shadowOpacity(for: animation)), radius: max(1, size * 0.014), y: max(1, size * 0.008))
-    }
-
-    private func notchMaskAlignment(for animation: HaloPetAnimation) -> Alignment {
-        switch animation {
-        case .peekFromLeft: return .leading
-        case .peekFromRight: return .trailing
-        default: return .bottom
-        }
-    }
-
-    private func notchRevealAmount(for animation: HaloPetAnimation) -> CGFloat {
-        // V2 notch sheets already encode the partial-body composition. Clipping remains here so the
-        // sprite can sit against Halo's real notch boundary without drawing a fake ledge.
-        switch animation {
-        case .eyesPeekUp: return 0.34
-        case .headPeekUp: return 0.52
-        case .pawsOnLedge: return 0.72
-        case .tailReveal: return 0.58
-        default: return 1
-        }
+            .compositingGroup()
     }
 
     private func shadowOpacity(for animation: HaloPetAnimation) -> Double {
