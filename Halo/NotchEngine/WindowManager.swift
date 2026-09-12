@@ -540,7 +540,7 @@ final class WindowManager {
     private func powerReaction(options: ClosedNotchOptions,
                                items: (left: ClosedNotchItem, right: ClosedNotchItem),
                                compactHeight: Double)
-        -> (side: DynamicSide, badgeWidth: Double, minimumSideWidth: Double)? {
+        -> (side: DynamicSide, badgeWidth: Double, notchMargin: Double, extraSpace: Double)? {
         let settings = options.powerReaction ?? PowerReactionOptions()
         guard settings.isEnabled, let battery = store.workspace.system.battery else { return nil }
         let style: PowerReactionStyle
@@ -617,11 +617,8 @@ final class WindowManager {
         }()
         let hasSibling = itemIsVisible(targetItem) ||
             (targetDecoration?.isVisible(playing: playing) ?? false) || hasArtworkSibling
-        let minimumSideWidth = settings.expandForEvent && !hasSibling
-            ? max(badgeWidth, settings.eventWidth)
-            : badgeWidth
-
-        return (side, badgeWidth, minimumSideWidth)
+        let extraSpace = settings.expandForEvent && !hasSibling ? settings.resolvedExtraEventSpace : 0
+        return (side, badgeWidth, settings.resolvedNotchMargin, extraSpace)
     }
 
     private func configureDynamicWidth(_ host: Host) {
@@ -742,7 +739,7 @@ final class WindowManager {
 
     private func fittedClosedSides(host: Host, layout: WorkspaceLayout,
                                    items: (left: ClosedNotchItem, right: ClosedNotchItem),
-                                   power: (side: DynamicSide, badgeWidth: Double, minimumSideWidth: Double)?) ->
+                                   power: (side: DynamicSide, badgeWidth: Double, notchMargin: Double, extraSpace: Double)?) ->
         (left: Double, right: Double, decorationLeft: Double, decorationRight: Double) {
         guard let geometry = host.geometry else { return (0, 0, 0, 0) }
         let options = layout.closedNotch ?? ClosedNotchOptions()
@@ -871,13 +868,21 @@ final class WindowManager {
         }
 
         if let power {
+            // A power event sits nearest the camera. Replace the generic camera margin with the
+            // power-specific margin, then add only the badge's measured width. This keeps tiny
+            // icon-only events tight to the notch instead of reserving the old 96 pt container.
+            func withPower(_ existing: Double) -> Double {
+                let base: Double
+                if existing > 0 {
+                    base = max(0, existing - options.contentSideMargin) + elementGap
+                } else {
+                    base = 2 * options.contentPaddingX + options.contentOuterMargin
+                }
+                return base + power.notchMargin + power.badgeWidth + power.extraSpace
+            }
             switch power.side {
-            case .left:
-                let withBadge = leftFull > 0 ? leftFull + elementGap + power.badgeWidth : slotMargins + power.badgeWidth
-                leftFull = max(withBadge, power.minimumSideWidth)
-            case .right:
-                let withBadge = rightFull > 0 ? rightFull + elementGap + power.badgeWidth : slotMargins + power.badgeWidth
-                rightFull = max(withBadge, power.minimumSideWidth)
+            case .left: leftFull = withPower(leftFull)
+            case .right: rightFull = withPower(rightFull)
             }
         }
         return (leftFull, rightFull, left.decoration, right.decoration)

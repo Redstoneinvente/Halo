@@ -321,8 +321,19 @@ struct ClosedNotchSettingsView: View {
                 Picker("Low battery", selection: power.low) { powerStyles() }
                 Picker("Charged", selection: power.charged) { powerStyles() }
                 PreciseSlider(title: "Low battery threshold", value: Binding(get: { Double(power.wrappedValue.lowThreshold) }, set: { power.wrappedValue.lowThreshold = Int($0) }), range: 5...50, step: 1, suffix: "%")
+                PreciseSlider(title: "Margin from notch", value: Binding(
+                    get: { power.wrappedValue.resolvedNotchMargin },
+                    set: { power.wrappedValue.notchMargin = $0 }
+                ), range: 0...48, step: 1, suffix: "pt")
                 Toggle("Expand for power events", isOn: power.expandForEvent)
-                if power.wrappedValue.expandForEvent { PreciseSlider(title: "Power event width", value: power.eventWidth, range: 48...240, step: 1, suffix: "pt") }
+                if power.wrappedValue.expandForEvent {
+                    PreciseSlider(title: "Extra event space", value: Binding(
+                        get: { power.wrappedValue.resolvedExtraEventSpace },
+                        set: { power.wrappedValue.extraEventSpace = $0 }
+                    ), range: 0...120, step: 1, suffix: "pt")
+                    Text("Power events size to their visible content. Extra event space is optional breathing room and no longer forces a large default wing.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Toggle("Dynamic color by battery level", isOn: Binding(get: { power.wrappedValue.usesDynamicColor }, set: { power.wrappedValue.dynamicColor = $0 }))
                 if power.wrappedValue.usesDynamicColor {
                     ColorPicker("Low battery color", selection: Binding(get: { power.wrappedValue.resolvedLowColor.color }, set: { power.wrappedValue.lowColor = WidgetColor($0) }), supportsOpacity: false)

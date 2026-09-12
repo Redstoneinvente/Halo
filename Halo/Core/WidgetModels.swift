@@ -189,7 +189,13 @@ struct PowerReactionOptions: Codable, Equatable {
     var low: PowerReactionStyle = .iconPercent
     var charged: PowerReactionStyle = .icon
     var expandForEvent = true
+    // Legacy field retained so older saved profiles continue to decode. Power events are now
+    // content-sized instead of forcing this value as a minimum wing width.
     var eventWidth = 96.0
+    var notchMargin: Double?
+    var extraEventSpace: Double?
+    var resolvedNotchMargin: Double { min(48, max(0, notchMargin ?? 4)) }
+    var resolvedExtraEventSpace: Double { min(120, max(0, extraEventSpace ?? 0)) }
     var color = WidgetColor.accent
     var dynamicColor: Bool?
     var usesDynamicColor: Bool { dynamicColor ?? false }
@@ -200,10 +206,12 @@ struct PowerReactionOptions: Codable, Equatable {
     var resolvedMidColor: WidgetColor { midColor ?? WidgetColor(red: 1.0, green: 0.72, blue: 0.12) }
     var resolvedHighColor: WidgetColor { highColor ?? WidgetColor(red: 0.28, green: 0.92, blue: 0.42) }
     func validated() throws -> PowerReactionOptions {
-        guard eventWidth.isFinite else { throw CocoaError(.fileReadCorruptFile) }
+        guard [eventWidth, notchMargin ?? 4, extraEventSpace ?? 0].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
         v.lowThreshold = min(50, max(5, lowThreshold))
         v.eventWidth = min(240, max(48, eventWidth))
+        if notchMargin != nil { v.notchMargin = resolvedNotchMargin }
+        if extraEventSpace != nil { v.extraEventSpace = resolvedExtraEventSpace }
         v.color = try color.validated()
         if lowColor != nil { v.lowColor = try resolvedLowColor.validated() }
         if midColor != nil { v.midColor = try resolvedMidColor.validated() }

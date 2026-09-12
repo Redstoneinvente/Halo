@@ -290,7 +290,7 @@ struct ClosedNotchSlot: View {
     private let elementSpacing = 6.0
     private var activeActivity: LiveActivity? { activity }
     private var innerHeight: Double { max(1, availableHeight - 2 * options.contentPaddingY) }
-    private var innerWidth: Double { max(1, availableWidth - 2 * options.contentPaddingX - options.contentSideMargin - options.contentOuterMargin) }
+    private var innerWidth: Double { max(1, availableWidth - 2 * options.contentPaddingX - slotCameraMargin - options.contentOuterMargin) }
     private var isMusicItem: Bool { item == .media || item == .visualizer }
     private var itemIsVisible: Bool {
         if isMusicItem { return media.isPlaying }
@@ -338,6 +338,11 @@ struct ClosedNotchSlot: View {
         }
     }
     private var showPowerEvent: Bool { powerTargetSide == side }
+    private var powerSettings: PowerReactionOptions { options.powerReaction ?? PowerReactionOptions() }
+    private var powerNotchMargin: Double { powerSettings.resolvedNotchMargin }
+    // Power is always the element nearest the physical camera. When it is visible, its own
+    // notch margin replaces the generic closed-notch side margin instead of stacking on top.
+    private var slotCameraMargin: Double { showPowerEvent ? 0 : options.contentSideMargin }
     private var decorationSize: Double {
         guard let decoration, decoration.isVisible(playing: media.isPlaying) else { return 0 }
         return min(decoration.size, min(innerHeight, itemIsVisible ? innerWidth / 3 : innerWidth))
@@ -345,9 +350,6 @@ struct ClosedNotchSlot: View {
     private var textSize: Double { min(options.fontSize, innerHeight / 1.25) }
     private var powerTextSize: Double { min(textSize, max(9, innerHeight * 0.46)) }
     private var powerIconWidth: Double { max(12, powerTextSize + 2) }
-    private var powerSlotMargins: Double {
-        2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
-    }
     private func powerTextWidth(_ value: String, monospaced: Bool = false) -> Double {
         let font = monospaced
             ? NSFont.monospacedDigitSystemFont(ofSize: powerTextSize, weight: .semibold)
@@ -421,16 +423,15 @@ struct ClosedNotchSlot: View {
     }
     private var powerUsesEventContainer: Bool {
         guard showPowerEvent else { return false }
-        let settings = options.powerReaction ?? PowerReactionOptions()
-        return settings.expandForEvent && !itemIsVisible && decorationSize <= 0 && artworkFootprint <= 0 && hudReservedWidth <= 0
+        return powerSettings.expandForEvent && !itemIsVisible && decorationSize <= 0 && artworkFootprint <= 0 && hudReservedWidth <= 0
     }
     private var powerFootprint: Double {
         guard showPowerEvent else { return 0 }
         let natural = max(16, naturalPowerWidth)
-        guard powerUsesEventContainer else { return min(innerWidth, natural) }
-        let settings = options.powerReaction ?? PowerReactionOptions()
-        let targetContentWidth = max(natural, settings.eventWidth - powerSlotMargins)
-        return min(innerWidth, targetContentWidth)
+        let extra = powerUsesEventContainer ? powerSettings.resolvedExtraEventSpace : 0
+        // The footprint is content-driven. The old eventWidth no longer creates a large empty
+        // container that centers a tiny icon far away from the camera cutout.
+        return min(innerWidth, natural + powerNotchMargin + extra)
     }
     private var mediaSiblingFootprint: Double {
         var widths: [Double] = []
@@ -492,7 +493,7 @@ struct ClosedNotchSlot: View {
         .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
         .padding(.horizontal, options.contentPaddingX)
         .padding(.vertical, options.contentPaddingY)
-        .padding(side == .left ? .trailing : .leading, options.contentSideMargin)
+        .padding(side == .left ? .trailing : .leading, slotCameraMargin)
         .padding(side == .left ? .leading : .trailing, options.contentOuterMargin)
         .frame(width: availableWidth, height: availableHeight, alignment: .center)
         .clipped()
@@ -556,10 +557,10 @@ struct ClosedNotchSlot: View {
                 options: options.powerReaction ?? PowerReactionOptions(),
                 side: side,
                 textSize: powerTextSize,
-                centered: powerUsesEventContainer
+                notchMargin: powerNotchMargin
             )
             .frame(width: powerFootprint, height: innerHeight,
-                   alignment: powerUsesEventContainer ? .center : (side == .left ? .trailing : .leading))
+                   alignment: side == .left ? .trailing : .leading)
             .clipped()
             .layoutPriority(2)
         }
@@ -878,11 +879,9 @@ private struct PowerEventBadge: View {
     let options: PowerReactionOptions
     let side: ClosedNotchSide
     let textSize: Double
-    let centered: Bool
+    let notchMargin: Double
 
-    private var contentAlignment: Alignment {
-        centered ? .center : (side == .left ? .trailing : .leading)
-    }
+    private var contentAlignment: Alignment { side == .left ? .trailing : .leading }
     private var iconWidth: Double { max(12, textSize + 2) }
 
     var body: some View {
@@ -919,8 +918,9 @@ private struct PowerEventBadge: View {
         .font(.system(size: textSize, weight: .semibold))
         .lineLimit(1)
         .minimumScaleFactor(0.82)
+        .padding(side == .left ? .trailing : .leading, notchMargin)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: contentAlignment)
-        .padding(.horizontal, 1)
+        .padding(side == .left ? .leading : .trailing, 1)
         .foregroundStyle(powerColor)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(event.label), \(event.battery) percent")
