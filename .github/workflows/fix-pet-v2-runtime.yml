@@ -1,0 +1,35 @@
+name: Fix Pet V2 Runtime
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-pet-v2-runtime.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply runtime fix
+        run: python3 .github/scripts/fix_pet_v2_runtime.py
+      - name: Verify fix
+        run: |
+          grep -q 'kind.rawValue.lowercased()' Halo/Views/CompanionSprite.swift
+          grep -q 'DispatchQueue.main.async' Halo/Views/CompanionSprite.swift
+      - name: Build Halo
+        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build
+      - name: Commit fix
+        run: |
+          git config user.name "Doshagyasing Gowardun"
+          git config user.email "45894815+Redstoneinvente@users.noreply.github.com"
+          git add Halo/Views/CompanionSprite.swift
+          if ! git diff --cached --quiet; then
+            git commit -m "fix: restore halo pets v2 runtime rendering"
+            git push origin main
+          fi
