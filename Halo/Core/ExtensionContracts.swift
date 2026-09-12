@@ -177,7 +177,7 @@ struct EIOpenSurface: View {
                         .foregroundStyle(preferences.value.accent.color.opacity(0.82))
                     Spacer()
                     Button { ui.editing.toggle() } label: {
-                        Image(systemName: ui.editing ? "slider.horizontal.3" : "slider.horizontal.3")
+                        Image(systemName: "slider.horizontal.3")
                     }
                     .buttonStyle(.plain)
                     .help(ui.editing ? "EI Studio is open" : "Open EI Studio")
@@ -192,7 +192,8 @@ struct EIOpenSurface: View {
                     HStack {
                         Spacer()
                         EIQuickEditor()
-                            .frame(width: min(350, proxy.size.width * 0.52), maxHeight: proxy.size.height - 24)
+                            .frame(width: min(350, proxy.size.width * 0.52))
+                            .frame(maxHeight: max(120, proxy.size.height - 24))
                             .padding(12)
                     }
                     .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -227,8 +228,7 @@ struct EIOpenSurface: View {
                 EIPetAvatar(size: min(220, max(120, size.height * 0.58)), walking: false)
                     .offset(y: -max(8, size.height * 0.055))
                     .onTapGesture { engine.interact(.petPat) }
-                petActions
-                    .padding(.bottom, 13)
+                petActions.padding(.bottom, 13)
             }
         case .plant:
             ZStack(alignment: .bottom) {
