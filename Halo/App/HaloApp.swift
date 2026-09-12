@@ -21,17 +21,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var status: NSStatusItem?
     private var settings: NSWindow?
     private var hudSettings: NSWindow?
-    private var welcome: NSWindow?
     private var commercialBag = Set<AnyCancellable>()
-    private var runtimeStarted = false
-    private let welcomeCompletedKey = "HaloCommercialWelcomeCompleted"
-
-    private var commercialCredentialsValid: Bool {
-        HaloAccountManager.shared.isSignedIn && HaloLicenseManager.shared.state.isValid
-    }
+    private var licensedServicesStarted = false
 
     private var commercialAccessGranted: Bool {
-        commercialCredentialsValid && UserDefaults.standard.bool(forKey: welcomeCompletedKey)
+        HaloAccountManager.shared.isSignedIn && HaloLicenseManager.shared.state.isValid
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -75,10 +69,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
         status?.menu = menu
-
     }
 
     private func configureCommercialAccessGate() {
+        // The panel/geometry engine is always alive. When access is unavailable the router renders
+        // only the black locked notch and the sign-in/license flow; normal Halo content never runs.
+        let manager = WindowManager(store: store)
+        engine = manager
+        manager.start()
+
         Publishers.CombineLatest(
             HaloAccountManager.shared.$isSignedIn.removeDuplicates(),
             HaloLicenseManager.shared.$state.removeDuplicates()
@@ -87,8 +86,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         .sink { [weak self] _, _ in self?.refreshCommercialAccess() }
         .store(in: &commercialBag)
 
-        // Keep the runtime completely dormant until both services have restored and validated.
-        showWelcome()
         Task { @MainActor [weak self] in
             await HaloAccountManager.shared.restore()
             await HaloLicenseManager.shared.restoreAndValidate()
@@ -98,69 +95,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshCommercialAccess() {
         if commercialAccessGranted {
-            welcome?.orderOut(nil)
-            startLicensedRuntime()
+            startLicensedServices()
         } else {
-            stopLicensedRuntime()
-            showWelcome()
+            stopLicensedServices()
         }
     }
 
-    private func startLicensedRuntime() {
-        guard !runtimeStarted else { return }
-        runtimeStarted = true
+    private func startLicensedServices() {
+        guard !licensedServicesStarted else { return }
+        licensedServicesStarted = true
         store.workspace.start()
-        let manager = WindowManager(store: store)
-        engine = manager
-        manager.start()
         let hud = HaloHUDController(audio: store.workspace.audio)
         hudController = hud
         hud.start()
     }
 
-    private func stopLicensedRuntime() {
-        guard runtimeStarted else { return }
-        runtimeStarted = false
+    private func stopLicensedServices() {
+        guard licensedServicesStarted else { return }
+        licensedServicesStarted = false
         hudController?.stop()
         hudController = nil
-        engine?.stop()
-        engine = nil
         store.workspace.stop()
     }
 
-    private func completeWelcome() {
-        guard commercialCredentialsValid else { return }
-        UserDefaults.standard.set(true, forKey: welcomeCompletedKey)
-        refreshCommercialAccess()
-    }
-
-    private func showWelcome() {
-        if welcome == nil {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 640, height: 720),
-                styleMask: [.titled, .closable, .miniaturizable],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "Welcome to Halo"
-            window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: HaloCommercialWelcomeView(
-                firstRun: !UserDefaults.standard.bool(forKey: welcomeCompletedKey),
-                onContinue: { [weak self] in self?.completeWelcome() },
-                openSettings: { [weak self] in self?.openSettings() },
-                quit: { NSApp.terminate(nil) }
-            ))
-            window.center()
-            welcome = window
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        welcome?.makeKeyAndOrderFront(nil)
-    }
-
-    @objc private func toggle() {
-        guard commercialAccessGranted else { showWelcome(); return }
-        engine?.toggleAll()
-    }
+    @objc private func toggle() { engine?.toggleAll() }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func previewVolumeHUD() { postHUDPreview("volume") }
     @objc private func previewBrightnessHUD() { postHUDPreview("brightness") }
@@ -185,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func openHUDSettings() {
+        guard commercialAccessGranted else { engine?.toggleAll(); return }
         if hudSettings == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 790), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = "Halo · HUD"
@@ -199,11 +158,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        stopLicensedRuntime()
+        stopLicensedServices()
+        engine?.stop()
+        engine = nil
         store.flushConfiguration()
     }
 }
 
+#if false
 @MainActor
 private struct HaloCommercialWelcomeView: View {
     @ObservedObject private var account = HaloAccountManager.shared
@@ -351,6 +313,8 @@ private struct HaloCommercialWelcomeView: View {
         .frame(width: 640, height: 720)
     }
 }
+
+#endif
 
 enum HaloHUDKeys {
     static let enabled = "HaloHUDEnabled"

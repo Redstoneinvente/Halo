@@ -54,6 +54,8 @@ struct HaloSurfaceRouter: View {
     @ObservedObject private var eiSettings = EISettingsStore.shared
     @ObservedObject private var engine = EnvironmentalInterfaceEngine.shared
     @ObservedObject private var bluetooth = BluetoothStateService.shared
+    @ObservedObject private var account = HaloAccountManager.shared
+    @ObservedObject private var license = HaloLicenseManager.shared
 
     @AppStorage("HaloContextMusicPriority") private var musicPriority = 60.0
     @AppStorage("HaloContextBluetoothEnabled") private var bluetoothEnabled = false
@@ -81,8 +83,12 @@ struct HaloSurfaceRouter: View {
         }?.0
     }
 
+    private var accessLocked: Bool {
+        !account.isSignedIn || !license.state.isValid
+    }
+
     private var eiOwnsSurface: Bool {
-        state.expanded && ownership.isRequested && eiSettings.settings.mode != .off && activeCI == nil
+        !accessLocked && state.expanded && ownership.isRequested && eiSettings.settings.mode != .off && activeCI == nil
     }
 
     private var effectiveShape: SurfaceShapeKind {
@@ -108,22 +114,29 @@ struct HaloSurfaceRouter: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            SurfaceView(store: store, state: state, workspace: workspace)
-                .opacity(eiOwnsSurface ? 0 : 1)
-                .allowsHitTesting(!eiOwnsSurface)
-                .accessibilityHidden(eiOwnsSurface)
-
-            if eiOwnsSurface {
-                EIOpenSurface(surfaceState: state)
-                    .background(EISurfaceBackdrop(mode: eiSettings.settings.mode,
-                                                  preferences: EIOpenPreferencesStore.shared.value,
-                                                  environment: engine.environment))
+            if accessLocked {
+                HaloLockedAccessSurface(surfaceState: state)
                     .clipShape(contour)
-                    .overlay(contour.stroke(Color.white.opacity(0.11), lineWidth: 1))
                     .contentShape(contour)
-                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
-                    .zIndex(20)
+                    .transition(.opacity)
+                    .zIndex(100)
+            } else {
+                SurfaceView(store: store, state: state, workspace: workspace)
+                    .opacity(eiOwnsSurface ? 0 : 1)
+                    .allowsHitTesting(!eiOwnsSurface)
+                    .accessibilityHidden(eiOwnsSurface)
 
+                if eiOwnsSurface {
+                    EIOpenSurface(surfaceState: state)
+                        .background(EISurfaceBackdrop(mode: eiSettings.settings.mode,
+                                                      preferences: EIOpenPreferencesStore.shared.value,
+                                                      environment: engine.environment))
+                        .clipShape(contour)
+                        .overlay(contour.stroke(Color.white.opacity(0.11), lineWidth: 1))
+                        .contentShape(contour)
+                        .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                        .zIndex(20)
+                }
             }
         }
         .frame(width: viewport.size.width, height: viewport.size.height, alignment: .top)
@@ -135,6 +148,205 @@ struct HaloSurfaceRouter: View {
 
     private func updateAmbientSuppression(_ active: Bool) {
         DispatchQueue.main.async { EnvironmentalInterfaceManager.shared.setOwnedSurfaceActive(active) }
+    }
+}
+
+// MARK: - Commercial lock surface
+
+@MainActor
+private struct HaloLockedAccessSurface: View {
+    @ObservedObject var surfaceState: SurfaceState
+    @ObservedObject private var account = HaloAccountManager.shared
+    @ObservedObject private var license = HaloLicenseManager.shared
+
+    @State private var email = ""
+    @State private var password = ""
+    @State private var licenseKey = ""
+    @State private var creatingAccount = false
+
+    private var preferredSize: CGSize { CGSize(width: 520, height: account.isSignedIn ? 360 : 390) }
+
+    var body: some View {
+        ZStack {
+            Color.black
+
+            if surfaceState.expanded {
+                setupContent
+                    .padding(.horizontal, 30)
+                    .padding(.top, 24)
+                    .padding(.bottom, 22)
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+            }
+        }
+        .foregroundStyle(.white)
+        .onHover { inside in surfaceState.hover(inside, enabled: true) }
+        .onTapGesture {
+            if !surfaceState.expanded { surfaceState.expanded = true }
+        }
+        .onAppear { publishPreferredSize() }
+        .onChange(of: surfaceState.expanded) { _ in publishPreferredSize() }
+        .onChange(of: account.isSignedIn) { _ in publishPreferredSize() }
+        .onDisappear {
+            if !account.isSignedIn || !license.state.isValid { surfaceState.contextPreferredSize = nil }
+        }
+    }
+
+    private var setupContent: some View {
+        VStack(spacing: 18) {
+            header
+
+            if !account.isSignedIn {
+                accountStep
+            } else if !license.state.isValid {
+                licenseStep
+            } else {
+                ProgressView().controlSize(.small)
+                Text("Unlocking Halo…")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.72))
+            }
+
+            Spacer(minLength: 0)
+            Link("Need help? r.support@redstoneinvente.com",
+                 destination: URL(string: "mailto:r.support@redstoneinvente.com")!)
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.55))
+        }
+    }
+
+    private var header: some View {
+        VStack(spacing: 6) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 52, height: 52)
+            Text(account.isSignedIn ? "Activate Halo" : "Welcome to Halo")
+                .font(.system(size: 21, weight: .bold, design: .rounded))
+            Text(account.isSignedIn
+                 ? "Your account is ready. Activate a license to unlock the notch."
+                 : "Sign in or create a Halo account to continue.")
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.62))
+                .multilineTextAlignment(.center)
+        }
+    }
+
+    private var accountStep: some View {
+        VStack(spacing: 12) {
+            Picker("Account", selection: $creatingAccount) {
+                Text("Sign In").tag(false)
+                Text("Create Account").tag(true)
+            }
+            .pickerStyle(.segmented)
+
+            TextField("Email", text: $email)
+                .textFieldStyle(.roundedBorder)
+            SecureField("Password", text: $password)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Button(creatingAccount ? "Create Account" : "Sign In") {
+                    Task {
+                        if creatingAccount {
+                            await account.signUp(email: email, password: password)
+                        } else {
+                            await account.signIn(email: email, password: password)
+                        }
+                        if account.isSignedIn { password = "" }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(account.isBusy || email.isEmpty || password.isEmpty)
+
+                if !creatingAccount {
+                    Button("Forgot Password?") { Task { await account.resetPassword(email: email) } }
+                        .disabled(account.isBusy || email.isEmpty)
+                }
+
+                if account.isBusy { ProgressView().controlSize(.small) }
+            }
+
+            commercialMessages(account.notice, account.errorMessage)
+        }
+        .frame(maxWidth: 430)
+    }
+
+    private var licenseStep: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(account.email.isEmpty ? "Signed in" : account.email)
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(account.emailVerified ? "Email verified" : "Email not verified")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.52))
+                }
+                Spacer()
+                if !account.emailVerified {
+                    Button("Verify Email") { Task { await account.sendVerificationEmail() } }
+                        .controlSize(.small)
+                    Button("Refresh") { Task { await account.refreshVerificationStatus() } }
+                        .controlSize(.small)
+                }
+                Button("Sign Out") { account.signOut() }
+                    .controlSize(.small)
+            }
+
+            Divider().overlay(Color.white.opacity(0.15))
+
+            HStack {
+                Image(systemName: "key.horizontal")
+                    .foregroundStyle(.white.opacity(0.65))
+                Text("License")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text(license.state.title)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.52))
+            }
+
+            SecureField("License key", text: $licenseKey)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Button("Activate License") {
+                    Task {
+                        await license.activate(licenseKey)
+                        if license.state.isValid { licenseKey = "" }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(license.isBusy || licenseKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if !license.licenseHint.isEmpty {
+                    Button("Validate Existing") { Task { await license.validate() } }
+                        .disabled(license.isBusy)
+                    Button("Clear", role: .destructive) { license.clearLocalLicense() }
+                        .disabled(license.isBusy)
+                }
+
+                if license.isBusy { ProgressView().controlSize(.small) }
+            }
+
+            commercialMessages(license.notice, license.errorMessage)
+        }
+        .frame(maxWidth: 450)
+    }
+
+    @ViewBuilder
+    private func commercialMessages(_ notice: String?, _ error: String?) -> some View {
+        if let notice {
+            Text(notice).font(.system(size: 9)).foregroundStyle(.white.opacity(0.58))
+        }
+        if let error {
+            Text(error).font(.system(size: 9)).foregroundStyle(.red.opacity(0.92))
+                .multilineTextAlignment(.center)
+        }
+    }
+
+    private func publishPreferredSize() {
+        surfaceState.contextPreferredSize = surfaceState.expanded ? preferredSize : nil
     }
 }
 
