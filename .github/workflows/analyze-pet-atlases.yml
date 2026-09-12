@@ -20,4 +20,4 @@ jobs:
         with:
           name: pet-atlas-analysis
           path: /tmp/pet-atlas-analysis
-          # optimized alpha-aware extraction preview
+          # row-aware component assignment preview
