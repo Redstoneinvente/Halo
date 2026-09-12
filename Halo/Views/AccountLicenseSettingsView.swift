@@ -181,12 +181,9 @@ struct AccountLicenseSettingsView: View {
                     .foregroundStyle(.orange)
                 activationControls
 
-            case .active(let maskedKey, let device, let activatedAt, let lastValidated, let offline):
+            case .active(let maskedKey, let offline):
                 LabeledContent("License", value: maskedKey)
                 LabeledContent("Mode", value: offline ? "Signed offline grant" : "Online validated")
-                LabeledContent("Activated", value: activatedAt.formatted(date: .abbreviated, time: .shortened))
-                LabeledContent("Last checked", value: lastValidated.formatted(date: .abbreviated, time: .shortened))
-                LabeledContent("Device", value: device)
                 if let next = manager.nextLicenseValidation {
                     LabeledContent("Next check", value: next.formatted(date: .abbreviated, time: .shortened))
                 }
