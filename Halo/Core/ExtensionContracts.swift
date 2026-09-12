@@ -164,7 +164,7 @@ private struct HaloLockedAccessSurface: View {
     @State private var licenseKey = ""
     @State private var creatingAccount = false
 
-    private var preferredSize: CGSize { CGSize(width: 520, height: account.isSignedIn ? 360 : 390) }
+    private var preferredSize: CGSize { CGSize(width: 540, height: account.isSignedIn ? 470 : 390) }
 
     var body: some View {
         ZStack {

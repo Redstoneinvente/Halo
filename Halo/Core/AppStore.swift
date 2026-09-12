@@ -1060,6 +1060,11 @@ struct HaloLicenseDetails: Equatable {
         if let seatLimit { return "\(activeSeats) of \(seatLimit)" }
         return "\(activeSeats)"
     }
+
+    var isTrial: Bool {
+        let normalized = plan.lowercased()
+        return normalized.contains("trial") || normalized.contains("demo")
+    }
 }
 
 @MainActor

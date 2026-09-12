@@ -135,6 +135,7 @@ exports.startHaloTrial = onRequest(
     secrets: [LICENSESEAT_SECRET_KEY],
   },
   async (req, res) => {
+    res.set("Cache-Control", "no-store");
     if (req.method !== "POST") {
       res.set("Allow", "POST");
       res.status(405).json(errorPayload("METHOD_NOT_ALLOWED", "Use POST to start a Halo trial."));

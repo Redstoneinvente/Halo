@@ -1275,7 +1275,8 @@ private struct HaloAccountLicenseSettingsView: View {
                     if !license.details.plan.isEmpty { LabeledContent("Plan", value: license.details.plan) }
                     LabeledContent("Activated Macs", value: license.details.activatedMacsTitle)
                     if let days = license.details.daysRemaining, let expiresAt = license.details.expiresAt {
-                        LabeledContent("Subscription remaining", value: "\(days) day\(days == 1 ? "" : "s")")
+                        LabeledContent(license.details.isTrial ? "Trial remaining" : "Subscription remaining",
+                                       value: "\(days) day\(days == 1 ? "" : "s")")
                         LabeledContent("Expires", value: expiresAt.formatted(date: .abbreviated, time: .omitted))
                     } else {
                         LabeledContent("License term", value: "Lifetime / no expiry reported")
