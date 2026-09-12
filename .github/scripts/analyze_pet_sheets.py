@@ -36,33 +36,31 @@ def component_assignments(im, rows):
         cx=float(gx.mean()); cy=float(gy.mean())
         c,r=nearest_cell(cx,cy,rows)
         bbox=(int(gx.min()),int(gy.min()),int(gx.max()+1),int(gy.max()+1))
+        item=(lab,area,bbox)
         comps.append((lab,area,cx,cy,bbox,r,c))
-        assignments[(r,c)].append((lab,area,bbox))
+        assignments[(r,c)].append(item)
     return arr,labels,assignments,comps
 
+def assigned_bbox(items):
+    items=[x for x in items if x[1]>=20]
+    if not items: return None
+    return (min(x[2][0] for x in items),min(x[2][1] for x in items),
+            max(x[2][2] for x in items),max(x[2][3] for x in items))
+
 def clean_sheet(im, rows, assignments, labels, arr):
-    # Build one canonical coordinate space per animation row. Connected components are assigned
-    # from the whole transparent atlas, so pixels that overflow a nominal 200x200 cell stay with
-    # the correct frame instead of becoming neighbour fragments.
     output=Image.new('RGBA',(cols*cell_w,rows*cell_h),(0,0,0,0))
     previews=Image.new('RGBA',(cols*cell_w,rows*cell_h),(42,42,42,255))
     pd=ImageDraw.Draw(previews)
     for r in range(rows):
-        relative_boxes=[]
-        frame_masks=[]
+        frame_items=[]; relative_boxes=[]
         for c in range(cols):
-            labs=[lab for lab,area,bbox in assignments[(r,c)] if area>=20]
-            mask=np.isin(labels,labs) if labs else np.zeros(labels.shape,dtype=bool)
-            ys,xs=np.nonzero(mask)
-            if len(xs)==0:
-                frame_masks.append((mask,None))
-                continue
-            bbox=(int(xs.min()),int(ys.min()),int(xs.max()+1),int(ys.max()+1))
-            rel=(bbox[0]-c*cell_w,bbox[1]-r*cell_h,bbox[2]-c*cell_w,bbox[3]-r*cell_h)
-            relative_boxes.append(rel)
-            frame_masks.append((mask,bbox))
-        if not relative_boxes:
-            continue
+            items=[x for x in assignments[(r,c)] if x[1]>=20]
+            bbox=assigned_bbox(items)
+            frame_items.append((items,bbox))
+            if bbox:
+                relative_boxes.append((bbox[0]-c*cell_w,bbox[1]-r*cell_h,
+                                       bbox[2]-c*cell_w,bbox[3]-r*cell_h))
+        if not relative_boxes: continue
         ux0=min(b[0] for b in relative_boxes); uy0=min(b[1] for b in relative_boxes)
         ux1=max(b[2] for b in relative_boxes); uy1=max(b[3] for b in relative_boxes)
         union_w=max(1,ux1-ux0); union_h=max(1,uy1-uy0)
@@ -71,15 +69,18 @@ def clean_sheet(im, rows, assignments, labels, arr):
         target_w=max(1,int(round(union_w*scale))); target_h=max(1,int(round(union_h*scale)))
         base_x=(cell_w-target_w)//2; base_y=(cell_h-target_h)//2
         report.append(f'    clean row {r}: union=({ux0},{uy0},{ux1},{uy1}) size={union_w}x{union_h} scale={scale:.3f}')
-        for c,(mask,bbox) in enumerate(frame_masks):
-            if bbox is None: continue
-            # Reconstruct only components assigned to this frame on a canonical row-union canvas.
+        for c,(items,bbox) in enumerate(frame_items):
+            if not items: continue
             canvas=np.zeros((union_h,union_w,4),dtype=np.uint8)
-            ys,xs=np.nonzero(mask)
-            # Convert global pixel positions into row-relative canonical coordinates.
-            lx=xs-c*cell_w-ux0; ly=ys-r*cell_h-uy0
-            valid=(lx>=0)&(ly>=0)&(lx<union_w)&(ly<union_h)
-            canvas[ly[valid],lx[valid]]=arr[ys[valid],xs[valid]]
+            for lab,area,(x0,y0,x1,y1) in items:
+                sub_labels=labels[y0:y1,x0:x1]
+                component=(sub_labels==lab)
+                if not component.any(): continue
+                src=arr[y0:y1,x0:x1]
+                dx=x0-c*cell_w-ux0; dy=y0-r*cell_h-uy0
+                h,w=component.shape
+                dst=canvas[dy:dy+h,dx:dx+w]
+                dst[component]=src[component]
             frame=Image.fromarray(canvas,'RGBA')
             if scale < 0.999:
                 frame=frame.resize((target_w,target_h),Image.Resampling.LANCZOS)
@@ -106,8 +107,7 @@ for species in ['cat','dog','fox']:
                 cell=im.crop((c*cell_w,r*cell_h,(c+1)*cell_w,(r+1)*cell_h))
                 alpha=cell.getchannel('A')
                 mask=alpha.point(lambda a: 255 if a >= 8 else 0)
-                bbox=mask.getbbox()
-                row_boxes.append(bbox)
+                bbox=mask.getbbox(); row_boxes.append(bbox)
                 x=c*cell_w; y=r*cell_h
                 bg=Image.new('RGBA',(cell_w,cell_h),(62,62,62,255)); bg.alpha_composite(cell)
                 sheet.alpha_composite(bg,(x,y))
@@ -118,7 +118,6 @@ for species in ['cat','dog','fox']:
                 dr.text((x+5,y+5),f'{r}:{c}',fill=(255,255,0,255))
             report.append(f"  row {r:02d} {definition['id']}: {row_boxes}")
         sheet.save(out/f'{species}-{atlas_name}.png')
-
         arr,labels,assignments,comps=component_assignments(im,rows)
         report.append(f'  connected components >=8px: {len(comps)}')
         clean,preview=clean_sheet(im,rows,assignments,labels,arr)
