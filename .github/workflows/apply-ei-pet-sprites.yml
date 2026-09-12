@@ -18,18 +18,37 @@ jobs:
           fetch-depth: 0
 
       - name: Apply canonical pet renderer patch
-        run: python3 .github/scripts/apply_ei_pet_sprites.py
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/apply_ei_pet_sprites.py')
+          text = path.read_text()
+          text = text.replace(
+              'enum HaloPetPose: String, CaseIterable, Identifiable {',
+              'enum HaloPetPose: String, CaseIterable, Identifiable, Hashable {'
+          )
+          path.write_text(text)
+          PY
+          python3 .github/scripts/apply_ei_pet_sprites.py
 
       - name: Verify patch formatting
         run: git diff --check
 
-      - name: Build Halo
-        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+      - name: Build Halo arm64
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS,arch=arm64' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build 2>&1 | tee /tmp/halo-build.log || {
+            echo '--- Relevant compiler diagnostics ---'
+            grep -nE 'error:|CompanionSprite\.swift|ExtensionContracts\.swift' /tmp/halo-build.log | tail -220 || true
+            exit 65
+          }
 
       - name: Commit validated renderer
         shell: bash
         run: |
-          if git diff --quiet; then
+          if git diff --quiet -- Halo/Views/CompanionSprite.swift Halo/Core/ExtensionContracts.swift; then
             echo "No source changes to commit"
             exit 0
           fi
