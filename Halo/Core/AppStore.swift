@@ -211,34 +211,15 @@ final class EIOpenPreferencesStore: ObservableObject {
     @Published var editing = false
 }
 
-/// Owns EI's explicit "open" state. The owned EI view is inserted directly inside HaloPanel's
-/// content hierarchy, so there is a single normal opened-notch window: CI first, EI second,
-/// regular dashboard third. Only roaming pets use their own borderless panels so they can leave Halo.
+/// Tracks EI's explicit ownership request, roaming pet state and CI safe regions.
+/// The actual owned EI is rendered by HaloSurfaceRouter in the normal SwiftUI surface tree.
 @MainActor
 final class EnvironmentalInterfaceOwnershipController: ObservableObject {
     static let shared = EnvironmentalInterfaceOwnershipController()
 
-    @MainActor private final class SurfaceHost {
-        weak var panel: HaloPanel?
-        let ownedView: NSHostingView<AnyView>
+    private struct SurfaceSnapshot {
         var frame = CGRect.zero
         var screenID = ""
-
-        init(panel: HaloPanel) {
-            self.panel = panel
-            ownedView = NSHostingView(rootView: AnyView(EIOpenSurface()))
-            ownedView.sizingOptions = []
-            ownedView.wantsLayer = true
-            ownedView.layer?.backgroundColor = NSColor.clear.cgColor
-            ownedView.isHidden = true
-            if let content = panel.contentView {
-                ownedView.frame = content.bounds
-                ownedView.autoresizingMask = [.width, .height]
-                content.addSubview(ownedView, positioned: .above, relativeTo: nil)
-            }
-        }
-
-        func detach() { ownedView.removeFromSuperview() }
     }
 
     @MainActor private final class RoamHost {
@@ -269,7 +250,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
     private var started = false
     @Published private(set) var requested = false
     private var expandedByEI = false
-    private var hosts: [ObjectIdentifier: SurfaceHost] = [:]
+    private var surfaces: [ObjectIdentifier: SurfaceSnapshot] = [:]
     private var roam: [String: RoamHost] = [:]
     private var bag = Set<AnyCancellable>()
     private var step = 0
@@ -277,93 +258,140 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
     private let hotkey = HotkeyService(identifierID: 4, notificationName: .init("HaloEnvironmentalInterfaceToggle"))
 
     var isRequested: Bool { requested }
+    var ciOwnsSurface: Bool { activeCI() != nil }
 
     func start(workspace: WorkspaceStore) {
         self.workspace = workspace
-        guard !started else { refresh(); return }
+        guard !started else {
+            deferRefresh(animatedRoaming: false)
+            return
+        }
         started = true
 
         NotificationCenter.default.publisher(for: .init("HaloPanelGeometryChanged"))
             .receive(on: RunLoop.main)
-            .sink { [weak self] in self?.geometry($0) }
+            .sink { [weak self] note in self?.geometry(note) }
             .store(in: &bag)
         NotificationCenter.default.publisher(for: .init("HaloEnvironmentalInterfaceToggle"))
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.toggle() }
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { self?.toggleNow() }
+            }
             .store(in: &bag)
         NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] note in
                 guard let panel = note.object as? HaloPanel else { return }
                 let id = ObjectIdentifier(panel)
-                if let host = self?.hosts.removeValue(forKey: id) {
-                    if !host.screenID.isEmpty { EIPlacementRegistry.shared.set(nil, for: host.screenID) }
-                    host.detach()
+                if let surface = self?.surfaces.removeValue(forKey: id), !surface.screenID.isEmpty {
+                    EIPlacementRegistry.shared.set(nil, for: surface.screenID)
                 }
             }
             .store(in: &bag)
 
         EIOpenPreferencesStore.shared.$value.removeDuplicates()
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.hotkeyUpdate(); self?.refresh(); self?.roaming(true) }
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.hotkeyUpdate()
+                    self?.refreshPlacements()
+                    self?.roaming(true)
+                }
+            }
             .store(in: &bag)
         EISettingsStore.shared.$settings.removeDuplicates()
             .receive(on: RunLoop.main)
             .sink { [weak self] settings in
-                if settings.mode == .off, self?.requested == true { self?.close() }
-                self?.refresh(); self?.roaming(true)
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if settings.mode == .off, self.requested { self.closeNow() }
+                    self.refreshPlacements()
+                    self.roaming(true)
+                }
             }
             .store(in: &bag)
         EnvironmentalInterfaceEngine.shared.objectWillChange
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.refresh(); self?.roaming(false) } }
+            .sink { [weak self] _ in self?.deferRefresh(animatedRoaming: false) }
             .store(in: &bag)
         workspace.media.objectWillChange.merge(with: workspace.bluetooth.objectWillChange)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.refresh() } }
+            .sink { [weak self] _ in self?.deferRefresh(animatedRoaming: false) }
             .store(in: &bag)
         workspace.$settings
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.refresh() } }
+            .sink { [weak self] _ in self?.deferRefresh(animatedRoaming: false) }
             .store(in: &bag)
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.refresh() }
+            .sink { [weak self] _ in self?.deferRefresh(animatedRoaming: false) }
             .store(in: &bag)
         Timer.publish(every: 6, on: .main, in: .common).autoconnect()
-            .sink { [weak self] _ in self?.step &+= 1; self?.roaming(true) }
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.step &+= 1
+                self.roaming(true)
+            }
             .store(in: &bag)
 
         hotkeyUpdate()
-        refresh()
+        refreshPlacements()
+        roaming(false)
     }
 
     func open(editor: Bool = false) {
-        if editor { EIOpenUI.shared.editing = true }
-        if !requested { toggle() }
-    }
-
-    func close() {
-        guard requested else { return }
-        requested = false
-        EIOpenUI.shared.editing = false
-        let collapse = expandedByEI && !hasCI()
-        expandedByEI = false
-        hosts.values.forEach { $0.ownedView.isHidden = true }
-        roaming(true)
-        if collapse {
-            DispatchQueue.main.async { NotificationCenter.default.post(name: .init("HaloToggle"), object: nil) }
+        DispatchQueue.main.async { [weak self] in
+            self?.openNow(editor: editor)
         }
     }
 
-    private func toggle() {
+    func close() {
+        DispatchQueue.main.async { [weak self] in
+            self?.closeNow()
+        }
+    }
+
+    private func openNow(editor: Bool) {
         guard EISettingsStore.shared.settings.mode != .off else { NSSound.beep(); return }
-        if requested { close(); return }
+        if editor { EIOpenUI.shared.editing = true }
+        guard !requested else { return }
         requested = true
-        expandedByEI = hosts.isEmpty || hosts.values.allSatisfy { $0.frame.height <= 82 }
-        if expandedByEI { NotificationCenter.default.post(name: .init("HaloToggle"), object: nil) }
-        refresh()
+        expandedByEI = surfaces.isEmpty || surfaces.values.allSatisfy { $0.frame.height <= 82 }
+        if expandedByEI {
+            NotificationCenter.default.post(name: .init("HaloToggle"), object: nil)
+        }
+        refreshPlacements()
         roaming(false)
+    }
+
+    private func closeNow() {
+        guard requested else {
+            EIOpenUI.shared.editing = false
+            return
+        }
+        let shouldCollapse = expandedByEI && !ciOwnsSurface
+        requested = false
+        EIOpenUI.shared.editing = false
+        expandedByEI = false
+        refreshPlacements()
+        roaming(true)
+        if shouldCollapse {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .init("HaloToggle"), object: nil)
+            }
+        }
+    }
+
+    private func toggleNow() {
+        if requested { closeNow() }
+        else { openNow(editor: false) }
+    }
+
+    private func deferRefresh(animatedRoaming: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshPlacements()
+            self?.roaming(animatedRoaming)
+        }
     }
 
     private func hotkeyUpdate() {
@@ -379,37 +407,17 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
         guard let panel = note.object as? HaloPanel,
               let frame = note.userInfo?["frame"] as? CGRect else { return }
         let id = ObjectIdentifier(panel)
-        let host = hosts[id] ?? SurfaceHost(panel: panel)
-        hosts[id] = host
-        host.frame = frame
-        if let screenID = note.userInfo?["screen"] as? String { host.screenID = screenID }
-        if let content = panel.contentView, host.ownedView.superview !== content {
-            host.ownedView.removeFromSuperview()
-            host.ownedView.frame = content.bounds
-            host.ownedView.autoresizingMask = [.width, .height]
-            content.addSubview(host.ownedView, positioned: .above, relativeTo: nil)
-        }
-        publishPlacement(for: host)
-        refresh(host)
+        var snapshot = surfaces[id] ?? SurfaceSnapshot()
+        snapshot.frame = frame
+        if let screenID = note.userInfo?["screen"] as? String { snapshot.screenID = screenID }
+        surfaces[id] = snapshot
+        publishPlacement(for: snapshot)
         roaming(false)
     }
 
-    private func refresh() {
-        hosts.values.forEach {
-            publishPlacement(for: $0)
-            refresh($0)
-        }
+    private func refreshPlacements() {
+        for surface in surfaces.values { publishPlacement(for: surface) }
     }
-
-    private func refresh(_ host: SurfaceHost) {
-        let shouldOwn = requested && EISettingsStore.shared.settings.mode != .off && !hasCI() && host.frame.height > 82
-        guard let content = host.panel?.contentView else { host.ownedView.isHidden = true; return }
-        host.ownedView.frame = content.bounds
-        host.ownedView.isHidden = !shouldOwn
-        if shouldOwn { content.addSubview(host.ownedView, positioned: .above, relativeTo: nil) }
-    }
-
-    private func hasCI() -> Bool { activeCI() != nil }
 
     /// Mirrors SurfaceView's CI arbitration so the hand-tuned EI safe region always belongs to
     /// the same CI that actually owns Halo.
@@ -438,14 +446,14 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
     /// Each CI exposes a different safe silhouette. These regions are deliberately conservative:
     /// EI may decorate edges and corners, but should not overlap player controls, Bluetooth rows,
     /// or the Retro game board.
-    private func publishPlacement(for host: SurfaceHost) {
-        guard !host.screenID.isEmpty, host.frame.width > 80, host.frame.height > 82,
+    private func publishPlacement(for surface: SurfaceSnapshot) {
+        guard !surface.screenID.isEmpty, surface.frame.width > 80, surface.frame.height > 82,
               let owner = activeCI() else {
-            if !host.screenID.isEmpty { EIPlacementRegistry.shared.set(nil, for: host.screenID) }
+            if !surface.screenID.isEmpty { EIPlacementRegistry.shared.set(nil, for: surface.screenID) }
             return
         }
-        let width = host.frame.width
-        let height = host.frame.height
+        let width = surface.frame.width
+        let height = surface.frame.height
         let context: EIPlacementContext
         switch owner {
         case .music:
@@ -486,7 +494,7 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
                 contentExclusionRegions: [CGRect(x: 14, y: max(40, height * 0.12), width: max(1, width - 28), height: max(96, height * 0.74))]
             )
         }
-        EIPlacementRegistry.shared.set(context, for: host.screenID)
+        EIPlacementRegistry.shared.set(context, for: surface.screenID)
     }
 
     private func roaming(_ animated: Bool) {
