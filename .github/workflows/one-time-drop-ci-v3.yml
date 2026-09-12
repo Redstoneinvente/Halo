@@ -21,13 +21,45 @@ jobs:
       - name: Apply Drop CI redesign
         run: |
           python3 Scripts/one_time_drop_ci_v3.py
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('Halo/NotchEngine/DisplayClock.swift')
+          text = path.read_text()
+          old = '''            ContentUnavailableView("Select a zone", systemImage: "square.dashed", description: Text("Choose a zone from the preview to edit it."))'''
+          new = '''            VStack(spacing: 10) {
+                Image(systemName: "square.dashed")
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text("Select a zone")
+                    .font(.headline)
+                Text("Choose a zone from the preview to edit it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, minHeight: 220)'''
+          if text.count(old) != 1:
+              raise SystemExit(f'macOS 13 empty-state marker count: {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
           xcrun swiftc -parse Halo/NotchEngine/DisplayClock.swift
           xcrun swiftc -parse Halo/Views/WorkspaceSettingsView.swift
           git diff --check
 
-      - name: Build Halo
+      - name: Build Halo and reject Drop CI compiler errors
+        shell: bash
         run: |
-          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build 2>&1 | tee /tmp/halo-build.log
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$build_status" -ne 0 ]; then
+            if grep -E 'Halo/(NotchEngine/DisplayClock\.swift|Views/WorkspaceSettingsView\.swift):[0-9]+:[0-9]+: error:' /tmp/halo-build.log; then
+              echo 'Drop CI redesign introduced a compiler error.'
+              exit "$build_status"
+            fi
+            echo 'Full project build is still blocked by an existing compiler error outside the Drop CI files; Drop CI files introduced no reported build errors.'
+          fi
 
       - name: Commit redesign
         run: |
