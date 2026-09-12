@@ -26,15 +26,60 @@ final class SurfaceState: ObservableObject {
     @Published var dropTargeted = false
     @Published var dropItemCount = 0
     var collapseTask: Task<Void, Never>?
+    var dropExitTask: Task<Void, Never>?
     var editingGeometry = false
+
+    func beginFileDrop(count: Int) {
+        dropExitTask?.cancel()
+        collapseTask?.cancel()
+        let nextCount = max(1, count)
+        if dropItemCount != nextCount { dropItemCount = nextCount }
+        if !dropTargeted { dropTargeted = true }
+        if !expanded { expanded = true }
+    }
+
+    func endFileDrop(collapseAfterDelay: Bool = true) {
+        dropExitTask?.cancel()
+        dropExitTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.dropTargeted = false
+            self.dropItemCount = 0
+            guard collapseAfterDelay, !self.pinned, !self.editingGeometry else { return }
+            self.collapseTask?.cancel()
+            self.collapseTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 420_000_000)
+                guard !Task.isCancelled, let self, !self.pinned, !self.editingGeometry, !self.dropTargeted else { return }
+                self.expanded = false
+            }
+        }
+    }
+
+    func completeFileDrop() {
+        dropExitTask?.cancel()
+        dropTargeted = false
+        dropItemCount = 0
+        guard !pinned, !editingGeometry else { return }
+        collapseTask?.cancel()
+        collapseTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            guard !Task.isCancelled, let self, !self.pinned, !self.editingGeometry, !self.dropTargeted else { return }
+            self.expanded = false
+        }
+    }
+
     func hover(_ inside: Bool, enabled: Bool) {
         collapseTask?.cancel()
         guard enabled, !editingGeometry else { return }
+        if dropTargeted {
+            if inside && !expanded { expanded = true }
+            return
+        }
         if inside { expanded = true }
         else if !pinned {
             collapseTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 450_000_000)
-                guard !Task.isCancelled, let self, !self.pinned, !self.editingGeometry else { return }
+                guard !Task.isCancelled, let self, !self.pinned, !self.editingGeometry, !self.dropTargeted else { return }
                 self.expanded = false
             }
         }
@@ -44,6 +89,69 @@ final class SurfaceState: ObservableObject {
 final class HaloPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+}
+
+@MainActor
+final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
+    var dragStateHandler: ((Bool, Int) -> Void)?
+    var dropHandler: (([URL]) -> Void)?
+
+    required init(rootView: Content) {
+        super.init(rootView: rootView)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func fileURLCount(_ sender: NSDraggingInfo) -> Int {
+        sender.draggingPasteboard.pasteboardItems?.reduce(into: 0) { count, item in
+            if item.availableType(from: [.fileURL]) != nil { count += 1 }
+        } ?? 0
+    }
+
+    private func fileURLs(_ sender: NSDraggingInfo) -> [URL] {
+        let objects = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) ?? []
+        return objects.compactMap { object in
+            guard let url = object as? NSURL else { return nil }
+            return url as URL
+        }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let count = fileURLCount(sender)
+        guard count > 0 else { return [] }
+        dragStateHandler?(true, count)
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let count = fileURLCount(sender)
+        guard count > 0 else { return [] }
+        dragStateHandler?(true, count)
+        return .copy
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        dragStateHandler?(false, 0)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = fileURLs(sender)
+        guard !urls.isEmpty else {
+            dragStateHandler?(false, 0)
+            return false
+        }
+        dropHandler?(urls)
+        return true
+    }
+
+    override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+        dragStateHandler?(false, 0)
+    }
 }
 
 @MainActor
@@ -188,7 +296,8 @@ final class WindowManager {
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         }
         func stop() {
-            animator.cancel(); state.collapseTask?.cancel(); subscription?.cancel(); contextSizeSubscription?.cancel(); panel.close()
+            animator.cancel(); state.collapseTask?.cancel(); state.dropExitTask?.cancel()
+            subscription?.cancel(); contextSizeSubscription?.cancel(); panel.close()
         }
     }
 
@@ -1153,8 +1262,24 @@ final class WindowManager {
                                              state: host.state,
                                              workspace: store.workspace)
                     .environment(\.haloScreenFrame, screen.frame)
-                let view = NSHostingView(rootView: root)
+                let view = HaloDropHostingView(rootView: root)
                 view.sizingOptions = []
+                view.dragStateHandler = { [weak host] active, count in
+                    guard let host else { return }
+                    let defaults = UserDefaults.standard
+                    let ciEnabled = defaults.object(forKey: "HaloContextDropEnabled") == nil
+                        ? true : defaults.bool(forKey: "HaloContextDropEnabled")
+                    if active && ciEnabled {
+                        host.state.beginFileDrop(count: count)
+                    } else if host.state.dropTargeted {
+                        host.state.endFileDrop(collapseAfterDelay: true)
+                    }
+                }
+                view.dropHandler = { [weak self, weak host] urls in
+                    guard let self, let host else { return }
+                    host.state.completeFileDrop()
+                    self.store.addFiles(urls)
+                }
                 host.panel.contentView = view
                 host.subscription = host.state.$expanded.dropFirst().removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self, weak host] expanded in
                     guard let self, let host, let geometry = host.geometry else { return }

@@ -129,7 +129,12 @@ struct WidgetSettingsView: View {
             PreciseSlider(title: "Corner radius", value: style.cornerRadius, range: 0...40, step: 1, suffix: "pt")
             Toggle("Fill available width", isOn: Binding(get: { style.wrappedValue.width == 0 }, set: { style.wrappedValue.width = $0 ? 0 : 280 }))
             if style.wrappedValue.width > 0 { PreciseSlider(title: "Maximum width", value: style.width, range: 120...640, step: 1, suffix: "pt") }
-            PreciseSlider(title: "Minimum height", value: style.minimumHeight, range: 0...400, step: 1, suffix: "pt")
+            if layout.horizontalWidgets ?? false {
+                Text("Horizontal widgets use the dashboard's fixed horizontal height, so per-widget minimum height does not apply in this layout mode.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                PreciseSlider(title: "Minimum height", value: style.minimumHeight, range: 0...400, step: 1, suffix: "pt")
+            }
             Divider()
             ColorPicker("Border color", selection: Binding(get: { chrome.wrappedValue.borderColor.color }, set: { chrome.wrappedValue.borderColor = WidgetColor($0) }), supportsOpacity: false)
             PreciseSlider(title: "Border opacity", value: chrome.borderOpacity, range: 0...1, step: 0.05, decimals: 2)
@@ -186,6 +191,7 @@ struct WidgetSettingsView: View {
                 Toggle("Show source", isOn: content.mediaShowSource)
                 Toggle("Show artist", isOn: content.mediaShowArtist)
                 Toggle("Show playback controls", isOn: content.showControls)
+                Toggle("Show Retry detection", isOn: content.showQuickActions)
                 Toggle("Show errors / status", isOn: content.showStatus)
                 PreciseSlider(title: "Title lines", value: Binding(get: { Double(content.wrappedValue.mediaTitleLines) }, set: { content.wrappedValue.mediaTitleLines = Int($0) }), range: 1...4, step: 1)
             }

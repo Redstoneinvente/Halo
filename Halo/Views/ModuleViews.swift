@@ -55,7 +55,7 @@ struct IntegrationModuleView: View {
                 HStack(spacing: options.spacing) {
                     VStack(alignment: options.alignment.horizontal, spacing: max(2, options.spacing * 0.35)) {
                         Text(activity.title)
-                        if options.activitiesShowDetail && options.showSecondaryText && !activity.detail.isEmpty {
+                        if options.activitiesShowDetail && !activity.detail.isEmpty {
                             Text(activity.detail).font(style.font(scale: 0.85)).foregroundStyle(.secondary)
                         }
                         if options.showProgress, let progress = activity.progress { ProgressView(value: progress) }
@@ -92,7 +92,7 @@ struct CaptureModuleView: View {
     var body: some View {
         let options = style.resolvedContent
         VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
-            if options.captureShowHelp && options.showSecondaryText { Text("Capture asks for Screen Recording access.").font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
+            if options.captureShowHelp { Text("Capture asks for Screen Recording access.").font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
             if options.showControls {
                 HStack(spacing: options.spacing) {
                     Button("Capture region…") { service.capture { store.addFiles([$0]) } }
@@ -121,20 +121,24 @@ struct MediaModuleView: View {
         let options = style.resolvedContent
         VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
             Text(service.title).lineLimit(options.mediaTitleLines)
-            if options.mediaShowSource && options.showSecondaryText, let source = service.connectedApp {
+            if options.mediaShowSource, let source = service.connectedApp {
                 Text(source == "com.apple.Music" ? "Apple Music" : source == "com.spotify.client" ? "Spotify" : "System Audio")
                     .font(style.font(scale: 0.75)).foregroundStyle(.secondary)
             }
-            if options.mediaShowArtist && options.showSecondaryText && !service.artist.isEmpty {
+            if options.mediaShowArtist && !service.artist.isEmpty {
                 Text(service.artist).font(style.font(scale: 0.85)).foregroundStyle(.secondary)
             }
-            if options.showControls {
+            if options.showControls || options.showQuickActions {
                 HStack(spacing: options.spacing) {
-                    Button { service.perform("previous track", app: app) } label: { Image(systemName: "backward.end.fill") }.accessibilityLabel("Previous track")
-                    Button { service.perform("playpause", app: app) } label: { Image(systemName: "playpause.fill") }.accessibilityLabel("Play or pause")
-                    Button { service.perform("next track", app: app) } label: { Image(systemName: "forward.end.fill") }.accessibilityLabel("Next track")
-                    Spacer()
-                    Button("Retry detection") { service.retryDetection(preferred: app) }
+                    if options.showControls {
+                        Button { service.perform("previous track", app: app) } label: { Image(systemName: "backward.end.fill") }.accessibilityLabel("Previous track")
+                        Button { service.perform("playpause", app: app) } label: { Image(systemName: "playpause.fill") }.accessibilityLabel("Play or pause")
+                        Button { service.perform("next track", app: app) } label: { Image(systemName: "forward.end.fill") }.accessibilityLabel("Next track")
+                    }
+                    if options.showQuickActions {
+                        Spacer()
+                        Button("Retry detection") { service.retryDetection(preferred: app) }
+                    }
                 }.disabled(service.busy)
             }
             if options.showStatus, let error = service.error { Text(error).font(style.font(scale: 0.85)).foregroundStyle(.orange) }
@@ -171,7 +175,7 @@ struct CalendarModuleView: View {
                 HStack(spacing: options.spacing) {
                     VStack(alignment: options.alignment.horizontal, spacing: max(2, options.spacing * 0.35)) {
                         Text(event.title ?? "Untitled event").lineLimit(1)
-                        if options.calendarShowTimes && options.showSecondaryText { Text(event.startDate, style: .time).font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
+                        if options.calendarShowTimes { Text(event.startDate, style: .time).font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
                     }
                     Spacer()
                     if options.calendarShowJoin && options.showControls, let url = service.meetingURL(for: event) { Link("Join", destination: url) }
@@ -192,7 +196,8 @@ struct ClipboardModuleView: View {
             if !enabled { if options.showStatus { Text("Off. Enable text history in Privacy settings.").font(style.font(scale: 0.85)) } }
             else {
                 if options.showSearch { TextField("Search clipboard", text: $search) }
-                ForEach(Array(service.entries.filter { search.isEmpty || $0.text.localizedCaseInsensitiveContains(search) }.prefix(options.maxItems))) { entry in
+                let effectiveSearch = options.showSearch ? search : ""
+                ForEach(Array(service.entries.filter { effectiveSearch.isEmpty || $0.text.localizedCaseInsensitiveContains(effectiveSearch) }.prefix(options.maxItems))) { entry in
                     HStack(spacing: options.spacing) {
                         Text(entry.text).font(style.font(scale: 0.85)).lineLimit(2)
                         Spacer()
@@ -237,15 +242,16 @@ struct LauncherModuleView: View {
         let options = style.resolvedContent
         VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
             if options.showSearch { TextField("Search apps and commands", text: $query) }
+            let effectiveQuery = options.showSearch ? query : ""
             if options.launcherTimers {
                 ForEach([5, 15, 25], id: \.self) { minutes in
-                    if CommandSearch.matches(query, in: "Start timer \(minutes)") {
+                    if CommandSearch.matches(effectiveQuery, in: "Start timer \(minutes)") {
                         Button("Start \(minutes)-minute timer") { store.startTimer(minutes: minutes) }
                     }
                 }
             }
             if options.launcherRunningApps {
-                ForEach(Array(workspace.runningApps.filter { CommandSearch.matches(query, in: $0.localizedName ?? "") }.prefix(options.maxItems)), id: \.processIdentifier) { app in
+                ForEach(Array(workspace.runningApps.filter { CommandSearch.matches(effectiveQuery, in: $0.localizedName ?? "") }.prefix(options.maxItems)), id: \.processIdentifier) { app in
                     Button { app.activate(options: .activateIgnoringOtherApps) } label: {
                         Label(app.localizedName ?? "Application", systemImage: "app")
                     }
@@ -253,7 +259,7 @@ struct LauncherModuleView: View {
             }
             if options.launcherPlugins {
                 ForEach(workspace.plugins) { plugin in
-                    ForEach(plugin.commands.filter { CommandSearch.matches(query, in: $0.title) }.prefix(options.maxItems)) { command in
+                    ForEach(plugin.commands.filter { CommandSearch.matches(effectiveQuery, in: $0.title) }.prefix(options.maxItems)) { command in
                         Button(command.title) { workspace.run(command) }
                     }
                 }

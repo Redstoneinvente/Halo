@@ -70,7 +70,7 @@ extension WidgetContentAlignment {
         switch self { case .leading: return .leading; case .center: return .center; case .trailing: return .trailing }
     }
     var alignment: Alignment {
-        switch self { case .leading: return .leading; case .center: return .center; case .trailing: return .trailing }
+        switch self { case .leading: return .topLeading; case .center: return .top; case .trailing: return .topTrailing }
     }
 }
 extension WidgetControlSize {
@@ -159,7 +159,14 @@ struct WidgetClock: View {
         let start = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970 / 60) * 60)
         TimelineView(.periodic(from: start, by: style.clock.showSeconds ? 1 : 60)) { context in
             VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: max(2, min(20, style.resolvedContent.spacing * 0.55))) {
-                if style.showTitle && !compact { Text("Clock").font(style.font(scale: 0.75)) }
+                if style.showTitle && !compact {
+                    HStack(spacing: max(4, style.resolvedContent.spacing * 0.55)) {
+                        Image(systemName: "clock")
+                            .font(.system(size: style.resolvedContent.iconSize, weight: .semibold))
+                            .foregroundStyle(style.accentColor.color)
+                        Text("Clock").font(style.font(scale: 0.75))
+                    }
+                }
                 Text(clockFormatter.string(from: context.date)).font(style.font()).monospacedDigit()
                 if style.clock.showDate && !compact {
                     Text(dateFormatter.string(from: context.date))

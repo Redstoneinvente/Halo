@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 
 enum VinylStylePreset: String, Codable, CaseIterable, Identifiable {
     case classic = "Classic"
@@ -831,21 +830,6 @@ struct SurfaceView: View {
                 retroGameRequested = false
             }
         }
-        .onDrop(of: [UTType.fileURL.identifier], delegate: HaloFileDropDelegate(
-            targeted: $state.dropTargeted,
-            itemCount: $state.dropItemCount,
-            perform: acceptFileDrop
-        ))
-    }
-
-    private func acceptFileDrop(_ providers: [NSItemProvider]) {
-        state.expanded = true
-        for provider in providers {
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                guard let url else { return }
-                Task { @MainActor in store.addFiles([url]) }
-            }
-        }
     }
 
     private func horizontalWidget(_ module: ModuleID) -> some View {
@@ -865,51 +849,6 @@ struct SurfaceView: View {
                 }
             }
         }
-    }
-}
-
-private struct HaloFileDropDelegate: DropDelegate {
-    @Binding var targeted: Bool
-    @Binding var itemCount: Int
-    let perform: ([NSItemProvider]) -> Void
-
-    private func providers(_ info: DropInfo) -> [NSItemProvider] {
-        info.itemProviders(for: [UTType.fileURL.identifier])
-    }
-
-    func validateDrop(info: DropInfo) -> Bool {
-        !providers(info).isEmpty
-    }
-
-    func dropEntered(info: DropInfo) {
-        let values = providers(info)
-        targeted = !values.isEmpty
-        itemCount = values.count
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        let values = providers(info)
-        targeted = !values.isEmpty
-        itemCount = values.count
-        return DropProposal(operation: .copy)
-    }
-
-    func dropExited(info: DropInfo) {
-        targeted = false
-        itemCount = 0
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        let values = providers(info)
-        guard !values.isEmpty else {
-            targeted = false
-            itemCount = 0
-            return false
-        }
-        targeted = false
-        itemCount = 0
-        perform(values)
-        return true
     }
 }
 
@@ -1029,7 +968,7 @@ struct BuiltinOrIntegrationWidget: View {
                 Spacer()
                 if let deadline = store.deadline { Text(deadline, style: .timer).monospacedDigit() }
                 else if options.showSecondaryText, store.pausedSeconds > 0 { Text("Paused · \(Int(store.pausedSeconds))s").font(style.font(scale: 0.85)) }
-                else if store.finished { Text("Session complete").foregroundStyle(.green) }
+                else if options.showSecondaryText && store.finished { Text("Session complete").foregroundStyle(.green) }
                 else if options.showSecondaryText { Text("Make room for deep work").font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
             }
             if options.showControls {
@@ -1038,7 +977,7 @@ struct BuiltinOrIntegrationWidget: View {
                         Button(store.deadline == nil ? "Resume" : "Pause") { store.pauseResume() }
                         Button("Reset") { store.resetTimer() }
                     } else {
-                        ForEach([options.timerPresetA, options.timerPresetB, options.timerPresetC], id: \.self) { minutes in
+                        ForEach(Array([options.timerPresetA, options.timerPresetB, options.timerPresetC].enumerated()), id: \.offset) { _, minutes in
                             Button("\(minutes) min") { store.startTimer(minutes: minutes) }
                         }
                     }
@@ -1064,7 +1003,7 @@ struct BuiltinOrIntegrationWidget: View {
             }
             ForEach(Array(store.files.prefix(options.maxItems)), id: \.self) { url in
                 HStack(spacing: options.spacing) {
-                    ShelfFileInfo(url: url, iconSize: options.shelfIconSize, showDetail: options.shelfShowDetails && options.showSecondaryText)
+                    ShelfFileInfo(url: url, iconSize: options.shelfIconSize, showDetail: options.shelfShowDetails)
                     Spacer()
                     if options.shelfShowActions && options.showControls {
                         Button { store.toggleFilePin(url) } label: { Image(systemName: store.pinnedFiles.contains(url) ? "pin.fill" : "pin") }.help("Keep this file on the shelf")
