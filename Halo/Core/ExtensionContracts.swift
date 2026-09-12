@@ -37,14 +37,116 @@ struct SignedLicense: Codable {
     }
 }
 
+// MARK: - Surface ownership router
+
+private enum RoutedContextInterface: String {
+    case music, bluetooth, retro
+}
+
+/// Keeps the normal Halo SurfaceView alive so CI state (especially Retro's local requested state)
+/// continues receiving events, while visually replacing it with EI whenever EI owns the surface.
+/// Ownership order is CI -> EI -> normal Halo.
+@MainActor
+struct HaloSurfaceRouter: View {
+    @ObservedObject var viewport: SurfaceViewport
+    @ObservedObject var store: AppStore
+    @ObservedObject var state: SurfaceState
+    @ObservedObject var workspace: WorkspaceStore
+
+    @ObservedObject private var ownership = EnvironmentalInterfaceOwnershipController.shared
+    @ObservedObject private var eiSettings = EISettingsStore.shared
+    @ObservedObject private var engine = EnvironmentalInterfaceEngine.shared
+    @ObservedObject private var bluetooth = BluetoothStateService.shared
+
+    @AppStorage("HaloContextMusicPriority") private var musicPriority = 60.0
+    @AppStorage("HaloContextBluetoothEnabled") private var bluetoothEnabled = false
+    @AppStorage("HaloContextBluetoothShowWhileConnected") private var bluetoothWhileConnected = true
+    @AppStorage("HaloContextBluetoothShowOnChanges") private var bluetoothOnChanges = true
+    @AppStorage("HaloContextBluetoothPriority") private var bluetoothPriority = 50.0
+    @AppStorage("HaloContextRetroEnabled") private var retroEnabled = false
+    @AppStorage("HaloContextRetroPriority") private var retroPriority = 80.0
+
+    private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.effectiveLayout }
+    private var musicOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
+
+    private var activeCI: RoutedContextInterface? {
+        var candidates: [(RoutedContextInterface, Double, Int)] = []
+        if retroEnabled && engine.retroGameRequested {
+            candidates.append((.retro, retroPriority, 3))
+        }
+        if musicOptions.enabled && workspace.media.isPlaying {
+            candidates.append((.music, musicPriority, 2))
+        }
+        let bluetoothEligible = bluetoothEnabled &&
+            ((bluetoothOnChanges && bluetooth.lastEvent != nil) ||
+             (bluetoothWhileConnected && !bluetooth.connectedDevices.isEmpty))
+        if bluetoothEligible {
+            candidates.append((.bluetooth, bluetoothPriority, 1))
+        }
+        return candidates.max { lhs, rhs in
+            if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
+            return lhs.2 < rhs.2
+        }?.0
+    }
+
+    private var eiOwnsSurface: Bool {
+        state.expanded && ownership.isRequested && eiSettings.settings.mode != .off && activeCI == nil
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            SurfaceView(store: store, state: state, workspace: workspace)
+                .opacity(eiOwnsSurface ? 0 : 1)
+                .allowsHitTesting(!eiOwnsSurface)
+                .accessibilityHidden(eiOwnsSurface)
+
+            if eiOwnsSurface {
+                EIOpenSurface(surfaceState: state)
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                    .zIndex(20)
+            }
+        }
+        .frame(width: viewport.size.width, height: viewport.size.height, alignment: .top)
+        .clipped()
+        .onAppear { updateAmbientSuppression(eiOwnsSurface) }
+        .onChange(of: eiOwnsSurface) { active in updateAmbientSuppression(active) }
+        .onDisappear { updateAmbientSuppression(false) }
+    }
+
+    private func updateAmbientSuppression(_ active: Bool) {
+        DispatchQueue.main.async {
+            EnvironmentalInterfaceManager.shared.setOwnedSurfaceActive(active)
+        }
+    }
+}
+
 // MARK: - Owned Environmental Interface
 
 @MainActor
 struct EIOpenSurface: View {
+    @ObservedObject var surfaceState: SurfaceState
     @ObservedObject private var settings = EISettingsStore.shared
     @ObservedObject private var preferences = EIOpenPreferencesStore.shared
     @ObservedObject private var engine = EnvironmentalInterfaceEngine.shared
     @ObservedObject private var ui = EIOpenUI.shared
+
+    private var sizingKey: String {
+        "\(settings.settings.mode.rawValue)|\(ui.editing)|\(preferences.value.roomStyle.rawValue)|\(preferences.value.petVisual.rawValue)"
+    }
+
+    private var preferredSize: CGSize {
+        let base: CGSize
+        switch settings.settings.mode {
+        case .off: base = CGSize(width: 500, height: 330)
+        case .pet: base = CGSize(width: 520, height: 350)
+        case .plant: base = CGSize(width: 540, height: 390)
+        case .simulation: base = CGSize(width: 620, height: 370)
+        }
+        if ui.editing {
+            return CGSize(width: base.width + 230, height: max(base.height, 430))
+        }
+        return base
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -69,9 +171,30 @@ struct EIOpenSurface: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
+            .background(Color.black)
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
             .animation(.easeInOut(duration: 0.18), value: ui.editing)
         }
+        .task(id: sizingKey) {
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            publishPreferredSize()
+        }
+        .onDisappear {
+            DispatchQueue.main.async { [surfaceState] in
+                guard !EnvironmentalInterfaceOwnershipController.shared.isRequested else { return }
+                surfaceState.contextPreferredSize = nil
+            }
+        }
+    }
+
+    private func publishPreferredSize() {
+        let next = preferredSize
+        if let current = surfaceState.contextPreferredSize,
+           abs(current.width - next.width) < 1,
+           abs(current.height - next.height) < 1 { return }
+        surfaceState.contextPreferredSize = next
     }
 
     private var header: some View {
