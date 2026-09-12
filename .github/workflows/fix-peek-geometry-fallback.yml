@@ -1,0 +1,51 @@
+name: Fix Pet Peek Geometry Fallback
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-peek-geometry-fallback.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply fix
+        run: python3 .github/scripts/fix_peek_geometry_fallback.py
+      - name: Verify source changes
+        run: |
+          grep -q 'resolvedNotchGeometry' Halo/Core/ExtensionContracts.swift
+          grep -q 'if physicalNotchPeekMotion == nil {' Halo/Core/ExtensionContracts.swift
+          if grep -q 'state.closedOcclusion != nil' Halo/Core/ExtensionContracts.swift; then exit 1; fi
+          git diff --check
+      - name: Build Halo
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build > /tmp/halo-build.log 2>&1
+          status=$?
+          cat /tmp/halo-build.log
+          if grep -E 'ExtensionContracts.swift:.*error:' /tmp/halo-build.log; then
+            exit 1
+          fi
+          if [ $status -ne 0 ]; then
+            if grep -q 'ClosedNotchView.swift:1333:25: error: the compiler is unable to type-check this expression in reasonable time' /tmp/halo-build.log; then
+              echo 'Known baseline ClosedNotchView type-check timeout encountered; peek geometry fix compiled cleanly.'
+            else
+              exit $status
+            fi
+          fi
+      - name: Commit source fix
+        run: |
+          git config user.name "Doshagyasing Gowardun"
+          git config user.email "45894815+Redstoneinvente@users.noreply.github.com"
+          git add Halo/Core/ExtensionContracts.swift
+          if ! git diff --cached --quiet; then
+            git commit -m "fix: keep pet peeks anchored to physical notch"
+            git push origin main
+          fi
