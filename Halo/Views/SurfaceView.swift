@@ -1343,7 +1343,7 @@ private struct ContextMusicView: View {
 
     private func heroLayout(proxy: GeometryProxy) -> some View {
         VStack(alignment: horizontalAlignment, spacing: options.resolvedSpacing) {
-            if options.resolvedForegroundArtwork != .none { foregroundArtwork(size: min(options.artworkSize, max(48, proxy.size.height * 0.34))) }
+            if options.resolvedForegroundArtwork != .none { foregroundArtwork(size: options.artworkSize) }
             metadata
             lyricsView
             scrubber
@@ -1357,7 +1357,7 @@ private struct ContextMusicView: View {
 
     private func splitLayout(proxy: GeometryProxy) -> some View {
         HStack(spacing: options.resolvedSpacing * 1.4) {
-            if options.resolvedForegroundArtwork != .none { foregroundArtwork(size: min(options.artworkSize, max(52, proxy.size.height * 0.50))) }
+            if options.resolvedForegroundArtwork != .none { foregroundArtwork(size: options.artworkSize) }
             VStack(alignment: horizontalAlignment, spacing: options.resolvedSpacing) {
                 metadata
                 lyricsView
@@ -1374,7 +1374,7 @@ private struct ContextMusicView: View {
 
     private func compactLayout(proxy: GeometryProxy) -> some View {
         HStack(spacing: options.resolvedSpacing) {
-            if options.resolvedForegroundArtwork != .none { foregroundArtwork(size: min(options.artworkSize, max(42, proxy.size.height * 0.24))) }
+            if options.resolvedForegroundArtwork != .none { foregroundArtwork(size: options.artworkSize) }
             VStack(alignment: .leading, spacing: max(3, options.resolvedSpacing * 0.45)) {
                 metadata
                 lyricsView
@@ -1390,7 +1390,7 @@ private struct ContextMusicView: View {
 
     private func minimalLayout(proxy: GeometryProxy) -> some View {
         VStack(alignment: horizontalAlignment, spacing: max(4, options.resolvedSpacing * 0.6)) {
-            if options.resolvedForegroundArtwork != .none { foregroundArtwork(size: min(options.artworkSize, max(36, proxy.size.height * 0.20))) }
+            if options.resolvedForegroundArtwork != .none { foregroundArtwork(size: options.artworkSize) }
             metadata
             lyricsView
             scrubber

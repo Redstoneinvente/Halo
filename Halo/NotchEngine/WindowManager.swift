@@ -210,6 +210,10 @@ final class WindowManager {
     private let store: AppStore
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
+    private var lastContextOffset = CGSize(
+        width: UserDefaults.standard.double(forKey: "HaloContextOffsetX"),
+        height: UserDefaults.standard.double(forKey: "HaloContextOffsetY")
+    )
 
     static func displayID(_ screen: NSScreen) -> String {
         guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
@@ -230,7 +234,16 @@ final class WindowManager {
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .debounce(for: .milliseconds(80), scheduler: RunLoop.main)
-            .sink { [weak self] _ in self?.reconcile() }
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let defaults = UserDefaults.standard
+                let next = CGSize(width: defaults.double(forKey: "HaloContextOffsetX"),
+                                  height: defaults.double(forKey: "HaloContextOffsetY"))
+                guard abs(next.width - self.lastContextOffset.width) >= 0.5 ||
+                      abs(next.height - self.lastContextOffset.height) >= 0.5 else { return }
+                self.lastContextOffset = next
+                self.reconcile()
+            }
             .store(in: &subscriptions)
         store.$configuration.dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
@@ -624,8 +637,6 @@ final class WindowManager {
         let sides = fittedClosedSides(host: host, layout: layout, items: items, power: power)
         var leftLive = sideHasLiveReason(item: items.left, decoration: options.leftDecoration)
         var rightLive = sideHasLiveReason(item: items.right, decoration: options.rightDecoration)
-        if power?.side == .left { leftLive = true }
-        if power?.side == .right { rightLive = true }
 
         let mediaSettings = options.mediaOptions ?? ClosedMediaOptions()
         let adaptiveLyrics = store.workspace.media.isPlaying && mediaSettings.textMode == .lyrics && mediaSettings.usesDynamicLyricWidth
@@ -638,6 +649,12 @@ final class WindowManager {
                 rightLive = options.rightDecoration?.visibility == .playing && store.workspace.media.isPlaying
             }
         }
+        // Generic active-width expansion belongs to normal live content. Power events have
+        // their own explicit eventWidth and must not inherit the generic Active width as well.
+        let leftExpansionLive = leftLive
+        let rightExpansionLive = rightLive
+        if power?.side == .left { leftLive = true }
+        if power?.side == .right { rightLive = true }
 
         let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
         let notchLike = attached || geometry.style == .notch || geometry.style == .simulated
@@ -699,7 +716,7 @@ final class WindowManager {
                 left: leftDemand,
                 right: rightDemand,
                 expansion: expansion.enabled ? expansion.width : 0,
-                leftLive: leftLive, rightLive: rightLive)
+                leftLive: leftExpansionLive, rightLive: rightExpansionLive)
             let baseCenter = attached ? geometry.screen.midX : geometry.visible.midX
             let center = baseCenter + geometry.offset(expanded: false).width
             let leftLimit = max(0, center - camera / 2 - geometry.visible.minX - 12)
@@ -711,8 +728,8 @@ final class WindowManager {
             host.geometry?.activeCompactCenterOffset = (rightExtent - leftExtent) / 2
         } else {
             var requested = baseWidth
-            if autoFit { requested = max(requested, sides.left + sides.right) }
-            if expansion.enabled && (leftLive || rightLive) { requested = max(requested, expansion.width) }
+            if autoFit || power != nil { requested = max(requested, sides.left + sides.right) }
+            if expansion.enabled && (leftExpansionLive || rightExpansionLive) { requested = max(requested, expansion.width) }
             host.geometry?.activeCompactWidth = min(geometry.visible.width, requested)
             host.geometry?.activeCompactCenterOffset = nil
         }
@@ -951,13 +968,14 @@ final class WindowManager {
         let base = geometry.frame(expanded: true)
         guard let requested, requested.width.isFinite, requested.height.isFinite else { return base }
 
-        let contextHorizontalSafety: CGFloat = 56
-        let contextVerticalSafety: CGFloat = 64
+        // Context views now report their complete content-safe size, including their
+        // own horizontal/top/bottom margins. Adding a second safety shell here produced
+        // visible dead space, especially below Music/Audio CI.
         let margin: CGFloat = 12
-        let minimumHeight = geometry.compactHeight + 112
+        let minimumHeight: CGFloat = 96
         let maxWidth = max(360, geometry.visible.width - margin * 2)
-        let width = min(maxWidth, max(360, requested.width + contextHorizontalSafety))
-        var height = max(minimumHeight, requested.height + contextVerticalSafety)
+        let width = min(maxWidth, max(360, requested.width))
+        var height = max(minimumHeight, requested.height)
         var frame: CGRect
 
         switch geometry.style {
