@@ -18,7 +18,7 @@ struct SettingsView: View {
     @State private var renamingProfile: UUID?
     @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
-    private let sections = ["General", "Appearance", "Modules", "Widgets", "Closed notch", "Context Notch Interface", "Environmental Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
+    private let sections = ["General", "Appearance", "Modules", "Widgets", "Closed notch", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -71,7 +71,6 @@ struct SettingsView: View {
         case "Modules": return "square.grid.2x2"
         case "Widgets": return "slider.horizontal.3"
         case "Context Notch Interface": return "rectangle.stack"
-        case "Environmental Interface": return "sparkles.rectangle.stack"
         case "HUD": return "rectangle.inset.filled.and.person.filled"
         case "Closed notch": return "rectangle.topthird.inset.filled"
         case "Media & Files": return "play.rectangle"
@@ -180,7 +179,6 @@ struct SettingsView: View {
                 }
             }
         case "Context Notch Interface": ContextInterfaceLibraryView(layout: $workspace.settings.layout)
-        case "Environmental Interface": EnvironmentalInterfaceSettingsView()
         case "Media & Files":
             Section("Media source") {
                 Picker("Source", selection: Binding(
