@@ -1,0 +1,48 @@
+name: One-time Drop CI bounds background rename
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-time-drop-ci-bounds-background-rename.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply patch
+        run: |
+          python3 Scripts/one_time_drop_ci_bounds_background_rename.py
+          xcrun swiftc -parse Halo/NotchEngine/DisplayClock.swift
+          git diff --check
+
+      - name: Validate Drop CI compiler output
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if grep -E 'DisplayClock.swift:[0-9]+:[0-9]+: error:' build.log; then
+            echo 'Drop CI introduced a compiler error.'
+            exit 1
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo 'Full build still has unrelated project errors; Drop CI file has no compiler errors.'
+          fi
+
+      - name: Commit patch
+        run: |
+          git config user.name "Redstoneinvente"
+          git config user.email "45894815+Redstoneinvente@users.noreply.github.com"
+          git add Halo/NotchEngine/DisplayClock.swift
+          git rm Scripts/one_time_drop_ci_bounds_background_rename.py .github/workflows/one-time-drop-ci-bounds-background-rename.yml
+          git commit -m "Fix Drop CI bounds backgrounds and rename"
+          git push origin main
