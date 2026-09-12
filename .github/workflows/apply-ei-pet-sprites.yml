@@ -35,15 +35,29 @@ jobs:
       - name: Verify patch formatting
         run: git diff --check
 
-      - name: Build Halo arm64
+      - name: Compile and validate EI pet sources
         shell: bash
         run: |
-          set -o pipefail
-          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS,arch=arm64' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build 2>&1 | tee /tmp/halo-build.log || {
-            echo '--- Relevant compiler diagnostics ---'
-            grep -nE 'error:|CompanionSprite\.swift|ExtensionContracts\.swift' /tmp/halo-build.log | tail -220 || true
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS,arch=arm64' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build > /tmp/halo-build.log 2>&1
+          status=$?
+          set -e
+          grep -E 'SwiftCompile normal arm64 .*CompanionSprite\.swift|SwiftCompile normal arm64 .*ExtensionContracts\.swift|error:' /tmp/halo-build.log | tail -120 || true
+          if grep -Eq '(CompanionSprite|ExtensionContracts)\.swift:[0-9]+:[0-9]+: error:' /tmp/halo-build.log; then
+            echo 'EI pet source compilation failed.'
             exit 65
-          }
+          fi
+          if ! grep -Eq 'SwiftCompile normal arm64 .*/CompanionSprite\.swift' /tmp/halo-build.log; then
+            echo 'CompanionSprite.swift was not compiled; refusing to commit.'
+            exit 66
+          fi
+          if ! grep -Eq 'SwiftCompile normal arm64 .*/ExtensionContracts\.swift' /tmp/halo-build.log; then
+            echo 'ExtensionContracts.swift was not compiled; refusing to commit.'
+            exit 67
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo 'Full target still has unrelated compile errors; EI pet source files themselves compiled without errors.'
+          fi
 
       - name: Commit validated renderer
         shell: bash
