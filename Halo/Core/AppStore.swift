@@ -151,68 +151,333 @@ final class AppStore: ObservableObject {
 
 // MARK: - EI ownership, roaming and cozy opened state
 
-enum EIPetVisualStyle: String, Codable, CaseIterable, Identifiable { case pixel = "Pixel", smooth = "Smooth"; var id: String { rawValue } }
-enum EIRoomStyle: String, Codable, CaseIterable, Identifiable { case warm = "Warm", night = "Night", greenhouse = "Greenhouse", minimal = "Minimal"; var id: String { rawValue } }
-struct EIOpenPreferences: Codable, Equatable {
-    var version = 1, shortcutEnabled = true, roam = true, menuBar = true, screenEdges = true
-    var shortcutKey: UInt32 = 14, shortcutModifiers: UInt32 = 2304
-    var petVisual: EIPetVisualStyle = .pixel; var roomStyle: EIRoomStyle = .warm
-    var room = WidgetColor(red: 0.15, green: 0.10, blue: 0.10), accent = WidgetColor(red: 0.96, green: 0.60, blue: 0.27), floor = WidgetColor(red: 0.22, green: 0.13, blue: 0.10)
-    var window = true, lamp = true, rug = true
+enum EIPetVisualStyle: String, Codable, CaseIterable, Identifiable {
+    case pixel = "Pixel"
+    case smooth = "Smooth Vector"
+    case illustrated = "Illustrated"
+    case minimal = "Minimal"
+    var id: String { rawValue }
 }
-@MainActor final class EIOpenPreferencesStore: ObservableObject {
-    static let shared = EIOpenPreferencesStore(); @Published var value: EIOpenPreferences { didSet { if let d = try? JSONEncoder().encode(value) { UserDefaults.standard.set(d, forKey: "HaloEIOpen.v1") } } }
-    private init() { value = (UserDefaults.standard.data(forKey: "HaloEIOpen.v1").flatMap { try? JSONDecoder().decode(EIOpenPreferences.self, from: $0) }).flatMap { $0.version == 1 ? $0 : nil } ?? EIOpenPreferences() }
-}
-@MainActor final class EIRoamModel: ObservableObject { @Published var right = true; @Published var walking = false }
-@MainActor final class EIOpenUI: ObservableObject { static let shared = EIOpenUI(); @Published var editing = false }
 
-@MainActor final class EnvironmentalInterfaceOwnershipController {
+enum EIRoomStyle: String, Codable, CaseIterable, Identifiable {
+    case warm = "Warm", night = "Night", greenhouse = "Greenhouse", minimal = "Minimal"
+    var id: String { rawValue }
+}
+
+struct EIOpenPreferences: Codable, Equatable {
+    var version = 1
+    var shortcutEnabled = true
+    var roam = true
+    var menuBar = true
+    var screenEdges = true
+    var shortcutKey: UInt32 = 14
+    var shortcutModifiers: UInt32 = 2304
+    var petVisual: EIPetVisualStyle = .pixel
+    var roomStyle: EIRoomStyle = .warm
+    var room = WidgetColor(red: 0.15, green: 0.10, blue: 0.10)
+    var accent = WidgetColor(red: 0.96, green: 0.60, blue: 0.27)
+    var floor = WidgetColor(red: 0.22, green: 0.13, blue: 0.10)
+    var window = true
+    var lamp = true
+    var rug = true
+    var shelf = true
+    var roomPlants = true
+}
+
+@MainActor
+final class EIOpenPreferencesStore: ObservableObject {
+    static let shared = EIOpenPreferencesStore()
+    @Published var value: EIOpenPreferences {
+        didSet {
+            if let data = try? JSONEncoder().encode(value) {
+                UserDefaults.standard.set(data, forKey: "HaloEIOpen.v1")
+            }
+        }
+    }
+    private init() {
+        value = (UserDefaults.standard.data(forKey: "HaloEIOpen.v1")
+            .flatMap { try? JSONDecoder().decode(EIOpenPreferences.self, from: $0) })
+            .flatMap { $0.version == 1 ? $0 : nil } ?? EIOpenPreferences()
+    }
+}
+
+@MainActor final class EIRoamModel: ObservableObject {
+    @Published var right = true
+    @Published var walking = false
+}
+@MainActor final class EIOpenUI: ObservableObject {
+    static let shared = EIOpenUI()
+    @Published var editing = false
+}
+
+/// Owns EI's explicit "open" state. Unlike the original implementation, the owned EI view is
+/// inserted directly into HaloPanel's content hierarchy rather than presented in another NSPanel.
+/// That keeps EI in the normal opened-notch render path while still allowing CI to win instantly.
+@MainActor
+final class EnvironmentalInterfaceOwnershipController: ObservableObject {
     static let shared = EnvironmentalInterfaceOwnershipController()
-    @MainActor private final class Host {
-        let panel: NSPanel; var frame = CGRect.zero
-        init(root: AnyView, level: Int) { panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false); panel.backgroundColor = .clear; panel.isOpaque = false; panel.hasShadow = false; panel.hidesOnDeactivate = false; panel.isReleasedWhenClosed = false; panel.becomesKeyOnlyIfNeeded = true; panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + level); panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]; let v = NSHostingView(rootView: root); v.sizingOptions = []; panel.contentView = v }
+
+    @MainActor private final class SurfaceHost {
+        weak var panel: HaloPanel?
+        let ownedView: NSHostingView<AnyView>
+        var frame = CGRect.zero
+        var screenID = ""
+
+        init(panel: HaloPanel) {
+            self.panel = panel
+            ownedView = NSHostingView(rootView: AnyView(EIOpenSurface()))
+            ownedView.sizingOptions = []
+            ownedView.wantsLayer = true
+            ownedView.layer?.backgroundColor = NSColor.clear.cgColor
+            ownedView.isHidden = true
+            if let content = panel.contentView {
+                ownedView.frame = content.bounds
+                ownedView.autoresizingMask = [.width, .height]
+                content.addSubview(ownedView, positioned: .above, relativeTo: nil)
+            }
+        }
+
+        func detach() {
+            ownedView.removeFromSuperview()
+        }
     }
-    @MainActor private final class RoamHost { let host: Host; let model: EIRoamModel; init() { let model = EIRoamModel(); self.model = model; host = Host(root: AnyView(EIRoamingPetView(model: model)), level: 2) } }
+
+    @MainActor private final class RoamHost {
+        let panel: NSPanel
+        let model: EIRoamModel
+        var frame = CGRect.zero
+        init() {
+            model = EIRoamModel()
+            panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            panel.backgroundColor = .clear
+            panel.isOpaque = false
+            panel.hasShadow = false
+            panel.hidesOnDeactivate = false
+            panel.isReleasedWhenClosed = false
+            panel.becomesKeyOnlyIfNeeded = true
+            panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 2)
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+            let view = NSHostingView(rootView: EIRoamingPetView(model: model))
+            view.sizingOptions = []
+            panel.contentView = view
+        }
+    }
+
     private enum Route { case notchL, notchR, menuL, menuR, left, right, bottom }
-    private weak var workspace: WorkspaceStore?; private var started = false, requested = false, expandedByEI = false; private var hosts: [ObjectIdentifier: Host] = [:], roam: [String: RoamHost] = [:]; private var bag = Set<AnyCancellable>(); private var step = 0, shortcut = ""
+
+    private weak var workspace: WorkspaceStore?
+    private var started = false
+    @Published private(set) var requested = false
+    private var expandedByEI = false
+    private var hosts: [ObjectIdentifier: SurfaceHost] = [:]
+    private var roam: [String: RoamHost] = [:]
+    private var bag = Set<AnyCancellable>()
+    private var step = 0
+    private var shortcut = ""
     private let hotkey = HotkeyService(identifierID: 4, notificationName: .init("HaloEnvironmentalInterfaceToggle"))
+
     var isRequested: Bool { requested }
+
     func start(workspace: WorkspaceStore) {
-        self.workspace = workspace; guard !started else { refresh(true); return }; started = true
-        NotificationCenter.default.publisher(for: .init("HaloPanelGeometryChanged")).receive(on: RunLoop.main).sink { [weak self] in self?.geometry($0) }.store(in: &bag)
-        NotificationCenter.default.publisher(for: .init("HaloEnvironmentalInterfaceToggle")).receive(on: RunLoop.main).sink { [weak self] _ in self?.toggle() }.store(in: &bag)
-        NotificationCenter.default.publisher(for: NSWindow.willCloseNotification).receive(on: RunLoop.main).sink { [weak self] n in if let w = n.object as? NSWindow { self?.hosts.removeValue(forKey: ObjectIdentifier(w))?.panel.close() } }.store(in: &bag)
-        EIOpenPreferencesStore.shared.$value.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] _ in self?.hotkeyUpdate(); self?.refresh(true) }.store(in: &bag)
-        EISettingsStore.shared.$settings.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] s in if s.mode == .off, self?.requested == true { self?.close() }; self?.refresh(true) }.store(in: &bag)
-        EnvironmentalInterfaceEngine.shared.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in DispatchQueue.main.async { self?.refresh(true) } }.store(in: &bag)
-        workspace.media.objectWillChange.merge(with: workspace.bluetooth.objectWillChange).receive(on: RunLoop.main).sink { [weak self] _ in DispatchQueue.main.async { self?.refresh(true) } }.store(in: &bag)
-        workspace.$settings.receive(on: RunLoop.main).sink { [weak self] _ in DispatchQueue.main.async { self?.refresh(true) } }.store(in: &bag)
-        Timer.publish(every: 6, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.step &+= 1; self?.roaming(true) }.store(in: &bag)
-        hotkeyUpdate(); refresh(false)
+        self.workspace = workspace
+        guard !started else { refresh(); return }
+        started = true
+
+        NotificationCenter.default.publisher(for: .init("HaloPanelGeometryChanged"))
+            .receive(on: RunLoop.main)
+            .sink { [weak self] in self?.geometry($0) }
+            .store(in: &bag)
+        NotificationCenter.default.publisher(for: .init("HaloEnvironmentalInterfaceToggle"))
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.toggle() }
+            .store(in: &bag)
+        NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] note in
+                guard let panel = note.object as? HaloPanel else { return }
+                let id = ObjectIdentifier(panel)
+                self?.hosts.removeValue(forKey: id)?.detach()
+            }
+            .store(in: &bag)
+
+        EIOpenPreferencesStore.shared.$value.removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.hotkeyUpdate(); self?.refresh(); self?.roaming(true) }
+            .store(in: &bag)
+        EISettingsStore.shared.$settings.removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] settings in
+                if settings.mode == .off, self?.requested == true { self?.close() }
+                self?.refresh(); self?.roaming(true)
+            }
+            .store(in: &bag)
+        EnvironmentalInterfaceEngine.shared.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.refresh(); self?.roaming(false) } }
+            .store(in: &bag)
+        workspace.media.objectWillChange.merge(with: workspace.bluetooth.objectWillChange)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.refresh() } }
+            .store(in: &bag)
+        workspace.$settings
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.refresh() } }
+            .store(in: &bag)
+        Timer.publish(every: 6, on: .main, in: .common).autoconnect()
+            .sink { [weak self] _ in self?.step &+= 1; self?.roaming(true) }
+            .store(in: &bag)
+
+        hotkeyUpdate()
+        refresh()
     }
-    func open(editor: Bool = false) { if editor { EIOpenUI.shared.editing = true }; if !requested { toggle() } }
-    func close() { guard requested else { return }; requested = false; EIOpenUI.shared.editing = false; let collapse = expandedByEI && !hasCI(); expandedByEI = false; hosts.values.forEach { $0.panel.orderOut(nil) }; if let workspace { EnvironmentalInterfaceManager.shared.start(workspace: workspace) }; roaming(true); if collapse { DispatchQueue.main.async { NotificationCenter.default.post(name: .init("HaloToggle"), object: nil) } } }
+
+    func open(editor: Bool = false) {
+        if editor { EIOpenUI.shared.editing = true }
+        if !requested { toggle() }
+    }
+
+    func close() {
+        guard requested else { return }
+        requested = false
+        EIOpenUI.shared.editing = false
+        let collapse = expandedByEI && !hasCI()
+        expandedByEI = false
+        hosts.values.forEach { $0.ownedView.isHidden = true }
+        roaming(true)
+        if collapse {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .init("HaloToggle"), object: nil)
+            }
+        }
+    }
+
     private func toggle() {
-        guard EISettingsStore.shared.settings.mode != .off else { NSSound.beep(); return }; if requested { close(); return }
-        requested = true; EnvironmentalInterfaceManager.shared.stop(); if let workspace { EnvironmentalInterfaceEngine.shared.start(workspace: workspace) }
-        expandedByEI = hosts.values.allSatisfy { $0.frame.height <= 82 }; if expandedByEI { NotificationCenter.default.post(name: .init("HaloToggle"), object: nil) }; refresh(true)
+        guard EISettingsStore.shared.settings.mode != .off else { NSSound.beep(); return }
+        if requested { close(); return }
+        requested = true
+        expandedByEI = hosts.isEmpty || hosts.values.allSatisfy { $0.frame.height <= 82 }
+        if expandedByEI {
+            NotificationCenter.default.post(name: .init("HaloToggle"), object: nil)
+        }
+        refresh()
+        roaming(false)
     }
-    private func hotkeyUpdate() { let p = EIOpenPreferencesStore.shared.value, k = "\(p.shortcutEnabled)-\(p.shortcutKey)-\(p.shortcutModifiers)"; guard k != shortcut else { return }; shortcut = k; hotkey.stop(); if p.shortcutEnabled { _ = hotkey.register(code: p.shortcutKey, modifiers: p.shortcutModifiers) } }
-    private func geometry(_ n: Notification) { guard let w = n.object as? NSWindow, let f = n.userInfo?["frame"] as? CGRect else { return }; let id = ObjectIdentifier(w), h = hosts[id] ?? Host(root: AnyView(EIOpenSurface()), level: 3); hosts[id] = h; h.frame = f; owned(h, false); roaming(false) }
-    private func refresh(_ a: Bool) { hosts.values.forEach { owned($0, a) }; roaming(a) }
-    private func owned(_ h: Host, _ a: Bool) { guard requested, !hasCI(), h.frame.height > 82 else { h.panel.orderOut(nil); return }; if a, h.panel.frame != .zero { NSAnimationContext.runAnimationGroup { c in c.duration = 0.18; h.panel.animator().setFrame(h.frame, display: false) } } else { h.panel.setFrame(h.frame, display: false) }; h.panel.ignoresMouseEvents = false; h.panel.orderFrontRegardless() }
+
+    private func hotkeyUpdate() {
+        let prefs = EIOpenPreferencesStore.shared.value
+        let key = "\(prefs.shortcutEnabled)-\(prefs.shortcutKey)-\(prefs.shortcutModifiers)"
+        guard key != shortcut else { return }
+        shortcut = key
+        hotkey.stop()
+        if prefs.shortcutEnabled {
+            _ = hotkey.register(code: prefs.shortcutKey, modifiers: prefs.shortcutModifiers)
+        }
+    }
+
+    private func geometry(_ note: Notification) {
+        guard let panel = note.object as? HaloPanel,
+              let frame = note.userInfo?["frame"] as? CGRect else { return }
+        let id = ObjectIdentifier(panel)
+        let host = hosts[id] ?? SurfaceHost(panel: panel)
+        hosts[id] = host
+        host.frame = frame
+        if let screenID = note.userInfo?["screen"] as? String { host.screenID = screenID }
+        if let content = panel.contentView, host.ownedView.superview !== content {
+            host.ownedView.removeFromSuperview()
+            host.ownedView.frame = content.bounds
+            host.ownedView.autoresizingMask = [.width, .height]
+            content.addSubview(host.ownedView, positioned: .above, relativeTo: nil)
+        }
+        refresh(host)
+        roaming(false)
+    }
+
+    private func refresh() {
+        hosts.values.forEach { refresh($0) }
+    }
+
+    private func refresh(_ host: SurfaceHost) {
+        let shouldOwn = requested && EISettingsStore.shared.settings.mode != .off && !hasCI() && host.frame.height > 82
+        guard let content = host.panel?.contentView else { host.ownedView.isHidden = true; return }
+        host.ownedView.frame = content.bounds
+        host.ownedView.isHidden = !shouldOwn
+        if shouldOwn {
+            content.addSubview(host.ownedView, positioned: .above, relativeTo: nil)
+        }
+    }
+
     private func hasCI() -> Bool {
-        guard let w = workspace else { return false }; let d = UserDefaults.standard, b: (String,Bool)->Bool = { d.object(forKey:$0) == nil ? $1 : d.bool(forKey:$0) }
-        if b("HaloContextRetroEnabled", false), EnvironmentalInterfaceEngine.shared.retroGameRequested { return true }
-        if w.effectiveLayout.contextMusic?.enabled == true, w.media.isPlaying { return true }
-        return b("HaloContextBluetoothEnabled", false) && ((b("HaloContextBluetoothShowOnChanges", true) && w.bluetooth.lastEvent != nil) || (b("HaloContextBluetoothShowWhileConnected", true) && !w.bluetooth.connectedDevices.isEmpty))
+        guard let workspace else { return false }
+        let defaults = UserDefaults.standard
+        let bool: (String, Bool) -> Bool = { key, fallback in
+            defaults.object(forKey: key) == nil ? fallback : defaults.bool(forKey: key)
+        }
+        if bool("HaloContextRetroEnabled", false), EnvironmentalInterfaceEngine.shared.retroGameRequested { return true }
+        if workspace.effectiveLayout.contextMusic?.enabled == true, workspace.media.isPlaying { return true }
+        return bool("HaloContextBluetoothEnabled", false) &&
+            ((bool("HaloContextBluetoothShowOnChanges", true) && workspace.bluetooth.lastEvent != nil) ||
+             (bool("HaloContextBluetoothShowWhileConnected", true) && !workspace.bluetooth.connectedDevices.isEmpty))
     }
+
     private func roaming(_ animated: Bool) {
-        let e = EISettingsStore.shared.settings, p = EIOpenPreferencesStore.shared.value; guard e.mode == .pet, p.roam, !e.petResident, EnvironmentalInterfaceEngine.shared.currentReaction == nil, !requested else { roam.values.forEach { $0.host.panel.orderOut(nil) }; return }
-        let ids = Set(NSScreen.screens.map { WindowManager.displayID($0) }); for id in roam.keys.filter({ !ids.contains($0) }) { roam.removeValue(forKey: id)?.host.panel.close() }
-        for (i,s) in NSScreen.screens.enumerated() { let id = WindowManager.displayID(s), r = roam[id] ?? RoamHost(); roam[id] = r; r.host.panel.ignoresMouseEvents = !e.petInteraction; let f = roamFrame(route(step+i,p),s,CGFloat(e.petScale)); r.model.right = r.host.frame == .zero || f.midX >= r.host.frame.midX; r.model.walking = r.host.frame != .zero && abs(f.midX-r.host.frame.midX)>20; if animated, r.host.frame != .zero { NSAnimationContext.runAnimationGroup({ c in c.duration=2.1; r.host.panel.animator().setFrame(f, display:false) }, completionHandler:{ Task { @MainActor in r.model.walking=false } }) } else { r.host.panel.setFrame(f, display:false); r.model.walking=false }; r.host.frame=f; r.host.panel.orderFrontRegardless() }
+        let settings = EISettingsStore.shared.settings
+        let prefs = EIOpenPreferencesStore.shared.value
+        guard settings.mode == .pet, prefs.roam,
+              EnvironmentalInterfaceEngine.shared.currentReaction == nil,
+              !requested else {
+            roam.values.forEach { $0.panel.orderOut(nil) }
+            return
+        }
+
+        let ids = Set(NSScreen.screens.map { WindowManager.displayID($0) })
+        for id in roam.keys.filter({ !ids.contains($0) }) {
+            roam.removeValue(forKey: id)?.panel.close()
+        }
+
+        for (index, screen) in NSScreen.screens.enumerated() {
+            let id = WindowManager.displayID(screen)
+            let host = roam[id] ?? RoamHost()
+            roam[id] = host
+            host.panel.ignoresMouseEvents = !settings.petInteraction
+            let frame = roamFrame(route(step + index, prefs), screen, CGFloat(settings.petScale))
+            host.model.right = host.frame == .zero || frame.midX >= host.frame.midX
+            host.model.walking = host.frame != .zero && abs(frame.midX - host.frame.midX) > 20
+            if animated, host.frame != .zero {
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = 2.1
+                    context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    host.panel.animator().setFrame(frame, display: false)
+                }, completionHandler: {
+                    Task { @MainActor in host.model.walking = false }
+                })
+            } else {
+                host.panel.setFrame(frame, display: false)
+                host.model.walking = false
+            }
+            host.frame = frame
+            host.panel.orderFrontRegardless()
+        }
     }
-    private func route(_ n:Int,_ p:EIOpenPreferences)->Route { var a:[Route]=[.notchL,.notchR]; if p.menuBar { a += [.menuL,.menuR] }; if p.screenEdges { a += [.left,.right,.bottom] }; return a[(n & Int.max)%a.count] }
-    private func roamFrame(_ r:Route,_ s:NSScreen,_ z:CGFloat)->CGRect { let q=min(1.6,max(0.7,z)), sz=CGSize(width:76*q,height:52*q), f=s.frame; switch r { case .notchL:return .init(x:f.midX-170*q,y:f.maxY-sz.height+4,width:sz.width,height:sz.height); case .notchR:return .init(x:f.midX+94*q,y:f.maxY-sz.height+4,width:sz.width,height:sz.height); case .menuL:return .init(x:f.minX+min(180,f.width*0.18),y:f.maxY-sz.height+9,width:sz.width,height:sz.height); case .menuR:return .init(x:f.maxX-min(250,f.width*0.22)-sz.width,y:f.maxY-sz.height+9,width:sz.width,height:sz.height); case .left:return .init(x:f.minX-sz.width*0.45,y:f.midY,width:sz.width,height:sz.height); case .right:return .init(x:f.maxX-sz.width*0.55,y:f.midY+80,width:sz.width,height:sz.height); case .bottom:return .init(x:f.midX-sz.width/2,y:f.minY-sz.height*0.3,width:sz.width,height:sz.height) } }
+
+    private func route(_ value: Int, _ prefs: EIOpenPreferences) -> Route {
+        var routes: [Route] = [.notchL, .notchR]
+        if prefs.menuBar { routes += [.menuL, .menuR] }
+        if prefs.screenEdges { routes += [.left, .right, .bottom] }
+        return routes[(value & Int.max) % routes.count]
+    }
+
+    private func roamFrame(_ route: Route, _ screen: NSScreen, _ scale: CGFloat) -> CGRect {
+        let zoom = min(1.6, max(0.7, scale))
+        let size = CGSize(width: 76 * zoom, height: 52 * zoom)
+        let frame = screen.frame
+        switch route {
+        case .notchL: return .init(x: frame.midX - 170 * zoom, y: frame.maxY - size.height + 4, width: size.width, height: size.height)
+        case .notchR: return .init(x: frame.midX + 94 * zoom, y: frame.maxY - size.height + 4, width: size.width, height: size.height)
+        case .menuL: return .init(x: frame.minX + min(180, frame.width * 0.18), y: frame.maxY - size.height + 9, width: size.width, height: size.height)
+        case .menuR: return .init(x: frame.maxX - min(250, frame.width * 0.22) - size.width, y: frame.maxY - size.height + 9, width: size.width, height: size.height)
+        case .left: return .init(x: frame.minX - size.width * 0.45, y: frame.midY, width: size.width, height: size.height)
+        case .right: return .init(x: frame.maxX - size.width * 0.55, y: frame.midY + 80, width: size.width, height: size.height)
+        case .bottom: return .init(x: frame.midX - size.width / 2, y: frame.minY - size.height * 0.3, width: size.width, height: size.height)
+        }
+    }
 }
