@@ -188,17 +188,26 @@ struct EIOpenPreferences: Codable, Equatable {
 @MainActor
 final class EIOpenPreferencesStore: ObservableObject {
     static let shared = EIOpenPreferencesStore()
+    private let defaults = UserDefaults.standard
+    private let key = "HaloEIOpen.v1"
+    private var pendingPersist: DispatchWorkItem?
+
     @Published var value: EIOpenPreferences {
-        didSet {
-            if let data = try? JSONEncoder().encode(value) {
-                UserDefaults.standard.set(data, forKey: "HaloEIOpen.v1")
-            }
-        }
+        didSet { schedulePersist(value) }
     }
+
     private init() {
-        value = (UserDefaults.standard.data(forKey: "HaloEIOpen.v1")
+        value = (defaults.data(forKey: key)
             .flatMap { try? JSONDecoder().decode(EIOpenPreferences.self, from: $0) })
             .flatMap { $0.version == 1 ? $0 : nil } ?? EIOpenPreferences()
+    }
+
+    private func schedulePersist(_ snapshot: EIOpenPreferences) {
+        pendingPersist?.cancel()
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        let work = DispatchWorkItem { [defaults, key] in defaults.set(data, forKey: key) }
+        pendingPersist = work
+        DispatchQueue.main.async(execute: work)
     }
 }
 
