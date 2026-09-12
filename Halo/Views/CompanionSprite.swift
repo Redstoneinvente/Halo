@@ -2,10 +2,9 @@ import SwiftUI
 import AppKit
 import ImageIO
 
-// MARK: - Canonical EI pet sprite content
+// MARK: - Canonical EI pet animation atlas
 
 /// Semantic companion motions shared by ambient EI, the owned EI surface and roaming pets.
-/// The visual renderer below maps these behaviours onto the supplied canonical sprite artwork.
 enum HaloCompanionMotion: String, CaseIterable, Identifiable {
     case hidden, peekEyes, peekEars, peek, peekLeft, peekRight, observe, idle, walk, look, greet, celebrate
     case sleep, snack, dance, stretch, groom, playful, affectionate, tired, excited, paw, tail
@@ -13,504 +12,131 @@ enum HaloCompanionMotion: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-enum HaloPetPose: String, CaseIterable, Identifiable, Hashable {
-    case idle, sitting, standing, walking, lying, sleeping, stretching, grooming, lookingAround
-    case peekBottom, peekLeft, peekRight, pawsOnEdge, headOnEdge, hiddenPeek
-    case playful, curious, tired, happy, excited, dance, working, coffee, umbrella
+/// The supplied pet atlases are always 8 columns × 6 rows (48 frames total).
+/// Row order is part of the asset contract and must not be inferred from source pixel dimensions.
+enum HaloPetAtlasAnimation: Int, CaseIterable, Identifiable {
+    case walk = 0
+    case sleep = 1
+    case play = 2
+    case coffeeFromLeft = 3
+    case coffeeFromRight = 4
+    case wave = 5
 
-    var id: String { rawValue }
+    var id: Int { rawValue }
     var title: String {
         switch self {
-        case .lookingAround: return "Looking Around"
-        case .peekBottom: return "Peek Bottom"
-        case .peekLeft: return "Peek Left"
-        case .peekRight: return "Peek Right"
-        case .pawsOnEdge: return "Paws on Edge"
-        case .headOnEdge: return "Head on Edge"
-        case .hiddenPeek: return "Hidden Peek"
-        default:
-            return rawValue.replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression).capitalized
+        case .walk: return "Walk Right"
+        case .sleep: return "Settle & Sleep"
+        case .play: return "Play With Ball"
+        case .coffeeFromLeft: return "Enter Left & Coffee"
+        case .coffeeFromRight: return "Enter Right & Coffee"
+        case .wave: return "Say Hi / Paw Wave"
         }
     }
 
-    var fallbacks: [HaloPetPose] {
+    var framesPerSecond: Double {
         switch self {
-        case .idle: return [.sitting, .standing]
-        case .sitting: return [.idle, .standing]
-        case .standing: return [.idle, .sitting]
-        case .walking: return [.standing, .idle]
-        case .lying: return [.sleeping, .idle]
-        case .sleeping: return [.lying, .tired, .idle]
-        case .stretching: return [.standing, .idle]
-        case .grooming: return [.sitting, .idle]
-        case .lookingAround: return [.curious, .idle]
-        case .peekBottom: return [.headOnEdge, .hiddenPeek, .curious]
-        case .peekLeft: return [.peekBottom, .headOnEdge]
-        case .peekRight: return [.peekBottom, .headOnEdge]
-        case .pawsOnEdge: return [.headOnEdge, .peekBottom]
-        case .headOnEdge: return [.peekBottom, .hiddenPeek]
-        case .hiddenPeek: return [.headOnEdge, .peekBottom]
-        case .playful: return [.happy, .curious, .idle]
-        case .curious: return [.lookingAround, .idle]
-        case .tired: return [.lying, .sleeping, .idle]
-        case .happy: return [.playful, .idle]
-        case .excited: return [.happy, .playful, .idle]
-        case .dance: return [.excited, .happy, .playful, .idle]
-        case .working: return [.sitting, .idle]
-        case .coffee: return [.tired, .sitting, .idle]
-        case .umbrella: return [.standing, .idle]
+        case .walk: return 11
+        case .sleep: return 7
+        case .play: return 10
+        case .coffeeFromLeft, .coffeeFromRight: return 8
+        case .wave: return 9
+        }
+    }
+
+    var loops: Bool {
+        switch self {
+        case .walk, .play: return true
+        case .sleep, .coffeeFromLeft, .coffeeFromRight, .wave: return false
         }
     }
 }
 
-/// Runtime manifest built from the canonical sprite sheet. The source sheet always wins; aliases
-/// only provide graceful behaviour when a sheet genuinely lacks a requested state.
-final class HaloPetAssetManifest: @unchecked Sendable {
-    let species: String
+/// One transparent 8×6 atlas, pre-sliced once at load time. Frame rectangles are calculated from
+/// normalized fractions of the atlas width/height so non-square source pixels and odd dimensions are safe.
+final class HaloPetAtlas: @unchecked Sendable {
+    static let columns = 8
+    static let rows = 6
     let resourceName: String
-    let columns: Int
-    let rows: Int
-    let detectedAssetCount: Int
-    let assets: [HaloPetPose: CGImage]
-    let orderedAssets: [(HaloPetPose, CGImage)]
+    let pixelSize: CGSize
+    private let frames: [[CGImage]]
 
-    init(species: String, resourceName: String, columns: Int, rows: Int,
-         detectedAssetCount: Int, assets: [HaloPetPose: CGImage], orderedAssets: [(HaloPetPose, CGImage)]) {
-        self.species = species
+    init?(resourceName: String, image: CGImage) {
         self.resourceName = resourceName
-        self.columns = columns
-        self.rows = rows
-        self.detectedAssetCount = detectedAssetCount
-        self.assets = assets
-        self.orderedAssets = orderedAssets
+        self.pixelSize = CGSize(width: image.width, height: image.height)
+        var sliced: [[CGImage]] = []
+        sliced.reserveCapacity(Self.rows)
+        for row in 0..<Self.rows {
+            var rowFrames: [CGImage] = []
+            rowFrames.reserveCapacity(Self.columns)
+            for column in 0..<Self.columns {
+                // Use normalized boundaries rather than width / 8 and height / 6 assumptions.
+                let nx0 = CGFloat(column) / CGFloat(Self.columns)
+                let nx1 = CGFloat(column + 1) / CGFloat(Self.columns)
+                let ny0 = CGFloat(row) / CGFloat(Self.rows)
+                let ny1 = CGFloat(row + 1) / CGFloat(Self.rows)
+                let x0 = Int((nx0 * CGFloat(image.width)).rounded(.down))
+                let x1 = Int((nx1 * CGFloat(image.width)).rounded(.down))
+                let y0 = Int((ny0 * CGFloat(image.height)).rounded(.down))
+                let y1 = Int((ny1 * CGFloat(image.height)).rounded(.down))
+                let rect = CGRect(x: x0, y: y0, width: max(1, x1 - x0), height: max(1, y1 - y0))
+                guard let frame = image.cropping(to: rect) else { return nil }
+                rowFrames.append(frame)
+            }
+            sliced.append(rowFrames)
+        }
+        guard sliced.count == Self.rows, sliced.allSatisfy({ $0.count == Self.columns }) else { return nil }
+        self.frames = sliced
     }
 
-    func image(for pose: HaloPetPose) -> CGImage? {
-        if let exact = assets[pose] { return exact }
-        for fallback in pose.fallbacks {
-            if let image = assets[fallback] { return image }
-        }
-        return orderedAssets.first?.1
+    func frame(animation: HaloPetAtlasAnimation, index: Int) -> CGImage? {
+        guard animation.rawValue >= 0, animation.rawValue < frames.count else { return nil }
+        let row = frames[animation.rawValue]
+        guard !row.isEmpty else { return nil }
+        return row[min(max(0, index), row.count - 1)]
     }
 }
 
 @MainActor
 final class HaloPetAssetStore: ObservableObject {
     static let shared = HaloPetAssetStore()
-
     @Published private(set) var revision = 0
-    private var manifests: [String: HaloPetAssetManifest] = [:]
+    private var atlases: [String: HaloPetAtlas] = [:]
     private var loading = Set<String>()
 
-    func manifest(for kind: EIPetKind) -> HaloPetAssetManifest? { manifests[kind.rawValue] }
-    func image(for kind: EIPetKind, pose: HaloPetPose) -> CGImage? { manifests[kind.rawValue]?.image(for: pose) }
+    func atlas(for kind: EIPetKind) -> HaloPetAtlas? { atlases[kind.rawValue] }
 
     func load(_ kind: EIPetKind) {
         let key = kind.rawValue
-        guard manifests[key] == nil, !loading.contains(key) else { return }
-        let resource: (String, String)
+        guard atlases[key] == nil, !loading.contains(key) else { return }
+        let resource: String
         switch kind {
-        case .cat: resource = ("Cat", "png")
-        case .dog: resource = ("Dog", "jpg")
-        case .fox: resource = ("Fox", "jpg")
+        case .cat: resource = "cat"
+        case .dog: resource = "dog"
+        case .fox: resource = "fox"
         }
-        guard let url = Bundle.main.url(forResource: resource.0, withExtension: resource.1) else { return }
+        guard let url = Bundle.main.url(forResource: resource, withExtension: "png") else { return }
         loading.insert(key)
         Task { [weak self] in
-            let manifest = await Task.detached(priority: .utility) {
-                HaloPetSpriteSheetDecoder.decode(url: url, species: key, resourceName: "\(resource.0).\(resource.1)")
+            let atlas = await Task.detached(priority: .utility) { () -> HaloPetAtlas? in
+                guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                      let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+                return HaloPetAtlas(resourceName: "\(resource).png", image: image)
             }.value
             guard let self else { return }
             self.loading.remove(key)
-            if let manifest { self.manifests[key] = manifest }
+            if let atlas { self.atlases[key] = atlas }
             self.revision &+= 1
         }
     }
 }
 
-private enum HaloPetSpriteSheetDecoder {
-    private struct RGB {
-        var r: Int
-        var g: Int
-        var b: Int
-    }
-
-    /// Crop rectangles are authored against the exact supplied source sheets and then scaled to
-    /// the decoded image size. This is intentionally deterministic: these sheets are illustrations,
-    /// not uniform frame grids, and Dog/Fox contain text labels that must never enter a sprite crop.
-    private struct CropSpec {
-        let pose: HaloPetPose
-        let rect: CGRect
-    }
-
-    private struct SheetSpec {
-        let referenceSize: CGSize
-        let crops: [CropSpec]
-    }
-
-    private struct PixelBuffer {
-        let width: Int
-        let height: Int
-        var pixels: [UInt8]
-        let background: RGB
-
-        init?(image: CGImage) {
-            width = image.width
-            height = image.height
-            guard width > 0, height > 0 else { return nil }
-            var bytes = [UInt8](repeating: 0, count: width * height * 4)
-            guard let context = CGContext(data: &bytes, width: width, height: height,
-                                          bitsPerComponent: 8, bytesPerRow: width * 4,
-                                          space: CGColorSpaceCreateDeviceRGB(),
-                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-            context.translateBy(x: 0, y: CGFloat(height))
-            context.scaleBy(x: 1, y: -1)
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-            pixels = bytes
-
-            // The provided sheets have a baked checkerboard rather than useful transparency.
-            // Averaging many border samples lands between the two checker tones, allowing the
-            // flood-fill tolerance below to remove both without eating the illustrated animal.
-            var rs = 0, gs = 0, bs = 0, count = 0
-            let samples = 28
-            for i in 0..<samples {
-                let tx = Int(Double(i) / Double(samples - 1) * Double(width - 1))
-                let ty = Int(Double(i) / Double(samples - 1) * Double(height - 1))
-                for (x, y) in [(tx, 0), (tx, height - 1), (0, ty), (width - 1, ty)] {
-                    let p = (y * width + x) * 4
-                    rs += Int(bytes[p]); gs += Int(bytes[p + 1]); bs += Int(bytes[p + 2]); count += 1
-                }
-            }
-            background = count > 0 ? RGB(r: rs / count, g: gs / count, b: bs / count) : RGB(r: 190, g: 190, b: 192)
-        }
-
-        func extractedSprite(rect sourceRect: CGRect, referenceSize: CGSize) -> CGImage? {
-            guard referenceSize.width > 0, referenceSize.height > 0 else { return nil }
-            let sx = CGFloat(width) / referenceSize.width
-            let sy = CGFloat(height) / referenceSize.height
-            let x0 = max(0, min(width - 1, Int((sourceRect.minX * sx).rounded(.down))))
-            let y0 = max(0, min(height - 1, Int((sourceRect.minY * sy).rounded(.down))))
-            let x1 = max(x0 + 1, min(width, Int((sourceRect.maxX * sx).rounded(.up))))
-            let y1 = max(y0 + 1, min(height, Int((sourceRect.maxY * sy).rounded(.up))))
-            let w = x1 - x0
-            let h = y1 - y0
-            guard w > 1, h > 1 else { return nil }
-
-            var out = [UInt8](repeating: 0, count: w * h * 4)
-            for row in 0..<h {
-                let src = ((y0 + row) * width + x0) * 4
-                let dst = row * w * 4
-                out[dst..<(dst + w * 4)] = pixels[src..<(src + w * 4)]
-            }
-
-            removeCheckerboardBackground(&out, width: w, height: h)
-            guard let content = mainContentRect(out, width: w, height: h) else { return nil }
-            let padX = max(2, Int(Double(content.width) * 0.035))
-            let padY = max(2, Int(Double(content.height) * 0.035))
-            let left = max(0, content.x - padX)
-            let top = max(0, content.y - padY)
-            let right = min(w, content.x + content.width + padX)
-            let bottom = min(h, content.y + content.height + padY)
-            return makeImage(out, sourceWidth: w, x: left, y: top, width: right - left, height: bottom - top)
-        }
-
-        private func removeCheckerboardBackground(_ bytes: inout [UInt8], width w: Int, height h: Int) {
-            guard w > 2, h > 2 else { return }
-
-            // All supplied source sheets contain a *baked* grey checkerboard (including Cat.png;
-            // its alpha channel is fully opaque). JPEG compression also creates many shades around
-            // the nominal two checker tones, so exact two-colour matching leaves ugly squares.
-            // Instead learn the neutral luminance range from the crop border, then remove only the
-            // connected neutral field. The pet's outline acts as a hard boundary, protecting pale fur.
-            var border: [RGB] = []
-            let step = max(1, min(w, h) / 48)
-            for x in stride(from: 0, to: w, by: step) {
-                border.append(rgb(bytes, width: w, x: x, y: 0))
-                border.append(rgb(bytes, width: w, x: x, y: h - 1))
-            }
-            for y in stride(from: 0, to: h, by: step) {
-                border.append(rgb(bytes, width: w, x: 0, y: y))
-                border.append(rgb(bytes, width: w, x: w - 1, y: y))
-            }
-
-            let neutralBorder = border.filter { chroma($0) <= 28 }
-            let luminances = neutralBorder.map(luma).sorted()
-            let low: Double
-            let high: Double
-            if luminances.count >= 8 {
-                let p08 = luminances[Int(Double(luminances.count - 1) * 0.08)]
-                let p92 = luminances[Int(Double(luminances.count - 1) * 0.92)]
-                low = max(105, p08 - 24)
-                high = min(238, p92 + 24)
-            } else {
-                low = 120
-                high = 230
-            }
-
-            // Keep sampled tone centres as an additional JPEG-safe test, but don't depend on them.
-            let tones = checkerTones(neutralBorder.isEmpty ? border : neutralBorder)
-            func isBackground(_ index: Int) -> Bool {
-                let p = index * 4
-                let value = RGB(r: Int(bytes[p]), g: Int(bytes[p + 1]), b: Int(bytes[p + 2]))
-                let lum = luma(value)
-                let neutralChecker = chroma(value) <= 30 && lum >= low && lum <= high
-                let nearLearnedTone = tones.contains { distanceSquared(value, $0) <= 52 * 52 }
-                return neutralChecker || nearLearnedTone
-            }
-
-            var visited = [Bool](repeating: false, count: w * h)
-            var queue: [Int] = []
-            queue.reserveCapacity(w * 2 + h * 2)
-            func seed(_ index: Int) {
-                guard !visited[index], isBackground(index) else { return }
-                visited[index] = true
-                queue.append(index)
-            }
-            for x in 0..<w { seed(x); seed((h - 1) * w + x) }
-            for y in 0..<h { seed(y * w); seed(y * w + w - 1) }
-
-            var head = 0
-            while head < queue.count {
-                let index = queue[head]; head += 1
-                let x = index % w, y = index / w
-                if x > 0 { seed(index - 1) }
-                if x + 1 < w { seed(index + 1) }
-                if y > 0 { seed(index - w) }
-                if y + 1 < h { seed(index + w) }
-            }
-
-            for i in 0..<(w * h) where visited[i] {
-                bytes[i * 4 + 3] = 0
-            }
-
-            // Remove JPEG/checker contamination at the silhouette boundary. Only neutral pixels
-            // adjacent to removed background are affected; coloured fur/eyes/outlines remain intact.
-            // Two passes are deliberate because JPEG ringing can be ~2 px wide at this source size.
-            for _ in 0..<2 {
-                var remove: [Int] = []
-                for i in 0..<(w * h) where bytes[i * 4 + 3] > 0 {
-                    let x = i % w, y = i / w
-                    let touchesTransparent =
-                        (x > 0 && bytes[(i - 1) * 4 + 3] == 0) ||
-                        (x + 1 < w && bytes[(i + 1) * 4 + 3] == 0) ||
-                        (y > 0 && bytes[(i - w) * 4 + 3] == 0) ||
-                        (y + 1 < h && bytes[(i + w) * 4 + 3] == 0)
-                    guard touchesTransparent else { continue }
-                    let p = i * 4
-                    let value = RGB(r: Int(bytes[p]), g: Int(bytes[p + 1]), b: Int(bytes[p + 2]))
-                    let lum = luma(value)
-                    if chroma(value) <= 34 && lum >= low - 10 && lum <= high + 10 {
-                        remove.append(i)
-                    }
-                }
-                if remove.isEmpty { break }
-                for i in remove { bytes[i * 4 + 3] = 0 }
-            }
-
-            // A tiny alpha feather on the remaining edge avoids a cut-out look without reintroducing
-            // checker colour. This affects only the immediate non-neutral silhouette boundary.
-            var feather: [Int] = []
-            for i in 0..<(w * h) where bytes[i * 4 + 3] > 0 {
-                let x = i % w, y = i / w
-                if (x > 0 && bytes[(i - 1) * 4 + 3] == 0) ||
-                   (x + 1 < w && bytes[(i + 1) * 4 + 3] == 0) ||
-                   (y > 0 && bytes[(i - w) * 4 + 3] == 0) ||
-                   (y + 1 < h && bytes[(i + w) * 4 + 3] == 0) {
-                    feather.append(i)
-                }
-            }
-            for i in feather { bytes[i * 4 + 3] = min(bytes[i * 4 + 3], 235) }
-        }
-
-        private func chroma(_ value: RGB) -> Int {
-            max(value.r, max(value.g, value.b)) - min(value.r, min(value.g, value.b))
-        }
-
-        private func luma(_ value: RGB) -> Double {
-            0.2126 * Double(value.r) + 0.7152 * Double(value.g) + 0.0722 * Double(value.b)
-        }
-
-        private func rgb(_ bytes: [UInt8], width: Int, x: Int, y: Int) -> RGB {
-            let p = (y * width + x) * 4
-            return RGB(r: Int(bytes[p]), g: Int(bytes[p + 1]), b: Int(bytes[p + 2]))
-        }
-
-        private func checkerTones(_ samples: [RGB]) -> [RGB] {
-            guard !samples.isEmpty else { return [background] }
-            let sorted = samples.sorted { brightness($0) < brightness($1) }
-            let third = max(1, sorted.count / 3)
-            return [average(Array(sorted.prefix(third))), average(Array(sorted.suffix(third)))]
-        }
-
-        private func average(_ values: [RGB]) -> RGB {
-            guard !values.isEmpty else { return background }
-            return RGB(r: values.reduce(0) { $0 + $1.r } / values.count,
-                       g: values.reduce(0) { $0 + $1.g } / values.count,
-                       b: values.reduce(0) { $0 + $1.b } / values.count)
-        }
-
-        private func brightness(_ value: RGB) -> Int { value.r + value.g + value.b }
-        private func distanceSquared(_ a: RGB, _ b: RGB) -> Int {
-            let dr = a.r - b.r, dg = a.g - b.g, db = a.b - b.b
-            return dr * dr + dg * dg + db * db
-        }
-
-        private func mainContentRect(_ bytes: [UInt8], width w: Int, height h: Int) -> (x: Int, y: Int, width: Int, height: Int)? {
-            var minX = w, minY = h, maxX = -1, maxY = -1
-            for y in 0..<h {
-                for x in 0..<w where bytes[(y * w + x) * 4 + 3] > 24 {
-                    minX = min(minX, x); minY = min(minY, y)
-                    maxX = max(maxX, x); maxY = max(maxY, y)
-                }
-            }
-            guard maxX >= minX, maxY >= minY else { return nil }
-            return (minX, minY, maxX - minX + 1, maxY - minY + 1)
-        }
-
-        private func makeImage(_ bytes: [UInt8], sourceWidth: Int, x: Int, y: Int, width w: Int, height h: Int) -> CGImage? {
-            guard w > 0, h > 0 else { return nil }
-            var cropped = [UInt8](repeating: 0, count: w * h * 4)
-            for row in 0..<h {
-                let sourceStart = ((y + row) * sourceWidth + x) * 4
-                let destinationStart = row * w * 4
-                cropped[destinationStart..<(destinationStart + w * 4)] = bytes[sourceStart..<(sourceStart + w * 4)]
-            }
-            guard let provider = CGDataProvider(data: Data(cropped) as CFData) else { return nil }
-            return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
-                           space: CGColorSpaceCreateDeviceRGB(),
-                           bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                           provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
-        }
-    }
-
-    static func decode(url: URL, species: String, resourceName: String) -> HaloPetAssetManifest? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 2400,
-                kCGImageSourceShouldCacheImmediately: true
-              ] as CFDictionary),
-              let buffer = PixelBuffer(image: image),
-              let spec = sheetSpec(for: species) else { return nil }
-
-        var mapped: [HaloPetPose: CGImage] = [:]
-        var ordered: [(HaloPetPose, CGImage)] = []
-        for crop in spec.crops {
-            guard let sprite = buffer.extractedSprite(rect: crop.rect, referenceSize: spec.referenceSize) else { continue }
-            mapped[crop.pose] = sprite
-            ordered.append((crop.pose, sprite))
-        }
-        guard !ordered.isEmpty else { return nil }
-        return HaloPetAssetManifest(species: species,
-                                    resourceName: resourceName,
-                                    columns: 0,
-                                    rows: 0,
-                                    detectedAssetCount: mapped.count,
-                                    assets: mapped,
-                                    orderedAssets: ordered)
-    }
-
-    private static func c(_ pose: HaloPetPose, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CropSpec {
-        CropSpec(pose: pose, rect: CGRect(x: x, y: y, width: w, height: h))
-    }
-
-    private static func sheetSpec(for species: String) -> SheetSpec? {
-        switch species.lowercased() {
-        case "cat":
-            // Cat.png · 1697×927 · unlabelled canonical art supplied by the user.
-            return SheetSpec(referenceSize: CGSize(width: 1697, height: 927), crops: [
-                c(.idle, 62, 45, 165, 255),
-                c(.sitting, 820, 58, 155, 240),
-                c(.standing, 975, 62, 235, 235),
-                c(.walking, 1185, 55, 270, 245),
-                c(.lying, 1430, 145, 260, 145),
-                c(.sleeping, 735, 374, 215, 155),
-                c(.stretching, 950, 330, 240, 215),
-                c(.grooming, 1215, 335, 205, 210),
-                c(.lookingAround, 1450, 325, 195, 225),
-                c(.peekBottom, 75, 555, 180, 115),
-                c(.peekLeft, 300, 550, 155, 135),
-                c(.peekRight, 525, 545, 150, 140),
-                c(.pawsOnEdge, 900, 545, 195, 135),
-                c(.headOnEdge, 1145, 550, 215, 125),
-                c(.hiddenPeek, 1450, 550, 205, 125),
-                c(.playful, 28, 690, 300, 220),
-                c(.curious, 340, 680, 175, 225),
-                c(.tired, 545, 720, 260, 175),
-                c(.happy, 805, 690, 220, 215),
-                c(.excited, 1010, 680, 200, 225),
-                c(.dance, 1010, 680, 200, 225),
-                c(.working, 1220, 690, 275, 220),
-                c(.umbrella, 1490, 675, 200, 240)
-            ])
-
-        case "dog":
-            // Dog.jpg · 2048×1117 · crop bottoms stop above every baked label.
-            return SheetSpec(referenceSize: CGSize(width: 2048, height: 1117), crops: [
-                c(.idle, 1000, 55, 175, 245),
-                c(.sitting, 1000, 55, 175, 245),
-                c(.standing, 1190, 55, 235, 245),
-                c(.walking, 1450, 52, 285, 250),
-                c(.lying, 1740, 125, 300, 170),
-                c(.sleeping, 925, 420, 230, 160),
-                c(.stretching, 1180, 350, 265, 235),
-                c(.grooming, 1495, 382, 225, 200),
-                c(.lookingAround, 1785, 370, 205, 215),
-                c(.peekBottom, 92, 905, 215, 145),
-                c(.peekLeft, 435, 895, 120, 165),
-                c(.peekRight, 700, 895, 115, 165),
-                c(.pawsOnEdge, 1000, 900, 180, 160),
-                c(.headOnEdge, 1260, 920, 180, 120),
-                c(.hiddenPeek, 1560, 925, 185, 120),
-                c(.playful, 45, 640, 320, 175),
-                c(.curious, 425, 625, 165, 190),
-                c(.tired, 620, 680, 285, 135),
-                c(.happy, 915, 660, 225, 155),
-                c(.excited, 1160, 650, 180, 165),
-                c(.dance, 1360, 635, 165, 185),
-                c(.working, 1540, 655, 230, 165),
-                c(.coffee, 1785, 655, 255, 165),
-                c(.umbrella, 1840, 870, 190, 220)
-            ])
-
-        case "fox":
-            // Fox.jpg · 2048×1117 · explicit crops preserve the richer fox-only expressions.
-            return SheetSpec(referenceSize: CGSize(width: 2048, height: 1117), crops: [
-                c(.idle, 1000, 50, 180, 250),
-                c(.sitting, 1000, 50, 180, 250),
-                c(.standing, 1185, 50, 265, 245),
-                c(.walking, 1450, 55, 285, 245),
-                c(.lying, 1740, 120, 300, 175),
-                c(.sleeping, 915, 410, 250, 175),
-                c(.stretching, 1170, 335, 220, 250),
-                c(.lookingAround, 1785, 375, 190, 210),
-                c(.peekBottom, 315, 430, 190, 125),
-                c(.peekLeft, 580, 405, 130, 165),
-                c(.peekRight, 785, 405, 130, 165),
-                c(.pawsOnEdge, 1370, 430, 170, 125),
-                c(.headOnEdge, 1370, 430, 170, 125),
-                c(.hiddenPeek, 78, 425, 180, 130),
-                c(.playful, 340, 655, 205, 160),
-                c(.curious, 55, 645, 160, 170),
-                c(.tired, 670, 680, 230, 135),
-                c(.happy, 560, 645, 135, 170),
-                c(.excited, 1390, 930, 95, 120),
-                c(.dance, 480, 890, 135, 190),
-                c(.working, 1420, 655, 205, 165),
-                c(.coffee, 1850, 650, 185, 170),
-                c(.umbrella, 785, 885, 135, 205)
-            ])
-        default:
-            return nil
-        }
-    }
-}
 @MainActor
 final class HaloPetDebugState: ObservableObject {
     static let shared = HaloPetDebugState()
     @Published var forcedMotion: HaloCompanionMotion?
-    @Published var showAssets = false
+    @Published var selectedAnimation: HaloPetAtlasAnimation = .walk
+    @Published var previewFrame = 0
     private var playTask: Task<Void, Never>?
 
     func force(_ motion: HaloCompanionMotion?) {
@@ -521,18 +147,19 @@ final class HaloPetDebugState: ObservableObject {
         playTask?.cancel()
         playTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            for motion in HaloCompanionMotion.allCases where motion != .hidden {
+            let motions: [HaloCompanionMotion] = [.walk, .sleep, .playful, .coffee, .greet]
+            for motion in motions {
                 guard !Task.isCancelled else { return }
                 self.forcedMotion = motion
-                try? await Task.sleep(nanoseconds: 1_150_000_000)
+                try? await Task.sleep(nanoseconds: 1_600_000_000)
             }
             if !Task.isCancelled { self.forcedMotion = nil }
         }
     }
 }
 
-/// Asset-backed pet renderer. The supplied Cat/Dog/Fox sheets are the source of truth; this view
-/// only adds transforms, masking, timing and subtle secondary motion to make those drawings live.
+/// Asset-backed 8×6 atlas renderer. The source PNGs already contain transparency, so Halo never
+/// performs colour-keying, checkerboard removal or silhouette cleanup here; source alpha is preserved exactly.
 struct HaloCompanionSprite: View {
     let kind: EIPetKind
     let style: EIPetVisualStyle
@@ -542,7 +169,7 @@ struct HaloCompanionSprite: View {
     var motion: HaloCompanionMotion = .idle
     var facingRight = true
 
-    // Legacy call-site compatibility. Canonical pets intentionally ignore old pixel/vector styling.
+    // Legacy call-site compatibility; atlas artwork intentionally ignores old vector/pixel styling.
     var displayPreset: EIPixelDisplayPreset = .clean
     var pixelGrid = false
     var pixelGlow = true
@@ -553,36 +180,31 @@ struct HaloCompanionSprite: View {
     @ObservedObject private var assets = HaloPetAssetStore.shared
     @ObservedObject private var debug = HaloPetDebugState.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var activePose: HaloPetPose = .idle
-    @State private var previousPose: HaloPetPose?
-    @State private var blend = 1.0
+    @State private var animationEpoch = Date()
     @State private var hoverPoint: CGPoint?
 
     private var resolvedMotion: HaloCompanionMotion { debug.forcedMotion ?? motion }
-    private var targetPose: HaloPetPose {
+
+    private var animation: HaloPetAtlasAnimation {
         switch resolvedMotion {
-        case .hidden: return .hiddenPeek
-        case .peekEyes, .peekEars: return .hiddenPeek
-        case .peek: return .peekBottom
-        case .peekLeft: return .peekLeft
-        case .peekRight: return .peekRight
-        case .observe, .look: return .lookingAround
-        case .idle: return .idle
-        case .walk, .entering, .leaving: return .walking
-        case .greet, .affectionate, .happy: return .happy
-        case .celebrate, .excited: return .excited
-        case .sleep: return .sleeping
-        case .snack, .playful: return .playful
-        case .dance: return .dance
-        case .stretch: return .stretching
-        case .groom: return .grooming
-        case .tired: return .tired
-        case .paw: return .pawsOnEdge
-        case .tail, .curious: return .curious
-        case .resting: return .lying
-        case .coffee: return .coffee
-        case .working: return .working
-        case .umbrella: return .umbrella
+        case .walk, .leaving: return .walk
+        case .sleep, .resting, .tired: return .sleep
+        case .playful, .snack, .celebrate, .excited, .dance: return .play
+        case .coffee, .working, .entering:
+            return facingRight ? .coffeeFromLeft : .coffeeFromRight
+        case .greet, .paw, .affectionate, .happy: return .wave
+        case .hidden, .peekEyes, .peekEars, .peek, .peekLeft, .peekRight,
+             .observe, .idle, .look, .stretch, .groom, .tail, .curious, .umbrella:
+            return .wave
+        }
+    }
+
+    private var shouldAnimate: Bool {
+        if reduceMotion { return false }
+        switch resolvedMotion {
+        case .idle, .observe, .look, .curious, .umbrella, .peekEyes, .peekEars, .peek, .peekLeft, .peekRight, .hidden:
+            return false
+        default: return true
         }
     }
 
@@ -590,20 +212,14 @@ struct HaloCompanionSprite: View {
         Group {
             if resolvedMotion == .hidden {
                 Color.clear
-            } else if assets.image(for: kind, pose: activePose) == nil {
-                Color.clear
-            } else {
-                TimelineView(.animation(minimumInterval: updateInterval, paused: reduceMotion)) { timeline in
-                    let phase = timeline.date.timeIntervalSinceReferenceDate
-                    ZStack {
-                        if let previousPose, let image = assets.image(for: kind, pose: previousPose) {
-                            sprite(image, phase: phase).opacity(1 - blend)
-                        }
-                        if let image = assets.image(for: kind, pose: activePose) {
-                            sprite(image, phase: phase).opacity(blend)
-                        }
+            } else if let atlas = assets.atlas(for: kind) {
+                TimelineView(.animation(minimumInterval: shouldAnimate ? 1.0 / 30.0 : 0.25, paused: false)) { timeline in
+                    if let frame = atlas.frame(animation: animation, index: frameIndex(at: timeline.date)) {
+                        sprite(frame, phase: timeline.date.timeIntervalSinceReferenceDate)
                     }
                 }
+            } else {
+                Color.clear
             }
         }
         .frame(width: size, height: size * 0.90)
@@ -615,74 +231,63 @@ struct HaloCompanionSprite: View {
             }
         }
         .task(id: kind.rawValue) { assets.load(kind) }
-        .onAppear { activePose = targetPose }
-        .onChange(of: targetPose) { transition(to: $0) }
+        .onAppear { animationEpoch = Date() }
+        .onChange(of: resolvedMotion) { _ in animationEpoch = Date() }
+        .onChange(of: facingRight) { _ in animationEpoch = Date() }
         .accessibilityLabel("\(kind.rawValue) companion")
     }
 
-    private var updateInterval: Double {
-        if reduceMotion { return 0.28 }
-        switch resolvedMotion {
-        case .walk, .dance, .playful, .excited, .entering, .leaving: return 1.0 / 36.0
-        case .sleep, .resting: return 1.0 / 10.0
-        default: return 1.0 / 24.0
-        }
+    private func frameIndex(at date: Date) -> Int {
+        guard shouldAnimate else { return 0 }
+        let elapsed = max(0, date.timeIntervalSince(animationEpoch))
+        let raw = Int(floor(elapsed * animation.framesPerSecond))
+        if animation.loops { return raw % HaloPetAtlas.columns }
+        return min(HaloPetAtlas.columns - 1, raw)
     }
 
     private func sprite(_ image: CGImage, phase: Double) -> some View {
-        let breathing = reduceMotion ? 1.0 : 1.0 + sin(phase * breathingSpeed) * breathingAmount
-        let bob = reduceMotion ? 0.0 : bobOffset(phase)
         let hover = cursorOffset
+        let bob = reduceMotion ? 0 : bobOffset(phase)
         return Image(decorative: image, scale: 1, orientation: .up)
             .resizable()
             .interpolation(.high)
             .scaledToFit()
-            .scaleEffect(x: facingRight ? 1 : -1, y: breathing, anchor: .bottom)
+            // Atlas rows encode their own left/right entry direction. Only generic walk/idle art is mirrored.
+            .scaleEffect(x: shouldMirror ? -1 : 1, y: 1, anchor: .center)
             .offset(x: hover.width, y: bob + hover.height + revealOffset)
             .mask(alignment: .top) {
                 Rectangle().frame(height: max(1, size * 0.90 * revealAmount), alignment: .top)
             }
-            .shadow(color: Color.black.opacity(resolvedMotion == .sleep ? 0.14 : 0.20), radius: max(1, size * 0.018), y: max(1, size * 0.012))
+            .shadow(color: Color.black.opacity(resolvedMotion == .sleep ? 0.10 : 0.16), radius: max(1, size * 0.015), y: max(1, size * 0.010))
+    }
+
+    private var shouldMirror: Bool {
+        switch animation {
+        case .coffeeFromLeft, .coffeeFromRight: return false
+        default: return !facingRight
+        }
     }
 
     private var revealAmount: CGFloat {
         switch resolvedMotion {
-        case .peekEyes: return 0.25
-        case .peekEars: return 0.18
-        case .peek, .peekLeft, .peekRight: return 0.62
-        case .paw: return 0.72
-        case .entering: return 0.84
-        case .leaving: return 0.70
+        case .peekEyes: return 0.24
+        case .peekEars: return 0.17
+        case .peek, .peekLeft, .peekRight: return 0.60
+        case .paw: return 0.74
         default: return 1
         }
     }
 
     private var revealOffset: CGFloat {
         let hidden = 1 - revealAmount
-        return hidden > 0 ? hidden * size * 0.32 : 0
-    }
-
-    private var breathingSpeed: Double {
-        resolvedMotion == .sleep ? 0.72 : (kind == .dog ? 1.32 : kind == .fox ? 0.92 : 1.06)
-    }
-
-    private var breathingAmount: CGFloat {
-        if resolvedMotion == .sleep { return 0.009 }
-        return kind == .dog ? 0.006 : 0.0045
+        return hidden > 0 ? hidden * size * 0.30 : 0
     }
 
     private func bobOffset(_ phase: Double) -> CGFloat {
-        switch resolvedMotion {
-        case .walk, .entering, .leaving:
-            return -CGFloat(abs(sin(phase * (kind == .dog ? 8.8 : 7.6)))) * (kind == .dog ? 2.2 : 1.6)
-        case .dance:
-            return -CGFloat(abs(sin(phase * (kind == .dog ? 6.8 : 5.3)))) * (kind == .dog ? 3.0 : 1.8)
-        case .excited, .greet:
-            return -CGFloat(abs(sin(phase * 5.8))) * (kind == .dog ? 2.4 : 1.1)
-        case .sleep, .resting:
-            return CGFloat(sin(phase * 0.72)) * 0.35
-        default:
-            return CGFloat(sin(phase * 0.92)) * 0.45
+        switch animation {
+        case .walk: return -CGFloat(abs(sin(phase * 7.5))) * 1.2
+        case .play: return -CGFloat(abs(sin(phase * 6.0))) * 1.0
+        default: return 0
         }
     }
 
@@ -691,32 +296,7 @@ struct HaloCompanionSprite: View {
               [.observe, .look, .curious, .peek, .peekLeft, .peekRight].contains(resolvedMotion) else { return .zero }
         let nx = min(1, max(-1, (point.x / max(1, size) - 0.5) * 2))
         let ny = min(1, max(-1, (point.y / max(1, size * 0.90) - 0.5) * 2))
-        return CGSize(width: nx * min(2.4, size * 0.018), height: ny * min(1.3, size * 0.010))
-    }
-
-    private func transition(to pose: HaloPetPose) {
-        guard pose != activePose else { return }
-        if reduceMotion {
-            previousPose = nil; activePose = pose; blend = 1
-            return
-        }
-        previousPose = activePose
-        activePose = pose
-        blend = 0
-        withAnimation(.easeInOut(duration: transitionDuration)) { blend = 1 }
-        let expectedPrevious = previousPose
-        DispatchQueue.main.asyncAfter(deadline: .now() + transitionDuration + 0.05) {
-            if previousPose == expectedPrevious && blend >= 0.99 { previousPose = nil }
-        }
-    }
-
-    private var transitionDuration: Double {
-        switch resolvedMotion {
-        case .peek, .peekLeft, .peekRight, .peekEyes, .peekEars: return 0.28
-        case .sleep, .resting, .stretch: return 0.42
-        case .walk, .entering, .leaving: return 0.20
-        default: return 0.24
-        }
+        return CGSize(width: nx * min(2.0, size * 0.015), height: ny * min(1.0, size * 0.008))
     }
 }
 
@@ -727,11 +307,6 @@ struct HaloPetDebugPanel: View {
     @ObservedObject private var debug = HaloPetDebugState.shared
     @ObservedObject private var assets = HaloPetAssetStore.shared
 
-    private let primaryMotions: [HaloCompanionMotion] = [
-        .hidden, .peek, .idle, .walk, .sleep, .playful, .curious, .tired, .happy,
-        .dance, .coffee, .working, .umbrella
-    ]
-
     var body: some View {
         DisclosureGroup("Pet Debug") {
             VStack(alignment: .leading, spacing: 8) {
@@ -740,44 +315,32 @@ struct HaloPetDebugPanel: View {
                 }
                 .pickerStyle(.segmented)
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 5)], spacing: 5) {
-                    ForEach(primaryMotions) { motion in
-                        Button(motion.rawValue) { debug.force(motion) }
-                            .font(.caption2)
-                    }
-                }
                 HStack {
-                    Button("Play All Behaviours") { debug.playAll() }
-                    Button("Release") { debug.force(nil) }
-                }
-                HStack {
-                    Button("User Return") { debug.force(.greet) }
-                    Button("Long Work") { debug.force(.coffee) }
-                    Button("Late Night") { debug.force(.sleep) }
-                    Button("Music") { debug.force(.dance) }
-                    Button("Rain") { debug.force(.umbrella) }
+                    Button("Walk") { debug.force(.walk) }
+                    Button("Sleep") { debug.force(.sleep) }
+                    Button("Play") { debug.force(.playful) }
+                    Button("Coffee") { debug.force(.coffee) }
+                    Button("Wave") { debug.force(.greet) }
                 }
                 .font(.caption2)
+                HStack {
+                    Button("Play All") { debug.playAll() }
+                    Button("Release") { debug.force(nil) }
+                }
 
-                if let manifest = assets.manifest(for: settings.settings.petKind) {
-                    Text("\(manifest.resourceName) · explicit pose map · mapped \(manifest.assets.count)")
+                if let atlas = assets.atlas(for: settings.settings.petKind) {
+                    Text("\(atlas.resourceName) · 8×6 · 48 transparent frames · \(Int(atlas.pixelSize.width))×\(Int(atlas.pixelSize.height)) px")
                         .font(.caption2).foregroundStyle(.secondary)
-                    Toggle("Inspect extracted poses", isOn: $debug.showAssets)
-                    if debug.showAssets {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 5)], spacing: 7) {
-                            ForEach(HaloPetPose.allCases) { pose in
-                                if let image = manifest.image(for: pose) {
-                                    VStack(spacing: 2) {
-                                        Image(decorative: image, scale: 1, orientation: .up)
-                                            .resizable().scaledToFit().frame(height: 52)
-                                        Text(pose.title).font(.system(size: 7)).lineLimit(1)
-                                    }
-                                }
-                            }
-                        }
+                    Picker("Atlas row", selection: $debug.selectedAnimation) {
+                        ForEach(HaloPetAtlasAnimation.allCases) { Text($0.title).tag($0) }
+                    }
+                    Slider(value: Binding(get: { Double(debug.previewFrame) }, set: { debug.previewFrame = Int($0.rounded()) }), in: 0...7, step: 1)
+                    if let frame = atlas.frame(animation: debug.selectedAnimation, index: debug.previewFrame) {
+                        Image(decorative: frame, scale: 1, orientation: .up)
+                            .resizable().interpolation(.high).scaledToFit().frame(height: 72)
                     }
                 } else {
-                    Text("Loading canonical pet sheet…").font(.caption2).foregroundStyle(.secondary)
+                    Text("Loading transparent atlas…").font(.caption2).foregroundStyle(.secondary)
                 }
             }
             .padding(.top, 6)
@@ -786,6 +349,7 @@ struct HaloPetDebugPanel: View {
     }
 }
 #endif
+
 
 // MARK: - Premium plant renderer
 
