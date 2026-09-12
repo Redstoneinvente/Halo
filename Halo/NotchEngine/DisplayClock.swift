@@ -749,7 +749,6 @@ private struct HaloDropZoneBoardView: View {
                 .foregroundStyle(model.hoveredZone == nil ? Color.white.opacity(0.36) : Color.white.opacity(0.70))
                 .position(x: proxy.size.width / 2, y: max(12, proxy.size.height - 11))
             }
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .stroke(Color.white.opacity(0.075), lineWidth: 1)
@@ -908,11 +907,7 @@ private final class HaloDropZoneHostView: NSView {
         hosting = NSHostingView(rootView: HaloDropZoneBoardView(settings: settings, model: model))
         super.init(frame: .zero)
         registerForDraggedTypes([.fileURL])
-        wantsLayer = true
-        layer?.masksToBounds = true
         autoresizingMask = [.width, .height]
-        hosting.wantsLayer = true
-        hosting.layer?.masksToBounds = true
         hosting.sizingOptions = []
         hosting.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hosting)
@@ -1020,6 +1015,8 @@ private final class HaloEmbeddedDropZoneController {
             view.addSubview(host, positioned: .above, relativeTo: nil)
         }
         host.frame = view.bounds
+        host.needsLayout = true
+        host.layoutSubtreeIfNeeded()
         view.addSubview(host, positioned: .above, relativeTo: nil)
     }
 
