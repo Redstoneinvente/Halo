@@ -339,12 +339,13 @@ struct ClosedNotchSlot: View {
         }
     }
     private var showPowerEvent: Bool { powerTargetSide == side }
+    private var rendersPowerEvent: Bool { showPowerEvent && hudCollision != .replace }
     private var powerSettings: PowerReactionOptions { options.powerReaction ?? PowerReactionOptions() }
     private var powerNotchMargin: Double { powerSettings.resolvedNotchMargin }
     // Power is always nearest the camera. Its margin is the complete camera-edge inset, not an
     // additional value layered on top of the normal horizontal padding.
     private var slotCameraInset: Double {
-        layoutMetrics.cameraInset(power: showPowerEvent ? powerSettings : nil)
+        layoutMetrics.cameraInset(power: rendersPowerEvent ? powerSettings : nil)
     }
     private var slotOuterInset: Double { layoutMetrics.outerInset }
     private var decorationSize: Double {
@@ -426,11 +427,11 @@ struct ClosedNotchSlot: View {
         }
     }
     private var powerUsesEventContainer: Bool {
-        guard showPowerEvent else { return false }
+        guard rendersPowerEvent else { return false }
         return powerSettings.expandForEvent && !itemIsVisible && decorationSize <= 0 && artworkFootprint <= 0 && hudReservedWidth <= 0
     }
     private var powerFootprint: Double {
-        guard showPowerEvent else { return 0 }
+        guard rendersPowerEvent else { return 0 }
         let natural = max(16, naturalPowerWidth)
         let extra = powerUsesEventContainer ? powerSettings.resolvedExtraEventSpace : 0
         // Camera margin belongs to the slot edge inset, not to the element's own width.
@@ -553,7 +554,7 @@ struct ClosedNotchSlot: View {
         if itemIsVisible && !hideMusicContentForArtworkOnly { content }
     }
     @ViewBuilder private var powerElement: some View {
-        if showPowerEvent, let powerEvent {
+        if rendersPowerEvent, let powerEvent {
             PowerEventBadge(
                 event: powerEvent,
                 options: options.powerReaction ?? PowerReactionOptions(),
