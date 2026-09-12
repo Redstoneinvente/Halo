@@ -609,160 +609,190 @@ private struct HaloDropZoneBoardView: View {
         GeometryReader { proxy in
             let configuration = settings.configuration
             let frames = HaloDropZoneLayoutResolver.frames(size: proxy.size, configuration: configuration)
-            let compact = configuration.zones.count > 4 || proxy.size.height < 275
+            let dense = configuration.zones.count >= 6 || proxy.size.height < 260
 
             ZStack(alignment: .topLeading) {
-                Color.black.opacity(configuration.backgroundOpacity)
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color.black.opacity(configuration.backgroundOpacity))
+
                 LinearGradient(
-                    colors: [Color.white.opacity(0.045), Color.accentColor.opacity(0.055), Color.clear],
+                    colors: [Color.white.opacity(0.055), Color.clear, Color.accentColor.opacity(0.06)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .allowsHitTesting(false)
 
-                HStack(spacing: 10) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(Color.white.opacity(0.075))
-                        Image(systemName: "arrow.down.doc.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Color.accentColor)
-                    }
-                    .frame(width: 32, height: 32)
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(configuration.headerTitle.isEmpty ? "Drop" : configuration.headerTitle)
-                            .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        Text(model.result ?? (configuration.headerSubtitle.isEmpty ? "Choose an action" : configuration.headerSubtitle))
-                            .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(model.result == nil ? Color.white.opacity(0.48) : Color.green)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                    HStack(spacing: 5) {
-                        Image(systemName: model.itemCount == 1 ? "doc.fill" : "doc.on.doc.fill")
-                        Text("\(model.itemCount)")
-                    }
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.68))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.white.opacity(0.065), in: Capsule())
-                }
-                .padding(.horizontal, max(13, configuration.boardPadding + 3))
-                .padding(.top, 11)
+                header(configuration: configuration)
+                    .padding(.horizontal, max(14, configuration.boardPadding + 4))
+                    .padding(.top, 11)
 
                 ForEach(Array(configuration.zones.enumerated()), id: \.element.id) { index, zone in
                     if frames.indices.contains(index) {
                         let frame = frames[index]
-                        zoneCard(zone, active: model.hoveredZone == index, configuration: configuration, compact: compact)
-                            .frame(width: frame.width, height: frame.height)
-                            .position(x: frame.midX, y: frame.midY)
+                        zoneCard(
+                            zone,
+                            index: index,
+                            active: model.hoveredZone == index,
+                            configuration: configuration,
+                            dense: dense
+                        )
+                        .frame(width: frame.width, height: frame.height)
+                        .position(x: frame.midX, y: frame.midY)
                     }
                 }
 
                 HStack(spacing: 6) {
-                    Circle()
-                        .fill(model.hoveredZone == nil ? Color.white.opacity(0.24) : Color.green)
-                        .frame(width: 5, height: 5)
-                    Text(model.hoveredZone == nil ? "Choose a zone" : "Release to run action")
-                        .font(.system(size: 8, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.42))
+                    Image(systemName: model.hoveredZone == nil ? "cursorarrow.motionlines" : "arrow.down.circle.fill")
+                        .font(.system(size: 8.5, weight: .semibold))
+                    Text(model.hoveredZone == nil ? "Move over an action" : "Release to run this action")
+                        .font(.system(size: 8.5, weight: .medium, design: .rounded))
                 }
-                .position(x: proxy.size.width / 2, y: max(12, proxy.size.height - 10))
+                .foregroundStyle(model.hoveredZone == nil ? Color.white.opacity(0.36) : Color.white.opacity(0.70))
+                .position(x: proxy.size.width / 2, y: max(12, proxy.size.height - 11))
             }
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.white.opacity(0.075), lineWidth: 1)
+            )
             .foregroundStyle(.white)
+        }
+    }
+
+    private func header(configuration: HaloDropZoneConfiguration) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.accentColor.opacity(0.30), Color.accentColor.opacity(0.10)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                Image(systemName: "arrow.down.doc.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .frame(width: 34, height: 34)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(configuration.headerTitle.isEmpty ? "Drop into Halo" : configuration.headerTitle)
+                    .font(.system(size: 14.5, weight: .semibold, design: .rounded))
+                Text(model.result ?? (configuration.headerSubtitle.isEmpty ? "Choose what happens next" : configuration.headerSubtitle))
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(model.result == nil ? Color.white.opacity(0.45) : Color.green.opacity(0.90))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: 5) {
+                Image(systemName: model.itemCount == 1 ? "doc.fill" : "doc.on.doc.fill")
+                Text(model.itemCount == 1 ? "1 item" : "\(model.itemCount) items")
+            }
+            .font(.system(size: 9, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.62))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(Color.white.opacity(0.065), in: Capsule())
         }
     }
 
     private func zoneCard(
         _ zone: HaloDropZone,
+        index: Int,
         active: Bool,
         configuration: HaloDropZoneConfiguration,
-        compact: Bool
+        dense: Bool
     ) -> some View {
         GeometryReader { proxy in
-            let veryCompact = compact || proxy.size.height < 78 || proxy.size.width < 105
-            VStack(alignment: .leading, spacing: veryCompact ? 4 : 7) {
-                HStack(alignment: .center, spacing: 8) {
-                    if configuration.showIcons {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: veryCompact ? 8 : 10, style: .continuous)
-                                .fill(zone.color.color.opacity(active ? 0.22 : 0.11))
-                            Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
-                                .font(.system(size: veryCompact ? 13 : 16, weight: .semibold))
-                                .foregroundStyle(active ? Color.white : zone.color.color)
-                        }
-                        .frame(width: veryCompact ? 28 : 34, height: veryCompact ? 28 : 34)
-                    }
+            let compact = dense || proxy.size.width < 130 || proxy.size.height < 86
+            let accent = zone.color.color
 
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(zone.title.isEmpty ? zone.action.rawValue : zone.title)
-                            .font(.system(size: veryCompact ? 9.5 : 11.5, weight: .semibold, design: .rounded))
-                            .lineLimit(1)
-                        if configuration.showSubtitles && !veryCompact && !zone.subtitle.isEmpty {
-                            Text(zone.subtitle)
-                                .font(.system(size: 8.3, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.43))
+            ZStack {
+                RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous)
+                    .fill(Color.white.opacity(active ? 0.105 : 0.050))
+
+                LinearGradient(
+                    colors: [accent.opacity(active ? 0.24 : 0.075), Color.clear],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous))
+
+                VStack(alignment: .leading, spacing: compact ? 5 : 8) {
+                    HStack(spacing: compact ? 7 : 9) {
+                        if configuration.showIcons {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: compact ? 9 : 11, style: .continuous)
+                                    .fill(accent.opacity(active ? 0.27 : 0.13))
+                                Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
+                                    .font(.system(size: compact ? 14 : 17, weight: .semibold))
+                                    .foregroundStyle(active ? Color.white : accent)
+                            }
+                            .frame(width: compact ? 31 : 38, height: compact ? 31 : 38)
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(zone.title.isEmpty ? zone.action.rawValue : zone.title)
+                                .font(.system(size: compact ? 10 : 12.5, weight: .semibold, design: .rounded))
                                 .lineLimit(1)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                    if active {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: veryCompact ? 12 : 15, weight: .semibold))
-                            .foregroundStyle(zone.color.color)
-                            .transition(.scale.combined(with: .opacity))
-                    } else if zone.action.isDestructive {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.orange.opacity(0.82))
-                    }
-                }
-
-                if !veryCompact {
-                    Spacer(minLength: 0)
-                    HStack(spacing: 6) {
-                        if configuration.showActionBadges {
-                            Label(zone.accepts.rawValue, systemImage: zone.accepts.symbol)
-                                .font(.system(size: 7.5, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.45))
+                            if configuration.showSubtitles && !compact && !zone.subtitle.isEmpty {
+                                Text(zone.subtitle)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.44))
+                                    .lineLimit(1)
+                            }
                         }
                         Spacer(minLength: 0)
-                        Text(active ? "RELEASE" : zone.action.rawValue.uppercased())
-                            .font(.system(size: 7.2, weight: .bold, design: .rounded))
-                            .foregroundStyle(active ? zone.color.color : Color.white.opacity(0.28))
-                            .lineLimit(1)
+                    }
+
+                    if !compact {
+                        Spacer(minLength: 0)
+                        HStack(spacing: 6) {
+                            if configuration.showActionBadges {
+                                Label(zone.accepts.rawValue, systemImage: zone.accepts.symbol)
+                                    .font(.system(size: 8, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.42))
+                            }
+                            Spacer(minLength: 0)
+                            if active {
+                                Label("Release", systemImage: "arrow.down")
+                                    .font(.system(size: 8.5, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(accent.opacity(0.90), in: Capsule())
+                            } else if zone.action.isDestructive {
+                                Label("Changes original", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 7.6, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.orange.opacity(0.80))
+                            } else {
+                                Text(zone.action.rawValue)
+                                    .font(.system(size: 7.8, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.26))
+                                    .lineLimit(1)
+                            }
+                        }
+                    } else if active {
+                        HStack {
+                            Spacer()
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(accent)
+                        }
                     }
                 }
+                .padding(compact ? 8 : 11)
             }
-            .padding(veryCompact ? 7 : 10)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous)
-                        .fill(Color.white.opacity(active ? 0.085 : 0.045))
-                    LinearGradient(
-                        colors: [zone.color.color.opacity(active ? 0.17 : 0.045), Color.clear],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous))
-                }
-            )
             .overlay(
                 RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous)
-                    .stroke(active ? zone.color.color.opacity(configuration.highlightStrength) : Color.white.opacity(0.075), lineWidth: active ? 1.6 : 1)
+                    .stroke(active ? accent.opacity(configuration.highlightStrength) : Color.white.opacity(0.07), lineWidth: active ? 1.7 : 1)
             )
-            .overlay(alignment: .top) {
-                Capsule()
-                    .fill(zone.color.color.opacity(active ? 0.95 : 0.42))
-                    .frame(height: active ? 2.5 : 1.5)
-                    .padding(.horizontal, max(10, configuration.cornerRadius * 0.6))
-            }
-            .shadow(color: zone.color.color.opacity(active ? 0.18 : 0), radius: active ? 14 : 0, y: 4)
-            .scaleEffect(active ? 1.012 : 1)
-            .animation(.easeOut(duration: 0.12), value: active)
+            .shadow(color: active ? accent.opacity(0.23) : Color.clear, radius: active ? 16 : 0, y: 5)
+            .scaleEffect(active ? 1.018 : 1)
+            .animation(.easeOut(duration: 0.13), value: active)
         }
     }
 }
@@ -1004,7 +1034,7 @@ final class HaloDropZoneStudioWindowController: NSObject {
         }
         let controller = NSHostingController(rootView: HaloDropZoneStudioView())
         let window = NSWindow(
-            contentRect: CGRect(x: 0, y: 0, width: 820, height: 760),
+            contentRect: CGRect(x: 0, y: 0, width: 1040, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -1012,7 +1042,7 @@ final class HaloDropZoneStudioWindowController: NSObject {
         window.title = "Halo · Drop Zone Studio"
         window.contentViewController = controller
         window.isReleasedWhenClosed = false
-        window.minSize = CGSize(width: 720, height: 620)
+        window.minSize = CGSize(width: 900, height: 620)
         window.center()
         self.window = window
         NSApp.activate(ignoringOtherApps: true)
@@ -1023,86 +1053,435 @@ final class HaloDropZoneStudioWindowController: NSObject {
 @MainActor
 private struct HaloDropZoneStudioView: View {
     var body: some View {
-        ScrollView {
-            HaloDropZoneSettingsEditor()
-                .padding(18)
+        HaloDropZoneSettingsEditor()
+            .frame(minWidth: 900, minHeight: 620)
+    }
+}
+
+private enum HaloDropStudioTemplate: String, CaseIterable, Identifiable {
+    case essentials = "Essentials"
+    case everyday = "Everyday"
+    case creator = "Creator"
+    case power = "Power User"
+
+    var id: String { rawValue }
+    var symbol: String {
+        switch self {
+        case .essentials: return "sparkles"
+        case .everyday: return "square.grid.2x2"
+        case .creator: return "wand.and.stars"
+        case .power: return "bolt.fill"
         }
-        .frame(minWidth: 700, minHeight: 600)
+    }
+    var subtitle: String {
+        switch self {
+        case .essentials: return "Shelf + preview"
+        case .everyday: return "Four useful actions"
+        case .creator: return "Images and exports"
+        case .power: return "Six utility actions"
+        }
+    }
+    var actions: [HaloDropZoneAction] {
+        switch self {
+        case .essentials: return [.shelf, .quickLook]
+        case .everyday: return [.shelf, .quickLook, .copyDownloads, .copyPath]
+        case .creator: return [.quickLook, .convertPNG, .convertJPEG, .copyDownloads, .shelf]
+        case .power: return [.shelf, .quickLook, .compress, .extract, .copyPath, .duplicate]
+        }
+    }
+}
+
+private enum HaloDropStudioLook: String, CaseIterable, Identifiable {
+    case halo = "Halo"
+    case glass = "Soft Glass"
+    case minimal = "Minimal"
+    case compact = "Compact"
+
+    var id: String { rawValue }
+    var symbol: String {
+        switch self {
+        case .halo: return "circle.hexagongrid.fill"
+        case .glass: return "drop.fill"
+        case .minimal: return "minus.rectangle"
+        case .compact: return "rectangle.compress.vertical"
+        }
     }
 }
 
 @MainActor
 struct HaloDropZoneSettingsEditor: View {
     @ObservedObject private var store = HaloDropZoneSettingsStore.shared
+    @State private var selectedZoneID: UUID?
+    @State private var showAdvancedAppearance = false
+    @State private var showAdvancedZone = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Drop zones").font(.headline)
-                    Text("Build the action board that appears inside Drop CI.")
-                        .font(.caption).foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            studioHeader
+            Divider()
+
+            HStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        quickSetup
+                        livePreview
+                        zoneStrip
+                        layoutAndLook
+                        if showAdvancedAppearance { advancedAppearance }
+                    }
+                    .padding(20)
                 }
-                Spacer()
-                Button("Reset") { store.reset() }
-                Button { store.addZone() } label: { Label("Add Zone", systemImage: "plus") }
-                    .disabled(store.configuration.zones.count >= 8)
-            }
+                .frame(minWidth: 540)
 
-            HaloDropZoneStaticPreview(configuration: store.configuration)
-                .frame(height: previewHeight)
+                Divider()
 
-            GroupBox("Layout") {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 14) {
-                        Picker("Zones", selection: zoneCountBinding) {
-                            ForEach(1...8, id: \.self) { Text("\($0)").tag($0) }
-                        }
-                        Picker("Arrangement", selection: configurationBinding(\.layout)) {
-                            ForEach(HaloDropZoneLayout.allCases) {
-                                Label($0.rawValue, systemImage: $0.symbol).tag($0)
-                            }
-                        }
-                    }
-                    HStack {
-                        valueSlider("Padding", \.boardPadding, 0...28)
-                        valueSlider("Spacing", \.zoneSpacing, 2...24)
-                    }
-                    HStack {
-                        valueSlider("Corner radius", \.cornerRadius, 6...36)
-                        valueSlider("Background", \.backgroundOpacity, 0.45...1)
-                    }
-                    valueSlider("Hover emphasis", \.highlightStrength, 0.15...1)
-                    HStack(spacing: 18) {
-                        Toggle("Icons", isOn: configurationBinding(\.showIcons))
-                        Toggle("Subtitles", isOn: configurationBinding(\.showSubtitles))
-                        Toggle("Type badges", isOn: configurationBinding(\.showActionBadges))
-                    }
-                    TextField("Header title", text: configurationBinding(\.headerTitle))
-                    TextField("Header instruction", text: configurationBinding(\.headerSubtitle))
+                ScrollView {
+                    zoneInspector
+                        .padding(18)
                 }
-                .padding(.vertical, 4)
+                .frame(width: 330)
+                .background(Color.primary.opacity(0.018))
             }
-
-            GroupBox("Zone actions") {
-                VStack(spacing: 10) {
-                    ForEach(Array(store.configuration.zones.enumerated()), id: \.element.id) { index, _ in
-                        zoneEditor(index)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-
-            Text("Drop CI supports up to 8 zones. Rename and Move to Trash modify originals; Halo never assigns destructive actions automatically.")
-                .font(.caption).foregroundStyle(.secondary)
         }
+        .onAppear { ensureSelection() }
+        .onChange(of: store.configuration.zones) { _ in ensureSelection() }
+    }
+
+    private var studioHeader: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.12))
+                Image(systemName: "square.grid.2x2.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .frame(width: 42, height: 42)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Drop Zone Studio")
+                    .font(.title2.bold())
+                Text("Make dragging files feel instant, obvious and yours.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Text("\(store.configuration.zones.count) zone\(store.configuration.zones.count == 1 ? "" : "s")")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Color.primary.opacity(0.06), in: Capsule())
+
+            Button("Reset") { store.reset(); selectedZoneID = store.configuration.zones.first?.id }
+            Button { store.addZone(); selectedZoneID = store.configuration.zones.last?.id } label: {
+                Label("Add Zone", systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(store.configuration.zones.count >= 8)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+    }
+
+    private var quickSetup: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            sectionTitle("Quick setup", subtitle: "Start from a useful layout, then change anything.")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 9)], spacing: 9) {
+                ForEach(HaloDropStudioTemplate.allCases) { preset in
+                    Button { applyTemplate(preset) } label: {
+                        HStack(spacing: 9) {
+                            Image(systemName: preset.symbol)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .frame(width: 26)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(preset.rawValue).font(.callout.weight(.semibold))
+                                Text(preset.subtitle).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.primary.opacity(0.07)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var livePreview: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                sectionTitle("Live preview", subtitle: "Click a zone to edit it.")
+                Spacer()
+                Picker("Zones", selection: zoneCountBinding) {
+                    ForEach(1...8, id: \.self) { Text("\($0)").tag($0) }
+                }
+                .labelsHidden()
+                .frame(width: 72)
+            }
+
+            HaloDropZoneInteractivePreview(
+                configuration: store.configuration,
+                selectedZoneID: selectedZoneID,
+                onSelect: { selectedZoneID = $0 }
+            )
+            .frame(height: previewHeight)
+        }
+    }
+
+    private var zoneStrip: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            sectionTitle("Zones", subtitle: "Select one to edit. Order controls its position in the layout.")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(store.configuration.zones.enumerated()), id: \.element.id) { index, zone in
+                        Button { selectedZoneID = zone.id } label: {
+                            HStack(spacing: 7) {
+                                Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
+                                    .foregroundStyle(zone.color.color)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(zone.title.isEmpty ? zone.action.rawValue : zone.title)
+                                        .font(.caption.weight(.semibold)).lineLimit(1)
+                                    Text("Zone \(index + 1)").font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(
+                                (selectedZoneID == zone.id ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.04)),
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(selectedZoneID == zone.id ? Color.accentColor.opacity(0.55) : Color.primary.opacity(0.06))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private var layoutAndLook: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionTitle("Layout & style", subtitle: "Visual choices first; precision controls stay out of the way.")
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 105), spacing: 8)], spacing: 8) {
+                ForEach(HaloDropZoneLayout.allCases) { layout in
+                    Button { setConfiguration(\.layout, layout) } label: {
+                        VStack(spacing: 6) {
+                            Image(systemName: layout.symbol).font(.system(size: 17, weight: .semibold))
+                            Text(layout.rawValue).font(.caption2.weight(.semibold)).lineLimit(1)
+                        }
+                        .foregroundStyle(store.configuration.layout == layout ? Color.accentColor : Color.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(
+                            store.configuration.layout == layout ? Color.accentColor.opacity(0.11) : Color.primary.opacity(0.035),
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(store.configuration.layout == layout ? Color.accentColor.opacity(0.45) : Color.primary.opacity(0.06))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack(spacing: 8) {
+                ForEach(HaloDropStudioLook.allCases) { look in
+                    Button { applyLook(look) } label: {
+                        Label(look.rawValue, systemImage: look.symbol)
+                            .font(.caption.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.16)) { showAdvancedAppearance.toggle() }
+            } label: {
+                Label(showAdvancedAppearance ? "Hide advanced appearance" : "Advanced appearance", systemImage: "slider.horizontal.3")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var advancedAppearance: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Divider()
+            sectionTitle("Advanced appearance", subtitle: "Fine-tune the board after choosing a look.")
+            HStack { valueSlider("Padding", \.boardPadding, 0...28); valueSlider("Spacing", \.zoneSpacing, 2...24) }
+            HStack { valueSlider("Corner radius", \.cornerRadius, 6...36); valueSlider("Background", \.backgroundOpacity, 0.45...1) }
+            valueSlider("Hover emphasis", \.highlightStrength, 0.15...1)
+            HStack(spacing: 16) {
+                Toggle("Icons", isOn: configurationBinding(\.showIcons))
+                Toggle("Subtitles", isOn: configurationBinding(\.showSubtitles))
+                Toggle("Type badges", isOn: configurationBinding(\.showActionBadges))
+            }
+            TextField("Header title", text: configurationBinding(\.headerTitle))
+            TextField("Header instruction", text: configurationBinding(\.headerSubtitle))
+        }
+    }
+
+    @ViewBuilder private var zoneInspector: some View {
+        if let index = selectedZoneIndex {
+            let zone = zoneBinding(index)
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .fill(zone.wrappedValue.color.color.opacity(0.14))
+                        Image(systemName: zone.wrappedValue.symbol.isEmpty ? zone.wrappedValue.action.symbol : zone.wrappedValue.symbol)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(zone.wrappedValue.color.color)
+                    }
+                    .frame(width: 40, height: 40)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Zone \(index + 1)").font(.caption).foregroundStyle(.secondary)
+                        Text(zone.wrappedValue.title.isEmpty ? zone.wrappedValue.action.rawValue : zone.wrappedValue.title)
+                            .font(.headline).lineLimit(1)
+                    }
+                    Spacer()
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("What happens").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Picker("Action", selection: actionBinding(index)) {
+                        ForEach(HaloDropZoneAction.allCases) { action in
+                            Label(action.rawValue, systemImage: action.symbol).tag(action)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+
+                    Picker("Accept", selection: zone.accepts) {
+                        ForEach(HaloDropZoneAcceptance.allCases) { type in
+                            Label(type.rawValue, systemImage: type.symbol).tag(type)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Label").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    TextField("Title", text: zone.title)
+                    TextField("Short description", text: zone.subtitle)
+                    ColorPicker(
+                        "Accent",
+                        selection: Binding(
+                            get: { zone.wrappedValue.color.color },
+                            set: { color in var next = zone.wrappedValue; next.color = WidgetColor(color); zone.wrappedValue = next }
+                        ),
+                        supportsOpacity: false
+                    )
+                }
+
+                if zone.wrappedValue.action == .rename {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Rename template").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        TextField("{name}-renamed", text: zone.parameter)
+                        Text("Available: {name}, {ext}, {date}").font(.caption2).foregroundStyle(.secondary)
+                    }
+                } else if zone.wrappedValue.action == .copyFolder {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Destination").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        HStack {
+                            Text(zone.wrappedValue.parameter.isEmpty ? "No folder chosen" : URL(fileURLWithPath: zone.wrappedValue.parameter).lastPathComponent)
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Spacer()
+                            Button("Choose…") { chooseFolder(for: index) }
+                        }
+                    }
+                }
+
+                if zone.wrappedValue.action != .shelf {
+                    Toggle("Also keep in File Shelf", isOn: zone.alsoAddToShelf)
+                }
+
+                if zone.wrappedValue.action.isDestructive {
+                    Label("This action changes the original item.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .padding(9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) { showAdvancedZone.toggle() }
+                } label: {
+                    Label(showAdvancedZone ? "Hide advanced" : "Advanced", systemImage: "gearshape")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+
+                if showAdvancedZone {
+                    TextField("SF Symbol", text: zone.symbol)
+                }
+
+                Divider()
+
+                HStack(spacing: 7) {
+                    Button { store.moveZone(from: index, by: -1) } label: { Image(systemName: "arrow.left") }
+                        .disabled(index == 0)
+                    Button { store.moveZone(from: index, by: 1) } label: { Image(systemName: "arrow.right") }
+                        .disabled(index == store.configuration.zones.count - 1)
+                    Button { duplicateZone(index) } label: { Image(systemName: "plus.square.on.square") }
+                        .disabled(store.configuration.zones.count >= 8)
+                    Spacer()
+                    Button(role: .destructive) { removeSelectedZone(index) } label: { Image(systemName: "trash") }
+                        .disabled(store.configuration.zones.count <= 1)
+                }
+                .buttonStyle(.bordered)
+            }
+        } else {
+            VStack(spacing: 10) {
+      Image(systemName: "square.dashed")
+          .font(.system(size: 30, weight: .medium))
+          .foregroundStyle(.secondary)
+      Text("Select a zone")
+          .font(.headline)
+      Text("Choose a zone from the preview to edit it.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+  }
+  .frame(maxWidth: .infinity, minHeight: 220)
+        }
+    }
+
+    private func sectionTitle(_ title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.headline)
+            Text(subtitle).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var selectedZoneIndex: Int? {
+        guard let selectedZoneID else { return store.configuration.zones.indices.first }
+        return store.configuration.zones.firstIndex(where: { $0.id == selectedZoneID }) ?? store.configuration.zones.indices.first
     }
 
     private var previewHeight: CGFloat {
         let count = store.configuration.zones.count
         let rows: Int
         switch store.configuration.layout {
-        case .vertical: rows = count
+        case .vertical: rows = min(count, 4)
         case .horizontal: rows = 1
         case .twoColumns: rows = Int(ceil(Double(count) / 2.0))
         case .threeColumns: rows = Int(ceil(Double(count) / 3.0))
@@ -1112,94 +1491,7 @@ struct HaloDropZoneSettingsEditor: View {
             let columns = count <= 2 ? count : count <= 4 ? 2 : count <= 6 ? 3 : 4
             rows = Int(ceil(Double(count) / Double(max(1, columns))))
         }
-        return min(420, max(230, 132 + CGFloat(rows) * 68))
-    }
-
-    private func zoneEditor(_ index: Int) -> some View {
-        let zone = zoneBinding(index)
-        return DisclosureGroup {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    TextField("Zone title", text: zone.title)
-                    TextField("SF Symbol", text: zone.symbol).frame(width: 180)
-                }
-                TextField("Subtitle", text: zone.subtitle)
-                HStack {
-                    Picker("Action", selection: zone.action) {
-                        ForEach(HaloDropZoneAction.allCases) {
-                            Label($0.rawValue, systemImage: $0.symbol).tag($0)
-                        }
-                    }
-                    Picker("Accept", selection: zone.accepts) {
-                        ForEach(HaloDropZoneAcceptance.allCases) {
-                            Label($0.rawValue, systemImage: $0.symbol).tag($0)
-                        }
-                    }
-                }
-                ColorPicker(
-                    "Accent color",
-                    selection: Binding(
-                        get: { zone.wrappedValue.color.color },
-                        set: { color in
-                            var next = zone.wrappedValue
-                            next.color = WidgetColor(color)
-                            zone.wrappedValue = next
-                        }
-                    ),
-                    supportsOpacity: false
-                )
-
-                if zone.wrappedValue.action == .rename {
-                    TextField("Rename template", text: zone.parameter)
-                    Text("Use {name}, {ext}, and {date}.").font(.caption).foregroundStyle(.secondary)
-                } else if zone.wrappedValue.action == .copyFolder {
-                    HStack {
-                        TextField("Destination folder", text: zone.parameter)
-                        Button("Choose…") { chooseFolder(for: index) }
-                    }
-                }
-
-                if zone.wrappedValue.action != .shelf {
-                    Toggle("Also add accepted items to File Shelf", isOn: zone.alsoAddToShelf)
-                }
-                if zone.wrappedValue.action.isDestructive {
-                    Label("This action changes the original item.", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-                HStack {
-                    Button { store.moveZone(from: index, by: -1) } label: { Label("Earlier", systemImage: "arrow.up") }
-                        .disabled(index == 0)
-                    Button { store.moveZone(from: index, by: 1) } label: { Label("Later", systemImage: "arrow.down") }
-                        .disabled(index == store.configuration.zones.count - 1)
-                    Button { duplicateZone(index) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
-                        .disabled(store.configuration.zones.count >= 8)
-                    Spacer()
-                    Button(role: .destructive) { store.removeZone(at: index) } label: {
-                        Label("Remove", systemImage: "trash")
-                    }
-                    .disabled(store.configuration.zones.count <= 1)
-                }
-            }
-            .padding(.top, 8)
-        } label: {
-            HStack {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(zone.wrappedValue.color.color.opacity(0.14))
-                    Image(systemName: zone.wrappedValue.symbol.isEmpty ? zone.wrappedValue.action.symbol : zone.wrappedValue.symbol)
-                        .foregroundStyle(zone.wrappedValue.color.color)
-                }
-                .frame(width: 28, height: 28)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(zone.wrappedValue.title.isEmpty ? zone.wrappedValue.action.rawValue : zone.wrappedValue.title)
-                        .font(.headline)
-                    Text(zone.wrappedValue.action.rawValue)
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(zone.wrappedValue.accepts.rawValue).font(.caption2).foregroundStyle(.secondary)
-            }
-        }
+        return min(390, max(250, 170 + CGFloat(rows - 1) * 62))
     }
 
     private var zoneCountBinding: Binding<Int> {
@@ -1209,19 +1501,77 @@ struct HaloDropZoneSettingsEditor: View {
                 let count = min(8, max(1, requested))
                 while store.configuration.zones.count < count { store.addZone() }
                 while store.configuration.zones.count > count { store.removeZone(at: store.configuration.zones.count - 1) }
+                ensureSelection()
             }
         )
+    }
+
+    private func applyTemplate(_ preset: HaloDropStudioTemplate) {
+        var configuration = store.configuration
+        configuration.zones = preset.actions.enumerated().map { HaloDropZone.preset($0.element, index: $0.offset) }
+        configuration.layout = preset.actions.count <= 2 ? .horizontal : .adaptive
+        configuration.normalize()
+        store.configuration = configuration
+        selectedZoneID = configuration.zones.first?.id
+    }
+
+    private func applyLook(_ look: HaloDropStudioLook) {
+        var configuration = store.configuration
+        switch look {
+        case .halo:
+            configuration.boardPadding = 10; configuration.zoneSpacing = 8; configuration.cornerRadius = 18
+            configuration.backgroundOpacity = 0.94; configuration.highlightStrength = 0.88
+            configuration.showIcons = true; configuration.showSubtitles = true; configuration.showActionBadges = true
+        case .glass:
+            configuration.boardPadding = 13; configuration.zoneSpacing = 10; configuration.cornerRadius = 22
+            configuration.backgroundOpacity = 0.72; configuration.highlightStrength = 0.82
+            configuration.showIcons = true; configuration.showSubtitles = true; configuration.showActionBadges = false
+        case .minimal:
+            configuration.boardPadding = 8; configuration.zoneSpacing = 6; configuration.cornerRadius = 14
+            configuration.backgroundOpacity = 0.97; configuration.highlightStrength = 0.72
+            configuration.showIcons = true; configuration.showSubtitles = false; configuration.showActionBadges = false
+        case .compact:
+            configuration.boardPadding = 5; configuration.zoneSpacing = 5; configuration.cornerRadius = 12
+            configuration.backgroundOpacity = 0.95; configuration.highlightStrength = 1.0
+            configuration.showIcons = true; configuration.showSubtitles = false; configuration.showActionBadges = true
+        }
+        configuration.normalize()
+        store.configuration = configuration
+    }
+
+    private func actionBinding(_ index: Int) -> Binding<HaloDropZoneAction> {
+        Binding(
+            get: { store.configuration.zones[index].action },
+            set: { action in
+                guard store.configuration.zones.indices.contains(index) else { return }
+                var configuration = store.configuration
+                let old = configuration.zones[index]
+                let preset = HaloDropZone.preset(action, index: index)
+                configuration.zones[index].action = action
+                if old.title.isEmpty || old.title == old.action.rawValue { configuration.zones[index].title = preset.title }
+                if old.subtitle.isEmpty || old.subtitle == old.action.rawValue || old.subtitle == HaloDropZone.preset(old.action, index: index).subtitle {
+                    configuration.zones[index].subtitle = preset.subtitle
+                }
+                if old.symbol.isEmpty || old.symbol == old.action.symbol { configuration.zones[index].symbol = action.symbol }
+                if action == .rename && configuration.zones[index].parameter.isEmpty { configuration.zones[index].parameter = "{name}-renamed" }
+                if action != .rename && action != .copyFolder { configuration.zones[index].parameter = "" }
+                configuration.normalize()
+                store.configuration = configuration
+            }
+        )
+    }
+
+    private func setConfiguration<T>(_ keyPath: WritableKeyPath<HaloDropZoneConfiguration, T>, _ value: T) {
+        var configuration = store.configuration
+        configuration[keyPath: keyPath] = value
+        configuration.normalize()
+        store.configuration = configuration
     }
 
     private func configurationBinding<T>(_ keyPath: WritableKeyPath<HaloDropZoneConfiguration, T>) -> Binding<T> {
         Binding(
             get: { store.configuration[keyPath: keyPath] },
-            set: { value in
-                var next = store.configuration
-                next[keyPath: keyPath] = value
-                next.normalize()
-                store.configuration = next
-            }
+            set: { setConfiguration(keyPath, $0) }
         )
     }
 
@@ -1230,23 +1580,30 @@ struct HaloDropZoneSettingsEditor: View {
             get: { store.configuration.zones[index] },
             set: { value in
                 guard store.configuration.zones.indices.contains(index) else { return }
-                var next = store.configuration
-                next.zones[index] = value
-                next.normalize()
-                store.configuration = next
+                var configuration = store.configuration
+                configuration.zones[index] = value
+                configuration.normalize()
+                store.configuration = configuration
             }
         )
     }
 
     private func duplicateZone(_ index: Int) {
         guard store.configuration.zones.indices.contains(index), store.configuration.zones.count < 8 else { return }
-        var next = store.configuration
-        var copy = next.zones[index]
+        var configuration = store.configuration
+        var copy = configuration.zones[index]
         copy.id = UUID()
         copy.title = copy.title.isEmpty ? copy.action.rawValue : copy.title + " Copy"
-        next.zones.insert(copy, at: min(index + 1, next.zones.count))
-        next.normalize()
-        store.configuration = next
+        configuration.zones.insert(copy, at: min(index + 1, configuration.zones.count))
+        configuration.normalize()
+        store.configuration = configuration
+        selectedZoneID = copy.id
+    }
+
+    private func removeSelectedZone(_ index: Int) {
+        guard store.configuration.zones.count > 1 else { return }
+        store.removeZone(at: index)
+        selectedZoneID = store.configuration.zones[min(index, store.configuration.zones.count - 1)].id
     }
 
     private func chooseFolder(for index: Int) {
@@ -1255,52 +1612,61 @@ struct HaloDropZoneSettingsEditor: View {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            var next = store.configuration
-            next.zones[index].parameter = url.path
-            store.configuration = next
+            var configuration = store.configuration
+            configuration.zones[index].parameter = url.path
+            store.configuration = configuration
         }
     }
 
-    private func valueSlider(
-        _ title: String,
-        _ keyPath: WritableKeyPath<HaloDropZoneConfiguration, Double>,
-        _ range: ClosedRange<Double>
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+    private func ensureSelection() {
+        if let id = selectedZoneID, store.configuration.zones.contains(where: { $0.id == id }) { return }
+        selectedZoneID = store.configuration.zones.first?.id
+    }
+
+    private func valueSlider(_ title: String, _ keyPath: WritableKeyPath<HaloDropZoneConfiguration, Double>, _ range: ClosedRange<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(title)
+                Text(title).font(.caption)
                 Spacer()
                 Text(String(format: "%.1f", store.configuration[keyPath: keyPath]))
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
             }
-            SwiftUI.Slider(value: configurationBinding(keyPath), in: range)
+            Slider(value: configurationBinding(keyPath), in: range)
         }
     }
 }
 
 @MainActor
-private struct HaloDropZoneStaticPreview: View {
+private struct HaloDropZoneInteractivePreview: View {
     let configuration: HaloDropZoneConfiguration
+    let selectedZoneID: UUID?
+    let onSelect: (UUID) -> Void
 
     var body: some View {
         GeometryReader { proxy in
             let frames = HaloDropZoneLayoutResolver.frames(size: proxy.size, configuration: configuration)
-            let compact = configuration.zones.count > 4 || proxy.size.height < 275
-            ZStack(alignment: .topLeading) {
-                Color.black.opacity(configuration.backgroundOpacity)
-                LinearGradient(colors: [Color.white.opacity(0.04), Color.accentColor.opacity(0.05), Color.clear], startPoint: .topLeading, endPoint: .bottomTrailing)
+            let dense = configuration.zones.count >= 6 || proxy.size.height < 270
 
-                HStack(spacing: 8) {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.white.opacity(0.07))
-                        .frame(width: 29, height: 29)
-                        .overlay(Image(systemName: "arrow.down.doc.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.accentColor))
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color.black.opacity(configuration.backgroundOpacity))
+                LinearGradient(colors: [Color.white.opacity(0.05), Color.clear, Color.accentColor.opacity(0.055)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+
+                HStack(spacing: 9) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.accentColor.opacity(0.15))
+                        Image(systemName: "arrow.down.doc.fill").foregroundStyle(Color.accentColor)
+                    }
+                    .frame(width: 31, height: 31)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(configuration.headerTitle.isEmpty ? "Drop" : configuration.headerTitle).font(.system(size: 14, weight: .semibold, design: .rounded))
-                        Text(configuration.headerSubtitle.isEmpty ? "Choose an action" : configuration.headerSubtitle).font(.system(size: 8.5)).foregroundStyle(.secondary).lineLimit(1)
+                        Text(configuration.headerTitle.isEmpty ? "Drop into Halo" : configuration.headerTitle)
+                            .font(.system(size: 13.5, weight: .semibold, design: .rounded))
+                        Text(configuration.headerSubtitle.isEmpty ? "Choose what happens next" : configuration.headerSubtitle)
+                            .font(.system(size: 8.5)).foregroundStyle(.white.opacity(0.42)).lineLimit(1)
                     }
                     Spacer()
-                    Text("PREVIEW").font(.system(size: 7, weight: .bold, design: .rounded)).foregroundStyle(.secondary)
+                    Text("LIVE").font(.system(size: 7, weight: .bold, design: .rounded)).foregroundStyle(.white.opacity(0.30))
                 }
                 .padding(.horizontal, max(12, configuration.boardPadding + 2))
                 .padding(.top, 11)
@@ -1308,34 +1674,61 @@ private struct HaloDropZoneStaticPreview: View {
                 ForEach(Array(configuration.zones.enumerated()), id: \.element.id) { index, zone in
                     if frames.indices.contains(index) {
                         let frame = frames[index]
-                        VStack(alignment: .leading, spacing: compact ? 3 : 6) {
-                            HStack(spacing: 7) {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(zone.color.color.opacity(index == 0 ? 0.22 : 0.10))
-                                    .frame(width: compact ? 25 : 30, height: compact ? 25 : 30)
-                                    .overlay(Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol).font(.system(size: compact ? 11 : 14, weight: .semibold)).foregroundStyle(zone.color.color))
-                                Text(zone.title.isEmpty ? zone.action.rawValue : zone.title)
-                                    .font(.system(size: compact ? 8.5 : 10.5, weight: .semibold, design: .rounded)).lineLimit(1)
-                                Spacer(minLength: 0)
-                            }
-                            if !compact {
-                                Spacer(minLength: 0)
-                                Text(zone.action.rawValue.uppercased()).font(.system(size: 6.5, weight: .bold, design: .rounded)).foregroundStyle(.secondary).lineLimit(1)
-                            }
+                        Button { onSelect(zone.id) } label: {
+                            previewCard(zone, selected: selectedZoneID == zone.id, dense: dense)
                         }
-                        .padding(compact ? 6 : 9)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .background(Color.white.opacity(index == 0 ? 0.08 : 0.04), in: RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous).stroke(index == 0 ? zone.color.color.opacity(0.72) : Color.white.opacity(0.07), lineWidth: index == 0 ? 1.5 : 1))
-                        .overlay(alignment: .top) { Capsule().fill(zone.color.color.opacity(index == 0 ? 0.9 : 0.4)).frame(height: index == 0 ? 2.5 : 1.5).padding(.horizontal, 10) }
+                        .buttonStyle(.plain)
                         .frame(width: frame.width, height: frame.height)
                         .position(x: frame.midX, y: frame.midY)
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.white.opacity(0.08)))
             .foregroundStyle(.white)
+        }
+    }
+
+    private func previewCard(_ zone: HaloDropZone, selected: Bool, dense: Bool) -> some View {
+        GeometryReader { proxy in
+            let compact = dense || proxy.size.width < 125 || proxy.size.height < 80
+            let accent = zone.color.color
+            VStack(alignment: .leading, spacing: compact ? 4 : 7) {
+                HStack(spacing: 7) {
+                    if configuration.showIcons {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 9, style: .continuous).fill(accent.opacity(selected ? 0.24 : 0.12))
+                            Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
+                                .font(.system(size: compact ? 12 : 15, weight: .semibold))
+                                .foregroundStyle(accent)
+                        }
+                        .frame(width: compact ? 28 : 34, height: compact ? 28 : 34)
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(zone.title.isEmpty ? zone.action.rawValue : zone.title)
+                            .font(.system(size: compact ? 9 : 11, weight: .semibold, design: .rounded)).lineLimit(1)
+                        if configuration.showSubtitles && !compact && !zone.subtitle.isEmpty {
+                            Text(zone.subtitle).font(.system(size: 8)).foregroundStyle(.white.opacity(0.40)).lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                if !compact {
+                    Spacer(minLength: 0)
+                    HStack {
+                        if configuration.showActionBadges {
+                            Label(zone.accepts.rawValue, systemImage: zone.accepts.symbol)
+                                .font(.system(size: 7.5, weight: .semibold)).foregroundStyle(.white.opacity(0.38))
+                        }
+                        Spacer()
+                        if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(accent) }
+                    }
+                }
+            }
+            .padding(compact ? 7 : 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(Color.white.opacity(selected ? 0.09 : 0.045), in: RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous).stroke(selected ? accent.opacity(0.78) : Color.white.opacity(0.07), lineWidth: selected ? 1.7 : 1))
+            .shadow(color: selected ? accent.opacity(0.16) : Color.clear, radius: selected ? 12 : 0, y: 4)
         }
     }
 }

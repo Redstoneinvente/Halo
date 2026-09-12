@@ -676,6 +676,7 @@ private struct DropContextInterfaceCard: View {
 }
 
 private struct ContextDropSettings: View {
+    @ObservedObject private var zones = HaloDropZoneSettingsStore.shared
     @AppStorage("HaloContextDropEnabled") private var enabled = true
     @AppStorage("HaloContextDropUseFullNotchArea") private var usesFullNotchArea = true
     @AppStorage("HaloContextDropKeepClosedNotchContents") private var keepsClosedNotchContents = false
@@ -687,24 +688,69 @@ private struct ContextDropSettings: View {
             Text("Start dragging a real file or folder anywhere on your Mac and Halo can summon Drop CI immediately. The cursor does not need to reach the notch first.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+
         Section("Drop zones") {
-            HaloDropZoneSettingsEditor()
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.11))
+                    Image(systemName: "square.grid.2x2.fill")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 46, height: 46)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(zones.configuration.zones.count) custom zone\(zones.configuration.zones.count == 1 ? "" : "s")")
+                        .font(.headline)
+                    Text("\(zones.configuration.layout.rawValue) layout · click-to-edit live preview")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Customize Drop CI…") {
+                    HaloDropZoneStudioWindowController.shared.show()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(.vertical, 4)
+
+            HStack(spacing: 7) {
+                ForEach(Array(zones.configuration.zones.prefix(5))) { zone in
+                    Label(zone.title.isEmpty ? zone.action.rawValue : zone.title,
+                          systemImage: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
+                        .font(.caption2.weight(.medium))
+                        .lineLimit(1)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(zone.color.color.opacity(0.09), in: Capsule())
+                        .foregroundStyle(zone.color.color)
+                }
+                if zones.configuration.zones.count > 5 {
+                    Text("+\(zones.configuration.zones.count - 5)")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                }
+            }
+
+            Text("The studio gives you visual presets, a live clickable preview, per-zone actions and filters, custom labels/icons/colors, reorder controls, and advanced appearance only when you want it.")
+                .font(.caption).foregroundStyle(.secondary)
         }
+
         Section("CI priority") {
             Slider(value: $priority, in: 0...100, step: 1) { Text("Drop CI priority") }
             Text("Drop CI defaults to the highest priority because a drag is an immediate user action. Lower it if another Context Interface should keep ownership during file drags.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+
         Section("CI surface") {
             Toggle("Use full notch area", isOn: $usesFullNotchArea)
             Toggle("Keep closed-notch contents visible", isOn: $keepsClosedNotchContents)
-            Text("The Drop board lives inside the actual Drop CI surface. Halo automatically requests more vertical space when your chosen zone layout needs it.")
+            Text("Halo automatically requests the space needed by your chosen zone layout.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        Section("Drop behaviour") {
+
+        Section("Safety") {
             Label("Only genuine file/folder drag payloads can summon Drop CI.", systemImage: "checkmark.shield")
-            Label("Each zone decides what happens when you release over it.", systemImage: "square.grid.2x2")
-            Label("Destructive actions are never assigned automatically.", systemImage: "lock.shield")
+            Label("Destructive actions are clearly marked and never added by a preset unless you choose them.", systemImage: "lock.shield")
         }
     }
 }
