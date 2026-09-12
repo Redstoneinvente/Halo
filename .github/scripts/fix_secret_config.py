@@ -21,7 +21,7 @@ with plist_path.open('wb') as f:
 base_path.parent.mkdir(parents=True, exist_ok=True)
 base_path.write_text('''// Committed build configuration for Halo commercial services.\n// Real local values belong in Secrets.xcconfig, which is ignored by Git.\nHALO_FIREBASE_API_KEY =\nHALO_LICENSESEAT_PUBLISHABLE_KEY =\nHALO_LICENSESEAT_PRODUCT_SLUG = halo-macos-notch-utility\n\n#include? "Secrets.xcconfig"\n''')
 
-example_path.write_text('''// Copy this file to Secrets.xcconfig and replace the placeholders.\nHALO_FIREBASE_API_KEY = YOUR_FIREBASE_WEB_API_KEY\nHALO_LICENSESEAT_PUBLISHABLE_KEY = pk_live_REPLACE_ME\nHALO_LICENSESEAT_PRODUCT_SLUG = halo-macos-notch-utility\n''')
+example_path.write_text('''// Copy this file to Secrets.xcconfig and replace the placeholders.\nHALO_FIREBASE_API_KEY = YOUR_FIREBASE_WEB_API_KEY\nHALO_LICENSESEAT_PUBLISHABLE_KEY = YOUR_LICENSESEAT_PUBLISHABLE_KEY\nHALO_LICENSESEAT_PRODUCT_SLUG = halo-macos-notch-utility\n''')
 
 # 3) Wire Base.xcconfig to the Halo target's Debug + Release configurations.
 s = project_path.read_text()
@@ -45,5 +45,10 @@ for config_id, label in [
         raise SystemExit(f'Target {label} build configuration not found')
     s = s.replace(anchor, replacement, 1)
 
+# The Config synchronized group must NOT have target membership. If it does, Xcode copies
+# Secrets.xcconfig into Halo.app/Contents/Resources, which defeats the point of keeping it local.
+sync_membership = '''\t\t\tfileSystemSynchronizedGroups = (\n\t\t\t\tF84A0AB1305582E700E8B51E /* Config */,\n\t\t\t);\n'''
+s = s.replace(sync_membership, '', 1)
+
 project_path.write_text(s)
-print('Commercial secret configuration corrected and wired to Xcode')
+print('Commercial secret configuration corrected, wired to Xcode, and excluded from app resources')
