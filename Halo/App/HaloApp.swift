@@ -25,7 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var licensedServicesStarted = false
 
     private var commercialAccessGranted: Bool {
-        HaloAccountManager.shared.isSignedIn && HaloLicenseManager.shared.state.isValid
+        let account = HaloAccountManager.shared
+        return account.isSignedIn && HaloLicenseManager.shared.accessValid(for: account.userID)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

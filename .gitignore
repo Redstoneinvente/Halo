@@ -14,9 +14,3 @@ build/
 
 # Halo local secrets
 Halo/Config/Secrets.xcconfig
-
-# Firebase local/deploy state
-functions/node_modules/
-.firebase/
-firebase-debug.log
-firestore-debug.log

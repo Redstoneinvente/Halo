@@ -84,7 +84,7 @@ struct HaloSurfaceRouter: View {
     }
 
     private var accessLocked: Bool {
-        !account.isSignedIn || !license.state.isValid
+        !account.isSignedIn || !license.accessValid(for: account.userID)
     }
 
     private var eiOwnsSurface: Bool {
@@ -223,7 +223,7 @@ private struct HaloLockedAccessSurface: View {
             Text(account.isSignedIn ? "Activate Halo" : "Welcome to Halo")
                 .font(.system(size: 21, weight: .bold, design: .rounded))
             Text(account.isSignedIn
-                 ? "Your account is ready. Activate a license to unlock the notch."
+                 ? "Start your free trial or activate a license to unlock the notch."
                  : "Sign in or create a Halo account to continue.")
                 .font(.system(size: 11))
                 .foregroundStyle(.white.opacity(0.62))
@@ -308,18 +308,13 @@ private struct HaloLockedAccessSurface: View {
                     Button("Start 14-Day Trial") {
                         Task { await license.startTrial() }
                     }
-                    .disabled(!account.emailVerified || !license.trialConfigured || license.isBusy || license.isStartingTrial)
+                    .disabled(!account.emailVerified || license.isBusy || license.isStartingTrial)
                 }
 
                 if !account.emailVerified {
                     Text("Verify your email above to start a free trial.")
                         .font(.system(size: 9))
                         .foregroundStyle(.white.opacity(0.52))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else if !license.trialConfigured {
-                    Text("Trial service is not configured on this build yet.")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.orange.opacity(0.9))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }

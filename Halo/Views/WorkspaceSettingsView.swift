@@ -1292,12 +1292,9 @@ private struct HaloAccountLicenseSettingsView: View {
                     if account.isSignedIn {
                         HStack {
                             Button("Start 14-Day Free Trial") { Task { await license.startTrial() } }
-                                .disabled(!account.emailVerified || !license.trialConfigured || license.isBusy || license.isStartingTrial)
+                                .disabled(!account.emailVerified || license.isBusy || license.isStartingTrial)
                             if !account.emailVerified {
                                 Text("Verify your email to start a trial.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            } else if !license.trialConfigured {
-                                Text("Trial service not configured.")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             if license.isStartingTrial { ProgressView().controlSize(.small) }

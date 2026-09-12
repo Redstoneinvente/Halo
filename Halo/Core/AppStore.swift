@@ -708,12 +708,10 @@ struct HaloCommercialConfiguration {
     static var firebaseAPIKey: String { value("HaloFirebaseAPIKey") }
     static var licenseSeatPublishableKey: String { value("HaloLicenseSeatPublishableKey") }
     static var licenseSeatProductSlug: String { value("HaloLicenseSeatProductSlug") }
-    static var trialEndpoint: String { value("HaloTrialEndpoint") }
     static var firebaseConfigured: Bool { !firebaseAPIKey.isEmpty }
     static var licenseSeatConfigured: Bool {
         !licenseSeatPublishableKey.isEmpty && !licenseSeatProductSlug.isEmpty
     }
-    static var trialConfigured: Bool { !trialEndpoint.isEmpty }
 }
 
 enum HaloKeychain {
@@ -1081,22 +1079,31 @@ final class HaloLicenseManager: ObservableObject {
 
     private let licenseKeyKey = "licenseseat.licenseKey"
     private let fingerprintKey = "licenseseat.fingerprint"
+    private let localTrialUsedKey = "trial.local.used"
+    private let localTrialOwnerKey = "trial.local.owner"
+    private let localTrialStartedKey = "trial.local.startedAt"
+    private let localTrialExpiresKey = "trial.local.expiresAt"
+    private let localTrialLastCheckKey = "trial.local.lastCheck"
+    private var trialExpiryTask: Task<Void, Never>?
 
     var isConfigured: Bool { HaloCommercialConfiguration.licenseSeatConfigured }
-    var trialConfigured: Bool { HaloCommercialConfiguration.trialConfigured }
+    // Client-side trial mode is intentionally always available for now.
+    var trialConfigured: Bool { true }
 
     func restoreAndValidate() async {
-        guard isConfigured else { state = .unconfigured; details = .empty; return }
-        guard let key = HaloKeychain.string(for: licenseKeyKey), !key.isEmpty else { state = .inactive; details = .empty; return }
-        licenseHint = Self.hint(key)
-        await validate()
+        // Prefer a paid LicenseSeat entitlement whenever one is stored and valid.
+        if isConfigured, let key = HaloKeychain.string(for: licenseKeyKey), !key.isEmpty {
+            licenseHint = Self.hint(key)
+            await validate()
+            if state.isValid { return }
+        }
+
+        if restoreLocalTrial() { return }
+        state = isConfigured ? .inactive : .unconfigured
+        details = .empty
     }
 
     func startTrial() async {
-        guard trialConfigured else {
-            errorMessage = "Halo trials are not configured on this build yet."
-            return
-        }
         guard HaloAccountManager.shared.isSignedIn else {
             errorMessage = "Sign in to your Halo account before starting a trial."
             return
@@ -1105,10 +1112,9 @@ final class HaloLicenseManager: ObservableObject {
             errorMessage = "Verify your email before starting the free trial."
             return
         }
-        guard let url = URL(string: HaloCommercialConfiguration.trialEndpoint),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "https" || (scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")) else {
-            errorMessage = "The Halo trial service URL is invalid."
+        let accountID = HaloAccountManager.shared.userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !accountID.isEmpty else {
+            errorMessage = "Halo could not identify this account. Sign out and sign in again."
             return
         }
 
@@ -1117,40 +1123,34 @@ final class HaloLicenseManager: ObservableObject {
         notice = nil
         defer { isStartingTrial = false }
 
-        do {
-            let token = try await HaloAccountManager.shared.validIDToken()
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: [
-                "platform": "macOS",
-                "device_name": Host.current().localizedName ?? "Mac"
-            ])
-
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw HaloCommercialError.message("No response from the Halo trial service.")
+        // One local trial per Mac. The owner binding also prevents another signed-in account
+        // from inheriting an active trial on this installation.
+        if HaloKeychain.string(for: localTrialUsedKey) == "1" {
+            if restoreLocalTrial() {
+                if state.isValid {
+                    notice = "Your Halo trial is already active on this Mac."
+                } else if errorMessage == nil {
+                    errorMessage = "The free trial has already been used on this Mac."
+                }
+                return
             }
-            let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            guard (200..<300).contains(http.statusCode) else {
-                let message = ((root?["error"] as? [String: Any])?["message"] as? String)
-                    ?? (root?["message"] as? String)
-                    ?? "Unable to start the Halo trial (\(http.statusCode))."
-                throw HaloCommercialError.message(message)
-            }
-            guard let key = (root?["license_key"] as? String) ?? (root?["licenseKey"] as? String),
-                  !key.isEmpty else {
-                throw HaloCommercialError.message("The trial service did not return a license.")
-            }
-
-            await activate(key)
-            if state.isValid {
-                notice = "Your 14-day Halo trial is active."
-            }
-        } catch {
-            errorMessage = readable(error)
+            errorMessage = "The free trial has already been used on this Mac."
+            return
         }
+
+        let startedAt = Date()
+        let expiresAt = startedAt.addingTimeInterval(14 * 86_400)
+        guard HaloKeychain.set("1", for: localTrialUsedKey),
+              HaloKeychain.set(accountID, for: localTrialOwnerKey),
+              HaloKeychain.set(String(startedAt.timeIntervalSince1970), for: localTrialStartedKey),
+              HaloKeychain.set(String(expiresAt.timeIntervalSince1970), for: localTrialExpiresKey),
+              HaloKeychain.set(String(startedAt.timeIntervalSince1970), for: localTrialLastCheckKey) else {
+            errorMessage = "Halo could not save the local trial securely in Keychain."
+            return
+        }
+
+        applyLocalTrial(expiresAt: expiresAt)
+        notice = "Your 14-day Halo trial is active on this Mac."
     }
 
     func activate(_ key: String) async {
@@ -1170,6 +1170,7 @@ final class HaloLicenseManager: ObservableObject {
             guard parsed.valid else { throw HaloCommercialError.message(parsed.message ?? "License activation was rejected.") }
             HaloKeychain.set(cleaned, for: licenseKeyKey)
             licenseHint = Self.hint(cleaned)
+            trialExpiryTask?.cancel()
             details = parsed.details
             state = .valid(plan: parsed.details.plan.isEmpty ? nil : parsed.details.plan)
             notice = "License activated on this Mac."
@@ -1192,15 +1193,18 @@ final class HaloLicenseManager: ObservableObject {
             let parsed = parseValidation(json)
             details = parsed.details
             if parsed.valid {
+                trialExpiryTask?.cancel()
                 state = .valid(plan: parsed.details.plan.isEmpty ? nil : parsed.details.plan)
                 licenseHint = Self.hint(key)
-            } else {
+            } else if !restoreLocalTrial() {
                 state = .invalid(parsed.message ?? "This license is not valid for this Mac.")
             }
         } catch {
-            details = .empty
-            state = .invalid(readable(error))
-            errorMessage = readable(error)
+            if !restoreLocalTrial() {
+                details = .empty
+                state = .invalid(readable(error))
+                errorMessage = readable(error)
+            }
         }
     }
 
@@ -1217,8 +1221,8 @@ final class HaloLicenseManager: ObservableObject {
             HaloKeychain.remove(licenseKeyKey)
             licenseHint = ""
             details = .empty
-            state = .inactive
-            notice = "This Mac has been deactivated."
+            if !restoreLocalTrial() { state = .inactive }
+            notice = state.isValid ? "Paid license deactivated. Your local trial is still active." : "This Mac has been deactivated."
         } catch { errorMessage = readable(error) }
     }
 
@@ -1226,8 +1230,79 @@ final class HaloLicenseManager: ObservableObject {
         HaloKeychain.remove(licenseKeyKey)
         licenseHint = ""
         details = .empty
-        state = isConfigured ? .inactive : .unconfigured
-        notice = "Local license data cleared."
+        if !restoreLocalTrial() { state = isConfigured ? .inactive : .unconfigured }
+        notice = state.isValid ? "Paid license cleared. Your local trial is still active." : "Local license data cleared."
+    }
+
+    func accessValid(for accountID: String) -> Bool {
+        guard state.isValid else { return false }
+        guard details.isTrial && details.plan == "Local Trial" else { return true }
+        guard let owner = HaloKeychain.string(for: localTrialOwnerKey), owner == accountID,
+              let expiresAt = localTrialDate(for: localTrialExpiresKey) else { return false }
+        return Date() < expiresAt
+    }
+
+    @discardableResult
+    private func restoreLocalTrial() -> Bool {
+        guard HaloKeychain.string(for: localTrialUsedKey) == "1" else { return false }
+        guard let expiresAt = localTrialDate(for: localTrialExpiresKey),
+              let owner = HaloKeychain.string(for: localTrialOwnerKey), !owner.isEmpty else {
+            state = .invalid("The local trial record is incomplete.")
+            details = .empty
+            return true
+        }
+
+        let account = HaloAccountManager.shared
+        guard account.isSignedIn, !account.userID.isEmpty else { return false }
+        guard owner == account.userID else {
+            trialExpiryTask?.cancel()
+            details = HaloLicenseDetails(status: "account_mismatch", plan: "Local Trial", expiresAt: expiresAt, activeSeats: 1, seatLimit: 1)
+            state = .invalid("This Mac's free trial belongs to another Halo account.")
+            return true
+        }
+
+        let now = Date()
+        if let lastCheck = localTrialDate(for: localTrialLastCheckKey), now.timeIntervalSince(lastCheck) < -300 {
+            trialExpiryTask?.cancel()
+            details = HaloLicenseDetails(status: "clock_changed", plan: "Local Trial", expiresAt: expiresAt, activeSeats: 1, seatLimit: 1)
+            state = .invalid("The system clock moved backwards. Restore the correct date and restart Halo.")
+            return true
+        }
+        HaloKeychain.set(String(now.timeIntervalSince1970), for: localTrialLastCheckKey)
+
+        if now >= expiresAt {
+            trialExpiryTask?.cancel()
+            details = HaloLicenseDetails(status: "expired", plan: "Local Trial", expiresAt: expiresAt, activeSeats: 1, seatLimit: 1)
+            state = .invalid("Your 14-day Halo trial has ended.")
+            return true
+        }
+
+        applyLocalTrial(expiresAt: expiresAt)
+        return true
+    }
+
+    private func applyLocalTrial(expiresAt: Date) {
+        licenseHint = ""
+        details = HaloLicenseDetails(status: "active", plan: "Local Trial", expiresAt: expiresAt, activeSeats: 1, seatLimit: 1)
+        state = .valid(plan: "Local Trial")
+        scheduleLocalTrialExpiry(at: expiresAt)
+    }
+
+    private func scheduleLocalTrialExpiry(at expiresAt: Date) {
+        trialExpiryTask?.cancel()
+        let seconds = max(0, expiresAt.timeIntervalSinceNow)
+        let nanoseconds = UInt64(min(seconds, Double(UInt64.max / 1_000_000_000)) * 1_000_000_000)
+        trialExpiryTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(nanoseconds: nanoseconds) }
+            catch { return }
+            guard let self, !Task.isCancelled else { return }
+            _ = self.restoreLocalTrial()
+        }
+    }
+
+    private func localTrialDate(for key: String) -> Date? {
+        guard let raw = HaloKeychain.string(for: key), let timestamp = TimeInterval(raw) else { return nil }
+        return Date(timeIntervalSince1970: timestamp)
     }
 
     private func fingerprint() -> String {
