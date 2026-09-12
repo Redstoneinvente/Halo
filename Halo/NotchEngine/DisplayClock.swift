@@ -9,20 +9,19 @@ private protocol HaloGlobalDropTarget: AnyObject {
 
 extension HaloDropHostingView: HaloGlobalDropTarget {}
 
-/// Watches the system drag pasteboard so Drop CI can be summoned as soon as a
-/// file drag starts, rather than waiting for the pointer to reach Halo itself.
-/// The existing HaloDropHostingView callback remains the single source of truth
-/// for opening/closing Drop CI and validating whether the feature is enabled.
+/// Summons Drop CI as soon as a system file drag begins instead of waiting for
+/// the pointer to physically enter Halo's NSDraggingDestination.
 @MainActor
 private final class HaloGlobalFileDragMonitor {
     static let shared = HaloGlobalFileDragMonitor()
 
     private var globalMonitor: Any?
     private var localMonitor: Any?
-    private var keepAliveTimer: Timer?
+    private var pollTimer: Timer?
     private weak var activeTarget: (any HaloGlobalDropTarget)?
     private var activeItemCount = 0
     private var lastCompletedPasteboardChangeCount: Int?
+    private var sawMouseDrag = false
 
     private init() {}
 
@@ -31,32 +30,77 @@ private final class HaloGlobalFileDragMonitor {
 
         let mask: NSEvent.EventTypeMask = [.leftMouseDragged, .leftMouseUp]
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
-            let isMouseUp = event.type == .leftMouseUp
+            let type = event.type
             DispatchQueue.main.async { [weak self] in
-                if isMouseUp { self?.finishDrag() }
-                else { self?.handleDraggedMouse() }
+                self?.handleMouseEvent(type)
             }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
-            let isMouseUp = event.type == .leftMouseUp
+            let type = event.type
             DispatchQueue.main.async { [weak self] in
-                if isMouseUp { self?.finishDrag() }
-                else { self?.handleDraggedMouse() }
+                self?.handleMouseEvent(type)
             }
             return event
         }
+
+        // Polling is intentional. During drags from Finder/macOS, the system drag
+        // pasteboard can become readable slightly before/after the global NSEvent
+        // callback. Sampling while the left button is held removes that race.
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.pollDragSession() }
+        }
+        timer.tolerance = 0.01
+        pollTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
-    private func handleDraggedMouse() {
+    private func handleMouseEvent(_ type: NSEvent.EventType) {
+        switch type {
+        case .leftMouseDragged:
+            sawMouseDrag = true
+            inspectDragPasteboard()
+
+            // Finder owns Desktop/file drags. macOS does not guarantee that the
+            // drag pasteboard payload is already visible at the very first mouse-
+            // dragged event, so optimistically summon Drop CI for Finder here.
+            // The normal NSDraggingDestination still validates the actual drop.
+            if activeTarget == nil, isLikelyFinderFileDrag {
+                activeItemCount = max(1, dragPasteboardFileCount())
+                activateTarget(at: NSEvent.mouseLocation, count: activeItemCount)
+            }
+
+        case .leftMouseUp:
+            finishDrag()
+        default:
+            break
+        }
+    }
+
+    private func pollDragSession() {
+        let leftButtonDown = (NSEvent.pressedMouseButtons & 1) != 0
+        guard leftButtonDown else {
+            if activeTarget != nil || sawMouseDrag { finishDrag() }
+            return
+        }
+
+        guard sawMouseDrag || activeTarget != nil else { return }
+        inspectDragPasteboard()
+
+        // Once Drop CI has been summoned, keep feeding the existing drag-state
+        // callback. This cancels SurfaceState's short drag-exit collapse task when
+        // the pointer is sitting away from Halo or temporarily crosses windows.
+        if activeTarget != nil {
+            activateTarget(at: NSEvent.mouseLocation, count: max(1, activeItemCount))
+        }
+    }
+
+    private func inspectDragPasteboard() {
         let pasteboard = NSPasteboard(name: .drag)
-        let count = pasteboard.pasteboardItems?.reduce(into: 0) { result, item in
-            if item.availableType(from: [.fileURL]) != nil { result += 1 }
-        } ?? 0
+        let count = dragPasteboardFileCount(pasteboard)
         guard count > 0 else { return }
 
-        // The drag pasteboard can retain its previous contents briefly after a
-        // session ends. Requiring a new changeCount prevents a later ordinary
-        // mouse drag from accidentally reopening Drop CI with stale file data.
+        // The drag pasteboard can briefly retain the previous session's data.
+        // Only use it to start a new session when its generation changed.
         if activeTarget == nil,
            let lastCompletedPasteboardChangeCount,
            pasteboard.changeCount == lastCompletedPasteboardChangeCount {
@@ -65,33 +109,43 @@ private final class HaloGlobalFileDragMonitor {
 
         activeItemCount = count
         activateTarget(at: NSEvent.mouseLocation, count: count)
-        startKeepAliveTimerIfNeeded()
     }
 
-    private func startKeepAliveTimerIfNeeded() {
-        guard keepAliveTimer == nil else { return }
-        let timer = Timer(timeInterval: 0.10, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.keepDragAlive() }
-        }
-        timer.tolerance = 0.02
-        keepAliveTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
+    private func dragPasteboardFileCount(_ pasteboard: NSPasteboard = NSPasteboard(name: .drag)) -> Int {
+        pasteboard.pasteboardItems?.reduce(into: 0) { result, item in
+            if item.availableType(from: [.fileURL]) != nil { result += 1 }
+        } ?? 0
     }
 
-    private func keepDragAlive() {
-        guard activeTarget != nil else {
-            stopKeepAliveTimer()
-            return
-        }
-        guard NSEvent.pressedMouseButtons & 1 != 0 else {
-            finishDrag()
-            return
+    private var isLikelyFinderFileDrag: Bool {
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else {
+            return false
         }
 
-        // Reasserting the existing callback cancels Halo's short drag-exit
-        // collapse task. That keeps Drop CI open even when the pointer is
-        // stationary somewhere away from the notch.
-        activateTarget(at: NSEvent.mouseLocation, count: activeItemCount)
+        // Exclude the upper chrome of an on-screen Finder window so dragging the
+        // title/toolbar doesn't summon Drop CI. Desktop drags have no Finder
+        // content window beneath the pointer and therefore pass through.
+        let point = NSEvent.mouseLocation
+        guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                as? [[String: Any]] else {
+            return true
+        }
+
+        for info in windows {
+            guard (info[kCGWindowOwnerName as String] as? String) == "Finder",
+                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
+                  bounds.contains(point) else { continue }
+
+            // Quartz window bounds use a top-left global coordinate system while
+            // NSEvent.mouseLocation is bottom-left. Convert against the union of
+            // visible screen frames before checking the toolbar exclusion band.
+            let desktopTop = NSScreen.screens.map(\.frame.maxY).max() ?? 0
+            let pointFromTop = desktopTop - point.y
+            let distanceFromWindowTop = pointFromTop - bounds.minY
+            return distanceFromWindowTop > 72
+        }
+        return true
     }
 
     private func activateTarget(at point: NSPoint, count: Int) {
@@ -105,6 +159,7 @@ private final class HaloGlobalFileDragMonitor {
 
     private func targetForDrag(at point: NSPoint) -> (any HaloGlobalDropTarget)? {
         let haloPanels = NSApp.windows.compactMap { $0 as? HaloPanel }
+
         if let panel = haloPanels.first(where: { panel in
             guard let screen = panel.screen else { return false }
             return screen.frame.contains(point)
@@ -112,23 +167,18 @@ private final class HaloGlobalFileDragMonitor {
             return target
         }
 
-        // When Halo is configured for only one display, still summon that Drop
-        // CI if the drag begins on another display rather than doing nothing.
+        // If Halo is configured for one display only, still make that surface the
+        // drop destination when the user starts dragging on another display.
         return haloPanels.compactMap { $0.contentView as? any HaloGlobalDropTarget }.first
     }
 
     private func finishDrag() {
-        guard activeTarget != nil || keepAliveTimer != nil else { return }
+        guard activeTarget != nil || sawMouseDrag else { return }
         activeTarget?.dragStateHandler?(false, 0)
         activeTarget = nil
         activeItemCount = 0
+        sawMouseDrag = false
         lastCompletedPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
-        stopKeepAliveTimer()
-    }
-
-    private func stopKeepAliveTimer() {
-        keepAliveTimer?.invalidate()
-        keepAliveTimer = nil
     }
 }
 
