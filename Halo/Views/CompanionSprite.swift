@@ -101,7 +101,7 @@ struct HaloCompanionSprite: View {
                     .font(.system(size: size * 0.17, weight: .bold))
                     .foregroundStyle(accent)
                     .offset(x: size * 0.28, y: -size * 0.20)
-                    .scaleEffect(0.86 + abs(sin(phase * 5.5)) * 0.24)
+                    .scaleEffect(CGFloat(0.86 + abs(sin(phase * 5.5)) * 0.24))
             }
         }
     }
@@ -111,8 +111,8 @@ struct HaloCompanionSprite: View {
         let fill = outlined ? primary.opacity(0.10) : primary
         let lineWidth = max(1.2, size * 0.025)
         let blink = Int(phase * 2.0).isMultiple(of: 11)
-        let legSwing = motion == .walk ? CGFloat(sin(phase * 9.0) * size * 0.035) : 0
-        let tailSwing = CGFloat(sin(phase * (motion == .dance ? 6.0 : 2.4)) * 12)
+        let legSwing: CGFloat = motion == .walk ? CGFloat(sin(phase * 9.0)) * size * 0.035 : 0
+        let tailSwing = sin(phase * (motion == .dance ? 6.0 : 2.4)) * 12
         let pawRaised = motion == .greet || motion == .celebrate
 
         return ZStack {
