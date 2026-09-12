@@ -229,7 +229,9 @@ final class WindowManager {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
-            .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+            .receive(on: RunLoop.main).sink { [weak self] _ in
+                DispatchQueue.main.async { self?.reconcile() }
+            }.store(in: &subscriptions)
         store.$configuration.dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.$settings.map { [store] settings in
@@ -979,7 +981,10 @@ final class WindowManager {
                                                 userInfo: ["frame": target, "screen": id])
             }
             if existing == nil {
-                let root = SurfaceViewportView(viewport: host.state.viewport, content: SurfaceView(store: store, state: host.state, workspace: store.workspace))
+                let root = HaloSurfaceRouter(viewport: host.state.viewport,
+                                             store: store,
+                                             state: host.state,
+                                             workspace: store.workspace)
                     .environment(\.haloScreenFrame, screen.frame)
                 let view = NSHostingView(rootView: root)
                 view.sizingOptions = []
