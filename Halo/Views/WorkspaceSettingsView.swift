@@ -1178,7 +1178,7 @@ private enum HaloAboutContent {
     static let description = "A customizable workspace for your Mac’s notch. Keep music, widgets and everyday controls within reach."
     static let creator = "Redstoneinvente"
     static let website = URL(string: "https://halo.redstoneinvente.com")!
-    static let support = URL(string: "https://buymeacoffee.com/redstoneinvente")!
+    static let support = URL(string: "mailto:r.support@redstoneinvente.com")!
 }
 private struct HaloAboutView: View {
     private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0" }
@@ -1195,7 +1195,7 @@ private struct HaloAboutView: View {
         }
         Section("Find out more") {
             Link(destination: HaloAboutContent.website) { Label("Visit Halo’s website", systemImage: "globe") }
-            Link(destination: HaloAboutContent.support) { Label("Buy me a coffee", systemImage: "cup.and.saucer.fill") }
+            Link(destination: HaloAboutContent.support) { Label("Email support · r.support@redstoneinvente.com", systemImage: "envelope.fill") }
         }
     }
 }
@@ -1224,6 +1224,10 @@ private struct HaloAccountLicenseSettingsView: View {
                 }
                 LabeledContent("Email", value: account.emailVerified ? "Verified" : "Not verified")
                 HStack {
+                    if !account.emailVerified {
+                        Button("Send Verification Email") { Task { await account.sendVerificationEmail() } }
+                        Button("Refresh Verification Status") { Task { await account.refreshVerificationStatus() } }
+                    }
                     Button("Sign Out") { account.signOut() }
                     if account.isBusy { ProgressView().controlSize(.small) }
                 }
@@ -1266,6 +1270,17 @@ private struct HaloAccountLicenseSettingsView: View {
                     if license.isBusy { ProgressView().controlSize(.small) }
                 }
                 if !license.licenseHint.isEmpty { LabeledContent("License", value: license.licenseHint) }
+                if license.state.isValid {
+                    LabeledContent("Status", value: license.details.statusTitle)
+                    if !license.details.plan.isEmpty { LabeledContent("Plan", value: license.details.plan) }
+                    LabeledContent("Activated Macs", value: license.details.activatedMacsTitle)
+                    if let days = license.details.daysRemaining, let expiresAt = license.details.expiresAt {
+                        LabeledContent("Subscription remaining", value: "\(days) day\(days == 1 ? "" : "s")")
+                        LabeledContent("Expires", value: expiresAt.formatted(date: .abbreviated, time: .omitted))
+                    } else {
+                        LabeledContent("License term", value: "Lifetime / no expiry reported")
+                    }
+                }
 
                 if license.state.isValid {
                     HStack {
@@ -1297,6 +1312,7 @@ private struct HaloAccountLicenseSettingsView: View {
             Text("Your Halo account and your software license are separate credentials. Firebase handles identity and session recovery; LicenseSeat handles the purchased license and device seat. Halo stores the Firebase refresh token, the activated license key, and its stable installation fingerprint in macOS Keychain.")
                 .font(.caption).foregroundStyle(.secondary)
             Link("Manage LicenseSeat account", destination: URL(string: "https://licenseseat.com")!)
+            Link("Contact Halo support · r.support@redstoneinvente.com", destination: URL(string: "mailto:r.support@redstoneinvente.com")!)
         }
     }
 }

@@ -3,6 +3,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import IOKit
+import Combine
 
 @main
 struct HaloApp: App {
@@ -20,17 +21,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var status: NSStatusItem?
     private var settings: NSWindow?
     private var hudSettings: NSWindow?
+    private var welcome: NSWindow?
+    private var commercialBag = Set<AnyCancellable>()
+    private var runtimeStarted = false
+    private let welcomeCompletedKey = "HaloCommercialWelcomeCompleted"
+
+    private var commercialCredentialsValid: Bool {
+        HaloAccountManager.shared.isSignedIn && HaloLicenseManager.shared.state.isValid
+    }
+
+    private var commercialAccessGranted: Bool {
+        commercialCredentialsValid && UserDefaults.standard.bool(forKey: welcomeCompletedKey)
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         NotificationCenter.default.addObserver(self, selector: #selector(openSettings), name: Notification.Name("HaloOpenSettings"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(toggle), name: Notification.Name("HaloToggle"), object: nil)
-        store.workspace.start()
-        engine = WindowManager(store: store)
-        engine?.start()
-        hudController = HaloHUDController(audio: store.workspace.audio)
-        hudController?.start()
-
+        configureCommercialAccessGate()
 
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         status?.button?.image = NSImage(systemSymbolName: "capsule.tophalf.filled", accessibilityDescription: "Halo")
@@ -68,10 +76,91 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
         status?.menu = menu
 
-        if !UserDefaults.standard.bool(forKey: "onboarded") { openSettings() }
     }
 
-    @objc private func toggle() { engine?.toggleAll() }
+    private func configureCommercialAccessGate() {
+        Publishers.CombineLatest(
+            HaloAccountManager.shared.$isSignedIn.removeDuplicates(),
+            HaloLicenseManager.shared.$state.removeDuplicates()
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] _, _ in self?.refreshCommercialAccess() }
+        .store(in: &commercialBag)
+
+        // Keep the runtime completely dormant until both services have restored and validated.
+        showWelcome()
+        Task { @MainActor [weak self] in
+            await HaloAccountManager.shared.restore()
+            await HaloLicenseManager.shared.restoreAndValidate()
+            self?.refreshCommercialAccess()
+        }
+    }
+
+    private func refreshCommercialAccess() {
+        if commercialAccessGranted {
+            welcome?.orderOut(nil)
+            startLicensedRuntime()
+        } else {
+            stopLicensedRuntime()
+            showWelcome()
+        }
+    }
+
+    private func startLicensedRuntime() {
+        guard !runtimeStarted else { return }
+        runtimeStarted = true
+        store.workspace.start()
+        let manager = WindowManager(store: store)
+        engine = manager
+        manager.start()
+        let hud = HaloHUDController(audio: store.workspace.audio)
+        hudController = hud
+        hud.start()
+    }
+
+    private func stopLicensedRuntime() {
+        guard runtimeStarted else { return }
+        runtimeStarted = false
+        hudController?.stop()
+        hudController = nil
+        engine?.stop()
+        engine = nil
+        store.workspace.stop()
+    }
+
+    private func completeWelcome() {
+        guard commercialCredentialsValid else { return }
+        UserDefaults.standard.set(true, forKey: welcomeCompletedKey)
+        refreshCommercialAccess()
+    }
+
+    private func showWelcome() {
+        if welcome == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 640, height: 720),
+                styleMask: [.titled, .closable, .miniaturizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Welcome to Halo"
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: HaloCommercialWelcomeView(
+                firstRun: !UserDefaults.standard.bool(forKey: welcomeCompletedKey),
+                onContinue: { [weak self] in self?.completeWelcome() },
+                openSettings: { [weak self] in self?.openSettings() },
+                quit: { NSApp.terminate(nil) }
+            ))
+            window.center()
+            welcome = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        welcome?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func toggle() {
+        guard commercialAccessGranted else { showWelcome(); return }
+        engine?.toggleAll()
+    }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func previewVolumeHUD() { postHUDPreview("volume") }
     @objc private func previewBrightnessHUD() { postHUDPreview("brightness") }
@@ -110,8 +199,156 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        hudController?.stop()
-        engine?.stop(); store.flushConfiguration(); store.workspace.stop()
+        stopLicensedRuntime()
+        store.flushConfiguration()
+    }
+}
+
+@MainActor
+private struct HaloCommercialWelcomeView: View {
+    @ObservedObject private var account = HaloAccountManager.shared
+    @ObservedObject private var license = HaloLicenseManager.shared
+    @State private var email = ""
+    @State private var password = ""
+    @State private var licenseKey = ""
+    @State private var creatingAccount = false
+
+    let firstRun: Bool
+    let onContinue: () -> Void
+    let openSettings: () -> Void
+    let quit: () -> Void
+
+    private var canContinue: Bool { account.isSignedIn && license.state.isValid }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 20) {
+                    VStack(spacing: 8) {
+                        Image(nsImage: NSApp.applicationIconImage)
+                            .resizable().scaledToFit().frame(width: 92, height: 92)
+                        Text(firstRun ? "Welcome to Halo" : "Halo needs your attention")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                        Text("Sign in to your Halo account and activate a valid license before the notch starts.")
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 480)
+                    }
+
+                    GroupBox("Halo Account") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if account.isSignedIn {
+                                HStack {
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                                    Text(account.email.isEmpty ? "Signed in" : account.email).fontWeight(.semibold)
+                                    Spacer()
+                                    Text(account.emailVerified ? "Verified" : "Email not verified")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                if !account.emailVerified {
+                                    HStack {
+                                        Button("Send Verification Email") { Task { await account.sendVerificationEmail() } }
+                                        Button("Refresh Status") { Task { await account.refreshVerificationStatus() } }
+                                    }
+                                }
+                                Button("Sign Out") { account.signOut() }
+                            } else {
+                                Picker("Account", selection: $creatingAccount) {
+                                    Text("Sign In").tag(false)
+                                    Text("Create Account").tag(true)
+                                }
+                                .pickerStyle(.segmented)
+                                TextField("Email", text: $email)
+                                SecureField("Password", text: $password)
+                                HStack {
+                                    Button(creatingAccount ? "Create Account" : "Sign In") {
+                                        Task {
+                                            if creatingAccount { await account.signUp(email: email, password: password) }
+                                            else { await account.signIn(email: email, password: password) }
+                                            if account.isSignedIn { password = "" }
+                                        }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(account.isBusy || email.isEmpty || password.isEmpty)
+                                    if !creatingAccount {
+                                        Button("Forgot Password?") { Task { await account.resetPassword(email: email) } }
+                                            .disabled(account.isBusy || email.isEmpty)
+                                    }
+                                }
+                            }
+                            if account.isBusy { ProgressView().controlSize(.small) }
+                            if let notice = account.notice { Text(notice).font(.caption).foregroundStyle(.secondary) }
+                            if let error = account.errorMessage { Text(error).font(.caption).foregroundStyle(.red) }
+                        }
+                        .padding(6)
+                    }
+
+                    GroupBox("Halo License") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Image(systemName: license.state.isValid ? "checkmark.seal.fill" : "key.horizontal")
+                                    .foregroundStyle(license.state.isValid ? .green : .secondary)
+                                Text(license.state.title).fontWeight(.semibold)
+                                Spacer()
+                                if license.isBusy { ProgressView().controlSize(.small) }
+                            }
+                            if license.state.isValid {
+                                Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
+                                    GridRow { Text("Status").foregroundStyle(.secondary); Text(license.details.statusTitle) }
+                                    if !license.details.plan.isEmpty {
+                                        GridRow { Text("Plan").foregroundStyle(.secondary); Text(license.details.plan) }
+                                    }
+                                    GridRow { Text("Activated Macs").foregroundStyle(.secondary); Text(license.details.activatedMacsTitle) }
+                                    if let days = license.details.daysRemaining {
+                                        GridRow { Text("Remaining").foregroundStyle(.secondary); Text("\(days) day\(days == 1 ? "" : "s")") }
+                                    }
+                                }
+                                HStack {
+                                    Button("Validate Now") { Task { await license.validate() } }.disabled(license.isBusy)
+                                    Button("Deactivate This Mac", role: .destructive) { Task { await license.deactivate() } }.disabled(license.isBusy)
+                                }
+                            } else {
+                                SecureField("License key", text: $licenseKey)
+                                Button("Activate License") {
+                                    Task {
+                                        await license.activate(licenseKey)
+                                        if license.state.isValid { licenseKey = "" }
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(license.isBusy || licenseKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            }
+                            if let notice = license.notice { Text(notice).font(.caption).foregroundStyle(.secondary) }
+                            if let error = license.errorMessage { Text(error).font(.caption).foregroundStyle(.red) }
+                        }
+                        .padding(6)
+                    }
+
+                    HStack(spacing: 14) {
+                        Link("r.support@redstoneinvente.com", destination: URL(string: "mailto:r.support@redstoneinvente.com")!)
+                        Button("Open Settings") { openSettings() }
+                            .buttonStyle(.link)
+                    }
+                    .font(.caption)
+                }
+                .padding(28)
+            }
+
+            Divider()
+            HStack {
+                Button("Quit Halo") { quit() }
+                Spacer()
+                if !canContinue {
+                    Text("A signed-in account and valid license are required.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Button("Continue to Halo") { onContinue() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canContinue)
+            }
+            .padding(18)
+        }
+        .frame(width: 640, height: 720)
     }
 }
 

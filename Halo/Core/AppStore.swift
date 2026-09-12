@@ -31,10 +31,8 @@ final class AppStore: ObservableObject {
         workspace.applyTheme = { [weak self] theme in self?.configuration.theme = theme }
         // Environmental Interface is intentionally dormant for now. Keep the implementation
         // and assets in the tree so development can resume later without shipping EI at runtime.
-        Task {
-            await HaloAccountManager.shared.restore()
-            await HaloLicenseManager.shared.restoreAndValidate()
-        }
+        // Commercial account/license restoration is owned by AppDelegate so Halo's runtime
+        // cannot start before access has been validated.
         if workspace.settings.persistShelf {
             files = (defaults.stringArray(forKey: "shelf.paths") ?? []).map { URL(fileURLWithPath: $0) }.filter { FileManager.default.fileExists(atPath: $0.path) }
             let savedDates = (defaults.dictionary(forKey: "shelf.addedAt") as? [String: Date]) ?? [:]
@@ -856,6 +854,34 @@ final class HaloAccountManager: ObservableObject {
         } catch { errorMessage = readable(error) }
     }
 
+    func sendVerificationEmail() async {
+        guard isConfigured else { errorMessage = "Firebase is not configured yet."; return }
+        guard isSignedIn else { errorMessage = "Sign in to your Halo account first."; return }
+        if emailVerified { notice = "Your email is already verified."; errorMessage = nil; return }
+        isBusy = true; errorMessage = nil; notice = nil
+        defer { isBusy = false }
+        do {
+            let token = try await validIDToken()
+            _ = try await firebaseRequest(
+                endpoint: "accounts:sendOobCode",
+                body: ["requestType": "VERIFY_EMAIL", "idToken": token]
+            )
+            notice = email.isEmpty ? "Verification email sent." : "Verification email sent to \(email)."
+        } catch { errorMessage = readable(error) }
+    }
+
+    func refreshVerificationStatus() async {
+        guard isConfigured else { errorMessage = "Firebase is not configured yet."; return }
+        guard isSignedIn else { errorMessage = "Sign in to your Halo account first."; return }
+        isBusy = true; errorMessage = nil; notice = nil
+        defer { isBusy = false }
+        do {
+            _ = try await validIDToken()
+            try await loadProfile()
+            notice = emailVerified ? "Email verified." : "Email is still awaiting verification."
+        } catch { errorMessage = readable(error) }
+    }
+
     func signOut() {
         clearLocalSession()
         notice = "Signed out."
@@ -1008,12 +1034,39 @@ enum HaloLicenseState: Equatable {
     }
 }
 
+struct HaloLicenseDetails: Equatable {
+    var status: String = ""
+    var plan: String = ""
+    var expiresAt: Date?
+    var activeSeats: Int?
+    var seatLimit: Int?
+
+    static let empty = HaloLicenseDetails()
+
+    var statusTitle: String {
+        guard !status.isEmpty else { return "Unknown" }
+        return status.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    var daysRemaining: Int? {
+        guard let expiresAt else { return nil }
+        return max(0, Int(ceil(expiresAt.timeIntervalSinceNow / 86_400)))
+    }
+
+    var activatedMacsTitle: String {
+        guard let activeSeats else { return "Unavailable" }
+        if let seatLimit { return "\(activeSeats) of \(seatLimit)" }
+        return "\(activeSeats)"
+    }
+}
+
 @MainActor
 final class HaloLicenseManager: ObservableObject {
     static let shared = HaloLicenseManager()
 
     @Published private(set) var state: HaloLicenseState = .inactive
     @Published private(set) var licenseHint = ""
+    @Published private(set) var details: HaloLicenseDetails = .empty
     @Published private(set) var isBusy = false
     @Published var errorMessage: String?
     @Published var notice: String?
@@ -1024,8 +1077,8 @@ final class HaloLicenseManager: ObservableObject {
     var isConfigured: Bool { HaloCommercialConfiguration.licenseSeatConfigured }
 
     func restoreAndValidate() async {
-        guard isConfigured else { state = .unconfigured; return }
-        guard let key = HaloKeychain.string(for: licenseKeyKey), !key.isEmpty else { state = .inactive; return }
+        guard isConfigured else { state = .unconfigured; details = .empty; return }
+        guard let key = HaloKeychain.string(for: licenseKeyKey), !key.isEmpty else { state = .inactive; details = .empty; return }
         licenseHint = Self.hint(key)
         await validate()
     }
@@ -1047,7 +1100,8 @@ final class HaloLicenseManager: ObservableObject {
             guard parsed.valid else { throw HaloCommercialError.message(parsed.message ?? "License activation was rejected.") }
             HaloKeychain.set(cleaned, for: licenseKeyKey)
             licenseHint = Self.hint(cleaned)
-            state = .valid(plan: parsed.plan)
+            details = parsed.details
+            state = .valid(plan: parsed.details.plan.isEmpty ? nil : parsed.details.plan)
             notice = "License activated on this Mac."
         } catch {
             state = .invalid(readable(error))
@@ -1066,13 +1120,15 @@ final class HaloLicenseManager: ObservableObject {
                 "fingerprint": fingerprint()
             ])
             let parsed = parseValidation(json)
+            details = parsed.details
             if parsed.valid {
-                state = .valid(plan: parsed.plan)
+                state = .valid(plan: parsed.details.plan.isEmpty ? nil : parsed.details.plan)
                 licenseHint = Self.hint(key)
             } else {
                 state = .invalid(parsed.message ?? "This license is not valid for this Mac.")
             }
         } catch {
+            details = .empty
             state = .invalid(readable(error))
             errorMessage = readable(error)
         }
@@ -1090,6 +1146,7 @@ final class HaloLicenseManager: ObservableObject {
             ])
             HaloKeychain.remove(licenseKeyKey)
             licenseHint = ""
+            details = .empty
             state = .inactive
             notice = "This Mac has been deactivated."
         } catch { errorMessage = readable(error) }
@@ -1098,6 +1155,7 @@ final class HaloLicenseManager: ObservableObject {
     func clearLocalLicense() {
         HaloKeychain.remove(licenseKeyKey)
         licenseHint = ""
+        details = .empty
         state = isConfigured ? .inactive : .unconfigured
         notice = "Local license data cleared."
     }
@@ -1134,13 +1192,49 @@ final class HaloLicenseManager: ObservableObject {
         return root
     }
 
-    private func parseValidation(_ root: [String: Any]) -> (valid: Bool, plan: String?, message: String?) {
-        let valid = (root["valid"] as? Bool) ?? true
-        let license = root["license"] as? [String: Any]
-        let plan = (license?["plan_key"] as? String) ?? (license?["plan"] as? String)
+    private func parseValidation(_ root: [String: Any]) -> (valid: Bool, details: HaloLicenseDetails, message: String?) {
+        let license = (root["license"] as? [String: Any])
+            ?? ((root["activation"] as? [String: Any])?["license"] as? [String: Any])
+        let status = (license?["status"] as? String) ?? ""
+        let plan = (license?["plan_key"] as? String) ?? (license?["plan"] as? String) ?? ""
+        let activeSeats = intValue(license?["active_seats"])
+        let seatLimit = intValue(license?["seat_limit"])
+
+        var expiresAt = dateValue(license?["expires_at"])
+        if expiresAt == nil, let entitlements = license?["active_entitlements"] as? [[String: Any]] {
+            let expirations = entitlements.compactMap { dateValue($0["expires_at"]) }
+            expiresAt = expirations.min()
+        }
+
+        let explicitValid = root["valid"] as? Bool
+        let object = root["object"] as? String
+        let inferredValid = status.lowercased() == "active" || object == "activation"
+        let valid = explicitValid ?? inferredValid
         let message = (root["message"] as? String)
             ?? ((root["error"] as? [String: Any])?["message"] as? String)
-        return (valid, plan, message)
+        let details = HaloLicenseDetails(
+            status: status.isEmpty ? (valid ? "active" : "invalid") : status,
+            plan: plan,
+            expiresAt: expiresAt,
+            activeSeats: activeSeats,
+            seatLimit: seatLimit
+        )
+        return (valid, details, message)
+    }
+
+    private func intValue(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? NSNumber { return value.intValue }
+        if let value = value as? String { return Int(value) }
+        return nil
+    }
+
+    private func dateValue(_ value: Any?) -> Date? {
+        guard let raw = value as? String, !raw.isEmpty else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: raw) { return date }
+        return ISO8601DateFormatter().date(from: raw)
     }
 
     private static func hint(_ key: String) -> String {
