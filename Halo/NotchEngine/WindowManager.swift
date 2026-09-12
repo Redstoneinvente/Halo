@@ -229,9 +229,9 @@ final class WindowManager {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
-            .receive(on: RunLoop.main).sink { [weak self] _ in
-                DispatchQueue.main.async { self?.reconcile() }
-            }.store(in: &subscriptions)
+            .debounce(for: .milliseconds(80), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.reconcile() }
+            .store(in: &subscriptions)
         store.$configuration.dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.$settings.map { [store] settings in
@@ -245,7 +245,8 @@ final class WindowManager {
             }
             return SurfaceRenderConfiguration(appearance: layout.appearance, displays: resolvedDisplays, closedNotch: layout.closedNotch, clock: layout.widgetStyle(for: .clock), horizontalWidgets: layout.horizontalWidgets, horizontalHeight: layout.horizontalHeight)
         }
-            .removeDuplicates().dropFirst().receive(on: DispatchQueue.main)
+            .removeDuplicates().dropFirst()
+            .throttle(for: .milliseconds(33), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloGeometryPreview"))
             .receive(on: DispatchQueue.main).sink { [weak self] note in
@@ -586,7 +587,23 @@ final class WindowManager {
         }
         let targetItem = side == .left ? items.left : items.right
         let targetDecoration = side == .left ? options.leftDecoration : options.rightDecoration
-        let hasSibling = itemIsVisible(targetItem) || (targetDecoration?.isVisible(playing: playing) ?? false)
+        var artwork = options.artworkOptions ?? ClosedArtworkOptions()
+        if options.artworkOptions == nil, let legacy = options.mediaOptions, legacy.artwork != .none {
+            artwork.enabled = true; artwork.mode = legacy.artwork; artwork.size = legacy.artworkSize
+        }
+        let hasArtworkSibling: Bool = {
+            guard playing, artwork.enabled, artwork.mode != .none, artwork.mode != .background else { return false }
+            switch artwork.side {
+            case .left: return side == .left
+            case .right: return side == .right
+            case .automatic:
+                if options.left == .media || options.left == .visualizer { return side == .left }
+                if options.right == .media || options.right == .visualizer { return side == .right }
+                return side == .right
+            }
+        }()
+        let hasSibling = itemIsVisible(targetItem) ||
+            (targetDecoration?.isVisible(playing: playing) ?? false) || hasArtworkSibling
         let minimumSideWidth = settings.expandForEvent && !hasSibling
             ? max(badgeWidth, settings.eventWidth)
             : badgeWidth
@@ -639,6 +656,11 @@ final class WindowManager {
         if notchLike {
             var leftDemand = autoFit ? sides.left : sides.decorationLeft
             var rightDemand = autoFit ? sides.right : sides.decorationRight
+            // Transient power events must remain readable even when global auto-fit is disabled.
+            if let power {
+                if power.side == .left { leftDemand = max(leftDemand, sides.left) }
+                else { rightDemand = max(rightDemand, sides.right) }
+            }
 
             if let hud = hudNotchExpansion, hud.screenFrame.equalTo(geometry.screen), !hud.vertical {
                 let hudGap = 6.0
@@ -710,8 +732,10 @@ final class WindowManager {
         let playing = store.workspace.media.isPlaying
         let activity = activeClosedActivity
         let baseCompactHeight = max(16, geometry.appearance.surface.compactHeight)
-        let size = min(options.fontSize, max(1, baseCompactHeight - 2 * options.contentPaddingY) / 1.25)
+        let innerHeight = max(1, baseCompactHeight - 2 * options.contentPaddingY)
+        let size = min(options.fontSize, innerHeight / 1.25)
         let font = NSFont.systemFont(ofSize: size)
+        let digitFont = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .regular)
         let slotMargins = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
         let elementGap = 6.0
 
@@ -781,12 +805,20 @@ final class WindowManager {
                     let template = "88:88" + (style.clock.showSeconds ? ":88" : "") + (style.clock.twentyFourHour ? "" : " PM")
                     content = textWidth(template, font: clockFont) * 1.08
                 case .date: content = textWidth("Sep 28", font: font)
-                case .timer: content = textWidth("88:88:88", font: font) + size
-                case .battery: content = textWidth("100%", font: font) + size + 5
+                case .timer:
+                    if store.deadline != nil {
+                        content = textWidth("88:88:88", font: digitFont)
+                    } else {
+                        let label = store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready"
+                        content = max(12, size) + elementGap + textWidth(label, font: font)
+                    }
+                case .battery:
+                    let value = store.workspace.system.battery.map { "\($0)%" } ?? ""
+                    content = value.isEmpty ? max(12, size) : max(12, size) + 5 + textWidth(value, font: digitFont)
                 case .media: content = mediaWidth()
                 case .visualizer: content = playing ? (options.visualizer ?? VisualizerOptions()).width : 0
                 case .mirror: content = 112
-                case .files: content = textWidth(String(store.files.count), font: font) + size + 5
+                case .files: content = max(12, size) + 5 + textWidth(String(store.files.count), font: digitFont)
                 case .activity:
                     content = activity.map {
                         let title = textWidth(String($0.title.prefix(80)), font: font)
@@ -795,7 +827,7 @@ final class WindowManager {
                         let icon = max(12, size)
                         let text = max(title, detail)
                         let progress = $0.progress == nil ? 0 : elementGap + 38
-                        return icon + elementGap + text + progress + 2
+                        return min(240, icon + elementGap + text + progress + 2)
                     } ?? 0
                 }
             }
@@ -811,7 +843,8 @@ final class WindowManager {
         var rightFull = right.full
 
         if let artworkTarget {
-            let artworkWidth = artwork.size + 2 * artwork.padding + artwork.margin
+            let renderedArtworkSize = max(1, min(artwork.size, innerHeight - 2 * artwork.padding))
+            let artworkWidth = renderedArtworkSize + 2 * artwork.padding + artwork.margin
             switch artworkTarget {
             case .left:
                 leftFull = leftFull > 0 ? leftFull + elementGap + artworkWidth : slotMargins + artworkWidth

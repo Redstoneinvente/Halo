@@ -1141,15 +1141,23 @@ private struct ContextMusicView: View {
     @State private var vinylRotation = 0.0
     @State private var vinylLastTick = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private var safeInset: Double { max(18, options.resolvedSpacing * 1.25) }
+    private var safeInset: Double { options.resolvedHorizontalMargin }
     private var contentTopInset: Double {
-        guard usesFullNotchArea else { return max(16, safeInset * 0.75) }
-        if keepsClosedNotchContents { return max(16, surfaceState.compactHeight + max(6, options.resolvedSpacing * 0.5)) }
-        return max(16, surfaceState.compactHeight * 0.68)
+        let base: Double
+        if !usesFullNotchArea {
+            base = max(16, max(18, options.resolvedSpacing * 1.25) * 0.75)
+        } else if keepsClosedNotchContents {
+            base = max(16, surfaceState.compactHeight + max(6, options.resolvedSpacing * 0.5))
+        } else {
+            base = max(16, surfaceState.compactHeight * 0.68)
+        }
+        return base + options.resolvedTopMargin
     }
     private var controlsTopInset: Double {
-        if usesFullNotchArea && keepsClosedNotchContents { return max(12, surfaceState.compactHeight + 6) }
-        return max(12, safeInset * 0.65)
+        let base = usesFullNotchArea && keepsClosedNotchContents
+            ? max(12, surfaceState.compactHeight + 6)
+            : max(12, max(18, options.resolvedSpacing * 1.25) * 0.65)
+        return base + options.resolvedTopMargin
     }
     private var artworkKey: String {
         "\(media.connectedApp ?? "")|\(media.title)|\(media.artist)|\(options.resolvedForegroundArtwork.rawValue)|\(options.usesArtworkBackground)"
@@ -1162,12 +1170,19 @@ private struct ContextMusicView: View {
          String(options.showVisualizer), String(options.showsLyrics), options.resolvedLyricDisplay.rawValue,
          String(options.resolvedLyricFontSize), options.resolvedVisualizerStyle.rawValue,
          String(options.resolvedSpacing), String(options.resolvedControlSize), String(visualizerFullWidth),
+         String(options.resolvedHorizontalMargin), String(options.resolvedTopMargin), String(options.resolvedBottomMargin),
          String(usesFullNotchArea), String(keepsClosedNotchContents)].joined(separator: "|")
     }
     private var songColors: [Color] { media.artworkColors.map(\.color) }
-    private var primarySongColor: Color { songColors.first ?? options.textColor.color }
-    private var effectiveTextColor: Color { options.usesSongTextColors && !songColors.isEmpty ? primarySongColor : options.textColor.color }
-    private var effectiveControlColor: Color { options.usesSongControlColors && !songColors.isEmpty ? primarySongColor : effectiveTextColor }
+    private var baseTextColor: Color { options.textColor.color }
+    private var primarySongColor: Color { songColors.first ?? baseTextColor }
+    private var effectiveTextColor: Color { options.usesSongTextColors && !songColors.isEmpty ? primarySongColor : baseTextColor }
+    private var effectiveControlColor: Color { options.usesSongControlColors && !songColors.isEmpty ? primarySongColor : baseTextColor }
+    private var effectiveVisualizerColor: Color { options.usesSongVisualizerColors && !songColors.isEmpty ? primarySongColor : baseTextColor }
+    private var visualizerPalette: [WidgetColor] { options.usesSongVisualizerColors ? media.artworkColors : [] }
+    private var backgroundGradientColors: [Color] {
+        options.usesSongBackgroundColors && !songColors.isEmpty ? Array(songColors.prefix(3)) : [.blue, .purple]
+    }
     private var horizontalAlignment: HorizontalAlignment {
         switch options.resolvedContentAlignment { case .leading: return .leading; case .center: return .center; case .trailing: return .trailing }
     }
@@ -1188,7 +1203,7 @@ private struct ContextMusicView: View {
                 }
                 .padding(.horizontal, safeInset)
                 .padding(.top, contentTopInset)
-                .padding(.bottom, max(10, safeInset * 0.55))
+                .padding(.bottom, options.resolvedBottomMargin)
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             .clipped()
@@ -1288,7 +1303,11 @@ private struct ContextMusicView: View {
             innerHeight = artworkSize + textColumn + (artworkSize > 0 && textColumn > 0 ? spacing * 0.7 : 0)
             width = max(340, min(580, max(380, artworkSize * 2.15)))
         }
-        return CGSize(width: width, height: min(700, max(150, innerHeight + 18)))
+        let legacyHorizontalMargin = max(18, options.resolvedSpacing * 1.25)
+        let extraHorizontalSpace = max(0, options.resolvedHorizontalMargin - legacyHorizontalMargin) * 2
+        let requestedWidth = min(760, width + extraHorizontalSpace)
+        let requestedHeight = innerHeight + contentTopInset + options.resolvedBottomMargin
+        return CGSize(width: requestedWidth, height: min(700, max(150, requestedHeight)))
     }
 
     @ViewBuilder private func contextBackground(size: CGSize) -> some View {
@@ -1297,14 +1316,14 @@ private struct ContextMusicView: View {
             case .glass:
                 Rectangle().fill(.ultraThinMaterial).opacity(max(0.12, options.backgroundOpacity))
             case .gradient:
-                LinearGradient(colors: songColors.isEmpty ? [.blue, .purple] : Array(songColors.prefix(3)), startPoint: .topLeading, endPoint: .bottomTrailing)
+                LinearGradient(colors: backgroundGradientColors, startPoint: .topLeading, endPoint: .bottomTrailing)
                     .opacity(options.backgroundOpacity)
             default:
                 Color.black.opacity(options.backgroundOpacity)
             }
-            if options.usesSongBackgroundColors, !songColors.isEmpty {
+            if options.usesSongBackgroundColors, !songColors.isEmpty, options.background != .gradient {
                 LinearGradient(colors: Array(songColors.prefix(2)), startPoint: .topLeading, endPoint: .bottomTrailing)
-                    .opacity(min(0.78, max(0.16, options.backgroundOpacity)))
+                    .opacity(min(0.62, max(0.12, options.backgroundOpacity * 0.82)))
                     .blendMode(.plusLighter)
             }
             if options.usesArtworkBackground, let artwork {
@@ -1467,7 +1486,7 @@ private struct ContextMusicView: View {
         for (index, word) in words.enumerated() {
             result = result + Text((index == 0 ? "" : " ") + word)
                 .fontWeight(index == activeWord ? .bold : .regular)
-                .foregroundColor(index == activeWord ? primarySongColor : effectiveTextColor.opacity(0.5))
+                .foregroundColor(index == activeWord ? effectiveTextColor : effectiveTextColor.opacity(0.5))
         }
         return result.font(.system(size: options.resolvedLyricFontSize, design: .rounded)).lineLimit(2).multilineTextAlignment(textAlignment)
     }
@@ -1519,7 +1538,7 @@ private struct ContextMusicView: View {
         if options.showVisualizer {
             let configured = contextVisualizerOptions
             PlaybackVisualizer(kind: options.resolvedVisualizerStyle, playing: media.isPlaying, enabled: true,
-                               options: configured, palette: media.artworkColors, fallback: effectiveControlColor)
+                               options: configured, palette: visualizerPalette, fallback: effectiveVisualizerColor)
                 .frame(maxWidth: visualizerFullWidth ? .infinity : CGFloat(configured.width), alignment: .center)
                 .frame(height: max(18, min(64, configured.height)))
                 .contentShape(Rectangle())

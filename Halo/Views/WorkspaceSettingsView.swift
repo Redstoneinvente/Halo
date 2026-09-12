@@ -706,6 +706,9 @@ private struct ContextMusicSettings: View {
     private var lyricFontSize: Binding<Double> { Binding(get: { options.wrappedValue.resolvedLyricFontSize }, set: { options.wrappedValue.lyricFontSize = $0 }) }
     private var onlineLyrics: Binding<Bool> { Binding(get: { options.wrappedValue.usesOnlineLyrics }, set: { options.wrappedValue.lyricsOnline = $0 }) }
     private var visualizerStyle: Binding<PlaybackAnimation> { Binding(get: { options.wrappedValue.resolvedVisualizerStyle }, set: { options.wrappedValue.visualizerStyle = $0 }) }
+    private var horizontalMargin: Binding<Double> { Binding(get: { options.wrappedValue.resolvedHorizontalMargin }, set: { options.wrappedValue.horizontalMargin = $0 }) }
+    private var topMargin: Binding<Double> { Binding(get: { options.wrappedValue.resolvedTopMargin }, set: { options.wrappedValue.topMargin = $0 }) }
+    private var bottomMargin: Binding<Double> { Binding(get: { options.wrappedValue.resolvedBottomMargin }, set: { options.wrappedValue.bottomMargin = $0 }) }
     private func boolBinding(_ keyPath: WritableKeyPath<ContextMusicOptions, Bool?>, resolved: @escaping (ContextMusicOptions) -> Bool) -> Binding<Bool> {
         Binding(get: { resolved(options.wrappedValue) }, set: { options.wrappedValue[keyPath: keyPath] = $0 })
     }
@@ -733,6 +736,13 @@ private struct ContextMusicSettings: View {
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Keep closed-notch contents visible", isOn: $keepClosedNotchContents)
             Text("Controls whether the Closed Notch contents remain visible while Music CI is active. This setting is independent from the normal opened-notch Appearance setting.")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider()
+            Text("Content safe margins").font(.headline)
+            PreciseSlider(title: "Horizontal margin", value: horizontalMargin, range: 0...120, step: 1, suffix: "pt")
+            PreciseSlider(title: "Extra top margin", value: topMargin, range: 0...160, step: 1, suffix: "pt")
+            PreciseSlider(title: "Bottom margin", value: bottomMargin, range: 0...120, step: 1, suffix: "pt")
+            Text("Margins are included in the CI's requested surface size, so increasing them moves content inward instead of clipping it outside the notch.")
                 .font(.caption).foregroundStyle(.secondary)
         }
 

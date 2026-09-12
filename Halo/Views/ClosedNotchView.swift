@@ -422,7 +422,7 @@ struct ClosedNotchSlot: View {
     private var powerUsesEventContainer: Bool {
         guard showPowerEvent else { return false }
         let settings = options.powerReaction ?? PowerReactionOptions()
-        return settings.expandForEvent && !itemIsVisible && decorationSize <= 0 && artworkFootprint <= 0
+        return settings.expandForEvent && !itemIsVisible && decorationSize <= 0 && artworkFootprint <= 0 && hudReservedWidth <= 0
     }
     private var powerFootprint: Double {
         guard showPowerEvent else { return 0 }
@@ -532,6 +532,8 @@ struct ClosedNotchSlot: View {
     @ViewBuilder private var decorationElement: some View {
         if let decoration, decorationSize > 0 {
             SideDecorationView(options: decoration, playing: media.isPlaying, lowPower: system.lowPower, maximumHeight: decorationSize)
+                .frame(width: decorationSize, height: decorationSize, alignment: .center)
+                .clipped()
         }
     }
     @ViewBuilder private var artworkElement: some View {

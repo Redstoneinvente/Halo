@@ -307,6 +307,9 @@ struct ContextMusicOptions: Codable, Equatable {
     var songControlColors: Bool?
     var songVisualizerColors: Bool?
     var songBackgroundColors: Bool?
+    var horizontalMargin: Double?
+    var topMargin: Double?
+    var bottomMargin: Double?
     var resolvedLayoutMode: ContextMusicLayoutMode { layoutMode ?? .hero }
     var resolvedForegroundArtwork: ContextArtworkPresentation { foregroundArtwork ?? (showArtwork ? .cover : .none) }
     var usesArtworkBackground: Bool { artworkBackground ?? false }
@@ -327,10 +330,13 @@ struct ContextMusicOptions: Codable, Equatable {
     var usesSongControlColors: Bool { songControlColors ?? false }
     var usesSongVisualizerColors: Bool { songVisualizerColors ?? true }
     var usesSongBackgroundColors: Bool { songBackgroundColors ?? false }
+    var resolvedHorizontalMargin: Double { min(120, max(0, horizontalMargin ?? max(18, resolvedSpacing * 1.25))) }
+    var resolvedTopMargin: Double { min(160, max(0, topMargin ?? 0)) }
+    var resolvedBottomMargin: Double { min(120, max(0, bottomMargin ?? max(10, resolvedSpacing * 0.55))) }
     func validated() throws -> ContextMusicOptions {
         guard [artworkSize, fontSize, backgroundOpacity, artworkBackgroundBlur ?? 12, artworkBackgroundDim ?? 0.38,
                spacing ?? 12, cornerRadius ?? 18, controlSize ?? 24, vinylRPM ?? 8,
-               lyricSyncOffset ?? 0, lyricFontSize ?? 16].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+               lyricSyncOffset ?? 0, lyricFontSize ?? 16, horizontalMargin ?? 18, topMargin ?? 0, bottomMargin ?? 10].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var result = self
         result.artworkSize = min(240, max(32, artworkSize))
         result.fontSize = min(48, max(12, fontSize))
@@ -348,6 +354,9 @@ struct ContextMusicOptions: Codable, Equatable {
         if vinylRPM != nil { result.vinylRPM = resolvedVinylRPM }
         if lyricSyncOffset != nil { result.lyricSyncOffset = resolvedLyricSyncOffset }
         if lyricFontSize != nil { result.lyricFontSize = resolvedLyricFontSize }
+        if horizontalMargin != nil { result.horizontalMargin = resolvedHorizontalMargin }
+        if topMargin != nil { result.topMargin = resolvedTopMargin }
+        if bottomMargin != nil { result.bottomMargin = resolvedBottomMargin }
         return result
     }
 }
