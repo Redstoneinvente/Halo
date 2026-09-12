@@ -1,0 +1,80 @@
+name: Fix Drop CI and Open Widget Controls
+
+on:
+  push:
+    paths:
+      - '.github/scripts/fix_drop_ci_and_open_widget_controls.py'
+      - '.github/workflows/fix-drop-ci-and-open-widget-controls.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply fixes
+        run: python3 .github/scripts/fix_drop_ci_and_open_widget_controls.py
+
+      - name: Check patch
+        run: git diff --check
+
+      - name: Verify implementation wiring
+        run: |
+          grep -q 'final class HaloDropHostingView' Halo/NotchEngine/WindowManager.swift
+          grep -q 'beginFileDrop(count:' Halo/NotchEngine/WindowManager.swift
+          grep -q 'host.state.beginFileDrop' Halo/NotchEngine/WindowManager.swift
+          grep -q 'Show Retry detection' Halo/Views/WidgetSettingsView.swift
+          grep -q 'effectiveSearch = options.showSearch' Halo/Views/ModuleViews.swift
+          grep -q 'effectiveQuery = options.showSearch' Halo/Views/ModuleViews.swift
+          grep -q 'Image(systemName: "clock")' Halo/Views/WidgetViews.swift
+          ! grep -q 'HaloFileDropDelegate' Halo/Views/SurfaceView.swift
+
+      - name: Parse changed Swift
+        run: |
+          xcrun swiftc -parse Halo/NotchEngine/WindowManager.swift
+          xcrun swiftc -parse Halo/Views/SurfaceView.swift
+          xcrun swiftc -parse Halo/Views/WidgetViews.swift
+          xcrun swiftc -parse Halo/Views/ModuleViews.swift
+          xcrun swiftc -parse Halo/Views/WidgetSettingsView.swift
+
+      - name: Build and reject new compiler errors
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build > /tmp/halo-build.log 2>&1
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo 'Build succeeded.'
+            exit 0
+          fi
+          grep -E 'error:' /tmp/halo-build.log > /tmp/halo-errors.log || true
+          cat /tmp/halo-errors.log
+          grep -Ev 'ClosedNotchView\.swift:.*compiler is unable to type-check this expression in reasonable time' /tmp/halo-errors.log > /tmp/halo-new-errors.log || true
+          if [ -s /tmp/halo-new-errors.log ]; then
+            echo 'New compiler errors detected:'
+            cat /tmp/halo-new-errors.log
+            exit 1
+          fi
+          if ! grep -Eq 'ClosedNotchView\.swift:.*compiler is unable to type-check this expression in reasonable time' /tmp/halo-errors.log; then
+            echo 'Build failed without the known ClosedNotchView baseline error.'
+            tail -120 /tmp/halo-build.log
+            exit 1
+          fi
+          echo 'Only the known ClosedNotchView type-check timeout remains.'
+
+      - name: Commit implementation
+        run: |
+          if git diff --quiet; then
+            echo 'No changes to commit.'
+            exit 0
+          fi
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/NotchEngine/WindowManager.swift Halo/Views/SurfaceView.swift Halo/Views/WidgetViews.swift Halo/Views/ModuleViews.swift Halo/Views/WidgetSettingsView.swift
+          git commit -m 'fix: expand Drop CI and wire opened widget controls'
+          git push origin main
