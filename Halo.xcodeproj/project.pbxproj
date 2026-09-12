@@ -41,9 +41,9 @@
 		0000000000000000000002D1 /* Services/AudioSpectrumService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002D0 /* Services/AudioSpectrumService.swift */; };
 		0000000000000000000002E3 /* Services/HUDEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002E2 /* Services/HUDEngine.swift */; };
 		0000000000000000000002E4 /* Views/CompanionSprite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002E5 /* Views/CompanionSprite.swift */; };
-		F84A0A813055323900E8B51E /* Cat.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A7D3055323900E8B51E /* Cat.png */; };
-		F84A0A823055323900E8B51E /* Dog.jpg in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A7E3055323900E8B51E /* Dog.jpg */; };
-		F84A0A833055323900E8B51E /* Fox.jpg in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A7F3055323900E8B51E /* Fox.jpg */; };
+		F84A0A87305545C500E8B51E /* dog.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A85305545C500E8B51E /* dog.png */; };
+		F84A0A88305545C500E8B51E /* fox.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A86305545C500E8B51E /* fox.png */; };
+		F84A0A89305545C500E8B51E /* cat.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A84305545C500E8B51E /* cat.png */; };
 		F8614B61305322E600D4943C /* AppIcon 2.icns in Resources */ = {isa = PBXBuildFile; fileRef = F8614B60305322E600D4943C /* AppIcon 2.icns */; };
 		F8614B693053262D00D4943C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F8614B683053262D00D4943C /* Assets.xcassets */; };
 		F8614B6B3053275D00D4943C /* Halo_AppIcon_Transparent.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6A3053275D00D4943C /* Halo_AppIcon_Transparent.png */; };
@@ -96,9 +96,9 @@
 		0000000000000000000002D0 /* Services/AudioSpectrumService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/AudioSpectrumService.swift; sourceTree = "<group>"; };
 		0000000000000000000002E2 /* Services/HUDEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HUDEngine.swift; sourceTree = "<group>"; };
 		0000000000000000000002E5 /* Views/CompanionSprite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/CompanionSprite.swift; sourceTree = "<group>"; };
-		F84A0A7D3055323900E8B51E /* Cat.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Cat.png; sourceTree = "<group>"; };
-		F84A0A7E3055323900E8B51E /* Dog.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = Dog.jpg; sourceTree = "<group>"; };
-		F84A0A7F3055323900E8B51E /* Fox.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = Fox.jpg; sourceTree = "<group>"; };
+		F84A0A84305545C500E8B51E /* cat.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = cat.png; sourceTree = "<group>"; };
+		F84A0A85305545C500E8B51E /* dog.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = dog.png; sourceTree = "<group>"; };
+		F84A0A86305545C500E8B51E /* fox.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = fox.png; sourceTree = "<group>"; };
 		F8614B60305322E600D4943C /* AppIcon 2.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = "AppIcon 2.icns"; sourceTree = "<group>"; };
 		F8614B623053239E00D4943C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		F8614B633053242D00D4943C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -201,9 +201,9 @@
 		F84A0A803055323900E8B51E /* Pets */ = {
 			isa = PBXGroup;
 			children = (
-				F84A0A7D3055323900E8B51E /* Cat.png */,
-				F84A0A7E3055323900E8B51E /* Dog.jpg */,
-				F84A0A7F3055323900E8B51E /* Fox.jpg */,
+				F84A0A84305545C500E8B51E /* cat.png */,
+				F84A0A85305545C500E8B51E /* dog.png */,
+				F84A0A86305545C500E8B51E /* fox.png */,
 			);
 			path = Pets;
 			sourceTree = "<group>";
@@ -302,15 +302,15 @@
 				F8614B7A3053291B00D4943C /* icon_32x32@2x.png in Resources */,
 				F8614B7B3053291B00D4943C /* icon_128x128.png in Resources */,
 				F8614B7C3053291B00D4943C /* icon_512x512.png in Resources */,
+				F84A0A87305545C500E8B51E /* dog.png in Resources */,
+				F84A0A88305545C500E8B51E /* fox.png in Resources */,
+				F84A0A89305545C500E8B51E /* cat.png in Resources */,
 				F8614B7D3053291B00D4943C /* icon_256x256.png in Resources */,
 				F8614B7E3053291B00D4943C /* icon_32x32.png in Resources */,
 				F8614B7F3053291B00D4943C /* icon_256x256@2x.png in Resources */,
 				F8614B803053291B00D4943C /* icon_16x16@2x.png in Resources */,
 				F8614B813053291B00D4943C /* icon_16x16.png in Resources */,
 				F8614B823053291B00D4943C /* Halo.png in Resources */,
-				F84A0A813055323900E8B51E /* Cat.png in Resources */,
-				F84A0A823055323900E8B51E /* Dog.jpg in Resources */,
-				F84A0A833055323900E8B51E /* Fox.jpg in Resources */,
 				F8614B6B3053275D00D4943C /* Halo_AppIcon_Transparent.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
