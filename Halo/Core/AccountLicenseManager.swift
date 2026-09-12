@@ -16,7 +16,7 @@ enum HaloLicenseState: Equatable {
     case notConfigured(String)
     case inactive(String)
     case pending(String)
-    case active(maskedKey: String, device: String, activatedAt: Date, lastValidated: Date, offline: Bool)
+    case active(maskedKey: String, offline: Bool)
     case invalid(String)
 
     var isLicensed: Bool {
@@ -29,7 +29,7 @@ enum HaloLicenseState: Equatable {
         case .notConfigured: return "Not configured"
         case .inactive: return "Not activated"
         case .pending: return "Checking license…"
-        case .active(_, _, _, _, let offline): return offline ? "Licensed · Offline" : "Licensed"
+        case .active(_, let offline): return offline ? "Licensed · Offline" : "Licensed"
         case .invalid: return "License problem"
         }
     }
@@ -242,23 +242,16 @@ final class HaloAccountLicenseManager: ObservableObject {
             licenseState = .pending(message)
         case .invalid(let message), .offlineInvalid(let message):
             licenseState = .invalid(message)
-        case .active(let details):
-            licenseState = .active(
-                maskedKey: Self.mask(details.license),
-                device: details.device,
-                activatedAt: details.activatedAt,
-                lastValidated: details.lastValidated,
-                offline: false
-            )
-        case .offlineValid(let details):
-            licenseState = .active(
-                maskedKey: Self.mask(details.license),
-                device: details.device,
-                activatedAt: details.activatedAt,
-                lastValidated: details.lastValidated,
-                offline: true
-            )
+        case .active(_):
+            licenseState = .active(maskedKey: maskedCurrentLicenseKey(), offline: false)
+        case .offlineValid(_):
+            licenseState = .active(maskedKey: maskedCurrentLicenseKey(), offline: true)
         }
+    }
+
+    private func maskedCurrentLicenseKey() -> String {
+        guard let license = LicenseSeatStore.shared.seat?.currentLicense() else { return "••••" }
+        return Self.mask(license.licenseKey)
     }
 
     func activateLicense(_ key: String) async {
