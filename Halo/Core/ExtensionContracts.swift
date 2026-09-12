@@ -39,13 +39,10 @@ struct SignedLicense: Codable {
 
 // MARK: - Surface ownership router
 
-private enum RoutedContextInterface: String {
-    case music, bluetooth, retro
-}
+private enum RoutedContextInterface: String { case music, bluetooth, retro }
 
-/// Keeps the normal Halo SurfaceView alive so CI state (especially Retro's local requested state)
-/// continues receiving events, while visually replacing it with EI whenever EI owns the surface.
-/// Ownership order is CI -> EI -> normal Halo.
+/// CI -> EI -> normal Halo. The normal SurfaceView remains alive behind EI so CI-local state
+/// continues receiving events, but EI becomes the visible owner and receives CI-style sizing.
 @MainActor
 struct HaloSurfaceRouter: View {
     @ObservedObject var viewport: SurfaceViewport
@@ -68,21 +65,16 @@ struct HaloSurfaceRouter: View {
 
     private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.effectiveLayout }
     private var musicOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
+    private var theme: Theme { state.theme }
 
     private var activeCI: RoutedContextInterface? {
         var candidates: [(RoutedContextInterface, Double, Int)] = []
-        if retroEnabled && engine.retroGameRequested {
-            candidates.append((.retro, retroPriority, 3))
-        }
-        if musicOptions.enabled && workspace.media.isPlaying {
-            candidates.append((.music, musicPriority, 2))
-        }
+        if retroEnabled && engine.retroGameRequested { candidates.append((.retro, retroPriority, 3)) }
+        if musicOptions.enabled && workspace.media.isPlaying { candidates.append((.music, musicPriority, 2)) }
         let bluetoothEligible = bluetoothEnabled &&
             ((bluetoothOnChanges && bluetooth.lastEvent != nil) ||
              (bluetoothWhileConnected && !bluetooth.connectedDevices.isEmpty))
-        if bluetoothEligible {
-            candidates.append((.bluetooth, bluetoothPriority, 1))
-        }
+        if bluetoothEligible { candidates.append((.bluetooth, bluetoothPriority, 1)) }
         return candidates.max { lhs, rhs in
             if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
             return lhs.2 < rhs.2
@@ -91,6 +83,27 @@ struct HaloSurfaceRouter: View {
 
     private var eiOwnsSurface: Bool {
         state.expanded && ownership.isRequested && eiSettings.settings.mode != .off && activeCI == nil
+    }
+
+    private var effectiveShape: SurfaceShapeKind {
+        guard layout.appearance.surface.useStyleContour ?? true else { return layout.appearance.surface.shape }
+        switch theme.style {
+        case .pill, .island: return state.expanded ? .rounded : .capsule
+        case .simulated, .notch: return .scoop
+        case .shelf: return .chamfer
+        case .detached, .menuBar: return .rounded
+        default: return layout.appearance.surface.shape
+        }
+    }
+
+    private var contour: HaloContour {
+        HaloContour(kind: effectiveShape,
+                    radius: (layout.appearance.surface.useStyleContour ?? true)
+                        ? (theme.style == .menuBar ? 4 : theme.style == .pill ? 40 : theme.cornerRadius)
+                        : theme.cornerRadius,
+                    topRadius: layout.appearance.surface.topRadius,
+                    bottomRadius: layout.appearance.surface.bottomRadius,
+                    shoulder: layout.appearance.surface.shoulder)
     }
 
     var body: some View {
@@ -102,6 +115,12 @@ struct HaloSurfaceRouter: View {
 
             if eiOwnsSurface {
                 EIOpenSurface(surfaceState: state)
+                    .background(EISurfaceBackdrop(mode: eiSettings.settings.mode,
+                                                  preferences: EIOpenPreferencesStore.shared.value,
+                                                  environment: engine.environment))
+                    .clipShape(contour)
+                    .overlay(contour.stroke(Color.white.opacity(0.11), lineWidth: 1))
+                    .contentShape(contour)
                     .transition(.opacity.combined(with: .scale(scale: 0.985)))
                     .zIndex(20)
             }
@@ -114,9 +133,7 @@ struct HaloSurfaceRouter: View {
     }
 
     private func updateAmbientSuppression(_ active: Bool) {
-        DispatchQueue.main.async {
-            EnvironmentalInterfaceManager.shared.setOwnedSurfaceActive(active)
-        }
+        DispatchQueue.main.async { EnvironmentalInterfaceManager.shared.setOwnedSurfaceActive(active) }
     }
 }
 
@@ -131,54 +148,63 @@ struct EIOpenSurface: View {
     @ObservedObject private var ui = EIOpenUI.shared
 
     private var sizingKey: String {
-        "\(settings.settings.mode.rawValue)|\(ui.editing)|\(preferences.value.roomStyle.rawValue)|\(preferences.value.petVisual.rawValue)"
+        "\(settings.settings.mode.rawValue)|\(ui.editing)|\(preferences.value.roomStyle.rawValue)|\(preferences.value.petVisual.rawValue)|\(settings.settings.plantKind.rawValue)"
     }
 
     private var preferredSize: CGSize {
         let base: CGSize
         switch settings.settings.mode {
         case .off: base = CGSize(width: 500, height: 330)
-        case .pet: base = CGSize(width: 520, height: 350)
-        case .plant: base = CGSize(width: 540, height: 390)
-        case .simulation: base = CGSize(width: 620, height: 370)
+        case .pet: base = CGSize(width: 560, height: 370)
+        case .plant: base = CGSize(width: 590, height: 410)
+        case .simulation: base = CGSize(width: 700, height: 390)
         }
-        if ui.editing {
-            return CGSize(width: base.width + 230, height: max(base.height, 430))
-        }
+        if ui.editing { return CGSize(width: base.width + 245, height: max(base.height, 470)) }
         return base
     }
 
     var body: some View {
         GeometryReader { proxy in
-            ZStack {
-                EICozyRoom(preferences: preferences.value, environment: engine.environment)
-                VStack(spacing: 0) {
-                    header
-                    Spacer(minLength: 4)
-                    main(size: proxy.size)
-                    Spacer(minLength: 4)
-                    actions.padding(.bottom, 13)
+            ZStack(alignment: .top) {
+                content(size: proxy.size)
+
+                HStack(spacing: 9) {
+                    Label(title, systemImage: settings.settings.mode.symbol)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.78))
+                    Text("EI")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(preferences.value.accent.color.opacity(0.82))
+                    Spacer()
+                    Button { ui.editing.toggle() } label: {
+                        Image(systemName: ui.editing ? "slider.horizontal.3" : "slider.horizontal.3")
+                    }
+                    .buttonStyle(.plain)
+                    .help(ui.editing ? "EI Studio is open" : "Open EI Studio")
+                    Button { EnvironmentalInterfaceOwnershipController.shared.close() } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain).help("Close Environmental Interface")
                 }
-                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.top, 13)
+                .zIndex(8)
 
                 if ui.editing {
                     HStack {
                         Spacer()
                         EIQuickEditor()
-                            .frame(width: min(330, proxy.size.width * 0.58))
+                            .frame(width: min(350, proxy.size.width * 0.52), maxHeight: proxy.size.height - 24)
                             .padding(12)
                     }
                     .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .zIndex(30)
                 }
             }
-            .background(Color.black)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
-            .animation(.easeInOut(duration: 0.18), value: ui.editing)
+            .animation(.easeInOut(duration: 0.22), value: ui.editing)
         }
         .task(id: sizingKey) {
             await Task.yield()
             guard !Task.isCancelled else { return }
+            migrateLegacyPetStyleIfNeeded()
             publishPreferredSize()
         }
         .onDisappear {
@@ -189,166 +215,234 @@ struct EIOpenSurface: View {
         }
     }
 
-    private func publishPreferredSize() {
-        let next = preferredSize
-        if let current = surfaceState.contextPreferredSize,
-           abs(current.width - next.width) < 1,
-           abs(current.height - next.height) < 1 { return }
-        surfaceState.contextPreferredSize = next
-    }
-
-    private var header: some View {
-        HStack(spacing: 10) {
-            Label(title, systemImage: settings.settings.mode.symbol).font(.headline)
-            Text("ENVIRONMENTAL INTERFACE")
-                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                .foregroundStyle(preferences.value.accent.color.opacity(0.9))
-            Spacer()
-            Button { ui.editing.toggle() } label: { Image(systemName: "slider.horizontal.3") }
-                .buttonStyle(.plain).help("Customize EI")
-            Button { EnvironmentalInterfaceOwnershipController.shared.close() } label: { Image(systemName: "xmark") }
-                .buttonStyle(.plain).help("Close Environmental Interface")
+    @ViewBuilder
+    private func content(size: CGSize) -> some View {
+        switch settings.settings.mode {
+        case .off:
+            EmptyView()
+        case .pet:
+            ZStack(alignment: .bottom) {
+                EIHabitatDetails(preferences: preferences.value, environment: engine.environment)
+                    .allowsHitTesting(false)
+                EIPetAvatar(size: min(220, max(120, size.height * 0.58)), walking: false)
+                    .offset(y: -max(8, size.height * 0.055))
+                    .onTapGesture { engine.interact(.petPat) }
+                petActions
+                    .padding(.bottom, 13)
+            }
+        case .plant:
+            ZStack(alignment: .bottom) {
+                EIHabitatDetails(preferences: preferences.value, environment: engine.environment)
+                    .allowsHitTesting(false)
+                HaloPlantRenderer(kind: settings.settings.plantKind,
+                                  size: min(280, max(150, size.height * 0.70)),
+                                  plantColor: settings.settings.plantColor.color,
+                                  potColor: settings.settings.plantPotColor.color,
+                                  growth: min(1, engine.persistentState.plant.growth + engine.persistentState.plant.bonusGrowth),
+                                  environment: engine.environment,
+                                  reaction: engine.currentReaction?.kind)
+                    .offset(y: -max(12, size.height * 0.04))
+                    .onTapGesture { engine.preview(.plantPerk, duration: 4.5) }
+                plantActions.padding(.bottom, 13)
+            }
+        case .simulation:
+            ZStack(alignment: .bottom) {
+                HaloCityRenderer(accent: settings.settings.simulationAccentColor.color,
+                                 environment: engine.environment,
+                                 reaction: engine.currentReaction?.kind,
+                                 seed: engine.persistentState.simulation.seed,
+                                 compact: false)
+                    .padding(.top, 28)
+                cityActions.padding(.bottom, 12)
+            }
         }
-        .padding(14)
     }
 
     private var title: String {
         switch settings.settings.mode {
         case .off: return "Environmental Interface"
         case .pet: return "Companion"
-        case .plant: return "Cozy Garden"
-        case .simulation: return "Tiny World"
+        case .plant: return "Living Plant"
+        case .simulation: return "Tiny City"
         }
     }
 
-    @ViewBuilder
-    private func main(size: CGSize) -> some View {
-        switch settings.settings.mode {
-        case .off:
-            EmptyView()
-        case .pet:
-            EIPetAvatar(size: min(165, max(92, size.height * 0.48)), walking: false)
-                .onTapGesture { engine.interact(.petPat) }
-        case .plant:
-            EIPlantCozy(size: min(180, max(110, size.height * 0.52)))
-                .onTapGesture { engine.preview(.plantPerk, duration: 3) }
-        case .simulation:
-            VStack(spacing: 10) {
-                Image(systemName: "building.2.fill")
-                    .font(.system(size: min(92, size.height * 0.30)))
-                    .foregroundStyle(preferences.value.accent.color)
-                    .shadow(color: preferences.value.accent.color.opacity(0.3), radius: 14)
-                Text("A tiny world living in your notch").font(.caption)
-                Text(engine.environment.timeOfDay.rawValue.uppercased())
-                    .font(.system(size: 9, weight: .bold, design: .monospaced)).opacity(0.55)
+    private var petActions: some View {
+        HStack(spacing: 7) {
+            action("Pat", "hand.tap") { engine.interact(.petPat) }
+            action("Treat", "sparkles") { engine.interact(.petSnack) }
+            action("Toy", "circle.hexagongrid.fill") { engine.interact(.petToy) }
+            action("Call", "wave.3.right") { engine.interact(.petCall) }
+            action("Hide", "eye.slash") { engine.interact(.petHide) }
+        }
+        .disabled(!settings.settings.petInteraction)
+    }
+
+    private var plantActions: some View {
+        HStack(spacing: 7) {
+            action("Water", "drop.fill") { engine.preview(.plantRain, duration: 7) }
+            action("Touch", "hand.tap") { engine.preview(.plantPerk, duration: 5) }
+            action("Bloom", "camera.macro") { engine.preview(.plantBloom, duration: 10) }
+            if settings.settings.plantKind == .vine {
+                action("Grow", "arrow.up.right") { engine.preview(.plantVineGrow, duration: 9) }
             }
         }
     }
 
-    @ViewBuilder
-    private var actions: some View {
-        switch settings.settings.mode {
-        case .off:
-            EmptyView()
-        case .pet:
-            HStack {
-                action("Pat", "hand.tap") { engine.interact(.petPat) }
-                action("Snack", "fork.knife") { engine.interact(.petSnack) }
-                action("Hello", "bubble.left") { engine.interact(.petGreet) }
-            }
-            .disabled(!settings.settings.petInteraction)
-        case .plant:
-            HStack {
-                action("Water", "drop.fill") { engine.preview(.plantRain, duration: 4) }
-                action("Touch", "hand.tap") { engine.preview(.plantPerk, duration: 3) }
-                action("Sun", "sun.max.fill") { engine.preview(.plantBloom, duration: 5) }
-            }
-        case .simulation:
-            HStack {
-                action("Busy", "car.2.fill") { engine.preview(.cityBusy, duration: 6) }
-                action("Night", "moon.stars.fill") { engine.preview(.cityNight, duration: 7) }
-                action("Rain", "cloud.rain.fill") { engine.preview(.cityRain, duration: 7) }
-            }
+    private var cityActions: some View {
+        HStack(spacing: 7) {
+            action("Traffic", "car.2.fill") { engine.preview(.cityTraffic, duration: 9) }
+            action("Rain", "cloud.rain.fill") { engine.preview(.cityRain, duration: 10) }
+            action("Night", "moon.stars.fill") { engine.preview(.cityNight, duration: 11) }
+            action("Delivery", "shippingbox.fill") { engine.preview(.cityDelivery, duration: 9) }
         }
     }
 
     private func action(_ title: String, _ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: symbol)
-                .font(.caption.bold())
-                .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(.white.opacity(0.10), in: Capsule())
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 9).padding(.vertical, 6)
+                .background(.black.opacity(0.24), in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1))
         }
         .buttonStyle(.plain)
     }
+
+    private func publishPreferredSize() {
+        let next = preferredSize
+        if let current = surfaceState.contextPreferredSize,
+           abs(current.width - next.width) < 1, abs(current.height - next.height) < 1 { return }
+        surfaceState.contextPreferredSize = next
+    }
+
+    private func migrateLegacyPetStyleIfNeeded() {
+        guard preferences.value.petVisual == .pixel else { return }
+        var value = preferences.value
+        value.petVisual = .smooth
+        DispatchQueue.main.async { EIOpenPreferencesStore.shared.value = value }
+    }
 }
+
+// MARK: - EI Studio
 
 @MainActor
 private struct EIQuickEditor: View {
     @ObservedObject private var preferences = EIOpenPreferencesStore.shared
     @ObservedObject private var settings = EISettingsStore.shared
+    @ObservedObject private var engine = EnvironmentalInterfaceEngine.shared
+    @ObservedObject private var ui = EIOpenUI.shared
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("EI Studio").font(.headline)
-                if settings.settings.mode == .pet {
-                    Picker("Pet style", selection: binding(\.petVisual)) {
-                        ForEach(EIPetVisualStyle.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    Toggle("Roam outside notch", isOn: binding(\.roam))
-                    Toggle("Walk in menu bar", isOn: binding(\.menuBar)).disabled(!preferences.value.roam)
-                    Toggle("Peek from screen edges", isOn: binding(\.screenEdges)).disabled(!preferences.value.roam)
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("EI Studio").font(.headline)
+                    Text("Live customization").font(.caption2).foregroundStyle(.secondary)
                 }
-                if settings.settings.mode == .pet || settings.settings.mode == .plant {
-                    Divider()
-                    Picker("Room", selection: binding(\.roomStyle)) {
-                        ForEach(EIRoomStyle.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    ColorPicker("Room color", selection: color(\.room), supportsOpacity: false)
-                    ColorPicker("Accent", selection: color(\.accent), supportsOpacity: false)
-                    ColorPicker("Floor", selection: color(\.floor), supportsOpacity: false)
-                    Toggle("Window", isOn: binding(\.window))
-                    Toggle("Lamp", isOn: binding(\.lamp))
-                    Toggle("Rug", isOn: binding(\.rug))
-                    Toggle("Shelf", isOn: binding(\.shelf))
-                    Toggle("Room plants", isOn: binding(\.roomPlants))
+                Spacer()
+                Button {
+                    ui.editing = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
-                Divider()
-                Toggle("EI shortcut", isOn: binding(\.shortcutEnabled))
-                if preferences.value.shortcutEnabled {
-                    Picker("Key", selection: binding(\.shortcutKey)) {
-                        Text("E").tag(UInt32(14)); Text("I").tag(UInt32(34)); Text("P").tag(UInt32(35)); Text("J").tag(UInt32(38))
-                    }
-                    Picker("Modifiers", selection: binding(\.shortcutModifiers)) {
-                        Text("Option + Command").tag(UInt32(2304)); Text("Control + Option").tag(UInt32(6144)); Text("Control + Shift").tag(UInt32(4608))
-                    }
-                }
-                Text("Context Interfaces always have ownership priority.")
-                    .font(.caption).foregroundStyle(.secondary)
+                .buttonStyle(.plain)
+                .help("Close EI Studio")
+                .accessibilityLabel("Close EI Studio")
             }
-            .padding(13)
+            .padding(.horizontal, 13).padding(.top, 12).padding(.bottom, 10)
+
+            Divider().opacity(0.35)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 11) {
+                    if settings.settings.mode == .pet {
+                        Picker("Pet style", selection: petStyleBinding) {
+                            Text("Soft Vector").tag(EIPetVisualStyle.smooth)
+                            Text("Illustrated Vector").tag(EIPetVisualStyle.illustrated)
+                            Text("Minimal Vector").tag(EIPetVisualStyle.minimal)
+                        }
+                        Toggle("Roam outside notch", isOn: binding(\.roam))
+                        Toggle("Walk in menu bar", isOn: binding(\.menuBar)).disabled(!preferences.value.roam)
+                        Toggle("Peek from screen edges", isOn: binding(\.screenEdges)).disabled(!preferences.value.roam)
+                    }
+
+                    if settings.settings.mode == .pet || settings.settings.mode == .plant {
+                        Divider()
+                        Picker("Habitat", selection: binding(\.roomStyle)) {
+                            ForEach(EIRoomStyle.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        ColorPicker("Room color", selection: color(\.room), supportsOpacity: false)
+                        ColorPicker("Accent light", selection: color(\.accent), supportsOpacity: false)
+                        ColorPicker("Surface", selection: color(\.floor), supportsOpacity: false)
+                        Toggle("Window", isOn: binding(\.window))
+                        Toggle("Lamp", isOn: binding(\.lamp))
+                        Toggle("Rug", isOn: binding(\.rug))
+                        Toggle("Shelf", isOn: binding(\.shelf))
+                        Toggle("Room plants", isOn: binding(\.roomPlants))
+                    }
+
+                    Divider()
+                    HStack {
+                        Text("Behaviour").font(.caption.weight(.semibold))
+                        Spacer()
+                        Text(engine.behaviourState.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("Mood").font(.caption.weight(.semibold))
+                        Spacer()
+                        Text(engine.moodState.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+                    Toggle("EI shortcut", isOn: binding(\.shortcutEnabled))
+                    if preferences.value.shortcutEnabled {
+                        Picker("Key", selection: binding(\.shortcutKey)) {
+                            Text("E").tag(UInt32(14)); Text("I").tag(UInt32(34)); Text("P").tag(UInt32(35)); Text("J").tag(UInt32(38))
+                        }
+                        Picker("Modifiers", selection: binding(\.shortcutModifiers)) {
+                            Text("Option + Command").tag(UInt32(2304)); Text("Control + Option").tag(UInt32(6144)); Text("Control + Shift").tag(UInt32(4608))
+                        }
+                    }
+
+                    Text("CI always has ownership priority. EI content automatically yields to CI exclusion regions.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                .padding(13)
+            }
         }
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 1))
         .foregroundStyle(.white)
+    }
+
+    private var petStyleBinding: Binding<EIPetVisualStyle> {
+        Binding(get: {
+            preferences.value.petVisual == .pixel ? .smooth : preferences.value.petVisual
+        }, set: { newValue in
+            var copy = preferences.value; copy.petVisual = newValue
+            DispatchQueue.main.async { preferences.value = copy }
+        })
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<EIOpenPreferences, T>) -> Binding<T> {
         Binding(get: { preferences.value[keyPath: keyPath] }, set: { value in
-            var copy = preferences.value
-            copy[keyPath: keyPath] = value
-            preferences.value = copy
+            var copy = preferences.value; copy[keyPath: keyPath] = value
+            DispatchQueue.main.async { preferences.value = copy }
         })
     }
 
     private func color(_ keyPath: WritableKeyPath<EIOpenPreferences, WidgetColor>) -> Binding<Color> {
         Binding(get: { preferences.value[keyPath: keyPath].color }, set: { value in
-            var copy = preferences.value
-            copy[keyPath: keyPath] = WidgetColor(value)
-            preferences.value = copy
+            var copy = preferences.value; copy[keyPath: keyPath] = WidgetColor(value)
+            DispatchQueue.main.async { preferences.value = copy }
         })
     }
 }
+
+// MARK: - Roaming pet
 
 @MainActor
 struct EIRoamingPetView: View {
@@ -357,14 +451,16 @@ struct EIRoamingPetView: View {
     @ObservedObject private var engine = EnvironmentalInterfaceEngine.shared
 
     var body: some View {
-        EIPetAvatar(size: 66, walking: model.walking)
+        EIPetAvatar(size: 72, walking: model.walking)
             .scaleEffect(x: model.right ? 1 : -1, y: 1)
             .contentShape(Rectangle())
             .onTapGesture { if settings.settings.petInteraction { engine.interact(.petPat) } }
             .contextMenu {
                 Button("Pat") { engine.interact(.petPat) }
-                Button("Snack") { engine.interact(.petSnack) }
-                Button("Say hello") { engine.interact(.petGreet) }
+                Button("Give treat") { engine.interact(.petSnack) }
+                Button("Give toy") { engine.interact(.petToy) }
+                Button("Call") { engine.interact(.petCall) }
+                Button("Hide for now") { engine.interact(.petHide) }
                 Divider()
                 Button("Open EI") { EnvironmentalInterfaceOwnershipController.shared.open() }
                 Button("Customize") { EnvironmentalInterfaceOwnershipController.shared.open(editor: true) }
@@ -381,86 +477,156 @@ private struct EIPetAvatar: View {
     @ObservedObject private var engine = EnvironmentalInterfaceEngine.shared
 
     var body: some View {
-        HaloCompanionSprite(
-            kind: settings.settings.petKind,
-            style: preferences.value.petVisual,
-            size: size,
-            primary: settings.settings.petPrimaryColor.color,
-            accent: settings.settings.petAccentColor.color,
-            motion: motion,
-            facingRight: true,
-            displayPreset: settings.settings.displayPreset,
-            pixelGrid: settings.settings.pixelGrid,
-            pixelGlow: settings.settings.pixelGlow,
-            scanlines: settings.settings.scanlines,
-            ghosting: settings.settings.ghosting,
-            brightnessVariation: settings.settings.brightnessVariation
-        )
+        HaloCompanionSprite(kind: settings.settings.petKind,
+                            style: preferences.value.petVisual == .pixel ? .smooth : preferences.value.petVisual,
+                            size: size,
+                            primary: settings.settings.petPrimaryColor.color,
+                            accent: settings.settings.petAccentColor.color,
+                            motion: motion,
+                            facingRight: true)
     }
 
     private var motion: HaloCompanionMotion {
         if walking { return .walk }
-        switch engine.currentReaction?.kind {
-        case .petDance?: return .dance
-        case .petSleep?: return .sleep
-        case .petSnack?: return .snack
-        case .petGreet?: return .greet
-        case .petCelebrate?: return .celebrate
-        case .petPeekLeft?, .petPeekRight?, .petPeekUnder?: return .peek
-        case .petLookAround?: return .look
+        guard let kind = engine.currentReaction?.kind else {
+            switch engine.behaviourState {
+            case .hidden: return .hidden
+            case .sleeping: return .sleep
+            case .observing: return .observe
+            case .playful: return .playful
+            case .affectionate: return .affectionate
+            case .tired: return .tired
+            case .excited: return .excited
+            default: return .idle
+            }
+        }
+        switch kind {
+        case .petPeekEyes: return .peekEyes
+        case .petPeekEars: return .peekEars
+        case .petPeekUnder, .petPeekLeft, .petPeekRight: return .peek
+        case .petPawFirst: return .paw
+        case .petTailFirst: return .tail
+        case .petObserve, .petRainWatch: return .observe
+        case .petLookAround, .petUnimpressed: return .look
+        case .petStretch: return .stretch
+        case .petGroom: return .groom
+        case .petCurlUp, .petSleep, .petLaptopSleep: return .sleep
+        case .petPlay, .petChase, .petToy: return .playful
+        case .petCoffee, .petYawn: return .tired
+        case .petDance: return .dance
+        case .petCelebrate: return .celebrate
+        case .petGreet, .petCall: return .greet
+        case .petPat: return .affectionate
+        case .petSnack: return .snack
+        case .petHide: return .hidden
         default: return .idle
         }
     }
 }
 
-@MainActor
-private struct EIPlantCozy: View {
-    let size: CGFloat
-    @ObservedObject private var settings = EISettingsStore.shared
-    @ObservedObject private var engine = EnvironmentalInterfaceEngine.shared
+// MARK: - EI habitat / surface backdrop
+
+private struct EISurfaceBackdrop: View {
+    let mode: EIMode
+    let preferences: EIOpenPreferences
+    let environment: EIEnvironment
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: false)) { timeline in
-            let phase = timeline.date.timeIntervalSinceReferenceDate
-            let growth = CGFloat(min(1, engine.persistentState.plant.growth + engine.persistentState.plant.bonusGrowth))
-            ZStack(alignment: .bottom) {
-                Ellipse().fill(Color.black.opacity(0.22)).frame(width: size * 0.60, height: size * 0.12).offset(y: size * 0.04)
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(LinearGradient(colors: [settings.settings.plantPotColor.color.opacity(1), settings.settings.plantPotColor.color.opacity(0.68)], startPoint: .top, endPoint: .bottom))
-                    .frame(width: size * 0.38, height: size * 0.27)
-                Capsule().fill(settings.settings.plantColor.color)
-                    .frame(width: size * 0.05, height: size * (0.44 + growth * 0.16))
-                    .offset(y: -size * 0.20)
-                ZStack {
-                    ForEach(0..<8, id: \.self) { index in
-                        Ellipse()
-                            .fill(settings.settings.plantColor.color.opacity(index.isMultiple(of: 3) ? 0.72 : 0.94))
-                            .frame(width: size * 0.29, height: size * 0.12)
-                            .rotationEffect(.degrees(index.isMultiple(of: 2) ? -30 : 30))
-                            .offset(x: (index.isMultiple(of: 2) ? -1 : 1) * size * 0.14,
-                                    y: -CGFloat(index / 2) * size * 0.12)
-                            .scaleEffect(index < Int(2 + growth * 6) ? 1 : 0.05)
-                    }
+        switch mode {
+        case .simulation:
+            Color.black
+        case .off:
+            Color.black
+        case .pet, .plant:
+            LinearGradient(colors: background, startPoint: .topLeading, endPoint: .bottomTrailing)
+                .overlay(alignment: .bottom) {
+                    LinearGradient(colors: [preferences.floor.color.opacity(0.15), preferences.floor.color.opacity(0.72)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 110)
                 }
-                .rotationEffect(.degrees(sin(phase * 1.2) * (engine.environment.isMusicPlaying ? 6 : 2)))
-                .offset(y: -size * 0.33)
+        }
+    }
 
-                if engine.currentReaction?.kind == .plantBloom {
-                    ZStack {
-                        Circle().fill(.pink).frame(width: size * 0.14)
-                        Circle().fill(.yellow).frame(width: size * 0.05)
-                    }
-                    .offset(y: -size * 0.76)
+    private var background: [Color] {
+        switch preferences.roomStyle {
+        case .warm: return [preferences.room.color, preferences.accent.color.opacity(0.14), .black.opacity(0.94)]
+        case .night: return [Color(red: 0.025, green: 0.03, blue: 0.07), preferences.room.color.opacity(0.72), .black]
+        case .greenhouse: return [Color(red: 0.03, green: 0.10, blue: 0.07), preferences.room.color.opacity(0.72), preferences.accent.color.opacity(0.12)]
+        case .minimal: return [preferences.room.color.opacity(0.88), preferences.room.color.opacity(0.56), .black.opacity(0.88)]
+        }
+    }
+}
+
+private struct EIHabitatDetails: View {
+    let preferences: EIOpenPreferences
+    let environment: EIEnvironment
+
+    var body: some View {
+        GeometryReader { proxy in
+            let accent = preferences.accent.color
+            ZStack {
+                if preferences.window {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(LinearGradient(colors: sky, startPoint: .top, endPoint: .bottom))
+                        .frame(width: min(150, proxy.size.width * 0.25), height: min(92, proxy.size.height * 0.26))
+                        .overlay(RoundedRectangle(cornerRadius: 13).stroke(Color.white.opacity(0.12), lineWidth: 1))
+                        .overlay(alignment: .topTrailing) {
+                            if environment.weather?.isRaining == true {
+                                Image(systemName: "cloud.rain.fill").font(.caption).foregroundStyle(.cyan.opacity(0.58)).padding(7)
+                            }
+                        }
+                        .position(x: proxy.size.width * 0.18, y: proxy.size.height * 0.38)
                 }
-                if engine.currentReaction?.kind == .plantRain {
-                    ForEach(0..<5, id: \.self) { index in
-                        Capsule().fill(Color.cyan.opacity(0.65)).frame(width: 2, height: 10)
-                            .offset(x: CGFloat(index - 2) * size * 0.12, y: -size * (0.56 + CGFloat(index % 2) * 0.08))
+
+                if preferences.rug {
+                    Ellipse().fill(accent.opacity(0.16))
+                        .frame(width: min(260, proxy.size.width * 0.46), height: min(62, proxy.size.height * 0.16))
+                        .position(x: proxy.size.width * 0.52, y: proxy.size.height * 0.82)
+                }
+
+                if preferences.shelf {
+                    VStack(spacing: 4) {
+                        HStack(spacing: 6) {
+                            ForEach(0..<4, id: \.self) { index in
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(index.isMultiple(of: 2) ? accent.opacity(0.40) : Color.white.opacity(0.16))
+                                    .frame(width: 7 + CGFloat(index % 2) * 4, height: 17 + CGFloat(index) * 2)
+                            }
+                        }
+                        Capsule().fill(Color.white.opacity(0.13)).frame(width: 70, height: 3)
                     }
+                    .position(x: proxy.size.width * 0.75, y: proxy.size.height * 0.30)
+                }
+
+                if preferences.roomPlants {
+                    HStack(spacing: 3) {
+                        ForEach(0..<3, id: \.self) { index in
+                            Capsule().fill(Color.green.opacity(0.32 + Double(index) * 0.10))
+                                .frame(width: 7, height: 18 + CGFloat(index) * 5)
+                                .rotationEffect(.degrees(Double(index - 1) * 16))
+                        }
+                    }
+                    .overlay(alignment: .bottom) {
+                        RoundedRectangle(cornerRadius: 4).fill(accent.opacity(0.34)).frame(width: 27, height: 11).offset(y: 6)
+                    }
+                    .position(x: proxy.size.width * 0.11, y: proxy.size.height * 0.72)
+                }
+
+                if preferences.lamp {
+                    VStack(spacing: -2) {
+                        EITriangleRoom().fill(accent.opacity(0.60)).frame(width: 38, height: 26)
+                        Rectangle().fill(Color.white.opacity(0.24)).frame(width: 3, height: 34)
+                        Capsule().fill(Color.white.opacity(0.14)).frame(width: 27, height: 5)
+                    }
+                    .shadow(color: accent.opacity(environment.timeOfDay == .night ? 0.52 : 0.24), radius: 22)
+                    .position(x: proxy.size.width * 0.86, y: proxy.size.height * 0.60)
                 }
             }
-            .frame(width: size, height: size)
         }
+    }
+
+    private var sky: [Color] {
+        if environment.timeOfDay == .night { return [Color(red: 0.025, green: 0.04, blue: 0.11), .purple.opacity(0.34)] }
+        return [.blue.opacity(0.52), .orange.opacity(environment.timeOfDay == .evening ? 0.38 : 0.08)]
     }
 }
 
@@ -472,96 +638,5 @@ private struct EITriangleRoom: Shape {
         path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
         path.closeSubpath()
         return path
-    }
-}
-
-private struct EICozyRoom: View {
-    let preferences: EIOpenPreferences
-    let environment: EIEnvironment
-
-    var body: some View {
-        GeometryReader { proxy in
-            let accent = preferences.accent.color
-            ZStack {
-                LinearGradient(colors: background, startPoint: .topLeading, endPoint: .bottomTrailing)
-
-                if preferences.window {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(LinearGradient(colors: sky, startPoint: .top, endPoint: .bottom))
-                        .frame(width: min(150, proxy.size.width * 0.30), height: min(104, proxy.size.height * 0.32))
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18), lineWidth: 2))
-                        .overlay(alignment: .topTrailing) {
-                            if environment.weather?.isRaining == true {
-                                Image(systemName: "cloud.rain.fill").foregroundStyle(.cyan.opacity(0.75)).padding(8)
-                            }
-                        }
-                        .position(x: proxy.size.width * 0.24, y: proxy.size.height * 0.35)
-                }
-
-                Rectangle().fill(preferences.floor.color)
-                    .frame(height: proxy.size.height * 0.27)
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-
-                if preferences.rug {
-                    Ellipse().fill(accent.opacity(0.30))
-                        .frame(width: min(250, proxy.size.width * 0.56), height: min(68, proxy.size.height * 0.18))
-                        .position(x: proxy.size.width * 0.52, y: proxy.size.height * 0.82)
-                }
-
-                if preferences.shelf {
-                    VStack(spacing: 5) {
-                        HStack(spacing: 7) {
-                            ForEach(0..<4, id: \.self) { index in
-                                RoundedRectangle(cornerRadius: 2)
-                                    .fill(index.isMultiple(of: 2) ? accent.opacity(0.58) : Color.white.opacity(0.24))
-                                    .frame(width: 8 + CGFloat(index % 2) * 4, height: 20 + CGFloat(index) * 2)
-                            }
-                        }
-                        Capsule().fill(.white.opacity(0.20)).frame(width: 78, height: 4)
-                    }
-                    .position(x: proxy.size.width * 0.72, y: proxy.size.height * 0.30)
-                }
-
-                if preferences.roomPlants {
-                    HStack(spacing: 4) {
-                        ForEach(0..<3, id: \.self) { index in
-                            Capsule().fill(Color.green.opacity(0.55 + Double(index) * 0.12))
-                                .frame(width: 8, height: 22 + CGFloat(index) * 5)
-                                .rotationEffect(.degrees(Double(index - 1) * 18))
-                        }
-                    }
-                    .overlay(alignment: .bottom) {
-                        RoundedRectangle(cornerRadius: 4).fill(accent.opacity(0.55)).frame(width: 30, height: 13).offset(y: 7)
-                    }
-                    .position(x: proxy.size.width * 0.14, y: proxy.size.height * 0.72)
-                }
-
-                if preferences.lamp {
-                    VStack(spacing: -2) {
-                        EITriangleRoom().fill(accent.opacity(0.78)).frame(width: 44, height: 30)
-                        Rectangle().fill(.white.opacity(0.35)).frame(width: 4, height: 40)
-                        Capsule().fill(.white.opacity(0.20)).frame(width: 30, height: 6)
-                    }
-                    .shadow(color: accent.opacity(environment.timeOfDay == .night ? 0.68 : 0.38), radius: 24)
-                    .position(x: proxy.size.width * 0.84, y: proxy.size.height * 0.58)
-                }
-            }
-        }
-    }
-
-    private var sky: [Color] {
-        if environment.timeOfDay == .night {
-            return [Color(red: 0.03, green: 0.05, blue: 0.13), .purple.opacity(0.45)]
-        }
-        return [.blue.opacity(0.70), .orange.opacity(environment.timeOfDay == .evening ? 0.50 : 0.12)]
-    }
-
-    private var background: [Color] {
-        switch preferences.roomStyle {
-        case .warm: return [preferences.room.color, preferences.accent.color.opacity(0.22), .black.opacity(0.92)]
-        case .night: return [Color(red: 0.03, green: 0.04, blue: 0.09), preferences.room.color.opacity(0.72), .black]
-        case .greenhouse: return [Color(red: 0.04, green: 0.12, blue: 0.08), preferences.room.color.opacity(0.75), preferences.accent.color.opacity(0.16)]
-        case .minimal: return [preferences.room.color, preferences.room.color.opacity(0.70), .black.opacity(0.80)]
-        }
     }
 }
