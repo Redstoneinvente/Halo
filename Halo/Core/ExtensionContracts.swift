@@ -106,6 +106,21 @@ struct HaloSurfaceRouter: View {
                     shoulder: layout.appearance.surface.shoulder)
     }
 
+    private var physicalNotchPeekMotion: HaloCompanionMotion? {
+        guard eiSettings.settings.mode == .pet, state.closedOcclusion != nil,
+              let kind = engine.currentReaction?.kind else { return nil }
+        switch kind {
+        case .petPeekEyes: return .peekEyes
+        case .petPeekEars: return .peekEars
+        case .petPeekUnder: return .peek
+        case .petPeekLeft: return .peekLeft
+        case .petPeekRight: return .peekRight
+        case .petPawFirst: return .paw
+        case .petTailFirst: return .tail
+        default: return nil
+        }
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             SurfaceView(store: store, state: state, workspace: workspace)
@@ -123,6 +138,17 @@ struct HaloSurfaceRouter: View {
                     .contentShape(contour)
                     .transition(.opacity.combined(with: .scale(scale: 0.985)))
                     .zIndex(20)
+
+                // Physical-notch peeks must not be children of EIOpenSurface: that surface is clipped
+                // to Halo's contour. Render the pet above the owned surface so only the real hardware
+                // notch/reveal window occludes it, making it genuinely emerge from the camera housing.
+                if let peekMotion = physicalNotchPeekMotion {
+                    EIPhysicalNotchPetPeek(surfaceState: state, motion: peekMotion)
+                        .frame(width: viewport.size.width, height: viewport.size.height, alignment: .top)
+                        .allowsHitTesting(false)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                        .zIndex(50)
+                }
             }
         }
         .frame(width: viewport.size.width, height: viewport.size.height, alignment: .top)
@@ -226,12 +252,9 @@ struct EIOpenSurface: View {
                 EIHabitatDetails(preferences: preferences.value, environment: engine.environment)
                     .allowsHitTesting(false)
 
-                if let peekMotion = physicalNotchPeekMotion {
-                    EIPhysicalNotchPetPeek(surfaceState: surfaceState, motion: peekMotion)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
-                        .zIndex(12)
-                } else {
+                // On a real notched display the active peek is rendered by HaloSurfaceRouter,
+                // outside this clipped room. Keep the normal companion out of the way while peeking.
+                if physicalNotchPeekMotion == nil || surfaceState.closedOcclusion == nil {
                     EIPetAvatar(size: min(220, max(120, size.height * 0.58)), walking: false)
                         .offset(y: -max(8, size.height * 0.055))
                         .onTapGesture { engine.interact(.petPat) }
@@ -479,88 +502,106 @@ private struct EIPhysicalNotchPetPeek: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let hardwareWidth = resolvedNotchWidth(in: proxy.size)
-            let hardwareHeight = resolvedNotchHeight()
-            let spriteSize = min(164, max(112, hardwareWidth * 0.82))
-            let center = CGPoint(x: horizontalCenter(in: proxy.size, notchWidth: hardwareWidth, spriteSize: spriteSize),
-                                 y: verticalCenter(notchHeight: hardwareHeight, spriteSize: spriteSize))
+            if let occlusion = surfaceState.closedOcclusion {
+                let notchWidth = max(92, occlusion.width)
+                let notchHeight = max(22, occlusion.height)
+                let spriteSize = min(150, max(108, notchWidth * 0.72))
+                let centerX = horizontalCenter(in: proxy.size, notchWidth: notchWidth, spriteSize: spriteSize)
+                let centerY = verticalCenter(notchHeight: notchHeight, spriteSize: spriteSize)
 
-            HaloCompanionSprite(kind: settings.settings.petKind,
-                                style: preferences.value.petVisual == .pixel ? .smooth : preferences.value.petVisual,
-                                size: spriteSize,
-                                primary: settings.settings.petPrimaryColor.color,
-                                accent: settings.settings.petAccentColor.color,
-                                motion: motion,
-                                facingRight: motion != .peekRight)
-                .position(center)
-                .mask {
-                    physicalNotchVisibilityMask(size: proxy.size,
-                                                notchWidth: hardwareWidth,
-                                                notchHeight: hardwareHeight)
-                }
-                .shadow(color: .black.opacity(0.16), radius: 5, y: 2)
+                HaloCompanionSprite(kind: settings.settings.petKind,
+                                    style: preferences.value.petVisual == .pixel ? .smooth : preferences.value.petVisual,
+                                    size: spriteSize,
+                                    primary: settings.settings.petPrimaryColor.color,
+                                    accent: settings.settings.petAccentColor.color,
+                                    motion: motion,
+                                    facingRight: motion != .peekRight)
+                    .position(x: centerX, y: centerY)
+                    .mask {
+                        revealMask(size: proxy.size,
+                                   notchWidth: notchWidth,
+                                   notchHeight: notchHeight,
+                                   spriteSize: spriteSize)
+                    }
+                    .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
+            }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 
-    private func resolvedNotchWidth(in size: CGSize) -> CGFloat {
-        if let occlusion = surfaceState.closedOcclusion, occlusion.width > 20 {
-            return min(size.width * 0.72, max(90, occlusion.width))
-        }
-        return min(210, max(140, size.width * 0.34))
-    }
-
-    private func resolvedNotchHeight() -> CGFloat {
-        if let occlusion = surfaceState.closedOcclusion, occlusion.height > 8 {
-            return min(54, max(22, occlusion.height))
-        }
-        return 32
-    }
-
     private func horizontalCenter(in size: CGSize, notchWidth: CGFloat, spriteSize: CGFloat) -> CGFloat {
+        let notchLeft = size.width / 2 - notchWidth / 2
+        let notchRight = size.width / 2 + notchWidth / 2
         switch motion {
         case .peekLeft:
-            return size.width / 2 - notchWidth / 2 - spriteSize * 0.20
+            return notchLeft - spriteSize * 0.18
         case .peekRight:
-            return size.width / 2 + notchWidth / 2 + spriteSize * 0.20
+            return notchRight + spriteSize * 0.18
         case .tail:
-            return size.width / 2 + notchWidth * 0.22
+            return size.width / 2 + notchWidth * 0.18
         default:
             return size.width / 2
         }
     }
 
     private func verticalCenter(notchHeight: CGFloat, spriteSize: CGFloat) -> CGFloat {
+        // Keep most of the body behind/above the notch edge. The reveal mask exposes only the part
+        // that has actually cleared the physical camera housing, so the pet reads as peeking, not
+        // standing inside Halo.
         switch motion {
-        case .peekLeft, .peekRight:
-            return max(notchHeight * 0.70, spriteSize * 0.25)
-        case .peekEyes:
-            return notchHeight + spriteSize * 0.20
-        case .peekEars:
-            return notchHeight + spriteSize * 0.24
-        case .paw:
-            return notchHeight + spriteSize * 0.30
-        case .tail:
-            return notchHeight + spriteSize * 0.18
-        default:
-            return notchHeight + spriteSize * 0.28
+        case .peekEyes: return notchHeight + spriteSize * 0.08
+        case .peekEars: return notchHeight + spriteSize * 0.11
+        case .peek: return notchHeight + spriteSize * 0.18
+        case .paw: return notchHeight + spriteSize * 0.20
+        case .tail: return notchHeight + spriteSize * 0.13
+        case .peekLeft, .peekRight: return notchHeight + spriteSize * 0.10
+        default: return notchHeight + spriteSize * 0.15
         }
     }
 
-    /// Visible pixels are the actual screen around the camera housing. The central top rectangle is
-    /// removed from the mask, so the pet can genuinely travel behind the MacBook's physical notch.
     @ViewBuilder
-    private func physicalNotchVisibilityMask(size: CGSize, notchWidth: CGFloat, notchHeight: CGFloat) -> some View {
-        let sideWidth = max(0, (size.width - notchWidth) / 2)
-        ZStack(alignment: .topLeading) {
+    private func revealMask(size: CGSize, notchWidth: CGFloat, notchHeight: CGFloat, spriteSize: CGFloat) -> some View {
+        let notchLeft = size.width / 2 - notchWidth / 2
+        let notchRight = size.width / 2 + notchWidth / 2
+        switch motion {
+        case .peekLeft:
             Rectangle()
-                .frame(width: size.width, height: max(0, size.height - notchHeight))
-                .offset(y: notchHeight)
-            Rectangle().frame(width: sideWidth, height: notchHeight)
+                .frame(width: spriteSize * 0.62, height: spriteSize * 0.68)
+                .position(x: notchLeft - spriteSize * 0.25,
+                          y: notchHeight + spriteSize * 0.12)
+        case .peekRight:
             Rectangle()
-                .frame(width: sideWidth, height: notchHeight)
-                .offset(x: sideWidth + notchWidth)
+                .frame(width: spriteSize * 0.62, height: spriteSize * 0.68)
+                .position(x: notchRight + spriteSize * 0.25,
+                          y: notchHeight + spriteSize * 0.12)
+        default:
+            let revealHeight: CGFloat
+            let revealWidth: CGFloat
+            switch motion {
+            case .peekEyes:
+                revealHeight = spriteSize * 0.22
+                revealWidth = min(notchWidth * 0.76, spriteSize * 0.82)
+            case .peekEars:
+                revealHeight = spriteSize * 0.28
+                revealWidth = min(notchWidth * 0.82, spriteSize * 0.90)
+            case .peek:
+                revealHeight = spriteSize * 0.42
+                revealWidth = min(notchWidth * 0.94, spriteSize)
+            case .paw:
+                revealHeight = spriteSize * 0.48
+                revealWidth = min(notchWidth, spriteSize)
+            case .tail:
+                revealHeight = spriteSize * 0.34
+                revealWidth = min(notchWidth * 0.84, spriteSize * 0.90)
+            default:
+                revealHeight = spriteSize * 0.38
+                revealWidth = min(notchWidth * 0.90, spriteSize)
+            }
+            Rectangle()
+                .frame(width: revealWidth, height: revealHeight)
+                .position(x: size.width / 2,
+                          y: notchHeight + revealHeight / 2)
         }
     }
 }

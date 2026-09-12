@@ -110,11 +110,10 @@ final class HaloPetV2Library: @unchecked Sendable {
                     let x = column * cellWidth
                     guard x + cellWidth <= image.width else { break }
 
-                    // The manifest is authored top-to-bottom, while CGImage crop rectangles use
-                    // Core Graphics' bottom-origin image space. Convert the authored row explicitly.
-                    // Using the fixed 200x200 manifest cell is also important: dividing by the PNG's
-                    // total height makes a single export-padding pixel corrupt every row below it.
-                    let y = image.height - authoredTop - cellHeight
+                    // CGImage.cropping(to:) addresses raster rows from the first image-data row:
+                    // (0, 0) is the first pixel of the first row. The manifest is authored top-to-bottom,
+                    // so row N starts directly at N * cellHeight. Keep the exact 200x200 manifest cells.
+                    let y = authoredTop
                     let rect = CGRect(x: x, y: y, width: cellWidth, height: cellHeight)
                     guard let frame = image.cropping(to: rect) else { continue }
                     frames.append(frame)
