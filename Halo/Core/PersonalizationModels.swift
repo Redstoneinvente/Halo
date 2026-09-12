@@ -640,6 +640,8 @@ struct ContextRetroGameSettings: View {
     @AppStorage("HaloContextRetroGame") private var gameRaw = RetroGameKind.snake.rawValue
     @AppStorage("HaloContextRetroPalette") private var paletteRaw = RetroGamePalette.phosphor.rawValue
     @AppStorage("HaloContextRetroScanlines") private var scanlines = true
+    @AppStorage("HaloContextRetroShowInactivePixels") private var showInactivePixels = false
+    @AppStorage("HaloContextRetroCompanionMascot") private var showCompanionMascot = true
 
     var body: some View {
         Section("Retro Game Context Interface") {
@@ -650,7 +652,11 @@ struct ContextRetroGameSettings: View {
             Picker("Pixel palette", selection: $paletteRaw) {
                 ForEach(RetroGamePalette.allCases) { Text($0.rawValue).tag($0.rawValue) }
             }
+            Toggle("Show inactive pixel cells", isOn: $showInactivePixels)
             Toggle("CRT scanlines", isOn: $scanlines)
+            Toggle("Show EI companion mascot", isOn: $showCompanionMascot)
+            Text(showInactivePixels ? "Unlit cells remain faintly visible, like a physical dot-matrix/LCD panel." : "Only illuminated game pixels are visible.")
+                .font(.caption).foregroundStyle(.secondary)
             Button("Open / close Retro Game CI") {
                 NotificationCenter.default.post(name: .init("HaloRetroGameToggle"), object: nil)
             }
@@ -691,7 +697,7 @@ struct ContextRetroGameSettings: View {
         Section("Controls") {
             Label("Snake: arrow keys or WASD", systemImage: "arrowkeys")
             Label("Pong: W/S or ↑/↓", systemImage: "gamecontroller")
-            Text("On-screen controls are also available, so the games remain playable even when Halo is not the active app window.")
+            Text("Halo listens locally while it has focus and also uses a global key monitor while another app owns focus. macOS may require Input Monitoring for the global path. On-screen controls remain available.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -724,12 +730,15 @@ private enum RetroSnakeDirection {
 
 struct RetroGameContextView: View {
     @ObservedObject var surfaceState: SurfaceState
+    @ObservedObject private var eiSettings = EISettingsStore.shared
     @AppStorage("HaloContextRetroUseFullNotchArea") private var usesFullNotchArea = false
     @AppStorage("HaloContextRetroKeepClosedNotchContents") private var keepsClosedNotchContents = false
     @AppStorage("HaloContextRetroPriority") private var priority = 80.0
     @AppStorage("HaloContextRetroGame") private var gameRaw = RetroGameKind.snake.rawValue
     @AppStorage("HaloContextRetroPalette") private var paletteRaw = RetroGamePalette.phosphor.rawValue
     @AppStorage("HaloContextRetroScanlines") private var scanlines = true
+    @AppStorage("HaloContextRetroShowInactivePixels") private var showInactivePixels = false
+    @AppStorage("HaloContextRetroCompanionMascot") private var showCompanionMascot = true
 
     @State private var snake = [RetroPixelCell(x: 8, y: 6), RetroPixelCell(x: 7, y: 6), RetroPixelCell(x: 6, y: 6)]
     @State private var snakeDirection: RetroSnakeDirection = .right
@@ -747,6 +756,7 @@ struct RetroGameContextView: View {
 
     @State private var tickCount = 0
     @State private var keyMonitor: Any?
+    @State private var globalKeyMonitor: Any?
 
     private let snakeColumns = 28
     private let snakeRows = 12
@@ -775,13 +785,13 @@ struct RetroGameContextView: View {
         .onReceive(Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()) { _ in tick() }
         .onAppear {
             publishPreferredSize()
-            installKeyMonitor()
+            installKeyMonitors()
         }
         .onChange(of: usesFullNotchArea) { _ in publishPreferredSize() }
         .onChange(of: keepsClosedNotchContents) { _ in publishPreferredSize() }
         .onChange(of: gameRaw) { _ in resetCurrentGame() }
         .onDisappear {
-            if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
+            removeKeyMonitors()
             surfaceState.contextPreferredSize = nil
         }
     }
@@ -826,10 +836,11 @@ struct RetroGameContextView: View {
 
     private var gameScreen: some View {
         GeometryReader { proxy in
-            ZStack {
+            ZStack(alignment: .bottomTrailing) {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(palette.background)
                 Canvas { context, size in
+                    if showInactivePixels { drawInactivePixels(context: context, size: size) }
                     switch game {
                     case .snake: drawSnake(context: context, size: size)
                     case .pong: drawPong(context: context, size: size)
@@ -856,6 +867,27 @@ struct RetroGameContextView: View {
                     .foregroundStyle(palette.foreground.opacity(0.72))
                     .padding(8)
                     Spacer()
+                }
+                if showCompanionMascot {
+                    HaloCompanionSprite(
+                        kind: eiSettings.settings.petKind,
+                        style: .pixel,
+                        size: 48,
+                        primary: palette.foreground,
+                        accent: eiSettings.settings.petAccentColor.color,
+                        motion: game == .pong ? .look : .walk,
+                        facingRight: false,
+                        displayPreset: .clean,
+                        pixelGrid: false,
+                        pixelGlow: false,
+                        scanlines: false,
+                        ghosting: false,
+                        brightnessVariation: false
+                    )
+                    .frame(width: 50, height: 38)
+                    .opacity(0.70)
+                    .padding(8)
+                    .allowsHitTesting(false)
                 }
             }
         }
@@ -903,6 +935,28 @@ struct RetroGameContextView: View {
         switch game {
         case .snake: return "SCORE \(String(format: "%03d", snakeScore))  HI \(String(format: "%03d", snakeHighScore))"
         case .pong: return "YOU \(pongPlayerScore) : \(pongCPUScore) CPU"
+        }
+    }
+
+    private func drawInactivePixels(context: GraphicsContext, size: CGSize) {
+        let columns = game == .snake ? snakeColumns : 48
+        let rows = game == .snake ? snakeRows : 20
+        let cell = floor(min(size.width / CGFloat(columns), size.height / CGFloat(rows)))
+        guard cell >= 2 else { return }
+        let boardWidth = cell * CGFloat(columns)
+        let boardHeight = cell * CGFloat(rows)
+        let originX = floor((size.width - boardWidth) / 2)
+        let originY = floor((size.height - boardHeight) / 2)
+        let inset = max(0.55, cell * 0.12)
+        for y in 0..<rows {
+            for x in 0..<columns {
+                var path = Path()
+                path.addRect(CGRect(x: originX + CGFloat(x) * cell + inset,
+                                    y: originY + CGFloat(y) * cell + inset,
+                                    width: max(0.8, cell - inset * 2),
+                                    height: max(0.8, cell - inset * 2)))
+                context.fill(path, with: .color(palette.foreground.opacity(0.055)))
+            }
         }
     }
 
@@ -975,7 +1029,13 @@ struct RetroGameContextView: View {
         case .left: next.x -= 1
         case .right: next.x += 1
         }
-        guard next.x >= 0, next.x < snakeColumns, next.y >= 0, next.y < snakeRows, !snake.contains(next) else {
+
+        // The current tail is removed on a normal movement tick. Moving into that outgoing tail
+        // cell is legal; checking the entire snake made that look like a random game restart.
+        let occupiedAfterTailMoves = snake.dropLast()
+        guard next.x >= 0, next.x < snakeColumns,
+              next.y >= 0, next.y < snakeRows,
+              !occupiedAfterTailMoves.contains(next) else {
             snakeHighScore = max(snakeHighScore, snakeScore)
             resetSnake()
             return
@@ -1053,19 +1113,33 @@ struct RetroGameContextView: View {
     }
 
     private func resetCurrentGame() {
+        tickCount = 0
         switch game {
         case .snake: resetSnake()
         case .pong: resetPong()
         }
     }
 
-    private func installKeyMonitor() {
-        guard keyMonitor == nil else { return }
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            handleKey(event.keyCode) ? nil : event
+    private func installKeyMonitors() {
+        if keyMonitor == nil {
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                handleKey(event.keyCode) ? nil : event
+            }
+        }
+        if globalKeyMonitor == nil {
+            globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+                let code = event.keyCode
+                Task { @MainActor in _ = handleKey(code) }
+            }
         }
     }
 
+    private func removeKeyMonitors() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
+        if let globalKeyMonitor { NSEvent.removeMonitor(globalKeyMonitor); self.globalKeyMonitor = nil }
+    }
+
+    @discardableResult
     private func handleKey(_ code: UInt16) -> Bool {
         switch game {
         case .snake:
