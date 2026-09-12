@@ -64,22 +64,6 @@ jobs:
           if s.count(old) != 1:
               raise SystemExit(f'live icon marker count: {s.count(old)}')
           s = s.replace(old, new, 1)
-
-          old = '''                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                          .fill(zone.color.color.opacity(index == 0 ? 0.22 : 0.10))
-                                          .frame(width: compact ? 25 : 30, height: compact ? 25 : 30)
-                                          .overlay(Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol).font(.system(size: compact ? 11 : 14, weight: .semibold)).foregroundStyle(zone.color.color))
-          '''
-          new = '''                                if configuration.showIcons {
-                                          RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                              .fill(zone.color.color.opacity(index == 0 ? 0.22 : 0.10))
-                                              .frame(width: compact ? 25 : 30, height: compact ? 25 : 30)
-                                              .overlay(Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol).font(.system(size: compact ? 11 : 14, weight: .semibold)).foregroundStyle(zone.color.color))
-                                      }
-          '''
-          if s.count(old) != 1:
-              raise SystemExit(f'preview icon marker count: {s.count(old)}')
-          s = s.replace(old, new, 1)
           p.write_text(s)
           PY
           xcrun swiftc -parse Halo/NotchEngine/DisplayClock.swift
