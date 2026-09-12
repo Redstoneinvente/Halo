@@ -146,6 +146,7 @@ struct EIOpenSurface: View {
     @ObservedObject private var settings = EISettingsStore.shared
     @ObservedObject private var preferences = EIOpenPreferencesStore.shared
     @ObservedObject private var engine = EnvironmentalInterfaceEngine.shared
+    @ObservedObject private var petDebug = HaloPetDebugState.shared
     @ObservedObject private var ui = EIOpenUI.shared
 
     private var sizingKey: String {
@@ -267,8 +268,18 @@ struct EIOpenSurface: View {
     }
 
     private var physicalNotchPeekMotion: HaloCompanionMotion? {
-        guard NSScreen.screens.contains(where: { $0.safeAreaInsets.top > 0 }),
-              let kind = engine.currentReaction?.kind else { return nil }
+        guard NSScreen.screens.contains(where: { $0.safeAreaInsets.top > 0 }) else { return nil }
+
+        if let forced = petDebug.forcedMotion {
+            switch forced {
+            case .peekEyes, .peekEars, .peek, .peekLeft, .peekRight, .paw, .tail:
+                return forced
+            default:
+                break
+            }
+        }
+
+        guard let kind = engine.currentReaction?.kind else { return nil }
         switch kind {
         case .petPeekEyes: return .peekEyes
         case .petPeekEars: return .peekEars

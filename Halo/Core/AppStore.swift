@@ -355,6 +355,10 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.deferRefresh(animatedRoaming: false) }
             .store(in: &bag)
+        HaloPetDebugState.shared.$forcedMotion.removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.deferRefresh(animatedRoaming: false) }
+            .store(in: &bag)
         workspace.media.objectWillChange.merge(with: workspace.bluetooth.objectWillChange)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.deferRefresh(animatedRoaming: false) }
@@ -539,8 +543,18 @@ final class EnvironmentalInterfaceOwnershipController: ObservableObject {
     private func activePeekMotion() -> HaloCompanionMotion? {
         let settings = EISettingsStore.shared.settings
         let engine = EnvironmentalInterfaceEngine.shared
-        guard settings.mode == .pet, engine.shouldRender,
-              let kind = engine.currentReaction?.kind else { return nil }
+        guard settings.mode == .pet, engine.shouldRender else { return nil }
+
+        if let forced = HaloPetDebugState.shared.forcedMotion {
+            switch forced {
+            case .peekEyes, .peekEars, .peek, .peekLeft, .peekRight, .paw, .tail:
+                return forced
+            default:
+                break
+            }
+        }
+
+        guard let kind = engine.currentReaction?.kind else { return nil }
         switch kind {
         case .petPeekEyes: return .peekEyes
         case .petPeekEars: return .peekEars
