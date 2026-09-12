@@ -16,7 +16,7 @@ enum HaloCompanionMotion: String, CaseIterable, Identifiable {
 enum HaloPetPose: String, CaseIterable, Identifiable, Hashable {
     case idle, sitting, standing, walking, lying, sleeping, stretching, grooming, lookingAround
     case peekBottom, peekLeft, peekRight, pawsOnEdge, headOnEdge, hiddenPeek
-    case playful, curious, tired, happy, dance, working, umbrella
+    case playful, curious, tired, happy, excited, dance, working, coffee, umbrella
 
     var id: String { rawValue }
     var title: String {
@@ -54,8 +54,10 @@ enum HaloPetPose: String, CaseIterable, Identifiable, Hashable {
         case .curious: return [.lookingAround, .idle]
         case .tired: return [.lying, .sleeping, .idle]
         case .happy: return [.playful, .idle]
-        case .dance: return [.happy, .playful, .idle]
+        case .excited: return [.happy, .playful, .idle]
+        case .dance: return [.excited, .happy, .playful, .idle]
         case .working: return [.sitting, .idle]
+        case .coffee: return [.tired, .sitting, .idle]
         case .umbrella: return [.standing, .idle]
         }
     }
@@ -133,18 +135,23 @@ private enum HaloPetSpriteSheetDecoder {
         var b: Int
     }
 
-    private struct GridChoice {
-        var columns: Int
-        var rows: Int
-        var activeCells: [Int]
-        var score: Double
+    /// Crop rectangles are authored against the exact supplied source sheets and then scaled to
+    /// the decoded image size. This is intentionally deterministic: these sheets are illustrations,
+    /// not uniform frame grids, and Dog/Fox contain text labels that must never enter a sprite crop.
+    private struct CropSpec {
+        let pose: HaloPetPose
+        let rect: CGRect
+    }
+
+    private struct SheetSpec {
+        let referenceSize: CGSize
+        let crops: [CropSpec]
     }
 
     private struct PixelBuffer {
         let width: Int
         let height: Int
         var pixels: [UInt8]
-        let hasUsefulAlpha: Bool
         let background: RGB
 
         init?(image: CGImage) {
@@ -161,103 +168,83 @@ private enum HaloPetSpriteSheetDecoder {
             context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
             pixels = bytes
 
-            var alphaSeen = false
-            let alphaStep = max(1, (width * height) / 4096)
-            for pixel in stride(from: 0, to: width * height, by: alphaStep) {
-                if Int(bytes[pixel * 4 + 3]) < 245 { alphaSeen = true; break }
-            }
-            hasUsefulAlpha = alphaSeen
-
-            let samples = [
-                (0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1),
-                (width / 2, 0), (width / 2, height - 1), (0, height / 2), (width - 1, height / 2)
-            ]
+            // The provided sheets have a baked checkerboard rather than useful transparency.
+            // Averaging many border samples lands between the two checker tones, allowing the
+            // flood-fill tolerance below to remove both without eating the illustrated animal.
             var rs = 0, gs = 0, bs = 0, count = 0
-            for (x, y) in samples {
-                let i = (y * width + x) * 4
-                if bytes[i + 3] > 8 {
-                    rs += Int(bytes[i]); gs += Int(bytes[i + 1]); bs += Int(bytes[i + 2]); count += 1
+            let samples = 28
+            for i in 0..<samples {
+                let tx = Int(Double(i) / Double(samples - 1) * Double(width - 1))
+                let ty = Int(Double(i) / Double(samples - 1) * Double(height - 1))
+                for (x, y) in [(tx, 0), (tx, height - 1), (0, ty), (width - 1, ty)] {
+                    let p = (y * width + x) * 4
+                    rs += Int(bytes[p]); gs += Int(bytes[p + 1]); bs += Int(bytes[p + 2]); count += 1
                 }
             }
-            background = count > 0 ? RGB(r: rs / count, g: gs / count, b: bs / count) : RGB(r: 255, g: 255, b: 255)
+            background = count > 0 ? RGB(r: rs / count, g: gs / count, b: bs / count) : RGB(r: 190, g: 190, b: 192)
         }
 
-        func isForeground(x: Int, y: Int) -> Bool {
-            guard x >= 0, y >= 0, x < width, y < height else { return false }
-            let i = (y * width + x) * 4
-            let a = Int(pixels[i + 3])
-            if hasUsefulAlpha { return a > 24 }
-            let dr = Int(pixels[i]) - background.r
-            let dg = Int(pixels[i + 1]) - background.g
-            let db = Int(pixels[i + 2]) - background.b
-            return dr * dr + dg * dg + db * db > 34 * 34
-        }
+        func extractedSprite(rect sourceRect: CGRect, referenceSize: CGSize) -> CGImage? {
+            guard referenceSize.width > 0, referenceSize.height > 0 else { return nil }
+            let sx = CGFloat(width) / referenceSize.width
+            let sy = CGFloat(height) / referenceSize.height
+            let x0 = max(0, min(width - 1, Int((sourceRect.minX * sx).rounded(.down))))
+            let y0 = max(0, min(height - 1, Int((sourceRect.minY * sy).rounded(.down))))
+            let x1 = max(x0 + 1, min(width, Int((sourceRect.maxX * sx).rounded(.up))))
+            let y1 = max(y0 + 1, min(height, Int((sourceRect.maxY * sy).rounded(.up))))
+            let w = x1 - x0
+            let h = y1 - y0
+            guard w > 1, h > 1 else { return nil }
 
-        func occupancy(x: Int, y: Int, width cellWidth: Int, height cellHeight: Int) -> Double {
-            let strideBy = max(1, min(cellWidth, cellHeight) / 42)
-            var foreground = 0
-            var total = 0
-            let maxY = min(height, y + cellHeight)
-            let maxX = min(width, x + cellWidth)
-            var yy = max(0, y)
-            while yy < maxY {
-                var xx = max(0, x)
-                while xx < maxX {
-                    total += 1
-                    if isForeground(x: xx, y: yy) { foreground += 1 }
-                    xx += strideBy
-                }
-                yy += strideBy
-            }
-            return total == 0 ? 0 : Double(foreground) / Double(total)
-        }
-
-        func extractedSprite(x: Int, y: Int, width cellWidth: Int, height cellHeight: Int) -> CGImage? {
-            let insetX = max(1, Int(Double(cellWidth) * 0.018))
-            let insetY = max(1, Int(Double(cellHeight) * 0.018))
-            let x0 = max(0, x + insetX)
-            let y0 = max(0, y + insetY)
-            let x1 = min(width, x + cellWidth - insetX)
-            let y1 = min(height, y + cellHeight - insetY)
-            guard x1 > x0, y1 > y0 else { return nil }
-            let w = x1 - x0, h = y1 - y0
             var out = [UInt8](repeating: 0, count: w * h * 4)
             for row in 0..<h {
-                let sourceStart = ((y0 + row) * width + x0) * 4
-                let destinationStart = row * w * 4
-                out[destinationStart..<(destinationStart + w * 4)] = pixels[sourceStart..<(sourceStart + w * 4)]
+                let src = ((y0 + row) * width + x0) * 4
+                let dst = row * w * 4
+                out[dst..<(dst + w * 4)] = pixels[src..<(src + w * 4)]
             }
 
-            if !hasUsefulAlpha {
-                removeBorderConnectedBackground(&out, width: w, height: h, reference: background)
-            }
-
-            guard let main = mainContentRect(out, width: w, height: h) else { return nil }
-            let padX = max(2, Int(Double(main.width) * 0.045))
-            let padY = max(2, Int(Double(main.height) * 0.045))
-            let left = max(0, main.x - padX)
-            let top = max(0, main.y - padY)
-            let right = min(w, main.x + main.width + padX)
-            let bottom = min(h, main.y + main.height + padY)
+            removeCheckerboardBackground(&out, width: w, height: h)
+            guard let content = mainContentRect(out, width: w, height: h) else { return nil }
+            let padX = max(2, Int(Double(content.width) * 0.035))
+            let padY = max(2, Int(Double(content.height) * 0.035))
+            let left = max(0, content.x - padX)
+            let top = max(0, content.y - padY)
+            let right = min(w, content.x + content.width + padX)
+            let bottom = min(h, content.y + content.height + padY)
             return makeImage(out, sourceWidth: w, x: left, y: top, width: right - left, height: bottom - top)
         }
 
-        private func removeBorderConnectedBackground(_ bytes: inout [UInt8], width w: Int, height h: Int, reference: RGB) {
+        private func removeCheckerboardBackground(_ bytes: inout [UInt8], width w: Int, height h: Int) {
             guard w > 2, h > 2 else { return }
-            var visited = [Bool](repeating: false, count: w * h)
-            var queue = [Int]()
-            queue.reserveCapacity(w * 2 + h * 2)
 
-            func nearBackground(_ index: Int) -> Bool {
-                let p = index * 4
-                let dr = Int(bytes[p]) - reference.r
-                let dg = Int(bytes[p + 1]) - reference.g
-                let db = Int(bytes[p + 2]) - reference.b
-                return dr * dr + dg * dg + db * db <= 48 * 48
+            // Capture actual checker colours from the crop border. Two clusters are enough for all
+            // three supplied sheets and are safer than treating every light pixel as background.
+            var border: [RGB] = []
+            let step = max(1, min(w, h) / 35)
+            for x in stride(from: 0, to: w, by: step) {
+                border.append(rgb(bytes, width: w, x: x, y: 0))
+                border.append(rgb(bytes, width: w, x: x, y: h - 1))
             }
+            for y in stride(from: 0, to: h, by: step) {
+                border.append(rgb(bytes, width: w, x: 0, y: y))
+                border.append(rgb(bytes, width: w, x: w - 1, y: y))
+            }
+            let tones = checkerTones(border)
+
+            func isBackground(_ index: Int) -> Bool {
+                let p = index * 4
+                let value = RGB(r: Int(bytes[p]), g: Int(bytes[p + 1]), b: Int(bytes[p + 2]))
+                return tones.contains { distanceSquared(value, $0) <= 32 * 32 }
+                    || distanceSquared(value, background) <= 40 * 40
+            }
+
+            var visited = [Bool](repeating: false, count: w * h)
+            var queue: [Int] = []
+            queue.reserveCapacity(w * 2 + h * 2)
             func seed(_ index: Int) {
-                guard !visited[index], nearBackground(index) else { return }
-                visited[index] = true; queue.append(index)
+                guard !visited[index], isBackground(index) else { return }
+                visited[index] = true
+                queue.append(index)
             }
             for x in 0..<w { seed(x); seed((h - 1) * w + x) }
             for y in 0..<h { seed(y * w); seed(y * w + w - 1) }
@@ -266,64 +253,60 @@ private enum HaloPetSpriteSheetDecoder {
             while head < queue.count {
                 let index = queue[head]; head += 1
                 let x = index % w, y = index / w
-                let neighbours = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
-                for (nx, ny) in neighbours where nx >= 0 && ny >= 0 && nx < w && ny < h {
-                    let next = ny * w + nx
-                    guard !visited[next], nearBackground(next) else { continue }
-                    visited[next] = true; queue.append(next)
-                }
+                if x > 0 { seed(index - 1) }
+                if x + 1 < w { seed(index + 1) }
+                if y > 0 { seed(index - w) }
+                if y + 1 < h { seed(index + w) }
             }
-            for index in 0..<(w * h) where visited[index] { bytes[index * 4 + 3] = 0 }
+            for i in 0..<(w * h) where visited[i] { bytes[i * 4 + 3] = 0 }
 
-            var fringe = [Int]()
-            for index in 0..<(w * h) where !visited[index] {
-                let x = index % w, y = index / w
-                if (x > 0 && visited[index - 1]) || (x + 1 < w && visited[index + 1]) ||
-                   (y > 0 && visited[index - w]) || (y + 1 < h && visited[index + w]) {
-                    fringe.append(index)
+            // Anti-alias one-pixel checker fringe without altering pale fur inside the silhouette.
+            var fringe: [Int] = []
+            for i in 0..<(w * h) where !visited[i] {
+                let x = i % w, y = i / w
+                if (x > 0 && visited[i - 1]) || (x + 1 < w && visited[i + 1]) ||
+                   (y > 0 && visited[i - w]) || (y + 1 < h && visited[i + w]) {
+                    fringe.append(i)
                 }
             }
-            for index in fringe { bytes[index * 4 + 3] = min(bytes[index * 4 + 3], 190) }
+            for i in fringe { bytes[i * 4 + 3] = min(bytes[i * 4 + 3], 205) }
+        }
+
+        private func rgb(_ bytes: [UInt8], width: Int, x: Int, y: Int) -> RGB {
+            let p = (y * width + x) * 4
+            return RGB(r: Int(bytes[p]), g: Int(bytes[p + 1]), b: Int(bytes[p + 2]))
+        }
+
+        private func checkerTones(_ samples: [RGB]) -> [RGB] {
+            guard !samples.isEmpty else { return [background] }
+            let sorted = samples.sorted { brightness($0) < brightness($1) }
+            let third = max(1, sorted.count / 3)
+            return [average(Array(sorted.prefix(third))), average(Array(sorted.suffix(third)))]
+        }
+
+        private func average(_ values: [RGB]) -> RGB {
+            guard !values.isEmpty else { return background }
+            return RGB(r: values.reduce(0) { $0 + $1.r } / values.count,
+                       g: values.reduce(0) { $0 + $1.g } / values.count,
+                       b: values.reduce(0) { $0 + $1.b } / values.count)
+        }
+
+        private func brightness(_ value: RGB) -> Int { value.r + value.g + value.b }
+        private func distanceSquared(_ a: RGB, _ b: RGB) -> Int {
+            let dr = a.r - b.r, dg = a.g - b.g, db = a.b - b.b
+            return dr * dr + dg * dg + db * db
         }
 
         private func mainContentRect(_ bytes: [UInt8], width w: Int, height h: Int) -> (x: Int, y: Int, width: Int, height: Int)? {
-            let minimumRowPixels = max(2, w / 180)
-            var rowCounts = [Int](repeating: 0, count: h)
+            var minX = w, minY = h, maxX = -1, maxY = -1
             for y in 0..<h {
-                var count = 0
-                for x in 0..<w where bytes[(y * w + x) * 4 + 3] > 20 { count += 1 }
-                rowCounts[y] = count
-            }
-
-            var best: (start: Int, end: Int, score: Double)?
-            var start: Int? = nil
-            var gap = 0
-            var running = 0
-            for y in 0...h {
-                let active = y < h && rowCounts[y] >= minimumRowPixels
-                if active {
-                    if start == nil { start = y }
-                    gap = 0; running += rowCounts[y]
-                } else if start != nil {
-                    gap += 1
-                    if gap <= 2 && y < h { continue }
-                    let end = max(start!, y - gap)
-                    let span = max(1, end - start! + 1)
-                    let score = Double(running) * sqrt(Double(span))
-                    if best == nil || score > best!.score { best = (start!, end, score) }
-                    start = nil; gap = 0; running = 0
+                for x in 0..<w where bytes[(y * w + x) * 4 + 3] > 24 {
+                    minX = min(minX, x); minY = min(minY, y)
+                    maxX = max(maxX, x); maxY = max(maxY, y)
                 }
             }
-            guard let run = best else { return nil }
-            let y0 = max(0, run.start - 2), y1 = min(h - 1, run.end + 2)
-            var minX = w, maxX = -1
-            for y in y0...y1 {
-                for x in 0..<w where bytes[(y * w + x) * 4 + 3] > 20 {
-                    minX = min(minX, x); maxX = max(maxX, x)
-                }
-            }
-            guard maxX >= minX else { return nil }
-            return (minX, y0, maxX - minX + 1, y1 - y0 + 1)
+            guard maxX >= minX, maxY >= minY else { return nil }
+            return (minX, minY, maxX - minX + 1, maxY - minY + 1)
         }
 
         private func makeImage(_ bytes: [UInt8], sourceWidth: Int, x: Int, y: Int, width w: Int, height h: Int) -> CGImage? {
@@ -350,64 +333,121 @@ private enum HaloPetSpriteSheetDecoder {
                 kCGImageSourceThumbnailMaxPixelSize: 2400,
                 kCGImageSourceShouldCacheImmediately: true
               ] as CFDictionary),
-              let buffer = PixelBuffer(image: image) else { return nil }
+              let buffer = PixelBuffer(image: image),
+              let spec = sheetSpec(for: species) else { return nil }
 
-        let poses = HaloPetPose.allCases
-        guard let grid = chooseGrid(buffer: buffer, expected: poses.count) else { return nil }
-        let cellWidth = buffer.width / grid.columns
-        let cellHeight = buffer.height / grid.rows
         var mapped: [HaloPetPose: CGImage] = [:]
         var ordered: [(HaloPetPose, CGImage)] = []
-
-        for (pose, cellIndex) in zip(poses, grid.activeCells.prefix(poses.count)) {
-            let column = cellIndex % grid.columns
-            let row = cellIndex / grid.columns
-            guard let sprite = buffer.extractedSprite(x: column * cellWidth, y: row * cellHeight,
-                                                      width: cellWidth, height: cellHeight) else { continue }
-            mapped[pose] = sprite
-            ordered.append((pose, sprite))
+        for crop in spec.crops {
+            guard let sprite = buffer.extractedSprite(rect: crop.rect, referenceSize: spec.referenceSize) else { continue }
+            mapped[crop.pose] = sprite
+            ordered.append((crop.pose, sprite))
         }
         guard !ordered.isEmpty else { return nil }
-        return HaloPetAssetManifest(species: species, resourceName: resourceName,
-                                    columns: grid.columns, rows: grid.rows,
-                                    detectedAssetCount: grid.activeCells.count,
-                                    assets: mapped, orderedAssets: ordered)
+        return HaloPetAssetManifest(species: species,
+                                    resourceName: resourceName,
+                                    columns: 0,
+                                    rows: 0,
+                                    detectedAssetCount: mapped.count,
+                                    assets: mapped,
+                                    orderedAssets: ordered)
     }
 
-    private static func chooseGrid(buffer: PixelBuffer, expected: Int) -> GridChoice? {
-        var best: GridChoice?
-        for columns in 3...7 {
-            for rows in 3...7 {
-                let cellWidth = buffer.width / columns
-                let cellHeight = buffer.height / rows
-                guard cellWidth >= 80, cellHeight >= 80 else { continue }
-                var active: [Int] = []
-                var occupancies: [Double] = []
-                for row in 0..<rows {
-                    for column in 0..<columns {
-                        let ratio = buffer.occupancy(x: column * cellWidth, y: row * cellHeight,
-                                                     width: cellWidth, height: cellHeight)
-                        if ratio > 0.018 && ratio < 0.92 {
-                            active.append(row * columns + column)
-                            occupancies.append(ratio)
-                        }
-                    }
-                }
-                guard active.count >= 8 else { continue }
-                let countPenalty = Double(abs(active.count - expected)) * 30
-                let aspect = Double(cellWidth) / Double(cellHeight)
-                let aspectPenalty = abs(log(max(0.05, aspect))) * 9
-                let overDense = occupancies.reduce(0.0) { $0 + max(0, $1 - 0.72) * 30 }
-                let score = 1000 - countPenalty - aspectPenalty - overDense
-                if best == nil || score > best!.score {
-                    best = GridChoice(columns: columns, rows: rows, activeCells: active, score: score)
-                }
-            }
+    private static func c(_ pose: HaloPetPose, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CropSpec {
+        CropSpec(pose: pose, rect: CGRect(x: x, y: y, width: w, height: h))
+    }
+
+    private static func sheetSpec(for species: String) -> SheetSpec? {
+        switch species.lowercased() {
+        case "cat":
+            // Cat.png · 1697×927 · unlabelled canonical art supplied by the user.
+            return SheetSpec(referenceSize: CGSize(width: 1697, height: 927), crops: [
+                c(.idle, 62, 45, 165, 255),
+                c(.sitting, 820, 58, 155, 240),
+                c(.standing, 975, 62, 235, 235),
+                c(.walking, 1185, 55, 270, 245),
+                c(.lying, 1430, 145, 260, 145),
+                c(.sleeping, 735, 374, 215, 155),
+                c(.stretching, 950, 330, 240, 215),
+                c(.grooming, 1215, 335, 205, 210),
+                c(.lookingAround, 1450, 325, 195, 225),
+                c(.peekBottom, 75, 555, 180, 115),
+                c(.peekLeft, 300, 550, 155, 135),
+                c(.peekRight, 525, 545, 150, 140),
+                c(.pawsOnEdge, 900, 545, 195, 135),
+                c(.headOnEdge, 1145, 550, 215, 125),
+                c(.hiddenPeek, 1450, 550, 205, 125),
+                c(.playful, 28, 690, 300, 220),
+                c(.curious, 340, 680, 175, 225),
+                c(.tired, 545, 720, 260, 175),
+                c(.happy, 805, 690, 220, 215),
+                c(.excited, 1010, 680, 200, 225),
+                c(.dance, 1010, 680, 200, 225),
+                c(.working, 1220, 690, 275, 220),
+                c(.umbrella, 1490, 675, 200, 240)
+            ])
+
+        case "dog":
+            // Dog.jpg · 2048×1117 · crop bottoms stop above every baked label.
+            return SheetSpec(referenceSize: CGSize(width: 2048, height: 1117), crops: [
+                c(.idle, 1000, 55, 175, 245),
+                c(.sitting, 1000, 55, 175, 245),
+                c(.standing, 1190, 55, 235, 245),
+                c(.walking, 1450, 52, 285, 250),
+                c(.lying, 1740, 125, 300, 170),
+                c(.sleeping, 925, 420, 230, 160),
+                c(.stretching, 1180, 350, 265, 235),
+                c(.grooming, 1495, 382, 225, 200),
+                c(.lookingAround, 1785, 370, 205, 215),
+                c(.peekBottom, 92, 905, 215, 145),
+                c(.peekLeft, 435, 895, 120, 165),
+                c(.peekRight, 700, 895, 115, 165),
+                c(.pawsOnEdge, 1000, 900, 180, 160),
+                c(.headOnEdge, 1260, 920, 180, 120),
+                c(.hiddenPeek, 1560, 925, 185, 120),
+                c(.playful, 45, 640, 320, 175),
+                c(.curious, 425, 625, 165, 190),
+                c(.tired, 620, 680, 285, 135),
+                c(.happy, 915, 660, 225, 155),
+                c(.excited, 1160, 650, 180, 165),
+                c(.dance, 1360, 635, 165, 185),
+                c(.working, 1540, 655, 230, 165),
+                c(.coffee, 1785, 655, 255, 165),
+                c(.umbrella, 1840, 870, 190, 220)
+            ])
+
+        case "fox":
+            // Fox.jpg · 2048×1117 · explicit crops preserve the richer fox-only expressions.
+            return SheetSpec(referenceSize: CGSize(width: 2048, height: 1117), crops: [
+                c(.idle, 1000, 50, 180, 250),
+                c(.sitting, 1000, 50, 180, 250),
+                c(.standing, 1185, 50, 265, 245),
+                c(.walking, 1450, 55, 285, 245),
+                c(.lying, 1740, 120, 300, 175),
+                c(.sleeping, 915, 410, 250, 175),
+                c(.stretching, 1170, 335, 220, 250),
+                c(.lookingAround, 1785, 375, 190, 210),
+                c(.peekBottom, 315, 430, 190, 125),
+                c(.peekLeft, 580, 405, 130, 165),
+                c(.peekRight, 785, 405, 130, 165),
+                c(.pawsOnEdge, 1370, 430, 170, 125),
+                c(.headOnEdge, 1370, 430, 170, 125),
+                c(.hiddenPeek, 78, 425, 180, 130),
+                c(.playful, 340, 655, 205, 160),
+                c(.curious, 55, 645, 160, 170),
+                c(.tired, 670, 680, 230, 135),
+                c(.happy, 560, 645, 135, 170),
+                c(.excited, 1390, 930, 95, 120),
+                c(.dance, 480, 890, 135, 190),
+                c(.working, 1420, 655, 205, 165),
+                c(.coffee, 1850, 650, 185, 170),
+                c(.umbrella, 785, 885, 135, 205)
+            ])
+        default:
+            return nil
         }
-        return best
     }
 }
-
 @MainActor
 final class HaloPetDebugState: ObservableObject {
     static let shared = HaloPetDebugState()
@@ -471,7 +511,8 @@ struct HaloCompanionSprite: View {
         case .observe, .look: return .lookingAround
         case .idle: return .idle
         case .walk, .entering, .leaving: return .walking
-        case .greet, .celebrate, .affectionate, .excited, .happy: return .happy
+        case .greet, .affectionate, .happy: return .happy
+        case .celebrate, .excited: return .excited
         case .sleep: return .sleeping
         case .snack, .playful: return .playful
         case .dance: return .dance
@@ -481,7 +522,8 @@ struct HaloCompanionSprite: View {
         case .paw: return .pawsOnEdge
         case .tail, .curious: return .curious
         case .resting: return .lying
-        case .coffee, .working: return .working
+        case .coffee: return .coffee
+        case .working: return .working
         case .umbrella: return .umbrella
         }
     }
@@ -660,7 +702,7 @@ struct HaloPetDebugPanel: View {
                 .font(.caption2)
 
                 if let manifest = assets.manifest(for: settings.settings.petKind) {
-                    Text("\(manifest.resourceName) · detected \(manifest.detectedAssetCount) · grid \(manifest.columns)×\(manifest.rows) · mapped \(manifest.assets.count)")
+                    Text("\(manifest.resourceName) · explicit pose map · mapped \(manifest.assets.count)")
                         .font(.caption2).foregroundStyle(.secondary)
                     Toggle("Inspect extracted poses", isOn: $debug.showAssets)
                     if debug.showAssets {
