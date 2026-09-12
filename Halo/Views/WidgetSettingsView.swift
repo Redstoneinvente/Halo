@@ -77,9 +77,23 @@ struct WidgetSettingsView: View {
     private var style: Binding<WidgetStyle> {
         Binding(get: { layout.widgetStyle(for: selected) }, set: { layout.setWidgetStyle($0, for: selected) })
     }
+    private var content: Binding<WidgetContentOptions> {
+        Binding(get: { style.wrappedValue.resolvedContent }, set: { value in
+            var updated = style.wrappedValue; updated.content = value; style.wrappedValue = updated
+        })
+    }
+    private var chrome: Binding<WidgetChromeOptions> {
+        Binding(get: { style.wrappedValue.resolvedChrome }, set: { value in
+            var updated = style.wrappedValue; updated.chrome = value; style.wrappedValue = updated
+        })
+    }
     var body: some View {
         Picker("Widget", selection: $selected) {
             ForEach(ModuleID.allCases) { Text($0.title).tag($0) }
+        }
+        Section("Opened notch widget") {
+            Text("Customize \(selected.title) independently. These settings apply to the widget in Halo's opened dashboard and travel with profiles and display-specific layouts.")
+                .font(.caption).foregroundStyle(.secondary)
         }
         Section("Typography") {
             Picker("Font", selection: style.fontFamily) {
@@ -98,6 +112,16 @@ struct WidgetSettingsView: View {
             colorPicker("Accent", style.accentColor)
             Toggle("Show title", isOn: style.showTitle)
         }
+        Section("Content layout") {
+            Picker("Alignment", selection: content.alignment) {
+                ForEach(WidgetContentAlignment.allCases) { Text($0.title).tag($0) }
+            }.pickerStyle(.segmented)
+            PreciseSlider(title: "Content spacing", value: content.spacing, range: 0...32, step: 1, suffix: "pt")
+            Picker("Control size", selection: content.controlSize) {
+                ForEach(WidgetControlSize.allCases) { Text($0.title).tag($0) }
+            }
+            PreciseSlider(title: "Header icon size", value: content.iconSize, range: 8...48, step: 1, suffix: "pt")
+        }
         Section("Card") {
             colorPicker("Background", style.backgroundColor)
             PreciseSlider(title: "Background opacity", value: style.backgroundOpacity, range: 0...1, step: 0.01, decimals: 2)
@@ -106,12 +130,28 @@ struct WidgetSettingsView: View {
             Toggle("Fill available width", isOn: Binding(get: { style.wrappedValue.width == 0 }, set: { style.wrappedValue.width = $0 ? 0 : 280 }))
             if style.wrappedValue.width > 0 { PreciseSlider(title: "Maximum width", value: style.width, range: 120...640, step: 1, suffix: "pt") }
             PreciseSlider(title: "Minimum height", value: style.minimumHeight, range: 0...400, step: 1, suffix: "pt")
+            Divider()
+            ColorPicker("Border color", selection: Binding(get: { chrome.wrappedValue.borderColor.color }, set: { chrome.wrappedValue.borderColor = WidgetColor($0) }), supportsOpacity: false)
+            PreciseSlider(title: "Border opacity", value: chrome.borderOpacity, range: 0...1, step: 0.05, decimals: 2)
+            PreciseSlider(title: "Border width", value: chrome.borderWidth, range: 0...6, step: 0.25, suffix: "pt", decimals: 2)
+            PreciseSlider(title: "Shadow opacity", value: chrome.shadowOpacity, range: 0...0.8, step: 0.05, decimals: 2)
+            if chrome.wrappedValue.shadowOpacity > 0 {
+                PreciseSlider(title: "Shadow radius", value: chrome.shadowRadius, range: 0...40, step: 1, suffix: "pt")
+                PreciseSlider(title: "Shadow Y", value: chrome.shadowY, range: -30...30, step: 1, suffix: "pt")
+            }
+            PreciseSlider(title: "Content opacity", value: chrome.contentOpacity, range: 0.15...1, step: 0.05, decimals: 2)
         }
+        moduleSpecificSettings
         if selected == .clock {
             Section("Clock") {
                 Toggle("24-hour time", isOn: style.clock.twentyFourHour)
                 Toggle("Show seconds", isOn: style.clock.showSeconds)
                 Toggle("Show date", isOn: style.clock.showDate)
+                if style.wrappedValue.clock.showDate {
+                    Picker("Date style", selection: content.clockDateStyle) {
+                        ForEach(WidgetClockDateStyle.allCases) { Text($0.title).tag($0) }
+                    }
+                }
                 SearchableStringPicker(title: "Time zone", selection: style.clock.timeZone, values: [""] + Self.timeZones, emptyLabel: "System time zone")
                 WidgetClock(style: style.wrappedValue).foregroundStyle(style.wrappedValue.textColor.color)
                     .padding().background(.black, in: RoundedRectangle(cornerRadius: 12))
@@ -120,6 +160,104 @@ struct WidgetSettingsView: View {
         Button("Reset this widget") { layout.widgets?.removeValue(forKey: selected.rawValue) }
         Text("Changes apply live. Save a profile to keep a preset. Display-specific layouts use their saved profile's widget settings.").font(.caption)
     }
+    @ViewBuilder private var moduleSpecificSettings: some View {
+        switch selected {
+        case .clock:
+            EmptyView()
+        case .timer:
+            Section("Focus timer") {
+                Toggle("Show status / helper text", isOn: content.showSecondaryText)
+                Toggle("Show timer controls", isOn: content.showControls)
+                PreciseSlider(title: "Preset 1", value: Binding(get: { Double(content.wrappedValue.timerPresetA) }, set: { content.wrappedValue.timerPresetA = Int($0) }), range: 1...180, step: 1, suffix: "min")
+                PreciseSlider(title: "Preset 2", value: Binding(get: { Double(content.wrappedValue.timerPresetB) }, set: { content.wrappedValue.timerPresetB = Int($0) }), range: 1...180, step: 1, suffix: "min")
+                PreciseSlider(title: "Preset 3", value: Binding(get: { Double(content.wrappedValue.timerPresetC) }, set: { content.wrappedValue.timerPresetC = Int($0) }), range: 1...180, step: 1, suffix: "min")
+            }
+        case .shelf:
+            Section("File Shelf") {
+                PreciseSlider(title: "Visible items", value: Binding(get: { Double(content.wrappedValue.maxItems) }, set: { content.wrappedValue.maxItems = Int($0) }), range: 1...30, step: 1)
+                Toggle("Show file details", isOn: content.shelfShowDetails)
+                Toggle("Show file actions", isOn: content.shelfShowActions)
+                Toggle("Show Add button", isOn: content.showQuickActions)
+                Toggle("Show overflow count", isOn: content.showFooter)
+                PreciseSlider(title: "File icon size", value: content.shelfIconSize, range: 14...64, step: 1, suffix: "pt")
+            }
+        case .media:
+            Section("Media") {
+                Toggle("Show source", isOn: content.mediaShowSource)
+                Toggle("Show artist", isOn: content.mediaShowArtist)
+                Toggle("Show playback controls", isOn: content.showControls)
+                Toggle("Show errors / status", isOn: content.showStatus)
+                PreciseSlider(title: "Title lines", value: Binding(get: { Double(content.wrappedValue.mediaTitleLines) }, set: { content.wrappedValue.mediaTitleLines = Int($0) }), range: 1...4, step: 1)
+            }
+        case .audio:
+            Section("Audio") {
+                PreciseSlider(title: "Maximum listed outputs", value: Binding(get: { Double(content.wrappedValue.maxItems) }, set: { content.wrappedValue.maxItems = Int($0) }), range: 1...30, step: 1)
+                Toggle("Show volume control", isOn: content.showControls)
+                Toggle("Show refresh action", isOn: content.showQuickActions)
+                Toggle("Show status / errors", isOn: content.showStatus)
+            }
+        case .calendar:
+            Section("Calendar") {
+                PreciseSlider(title: "Visible events", value: Binding(get: { Double(content.wrappedValue.maxItems) }, set: { content.wrappedValue.maxItems = Int($0) }), range: 1...30, step: 1)
+                Toggle("Show calendar status", isOn: content.showStatus)
+                Toggle("Show event times", isOn: content.calendarShowTimes)
+                Toggle("Show Join buttons", isOn: content.calendarShowJoin)
+                Toggle("Show refresh action", isOn: content.showQuickActions)
+            }
+        case .clipboard:
+            Section("Clipboard") {
+                PreciseSlider(title: "Visible entries", value: Binding(get: { Double(content.wrappedValue.maxItems) }, set: { content.wrappedValue.maxItems = Int($0) }), range: 1...30, step: 1)
+                Toggle("Show search", isOn: content.showSearch)
+                Toggle("Show Copy / Remove", isOn: content.showControls)
+                Toggle("Show Clear history", isOn: content.showQuickActions)
+                Toggle("Show privacy footer", isOn: content.showFooter)
+            }
+        case .system:
+            Section("System information") {
+                Toggle("Battery", isOn: content.systemBattery)
+                Toggle("Battery progress", isOn: content.showProgress)
+                Toggle("Memory", isOn: content.systemMemory)
+                Toggle("Storage", isOn: content.systemStorage)
+                Toggle("Uptime / Low Power Mode", isOn: content.systemUptime)
+            }
+        case .launcher:
+            Section("Launcher") {
+                Toggle("Search field", isOn: content.showSearch)
+                Toggle("Timer shortcuts", isOn: content.launcherTimers)
+                Toggle("Running applications", isOn: content.launcherRunningApps)
+                Toggle("Plugin commands", isOn: content.launcherPlugins)
+                Toggle("Open App / Downloads shortcuts", isOn: content.showQuickActions)
+                PreciseSlider(title: "Maximum apps / commands", value: Binding(get: { Double(content.wrappedValue.maxItems) }, set: { content.wrappedValue.maxItems = Int($0) }), range: 1...30, step: 1)
+            }
+        case .activities:
+            Section("Activities") {
+                PreciseSlider(title: "Visible activities", value: Binding(get: { Double(content.wrappedValue.maxItems) }, set: { content.wrappedValue.maxItems = Int($0) }), range: 1...30, step: 1)
+                Toggle("Show detail", isOn: content.activitiesShowDetail)
+                Toggle("Show progress", isOn: content.showProgress)
+                Toggle("Show dismiss controls", isOn: content.showControls)
+                Toggle("Show empty status", isOn: content.showStatus)
+            }
+        case .notes:
+            Section("Notes") {
+                PreciseSlider(title: "Editor height", value: content.notesHeight, range: 60...420, step: 5, suffix: "pt")
+            }
+        case .capture:
+            Section("Capture & OCR") {
+                Toggle("Show permission hint", isOn: content.captureShowHelp)
+                Toggle("Show capture controls", isOn: content.showControls)
+                Toggle("Show progress / errors", isOn: content.showStatus)
+                PreciseSlider(title: "OCR text lines", value: Binding(get: { Double(content.wrappedValue.captureTextLines) }, set: { content.wrappedValue.captureTextLines = Int($0) }), range: 2...40, step: 1)
+            }
+        case .stopwatch:
+            Section("Stopwatch") {
+                PreciseSlider(title: "Time scale", value: content.stopwatchScale, range: 0.8...4, step: 0.1, decimals: 1)
+                Toggle("Show controls", isOn: content.showControls)
+            }
+        case .developer:
+            EmptyView()
+        }
+    }
+
     private func colorPicker(_ title: String, _ value: Binding<WidgetColor>) -> some View {
         ColorPicker(title, selection: Binding(get: { value.wrappedValue.color }, set: { value.wrappedValue = WidgetColor($0) }), supportsOpacity: false)
     }
@@ -142,8 +280,6 @@ struct ClosedNotchSettingsView: View {
     @AppStorage("HaloBluetoothClosedNotchShowDevice") private var bluetoothShowDevice = true
     @AppStorage("HaloBluetoothClosedNotchDuration") private var bluetoothDuration = 10.0
     @AppStorage("HaloBluetoothClosedNotchIconSize") private var bluetoothIconSize = 16.0
-    @State private var selectedClosedWidget: ClosedNotchItem = .clock
-    @State private var closedWidgetFonts: [String] = []
     private var options: Binding<ClosedNotchOptions> { Binding(get: { layout.closedNotch ?? ClosedNotchOptions() }, set: { layout.closedNotch = $0 }) }
     private var visualizer: Binding<VisualizerOptions> { Binding(get: { options.wrappedValue.visualizer ?? VisualizerOptions() }, set: { options.wrappedValue.visualizer = $0 }) }
     private var expansion: Binding<ClosedExpansionOptions> { Binding(get: { options.wrappedValue.expansion ?? ClosedExpansionOptions() }, set: { options.wrappedValue.expansion = $0 }) }
@@ -162,29 +298,6 @@ struct ClosedNotchSettingsView: View {
     }
     private var reactive: Binding<ReactiveBackgroundOptions> { Binding(get: { options.wrappedValue.reactiveBackground ?? ReactiveBackgroundOptions() }, set: { options.wrappedValue.reactiveBackground = $0 }) }
     private var power: Binding<PowerReactionOptions> { Binding(get: { options.wrappedValue.powerReaction ?? PowerReactionOptions() }, set: { options.wrappedValue.powerReaction = $0 }) }
-    private var closedWidgetStyle: Binding<ClosedNotchWidgetStyle> {
-        Binding(get: {
-            options.wrappedValue.widgetStyle(for: selectedClosedWidget) ?? inheritedClosedWidgetStyle(selectedClosedWidget)
-        }, set: { newValue in
-            var updated = options.wrappedValue
-            updated.setWidgetStyle(newValue, for: selectedClosedWidget)
-            options.wrappedValue = updated
-        })
-    }
-    private func inheritedClosedWidgetStyle(_ item: ClosedNotchItem) -> ClosedNotchWidgetStyle {
-        var value = ClosedNotchWidgetStyle()
-        value.fontSize = options.wrappedValue.fontSize
-        value.textColor = options.wrappedValue.color
-        value.accentColor = options.wrappedValue.color
-        if item == .clock {
-            let source = layout.widgetStyle(for: .clock)
-            value.fontFamily = source.fontFamily
-            value.customFont = source.customFont
-            value.weight = source.weight
-            value.clock = source.clock
-        }
-        return value
-    }
     var body: some View {
         Section("Opened background") {
             Toggle("Apply these background effects when opened", isOn: Binding(get: { options.wrappedValue.applyBackgroundWhenOpened ?? false }, set: { options.wrappedValue.applyBackgroundWhenOpened = $0 }))
@@ -211,92 +324,6 @@ struct ClosedNotchSettingsView: View {
             PreciseSlider(title: "Text size", value: options.fontSize, range: 8...24, step: 1, suffix: "pt")
             ColorPicker("Color", selection: Binding(get: { options.wrappedValue.color.color }, set: { options.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
             Text("Active Halo activities have priority: they use an Activity slot, an inactive side, or temporarily replace the right slot if both sides are occupied.").font(.caption)
-        }
-        Section("Widget customization") {
-            Picker("Customize", selection: $selectedClosedWidget) {
-                ForEach(ClosedNotchItem.allCases.filter { $0 != .none }) { item in
-                    Text(item.title).tag(item)
-                }
-            }
-            Text("Each Closed Notch widget can have its own typography, colors, chrome, spacing and placement. Media, Visualizer and Live Activity keep their specialised controls below as well.")
-                .font(.caption).foregroundStyle(.secondary)
-
-            Group {
-                Picker("Font", selection: closedWidgetStyle.fontFamily) {
-                    ForEach(WidgetFontFamily.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
-                }
-                if closedWidgetStyle.wrappedValue.fontFamily == .custom {
-                    SearchableStringPicker(title: "Installed font", selection: closedWidgetStyle.customFont,
-                        values: closedWidgetFonts.contains(closedWidgetStyle.wrappedValue.customFont)
-                            ? closedWidgetFonts : [closedWidgetStyle.wrappedValue.customFont] + closedWidgetFonts)
-                        .onAppear { if closedWidgetFonts.isEmpty { closedWidgetFonts = NSFontManager.shared.availableFontFamilies.sorted() } }
-                }
-                Picker("Weight", selection: closedWidgetStyle.weight) {
-                    ForEach(WidgetFontWeight.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
-                }
-                PreciseSlider(title: "Text size", value: closedWidgetStyle.fontSize, range: 7...32, step: 1, suffix: "pt")
-                ColorPicker("Text color", selection: Binding(get: { closedWidgetStyle.wrappedValue.textColor.color }, set: { closedWidgetStyle.wrappedValue.textColor = WidgetColor($0) }), supportsOpacity: false)
-                ColorPicker("Accent / icon color", selection: Binding(get: { closedWidgetStyle.wrappedValue.accentColor.color }, set: { closedWidgetStyle.wrappedValue.accentColor = WidgetColor($0) }), supportsOpacity: false)
-                PreciseSlider(title: "Opacity", value: closedWidgetStyle.opacity, range: 0.1...1, step: 0.05, decimals: 2)
-            }
-
-            if [.timer, .battery, .files, .activity].contains(selectedClosedWidget) {
-                Divider()
-                Toggle("Show icon", isOn: closedWidgetStyle.showIcon)
-                Toggle("Show text", isOn: closedWidgetStyle.showText)
-                if closedWidgetStyle.wrappedValue.showIcon {
-                    PreciseSlider(title: "Icon size", value: closedWidgetStyle.iconSize, range: 7...36, step: 1, suffix: "pt")
-                }
-                PreciseSlider(title: "Icon / text spacing", value: closedWidgetStyle.spacing, range: 0...24, step: 1, suffix: "pt")
-            }
-
-            if selectedClosedWidget == .clock {
-                Divider()
-                Toggle("24-hour time", isOn: closedWidgetStyle.clock.twentyFourHour)
-                Toggle("Show seconds", isOn: closedWidgetStyle.clock.showSeconds)
-                SearchableStringPicker(title: "Time zone", selection: closedWidgetStyle.clock.timeZone,
-                    values: [""] + TimeZone.knownTimeZoneIdentifiers, emptyLabel: "System time zone")
-            }
-
-            if selectedClosedWidget == .date {
-                Divider()
-                Picker("Date style", selection: closedWidgetStyle.dateStyle) {
-                    ForEach(ClosedNotchDateStyle.allCases) { style in Text(style.title).tag(style) }
-                }
-            }
-
-            if selectedClosedWidget == .activity {
-                Divider()
-                Toggle("Show activity detail", isOn: closedWidgetStyle.activityShowDetail)
-                Toggle("Show progress", isOn: closedWidgetStyle.activityShowProgress)
-                Text("Bluetooth event contents still use the dedicated Bluetooth controls below; this section styles their overall widget chrome and placement.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
-            Divider()
-            Text("Widget chrome").font(.headline)
-            ColorPicker("Background color", selection: Binding(get: { closedWidgetStyle.wrappedValue.backgroundColor.color }, set: { closedWidgetStyle.wrappedValue.backgroundColor = WidgetColor($0) }), supportsOpacity: false)
-            PreciseSlider(title: "Background opacity", value: closedWidgetStyle.backgroundOpacity, range: 0...1, step: 0.05, decimals: 2)
-            PreciseSlider(title: "Inner padding", value: closedWidgetStyle.padding, range: 0...24, step: 1, suffix: "pt")
-            PreciseSlider(title: "Corner radius", value: closedWidgetStyle.cornerRadius, range: 0...32, step: 1, suffix: "pt")
-
-            Divider()
-            Text("Sizing & placement").font(.headline)
-            PreciseSlider(title: "Reserved width (0 = automatic)", value: closedWidgetStyle.width, range: 0...420, step: 1, suffix: "pt")
-            Picker("Alignment", selection: closedWidgetStyle.alignment) {
-                ForEach(ClosedNotchWidgetAlignment.allCases) { alignment in Text(alignment.title).tag(alignment) }
-            }
-            PreciseSlider(title: "Horizontal offset", value: closedWidgetStyle.horizontalOffset, range: -160...160, step: 1, suffix: "pt")
-            PreciseSlider(title: "Vertical offset", value: closedWidgetStyle.verticalOffset, range: -80...80, step: 1, suffix: "pt")
-            Text("Positive X moves right; positive Y moves down. Halo's content-fit width accounts for outward offsets so a customized widget does not get clipped.")
-                .font(.caption).foregroundStyle(.secondary)
-
-            Button("Reset \(selectedClosedWidget.title) customization") {
-                var updated = options.wrappedValue
-                updated.resetWidgetStyle(for: selectedClosedWidget)
-                options.wrappedValue = updated
-            }
-            .disabled(options.wrappedValue.widgetStyle(for: selectedClosedWidget) == nil)
         }
         Section("Bluetooth events") {
             Toggle("Show Bluetooth connection states", isOn: $bluetoothEvents)
@@ -471,7 +498,7 @@ struct ClosedNotchSettingsView: View {
         }
         Button("Reset closed content") { layout.closedNotch = ClosedNotchOptions() }
     }
-    private func itemPicker(_ title: String, _ value: Binding<ClosedNotchItem>) -> some View { Picker(title, selection: value) { ForEach(ClosedNotchItem.allCases) { Text($0.title).tag($0) } } }
+    private func itemPicker(_ title: String, _ value: Binding<ClosedNotchItem>) -> some View { Picker(title, selection: value) { ForEach(ClosedNotchItem.allCases) { Text($0.rawValue.capitalized).tag($0) } } }
     private func gesturePicker(_ title: String, _ value: Binding<MediaGestureAction>) -> some View {
         Picker(title, selection: value) {
             Text("None").tag(MediaGestureAction.none); Text("Play / Pause").tag(MediaGestureAction.playPause); Text("Next track").tag(MediaGestureAction.next); Text("Previous track").tag(MediaGestureAction.previous); Text("Open player").tag(MediaGestureAction.openPlayer)

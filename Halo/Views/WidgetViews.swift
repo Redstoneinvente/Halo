@@ -65,6 +65,19 @@ extension WidgetStyle {
         return .system(size: fontSize * scale, weight: weight, design: design)
     }
 }
+extension WidgetContentAlignment {
+    var horizontal: HorizontalAlignment {
+        switch self { case .leading: return .leading; case .center: return .center; case .trailing: return .trailing }
+    }
+    var alignment: Alignment {
+        switch self { case .leading: return .leading; case .center: return .center; case .trailing: return .trailing }
+    }
+}
+extension WidgetControlSize {
+    var swiftUI: ControlSize {
+        switch self { case .mini: return .mini; case .small: return .small; case .regular: return .regular; case .large: return .large }
+    }
+}
 private struct WidgetStyleKey: EnvironmentKey { static let defaultValue = WidgetStyle() }
 extension EnvironmentValues {
     var widgetStyle: WidgetStyle {
@@ -84,9 +97,13 @@ struct WidgetCard<Content: View>: View {
         fitted.fontSize = min(style.fontSize, max(10, height * 0.18))
         return fitted
     }
+    private var contentOptions: WidgetContentOptions { fittedStyle.resolvedContent }
+    private var chrome: WidgetChromeOptions { fittedStyle.resolvedChrome }
     private var styledContent: some View {
         content.environment(\.widgetStyle, fittedStyle).font(fittedStyle.font())
             .foregroundStyle(style.textColor.color).tint(style.accentColor.color)
+            .controlSize(contentOptions.controlSize.swiftUI)
+            .opacity(chrome.contentOpacity)
     }
     var body: some View {
         Group {
@@ -95,20 +112,25 @@ struct WidgetCard<Content: View>: View {
                 // Keep the card within the viewport; only overflowing contents scroll.
                 ScrollView(.vertical) {
                     styledContent
-                        .frame(maxWidth: .infinity, minHeight: max(0, height - 2 * padding), alignment: .topLeading)
+                        .frame(maxWidth: .infinity, minHeight: max(0, height - 2 * padding), alignment: contentOptions.alignment == .center ? .top : (contentOptions.alignment == .trailing ? .topTrailing : .topLeading))
                 }
                 .padding(padding)
                 .frame(height: max(0, height))
                 .clipped()
             } else {
                 styledContent
-                    .frame(maxWidth: .infinity, minHeight: style.minimumHeight, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: style.minimumHeight, alignment: contentOptions.alignment.alignment)
                     .padding(style.padding)
             }
         }
-        .background(style.backgroundColor.color.opacity(style.backgroundOpacity), in: RoundedRectangle(cornerRadius: style.cornerRadius))
+        .background(style.backgroundColor.color.opacity(style.backgroundOpacity), in: RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous)
+                .stroke(chrome.borderColor.color.opacity(chrome.borderOpacity), lineWidth: chrome.borderWidth)
+        )
+        .shadow(color: .black.opacity(chrome.shadowOpacity), radius: chrome.shadowRadius, y: chrome.shadowY)
         .frame(maxWidth: style.width > 0 ? style.width : .infinity)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: contentOptions.alignment.alignment)
     }
 }
 struct WidgetClock: View {
@@ -123,7 +145,12 @@ struct WidgetClock: View {
     }
     private var dayFormatter: DateFormatter {
         let value = formatter
-        value.dateFormat = "EEE, MMM d"
+        switch style.resolvedContent.clockDateStyle {
+        case .weekdayMonthDay: value.dateFormat = "EEE, MMM d"
+        case .monthDay: value.dateFormat = "MMM d"
+        case .full: value.dateFormat = "EEEE, MMMM d"
+        case .numeric: value.dateStyle = .short; value.timeStyle = .none
+        }
         return value
     }
     var body: some View {
@@ -131,7 +158,7 @@ struct WidgetClock: View {
         let dateFormatter = dayFormatter
         let start = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970 / 60) * 60)
         TimelineView(.periodic(from: start, by: style.clock.showSeconds ? 1 : 60)) { context in
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: max(2, min(20, style.resolvedContent.spacing * 0.55))) {
                 if style.showTitle && !compact { Text("Clock").font(style.font(scale: 0.75)) }
                 Text(clockFormatter.string(from: context.date)).font(style.font()).monospacedDigit()
                 if style.clock.showDate && !compact {
@@ -139,6 +166,7 @@ struct WidgetClock: View {
                         .font(style.font(scale: 0.75))
                 }
             }
+            .frame(maxWidth: .infinity, alignment: style.resolvedContent.alignment.alignment)
         }
     }
 }

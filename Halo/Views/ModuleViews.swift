@@ -27,11 +27,17 @@ struct IntegrationModuleView: View {
     let id: ModuleID
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
+    private var options: WidgetContentOptions { style.resolvedContent }
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if style.showTitle { Label(id.title, systemImage: id.symbol).font(style.font()) }
+        VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
+            if style.showTitle {
+                HStack(spacing: max(4, options.spacing * 0.55)) {
+                    if options.iconSize > 0 { Image(systemName: id.symbol).font(.system(size: options.iconSize, weight: .semibold)).foregroundStyle(style.accentColor.color) }
+                    Text(id.title).font(style.font())
+                }
+            }
             content
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
     }
     @ViewBuilder private var content: some View {
         switch id {
@@ -42,28 +48,38 @@ struct IntegrationModuleView: View {
         case .system: SystemModuleView(service: workspace.system)
         case .launcher: LauncherModuleView(store: store, workspace: workspace)
         case .activities:
-            if workspace.activities.isEmpty { Text("Timer completions appear here.").font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
-            ForEach(workspace.activities) { activity in
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(activity.title); Text(activity.detail).font(style.font(scale: 0.85)).foregroundStyle(.secondary)
-                        if let progress = activity.progress { ProgressView(value: progress) }
+            if workspace.activities.isEmpty, options.showStatus {
+                Text("Timer completions appear here.").font(style.font(scale: 0.85)).foregroundStyle(.secondary)
+            }
+            ForEach(Array(workspace.activities.prefix(options.maxItems))) { activity in
+                HStack(spacing: options.spacing) {
+                    VStack(alignment: options.alignment.horizontal, spacing: max(2, options.spacing * 0.35)) {
+                        Text(activity.title)
+                        if options.activitiesShowDetail && options.showSecondaryText && !activity.detail.isEmpty {
+                            Text(activity.detail).font(style.font(scale: 0.85)).foregroundStyle(.secondary)
+                        }
+                        if options.showProgress, let progress = activity.progress { ProgressView(value: progress) }
                     }
                     Spacer()
-                    Button { workspace.activities.removeAll { $0.id == activity.id } } label: { Image(systemName: "xmark") }.accessibilityLabel("Dismiss activity")
+                    if options.showControls {
+                        Button { workspace.activities.removeAll { $0.id == activity.id } } label: { Image(systemName: "xmark") }.accessibilityLabel("Dismiss activity")
+                    }
                 }
             }
         case .developer: EmptyView() // Legacy saved module, no longer displayed.
-        case .notes: TextEditor(text: $workspace.settings.notes).frame(height: 90).accessibilityLabel("Quick note")
+        case .notes: TextEditor(text: $workspace.settings.notes).frame(height: options.notesHeight).accessibilityLabel("Quick note")
         case .capture: CaptureModuleView(service: workspace.capture, store: store)
         case .stopwatch:
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let elapsed = Int(workspace.stopwatchElapsed + (workspace.stopwatchStart.map { context.date.timeIntervalSince($0) } ?? 0))
-                Text(String(format: "%02d:%02d:%02d", elapsed / 3600, elapsed / 60 % 60, elapsed % 60)).font(style.font(scale: 2)).monospacedDigit()
+                Text(String(format: "%02d:%02d:%02d", elapsed / 3600, elapsed / 60 % 60, elapsed % 60))
+                    .font(style.font(scale: options.stopwatchScale)).monospacedDigit()
             }
-            HStack {
-                Button(workspace.stopwatchStart == nil ? "Start" : "Pause") { workspace.toggleStopwatch() }
-                Button("Reset") { workspace.stopwatchStart = nil; workspace.stopwatchElapsed = 0 }
+            if options.showControls {
+                HStack(spacing: options.spacing) {
+                    Button(workspace.stopwatchStart == nil ? "Start" : "Pause") { workspace.toggleStopwatch() }
+                    Button("Reset") { workspace.stopwatchStart = nil; workspace.stopwatchElapsed = 0 }
+                }
             }
         default: EmptyView()
         }
@@ -74,20 +90,27 @@ struct CaptureModuleView: View {
     @ObservedObject var service: CaptureService
     @ObservedObject var store: AppStore
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Capture asks for Screen Recording access.").font(style.font(scale: 0.85))
-            HStack {
-                Button("Capture region…") { service.capture { store.addFiles([$0]) } }
-                Button("Extract text from image…") { service.chooseImage() }
-            }.disabled(service.busy)
-            if service.busy { ProgressView() }
-            if !service.recognizedText.isEmpty {
-                Text(service.recognizedText).font(style.font(scale: 0.85)).textSelection(.enabled).lineLimit(12)
-                Button("Copy extracted text") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(service.recognizedText, forType: .string) }
-                Button("Clear extracted text") { service.recognizedText = "" }
+        let options = style.resolvedContent
+        VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
+            if options.captureShowHelp && options.showSecondaryText { Text("Capture asks for Screen Recording access.").font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
+            if options.showControls {
+                HStack(spacing: options.spacing) {
+                    Button("Capture region…") { service.capture { store.addFiles([$0]) } }
+                    Button("Extract text from image…") { service.chooseImage() }
+                }.disabled(service.busy)
             }
-            if let error = service.error { Text(error).font(style.font(scale: 0.85)).foregroundStyle(.orange) }
-        }
+            if service.busy && options.showStatus { ProgressView() }
+            if !service.recognizedText.isEmpty {
+                Text(service.recognizedText).font(style.font(scale: 0.85)).textSelection(.enabled).lineLimit(options.captureTextLines)
+                if options.showControls {
+                    HStack(spacing: options.spacing) {
+                        Button("Copy extracted text") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(service.recognizedText, forType: .string) }
+                        Button("Clear extracted text") { service.recognizedText = "" }
+                    }
+                }
+            }
+            if options.showStatus, let error = service.error { Text(error).font(style.font(scale: 0.85)).foregroundStyle(.orange) }
+        }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
     }
 }
 struct MediaModuleView: View {
@@ -95,55 +118,67 @@ struct MediaModuleView: View {
     @ObservedObject var service: MediaService
     let app: String
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(service.title).lineLimit(2)
-            if let source = service.connectedApp { Text(source == "com.apple.Music" ? "Apple Music" : "Spotify").font(style.font(scale: 0.75)).foregroundStyle(.secondary) }
-            Text(service.artist).font(style.font(scale: 0.85)).foregroundStyle(.secondary)
-            HStack {
-                Button { service.perform("previous track", app: app) } label: { Image(systemName: "backward.end.fill") }.accessibilityLabel("Previous track")
-                Button { service.perform("playpause", app: app) } label: { Image(systemName: "playpause.fill") }.accessibilityLabel("Play or pause")
-                Button { service.perform("next track", app: app) } label: { Image(systemName: "forward.end.fill") }.accessibilityLabel("Next track")
-                Spacer()
-                Button("Retry detection") { service.retryDetection(preferred: app) }
-            }.disabled(service.busy)
-            if let error = service.error { Text(error).font(style.font(scale: 0.85)).foregroundStyle(.orange) }
-        }
+        let options = style.resolvedContent
+        VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
+            Text(service.title).lineLimit(options.mediaTitleLines)
+            if options.mediaShowSource && options.showSecondaryText, let source = service.connectedApp {
+                Text(source == "com.apple.Music" ? "Apple Music" : source == "com.spotify.client" ? "Spotify" : "System Audio")
+                    .font(style.font(scale: 0.75)).foregroundStyle(.secondary)
+            }
+            if options.mediaShowArtist && options.showSecondaryText && !service.artist.isEmpty {
+                Text(service.artist).font(style.font(scale: 0.85)).foregroundStyle(.secondary)
+            }
+            if options.showControls {
+                HStack(spacing: options.spacing) {
+                    Button { service.perform("previous track", app: app) } label: { Image(systemName: "backward.end.fill") }.accessibilityLabel("Previous track")
+                    Button { service.perform("playpause", app: app) } label: { Image(systemName: "playpause.fill") }.accessibilityLabel("Play or pause")
+                    Button { service.perform("next track", app: app) } label: { Image(systemName: "forward.end.fill") }.accessibilityLabel("Next track")
+                    Spacer()
+                    Button("Retry detection") { service.retryDetection(preferred: app) }
+                }.disabled(service.busy)
+            }
+            if options.showStatus, let error = service.error { Text(error).font(style.font(scale: 0.85)).foregroundStyle(.orange) }
+        }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
     }
 }
 struct AudioModuleView: View {
     @Environment(\.widgetStyle) private var style
     @ObservedObject var service: AudioService
     var body: some View {
-        VStack(alignment: .leading) {
+        let options = style.resolvedContent
+        VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
             Picker("Output", selection: Binding(get: { service.selected }, set: { service.setOutput($0) })) {
-                ForEach(service.devices) { Text($0.name).tag($0.id) }
+                ForEach(service.devices.prefix(options.maxItems)) { Text($0.name).tag($0.id) }
             }
-            if service.canSetVolume {
+            if service.canSetVolume && options.showControls {
                 Slider(value: Binding(get: { Double(service.volume) }, set: { service.setVolume(Float($0)) }), in: 0...1) { Text("Volume") }
-            } else { Text("Use this device's hardware volume controls.").font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
-            Button("Refresh devices") { service.refresh() }
-            if let error = service.error { Text(error).font(style.font(scale: 0.85)).foregroundStyle(.orange) }
-        }.onAppear { service.refresh() }
+            } else if !service.canSetVolume && options.showStatus {
+                Text("Use this device's hardware volume controls.").font(style.font(scale: 0.85)).foregroundStyle(.secondary)
+            }
+            if options.showQuickActions { Button("Refresh devices") { service.refresh() } }
+            if options.showStatus, let error = service.error { Text(error).font(style.font(scale: 0.85)).foregroundStyle(.orange) }
+        }.frame(maxWidth: .infinity, alignment: options.alignment.alignment).onAppear { service.refresh() }
     }
 }
 struct CalendarModuleView: View {
     @Environment(\.widgetStyle) private var style
     @ObservedObject var service: CalendarService
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(service.status).font(style.font(scale: 0.85)).foregroundStyle(.secondary)
-            ForEach(service.events, id: \.eventIdentifier) { event in
-                HStack {
-                    VStack(alignment: .leading) {
+        let options = style.resolvedContent
+        VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
+            if options.showStatus { Text(service.status).font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
+            ForEach(Array(service.events.prefix(options.maxItems)), id: \.eventIdentifier) { event in
+                HStack(spacing: options.spacing) {
+                    VStack(alignment: options.alignment.horizontal, spacing: max(2, options.spacing * 0.35)) {
                         Text(event.title ?? "Untitled event").lineLimit(1)
-                        Text(event.startDate, style: .time).font(style.font(scale: 0.85))
+                        if options.calendarShowTimes && options.showSecondaryText { Text(event.startDate, style: .time).font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
                     }
                     Spacer()
-                    if let url = service.meetingURL(for: event) { Link("Join", destination: url) }
+                    if options.calendarShowJoin && options.showControls, let url = service.meetingURL(for: event) { Link("Join", destination: url) }
                 }
             }
-            Button("Enable / Refresh calendar") { service.requestAccess() }
-        }.onAppear { service.refresh() }
+            if options.showQuickActions { Button("Enable / Refresh calendar") { service.requestAccess() } }
+        }.frame(maxWidth: .infinity, alignment: options.alignment.alignment).onAppear { service.refresh() }
     }
 }
 struct ClipboardModuleView: View {
@@ -152,36 +187,45 @@ struct ClipboardModuleView: View {
     let enabled: Bool
     @State private var search = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !enabled { Text("Off. Enable text history in Privacy settings.").font(style.font(scale: 0.85)) }
+        let options = style.resolvedContent
+        VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
+            if !enabled { if options.showStatus { Text("Off. Enable text history in Privacy settings.").font(style.font(scale: 0.85)) } }
             else {
-                TextField("Search clipboard", text: $search)
-                ForEach(service.entries.filter { search.isEmpty || $0.text.localizedCaseInsensitiveContains(search) }) { entry in
-                    HStack {
+                if options.showSearch { TextField("Search clipboard", text: $search) }
+                ForEach(Array(service.entries.filter { search.isEmpty || $0.text.localizedCaseInsensitiveContains(search) }.prefix(options.maxItems))) { entry in
+                    HStack(spacing: options.spacing) {
                         Text(entry.text).font(style.font(scale: 0.85)).lineLimit(2)
                         Spacer()
-                        Button("Copy") { service.copy(entry) }
-                        Button { service.entries.removeAll { $0.id == entry.id } } label: { Image(systemName: "xmark") }.accessibilityLabel("Remove clipboard item")
+                        if options.showControls {
+                            Button("Copy") { service.copy(entry) }
+                            Button { service.entries.removeAll { $0.id == entry.id } } label: { Image(systemName: "xmark") }.accessibilityLabel("Remove clipboard item")
+                        }
                     }
                 }
-                Button("Clear history") { service.reset() }
-                Text("Text only · 50 items · memory only · copying does not paste into another app").font(style.font(scale: 0.75)).foregroundStyle(.secondary)
+                if options.showQuickActions { Button("Clear history") { service.reset() } }
+                if options.showFooter { Text("Text only · 50 items · memory only · copying does not paste into another app").font(style.font(scale: 0.75)).foregroundStyle(.secondary) }
             }
-        }
+        }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
     }
 }
 struct SystemModuleView: View {
     @Environment(\.widgetStyle) private var style
     @ObservedObject var service: SystemService
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let battery = service.battery {
-                Label("\(battery)% · \(service.charging ? "Charging" : service.onBattery ? "Battery" : "AC power")", systemImage: service.charging ? "battery.100.bolt" : "battery.100")
-                ProgressView(value: Double(battery), total: 100)
+        let options = style.resolvedContent
+        VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
+            if options.systemBattery, let battery = service.battery {
+                HStack(spacing: max(4, options.spacing * 0.55)) {
+                    Image(systemName: service.charging ? "battery.100.bolt" : "battery.100")
+                        .font(.system(size: options.iconSize)).foregroundStyle(style.accentColor.color)
+                    Text("\(battery)% · \(service.charging ? "Charging" : service.onBattery ? "Battery" : "AC power")")
+                }
+                if options.showProgress { ProgressView(value: Double(battery), total: 100) }
             }
-            Text(service.memory); Text(service.storage)
-            Text(service.uptime + (service.lowPower ? " · Low Power Mode" : ""))
-        }.font(style.font(scale: 0.85))
+            if options.systemMemory { Text(service.memory) }
+            if options.systemStorage { Text(service.storage) }
+            if options.systemUptime { Text(service.uptime + (service.lowPower ? " · Low Power Mode" : "")) }
+        }.font(style.font(scale: 0.85)).frame(maxWidth: .infinity, alignment: options.alignment.alignment)
     }
 }
 struct LauncherModuleView: View {
@@ -190,31 +234,40 @@ struct LauncherModuleView: View {
     @ObservedObject var workspace: WorkspaceStore
     @State private var query = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TextField("Search apps and commands", text: $query)
-            ForEach([5, 15, 25], id: \.self) { minutes in
-                if CommandSearch.matches(query, in: "Start timer \(minutes)") {
-                    Button("Start \(minutes)-minute timer") { store.startTimer(minutes: minutes) }
+        let options = style.resolvedContent
+        VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
+            if options.showSearch { TextField("Search apps and commands", text: $query) }
+            if options.launcherTimers {
+                ForEach([5, 15, 25], id: \.self) { minutes in
+                    if CommandSearch.matches(query, in: "Start timer \(minutes)") {
+                        Button("Start \(minutes)-minute timer") { store.startTimer(minutes: minutes) }
+                    }
                 }
             }
-            ForEach(workspace.runningApps.filter { CommandSearch.matches(query, in: $0.localizedName ?? "") }, id: \.processIdentifier) { app in
-                Button { app.activate(options: .activateIgnoringOtherApps) } label: {
-                    Label(app.localizedName ?? "Application", systemImage: "app")
+            if options.launcherRunningApps {
+                ForEach(Array(workspace.runningApps.filter { CommandSearch.matches(query, in: $0.localizedName ?? "") }.prefix(options.maxItems)), id: \.processIdentifier) { app in
+                    Button { app.activate(options: .activateIgnoringOtherApps) } label: {
+                        Label(app.localizedName ?? "Application", systemImage: "app")
+                    }
                 }
             }
-            ForEach(workspace.plugins) { plugin in
-                ForEach(plugin.commands.filter { CommandSearch.matches(query, in: $0.title) }) { command in
-                    Button(command.title) { workspace.run(command) }
+            if options.launcherPlugins {
+                ForEach(workspace.plugins) { plugin in
+                    ForEach(plugin.commands.filter { CommandSearch.matches(query, in: $0.title) }.prefix(options.maxItems)) { command in
+                        Button(command.title) { workspace.run(command) }
+                    }
                 }
             }
-            HStack {
-                Button("Open application…") {
-                    let panel = NSOpenPanel(); panel.directoryURL = URL(fileURLWithPath: "/Applications"); panel.allowedContentTypes = [.application]
-                    if panel.runModal() == .OK, let url = panel.url { NSWorkspace.shared.open(url) }
+            if options.showQuickActions {
+                HStack(spacing: options.spacing) {
+                    Button("Open application…") {
+                        let panel = NSOpenPanel(); panel.directoryURL = URL(fileURLWithPath: "/Applications"); panel.allowedContentTypes = [.application]
+                        if panel.runModal() == .OK, let url = panel.url { NSWorkspace.shared.open(url) }
+                    }
+                    Button("Downloads") { NSWorkspace.shared.open(FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]) }
                 }
-                Button("Downloads") { NSWorkspace.shared.open(FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]) }
             }
-        }.onAppear { workspace.refreshApps() }
+        }.frame(maxWidth: .infinity, alignment: options.alignment.alignment).onAppear { workspace.refreshApps() }
     }
 }
 

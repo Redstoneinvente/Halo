@@ -1017,60 +1017,85 @@ struct BuiltinOrIntegrationWidget: View {
         }
     }
     private var timer: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                if style.showTitle { Label("Focus", systemImage: "timer").font(style.font()) }
+        let options = style.resolvedContent
+        return VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
+            HStack(spacing: options.spacing) {
+                if style.showTitle {
+                    HStack(spacing: max(4, options.spacing * 0.55)) {
+                        Image(systemName: "timer").font(.system(size: options.iconSize)).foregroundStyle(style.accentColor.color)
+                        Text("Focus").font(style.font())
+                    }
+                }
                 Spacer()
                 if let deadline = store.deadline { Text(deadline, style: .timer).monospacedDigit() }
-                else if store.pausedSeconds > 0 { Text("Paused · \(Int(store.pausedSeconds))s").font(style.font(scale: 0.85)) }
+                else if options.showSecondaryText, store.pausedSeconds > 0 { Text("Paused · \(Int(store.pausedSeconds))s").font(style.font(scale: 0.85)) }
                 else if store.finished { Text("Session complete").foregroundStyle(.green) }
-                else { Text("Make room for deep work").font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
+                else if options.showSecondaryText { Text("Make room for deep work").font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
             }
-            HStack {
-                if store.deadline != nil || store.pausedSeconds > 0 {
-                    Button(store.deadline == nil ? "Resume" : "Pause") { store.pauseResume() }
-                    Button("Reset") { store.resetTimer() }
-                } else {
-                    ForEach([5, 15, 25], id: \.self) { minutes in Button("\(minutes) min") { store.startTimer(minutes: minutes) } }
-                }
-            }.buttonStyle(.bordered)
-        }
+            if options.showControls {
+                HStack(spacing: options.spacing) {
+                    if store.deadline != nil || store.pausedSeconds > 0 {
+                        Button(store.deadline == nil ? "Resume" : "Pause") { store.pauseResume() }
+                        Button("Reset") { store.resetTimer() }
+                    } else {
+                        ForEach([options.timerPresetA, options.timerPresetB, options.timerPresetC], id: \.self) { minutes in
+                            Button("\(minutes) min") { store.startTimer(minutes: minutes) }
+                        }
+                    }
+                }.buttonStyle(.bordered)
+            }
+        }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
     }
     private var shelf: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                if style.showTitle { Label("File shelf", systemImage: "tray").font(style.font()) }
+        let options = style.resolvedContent
+        return VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
+            HStack(spacing: options.spacing) {
+                if style.showTitle {
+                    HStack(spacing: max(4, options.spacing * 0.55)) {
+                        Image(systemName: "tray").font(.system(size: options.iconSize)).foregroundStyle(style.accentColor.color)
+                        Text("File shelf").font(style.font())
+                    }
+                }
                 Spacer()
-                Button { store.chooseFiles() } label: { Image(systemName: "plus") }.accessibilityLabel("Add files")
+                if options.showQuickActions { Button { store.chooseFiles() } label: { Image(systemName: "plus") }.accessibilityLabel("Add files") }
             }
-            if store.files.isEmpty { Text("Drop files here. Originals stay untouched.").font(style.font(scale: 0.85)).foregroundStyle(.secondary).padding(.vertical, 8) }
-            ForEach(store.files, id: \.self) { url in
-                HStack {
-                    ShelfFileInfo(url: url)
+            if store.files.isEmpty, options.showSecondaryText {
+                Text("Drop files here. Originals stay untouched.").font(style.font(scale: 0.85)).foregroundStyle(.secondary).padding(.vertical, 8)
+            }
+            ForEach(Array(store.files.prefix(options.maxItems)), id: \.self) { url in
+                HStack(spacing: options.spacing) {
+                    ShelfFileInfo(url: url, iconSize: options.shelfIconSize, showDetail: options.shelfShowDetails && options.showSecondaryText)
                     Spacer()
-                    Button { store.toggleFilePin(url) } label: { Image(systemName: store.pinnedFiles.contains(url) ? "pin.fill" : "pin") }.help("Keep this file on the shelf")
-                    Button { store.shelfPreview.show(url) } label: { Image(systemName: "eye") }.help("Quick Look")
-                    Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: { Image(systemName: "folder") }.help("Reveal in Finder")
-                    Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.forward.app") }.help("Open file")
-                    ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
-                    Button { store.removeFile(url) } label: { Image(systemName: "xmark") }.help("Remove reference from shelf")
+                    if options.shelfShowActions && options.showControls {
+                        Button { store.toggleFilePin(url) } label: { Image(systemName: store.pinnedFiles.contains(url) ? "pin.fill" : "pin") }.help("Keep this file on the shelf")
+                        Button { store.shelfPreview.show(url) } label: { Image(systemName: "eye") }.help("Quick Look")
+                        Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: { Image(systemName: "folder") }.help("Reveal in Finder")
+                        Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.forward.app") }.help("Open file")
+                        ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
+                        Button { store.removeFile(url) } label: { Image(systemName: "xmark") }.help("Remove reference from shelf")
+                    }
                 }.onDrag { NSItemProvider(object: url as NSURL) }
             }
-        }
+            if options.showFooter && store.files.count > options.maxItems {
+                Text("+\(store.files.count - options.maxItems) more items").font(style.font(scale: 0.75)).foregroundStyle(.secondary)
+            }
+        }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
     }
 }
 
 struct ShelfFileInfo: View {
     let url: URL
+    var iconSize = 24.0
+    var showDetail = true
     @Environment(\.widgetStyle) private var style
     @State private var icon: NSImage?
     @State private var detail = ""
     var body: some View {
-        HStack {
-            if let icon { Image(nsImage: icon).resizable().frame(width: 24, height: 24) }
-            VStack(alignment: .leading) {
+        HStack(spacing: style.resolvedContent.spacing) {
+            if let icon { Image(nsImage: icon).resizable().frame(width: iconSize, height: iconSize) }
+            VStack(alignment: style.resolvedContent.alignment.horizontal) {
                 Text(url.lastPathComponent).font(style.font(scale: 0.85)).lineLimit(1)
-                Text(detail).font(style.font(scale: 0.75)).foregroundStyle(.secondary).lineLimit(1)
+                if showDetail { Text(detail).font(style.font(scale: 0.75)).foregroundStyle(.secondary).lineLimit(1) }
             }
         }.onAppear {
             guard icon == nil else { return }

@@ -19,6 +19,125 @@ struct ClockOptions: Codable, Equatable {
     var showDate = true
     var timeZone = ""
 }
+
+enum WidgetContentAlignment: String, Codable, CaseIterable, Identifiable {
+    case leading, center, trailing
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+enum WidgetControlSize: String, Codable, CaseIterable, Identifiable {
+    case mini, small, regular, large
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+enum WidgetClockDateStyle: String, Codable, CaseIterable, Identifiable {
+    case weekdayMonthDay, monthDay, full, numeric
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .weekdayMonthDay: return "Mon, Sep 28"
+        case .monthDay: return "Sep 28"
+        case .full: return "Monday, September 28"
+        case .numeric: return "09/28/2026"
+        }
+    }
+}
+
+/// Content controls for the opened-notch widget dashboard. One instance belongs to one ModuleID,
+/// so the editor can expose only the controls relevant to that widget while profiles keep them all.
+struct WidgetContentOptions: Codable, Equatable {
+    var alignment: WidgetContentAlignment = .leading
+    var spacing = 10.0
+    var controlSize: WidgetControlSize = .regular
+    var iconSize = 16.0
+    var maxItems = 6
+    var showSecondaryText = true
+    var showControls = true
+    var showProgress = true
+    var showStatus = true
+    var showSearch = true
+    var showFooter = true
+    var showQuickActions = true
+
+    var clockDateStyle: WidgetClockDateStyle = .weekdayMonthDay
+
+    var timerPresetA = 5
+    var timerPresetB = 15
+    var timerPresetC = 25
+
+    var shelfShowDetails = true
+    var shelfShowActions = true
+    var shelfIconSize = 24.0
+
+    var mediaShowSource = true
+    var mediaShowArtist = true
+    var mediaTitleLines = 2
+
+    var calendarShowTimes = true
+    var calendarShowJoin = true
+
+    var systemBattery = true
+    var systemMemory = true
+    var systemStorage = true
+    var systemUptime = true
+
+    var launcherTimers = true
+    var launcherRunningApps = true
+    var launcherPlugins = true
+
+    var activitiesShowDetail = true
+    var notesHeight = 90.0
+    var captureShowHelp = true
+    var captureTextLines = 12
+    var stopwatchScale = 2.0
+
+    func validated() throws -> WidgetContentOptions {
+        guard [spacing, iconSize, shelfIconSize, notesHeight, stopwatchScale].allSatisfy(\.isFinite) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        var value = self
+        value.spacing = min(32, max(0, spacing))
+        value.iconSize = min(48, max(8, iconSize))
+        value.maxItems = min(30, max(1, maxItems))
+        value.timerPresetA = min(180, max(1, timerPresetA))
+        value.timerPresetB = min(180, max(1, timerPresetB))
+        value.timerPresetC = min(180, max(1, timerPresetC))
+        value.shelfIconSize = min(64, max(14, shelfIconSize))
+        value.mediaTitleLines = min(4, max(1, mediaTitleLines))
+        value.notesHeight = min(420, max(60, notesHeight))
+        value.captureTextLines = min(40, max(2, captureTextLines))
+        value.stopwatchScale = min(4, max(0.8, stopwatchScale))
+        return value
+    }
+}
+
+struct WidgetChromeOptions: Codable, Equatable {
+    var borderColor = WidgetColor.white
+    var borderOpacity = 0.0
+    var borderWidth = 0.0
+    var shadowOpacity = 0.0
+    var shadowRadius = 8.0
+    var shadowY = 2.0
+    var contentOpacity = 1.0
+
+    func validated() throws -> WidgetChromeOptions {
+        guard [borderOpacity, borderWidth, shadowOpacity, shadowRadius, shadowY, contentOpacity].allSatisfy(\.isFinite) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        var value = self
+        value.borderColor = try borderColor.validated()
+        value.borderOpacity = min(1, max(0, borderOpacity))
+        value.borderWidth = min(6, max(0, borderWidth))
+        value.shadowOpacity = min(0.8, max(0, shadowOpacity))
+        value.shadowRadius = min(40, max(0, shadowRadius))
+        value.shadowY = min(30, max(-30, shadowY))
+        value.contentOpacity = min(1, max(0.15, contentOpacity))
+        return value
+    }
+}
+
 struct WidgetStyle: Codable, Equatable {
     var fontFamily: WidgetFontFamily = .system
     var customFont = "Helvetica Neue"
@@ -34,6 +153,10 @@ struct WidgetStyle: Codable, Equatable {
     var minimumHeight = 0.0
     var showTitle = true
     var clock = ClockOptions()
+    var content: WidgetContentOptions?
+    var chrome: WidgetChromeOptions?
+    var resolvedContent: WidgetContentOptions { content ?? WidgetContentOptions() }
+    var resolvedChrome: WidgetChromeOptions { chrome ?? WidgetChromeOptions() }
     func validated() throws -> WidgetStyle {
         guard [fontSize, backgroundOpacity, padding, cornerRadius, width, minimumHeight].allSatisfy(\.isFinite),
               clock.timeZone.isEmpty || TimeZone(identifier: clock.timeZone) != nil else { throw CocoaError(.fileReadCorruptFile) }
@@ -44,107 +167,14 @@ struct WidgetStyle: Codable, Equatable {
         v.minimumHeight = min(400, max(0, minimumHeight))
         v.textColor = try textColor.validated(); v.accentColor = try accentColor.validated(); v.backgroundColor = try backgroundColor.validated()
         v.customFont = String(customFont.prefix(120))
+        if content != nil { v.content = try resolvedContent.validated() }
+        if chrome != nil { v.chrome = try resolvedChrome.validated() }
         return v
     }
 }
 enum ClosedNotchItem: String, Codable, CaseIterable, Identifiable {
     case none, clock, date, timer, battery, media, visualizer, mirror, files, activity
     var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .none: return "None"
-        case .clock: return "Clock"
-        case .date: return "Date"
-        case .timer: return "Timer"
-        case .battery: return "Battery"
-        case .media: return "Media text"
-        case .visualizer: return "Visualizer"
-        case .mirror: return "Mirror"
-        case .files: return "File count"
-        case .activity: return "Live activity"
-        }
-    }
-}
-
-enum ClosedNotchWidgetAlignment: String, Codable, CaseIterable, Identifiable {
-    case automatic, leading, center, trailing
-    var id: String { rawValue }
-    var title: String { rawValue.capitalized }
-}
-
-enum ClosedNotchDateStyle: String, Codable, CaseIterable, Identifiable {
-    case monthDay, numeric, weekday, weekdayMonthDay
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .monthDay: return "Sep 28"
-        case .numeric: return "09/28"
-        case .weekday: return "Monday"
-        case .weekdayMonthDay: return "Mon, Sep 28"
-        }
-    }
-    var measurementTemplate: String {
-        switch self {
-        case .monthDay: return "Sep 28"
-        case .numeric: return "09/28"
-        case .weekday: return "Wednesday"
-        case .weekdayMonthDay: return "Wed, Sep 28"
-        }
-    }
-}
-
-/// Styling for one Closed Notch content type. The dictionary containing these values is optional,
-/// so profiles created before per-widget customization continue to use Halo's legacy/global look.
-struct ClosedNotchWidgetStyle: Codable, Equatable {
-    var fontFamily: WidgetFontFamily = .system
-    var customFont = "Helvetica Neue"
-    var weight: WidgetFontWeight = .medium
-    var fontSize = 12.0
-    var textColor = WidgetColor.white
-    var accentColor = WidgetColor.white
-    var backgroundColor = WidgetColor(red: 0.10, green: 0.10, blue: 0.12)
-    var backgroundOpacity = 0.0
-    var padding = 0.0
-    var cornerRadius = 8.0
-    var opacity = 1.0
-    var iconSize = 14.0
-    var spacing = 5.0
-    /// 0 means natural/content-fit width. A positive value reserves exactly this much widget space.
-    var width = 0.0
-    var horizontalOffset = 0.0
-    var verticalOffset = 0.0
-    var alignment: ClosedNotchWidgetAlignment = .automatic
-    var showIcon = true
-    var showText = true
-    var clock = ClockOptions()
-    var dateStyle: ClosedNotchDateStyle = .monthDay
-    var activityShowDetail = true
-    var activityShowProgress = true
-
-    func validated() throws -> ClosedNotchWidgetStyle {
-        let numbers = [fontSize, backgroundOpacity, padding, cornerRadius, opacity, iconSize,
-                       spacing, width, horizontalOffset, verticalOffset]
-        guard numbers.allSatisfy(\.isFinite),
-              clock.timeZone.isEmpty || TimeZone(identifier: clock.timeZone) != nil else {
-            throw CocoaError(.fileReadCorruptFile)
-        }
-        var value = self
-        value.fontSize = min(32, max(7, fontSize))
-        value.backgroundOpacity = min(1, max(0, backgroundOpacity))
-        value.padding = min(24, max(0, padding))
-        value.cornerRadius = min(32, max(0, cornerRadius))
-        value.opacity = min(1, max(0.1, opacity))
-        value.iconSize = min(36, max(7, iconSize))
-        value.spacing = min(24, max(0, spacing))
-        value.width = width <= 0 ? 0 : min(420, max(24, width))
-        value.horizontalOffset = min(160, max(-160, horizontalOffset))
-        value.verticalOffset = min(80, max(-80, verticalOffset))
-        value.textColor = try textColor.validated()
-        value.accentColor = try accentColor.validated()
-        value.backgroundColor = try backgroundColor.validated()
-        value.customFont = String(customFont.prefix(120))
-        return value
-    }
 }
 enum PlaybackAnimation: String, Codable, CaseIterable { case bars, wave, pulse, waveform, ribbon, dots, rings, orbit, spectrum }
 struct ClosedExpansionOptions: Codable, Equatable {
@@ -339,28 +369,12 @@ struct ClosedNotchOptions: Codable, Equatable {
     var rightDecoration: SideDecoration?
     var visualizer: VisualizerOptions?
     var expansion: ClosedExpansionOptions?
-    /// Optional per-item styles. Missing entries intentionally fall back to the legacy/global style.
-    var widgetStyles: [String: ClosedNotchWidgetStyle]?
     var left: ClosedNotchItem = .clock
     var right: ClosedNotchItem = .visualizer
     var fontSize = 12.0
     var color = WidgetColor.white
     var animation: PlaybackAnimation = .bars
     var animate = true
-
-    func widgetStyle(for item: ClosedNotchItem) -> ClosedNotchWidgetStyle? {
-        widgetStyles?[item.rawValue]
-    }
-    mutating func setWidgetStyle(_ style: ClosedNotchWidgetStyle, for item: ClosedNotchItem) {
-        guard item != .none else { return }
-        if widgetStyles == nil { widgetStyles = [:] }
-        widgetStyles?[item.rawValue] = style
-    }
-    mutating func resetWidgetStyle(for item: ClosedNotchItem) {
-        widgetStyles?.removeValue(forKey: item.rawValue)
-        if widgetStyles?.isEmpty == true { widgetStyles = nil }
-    }
-
     func validated() throws -> ClosedNotchOptions {
         guard fontSize.isFinite else { throw CocoaError(.fileReadCorruptFile) }
         guard (horizontalPadding ?? 8).isFinite, (verticalPadding ?? 2).isFinite, (sideMargin ?? 4).isFinite, (outerMargin ?? 4).isFinite else { throw CocoaError(.fileReadCorruptFile) }
@@ -377,14 +391,6 @@ struct ClosedNotchOptions: Codable, Equatable {
         v.artworkOptions = try artworkOptions?.validated()
         v.reactiveBackground = try reactiveBackground?.validated()
         v.powerReaction = try powerReaction?.validated()
-        if let widgetStyles {
-            var cleaned: [String: ClosedNotchWidgetStyle] = [:]
-            for (key, style) in widgetStyles.prefix(24) {
-                guard let item = ClosedNotchItem(rawValue: key), item != .none else { continue }
-                cleaned[key] = try style.validated()
-            }
-            v.widgetStyles = cleaned.isEmpty ? nil : cleaned
-        }
         if var expansion {
             guard expansion.width.isFinite else { throw CocoaError(.fileReadCorruptFile) }
             expansion.width = min(640, max(120, expansion.width)); v.expansion = expansion
