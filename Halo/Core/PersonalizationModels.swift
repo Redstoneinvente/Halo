@@ -641,7 +641,6 @@ struct ContextRetroGameSettings: View {
     @AppStorage("HaloContextRetroPalette") private var paletteRaw = RetroGamePalette.phosphor.rawValue
     @AppStorage("HaloContextRetroScanlines") private var scanlines = true
     @AppStorage("HaloContextRetroShowInactivePixels") private var showInactivePixels = false
-    @AppStorage("HaloContextRetroCompanionMascot") private var showCompanionMascot = true
 
     var body: some View {
         Section("Retro Game Context Interface") {
@@ -654,7 +653,6 @@ struct ContextRetroGameSettings: View {
             }
             Toggle("Show inactive pixel cells", isOn: $showInactivePixels)
             Toggle("CRT scanlines", isOn: $scanlines)
-            Toggle("Show EI companion mascot", isOn: $showCompanionMascot)
             Text(showInactivePixels ? "Unlit cells remain faintly visible, like a physical dot-matrix/LCD panel." : "Only illuminated game pixels are visible.")
                 .font(.caption).foregroundStyle(.secondary)
             Button("Open / close Retro Game CI") {
@@ -730,7 +728,6 @@ private enum RetroSnakeDirection {
 
 struct RetroGameContextView: View {
     @ObservedObject var surfaceState: SurfaceState
-    @ObservedObject private var eiSettings = EISettingsStore.shared
     @AppStorage("HaloContextRetroUseFullNotchArea") private var usesFullNotchArea = false
     @AppStorage("HaloContextRetroKeepClosedNotchContents") private var keepsClosedNotchContents = false
     @AppStorage("HaloContextRetroPriority") private var priority = 80.0
@@ -738,7 +735,6 @@ struct RetroGameContextView: View {
     @AppStorage("HaloContextRetroPalette") private var paletteRaw = RetroGamePalette.phosphor.rawValue
     @AppStorage("HaloContextRetroScanlines") private var scanlines = true
     @AppStorage("HaloContextRetroShowInactivePixels") private var showInactivePixels = false
-    @AppStorage("HaloContextRetroCompanionMascot") private var showCompanionMascot = true
 
     @State private var snake = [RetroPixelCell(x: 8, y: 6), RetroPixelCell(x: 7, y: 6), RetroPixelCell(x: 6, y: 6)]
     @State private var snakeDirection: RetroSnakeDirection = .right
@@ -867,27 +863,6 @@ struct RetroGameContextView: View {
                     .foregroundStyle(palette.foreground.opacity(0.72))
                     .padding(8)
                     Spacer()
-                }
-                if showCompanionMascot {
-                    HaloCompanionSprite(
-                        kind: eiSettings.settings.petKind,
-                        style: .pixel,
-                        size: 48,
-                        primary: palette.foreground,
-                        accent: eiSettings.settings.petAccentColor.color,
-                        motion: game == .pong ? .look : .walk,
-                        facingRight: false,
-                        displayPreset: .clean,
-                        pixelGrid: false,
-                        pixelGlow: false,
-                        scanlines: false,
-                        ghosting: false,
-                        brightnessVariation: false
-                    )
-                    .frame(width: 50, height: 38)
-                    .opacity(0.70)
-                    .padding(8)
-                    .allowsHitTesting(false)
                 }
             }
         }

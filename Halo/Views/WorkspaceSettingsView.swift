@@ -613,6 +613,7 @@ private struct DropContextInterfaceCard: View {
     let enabled: Bool
     let action: () -> Void
     @AppStorage("HaloContextDropPriority") private var priority = 100.0
+    @ObservedObject private var zones = HaloDropZoneSettingsStore.shared
     @State private var hovered = false
 
     var body: some View {
@@ -648,11 +649,11 @@ private struct DropContextInterfaceCard: View {
                         .foregroundStyle(enabled ? Color.green : Color.secondary)
                 }
 
-                Text("Turns Halo into a focused drop target while a Finder item is hovering over the notch.")
+                Text("A customizable action board that appears when you start dragging a real file or folder, with up to 8 live drop zones.")
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.leading)
 
                 HStack {
-                    Label("File Shelf", systemImage: "tray")
+                    Label("\(zones.configuration.zones.count) zone\(zones.configuration.zones.count == 1 ? "" : "s")", systemImage: "square.grid.2x2")
                         .font(.caption2).foregroundStyle(.secondary)
                     Text("Priority \(Int(priority))")
                         .font(.caption2).foregroundStyle(.secondary)
@@ -683,24 +684,27 @@ private struct ContextDropSettings: View {
     var body: some View {
         Section("Drag & Drop Context Interface") {
             Toggle("Enable Drop CI", isOn: $enabled)
-            Text("When a file or folder is dragged over Halo, the opened notch becomes a dedicated drop target. Release to add a reference to File Shelf; Halo never moves or deletes the original.")
+            Text("Start dragging a real file or folder anywhere on your Mac and Halo can summon Drop CI immediately. The cursor does not need to reach the notch first.")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Drop zones") {
+            HaloDropZoneSettingsEditor()
         }
         Section("CI priority") {
             Slider(value: $priority, in: 0...100, step: 1) { Text("Drop CI priority") }
-            Text("Drop CI defaults to the highest priority because the drag is an immediate user action. You can lower it if another Context Interface should remain visible during a drag.")
+            Text("Drop CI defaults to the highest priority because a drag is an immediate user action. Lower it if another Context Interface should keep ownership during file drags.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         Section("CI surface") {
             Toggle("Use full notch area", isOn: $usesFullNotchArea)
             Toggle("Keep closed-notch contents visible", isOn: $keepsClosedNotchContents)
-            Text("Full area gives the drop target the clearest visual feedback. Keeping closed contents visible reserves the top strip while you drag.")
+            Text("The Drop board lives inside the actual Drop CI surface. Halo automatically requests more vertical space when your chosen zone layout needs it.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        Section("What happens after dropping") {
-            Label("Files and folders are added to File Shelf as references.", systemImage: "tray.full")
-            Label("Originals remain in their current location.", systemImage: "lock.shield")
-            Label("Use Quick Look, pin, reveal, open or share from the Shelf widget.", systemImage: "eye")
+        Section("Drop behaviour") {
+            Label("Only genuine file/folder drag payloads can summon Drop CI.", systemImage: "checkmark.shield")
+            Label("Each zone decides what happens when you release over it.", systemImage: "square.grid.2x2")
+            Label("Destructive actions are never assigned automatically.", systemImage: "lock.shield")
         }
     }
 }

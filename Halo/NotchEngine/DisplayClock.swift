@@ -205,6 +205,7 @@ struct HaloDropZoneConfiguration: Codable, Equatable {
     var headerSubtitle = "Choose what should happen to the dragged item"
 
     mutating func normalize() {
+        if zones.isEmpty { zones = [.preset(.shelf, index: 0)] }
         if zones.count > 8 { zones = Array(zones.prefix(8)) }
         boardPadding = min(28, max(0, boardPadding))
         zoneSpacing = min(24, max(2, zoneSpacing))
@@ -256,7 +257,7 @@ final class HaloDropZoneSettingsStore: ObservableObject {
     }
 
     func removeZone(at index: Int) {
-        guard configuration.zones.indices.contains(index) else { return }
+        guard configuration.zones.count > 1, configuration.zones.indices.contains(index) else { return }
         var next = configuration
         next.zones.remove(at: index)
         configuration = next
@@ -608,73 +609,65 @@ private struct HaloDropZoneBoardView: View {
         GeometryReader { proxy in
             let configuration = settings.configuration
             let frames = HaloDropZoneLayoutResolver.frames(size: proxy.size, configuration: configuration)
-            let compactMode = configuration.zones.count > 4 || proxy.size.height < 250
+            let compact = configuration.zones.count > 4 || proxy.size.height < 275
 
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color.black.opacity(configuration.backgroundOpacity))
-                    .overlay(
-                        LinearGradient(
-                            colors: [Color.accentColor.opacity(0.18), Color.clear, Color.black.opacity(0.20)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .stroke(Color.white.opacity(0.11), lineWidth: 1)
-                    )
-                    .padding(3)
+                Color.black.opacity(configuration.backgroundOpacity)
+                LinearGradient(
+                    colors: [Color.white.opacity(0.045), Color.accentColor.opacity(0.055), Color.clear],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .allowsHitTesting(false)
 
                 HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(configuration.headerTitle.isEmpty ? "Drop into Halo" : configuration.headerTitle)
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(Color.white.opacity(0.075))
+                        Image(systemName: "arrow.down.doc.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .frame(width: 32, height: 32)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(configuration.headerTitle.isEmpty ? "Drop" : configuration.headerTitle)
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
                         Text(model.result ?? (configuration.headerSubtitle.isEmpty ? "Choose an action" : configuration.headerSubtitle))
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(model.result == nil ? Color.secondary : Color.green)
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(model.result == nil ? Color.white.opacity(0.48) : Color.green)
                             .lineLimit(1)
                     }
-                    Spacer()
-                    Label("\(model.itemCount)", systemImage: model.itemCount == 1 ? "doc.fill" : "doc.on.doc.fill")
-                        .font(.caption2.bold())
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.white.opacity(0.08), in: Capsule())
+                    Spacer(minLength: 8)
+                    HStack(spacing: 5) {
+                        Image(systemName: model.itemCount == 1 ? "doc.fill" : "doc.on.doc.fill")
+                        Text("\(model.itemCount)")
+                    }
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.68))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.white.opacity(0.065), in: Capsule())
                 }
                 .padding(.horizontal, max(13, configuration.boardPadding + 3))
-                .padding(.top, 12)
+                .padding(.top, 11)
 
-                if configuration.zones.isEmpty {
-                    VStack(spacing: 7) {
-                        Image(systemName: "rectangle.stack.badge.plus").font(.title2)
-                        Text("No Drop zones configured").font(.headline)
-                        Text("Open Drop Zone Studio to add up to 8 zones.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                } else {
-                    ForEach(Array(configuration.zones.enumerated()), id: \.element.id) { index, zone in
-                        if frames.indices.contains(index) {
-                            let frame = frames[index]
-                            zoneCard(
-                                zone,
-                                active: model.hoveredZone == index,
-                                configuration: configuration,
-                                compact: compactMode
-                            )
+                ForEach(Array(configuration.zones.enumerated()), id: \.element.id) { index, zone in
+                    if frames.indices.contains(index) {
+                        let frame = frames[index]
+                        zoneCard(zone, active: model.hoveredZone == index, configuration: configuration, compact: compact)
                             .frame(width: frame.width, height: frame.height)
                             .position(x: frame.midX, y: frame.midY)
-                        }
                     }
                 }
 
-                HStack(spacing: 5) {
-                    Circle().fill(model.hoveredZone == nil ? Color.secondary : Color.green).frame(width: 5, height: 5)
-                    Text(model.hoveredZone == nil ? "Move onto a zone, then release" : "Release to run this zone")
-                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(model.hoveredZone == nil ? Color.white.opacity(0.24) : Color.green)
+                        .frame(width: 5, height: 5)
+                    Text(model.hoveredZone == nil ? "Choose a zone" : "Release to run action")
+                        .font(.system(size: 8, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.42))
                 }
                 .position(x: proxy.size.width / 2, y: max(12, proxy.size.height - 10))
             }
@@ -688,44 +681,87 @@ private struct HaloDropZoneBoardView: View {
         configuration: HaloDropZoneConfiguration,
         compact: Bool
     ) -> some View {
-        VStack(spacing: compact ? 3 : 6) {
-            if configuration.showIcons {
-                Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
-                    .font(.system(size: compact ? 17 : (active ? 24 : 21), weight: .semibold))
-                    .foregroundStyle(zone.color.color)
+        GeometryReader { proxy in
+            let veryCompact = compact || proxy.size.height < 78 || proxy.size.width < 105
+            VStack(alignment: .leading, spacing: veryCompact ? 4 : 7) {
+                HStack(alignment: .center, spacing: 8) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: veryCompact ? 8 : 10, style: .continuous)
+                            .fill(zone.color.color.opacity(active ? 0.22 : 0.11))
+                        Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
+                            .font(.system(size: veryCompact ? 13 : 16, weight: .semibold))
+                            .foregroundStyle(active ? Color.white : zone.color.color)
+                    }
+                    .frame(width: veryCompact ? 28 : 34, height: veryCompact ? 28 : 34)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(zone.title.isEmpty ? zone.action.rawValue : zone.title)
+                            .font(.system(size: veryCompact ? 9.5 : 11.5, weight: .semibold, design: .rounded))
+                            .lineLimit(1)
+                        if configuration.showSubtitles && !veryCompact && !zone.subtitle.isEmpty {
+                            Text(zone.subtitle)
+                                .font(.system(size: 8.3, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.43))
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    if active {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: veryCompact ? 12 : 15, weight: .semibold))
+                            .foregroundStyle(zone.color.color)
+                            .transition(.scale.combined(with: .opacity))
+                    } else if zone.action.isDestructive {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.orange.opacity(0.82))
+                    }
+                }
+
+                if !veryCompact {
+                    Spacer(minLength: 0)
+                    HStack(spacing: 6) {
+                        if configuration.showActionBadges {
+                            Label(zone.accepts.rawValue, systemImage: zone.accepts.symbol)
+                                .font(.system(size: 7.5, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.45))
+                        }
+                        Spacer(minLength: 0)
+                        Text(active ? "RELEASE" : zone.action.rawValue.uppercased())
+                            .font(.system(size: 7.2, weight: .bold, design: .rounded))
+                            .foregroundStyle(active ? zone.color.color : Color.white.opacity(0.28))
+                            .lineLimit(1)
+                    }
+                }
             }
-            Text(zone.title.isEmpty ? zone.action.rawValue : zone.title)
-                .font(.system(size: compact ? 10 : 12, weight: .bold, design: .rounded))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-            if configuration.showSubtitles && !compact && !zone.subtitle.isEmpty {
-                Text(zone.subtitle)
-                    .font(.system(size: 8, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
+            .padding(veryCompact ? 7 : 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous)
+                        .fill(Color.white.opacity(active ? 0.085 : 0.045))
+                    LinearGradient(
+                        colors: [zone.color.color.opacity(active ? 0.17 : 0.045), Color.clear],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous))
+                }
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous)
+                    .stroke(active ? zone.color.color.opacity(configuration.highlightStrength) : Color.white.opacity(0.075), lineWidth: active ? 1.6 : 1)
+            )
+            .overlay(alignment: .top) {
+                Capsule()
+                    .fill(zone.color.color.opacity(active ? 0.95 : 0.42))
+                    .frame(height: active ? 2.5 : 1.5)
+                    .padding(.horizontal, max(10, configuration.cornerRadius * 0.6))
             }
-            if configuration.showActionBadges && !compact {
-                Label(zone.accepts.rawValue, systemImage: zone.accepts.symbol)
-                    .font(.system(size: 7, weight: .semibold))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Color.white.opacity(0.07), in: Capsule())
-            }
+            .shadow(color: zone.color.color.opacity(active ? 0.18 : 0), radius: active ? 14 : 0, y: 4)
+            .scaleEffect(active ? 1.012 : 1)
+            .animation(.easeOut(duration: 0.12), value: active)
         }
-        .padding(compact ? 5 : 7)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            zone.color.color.opacity(active ? 0.17 + configuration.highlightStrength * 0.18 : 0.065),
-            in: RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous)
-                .stroke(zone.color.color.opacity(active ? configuration.highlightStrength : 0.22), lineWidth: active ? 2 : 1)
-        )
-        .scaleEffect(active ? 1.018 : 1)
-        .shadow(color: zone.color.color.opacity(active ? 0.22 : 0), radius: 9)
-        .animation(.easeOut(duration: 0.10), value: active)
     }
 }
 
@@ -984,103 +1020,122 @@ final class HaloDropZoneStudioWindowController: NSObject {
 
 @MainActor
 private struct HaloDropZoneStudioView: View {
+    var body: some View {
+        ScrollView {
+            HaloDropZoneSettingsEditor()
+                .padding(18)
+        }
+        .frame(minWidth: 700, minHeight: 600)
+    }
+}
+
+@MainActor
+struct HaloDropZoneSettingsEditor: View {
     @ObservedObject private var store = HaloDropZoneSettingsStore.shared
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Drop Zone Studio").font(.title2.bold())
-                    Text("These zones appear inside Drop CI while you drag.")
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Drop zones").font(.headline)
+                    Text("Build the action board that appears inside Drop CI.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Reset Defaults") { store.reset() }
+                Button("Reset") { store.reset() }
                 Button { store.addZone() } label: { Label("Add Zone", systemImage: "plus") }
                     .disabled(store.configuration.zones.count >= 8)
             }
-            .padding(18)
-            Divider()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    GroupBox("Drop CI preview") {
-                        HaloDropZoneStaticPreview(configuration: store.configuration)
-                            .frame(height: 260)
-                            .padding(.vertical, 6)
-                    }
+            HaloDropZoneStaticPreview(configuration: store.configuration)
+                .frame(height: previewHeight)
 
-                    GroupBox("Layout") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Picker("Zone layout", selection: configurationBinding(\.layout)) {
-                                ForEach(HaloDropZoneLayout.allCases) {
-                                    Label($0.rawValue, systemImage: $0.symbol).tag($0)
-                                }
-                            }
-                            Picker("Number of zones", selection: zoneCountBinding) {
-                                ForEach(0...8, id: \.self) { Text("\($0)").tag($0) }
-                            }
-                            HStack {
-                                valueSlider("Padding", \.boardPadding, 0...28)
-                                valueSlider("Spacing", \.zoneSpacing, 2...24)
-                            }
-                            HStack {
-                                valueSlider("Corner radius", \.cornerRadius, 6...36)
-                                valueSlider("Background", \.backgroundOpacity, 0.45...1)
-                            }
-                            valueSlider("Hover highlight", \.highlightStrength, 0.15...1)
-                            Toggle("Show icons", isOn: configurationBinding(\.showIcons))
-                            Toggle("Show subtitles", isOn: configurationBinding(\.showSubtitles))
-                            Toggle("Show type badges", isOn: configurationBinding(\.showActionBadges))
-                            TextField("Header", text: configurationBinding(\.headerTitle))
-                            TextField("Instruction", text: configurationBinding(\.headerSubtitle))
+            GroupBox("Layout") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 14) {
+                        Picker("Zones", selection: zoneCountBinding) {
+                            ForEach(1...8, id: \.self) { Text("\($0)").tag($0) }
                         }
-                        .padding(.vertical, 4)
-                    }
-
-                    GroupBox("Zones") {
-                        VStack(spacing: 10) {
-                            if store.configuration.zones.isEmpty {
-                                Button("Add first zone") { store.addZone() }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(20)
-                            }
-                            ForEach(Array(store.configuration.zones.enumerated()), id: \.element.id) { index, _ in
-                                zoneEditor(index)
+                        Picker("Arrangement", selection: configurationBinding(\.layout)) {
+                            ForEach(HaloDropZoneLayout.allCases) {
+                                Label($0.rawValue, systemImage: $0.symbol).tag($0)
                             }
                         }
-                        .padding(.vertical, 4)
                     }
-
-                    Text("Rename and Move to Trash change the original item. Halo never assigns them by default.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        valueSlider("Padding", \.boardPadding, 0...28)
+                        valueSlider("Spacing", \.zoneSpacing, 2...24)
+                    }
+                    HStack {
+                        valueSlider("Corner radius", \.cornerRadius, 6...36)
+                        valueSlider("Background", \.backgroundOpacity, 0.45...1)
+                    }
+                    valueSlider("Hover emphasis", \.highlightStrength, 0.15...1)
+                    HStack(spacing: 18) {
+                        Toggle("Icons", isOn: configurationBinding(\.showIcons))
+                        Toggle("Subtitles", isOn: configurationBinding(\.showSubtitles))
+                        Toggle("Type badges", isOn: configurationBinding(\.showActionBadges))
+                    }
+                    TextField("Header title", text: configurationBinding(\.headerTitle))
+                    TextField("Header instruction", text: configurationBinding(\.headerSubtitle))
                 }
-                .padding(18)
+                .padding(.vertical, 4)
             }
+
+            GroupBox("Zone actions") {
+                VStack(spacing: 10) {
+                    ForEach(Array(store.configuration.zones.enumerated()), id: \.element.id) { index, _ in
+                        zoneEditor(index)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+
+            Text("Drop CI supports up to 8 zones. Rename and Move to Trash modify originals; Halo never assigns destructive actions automatically.")
+                .font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    private var previewHeight: CGFloat {
+        let count = store.configuration.zones.count
+        let rows: Int
+        switch store.configuration.layout {
+        case .vertical: rows = count
+        case .horizontal: rows = 1
+        case .twoColumns: rows = Int(ceil(Double(count) / 2.0))
+        case .threeColumns: rows = Int(ceil(Double(count) / 3.0))
+        case .fourColumns: rows = Int(ceil(Double(count) / 4.0))
+        case .spotlight: rows = count > 4 ? 2 : 1
+        case .adaptive:
+            let columns = count <= 2 ? count : count <= 4 ? 2 : count <= 6 ? 3 : 4
+            rows = Int(ceil(Double(count) / Double(max(1, columns))))
+        }
+        return min(420, max(230, 132 + CGFloat(rows) * 68))
     }
 
     private func zoneEditor(_ index: Int) -> some View {
         let zone = zoneBinding(index)
         return DisclosureGroup {
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     TextField("Zone title", text: zone.title)
                     TextField("SF Symbol", text: zone.symbol).frame(width: 180)
                 }
                 TextField("Subtitle", text: zone.subtitle)
-                Picker("Action", selection: zone.action) {
-                    ForEach(HaloDropZoneAction.allCases) {
-                        Label($0.rawValue, systemImage: $0.symbol).tag($0)
+                HStack {
+                    Picker("Action", selection: zone.action) {
+                        ForEach(HaloDropZoneAction.allCases) {
+                            Label($0.rawValue, systemImage: $0.symbol).tag($0)
+                        }
                     }
-                }
-                Picker("Accept", selection: zone.accepts) {
-                    ForEach(HaloDropZoneAcceptance.allCases) {
-                        Label($0.rawValue, systemImage: $0.symbol).tag($0)
+                    Picker("Accept", selection: zone.accepts) {
+                        ForEach(HaloDropZoneAcceptance.allCases) {
+                            Label($0.rawValue, systemImage: $0.symbol).tag($0)
+                        }
                     }
                 }
                 ColorPicker(
-                    "Zone color",
+                    "Accent color",
                     selection: Binding(
                         get: { zone.wrappedValue.color.color },
                         set: { color in
@@ -1114,22 +1169,33 @@ private struct HaloDropZoneStudioView: View {
                         .disabled(index == 0)
                     Button { store.moveZone(from: index, by: 1) } label: { Label("Later", systemImage: "arrow.down") }
                         .disabled(index == store.configuration.zones.count - 1)
+                    Button { duplicateZone(index) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+                        .disabled(store.configuration.zones.count >= 8)
                     Spacer()
                     Button(role: .destructive) { store.removeZone(at: index) } label: {
                         Label("Remove", systemImage: "trash")
                     }
+                    .disabled(store.configuration.zones.count <= 1)
                 }
             }
             .padding(.top, 8)
         } label: {
             HStack {
-                Image(systemName: zone.wrappedValue.symbol.isEmpty ? zone.wrappedValue.action.symbol : zone.wrappedValue.symbol)
-                    .foregroundStyle(zone.wrappedValue.color.color)
-                    .frame(width: 22)
-                Text(zone.wrappedValue.title.isEmpty ? zone.wrappedValue.action.rawValue : zone.wrappedValue.title)
-                    .font(.headline)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(zone.wrappedValue.color.color.opacity(0.14))
+                    Image(systemName: zone.wrappedValue.symbol.isEmpty ? zone.wrappedValue.action.symbol : zone.wrappedValue.symbol)
+                        .foregroundStyle(zone.wrappedValue.color.color)
+                }
+                .frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(zone.wrappedValue.title.isEmpty ? zone.wrappedValue.action.rawValue : zone.wrappedValue.title)
+                        .font(.headline)
+                    Text(zone.wrappedValue.action.rawValue)
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 Spacer()
-                Text(zone.wrappedValue.action.rawValue).font(.caption).foregroundStyle(.secondary)
+                Text(zone.wrappedValue.accepts.rawValue).font(.caption2).foregroundStyle(.secondary)
             }
         }
     }
@@ -1138,11 +1204,9 @@ private struct HaloDropZoneStudioView: View {
         Binding(
             get: { store.configuration.zones.count },
             set: { requested in
-                let count = min(8, max(0, requested))
+                let count = min(8, max(1, requested))
                 while store.configuration.zones.count < count { store.addZone() }
-                while store.configuration.zones.count > count {
-                    store.removeZone(at: store.configuration.zones.count - 1)
-                }
+                while store.configuration.zones.count > count { store.removeZone(at: store.configuration.zones.count - 1) }
             }
         )
     }
@@ -1170,6 +1234,17 @@ private struct HaloDropZoneStudioView: View {
                 store.configuration = next
             }
         )
+    }
+
+    private func duplicateZone(_ index: Int) {
+        guard store.configuration.zones.indices.contains(index), store.configuration.zones.count < 8 else { return }
+        var next = store.configuration
+        var copy = next.zones[index]
+        copy.id = UUID()
+        copy.title = copy.title.isEmpty ? copy.action.rawValue : copy.title + " Copy"
+        next.zones.insert(copy, at: min(index + 1, next.zones.count))
+        next.normalize()
+        store.configuration = next
     }
 
     private func chooseFolder(for index: Int) {
@@ -1208,37 +1283,56 @@ private struct HaloDropZoneStaticPreview: View {
     var body: some View {
         GeometryReader { proxy in
             let frames = HaloDropZoneLayoutResolver.frames(size: proxy.size, configuration: configuration)
+            let compact = configuration.zones.count > 4 || proxy.size.height < 275
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.black.opacity(configuration.backgroundOpacity))
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(configuration.headerTitle).font(.headline)
-                        Text(configuration.headerSubtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                Color.black.opacity(configuration.backgroundOpacity)
+                LinearGradient(colors: [Color.white.opacity(0.04), Color.accentColor.opacity(0.05), Color.clear], startPoint: .topLeading, endPoint: .bottomTrailing)
+
+                HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.white.opacity(0.07))
+                        .frame(width: 29, height: 29)
+                        .overlay(Image(systemName: "arrow.down.doc.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.accentColor))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(configuration.headerTitle.isEmpty ? "Drop" : configuration.headerTitle).font(.system(size: 14, weight: .semibold, design: .rounded))
+                        Text(configuration.headerSubtitle.isEmpty ? "Choose an action" : configuration.headerSubtitle).font(.system(size: 8.5)).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer()
-                    Text("DROP CI").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+                    Text("PREVIEW").font(.system(size: 7, weight: .bold, design: .rounded)).foregroundStyle(.secondary)
                 }
-                .padding(12)
+                .padding(.horizontal, max(12, configuration.boardPadding + 2))
+                .padding(.top, 11)
 
                 ForEach(Array(configuration.zones.enumerated()), id: \.element.id) { index, zone in
                     if frames.indices.contains(index) {
                         let frame = frames[index]
-                        VStack(spacing: 4) {
-                            if configuration.showIcons {
-                                Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol)
-                                    .foregroundStyle(zone.color.color)
+                        VStack(alignment: .leading, spacing: compact ? 3 : 6) {
+                            HStack(spacing: 7) {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(zone.color.color.opacity(index == 0 ? 0.22 : 0.10))
+                                    .frame(width: compact ? 25 : 30, height: compact ? 25 : 30)
+                                    .overlay(Image(systemName: zone.symbol.isEmpty ? zone.action.symbol : zone.symbol).font(.system(size: compact ? 11 : 14, weight: .semibold)).foregroundStyle(zone.color.color))
+                                Text(zone.title.isEmpty ? zone.action.rawValue : zone.title)
+                                    .font(.system(size: compact ? 8.5 : 10.5, weight: .semibold, design: .rounded)).lineLimit(1)
+                                Spacer(minLength: 0)
                             }
-                            Text(zone.title).font(.caption.bold()).lineLimit(1)
+                            if !compact {
+                                Spacer(minLength: 0)
+                                Text(zone.action.rawValue.uppercased()).font(.system(size: 6.5, weight: .bold, design: .rounded)).foregroundStyle(.secondary).lineLimit(1)
+                            }
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(zone.color.color.opacity(index == 0 ? 0.18 : 0.06), in: RoundedRectangle(cornerRadius: configuration.cornerRadius))
-                        .overlay(RoundedRectangle(cornerRadius: configuration.cornerRadius).stroke(zone.color.color.opacity(index == 0 ? 0.72 : 0.22)))
+                        .padding(compact ? 6 : 9)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .background(Color.white.opacity(index == 0 ? 0.08 : 0.04), in: RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: configuration.cornerRadius, style: .continuous).stroke(index == 0 ? zone.color.color.opacity(0.72) : Color.white.opacity(0.07), lineWidth: index == 0 ? 1.5 : 1))
+                        .overlay(alignment: .top) { Capsule().fill(zone.color.color.opacity(index == 0 ? 0.9 : 0.4)).frame(height: index == 0 ? 2.5 : 1.5).padding(.horizontal, 10) }
                         .frame(width: frame.width, height: frame.height)
                         .position(x: frame.midX, y: frame.midY)
                     }
                 }
             }
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.08)))
             .foregroundStyle(.white)
         }
     }
@@ -1255,9 +1349,9 @@ private final class HaloGlobalFileDragMonitor {
     private var pollTimer: Timer?
     private weak var activeTarget: (any HaloGlobalDropTarget)?
     private var activeItemCount = 0
+    private var dragSessionBaselineChangeCount: Int?
     private var lastCompletedPasteboardChangeCount: Int?
     private var sawMouseDrag = false
-    private var mouseDownAnchor: NSPoint?
     private var deferredFinishPending = false
 
     private init() {}
@@ -1266,7 +1360,7 @@ private final class HaloGlobalFileDragMonitor {
         guard globalMonitor == nil, localMonitor == nil else { return }
         HaloDropZoneStudioWindowController.shared.installMenuItem()
 
-        let mask: NSEvent.EventTypeMask = [.leftMouseDragged, .leftMouseUp]
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
             let type = event.type
             DispatchQueue.main.async { [weak self] in self?.handleMouseEvent(type) }
@@ -1287,10 +1381,11 @@ private final class HaloGlobalFileDragMonitor {
 
     private func handleMouseEvent(_ type: NSEvent.EventType) {
         switch type {
+        case .leftMouseDown:
+            beginPointerSession()
         case .leftMouseDragged:
             sawMouseDrag = true
             inspectDragPasteboard()
-            summonFinderFallbackIfNeeded()
         case .leftMouseUp:
             finishAfterDropOpportunity()
         default:
@@ -1298,47 +1393,44 @@ private final class HaloGlobalFileDragMonitor {
         }
     }
 
+    private func beginPointerSession() {
+        let pasteboard = NSPasteboard(name: .drag)
+        dragSessionBaselineChangeCount = pasteboard.changeCount
+        sawMouseDrag = false
+        deferredFinishPending = false
+    }
+
     private func pollDragSession() {
         let leftButtonDown = (NSEvent.pressedMouseButtons & 1) != 0
-        let point = NSEvent.mouseLocation
-
         guard leftButtonDown else {
-            mouseDownAnchor = nil
             if activeTarget != nil || sawMouseDrag { finishAfterDropOpportunity() }
             return
         }
 
         deferredFinishPending = false
-        if mouseDownAnchor == nil { mouseDownAnchor = point }
-        if let anchor = mouseDownAnchor {
-            let dx = point.x - anchor.x
-            let dy = point.y - anchor.y
-            if dx * dx + dy * dy >= 9 { sawMouseDrag = true }
+        if dragSessionBaselineChangeCount == nil {
+            dragSessionBaselineChangeCount = NSPasteboard(name: .drag).changeCount
         }
-
         inspectDragPasteboard()
-        summonFinderFallbackIfNeeded()
 
         if activeTarget != nil {
-            activateTarget(at: point, count: max(1, activeItemCount))
+            activateTarget(at: NSEvent.mouseLocation, count: max(1, activeItemCount))
         }
-    }
-
-    private func summonFinderFallbackIfNeeded() {
-        guard activeTarget == nil,
-              sawMouseDrag,
-              NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else { return }
-        activeItemCount = max(1, dragPasteboardFileCount())
-        activateTarget(at: NSEvent.mouseLocation, count: activeItemCount)
     }
 
     private func inspectDragPasteboard() {
         let pasteboard = NSPasteboard(name: .drag)
         let count = dragPasteboardFileCount(pasteboard)
         guard count > 0 else { return }
-        if activeTarget == nil,
-           let lastCompletedPasteboardChangeCount,
-           pasteboard.changeCount == lastCompletedPasteboardChangeCount { return }
+
+        if activeTarget == nil {
+            if let baseline = dragSessionBaselineChangeCount,
+               pasteboard.changeCount == baseline { return }
+            if dragSessionBaselineChangeCount == nil,
+               let lastCompletedPasteboardChangeCount,
+               pasteboard.changeCount == lastCompletedPasteboardChangeCount { return }
+        }
+
         activeItemCount = count
         activateTarget(at: NSEvent.mouseLocation, count: count)
     }
@@ -1390,7 +1482,10 @@ private final class HaloGlobalFileDragMonitor {
     }
 
     private func finishDrag() {
-        guard activeTarget != nil || sawMouseDrag else { return }
+        guard activeTarget != nil || sawMouseDrag else {
+            resetSessionState()
+            return
+        }
         activeTarget?.dragStateHandler?(false, 0)
         HaloEmbeddedDropZoneController.shared.cancelIfNeeded()
         resetSessionState()
@@ -1400,7 +1495,7 @@ private final class HaloGlobalFileDragMonitor {
         activeTarget = nil
         activeItemCount = 0
         sawMouseDrag = false
-        mouseDownAnchor = nil
+        dragSessionBaselineChangeCount = nil
         lastCompletedPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
     }
 }

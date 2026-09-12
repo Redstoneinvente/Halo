@@ -855,6 +855,7 @@ struct SurfaceView: View {
 private struct DropContextView: View {
     let itemCount: Int
     @ObservedObject var surfaceState: SurfaceState
+    @ObservedObject private var dropZones = HaloDropZoneSettingsStore.shared
     @AppStorage("HaloContextDropUseFullNotchArea") private var usesFullNotchArea = true
     @AppStorage("HaloContextDropKeepClosedNotchContents") private var keepsClosedNotchContents = false
     @AppStorage("HaloContextDropPriority") private var priority = 100.0
@@ -867,7 +868,31 @@ private struct DropContextView: View {
         if usesFullNotchArea { return max(22, surfaceState.compactHeight * 0.72) }
         return 22
     }
-    private var preferredSize: CGSize { CGSize(width: 520, height: 270 + max(0, topInset - 22)) }
+    private var preferredSize: CGSize {
+        let configuration = dropZones.configuration
+        let count = max(1, configuration.zones.count)
+        let columns: Int
+        switch configuration.layout {
+        case .vertical: columns = 1
+        case .horizontal: columns = count
+        case .twoColumns: columns = 2
+        case .threeColumns: columns = 3
+        case .fourColumns: columns = 4
+        case .spotlight: columns = 2
+        case .adaptive: columns = count <= 2 ? count : count <= 4 ? 2 : count <= 6 ? 3 : 4
+        }
+        let rows = max(1, Int(ceil(Double(count) / Double(max(1, columns)))))
+        let width: Double
+        switch configuration.layout {
+        case .vertical: width = 520
+        case .horizontal: width = min(760, max(560, 118 * Double(count)))
+        case .spotlight: width = 680
+        default: width = count >= 5 ? 680 : 600
+        }
+        let rowHeight = count > 4 ? 76.0 : 92.0
+        let height = 112 + Double(rows) * rowHeight + Double(max(0, rows - 1)) * configuration.zoneSpacing + max(0, topInset - 22)
+        return CGSize(width: width, height: min(700, max(270, height)))
+    }
 
     var body: some View {
         ZStack {
@@ -916,6 +941,7 @@ private struct DropContextView: View {
         .clipShape(RoundedRectangle(cornerRadius: usesFullNotchArea ? 0 : 20, style: .continuous))
         .task { publishPreferredSize() }
         .onChange(of: itemCount) { _ in publishPreferredSize() }
+        .onChange(of: dropZones.configuration) { _ in publishPreferredSize() }
         .onAppear {
             guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 0.72).repeatForever(autoreverses: true)) { pulse = true }
