@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "halo": "halo-macos-notch-utility"
+  },
+  "targets": {},
+  "etags": {},
+  "dataconnectEmulatorConfig": {}
+}
