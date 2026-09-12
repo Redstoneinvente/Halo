@@ -1288,6 +1288,20 @@ private struct HaloAccountLicenseSettingsView: View {
                         Button("Deactivate This Mac", role: .destructive) { Task { await license.deactivate() } }.disabled(license.isBusy)
                     }
                 } else {
+                    if account.isSignedIn {
+                        HStack {
+                            Button("Start 14-Day Free Trial") { Task { await license.startTrial() } }
+                                .disabled(!account.emailVerified || !license.trialConfigured || license.isBusy || license.isStartingTrial)
+                            if !account.emailVerified {
+                                Text("Verify your email to start a trial.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else if !license.trialConfigured {
+                                Text("Trial service not configured.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            if license.isStartingTrial { ProgressView().controlSize(.small) }
+                        }
+                    }
                     SecureField("License key", text: $licenseKey)
                     HStack {
                         Button("Activate License") {
@@ -1296,10 +1310,10 @@ private struct HaloAccountLicenseSettingsView: View {
                                 if license.state.isValid { licenseKey = "" }
                             }
                         }
-                        .disabled(license.isBusy || licenseKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(license.isBusy || license.isStartingTrial || licenseKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         if !license.licenseHint.isEmpty {
                             Button("Clear Local License", role: .destructive) { license.clearLocalLicense() }
-                                .disabled(license.isBusy)
+                                .disabled(license.isBusy || license.isStartingTrial)
                         }
                     }
                 }

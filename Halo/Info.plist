@@ -10,5 +10,7 @@
 	<string>$(HALO_LICENSESEAT_PRODUCT_SLUG)</string>
 	<key>HaloLicenseSeatPublishableKey</key>
 	<string>$(HALO_LICENSESEAT_PUBLISHABLE_KEY)</string>
+	<key>HaloTrialEndpoint</key>
+	<string>$(HALO_TRIAL_ENDPOINT)</string>
 </dict>
 </plist>

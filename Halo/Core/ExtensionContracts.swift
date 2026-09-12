@@ -295,6 +295,43 @@ private struct HaloLockedAccessSurface: View {
 
             Divider().overlay(Color.white.opacity(0.15))
 
+            VStack(spacing: 6) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Try Halo free for 14 days")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Full Halo · 1 Mac · no payment required")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.white.opacity(0.52))
+                    }
+                    Spacer()
+                    Button("Start 14-Day Trial") {
+                        Task { await license.startTrial() }
+                    }
+                    .disabled(!account.emailVerified || !license.trialConfigured || license.isBusy || license.isStartingTrial)
+                }
+
+                if !account.emailVerified {
+                    Text("Verify your email above to start a free trial.")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.52))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if !license.trialConfigured {
+                    Text("Trial service is not configured on this build yet.")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.orange.opacity(0.9))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+                Text("OR USE A LICENSE")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.38))
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+            }
+
             HStack {
                 Image(systemName: "key.horizontal")
                     .foregroundStyle(.white.opacity(0.65))
@@ -317,16 +354,16 @@ private struct HaloLockedAccessSurface: View {
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(license.isBusy || licenseKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(license.isBusy || license.isStartingTrial || licenseKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 if !license.licenseHint.isEmpty {
                     Button("Validate Existing") { Task { await license.validate() } }
-                        .disabled(license.isBusy)
+                        .disabled(license.isBusy || license.isStartingTrial)
                     Button("Clear", role: .destructive) { license.clearLocalLicense() }
-                        .disabled(license.isBusy)
+                        .disabled(license.isBusy || license.isStartingTrial)
                 }
 
-                if license.isBusy { ProgressView().controlSize(.small) }
+                if license.isBusy || license.isStartingTrial { ProgressView().controlSize(.small) }
             }
 
             commercialMessages(license.notice, license.errorMessage)

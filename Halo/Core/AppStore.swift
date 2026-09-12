@@ -708,10 +708,12 @@ struct HaloCommercialConfiguration {
     static var firebaseAPIKey: String { value("HaloFirebaseAPIKey") }
     static var licenseSeatPublishableKey: String { value("HaloLicenseSeatPublishableKey") }
     static var licenseSeatProductSlug: String { value("HaloLicenseSeatProductSlug") }
+    static var trialEndpoint: String { value("HaloTrialEndpoint") }
     static var firebaseConfigured: Bool { !firebaseAPIKey.isEmpty }
     static var licenseSeatConfigured: Bool {
         !licenseSeatPublishableKey.isEmpty && !licenseSeatProductSlug.isEmpty
     }
+    static var trialConfigured: Bool { !trialEndpoint.isEmpty }
 }
 
 enum HaloKeychain {
@@ -1068,6 +1070,7 @@ final class HaloLicenseManager: ObservableObject {
     @Published private(set) var licenseHint = ""
     @Published private(set) var details: HaloLicenseDetails = .empty
     @Published private(set) var isBusy = false
+    @Published private(set) var isStartingTrial = false
     @Published var errorMessage: String?
     @Published var notice: String?
 
@@ -1075,12 +1078,74 @@ final class HaloLicenseManager: ObservableObject {
     private let fingerprintKey = "licenseseat.fingerprint"
 
     var isConfigured: Bool { HaloCommercialConfiguration.licenseSeatConfigured }
+    var trialConfigured: Bool { HaloCommercialConfiguration.trialConfigured }
 
     func restoreAndValidate() async {
         guard isConfigured else { state = .unconfigured; details = .empty; return }
         guard let key = HaloKeychain.string(for: licenseKeyKey), !key.isEmpty else { state = .inactive; details = .empty; return }
         licenseHint = Self.hint(key)
         await validate()
+    }
+
+    func startTrial() async {
+        guard trialConfigured else {
+            errorMessage = "Halo trials are not configured on this build yet."
+            return
+        }
+        guard HaloAccountManager.shared.isSignedIn else {
+            errorMessage = "Sign in to your Halo account before starting a trial."
+            return
+        }
+        guard HaloAccountManager.shared.emailVerified else {
+            errorMessage = "Verify your email before starting the free trial."
+            return
+        }
+        guard let url = URL(string: HaloCommercialConfiguration.trialEndpoint),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || (scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")) else {
+            errorMessage = "The Halo trial service URL is invalid."
+            return
+        }
+
+        isStartingTrial = true
+        errorMessage = nil
+        notice = nil
+        defer { isStartingTrial = false }
+
+        do {
+            let token = try await HaloAccountManager.shared.validIDToken()
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "platform": "macOS",
+                "device_name": Host.current().localizedName ?? "Mac"
+            ])
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw HaloCommercialError.message("No response from the Halo trial service.")
+            }
+            let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            guard (200..<300).contains(http.statusCode) else {
+                let message = ((root?["error"] as? [String: Any])?["message"] as? String)
+                    ?? (root?["message"] as? String)
+                    ?? "Unable to start the Halo trial (\(http.statusCode))."
+                throw HaloCommercialError.message(message)
+            }
+            guard let key = (root?["license_key"] as? String) ?? (root?["licenseKey"] as? String),
+                  !key.isEmpty else {
+                throw HaloCommercialError.message("The trial service did not return a license.")
+            }
+
+            await activate(key)
+            if state.isValid {
+                notice = "Your 14-day Halo trial is active."
+            }
+        } catch {
+            errorMessage = readable(error)
+        }
     }
 
     func activate(_ key: String) async {
