@@ -187,7 +187,7 @@ private struct HaloLockedAccessSurface: View {
         .onChange(of: surfaceState.expanded) { _ in publishPreferredSize() }
         .onChange(of: account.isSignedIn) { _ in publishPreferredSize() }
         .onDisappear {
-            if !account.isSignedIn || !license.state.isValid { surfaceState.contextPreferredSize = nil }
+            surfaceState.contextPreferredSize = nil
         }
     }
 
