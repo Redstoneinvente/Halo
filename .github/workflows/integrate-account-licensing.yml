@@ -62,4 +62,4 @@ jobs:
           git commit -m 'feat: add Firebase accounts and LicenseSeat licensing'
           git push origin main
 
-# rerun after project-group migration fix
+# rerun after LicenseSeat status compatibility fix
