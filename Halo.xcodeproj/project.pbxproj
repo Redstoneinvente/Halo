@@ -40,6 +40,7 @@
 		0000000000000000000002C6 /* NotchEngine/DisplayClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002BC /* NotchEngine/DisplayClock.swift */; };
 		0000000000000000000002D1 /* Services/AudioSpectrumService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002D0 /* Services/AudioSpectrumService.swift */; };
 		0000000000000000000002E3 /* Services/HUDEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002E2 /* Services/HUDEngine.swift */; };
+		0000000000000000000002E4 /* Views/CompanionSprite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002E5 /* Views/CompanionSprite.swift */; };
 		F8614B61305322E600D4943C /* AppIcon 2.icns in Resources */ = {isa = PBXBuildFile; fileRef = F8614B60305322E600D4943C /* AppIcon 2.icns */; };
 		F8614B693053262D00D4943C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F8614B683053262D00D4943C /* Assets.xcassets */; };
 		F8614B6B3053275D00D4943C /* Halo_AppIcon_Transparent.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6A3053275D00D4943C /* Halo_AppIcon_Transparent.png */; };
@@ -91,6 +92,7 @@
 		0000000000000000000002BC /* NotchEngine/DisplayClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchEngine/DisplayClock.swift; sourceTree = "<group>"; };
 		0000000000000000000002D0 /* Services/AudioSpectrumService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/AudioSpectrumService.swift; sourceTree = "<group>"; };
 		0000000000000000000002E2 /* Services/HUDEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HUDEngine.swift; sourceTree = "<group>"; };
+		0000000000000000000002E5 /* Views/CompanionSprite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/CompanionSprite.swift; sourceTree = "<group>"; };
 		F8614B60305322E600D4943C /* AppIcon 2.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = "AppIcon 2.icns"; sourceTree = "<group>"; };
 		F8614B623053239E00D4943C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		F8614B633053242D00D4943C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -153,6 +155,7 @@
 				0000000000000000000002BC /* NotchEngine/DisplayClock.swift */,
 				0000000000000000000002D0 /* Services/AudioSpectrumService.swift */,
 				0000000000000000000002E2 /* Services/HUDEngine.swift */,
+				0000000000000000000002E5 /* Views/CompanionSprite.swift */,
 				000000000000000000000258 /* Core/PersonalizationModels.swift */,
 				000000000000000000000259 /* Views/PersonalizationSettingsView.swift */,
 				00000000000000000000025A /* Views/DecorationsView.swift */,
@@ -302,6 +305,7 @@
 				0000000000000000000002C6 /* NotchEngine/DisplayClock.swift in Sources */,
 				0000000000000000000002D1 /* Services/AudioSpectrumService.swift in Sources */,
 				0000000000000000000002E3 /* Services/HUDEngine.swift in Sources */,
+				0000000000000000000002E4 /* Views/CompanionSprite.swift in Sources */,
 				000000000000000000000262 /* Core/PersonalizationModels.swift in Sources */,
 				000000000000000000000263 /* Views/PersonalizationSettingsView.swift in Sources */,
 				000000000000000000000264 /* Views/DecorationsView.swift in Sources */,
