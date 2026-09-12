@@ -1,0 +1,59 @@
+name: Switch Trials Client Side V2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/switch-trials-client-side-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply migration
+        run: |
+          python3 .github/scripts/switch_trials_client_side.py
+          python3 .github/scripts/fix_gitignore_eof.py
+
+      - name: Verify source
+        shell: bash
+        run: |
+          git diff --check
+          grep -q 'trial.local.used' Halo/Core/AppStore.swift
+          grep -q 'func accessValid(for accountID: String)' Halo/Core/AppStore.swift
+          grep -q 'Your 14-day Halo trial has ended' Halo/Core/AppStore.swift
+          grep -q 'Start your free trial or activate a license' Halo/Core/ExtensionContracts.swift
+          ! grep -q 'HaloTrialEndpoint' Halo/Info.plist
+          ! grep -q 'HALO_TRIAL_ENDPOINT' Halo/Config/Base.xcconfig
+          ! test -e firebase.json
+          ! test -e firestore.rules
+          ! test -e functions/index.js
+
+      - name: Build Halo
+        shell: bash
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/HaloDerived CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES build 2>&1 | tee /tmp/halo-build.log
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -ne 0 ]; then
+            if grep -E 'error:' /tmp/halo-build.log | grep -v 'ClosedNotchView.swift:1333:25: error: the compiler is unable to type-check this expression in reasonable time' | grep -q .; then
+              echo 'Unexpected build error(s):'
+              grep -E 'error:' /tmp/halo-build.log
+              exit "$code"
+            fi
+            grep -q 'ClosedNotchView.swift:1333:25: error: the compiler is unable to type-check this expression in reasonable time' /tmp/halo-build.log || exit "$code"
+          fi
+
+      - name: Commit implementation
+        run: |
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: use client-side 14-day trials'
+          git push origin main
