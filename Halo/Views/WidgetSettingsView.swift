@@ -171,12 +171,12 @@ struct ClosedNotchSettingsView: View {
             PreciseSlider(title: "Vertical padding", value: Binding(get: { options.wrappedValue.contentPaddingY }, set: { options.wrappedValue.verticalPadding = $0 }), range: 0...12, step: 1, suffix: "pt")
             PreciseSlider(title: "Margin from camera", value: Binding(get: { options.wrappedValue.contentSideMargin }, set: { options.wrappedValue.sideMargin = $0 }), range: 0...48, step: 1, suffix: "pt")
             PreciseSlider(title: "Margin from outer edge", value: Binding(get: { options.wrappedValue.contentOuterMargin }, set: { options.wrappedValue.outerMargin = $0 }), range: 0...48, step: 1, suffix: "pt")
-            Text("The Appearance closed-width slider is the guaranteed idle/base width. Auto-size can grow beyond it, then returns to it when transient content disappears.").font(.caption)
+            Text("The Appearance closed-width slider is the idle/base width. Auto-size grows only as much as visible content needs. Default padding compresses automatically at very small closed heights; explicit padding and margin values stay exact.").font(.caption)
         }
         Section("Automatic width") {
             Toggle("Widen for music and live activity", isOn: expansion.enabled)
             PreciseSlider(title: "Active width", value: expansion.width, range: 120...640, step: 1, suffix: "pt")
-            Text("Music, pinned files, timers, power events and live activities can widen the closed notch. Dynamic lyrics and constrained Truncate/Marquee media use their own content width instead of forcing the fixed music width.").font(.caption)
+            Text("Optional fixed-width expansion for music and other live content. Leave this off for exact content-fit sizing. Power events always use their own measured size and margin.").font(.caption)
         }
         SideDecorationSettingsView(title: "Left icon / GIF", options: Binding(get: { options.wrappedValue.leftDecoration ?? SideDecoration() }, set: { options.wrappedValue.leftDecoration = $0 }))
         SideDecorationSettingsView(title: "Right icon / GIF", options: Binding(get: { options.wrappedValue.rightDecoration ?? SideDecoration() }, set: { options.wrappedValue.rightDecoration = $0 }))

@@ -567,7 +567,8 @@ final class WindowManager {
             else { side = .right }
         }
 
-        let innerHeight = max(1, compactHeight - 2 * options.contentPaddingY)
+        let metrics = ClosedNotchLayoutMetrics(options: options, height: compactHeight)
+        let innerHeight = metrics.contentHeight
         let baseSize = min(options.fontSize, innerHeight / 1.25)
         let size = min(baseSize, max(9, innerHeight * 0.46))
         let normalFont = NSFont.systemFont(ofSize: size, weight: .semibold)
@@ -628,6 +629,7 @@ final class WindowManager {
         let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
         let options = layout.closedNotch ?? ClosedNotchOptions()
         let expansion = options.expansion ?? ClosedExpansionOptions()
+        let closedMetrics = ClosedNotchLayoutMetrics(options: options, height: geometry.appearance.surface.compactHeight)
         let items = resolvedClosedItems(options)
         let power = powerReaction(options: options, items: items,
                                   compactHeight: geometry.appearance.surface.compactHeight)
@@ -677,33 +679,33 @@ final class WindowManager {
             }
 
             if let hud = hudNotchExpansion, hud.screenFrame.equalTo(geometry.screen), !hud.vertical {
-                let hudGap = 6.0
-                let shell = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin + 8
-                func merged(_ existing: Double, _ hudWidth: Double) -> Double {
+                let hudGap = closedMetrics.elementSpacing
+                let shell = closedMetrics.normalShell
+                func merged(_ existing: Double, _ hudBodyWidth: Double) -> Double {
                     switch hud.collision {
                     case .replace:
-                        return hudWidth
-                    case .push, .queue:
-                        return existing > 0 ? existing + hudGap + hudWidth : hudWidth
-                    case .overlay, .showExternally:
-                        return max(existing, hudWidth)
+                        return hudBodyWidth + shell
+                    case .push, .queue, .showExternally:
+                        return existing > 0 ? existing + hudGap + hudBodyWidth : hudBodyWidth + shell
+                    case .overlay:
+                        return max(existing, hudBodyWidth + shell)
                     }
                 }
                 switch hud.side {
                 case .left:
-                    leftDemand = merged(leftDemand, hud.width + shell)
+                    leftDemand = merged(leftDemand, hud.width)
                     leftLive = true
                 case .right:
-                    rightDemand = merged(rightDemand, hud.width + shell)
+                    rightDemand = merged(rightDemand, hud.width)
                     rightLive = true
                 case .full:
-                    let half = hud.width / 2 + shell
+                    let half = hud.width / 2
                     leftDemand = merged(leftDemand, half)
                     rightDemand = merged(rightDemand, half)
                     leftLive = true
                     rightLive = true
                 case .automatic:
-                    rightDemand = merged(rightDemand, hud.width + shell)
+                    rightDemand = merged(rightDemand, hud.width)
                     rightLive = true
                 }
             }
@@ -746,12 +748,12 @@ final class WindowManager {
         let playing = store.workspace.media.isPlaying
         let activity = activeClosedActivity
         let baseCompactHeight = max(16, geometry.appearance.surface.compactHeight)
-        let innerHeight = max(1, baseCompactHeight - 2 * options.contentPaddingY)
+        let metrics = ClosedNotchLayoutMetrics(options: options, height: baseCompactHeight)
+        let innerHeight = metrics.contentHeight
         let size = min(options.fontSize, innerHeight / 1.25)
         let font = NSFont.systemFont(ofSize: size)
         let digitFont = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .regular)
-        let slotMargins = 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin
-        let elementGap = 6.0
+        let elementGap = metrics.elementSpacing
 
         var artwork = options.artworkOptions ?? ClosedArtworkOptions()
         if options.artworkOptions == nil, let legacy = options.mediaOptions, legacy.artwork != .none {
@@ -774,30 +776,99 @@ final class WindowManager {
         func textWidth(_ text: String, font: NSFont) -> Double {
             ceil((text as NSString).size(withAttributes: [.font: font]).width) + 2
         }
+
         func mediaWidth() -> Double {
             guard playing else { return 0 }
             let media = options.mediaOptions ?? ClosedMediaOptions()
             let title = textWidth(String(store.workspace.media.title.prefix(120)), font: font)
-            let artist = textWidth(String(store.workspace.media.artist.prefix(120)), font: font)
+            let artistValue = store.workspace.media.artist.isEmpty ? store.workspace.media.title : store.workspace.media.artist
+            let artist = textWidth(String(artistValue.prefix(120)), font: font)
             let adaptive = media.textMode == .lyrics && media.usesDynamicLyricWidth && mediaWidthHint != nil
-            let icon = media.showPlaybackIcon ? size + 5 : 0
+
+            let usesInlineIcon: Bool = {
+                guard media.showPlaybackIcon else { return false }
+                switch media.textMode {
+                case .title, .artist: return true
+                case .titleArtist: return media.lines == 1
+                case .lyrics:
+                    switch media.resolvedLyricDisplay {
+                    case .word: return true
+                    case .line: return media.lines == 1
+                    case .focus: return false
+                    }
+                }
+            }()
+            let icon = usesInlineIcon ? max(12, size + 2) + elementGap : 0
+
             let naturalText: Double
             switch media.textMode {
             case .title: naturalText = title
-            case .artist: naturalText = max(size * 3, artist)
-            case .titleArtist: naturalText = media.lines == 2 ? max(title, artist) : title + (store.workspace.media.artist.isEmpty ? 0 : artist + size)
+            case .artist: naturalText = artist
+            case .titleArtist:
+                naturalText = media.lines == 2
+                    ? max(title, artist)
+                    : title + (store.workspace.media.artist.isEmpty ? 0 : artist + textWidth(" · ", font: font))
             case .lyrics:
                 naturalText = adaptive ? max(28, mediaWidthHint!) : max(90, min(220, title + artist * 0.35))
             }
-            let naturalTotal = naturalText + (adaptive ? 0 : icon)
+
             if adaptive { return min(320, max(28, naturalText)) }
+            let naturalTotal = naturalText + icon
             switch media.overflow {
-            case .marquee:
-                return min(max(24, naturalTotal), media.resolvedHorizontalSpace)
-            case .truncate:
+            case .marquee, .truncate:
                 return min(max(24, naturalTotal), media.resolvedHorizontalSpace)
             case .scale:
-                return min(naturalTotal, 260)
+                return min(max(24, naturalTotal), 260)
+            }
+        }
+
+        func bluetoothActivityWidth(_ activity: LiveActivity) -> Double? {
+            let label: String
+            switch activity.title {
+            case "Bluetooth connected": label = "Connected"
+            case "Bluetooth disconnected": label = "Disconnected"
+            case "Bluetooth on": label = "Bluetooth On"
+            case "Bluetooth off": label = "Bluetooth Off"
+            default: return nil
+            }
+
+            let defaults = UserDefaults.standard
+            func boolValue(_ key: String, fallback: Bool) -> Bool {
+                defaults.object(forKey: key) == nil ? fallback : defaults.bool(forKey: key)
+            }
+            let showIcon = boolValue("HaloBluetoothClosedNotchShowIcon", fallback: true)
+            let showLabel = boolValue("HaloBluetoothClosedNotchShowLabel", fallback: true)
+            let showDevice = boolValue("HaloBluetoothClosedNotchShowDevice", fallback: true)
+            let layoutRaw = defaults.string(forKey: "HaloBluetoothClosedNotchLayout") ?? BluetoothClosedNotchLayout.stacked.rawValue
+            let layout = BluetoothClosedNotchLayout(rawValue: layoutRaw) ?? .stacked
+            let configuredIcon = defaults.object(forKey: "HaloBluetoothClosedNotchIconSize") == nil
+                ? 16.0 : defaults.double(forKey: "HaloBluetoothClosedNotchIconSize")
+            let iconSize = min(max(8, configuredIcon), max(8, size * 1.8))
+            let iconWidth = showIcon ? max(12, iconSize + 2) : 0
+            let labelWidth = showLabel ? textWidth(label, font: font) : 0
+            let detailFont = NSFont.systemFont(ofSize: max(8, size * 0.76))
+            let detailWidth = showDevice && !activity.detail.isEmpty
+                ? textWidth(String(activity.detail.prefix(80)), font: detailFont) : 0
+
+            func inlineTextWidth() -> Double {
+                let parts = [labelWidth, detailWidth].filter { $0 > 0 }
+                guard !parts.isEmpty else { return 0 }
+                return parts.reduce(0, +) + Double(max(0, parts.count - 1)) * elementGap
+            }
+            let stackedText = max(labelWidth, detailWidth)
+
+            switch layout {
+            case .iconOnly:
+                return iconWidth
+            case .textOnly:
+                return stackedText
+            case .inline:
+                let text = inlineTextWidth()
+                if iconWidth > 0 && text > 0 { return iconWidth + elementGap + text }
+                return max(iconWidth, text)
+            case .stacked:
+                if iconWidth > 0 && stackedText > 0 { return iconWidth + elementGap + stackedText }
+                return max(iconWidth, stackedText)
             }
         }
 
@@ -806,86 +877,90 @@ final class WindowManager {
             return item == .media || item == .visualizer
         }
 
-        func measurements(_ side: DynamicSide, _ item: ClosedNotchItem, _ decoration: SideDecoration?) -> (full: Double, decoration: Double) {
-            let content: Double
-            if isArtworkOnly(side, item: item) {
-                content = 0
-            } else {
-                switch item {
-                case .none: content = 0
-                case .clock:
-                    let style = layout.widgetStyle(for: .clock)
-                    let clockFont = style.fontFamily == .custom ? NSFont(name: style.customFont, size: size) ?? font : NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
-                    let template = "88:88" + (style.clock.showSeconds ? ":88" : "") + (style.clock.twentyFourHour ? "" : " PM")
-                    content = textWidth(template, font: clockFont) * 1.08
-                case .date: content = textWidth("Sep 28", font: font)
-                case .timer:
-                    if store.deadline != nil {
-                        content = textWidth("88:88:88", font: digitFont)
-                    } else {
-                        let label = store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready"
-                        content = max(12, size) + elementGap + textWidth(label, font: font)
-                    }
-                case .battery:
-                    let value = store.workspace.system.battery.map { "\($0)%" } ?? ""
-                    content = value.isEmpty ? max(12, size) : max(12, size) + 5 + textWidth(value, font: digitFont)
-                case .media: content = mediaWidth()
-                case .visualizer: content = playing ? (options.visualizer ?? VisualizerOptions()).width : 0
-                case .mirror: content = 112
-                case .files: content = max(12, size) + 5 + textWidth(String(store.files.count), font: digitFont)
-                case .activity:
-                    content = activity.map {
-                        let title = textWidth(String($0.title.prefix(80)), font: font)
-                        let detailFont = NSFont.systemFont(ofSize: max(8, size * 0.76))
-                        let detail = $0.detail.isEmpty ? 0 : textWidth(String($0.detail.prefix(80)), font: detailFont)
-                        let icon = max(12, size)
-                        let text = max(title, detail)
-                        let progress = $0.progress == nil ? 0 : elementGap + 38
-                        return min(240, icon + elementGap + text + progress + 2)
-                    } ?? 0
-                }
+        func itemWidth(_ side: DynamicSide, _ item: ClosedNotchItem) -> Double {
+            if isArtworkOnly(side, item: item) { return 0 }
+            switch item {
+            case .none: return 0
+            case .clock:
+                let style = layout.widgetStyle(for: .clock)
+                let clockFont = style.fontFamily == .custom
+                    ? NSFont(name: style.customFont, size: size) ?? font
+                    : NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
+                let template = "88:88" + (style.clock.showSeconds ? ":88" : "") + (style.clock.twentyFourHour ? "" : " PM")
+                return textWidth(template, font: clockFont) * 1.04
+            case .date:
+                return textWidth("Sep 28", font: font)
+            case .timer:
+                if store.deadline != nil { return textWidth("88:88:88", font: digitFont) }
+                let label = store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready"
+                return max(12, size + 2) + elementGap + textWidth(label, font: font)
+            case .battery:
+                guard let battery = store.workspace.system.battery else { return max(12, size + 2) }
+                return max(12, size + 2) + elementGap + textWidth("\(battery)%", font: digitFont)
+            case .media:
+                return mediaWidth()
+            case .visualizer:
+                return playing ? (options.visualizer ?? VisualizerOptions()).width : 0
+            case .mirror:
+                return 112
+            case .files:
+                return max(12, size + 2) + elementGap + textWidth(String(store.files.count), font: digitFont)
+            case .activity:
+                guard let activity else { return 0 }
+                if let bluetooth = bluetoothActivityWidth(activity) { return min(240, max(0, bluetooth)) }
+                let title = textWidth(String(activity.title.prefix(80)), font: font)
+                let detailFont = NSFont.systemFont(ofSize: max(8, size * 0.76))
+                let detail = activity.detail.isEmpty ? 0 : textWidth(String(activity.detail.prefix(80)), font: detailFont)
+                let icon = max(12, size)
+                let text = max(title, detail)
+                let progress = activity.progress == nil ? 0 : elementGap + 38
+                return min(240, icon + elementGap + text + progress + 2)
             }
-            let ornament = decoration.flatMap { $0.isVisible(playing: playing) ? min($0.size, max(1, baseCompactHeight - 2 * options.contentPaddingY)) : nil } ?? 0
-            guard content > 0 || ornament > 0 else { return (0, 0) }
-            let spacing = content > 0 && ornament > 0 ? elementGap : 0
-            return (content + ornament + spacing + slotMargins, ornament > 0 ? ornament + slotMargins : 0)
         }
 
-        let left = measurements(.left, items.left, options.leftDecoration)
-        let right = measurements(.right, items.right, options.rightDecoration)
-        var leftFull = left.full
-        var rightFull = right.full
+        func decorationWidth(_ decoration: SideDecoration?) -> Double {
+            decoration.flatMap {
+                $0.isVisible(playing: playing) ? min($0.size, innerHeight) : nil
+            } ?? 0
+        }
+
+        func append(_ width: Double, to body: inout Double) {
+            guard width > 0 else { return }
+            if body > 0 { body += elementGap }
+            body += width
+        }
+
+        var leftBody = itemWidth(.left, items.left)
+        var rightBody = itemWidth(.right, items.right)
+        let leftDecoration = decorationWidth(options.leftDecoration)
+        let rightDecoration = decorationWidth(options.rightDecoration)
+        append(leftDecoration, to: &leftBody)
+        append(rightDecoration, to: &rightBody)
 
         if let artworkTarget {
             let renderedArtworkSize = max(1, min(artwork.size, innerHeight - 2 * artwork.padding))
             let artworkWidth = renderedArtworkSize + 2 * artwork.padding + artwork.margin
-            switch artworkTarget {
-            case .left:
-                leftFull = leftFull > 0 ? leftFull + elementGap + artworkWidth : slotMargins + artworkWidth
-            case .right:
-                rightFull = rightFull > 0 ? rightFull + elementGap + artworkWidth : slotMargins + artworkWidth
-            }
+            if artworkTarget == .left { append(artworkWidth, to: &leftBody) }
+            else { append(artworkWidth, to: &rightBody) }
         }
 
         if let power {
-            // A power event sits nearest the camera. Replace the generic camera margin with the
-            // power-specific margin, then add only the badge's measured width. This keeps tiny
-            // icon-only events tight to the notch instead of reserving the old 96 pt container.
-            func withPower(_ existing: Double) -> Double {
-                let base: Double
-                if existing > 0 {
-                    base = max(0, existing - options.contentSideMargin) + elementGap
-                } else {
-                    base = 2 * options.contentPaddingX + options.contentOuterMargin
-                }
-                return base + power.notchMargin + power.badgeWidth + power.extraSpace
-            }
-            switch power.side {
-            case .left: leftFull = withPower(leftFull)
-            case .right: rightFull = withPower(rightFull)
-            }
+            let powerWidth = power.badgeWidth + power.extraSpace
+            if power.side == .left { append(powerWidth, to: &leftBody) }
+            else { append(powerWidth, to: &rightBody) }
         }
-        return (leftFull, rightFull, left.decoration, right.decoration)
+
+        func fullWidth(body: Double, powerOnSide: Bool) -> Double {
+            guard body > 0 else { return 0 }
+            let cameraInset = powerOnSide && power != nil ? power!.notchMargin : metrics.normalCameraInset
+            return body + cameraInset + metrics.outerInset
+        }
+
+        let leftFull = fullWidth(body: leftBody, powerOnSide: power?.side == .left)
+        let rightFull = fullWidth(body: rightBody, powerOnSide: power?.side == .right)
+        let leftDecorationFull = leftDecoration > 0 ? leftDecoration + metrics.normalShell : 0
+        let rightDecorationFull = rightDecoration > 0 ? rightDecoration + metrics.normalShell : 0
+        return (leftFull, rightFull, leftDecorationFull, rightDecorationFull)
     }
 
     private func refreshDynamicWidths() {

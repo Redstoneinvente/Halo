@@ -264,7 +264,7 @@ struct ClosedNotchView: View {
     }
     private func slot(_ item: ClosedNotchItem, decoration: SideDecoration?, side: ClosedNotchSide, width: CGFloat, height: CGFloat) -> some View {
         Group {
-            if width >= 2 * options.contentPaddingX + options.contentSideMargin + options.contentOuterMargin + 8 {
+            if width > 1 {
                 ClosedNotchSlot(item: item, decoration: decoration, side: side, availableHeight: height, availableWidth: width,
                                 options: options, clock: layout.widgetStyle(for: .clock), store: store, workspace: workspace,
                                 media: workspace.media, system: workspace.system, activity: activeActivity, hud: hud(for: side))
@@ -287,10 +287,11 @@ struct ClosedNotchSlot: View {
     @ObservedObject var system: SystemService
     let activity: LiveActivity?
     let hud: HaloHUDNotchPresentation?
-    private let elementSpacing = 6.0
+    private var layoutMetrics: ClosedNotchLayoutMetrics { ClosedNotchLayoutMetrics(options: options, height: availableHeight) }
+    private var elementSpacing: Double { layoutMetrics.elementSpacing }
     private var activeActivity: LiveActivity? { activity }
-    private var innerHeight: Double { max(1, availableHeight - 2 * options.contentPaddingY) }
-    private var innerWidth: Double { max(1, availableWidth - 2 * options.contentPaddingX - slotCameraMargin - options.contentOuterMargin) }
+    private var innerHeight: Double { layoutMetrics.contentHeight }
+    private var innerWidth: Double { max(1, availableWidth - slotCameraInset - slotOuterInset) }
     private var isMusicItem: Bool { item == .media || item == .visualizer }
     private var itemIsVisible: Bool {
         if isMusicItem { return media.isPlaying }
@@ -340,9 +341,12 @@ struct ClosedNotchSlot: View {
     private var showPowerEvent: Bool { powerTargetSide == side }
     private var powerSettings: PowerReactionOptions { options.powerReaction ?? PowerReactionOptions() }
     private var powerNotchMargin: Double { powerSettings.resolvedNotchMargin }
-    // Power is always the element nearest the physical camera. When it is visible, its own
-    // notch margin replaces the generic closed-notch side margin instead of stacking on top.
-    private var slotCameraMargin: Double { showPowerEvent ? 0 : options.contentSideMargin }
+    // Power is always nearest the camera. Its margin is the complete camera-edge inset, not an
+    // additional value layered on top of the normal horizontal padding.
+    private var slotCameraInset: Double {
+        layoutMetrics.cameraInset(power: showPowerEvent ? powerSettings : nil)
+    }
+    private var slotOuterInset: Double { layoutMetrics.outerInset }
     private var decorationSize: Double {
         guard let decoration, decoration.isVisible(playing: media.isPlaying) else { return 0 }
         return min(decoration.size, min(innerHeight, itemIsVisible ? innerWidth / 3 : innerWidth))
@@ -429,9 +433,8 @@ struct ClosedNotchSlot: View {
         guard showPowerEvent else { return 0 }
         let natural = max(16, naturalPowerWidth)
         let extra = powerUsesEventContainer ? powerSettings.resolvedExtraEventSpace : 0
-        // The footprint is content-driven. The old eventWidth no longer creates a large empty
-        // container that centers a tiny icon far away from the camera cutout.
-        return min(innerWidth, natural + powerNotchMargin + extra)
+        // Camera margin belongs to the slot edge inset, not to the element's own width.
+        return min(innerWidth, natural + extra)
     }
     private var mediaSiblingFootprint: Double {
         var widths: [Double] = []
@@ -491,10 +494,9 @@ struct ClosedNotchSlot: View {
         .minimumScaleFactor(0.65)
         .foregroundStyle(effectiveTextColor)
         .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
-        .padding(.horizontal, options.contentPaddingX)
-        .padding(.vertical, options.contentPaddingY)
-        .padding(side == .left ? .trailing : .leading, slotCameraMargin)
-        .padding(side == .left ? .leading : .trailing, options.contentOuterMargin)
+        .padding(.vertical, layoutMetrics.verticalPadding)
+        .padding(side == .left ? .trailing : .leading, slotCameraInset)
+        .padding(side == .left ? .leading : .trailing, slotOuterInset)
         .frame(width: availableWidth, height: availableHeight, alignment: .center)
         .clipped()
         .modifier(MediaGestureModifier(media: media, options: closedMediaOptions, enabled: isMusicItem && hudCollision != .replace))
@@ -556,8 +558,7 @@ struct ClosedNotchSlot: View {
                 event: powerEvent,
                 options: options.powerReaction ?? PowerReactionOptions(),
                 side: side,
-                textSize: powerTextSize,
-                notchMargin: powerNotchMargin
+                textSize: powerTextSize
             )
             .frame(width: powerFootprint, height: innerHeight,
                    alignment: side == .left ? .trailing : .leading)
@@ -572,10 +573,10 @@ struct ClosedNotchSlot: View {
         case .date: TimelineView(.periodic(from: .now, by: 60)) { context in Text(context.date, format: .dateTime.month().day()).lineLimit(1) }
         case .timer:
             if let deadline = store.deadline { Text(deadline, style: .timer).monospacedDigit().lineLimit(1) }
-            else { Label(store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready", systemImage: "timer").lineLimit(1) }
+            else { compactLabel(symbol: "timer", text: store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready") }
         case .battery:
-            if let battery = system.battery { Label("\(battery)%", systemImage: system.charging ? "battery.100.bolt" : "battery.100").lineLimit(1) }
-            else { Image(systemName: "powerplug") }
+            if let battery = system.battery { compactLabel(symbol: system.charging ? "battery.100.bolt" : "battery.100", text: "\(battery)%") }
+            else { Image(systemName: "powerplug").frame(width: max(12, textSize + 2), alignment: .center) }
         case .media:
             if media.isPlaying {
                 ClosedMediaView(media: media, options: closedMediaOptions, fontSize: textSize, availableWidth: closedMediaWidth, lowPower: system.lowPower)
@@ -588,15 +589,15 @@ struct ClosedNotchSlot: View {
             MirrorWidgetView()
                 .frame(width: mirrorContentWidth, height: innerHeight)
                 .layoutPriority(0)
-        case .files: Label("\(store.files.count)", systemImage: "tray").lineLimit(1)
+        case .files: compactLabel(symbol: "tray", text: "\(store.files.count)")
         case .activity:
             if let activity = activeActivity {
                 if let kind = BluetoothClosedActivity.kind(for: activity) {
                     BluetoothClosedActivityView(activity: activity, kind: kind, side: side,
                                                 textSize: textSize, availableWidth: activityContentWidth,
-                                                inheritedColor: effectiveTextColor)
+                                                inheritedColor: effectiveTextColor, spacing: elementSpacing)
                 } else {
-                    HStack(spacing: 6) {
+                    HStack(spacing: elementSpacing) {
                         Image(systemName: "waveform.path")
                             .frame(width: max(12, textSize), alignment: .center)
                         VStack(alignment: .leading, spacing: 1) {
@@ -627,6 +628,13 @@ struct ClosedNotchSlot: View {
             }
         }
     }
+    private func compactLabel(symbol: String, text: String) -> some View {
+        HStack(spacing: elementSpacing) {
+            Image(systemName: symbol)
+                .frame(width: max(12, textSize + 2), alignment: .center)
+            Text(text).monospacedDigit().lineLimit(1)
+        }
+    }
     private var compactClock: WidgetStyle { var value = clock; value.fontSize = textSize; value.textColor = WidgetColor(effectiveTextColor); return value }
 }
 
@@ -637,6 +645,7 @@ private struct BluetoothClosedActivityView: View {
     let textSize: Double
     let availableWidth: Double
     let inheritedColor: Color
+    let spacing: Double
     @AppStorage("HaloBluetoothClosedNotchLayout") private var layoutRaw = BluetoothClosedNotchLayout.stacked.rawValue
     @AppStorage("HaloBluetoothClosedNotchAccent") private var accentRaw = BluetoothClosedNotchAccent.blue.rawValue
     @AppStorage("HaloBluetoothClosedNotchShowIcon") private var showIcon = true
@@ -668,7 +677,7 @@ private struct BluetoothClosedActivityView: View {
             case .textOnly:
                 textBlock
             case .inline:
-                HStack(spacing: 5) {
+                HStack(spacing: spacing) {
                     if side == .left {
                         inlineText
                         if showIcon { eventIcon }
@@ -678,7 +687,7 @@ private struct BluetoothClosedActivityView: View {
                     }
                 }
             case .stacked:
-                HStack(spacing: 6) {
+                HStack(spacing: spacing) {
                     if side == .left {
                         textBlock
                         if showIcon { eventIcon }
@@ -879,7 +888,6 @@ private struct PowerEventBadge: View {
     let options: PowerReactionOptions
     let side: ClosedNotchSide
     let textSize: Double
-    let notchMargin: Double
 
     private var contentAlignment: Alignment { side == .left ? .trailing : .leading }
     private var iconWidth: Double { max(12, textSize + 2) }
@@ -918,9 +926,8 @@ private struct PowerEventBadge: View {
         .font(.system(size: textSize, weight: .semibold))
         .lineLimit(1)
         .minimumScaleFactor(0.82)
-        .padding(side == .left ? .trailing : .leading, notchMargin)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: contentAlignment)
-        .padding(side == .left ? .leading : .trailing, 1)
+        .padding(.horizontal, 1)
         .foregroundStyle(powerColor)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(event.label), \(event.battery) percent")

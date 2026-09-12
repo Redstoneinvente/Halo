@@ -19,6 +19,56 @@ enum ClosedWingSizing {
     }
 }
 
+/// Canonical spacing model for the closed notch. Rendering and dynamic window sizing must use
+/// the same insets/gaps or the surface grows by a different amount than the content it contains.
+/// Default padding compresses gracefully at very small closed heights (16–24 pt), while explicit
+/// user values remain exact.
+struct ClosedNotchLayoutMetrics: Equatable {
+    let verticalPadding: Double
+    let horizontalPadding: Double
+    let cameraMargin: Double
+    let outerMargin: Double
+    let elementSpacing: Double
+    let contentHeight: Double
+
+    init(options: ClosedNotchOptions, height: Double) {
+        let safeHeight = max(1, height)
+        verticalPadding = min(options.contentPaddingY, max(0, (safeHeight - 8) / 2))
+        contentHeight = max(1, safeHeight - 2 * verticalPadding)
+
+        // Defaults should not consume an entire 16–24 pt wing. If the user explicitly chose a
+        // value, honour it exactly rather than silently clamping their customization.
+        let adaptiveHorizontal = max(1, min(8, contentHeight * 0.28))
+        horizontalPadding = options.horizontalPadding == nil
+            ? min(options.contentPaddingX, adaptiveHorizontal)
+            : options.contentPaddingX
+
+        let adaptiveMargin = max(0, min(4, contentHeight * 0.25))
+        cameraMargin = options.sideMargin == nil
+            ? min(options.contentSideMargin, adaptiveMargin)
+            : options.contentSideMargin
+        outerMargin = options.outerMargin == nil
+            ? min(options.contentOuterMargin, adaptiveMargin)
+            : options.contentOuterMargin
+
+        elementSpacing = min(6, max(2, contentHeight * 0.16))
+    }
+
+    var normalCameraInset: Double { horizontalPadding + cameraMargin }
+    var outerInset: Double { horizontalPadding + outerMargin }
+    var normalShell: Double { normalCameraInset + outerInset }
+
+    /// Power-event margin is defined as the total distance from the camera edge. It intentionally
+    /// replaces generic camera padding instead of stacking on top of it.
+    func cameraInset(power: PowerReactionOptions?) -> Double {
+        power?.resolvedNotchMargin ?? normalCameraInset
+    }
+
+    func shell(power: PowerReactionOptions?) -> Double {
+        cameraInset(power: power) + outerInset
+    }
+}
+
 enum FrameRatePolicy {
     static func target(maximum: Int, lowPower: Bool) -> Int {
         min(lowPower ? 60 : 120, maximum > 0 ? maximum : 60)

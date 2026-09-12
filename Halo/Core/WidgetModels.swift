@@ -53,7 +53,9 @@ enum ClosedNotchItem: String, Codable, CaseIterable, Identifiable {
 }
 enum PlaybackAnimation: String, Codable, CaseIterable { case bars, wave, pulse, waveform, ribbon, dots, rings, orbit, spectrum }
 struct ClosedExpansionOptions: Codable, Equatable {
-    var enabled = true
+    // Content-fit is the stable default. Users can opt into a fixed active width for a more
+    // dramatic music/live-activity expansion without making every transient event 400 pt wide.
+    var enabled = false
     var width = 400.0
 }
 struct VisualizerOptions: Codable, Equatable {
