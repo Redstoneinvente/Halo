@@ -1,0 +1,35 @@
+name: Hide EI Temporarily
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hide-ei-temporarily.yml
+
+permissions:
+  contents: write
+
+jobs:
+  hide:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply EI hide migration
+        run: python3 .github/scripts/hide_ei_temporarily.py
+      - name: Verify EI is absent from settings and startup
+        run: |
+          ! grep -q 'EnvironmentalInterfaceManager.shared.start' Halo/Core/AppStore.swift
+          ! grep -q 'EnvironmentalInterfaceOwnershipController.shared.start' Halo/Core/AppStore.swift
+          ! grep -q 'case "Environmental Interface"' Halo/Views/WorkspaceSettingsView.swift
+          ! grep -q '"Environmental Interface", "HUD"' Halo/Views/WorkspaceSettingsView.swift
+      - name: Build Halo
+        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+      - name: Commit source change
+        run: |
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/Core/AppStore.swift Halo/Views/WorkspaceSettingsView.swift
+          git commit -m 'chore: hide Environmental Interface for now'
+          git push origin main
