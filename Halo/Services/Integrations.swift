@@ -402,7 +402,7 @@ final class HotkeyService {
         var type = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let userData = Unmanaged.passUnretained(self).toOpaque()
         let status = InstallEventHandler(GetApplicationEventTarget(), { _, event, userData in
-            guard let event, let userData else { return noErr }
+            guard let event, let userData else { return OSStatus(eventNotHandledErr) }
             let service = Unmanaged<HotkeyService>.fromOpaque(userData).takeUnretainedValue()
             var identifier = EventHotKeyID()
             var actualSize = 0
@@ -413,7 +413,12 @@ final class HotkeyService {
                                          MemoryLayout<EventHotKeyID>.size,
                                          &actualSize,
                                          &identifier)
-            guard read == noErr, identifier.id == service.identifierID else { return noErr }
+            // Multiple Halo shortcuts install handlers on the same application event target.
+            // Returning noErr for somebody else's ID swallows the event before the owner sees it.
+            guard read == noErr else { return OSStatus(eventNotHandledErr) }
+            guard identifier.signature == 0x48414C4F, identifier.id == service.identifierID else {
+                return OSStatus(eventNotHandledErr)
+            }
             let name = service.notificationName
             DispatchQueue.main.async { NotificationCenter.default.post(name: name, object: nil) }
             return noErr
