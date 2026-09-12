@@ -5,10 +5,10 @@
 	<key>CFBundleIconFile</key>
 	<string>AppIcon.incs</string>
 	<key>HaloFirebaseAPIKey</key>
-	<string>AIzaSyCgnmkWeqSd0EUVeVgeQKP5xChjKowdOnU</string>
+	<string>$(HALO_FIREBASE_API_KEY)</string>
 	<key>HaloLicenseSeatProductSlug</key>
-	<string>halo-macos-notch-utility</string>
+	<string>$(HALO_LICENSESEAT_PUBLISHABLE_KEY)</string>
 	<key>HaloLicenseSeatPublishableKey</key>
-	<string>pk_live_27Vr5DhqgNjh8Mn2fuFMZ26wApJqhkMvA</string>
+	<string>$(HALO_LICENSESEAT_PRODUCT_SLUG)</string>
 </dict>
 </plist>

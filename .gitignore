@@ -11,3 +11,6 @@ build/
 *.p8
 *.mobileprovision
 *.provisionprofile
+
+# Halo local secrets
+Halo/Config/Secrets.xcconfig

@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -136,6 +136,10 @@
 		F8614B763053291B00D4943C /* icon_512x512@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_512x512@2x.png"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		F84A0AB1305582E700E8B51E /* Config */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Config; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
 /* Begin PBXFrameworksBuildPhase section */
 		000000000000000000000008 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
@@ -175,6 +179,7 @@
 		000000000000000000000003 /* Halo */ = {
 			isa = PBXGroup;
 			children = (
+				F84A0AB1305582E700E8B51E /* Config */,
 				F8614B773053291B00D4943C /* Halo Icons */,
 				F8614B6A3053275D00D4943C /* Halo_AppIcon_Transparent.png */,
 				F8614B623053239E00D4943C /* Info.plist */,
@@ -318,6 +323,9 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F84A0AB1305582E700E8B51E /* Config */,
 			);
 			name = Halo;
 			productName = Halo;
