@@ -34,10 +34,10 @@ jobs:
           git diff --check
           xcrun swiftc -parse Halo/Views/DecorationsView.swift
 
-          echo '=== Xcode non-batch validation ==='
+          echo '=== Xcode ordered single-file validation ==='
           set +e
-          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug \
-            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES SWIFT_ENABLE_BATCH_MODE=NO \
+          xcodebuild -jobs 1 -project Halo.xcodeproj -target Halo -configuration Debug \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES SWIFT_ENABLE_BATCH_MODE=NO SWIFT_COMPILATION_MODE=singlefile \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build \
             2>&1 | tee /tmp/notch-ambient-compile-fix.log
           build_status=${PIPESTATUS[0]}
@@ -53,7 +53,7 @@ jobs:
           if grep -qE 'SwiftCompile normal arm64 .*DecorationsView\.swift|SwiftCompile normal arm64 /.*DecorationsView\.swift' /tmp/notch-ambient-compile-fix.log; then
               echo 'DecorationsView compiled independently with no errors.'
           else
-              echo 'Non-batch build did not schedule DecorationsView before stopping.' >&2
+              echo 'Ordered build did not reach DecorationsView.swift.' >&2
               grep -E 'error:' /tmp/notch-ambient-compile-fix.log | tail -n 20 || true
               exit 1
           fi
