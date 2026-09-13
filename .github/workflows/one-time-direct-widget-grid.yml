@@ -17,14 +17,13 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p = Path('Scripts/one_time_direct_widget_grid.py')
-          text = p.read_text()
-          bad = '''        Menu("Lightweight element") { ForEach(OpenNotchElementKind.allCases) { element in Button(element.title) { addElement(element) } }
-          ''')'''
-          good = '''        Menu("Lightweight element") { ForEach(OpenNotchElementKind.allCases) { element in Button(element.title) { addElement(element) } } }
-          ''')'''
-          if text.count(bad) != 1:
-              raise SystemExit(f'Expected one malformed add-menu replacement, found {text.count(bad)}')
-          p.write_text(text.replace(bad, good, 1))
+          lines = p.read_text().splitlines()
+          needle = '        Menu("Lightweight element") { ForEach(OpenNotchElementKind.allCases) { element in Button(element.title) { addElement(element) } }'
+          matches = [i for i, line in enumerate(lines) if line == needle]
+          if len(matches) != 1:
+              raise SystemExit(f'Expected one malformed add-menu line, found {len(matches)}')
+          lines[matches[0]] += ' }'
+          p.write_text('\n'.join(lines) + '\n')
           PY
       - name: Apply direct-grid architecture
         run: python3 Scripts/one_time_direct_widget_grid.py
