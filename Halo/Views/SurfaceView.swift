@@ -901,8 +901,12 @@ private struct OpenNotchBackgroundView: View {
     let fallback: Appearance
     let theme: Theme
     @ObservedObject var system: SystemService
+
+    private var effectiveAppearance: Appearance { options.baseAppearance(fallback) }
+    private var glassBlur: Double { min(30, max(0, options.blur ?? fallback.blur)) }
+
     var body: some View {
-        SurfaceBackground(appearance: options.baseAppearance(fallback), theme: theme, expanded: true, system: system)
+        baseBackground
             .contrast(options.contrast ?? 1)
             .overlay((options.tintColor ?? WidgetColor(red: 0.35, green: 0.55, blue: 1)).color.opacity(options.tintOpacity ?? 0))
             .overlay(Color.orange.opacity(max(0, options.warmth ?? 0) * 0.06))
@@ -927,6 +931,34 @@ private struct OpenNotchBackgroundView: View {
                     }.allowsHitTesting(false)
                 }
             }
+    }
+
+    @ViewBuilder private var baseBackground: some View {
+        if effectiveAppearance.background == .glass {
+            ZStack {
+                SurfaceBackground(appearance: effectiveAppearance, theme: theme, expanded: true, system: system)
+                glassStrengthLayer
+            }
+        } else {
+            SurfaceBackground(appearance: effectiveAppearance, theme: theme, expanded: true, system: system)
+        }
+    }
+
+    @ViewBuilder private var glassStrengthLayer: some View {
+        let strength = min(1, max(0, glassBlur / 30))
+        if glassBlur < 0.5 {
+            Color.clear
+        } else if glassBlur < 7 {
+            Rectangle().fill(.ultraThinMaterial).opacity(0.18 + strength * 0.42)
+        } else if glassBlur < 14 {
+            Rectangle().fill(.thinMaterial).opacity(0.22 + strength * 0.46)
+        } else if glassBlur < 21 {
+            Rectangle().fill(.regularMaterial).opacity(0.28 + strength * 0.50)
+        } else if glassBlur < 27 {
+            Rectangle().fill(.thickMaterial).opacity(0.32 + strength * 0.54)
+        } else {
+            Rectangle().fill(.ultraThickMaterial).opacity(0.38 + strength * 0.58)
+        }
     }
 }
 

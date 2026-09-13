@@ -352,6 +352,52 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         )
     }
 
+    private var visualBackgroundKind: Binding<BackgroundKind> {
+        Binding(
+            get: { workspace.settings.layout.resolvedOpenNotchLayout.appearance.background ?? workspace.settings.layout.appearance.background },
+            set: { value in updateVisualAppearance { $0.background = value } }
+        )
+    }
+
+    private var visualAssetPath: Binding<String> {
+        Binding(
+            get: { workspace.settings.layout.resolvedOpenNotchLayout.appearance.assetPath },
+            set: { value in updateVisualAppearance { $0.assetPath = value } }
+        )
+    }
+
+    private func visualDouble(_ keyPath: WritableKeyPath<OpenNotchAppearance, Double?>, fallback: Double) -> Binding<Double> {
+        Binding(
+            get: { workspace.settings.layout.resolvedOpenNotchLayout.appearance[keyPath: keyPath] ?? fallback },
+            set: { value in updateVisualAppearance { $0[keyPath: keyPath] = value } }
+        )
+    }
+
+    private func visualColor(_ keyPath: WritableKeyPath<OpenNotchAppearance, WidgetColor?>, fallback: WidgetColor) -> Binding<Color> {
+        Binding(
+            get: { (workspace.settings.layout.resolvedOpenNotchLayout.appearance[keyPath: keyPath] ?? fallback).color },
+            set: { value in updateVisualAppearance { $0[keyPath: keyPath] = WidgetColor(value) } }
+        )
+    }
+
+    private func updateVisualAppearance(_ update: (inout OpenNotchAppearance) -> Void) {
+        var current = workspace.settings.layout
+        current.materializeOpenNotchLayout()
+        var opened = current.resolvedOpenNotchLayout
+        update(&opened.appearance)
+        opened.preset = .custom
+        current.openNotch = opened
+        workspace.settings.layout = current
+    }
+
+    private func chooseVisualBackgroundAsset(_ kind: BackgroundKind) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = kind == .video ? [.movie] : [.image]
+        if panel.runModal() == .OK, let url = panel.url { visualAssetPath.wrappedValue = url.path }
+    }
+
     @ViewBuilder private var basics: some View {
         Section("Opened notch size & spacing") {
             Slider(value: $store.configuration.theme.width, in: 340...1200, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Opened width") }
@@ -386,6 +432,21 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     }
 
     @ViewBuilder private var background: some View {
+        if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+            visualWorkspaceBackground
+        } else {
+            defaultWorkspaceBackground
+        }
+    }
+
+    @ViewBuilder private var defaultWorkspaceBackground: some View {
+        let kind = workspace.settings.layout.appearance.background
+        Section {
+            Label("Default Workspace", systemImage: "rectangle.split.3x1")
+                .font(.headline)
+            Text("These controls affect Halo's standard opened-notch workspace. Switch to Visual Workspace in Opened Space to edit its independent background instead.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
         SurfaceAppearanceControls(
             appearance: $workspace.settings.layout.appearance,
             theme: store.configuration.theme,
@@ -393,16 +454,100 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             scope: .background
         )
         Section("Background effects") {
-            if workspace.settings.layout.appearance.background == .glass {
-                Text("Glass blurs the desktop behind Halo. Opacity adjusts its tint; macOS controls the backdrop blur. Reduce Transparency replaces glass with a solid background.").font(.caption)
-            } else {
+            switch kind {
+            case .glass:
+                Text("Default glass uses Halo's system material. Visual Workspace has its own adjustable glass strength when that layout system is selected.")
+                    .font(.caption).foregroundStyle(.secondary)
+            case .image, .video:
                 Slider(value: $workspace.settings.layout.appearance.blur, in: 0...20) { Text("Blur") }
                 Slider(value: $workspace.settings.layout.appearance.saturation, in: 0...2) { Text("Saturation") }
                 Slider(value: $workspace.settings.layout.appearance.brightness, in: -0.5...0.5) { Text("Brightness") }
+            case .gradient:
+                Slider(value: $workspace.settings.layout.appearance.saturation, in: 0...2) { Text("Saturation") }
+                Slider(value: $workspace.settings.layout.appearance.brightness, in: -0.5...0.5) { Text("Brightness") }
+            case .solid:
+                EmptyView()
             }
             GrainSettingsView(options: Binding(get: { workspace.settings.layout.appearance.grain ?? GrainOptions() }, set: { workspace.settings.layout.appearance.grain = $0 }))
-            Toggle("Pause video on battery", isOn: $workspace.settings.layout.appearance.pauseVideoOnBattery)
-            Text("Video is muted, loops, and pauses when collapsed. Large videos and blur increase GPU use. Background files are referenced in place.").font(.caption)
+            if kind == .video {
+                Toggle("Pause video on battery", isOn: $workspace.settings.layout.appearance.pauseVideoOnBattery)
+                Text("Video is muted, loops, and pauses when collapsed. Large videos and blur increase GPU use. The file is referenced in place.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if kind == .image {
+                Text("The image file is referenced in place. Blur and color adjustments apply only to this background type.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var visualWorkspaceBackground: some View {
+        let kind = visualBackgroundKind.wrappedValue
+        let fallback = workspace.settings.layout.appearance
+        let openedAppearance = workspace.settings.layout.resolvedOpenNotchLayout.appearance
+        Section {
+            Label("Visual Workspace", systemImage: "rectangle.3.group")
+                .font(.headline)
+            Text("Background changes here are stored with the Visual Workspace and do not overwrite the Default workspace background.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Background") {
+            Picker("Type", selection: visualBackgroundKind) {
+                ForEach(BackgroundKind.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+            }
+
+            switch kind {
+            case .glass:
+                Text("Glass uses a live macOS material. The Glass blur control below now changes the material strength instead of being a no-op.")
+                    .font(.caption).foregroundStyle(.secondary)
+            case .solid:
+                ColorPicker("Color", selection: visualColor(\.solidColor, fallback: fallback.solidColor ?? .white), supportsOpacity: false)
+            case .gradient:
+                ColorPicker("Gradient start", selection: visualColor(\.gradientStartColor, fallback: fallback.gradientStartColor ?? WidgetColor(red: 0.07, green: 0.09, blue: 0.14)), supportsOpacity: false)
+                ColorPicker("Gradient end", selection: visualColor(\.gradientEndColor, fallback: fallback.gradientEndColor ?? WidgetColor(red: 0.01, green: 0.02, blue: 0.04)), supportsOpacity: false)
+            case .image, .video:
+                TextField(kind == .video ? "Video path" : "Image path", text: visualAssetPath)
+                Button(kind == .video ? "Choose Video…" : "Choose Image…") { chooseVisualBackgroundAsset(kind) }
+                Text("Halo references the selected file in place; it is not copied into the app.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+
+        Section("Material") {
+            if kind == .glass {
+                Slider(value: visualDouble(\.blur, fallback: fallback.blur), in: 0...30) { Text("Glass blur") }
+                Text("0 uses the base glass. Higher values progressively strengthen the live material and backdrop separation.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if kind == .image || kind == .video {
+                Slider(value: visualDouble(\.blur, fallback: fallback.blur), in: 0...30) { Text("Blur") }
+            }
+
+            if kind != .solid {
+                Slider(value: visualDouble(\.saturation, fallback: fallback.saturation), in: 0...2.5) { Text("Saturation") }
+                Slider(value: visualDouble(\.brightness, fallback: fallback.brightness), in: -0.5...0.5) { Text("Brightness") }
+                Slider(value: visualDouble(\.contrast, fallback: openedAppearance.contrast ?? 1), in: 0.5...2) { Text("Contrast") }
+            }
+
+            Slider(value: visualDouble(\.grain, fallback: openedAppearance.grain ?? 0), in: 0...0.35) { Text("Grain") }
+            Slider(value: visualDouble(\.warmth, fallback: openedAppearance.warmth ?? 0), in: -1...1) { Text("Warmth") }
+            ColorPicker("Tint", selection: visualColor(\.tintColor, fallback: openedAppearance.tintColor ?? WidgetColor(red: 0.35, green: 0.55, blue: 1)), supportsOpacity: false)
+            Slider(value: visualDouble(\.tintOpacity, fallback: openedAppearance.tintOpacity ?? 0), in: 0...0.5) { Text("Tint opacity") }
+        }
+
+        Section("Edge & depth") {
+            let borderWidth = visualDouble(\.borderWidth, fallback: openedAppearance.borderWidth ?? 0)
+            Slider(value: borderWidth, in: 0...6) { Text("Border width") }
+            if borderWidth.wrappedValue > 0.001 {
+                ColorPicker("Border", selection: visualColor(\.borderColor, fallback: openedAppearance.borderColor ?? .white), supportsOpacity: false)
+                Slider(value: visualDouble(\.borderOpacity, fallback: openedAppearance.borderOpacity ?? 0.2), in: 0...1) { Text("Border opacity") }
+                Slider(value: visualDouble(\.innerHighlight, fallback: openedAppearance.innerHighlight ?? 0), in: 0...0.5) { Text("Inner highlight") }
+            }
+
+            let shadowOpacity = visualDouble(\.shadowOpacity, fallback: openedAppearance.shadowOpacity ?? 0)
+            Slider(value: shadowOpacity, in: 0...0.7) { Text("Shadow opacity") }
+            if shadowOpacity.wrappedValue > 0.001 {
+                Slider(value: visualDouble(\.shadowBlur, fallback: openedAppearance.shadowBlur ?? 12), in: 0...50) { Text("Shadow blur") }
+            }
+            Slider(value: visualDouble(\.glow, fallback: openedAppearance.glow ?? 0), in: 0...0.5) { Text("Subtle glow") }
         }
     }
 

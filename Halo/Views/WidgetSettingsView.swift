@@ -1008,32 +1008,51 @@ struct OpenedNotchWorkspaceEditor: View {
 
     @ViewBuilder private var backgroundInspector: some View {
         let b = openBinding()
+        let kind = b.wrappedValue.appearance.background ?? layout.appearance.background
         Section("Opened notch surface") {
-            Picker("Background", selection: Binding(get: { b.wrappedValue.appearance.background ?? layout.appearance.background }, set: { b.wrappedValue.appearance.background = $0 })) {
+            Picker("Background", selection: Binding(get: { kind }, set: { b.wrappedValue.appearance.background = $0 })) {
                 ForEach(BackgroundKind.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
             }
-            ColorPicker("Solid / tint color", selection: Binding(get: { (b.wrappedValue.appearance.solidColor ?? layout.appearance.solidColor ?? .white).color }, set: { b.wrappedValue.appearance.solidColor = WidgetColor($0) }), supportsOpacity: false)
-            ColorPicker("Gradient start", selection: Binding(get: { (b.wrappedValue.appearance.gradientStartColor ?? layout.appearance.gradientStartColor ?? WidgetColor(red: 0.07, green: 0.09, blue: 0.14)).color }, set: { b.wrappedValue.appearance.gradientStartColor = WidgetColor($0) }), supportsOpacity: false)
-            ColorPicker("Gradient end", selection: Binding(get: { (b.wrappedValue.appearance.gradientEndColor ?? layout.appearance.gradientEndColor ?? WidgetColor(red: 0.01, green: 0.02, blue: 0.04)).color }, set: { b.wrappedValue.appearance.gradientEndColor = WidgetColor($0) }), supportsOpacity: false)
-            TextField("Image / video path", text: b.appearance.assetPath)
+            switch kind {
+            case .glass:
+                Text("Glass uses a live macOS material. Use Glass blur below to control how strongly it separates the workspace from the desktop.")
+                    .font(.caption).foregroundStyle(.secondary)
+            case .solid:
+                ColorPicker("Color", selection: Binding(get: { (b.wrappedValue.appearance.solidColor ?? layout.appearance.solidColor ?? .white).color }, set: { b.wrappedValue.appearance.solidColor = WidgetColor($0) }), supportsOpacity: false)
+            case .gradient:
+                ColorPicker("Gradient start", selection: Binding(get: { (b.wrappedValue.appearance.gradientStartColor ?? layout.appearance.gradientStartColor ?? WidgetColor(red: 0.07, green: 0.09, blue: 0.14)).color }, set: { b.wrappedValue.appearance.gradientStartColor = WidgetColor($0) }), supportsOpacity: false)
+                ColorPicker("Gradient end", selection: Binding(get: { (b.wrappedValue.appearance.gradientEndColor ?? layout.appearance.gradientEndColor ?? WidgetColor(red: 0.01, green: 0.02, blue: 0.04)).color }, set: { b.wrappedValue.appearance.gradientEndColor = WidgetColor($0) }), supportsOpacity: false)
+            case .image, .video:
+                TextField(kind == .video ? "Video path" : "Image path", text: b.appearance.assetPath)
+            }
         }
         Section("Material") {
-            optionalSlider("Blur", b.appearance.blur, fallback: layout.appearance.blur, range: 0...30, suffix: "pt")
-            optionalSlider("Saturation", b.appearance.saturation, fallback: layout.appearance.saturation, range: 0...2.5, step: 0.05, suffix: "×", decimals: 2)
-            optionalSlider("Brightness", b.appearance.brightness, fallback: layout.appearance.brightness, range: -0.5...0.5, step: 0.02, decimals: 2)
-            optionalSlider("Contrast", b.appearance.contrast, fallback: 1, range: 0.5...2, step: 0.05, suffix: "×", decimals: 2)
+            if kind == .glass {
+                optionalSlider("Glass blur", b.appearance.blur, fallback: layout.appearance.blur, range: 0...30, suffix: "pt")
+            } else if kind == .image || kind == .video {
+                optionalSlider("Blur", b.appearance.blur, fallback: layout.appearance.blur, range: 0...30, suffix: "pt")
+            }
+            if kind != .solid {
+                optionalSlider("Saturation", b.appearance.saturation, fallback: layout.appearance.saturation, range: 0...2.5, step: 0.05, suffix: "×", decimals: 2)
+                optionalSlider("Brightness", b.appearance.brightness, fallback: layout.appearance.brightness, range: -0.5...0.5, step: 0.02, decimals: 2)
+                optionalSlider("Contrast", b.appearance.contrast, fallback: 1, range: 0.5...2, step: 0.05, suffix: "×", decimals: 2)
+            }
             optionalSlider("Grain", b.appearance.grain, fallback: 0, range: 0...0.35, step: 0.01, decimals: 2)
             optionalSlider("Warmth", b.appearance.warmth, fallback: 0, range: -1...1, step: 0.05, decimals: 2)
             ColorPicker("Tint", selection: Binding(get: { (b.wrappedValue.appearance.tintColor ?? WidgetColor(red: 0.35, green: 0.55, blue: 1)).color }, set: { b.wrappedValue.appearance.tintColor = WidgetColor($0) }), supportsOpacity: false)
             optionalSlider("Tint opacity", b.appearance.tintOpacity, fallback: 0, range: 0...0.5, step: 0.01, decimals: 2)
         }
         Section("Edge & depth") {
-            ColorPicker("Border", selection: Binding(get: { (b.wrappedValue.appearance.borderColor ?? .white).color }, set: { b.wrappedValue.appearance.borderColor = WidgetColor($0) }), supportsOpacity: false)
             optionalSlider("Border width", b.appearance.borderWidth, fallback: 0, range: 0...6, step: 0.25, suffix: "pt", decimals: 2)
-            optionalSlider("Border opacity", b.appearance.borderOpacity, fallback: 0.2, range: 0...1, step: 0.05, decimals: 2)
-            optionalSlider("Inner highlight", b.appearance.innerHighlight, fallback: 0, range: 0...0.5, step: 0.02, decimals: 2)
-            optionalSlider("Shadow blur", b.appearance.shadowBlur, fallback: 12, range: 0...50, step: 1, suffix: "pt")
+            if (b.wrappedValue.appearance.borderWidth ?? 0) > 0.001 {
+                ColorPicker("Border", selection: Binding(get: { (b.wrappedValue.appearance.borderColor ?? .white).color }, set: { b.wrappedValue.appearance.borderColor = WidgetColor($0) }), supportsOpacity: false)
+                optionalSlider("Border opacity", b.appearance.borderOpacity, fallback: 0.2, range: 0...1, step: 0.05, decimals: 2)
+                optionalSlider("Inner highlight", b.appearance.innerHighlight, fallback: 0, range: 0...0.5, step: 0.02, decimals: 2)
+            }
             optionalSlider("Shadow opacity", b.appearance.shadowOpacity, fallback: 0, range: 0...0.7, step: 0.02, decimals: 2)
+            if (b.wrappedValue.appearance.shadowOpacity ?? 0) > 0.001 {
+                optionalSlider("Shadow blur", b.appearance.shadowBlur, fallback: 12, range: 0...50, step: 1, suffix: "pt")
+            }
             optionalSlider("Subtle glow", b.appearance.glow, fallback: 0, range: 0...0.5, step: 0.02, decimals: 2)
         }
     }
