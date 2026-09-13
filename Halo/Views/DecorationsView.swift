@@ -153,6 +153,7 @@ enum NotchAmbientDecorationKind: String, Codable, CaseIterable, Identifiable {
     case shadowDepth = "Shadow / Depth"
     case fairyLights = "Fairy Lights"
     case hangingStars = "Hanging Stars / Moons"
+    case christmasOrnaments = "Christmas Ornaments"
     case icicles = "Icicles"
     case vines = "Vines"
     case moss = "Grass / Moss"
@@ -189,7 +190,7 @@ enum NotchAmbientDecorationKind: String, Codable, CaseIterable, Identifiable {
     var category: NotchAmbientCategory {
         switch self {
         case .edgeGlow, .halo, .underline, .shadowDepth: return .minimal
-        case .fairyLights, .hangingStars, .icicles: return .hanging
+        case .fairyLights, .hangingStars, .christmasOrnaments, .icicles: return .hanging
         case .vines, .moss, .treeBranch, .flowers, .clouds, .rain, .snow: return .nature
         case .blackHole, .portal, .reactor, .spaceship, .ufo, .orbit: return .space
         case .aquarium, .waterfall, .waterSurface: return .water
@@ -207,6 +208,7 @@ enum NotchAmbientDecorationKind: String, Codable, CaseIterable, Identifiable {
         case .shadowDepth: return "square.3.layers.3d.down.right"
         case .fairyLights: return "lightbulb.2"
         case .hangingStars: return "sparkles"
+        case .christmasOrnaments: return "circle.grid.cross"
         case .icicles: return "triangle.fill"
         case .vines: return "leaf"
         case .moss: return "camera.macro"
@@ -440,6 +442,7 @@ extension NotchAmbientDecorationKind {
         case .shadowDepth: return [.thickness, .softness, .falloff]
         case .fairyLights: return [.count, .spacing, .length, .bloom, .flicker, .sway, .bulbShape, .audio, .cursor, .symmetry]
         case .hangingStars: return [.count, .spacing, .length, .bloom, .sway, .cursor, .symmetry]
+        case .christmasOrnaments: return [.count, .spacing, .length, .bloom, .sway, .cursor, .symmetry]
         case .icicles: return [.count, .spacing, .length, .density, .bloom, .symmetry]
         case .vines, .moss, .treeBranch, .flowers: return [.count, .length, .density, .sway, .foliageStyle, .cursor, .symmetry, .placement]
         case .clouds: return [.count, .density, .softness, .wind, .symmetry, .placement]
@@ -1049,12 +1052,13 @@ private struct NotchAmbientArtwork: View {
 
     var body: some View {
         Canvas { context, size in
-            let notch = CGRect(x: (size.width - notchWidth) / 2, y: 0, width: notchWidth, height: notchHeight)
-            NotchAmbientPainter.draw(kind: settings.decoration, context: &context, size: size, notch: notch,
+            let physicalNotch = CGRect(x: (size.width - notchWidth) / 2, y: 0, width: notchWidth, height: notchHeight)
+            let artworkNotch = NotchAmbientPainter.placedNotch(physicalNotch, settings: settings)
+            NotchAmbientPainter.draw(kind: settings.decoration, context: &context, size: size, notch: artworkNotch,
                                      settings: settings, phase: phase, audio: audio, cursor: cursor,
                                      palette: palette, lowPower: lowPower, date: date)
             if let season = settings.resolvedSeason(at: date) {
-                NotchAmbientPainter.drawSeason(season, context: &context, size: size, notch: notch,
+                NotchAmbientPainter.drawSeason(season, context: &context, size: size, notch: physicalNotch,
                                                settings: settings, phase: phase, palette: palette, lowPower: lowPower)
             }
         }
@@ -1095,9 +1099,21 @@ private enum NotchAmbientPainter {
         let dx = point.x - cursor.x, dy = point.y - cursor.y
         let d = max(1, hypot(dx, dy)); let radius = CGFloat(settings.reactionRadius)
         guard d < radius else { return (0, 0, 0) }
-        let strength = Double(1 - d / radius) * settings.reactionStrength
+        let raw = Double(1 - d / radius)
+        let exponent = max(0.35, 1.85 - settings.reactionSmoothing * 1.45)
+        let strength = pow(raw, exponent) * settings.reactionStrength
         let sign: CGFloat = settings.cursorReaction == .attract ? -1 : 1
         return (strength, sign * dx / d * CGFloat(12 * strength), sign * dy / d * CGFloat(12 * strength))
+    }
+
+    static func placedNotch(_ notch: CGRect, settings s: NotchAmbientSettings) -> CGRect {
+        switch s.placement {
+        case .above: return notch.offsetBy(dx: 0, dy: -min(10, notch.height * 0.25))
+        case .below: return notch.offsetBy(dx: 0, dy: min(18, notch.height * 0.45))
+        case .left: return notch.offsetBy(dx: -min(54, notch.width * 0.28), dy: 0)
+        case .right: return notch.offsetBy(dx: min(54, notch.width * 0.28), dy: 0)
+        case .around, .behind, .edgeAttached: return notch
+        }
     }
 
     static func draw(kind: NotchAmbientDecorationKind, context: inout GraphicsContext, size: CGSize, notch: CGRect,
@@ -1107,12 +1123,13 @@ private enum NotchAmbientPainter {
         let timeFactor = s.timeBasedAppearance ? (hour < 6 ? 0.68 : hour < 12 ? 1.08 : hour < 18 ? 1.0 : 0.82) : 1.0
         let intensity = min(1, effectiveIntensity(s, audio: audio, lowPower: lowPower) * timeFactor)
         switch kind {
-        case .edgeGlow: drawEdgeGlow(&context, notch: notch, s: s, phase: phase, intensity: intensity, palette: palette)
-        case .halo: drawHalo(&context, notch: notch, s: s, phase: phase, intensity: intensity, palette: palette)
+        case .edgeGlow: drawEdgeGlow(&context, notch: notch, s: s, phase: phase, intensity: intensity, palette: palette, cursor: cursor)
+        case .halo: drawHalo(&context, notch: notch, s: s, phase: phase, intensity: intensity, palette: palette, cursor: cursor)
         case .underline: drawUnderline(&context, notch: notch, s: s, phase: phase, intensity: intensity, palette: palette)
         case .shadowDepth: drawDepth(&context, notch: notch, s: s, intensity: intensity, palette: palette)
-        case .fairyLights: drawHanging(&context, size: size, notch: notch, s: s, phase: phase, intensity: intensity, palette: palette, stars: false, cursor: cursor, lowPower: lowPower)
-        case .hangingStars: drawHanging(&context, size: size, notch: notch, s: s, phase: phase, intensity: intensity, palette: palette, stars: true, cursor: cursor, lowPower: lowPower)
+        case .fairyLights: drawHanging(&context, size: size, notch: notch, s: s, phase: phase, intensity: intensity, palette: palette, stars: false, ornaments: false, cursor: cursor, lowPower: lowPower)
+        case .hangingStars: drawHanging(&context, size: size, notch: notch, s: s, phase: phase, intensity: intensity, palette: palette, stars: true, ornaments: false, cursor: cursor, lowPower: lowPower)
+        case .christmasOrnaments: drawHanging(&context, size: size, notch: notch, s: s, phase: phase, intensity: intensity, palette: palette, stars: false, ornaments: true, cursor: cursor, lowPower: lowPower)
         case .icicles: drawIcicles(&context, notch: notch, s: s, phase: phase, intensity: intensity, palette: palette, lowPower: lowPower)
         case .vines, .moss, .treeBranch, .flowers: drawNature(&context, size: size, notch: notch, kind: kind, s: s, phase: phase, intensity: intensity, palette: palette, cursor: cursor, lowPower: lowPower)
         case .clouds, .rain, .snow: drawWeather(&context, size: size, notch: notch, kind: kind, s: s, phase: phase, intensity: intensity, palette: palette, lowPower: lowPower)
@@ -1124,23 +1141,35 @@ private enum NotchAmbientPainter {
         }
     }
 
-    private static func drawEdgeGlow(_ ctx: inout GraphicsContext, notch n: CGRect, s: NotchAmbientSettings, phase: Double, intensity: Double, palette: [Color]) {
+    private static func drawEdgeGlow(_ ctx: inout GraphicsContext, notch n: CGRect, s: NotchAmbientSettings, phase: Double, intensity: Double, palette: [Color], cursor: CGPoint?) {
         let breathe = 1 + sin(phase * 0.75) * s.pulse * 0.22
         let y = n.maxY + 0.5
+        let falloff = 0.52 + s.falloff * 0.48
         let points = [CGPoint(x: n.minX, y: n.minY + n.height * 0.46), CGPoint(x: n.minX, y: y), CGPoint(x: n.maxX, y: y), CGPoint(x: n.maxX, y: n.minY + n.height * 0.46)]
-        glowLine(&ctx, points, color: c(palette, 0).opacity(intensity * breathe), width: CGFloat(s.thickness), bloom: s.softness / 22)
+        glowLine(&ctx, points, color: c(palette, 0).opacity(intensity * breathe * falloff), width: CGFloat(s.thickness), bloom: s.softness / 22)
+        if let cursor {
+            let x = min(n.maxX, max(n.minX, cursor.x))
+            let anchor = CGPoint(x: x, y: y)
+            let reaction = cursorInfluence(cursor, point: anchor, settings: s)
+            if reaction.strength > 0 {
+                let half = CGFloat(12 + reaction.strength * 22)
+                glowLine(&ctx, [CGPoint(x:max(n.minX,x-half),y:y), CGPoint(x:min(n.maxX,x+half),y:y)], color:c(palette,1).opacity(intensity*(0.35+reaction.strength)), width:CGFloat(s.thickness*1.15), bloom:min(1,s.softness/18))
+            }
+        }
         if s.symmetry != .symmetric {
             let start = s.symmetry == .rightWeighted ? n.midX : n.minX
             glowLine(&ctx, [CGPoint(x: start, y: y + 2), CGPoint(x: n.maxX, y: y + 2)], color: c(palette, 1).opacity(intensity * 0.55), width: CGFloat(max(0.6, s.thickness * 0.55)), bloom: s.softness / 30)
         }
     }
 
-    private static func drawHalo(_ ctx: inout GraphicsContext, notch n: CGRect, s: NotchAmbientSettings, phase: Double, intensity: Double, palette: [Color]) {
-        let p = 1 + sin(phase * 0.55) * s.pulse * 0.18
+    private static func drawHalo(_ ctx: inout GraphicsContext, notch n: CGRect, s: NotchAmbientSettings, phase: Double, intensity: Double, palette: [Color], cursor: CGPoint?) {
+        let interaction = cursorInfluence(cursor, point: CGPoint(x:n.midX,y:n.maxY), settings:s).strength
+        let p = 1 + sin(phase * 0.55) * s.pulse * 0.18 + interaction * 0.08
+        let falloff = 0.52 + s.falloff * 0.48
         for i in 0..<5 {
             let inset = CGFloat(i * 7 + 5)
             let rect = n.insetBy(dx: -inset * p, dy: -inset * 0.42 * p).offsetBy(dx: 0, dy: 5)
-            ellipse(&ctx, rect: rect, color: c(palette, i).opacity(intensity * (0.18 - Double(i) * 0.025)), fill: false, width: CGFloat(5 + i * 3))
+            ellipse(&ctx, rect: rect, color: c(palette, i).opacity(intensity * falloff * (0.18 - Double(i) * 0.025) * (1 + interaction)), fill: false, width: CGFloat(5 + i * 3))
         }
     }
 
@@ -1170,8 +1199,8 @@ private enum NotchAmbientPainter {
         line(&ctx, [CGPoint(x: n.minX, y: n.maxY + depth), CGPoint(x: n.maxX, y: n.maxY + depth)], color: Color.black.opacity(0.18), width: 2)
     }
 
-    private static func drawHanging(_ ctx: inout GraphicsContext, size: CGSize, notch n: CGRect, s: NotchAmbientSettings, phase: Double, intensity: Double, palette: [Color], stars: Bool, cursor: CGPoint?, lowPower: Bool) {
-        let count = max(2, min(lowPower ? 12 : 24, s.count)); let span = n.width * 0.88
+    private static func drawHanging(_ ctx: inout GraphicsContext, size: CGSize, notch n: CGRect, s: NotchAmbientSettings, phase: Double, intensity: Double, palette: [Color], stars: Bool, ornaments: Bool, cursor: CGPoint?, lowPower: Bool) {
+        let count = max(2, min(lowPower ? 12 : 24, s.count)); let span = n.width * CGFloat(min(1.35, max(0.55, 0.55 + s.spacing * 0.33)))
         for i in 0..<count {
             let t = Double(i) / Double(max(1, count - 1)); let baseX = n.midX - span/2 + span * CGFloat(t)
             let variance = 0.72 + rand(i, seed: s.seed, salt: 11) * 0.55
@@ -1185,9 +1214,18 @@ private enum NotchAmbientPainter {
             let color = c(palette, i).opacity(intensity * flicker * (1 + reaction.strength * 0.45))
             if stars {
                 let r = CGFloat(2.5 + rand(i, seed: s.seed, salt: 14)*2.2)
-                line(&ctx, [CGPoint(x:end.x-r,y:end.y), CGPoint(x:end.x+r,y:end.y)], color: color, width: 1)
-                line(&ctx, [CGPoint(x:end.x,y:end.y-r), CGPoint(x:end.x,y:end.y+r)], color: color, width: 1)
-                ellipse(&ctx, rect: CGRect(x:end.x-1.2,y:end.y-1.2,width:2.4,height:2.4), color: color, fill: true)
+                if i.isMultiple(of: 3) {
+                    var moon = Path(); moon.move(to:CGPoint(x:end.x,y:end.y-r-1)); moon.addCurve(to:CGPoint(x:end.x,y:end.y+r+1),control1:CGPoint(x:end.x-r*1.4,y:end.y-r*0.25),control2:CGPoint(x:end.x-r*1.4,y:end.y+r*0.35)); moon.addCurve(to:CGPoint(x:end.x,y:end.y-r-1),control1:CGPoint(x:end.x-r*0.10,y:end.y+r*0.30),control2:CGPoint(x:end.x-r*0.10,y:end.y-r*0.28)); moon.closeSubpath(); ctx.fill(moon,with:.color(color))
+                } else {
+                    line(&ctx, [CGPoint(x:end.x-r,y:end.y), CGPoint(x:end.x+r,y:end.y)], color: color, width: 1)
+                    line(&ctx, [CGPoint(x:end.x,y:end.y-r), CGPoint(x:end.x,y:end.y+r)], color: color, width: 1)
+                    ellipse(&ctx, rect: CGRect(x:end.x-1.2,y:end.y-1.2,width:2.4,height:2.4), color: color, fill: true)
+                }
+            } else if ornaments {
+                let radius=CGFloat(3.2+rand(i,seed:s.seed,salt:16)*2.1)
+                line(&ctx,[CGPoint(x:end.x,y:end.y-radius-3),CGPoint(x:end.x,y:end.y-radius)],color:Color.white.opacity(0.28+intensity*0.25),width:0.7)
+                ellipse(&ctx,rect:CGRect(x:end.x-radius,y:end.y-radius,width:radius*2,height:radius*2),color:c(palette,i).opacity(0.42+intensity*0.48),fill:true)
+                line(&ctx,[CGPoint(x:end.x-radius*0.45,y:end.y-radius*0.45),CGPoint(x:end.x+radius*0.35,y:end.y+radius*0.35)],color:Color.white.opacity(0.22),width:0.65)
             } else {
                 let w: CGFloat = s.bulbShape == .capsule ? 4 : 5
                 let h: CGFloat = s.bulbShape == .teardrop ? 7 : s.bulbShape == .capsule ? 8 : 5
@@ -1213,7 +1251,7 @@ private enum NotchAmbientPainter {
     private static func drawNature(_ ctx: inout GraphicsContext, size: CGSize, notch n: CGRect, kind: NotchAmbientDecorationKind, s: NotchAmbientSettings, phase: Double, intensity: Double, palette: [Color], cursor: CGPoint?, lowPower: Bool) {
         if kind == .moss {
             let count=max(8,min(lowPower ? 28:52,Int(14+s.density*40)))
-            for i in 0..<count { let side = i.isMultiple(of:2) ? n.minX : n.maxX; let spread=CGFloat(rand(i,seed:s.seed,salt:31)*30); let x=side + (i.isMultiple(of:2) ? -spread:spread); let h=CGFloat(4+rand(i,seed:s.seed,salt:32)*18*s.density); line(&ctx,[CGPoint(x:x,y:n.maxY+2),CGPoint(x:x+CGFloat(sin(phase+Double(i)))*1.8*s.sway,y:n.maxY-h)],color:c(palette,i).opacity(0.32+intensity*0.45),width:1.1) }
+            for i in 0..<count { let side = i.isMultiple(of:2) ? n.minX : n.maxX; let spread=CGFloat(rand(i,seed:s.seed,salt:31)*30); let x=side + (i.isMultiple(of:2) ? -spread:spread); let h=CGFloat(4+rand(i,seed:s.seed,salt:32)*18*s.density); let tip=CGPoint(x:x+CGFloat(sin(phase+Double(i)))*1.8*s.sway,y:n.maxY-h); let react=cursorInfluence(cursor,point:tip,settings:s); line(&ctx,[CGPoint(x:x,y:n.maxY+2),CGPoint(x:tip.x+react.dx,y:tip.y+react.dy)],color:c(palette,i).opacity(0.32+intensity*0.45),width:1.1) }
             return
         }
         let branchRight = s.symmetry == .rightWeighted || (s.symmetry != .leftWeighted && rand(1,seed:s.seed,salt:30)>0.5)
@@ -1256,8 +1294,9 @@ private enum NotchAmbientPainter {
             if s.lensDistortion || s.distortion > 0.5 { ellipse(&ctx,rect:n.insetBy(dx:-24,dy:-10).offsetBy(dx:0,dy:5),color:.white.opacity(intensity*s.distortion*0.08),fill:false,width:1) }
         case .portal:
             let center=CGPoint(x:n.midX,y:n.midY+5)
-            for i in 0..<7 { let pad=CGFloat(7+i*7); ellipse(&ctx,rect:CGRect(x:center.x-n.width/2-pad,y:center.y-CGFloat(13+i*2),width:n.width+pad*2,height:CGFloat(26+i*4)),color:c(palette,i).opacity(intensity*(0.25-Double(i)*0.022)),fill:false,width:CGFloat(1.2+(i%2))) }
-            let count=max(4,min(lowPower ? 14:28,Int(5+s.density*24))); for i in 0..<count { let a=rand(i,seed:s.seed,salt:61)*Double.pi*2+phase*0.12; let r=CGFloat(25+rand(i,seed:s.seed,salt:62)*80); let x=center.x+cos(a)*r; let y=center.y+sin(a)*r*0.36+CGFloat((phase*9+Double(i)*7).truncatingRemainder(dividingBy:18)); ellipse(&ctx,rect:CGRect(x:x-1,y:y-1,width:2,height:2),color:c(palette,i).opacity(intensity*0.58),fill:true) }
+            let interaction=cursorInfluence(cursor,point:center,settings:s).strength
+            for i in 0..<7 { let pad=CGFloat(7+i*7); ellipse(&ctx,rect:CGRect(x:center.x-n.width/2-pad,y:center.y-CGFloat(13+i*2),width:n.width+pad*2,height:CGFloat(26+i*4)),color:c(palette,i).opacity(intensity*(0.25-Double(i)*0.022)*(1+interaction*1.3)),fill:false,width:CGFloat(1.2+(i%2))) }
+            let count=max(4,min(lowPower ? 14:28,Int(5+s.density*24))); for i in 0..<count { let a=rand(i,seed:s.seed,salt:61)*Double.pi*2+phase*0.12; let r=CGFloat(25+rand(i,seed:s.seed,salt:62)*80); let x=center.x+cos(a)*r; let y=center.y+sin(a)*r*0.36+CGFloat((phase*(9+interaction*6)+Double(i)*7).truncatingRemainder(dividingBy:18)); ellipse(&ctx,rect:CGRect(x:x-1,y:y-1,width:2,height:2),color:c(palette,i).opacity(intensity*(0.58+interaction*0.32)),fill:true) }
         case .reactor:
             let y=n.maxY+5; for side in [-1.0,1.0] { let sx=CGFloat(side); let start=CGPoint(x:n.midX+sx*n.width/2,y:y); let p=[start,CGPoint(x:start.x+sx*20,y:y+12),CGPoint(x:start.x+sx*65,y:y+12),CGPoint(x:start.x+sx*82,y:y+2)]; glowLine(&ctx,p,color:c(palette,side<0 ? 0:1).opacity(intensity),width:CGFloat(s.thickness),bloom:s.softness/25); let t=CGFloat((phase*0.22).truncatingRemainder(dividingBy:1)); let x=p[1].x+(p[2].x-p[1].x)*t; ellipse(&ctx,rect:CGRect(x:x-2,y:y+10,width:4,height:4),color:.white.opacity(intensity*0.75),fill:true) }
         case .spaceship:
