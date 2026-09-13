@@ -43,7 +43,7 @@ jobs:
           xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > /tmp/adaptive-preflight.log 2>&1
           BUILD_STATUS=$?
           set -e
-          tail -n 140 /tmp/adaptive-preflight.log || true
+          tail -n 160 /tmp/adaptive-preflight.log || true
           python3 /tmp/validate_adaptive_widgets.py scan-log /tmp/adaptive-preflight.log
 
           SOURCE_LIST=$(find build -path '*Objects-normal/arm64/Halo.SwiftFileList' -print -quit)
@@ -56,10 +56,12 @@ jobs:
             local primary="$PWD/$rel"
             local source
             declare -a sources=()
+            declare -A seen=()
             while IFS= read -r source; do
               test -z "$source" && continue
               test "$source" = "$primary" && continue
-              case " ${sources[*]} " in *" $source "*) continue ;; esac
+              if test -n "${seen[$source]:-}"; then continue; fi
+              seen[$source]=1
               sources+=("$source")
             done < "$SOURCE_LIST"
             echo "=== Primary typecheck: $label ==="
