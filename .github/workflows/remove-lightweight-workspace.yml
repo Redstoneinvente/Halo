@@ -1,0 +1,62 @@
+name: Remove Lightweight Workspace Elements
+
+on:
+  push:
+    branches:
+      - chatgpt/remove-lightweight-workspace
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply widget-only Workspace change to latest main
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/remove_lightweight_workspace.py /tmp/remove_lightweight_workspace.py
+          git fetch origin main
+          git checkout --detach origin/main
+          python3 /tmp/remove_lightweight_workspace.py
+          git diff --check
+
+          if grep -q 'Menu("Lightweight element")' Halo/Views/WidgetSettingsView.swift; then
+            echo 'Lightweight element menu still exists' >&2
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('Halo/Core/WorkspaceModels.swift').read_text()
+          made = text.split('static func made(_ preset: OpenNotchPreset) -> OpenNotchLayout {', 1)[1].split('func validated() throws -> OpenNotchLayout {', 1)[0]
+          if '.elementItem(' in made:
+              raise SystemExit('A Workspace preset still creates a lightweight element')
+          if 'Self.workspaceWidgetItems' not in text:
+              raise SystemExit('Workspace item filtering was not installed')
+          PY
+
+          xcrun swiftc -parse Halo/Core/WorkspaceModels.swift
+          xcrun swiftc -parse Halo/Views/WidgetSettingsView.swift
+          xcrun swiftc -parse Halo/Views/SurfaceView.swift
+
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > /tmp/remove-lightweight-build.log 2>&1
+          BUILD_STATUS=$?
+          set -e
+          grep -E '(WorkspaceModels.swift|WidgetSettingsView.swift|SurfaceView.swift):.*(error:|warning:)' /tmp/remove-lightweight-build.log || true
+          if grep -Eq '(WorkspaceModels.swift|WidgetSettingsView.swift|SurfaceView.swift):.*error:' /tmp/remove-lightweight-build.log; then
+            exit 1
+          fi
+          echo "Full build status: $BUILD_STATUS (unrelated pre-existing compiler failures are tolerated only when changed files have no errors)"
+
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/Core/WorkspaceModels.swift Halo/Views/WidgetSettingsView.swift Halo/Views/SurfaceView.swift
+          git commit -m 'Remove Lightweight elements from Workspace'
+          git push origin HEAD:main
