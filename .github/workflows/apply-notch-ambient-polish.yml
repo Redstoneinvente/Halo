@@ -34,22 +34,29 @@ jobs:
           git diff --check
           xcrun swiftc -parse Halo/Views/DecorationsView.swift
 
-          echo '=== Xcode validation ==='
+          echo '=== Xcode non-batch validation ==='
           set +e
-          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee /tmp/notch-ambient-compile-fix.log
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES SWIFT_ENABLE_BATCH_MODE=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build \
+            2>&1 | tee /tmp/notch-ambient-compile-fix.log
           build_status=${PIPESTATUS[0]}
           set -e
 
-          if grep -E 'Halo/Views/DecorationsView\.swift:[0-9]+:[0-9]+: error:' /tmp/notch-ambient-compile-fix.log; then
+          ambient_errors=$(grep -E 'Halo/Views/DecorationsView\.swift:[0-9]+:[0-9]+: error:' /tmp/notch-ambient-compile-fix.log || true)
+          if [[ -n "$ambient_errors" ]]; then
               echo 'DecorationsView still has compiler errors.' >&2
-              grep -E 'Halo/Views/DecorationsView\.swift:[0-9]+:[0-9]+: error:' /tmp/notch-ambient-compile-fix.log
+              echo "$ambient_errors" >&2
               exit 1
           fi
-          if ! grep -q 'SwiftCompile.*DecorationsView.swift' /tmp/notch-ambient-compile-fix.log; then
-              echo 'Build stopped before compiling DecorationsView.swift.' >&2
+
+          if grep -qE 'SwiftCompile normal arm64 .*DecorationsView\.swift|SwiftCompile normal arm64 /.*DecorationsView\.swift' /tmp/notch-ambient-compile-fix.log; then
+              echo 'DecorationsView compiled independently with no errors.'
+          else
+              echo 'Non-batch build did not schedule DecorationsView before stopping.' >&2
+              grep -E 'error:' /tmp/notch-ambient-compile-fix.log | tail -n 20 || true
               exit 1
           fi
-          echo 'Compiler reached DecorationsView.swift with no errors.'
 
           if [[ $build_status -ne 0 ]]; then
               echo 'Full target still has unrelated repository errors; DecorationsView is clean.'
