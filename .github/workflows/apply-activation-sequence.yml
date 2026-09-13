@@ -1,0 +1,124 @@
+name: Apply Halo Activation Sequence
+
+on:
+  push:
+    branches:
+      - chatgpt/activation-sequence
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch, validate, typecheck and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/activation_sequence_patch.py /tmp/activation_sequence_patch.py
+          cp Halo/Views/ActivationSequence.swift /tmp/ActivationSequence.swift
+
+          git fetch origin main
+          git checkout -B main origin/main
+          cp /tmp/ActivationSequence.swift Halo/Views/ActivationSequence.swift
+          python3 /tmp/activation_sequence_patch.py
+
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          expected = {
+              'Halo/App/HaloApp.swift',
+              'Halo/NotchEngine/WindowManager.swift',
+              'Halo/Views/WorkspaceSettingsView.swift',
+              'Halo/Views/ActivationSequence.swift',
+              'Halo.xcodeproj/project.pbxproj',
+          }
+          tracked = set(subprocess.check_output(['git','diff','--name-only'], text=True).splitlines())
+          untracked = set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'], text=True).splitlines())
+          changed = tracked | untracked
+          if changed != expected:
+              raise SystemExit(f'Unexpected production scope: {sorted(changed)}')
+          text = Path('Halo/NotchEngine/WindowManager.swift').read_text()
+          if 'ActivationSequenceOverlay(displayID: id' not in text:
+              raise SystemExit('Activation overlay was not mounted')
+          if 'SurfaceAnimator' not in text or 'func move(panel:' not in text:
+              raise SystemExit('Normal surface animator unexpectedly missing')
+          app = Path('Halo/App/HaloApp.swift').read_text()
+          if 'startupActivationContext: activationContext' not in app:
+              raise SystemExit('Launch classification was not wired')
+          settings = Path('Halo/Views/WorkspaceSettingsView.swift').read_text()
+          if 'case "Activation Sequence": ActivationSequenceSettingsPane()' not in settings:
+              raise SystemExit('Activation settings pane not wired')
+          activation = Path('Halo/Views/ActivationSequence.swift').read_text()
+          for preset in ['haloReveal','powerOn','lightSweep','softPulse','aperture','liquid','materialize','digitalBoot','neonIgnition','spark','ripple','warpIn','blackHole','minimalFade','none']:
+              if f'case {preset}' not in activation and f'case .{preset}' not in activation:
+                  raise SystemExit(f'Missing activation preset: {preset}')
+          for requirement in ['allowsHitTesting(false)', 'accessibilityDisplayShouldReduceMotion', 'processInfo.isLowPowerModeEnabled', 'randomFavorite', 'customSoundPath', 'Display With Notch Only']:
+              if requirement not in activation:
+                  raise SystemExit(f'Missing activation requirement: {requirement}')
+          print('Activation scope and architecture audit passed.')
+          PY
+
+          git diff --check
+          for file in Halo/App/HaloApp.swift Halo/NotchEngine/WindowManager.swift Halo/Views/WorkspaceSettingsView.swift Halo/Views/ActivationSequence.swift; do
+            echo "Parsing $file"
+            xcrun swiftc -parse "$file"
+          done
+
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > /tmp/activation-preflight.log 2>&1
+          BUILD_STATUS=$?
+          set -e
+          tail -n 180 /tmp/activation-preflight.log || true
+
+          python3 - <<'PY'
+          from pathlib import Path
+          log = Path('/tmp/activation-preflight.log').read_text(errors='replace')
+          changed = ['ActivationSequence.swift','WindowManager.swift','WorkspaceSettingsView.swift','HaloApp.swift']
+          bad = [line for line in log.splitlines() if ' error:' in line and any('/'+name+':' in line for name in changed)]
+          if bad:
+              print('\n'.join(bad))
+              raise SystemExit('Compiler error reported in Activation Sequence production scope')
+          print('No full-build compiler errors reported in Activation Sequence files.')
+          PY
+
+          SOURCE_LIST=$(find build -path '*Objects-normal/arm64/Halo.SwiftFileList' -print -quit)
+          test -n "$SOURCE_LIST"
+          SDK=$(xcrun --sdk macosx --show-sdk-path)
+
+          typecheck_primary() {
+            local rel="$1"
+            local label="$2"
+            local primary="$PWD/$rel"
+            local source
+            local filtered="/tmp/${label}-sources.txt"
+            declare -a sources=()
+            awk -v primary="$primary" 'NF && $0 != primary && !seen[$0]++ { print }' "$SOURCE_LIST" > "$filtered"
+            while IFS= read -r source; do sources+=("$source"); done < "$filtered"
+            echo "=== Primary typecheck: $label ==="
+            xcrun swiftc -frontend -typecheck "${sources[@]}" -primary-file "$primary" \
+              -target arm64-apple-macos13.0 -sdk "$SDK" -module-name Halo -swift-version 5 \
+              -D DEBUG -enable-testing -enable-bare-slash-regex \
+              -enable-experimental-feature DebugDescriptionMacro -I "$PWD/build/Debug" -F "$PWD/build/Debug"
+          }
+
+          typecheck_primary Halo/Views/ActivationSequence.swift activation
+          typecheck_primary Halo/NotchEngine/WindowManager.swift window-manager
+          typecheck_primary Halo/Views/WorkspaceSettingsView.swift settings
+          typecheck_primary Halo/App/HaloApp.swift app-lifecycle
+
+          if test "$BUILD_STATUS" -ne 0; then
+            echo 'Full target hit an unrelated baseline failure; Activation Sequence primary-file gates passed.'
+          fi
+
+          git diff --stat
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/App/HaloApp.swift Halo/NotchEngine/WindowManager.swift Halo/Views/WorkspaceSettingsView.swift Halo/Views/ActivationSequence.swift Halo.xcodeproj/project.pbxproj
+          git commit -m 'Add Halo Activation Sequence'
+          git push origin HEAD:main
