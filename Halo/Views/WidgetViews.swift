@@ -145,7 +145,8 @@ struct WidgetCard<Content: View>: View {
             )
         case .glass:
             shape.fill(.ultraThinMaterial)
-                .overlay(shape.fill(fittedStyle.backgroundColor.color.opacity(fittedStyle.resolvedGlassTintOpacity)))
+                .opacity(fittedStyle.backgroundOpacity)
+                .overlay(shape.fill(fittedStyle.backgroundColor.color.opacity(fittedStyle.resolvedGlassTintOpacity * fittedStyle.backgroundOpacity)))
         case .accent:
             shape.fill(fittedStyle.accentColor.color.opacity(fittedStyle.backgroundOpacity))
         }

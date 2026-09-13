@@ -157,7 +157,11 @@ struct WidgetSettingsView: View {
                 ForEach(WidgetCardBackgroundStyle.allCases) { Text($0.rawValue).tag($0) }
             }
             if style.wrappedValue.resolvedCardBackgroundStyle != .none {
-                colorPicker(style.wrappedValue.resolvedCardBackgroundStyle == .accent ? "Tint base" : "Background", style.backgroundColor)
+                if style.wrappedValue.resolvedCardBackgroundStyle == .accent {
+                    colorPicker("Tint color", style.accentColor)
+                } else {
+                    colorPicker("Background", style.backgroundColor)
+                }
                 if style.wrappedValue.resolvedCardBackgroundStyle == .gradient {
                     ColorPicker("Second color", selection: Binding(
                         get: { style.wrappedValue.resolvedBackgroundSecondaryColor.color },
