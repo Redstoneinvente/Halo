@@ -19,6 +19,16 @@ jobs:
           git fetch origin main
           git checkout -B main origin/main
           python3 /tmp/calendar_showcase_patch.py
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('Halo/Views/ModuleViews.swift')
+          text = path.read_text()
+          old = '    static func family(columns: Int, rows: Int, width: CGFloat?, height: CGFloat?) -> VisualCalendarFamily {'
+          new = '    private static func family(columns: Int, rows: Int, width: CGFloat?, height: CGFloat?) -> VisualCalendarFamily {'
+          if old not in text:
+              raise SystemExit('Calendar family resolver signature not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
 
           echo '=== Scope guard ==='
           git diff --name-only
