@@ -4,4 +4,10 @@ HALO_FIREBASE_API_KEY =
 HALO_LICENSESEAT_PUBLISHABLE_KEY =
 HALO_LICENSESEAT_PRODUCT_SLUG = halo-macos-notch-utility
 
+// Sparkle release metadata. Keep the Ed25519 public key and feed URL in
+// Secrets.xcconfig while Gate 3 is being tested. The private key stays in
+// your macOS login Keychain and must never be committed.
+HALO_SPARKLE_FEED_URL =
+HALO_SPARKLE_PUBLIC_KEY =
+
 #include? "Secrets.xcconfig"
