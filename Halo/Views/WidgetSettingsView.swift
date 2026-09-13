@@ -1694,6 +1694,10 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
             visualCalendarSettings(style: style)
             visualCalendarSizeOverrideInspector(itemID: itemID, style: style)
         }
+        if module.visualAdaptiveSupported {
+            visualAdaptiveSettings(style: style, module: module)
+            visualAdaptiveSizeOverrideInspector(itemID: itemID, style: style, module: module)
+        }
         Section("Block Styling") {
             Picker("Background", selection: Binding(get: { style.wrappedValue.resolvedCardBackgroundStyle }, set: { style.wrappedValue.cardBackgroundStyle = $0 })) {
                 ForEach(WidgetCardBackgroundStyle.allCases) { Text($0.rawValue).tag($0) }
@@ -1754,6 +1758,199 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
         }
     }
 
+
+
+    @ViewBuilder private func visualAdaptiveSettings(style: Binding<WidgetStyle>, module: ModuleID) -> some View {
+        let adaptive = style.visualAdaptive.withDefault(VisualAdaptiveWidgetOptions.defaults(for: module))
+        Section("Adaptive Layout") {
+            Picker("Presentation", selection: adaptive.preferredPresentation) { ForEach(VisualAdaptivePresentation.allCases) { Text($0.rawValue).tag($0) } }
+            Picker("Density", selection: adaptive.density) { ForEach(VisualAdaptiveDensity.allCases) { Text($0.rawValue).tag($0) } }
+            Stepper("Maximum items: \(adaptive.wrappedValue.maxItems)", value: adaptive.maxItems, in: 1...30)
+            Toggle("Show controls", isOn: adaptive.showControls)
+            Button("Reset All Size Overrides") { adaptive.wrappedValue.sizeOverrides = [:] }.disabled(adaptive.wrappedValue.sizeOverrides.isEmpty)
+            Text("Automatic is recommended. Width, height and aspect ratio independently choose Micro, Compact, Horizontal, Vertical, Standard, Expanded, Dashboard or Hero layouts.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Information Priority") {
+            if !module.visualAdaptiveAlwaysInformation.isEmpty {
+                Text("Always").font(.caption2).foregroundStyle(.secondary)
+                ForEach(module.visualAdaptiveAlwaysInformation, id: \.self) { key in
+                    Label(module.widgetElements.first(where: { $0.key == key })?.title ?? key, systemImage: "checkmark.circle.fill").foregroundStyle(.secondary)
+                }
+            }
+            Text("Lower-priority information disappears first as the widget becomes constrained.").font(.caption2).foregroundStyle(.secondary)
+            ForEach(adaptive.wrappedValue.resolvedInformationPriority(for: module).filter { !module.visualAdaptiveAlwaysInformation.contains($0) }, id: \.self) { key in
+                HStack(spacing: 7) {
+                    Toggle(module.widgetElements.first(where: { $0.key == key })?.title ?? key, isOn: adaptiveInformationEnabled(adaptive, key))
+                    Spacer(minLength: 2)
+                    Button { moveAdaptiveInformation(adaptive, module: module, key: key, direction: -1) } label: { Image(systemName: "chevron.up") }.buttonStyle(.borderless)
+                    Button { moveAdaptiveInformation(adaptive, module: module, key: key, direction: 1) } label: { Image(systemName: "chevron.down") }.buttonStyle(.borderless)
+                }
+            }
+        }
+        visualAdaptiveModuleSettings(adaptive, module: module)
+    }
+
+    @ViewBuilder private func visualAdaptiveModuleSettings(_ adaptive: Binding<VisualAdaptiveWidgetOptions>, module: ModuleID) -> some View {
+        switch module {
+        case .timer:
+            Section("Timer") {
+                Picker("Style", selection: adaptive.timerStyle) { ForEach(VisualTimerStyle.allCases) { Text($0.rawValue).tag($0) } }
+                Picker("Primary value", selection: adaptive.timerMode) { ForEach(VisualTimerMode.allCases) { Text($0.rawValue).tag($0) } }
+                TextField("Timer name", text: adaptive.timerName)
+                Toggle("Show seconds", isOn: adaptive.timerShowSeconds)
+                PreciseSlider(title: "Progress thickness", value: Binding(get: { Double(adaptive.wrappedValue.timerProgressThickness) }, set: { adaptive.wrappedValue.timerProgressThickness = CGFloat($0) }), range: 1...18, step: 1, suffix: "pt")
+            }
+        case .media:
+            Section("Media") {
+                Picker("Micro style", selection: adaptive.mediaMicroStyle) { ForEach(VisualMediaMicroStyle.allCases) { Text($0.rawValue).tag($0) } }
+                Picker("Artwork shape", selection: adaptive.mediaArtworkShape) { ForEach(VisualAdaptiveArtworkShape.allCases) { Text($0.rawValue).tag($0) } }
+                PreciseSlider(title: "Artwork scale", value: Binding(get: { Double(adaptive.wrappedValue.mediaArtworkScale) }, set: { adaptive.wrappedValue.mediaArtworkScale = CGFloat($0) }), range: 0.5...1.8, step: 0.05, suffix: "×", decimals: 2)
+                PreciseSlider(title: "Artwork corner radius", value: Binding(get: { Double(adaptive.wrappedValue.mediaArtworkCornerRadius) }, set: { adaptive.wrappedValue.mediaArtworkCornerRadius = CGFloat($0) }), range: 0...60, step: 1, suffix: "pt")
+                Toggle("Artwork background", isOn: adaptive.mediaArtworkBackground)
+                if adaptive.wrappedValue.mediaArtworkBackground { PreciseSlider(title: "Artwork background blur", value: Binding(get: { Double(adaptive.wrappedValue.mediaArtworkBlur) }, set: { adaptive.wrappedValue.mediaArtworkBlur = CGFloat($0) }), range: 0...40, step: 1, suffix: "pt") }
+                Toggle("Artwork-derived accent", isOn: adaptive.mediaUseArtworkColors)
+                Picker("Progress", selection: adaptive.mediaProgressStyle) { ForEach(VisualAdaptiveProgressStyle.allCases) { Text($0.rawValue).tag($0) } }
+                Toggle("Visualizer on large layouts", isOn: adaptive.mediaVisualizer)
+                if adaptive.wrappedValue.mediaVisualizer { Picker("Visualizer position", selection: adaptive.mediaVisualizerPosition) { ForEach(VisualAdaptiveVisualizerPosition.allCases) { Text($0.rawValue).tag($0) } } }
+                Text("Shuffle and repeat only appear when the connected player reports support. Lyrics remain hidden because Halo does not currently expose a reliable lyric source to this widget.").font(.caption2).foregroundStyle(.secondary)
+            }
+        case .audio:
+            Section("Audio") {
+                Picker("Slider", selection: adaptive.audioSliderStyle) { ForEach(VisualAdaptiveAudioSliderStyle.allCases) { Text($0.rawValue).tag($0) } }
+                Toggle("Volume percentage", isOn: adaptive.audioShowPercentage)
+                Toggle("Device icon", isOn: adaptive.audioShowDeviceIcon)
+                Toggle("Volume slider", isOn: adaptive.audioShowSlider)
+                Toggle("Output selector", isOn: adaptive.audioShowOutputSelector)
+                Toggle("Quick volume levels", isOn: adaptive.audioShowQuickLevels)
+                Text("Input/microphone controls are intentionally absent until Halo has a supported input-audio control path.").font(.caption2).foregroundStyle(.secondary)
+            }
+        case .clipboard:
+            Section("Clipboard") {
+                Stepper("Preview length: \(adaptive.wrappedValue.clipboardPreviewLength)", value: adaptive.clipboardPreviewLength, in: 16...500, step: 8)
+                Toggle("Timestamps", isOn: adaptive.clipboardShowTimestamp)
+                Toggle("Search", isOn: adaptive.clipboardShowSearch)
+                Picker("Rows", selection: adaptive.clipboardRowStyle) { ForEach(VisualAdaptiveClipboardRowStyle.allCases) { Text($0.rawValue).tag($0) } }
+                Text("Halo currently stores text clipboard history only. Sensitive/concealed pasteboard entries remain excluded rather than being retained and marked.").font(.caption2).foregroundStyle(.secondary)
+            }
+        case .system:
+            Section("System") {
+                Picker("Primary metric", selection: adaptive.systemPrimaryMetric) { ForEach(VisualSystemMetric.allCases) { Text($0.rawValue).tag($0) } }
+                Toggle("History graphs", isOn: adaptive.systemShowGraphs)
+                if adaptive.wrappedValue.systemShowGraphs { Picker("Graph style", selection: adaptive.systemGraphType) { ForEach(VisualSystemGraphType.allCases) { Text($0.rawValue).tag($0) } } }
+                PreciseSlider(title: "Warning threshold", value: adaptive.systemWarningThreshold, range: 50...100, step: 1, suffix: "%")
+                Text("Metric order: " + adaptive.wrappedValue.resolvedSystemMetrics.map(\.shortTitle).joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary)
+                Menu("Move metric to front") { ForEach(VisualSystemMetric.allCases) { metric in Button(metric.rawValue) { var list = adaptive.wrappedValue.systemMetricOrder.filter { $0 != metric }; list.insert(metric, at: 0); adaptive.wrappedValue.systemMetricOrder = list } } }
+            }
+        case .launcher:
+            Section("Launcher") {
+                PreciseSlider(title: "Icon size", value: Binding(get: { Double(adaptive.wrappedValue.launcherIconSize) }, set: { adaptive.wrappedValue.launcherIconSize = CGFloat($0) }), range: 16...72, step: 1, suffix: "pt")
+                Stepper("Columns: \(adaptive.wrappedValue.launcherColumns)", value: adaptive.launcherColumns, in: 1...8)
+                Toggle("Labels", isOn: adaptive.launcherShowLabels)
+                Toggle("Search", isOn: adaptive.launcherShowSearch)
+                Toggle("Running applications", isOn: adaptive.launcherShowRunningApps)
+                Toggle("Downloads action", isOn: adaptive.launcherShowDownloads)
+                Toggle("Timer action", isOn: adaptive.launcherShowTimerActions)
+                TextField("Favorite app bundle IDs", text: adaptiveFavoriteBundles(adaptive))
+                Text("Comma-separated bundle IDs. Halo opens installed apps directly; it does not pretend to provide Spotlight indexing.").font(.caption2).foregroundStyle(.secondary)
+            }
+        case .activities:
+            Section("Activities") {
+                Toggle("Progress", isOn: adaptive.activitiesShowProgress)
+                Toggle("Details", isOn: adaptive.activitiesShowDetails)
+                Toggle("Timestamps", isOn: adaptive.activitiesShowTimestamps)
+                Text("This widget uses Halo's live activity store. Completed-history UI is not fabricated when no persisted activity history exists.").font(.caption2).foregroundStyle(.secondary)
+            }
+        case .notes:
+            Section("Notes") {
+                PreciseSlider(title: "Line spacing", value: Binding(get: { Double(adaptive.wrappedValue.notesLineSpacing) }, set: { adaptive.wrappedValue.notesLineSpacing = CGFloat($0) }), range: 0...18, step: 1, suffix: "pt")
+                PreciseSlider(title: "Editor padding", value: Binding(get: { Double(adaptive.wrappedValue.notesEditorPadding) }, set: { adaptive.wrappedValue.notesEditorPadding = CGFloat($0) }), range: 0...24, step: 1, suffix: "pt")
+                Toggle("Word / character count", isOn: adaptive.notesShowCounts)
+                TextField("Placeholder", text: adaptive.notesPlaceholder)
+            }
+        case .capture:
+            Section("Capture") {
+                Picker("Primary action", selection: adaptive.capturePrimaryAction) { ForEach(VisualCapturePrimaryAction.allCases) { Text($0.rawValue).tag($0) } }
+                Toggle("Recent capture", isOn: adaptive.captureShowRecent)
+                if adaptive.wrappedValue.captureShowRecent { PreciseSlider(title: "Thumbnail size", value: Binding(get: { Double(adaptive.wrappedValue.captureThumbnailSize) }, set: { adaptive.wrappedValue.captureThumbnailSize = CGFloat($0) }), range: 64...320, step: 4, suffix: "pt") }
+                Toggle("OCR result", isOn: adaptive.captureShowOCR)
+                Text("Only the existing interactive region capture and image OCR paths are exposed; unsupported full-screen/editor tooling is not faked.").font(.caption2).foregroundStyle(.secondary)
+            }
+        case .stopwatch:
+            Section("Stopwatch") {
+                Picker("Precision", selection: adaptive.stopwatchPrecision) { ForEach(VisualStopwatchPrecision.allCases) { Text($0.rawValue).tag($0) } }
+                Toggle("Laps", isOn: adaptive.stopwatchShowLaps)
+                if adaptive.wrappedValue.stopwatchShowLaps { Stepper("Visible laps: \(adaptive.wrappedValue.stopwatchLapCount)", value: adaptive.stopwatchLapCount, in: 1...20); Toggle("Fastest / slowest indicators", isOn: adaptive.stopwatchShowLapExtremes) }
+                PreciseSlider(title: "Time scale", value: adaptive.stopwatchTimeScale, range: 0.6...2.5, step: 0.05, suffix: "×", decimals: 2)
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    private func adaptiveInformationEnabled(_ adaptive: Binding<VisualAdaptiveWidgetOptions>, _ key: String) -> Binding<Bool> {
+        Binding(get: { !adaptive.wrappedValue.hiddenInformation.contains(key) }, set: { enabled in
+            var hidden = adaptive.wrappedValue.hiddenInformation
+            if enabled { hidden.removeAll { $0 == key } }
+            else if !hidden.contains(key) { hidden.append(key) }
+            adaptive.wrappedValue.hiddenInformation = hidden
+        })
+    }
+
+    private func moveAdaptiveInformation(_ adaptive: Binding<VisualAdaptiveWidgetOptions>, module: ModuleID, key: String, direction: Int) {
+        var order = adaptive.wrappedValue.resolvedInformationPriority(for: module)
+        guard let index = order.firstIndex(of: key) else { return }
+        let target = index + direction
+        guard order.indices.contains(target), !module.visualAdaptiveAlwaysInformation.contains(order[target]) else { return }
+        order.swapAt(index, target)
+        adaptive.wrappedValue.informationPriority = order
+    }
+
+    private func adaptiveFavoriteBundles(_ adaptive: Binding<VisualAdaptiveWidgetOptions>) -> Binding<String> {
+        Binding(get: { adaptive.wrappedValue.launcherFavoriteBundleIDs.joined(separator: ", ") }, set: { text in
+            adaptive.wrappedValue.launcherFavoriteBundleIDs = text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        })
+    }
+
+    @ViewBuilder private func visualAdaptiveSizeOverrideInspector(itemID: UUID, style: Binding<WidgetStyle>, module: ModuleID) -> some View {
+        let placement = findItem(itemID)?.gridPlacement ?? OpenNotchGridPlacement()
+        let columns = min(8, max(1, placement.columnSpan))
+        let rows = min(4, max(1, placement.rowSpan))
+        let key = VisualAdaptiveWidgetOptions.sizeKey(columns: columns, rows: rows)
+        let adaptive = style.visualAdaptive.withDefault(VisualAdaptiveWidgetOptions.defaults(for: module))
+        let override = Binding<VisualAdaptiveSizeOverride?>(get: { adaptive.wrappedValue.sizeOverrides[key] }, set: { replacement in
+            var values = adaptive.wrappedValue.sizeOverrides
+            if let replacement { values[key] = replacement } else { values.removeValue(forKey: key) }
+            adaptive.wrappedValue.sizeOverrides = values
+        })
+        Section("\(columns)×\(rows) Adaptive Override") {
+            Toggle("Override Automatic", isOn: Binding(get: { override.wrappedValue != nil }, set: { enabled in
+                override.wrappedValue = enabled ? VisualAdaptiveSizeOverride(presentation: adaptive.wrappedValue.preferredPresentation, density: adaptive.wrappedValue.density, maxItems: adaptive.wrappedValue.maxItems, showControls: adaptive.wrappedValue.showControls, hiddenInformation: adaptive.wrappedValue.hiddenInformation) : nil
+            }))
+            if override.wrappedValue != nil {
+                let value = override.withDefault(VisualAdaptiveSizeOverride())
+                Picker("Presentation", selection: value.presentation.withDefault(.automatic)) { ForEach(VisualAdaptivePresentation.allCases) { Text($0.rawValue).tag($0) } }
+                Picker("Density", selection: value.density.withDefault(adaptive.wrappedValue.density)) { ForEach(VisualAdaptiveDensity.allCases) { Text($0.rawValue).tag($0) } }
+                Stepper("Maximum items: \(value.wrappedValue.maxItems ?? adaptive.wrappedValue.maxItems)", value: value.maxItems.withDefault(adaptive.wrappedValue.maxItems), in: 1...30)
+                Toggle("Show controls", isOn: value.showControls.withDefault(adaptive.wrappedValue.showControls))
+                Text("Information for this size").font(.caption).foregroundStyle(.secondary)
+                ForEach(module.widgetElements.filter { !module.visualAdaptiveAlwaysInformation.contains($0.key) }) { descriptor in
+                    Toggle(descriptor.title, isOn: Binding(get: {
+                        let hidden = value.wrappedValue.hiddenInformation ?? adaptive.wrappedValue.hiddenInformation
+                        return !hidden.contains(descriptor.key)
+                    }, set: { enabled in
+                        var hidden = value.wrappedValue.hiddenInformation ?? adaptive.wrappedValue.hiddenInformation
+                        if enabled { hidden.removeAll { $0 == descriptor.key } }
+                        else if !hidden.contains(descriptor.key) { hidden.append(descriptor.key) }
+                        value.wrappedValue.hiddenInformation = hidden
+                    }))
+                }
+                Button("Reset This Size to Automatic") { override.wrappedValue = nil }
+            } else {
+                Text("This exact footprint currently follows the shared automatic layout and information priority.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
 
     @ViewBuilder private func clockSizeOverrideInspector(itemID: UUID, style: Binding<WidgetStyle>) -> some View {
         let placement = findItem(itemID)?.gridPlacement ?? OpenNotchGridPlacement()

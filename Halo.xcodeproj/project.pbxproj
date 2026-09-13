@@ -59,6 +59,7 @@
 		F8614B803053291B00D4943C /* icon_16x16@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6E3053291B00D4943C /* icon_16x16@2x.png */; };
 		F8614B813053291B00D4943C /* icon_16x16.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6D3053291B00D4943C /* icon_16x16.png */; };
 		F8614B823053291B00D4943C /* Halo.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6C3053291B00D4943C /* Halo.png */; };
+		A11C0F1A0000000000000311 /* Views/VisualWorkspaceAdaptiveWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -135,6 +136,7 @@
 		F8614B753053291B00D4943C /* icon_512x512.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_512x512.png; sourceTree = "<group>"; };
 		F8614B763053291B00D4943C /* icon_512x512@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_512x512@2x.png"; sourceTree = "<group>"; };
 		A11C0F1A0000000000000001 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Halo/Config/Base.xcconfig; sourceTree = SOURCE_ROOT; };
+		A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/VisualWorkspaceAdaptiveWidgets.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -207,6 +209,7 @@
 				00000000000000000000006A /* Core/WorkspaceModels.swift */,
 				00000000000000000000006B /* Core/WorkspaceStore.swift */,
 				00000000000000000000006C /* Views/ModuleViews.swift */,
+				A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */,
 				00000000000000000000006D /* Services/Integrations.swift */,
 				00000000000000000000006E /* Services/CaptureService.swift */,
 				00000000000000000000006F /* Core/ExtensionContracts.swift */,
@@ -429,6 +432,7 @@
 				0000000000000000000000CE /* Core/WorkspaceModels.swift in Sources */,
 				0000000000000000000000CF /* Core/WorkspaceStore.swift in Sources */,
 				0000000000000000000000D0 /* Views/ModuleViews.swift in Sources */,
+				A11C0F1A0000000000000311 /* Views/VisualWorkspaceAdaptiveWidgets.swift in Sources */,
 				0000000000000000000000D1 /* Services/Integrations.swift in Sources */,
 				0000000000000000000000D2 /* Services/CaptureService.swift in Sources */,
 				0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */,

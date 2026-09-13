@@ -7,6 +7,7 @@ final class CaptureService: ObservableObject {
     @Published var busy = false
     @Published var recognizedText = ""
     @Published var error: String?
+    @Published var recentCaptures: [URL] = []
     func capture(completion: @escaping (URL) -> Void) {
         guard !busy else { return }
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
@@ -20,7 +21,12 @@ final class CaptureService: ObservableObject {
         task.terminationHandler = { [weak self] task in
             Task { @MainActor in
                 self?.busy = false
-                if task.terminationStatus == 0, FileManager.default.fileExists(atPath: url.path) { completion(url) }
+                if task.terminationStatus == 0, FileManager.default.fileExists(atPath: url.path) {
+                    self?.recentCaptures.removeAll { $0 == url }
+                    self?.recentCaptures.insert(url, at: 0)
+                    if let count = self?.recentCaptures.count, count > 8 { self?.recentCaptures.removeLast(count - 8) }
+                    completion(url)
+                }
             }
         }
         do { try task.run() } catch { busy = false; self.error = error.localizedDescription }

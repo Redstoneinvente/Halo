@@ -927,6 +927,280 @@ struct WidgetChromeOptions: Codable, Equatable {
     }
 }
 
+
+// MARK: - Visual Workspace adaptive widget system
+
+enum VisualAdaptivePresentation: String, Codable, CaseIterable, Identifiable {
+    case automatic = "Automatic"
+    case micro = "Micro"
+    case compact = "Compact"
+    case horizontal = "Horizontal"
+    case vertical = "Vertical"
+    case standard = "Standard"
+    case expanded = "Expanded"
+    case dashboard = "Dashboard"
+    case hero = "Hero"
+    var id: String { rawValue }
+}
+
+enum VisualAdaptiveDensity: String, Codable, CaseIterable, Identifiable {
+    case compact = "Compact", comfortable = "Comfortable", spacious = "Spacious"
+    var id: String { rawValue }
+}
+
+enum VisualTimerStyle: String, Codable, CaseIterable, Identifiable {
+    case minimal = "Minimal", digital = "Digital", circular = "Circular", ring = "Ring", progressBar = "Progress Bar", editorial = "Editorial", largeTypography = "Large Typography"
+    var id: String { rawValue }
+}
+enum VisualTimerMode: String, Codable, CaseIterable, Identifiable { case remaining = "Remaining", elapsed = "Elapsed"; var id: String { rawValue } }
+enum VisualMediaMicroStyle: String, Codable, CaseIterable, Identifiable { case artwork = "Artwork", artworkPlay = "Artwork + Play", title = "Title"; var id: String { rawValue } }
+enum VisualAdaptiveArtworkShape: String, Codable, CaseIterable, Identifiable { case rounded = "Rounded", square = "Square", circle = "Circle"; var id: String { rawValue } }
+enum VisualAdaptiveProgressStyle: String, Codable, CaseIterable, Identifiable { case native = "Interactive Slider", thin = "Thin", pill = "Pill"; var id: String { rawValue } }
+enum VisualAdaptiveVisualizerPosition: String, Codable, CaseIterable, Identifiable { case inline = "Inline", bottom = "Bottom"; var id: String { rawValue } }
+enum VisualAdaptiveAudioSliderStyle: String, Codable, CaseIterable, Identifiable { case standard = "Standard", compact = "Compact"; var id: String { rawValue } }
+enum VisualAdaptiveClipboardRowStyle: String, Codable, CaseIterable, Identifiable { case list = "List", tiles = "Tiles", minimal = "Minimal"; var id: String { rawValue } }
+enum VisualSystemGraphType: String, Codable, CaseIterable, Identifiable { case line = "Line", bars = "Bars"; var id: String { rawValue } }
+enum VisualCapturePrimaryAction: String, Codable, CaseIterable, Identifiable { case region = "Capture Region", ocr = "OCR Image"; var id: String { rawValue } }
+enum VisualStopwatchPrecision: String, Codable, CaseIterable, Identifiable {
+    case seconds = "Seconds", tenths = "Tenths", hundredths = "Hundredths"
+    var id: String { rawValue }
+    var interval: TimeInterval { switch self { case .seconds: return 1; case .tenths: return 0.1; case .hundredths: return 0.05 } }
+}
+
+enum VisualSystemMetric: String, Codable, CaseIterable, Identifiable {
+    case cpu = "CPU", memory = "Memory", storage = "Storage", battery = "Battery", network = "Network", swap = "Swap", thermal = "Thermal", uptime = "Uptime"
+    var id: String { rawValue }
+    var title: String { rawValue }
+    var shortTitle: String { switch self { case .memory: return "RAM"; case .storage: return "SSD"; case .battery: return "BAT"; case .network: return "NET"; case .thermal: return "TEMP"; case .uptime: return "UP"; default: return rawValue.uppercased() } }
+    var symbol: String { switch self { case .cpu: return "cpu"; case .memory: return "memorychip"; case .storage: return "internaldrive"; case .battery: return "battery.100"; case .network: return "arrow.down.arrow.up"; case .swap: return "arrow.triangle.swap"; case .thermal: return "thermometer.medium"; case .uptime: return "clock.arrow.circlepath" } }
+    var supportsHistory: Bool { self == .cpu || self == .memory || self == .network }
+}
+
+struct VisualAdaptiveSizeOverride: Codable, Equatable {
+    var presentation: VisualAdaptivePresentation?
+    var density: VisualAdaptiveDensity?
+    var maxItems: Int?
+    var showControls: Bool?
+    var hiddenInformation: [String]?
+}
+
+struct VisualAdaptiveWidgetOptions: Codable, Equatable {
+    var preferredPresentation: VisualAdaptivePresentation = .automatic
+    var density: VisualAdaptiveDensity = .comfortable
+    var maxItems = 6
+    var showControls = true
+    var informationPriority: [String] = []
+    var hiddenInformation: [String] = []
+    var sizeOverrides: [String: VisualAdaptiveSizeOverride] = [:]
+
+    // Timer
+    var timerStyle: VisualTimerStyle = .digital
+    var timerMode: VisualTimerMode = .remaining
+    var timerProgressThickness: CGFloat = 5
+    var timerShowSeconds = true
+    var timerName = "Focus"
+
+    // Media
+    var mediaMicroStyle: VisualMediaMicroStyle = .artworkPlay
+    var mediaArtworkShape: VisualAdaptiveArtworkShape = .rounded
+    var mediaArtworkCornerRadius: CGFloat = 16
+    var mediaArtworkScale: CGFloat = 1
+    var mediaArtworkBackground = false
+    var mediaArtworkBlur: CGFloat = 14
+    var mediaUseArtworkColors = true
+    var mediaProgressStyle: VisualAdaptiveProgressStyle = .native
+    var mediaVisualizer = false
+    var mediaVisualizerPosition: VisualAdaptiveVisualizerPosition = .bottom
+
+    // Audio
+    var audioSliderStyle: VisualAdaptiveAudioSliderStyle = .standard
+    var audioShowPercentage = true
+    var audioShowDeviceIcon = true
+    var audioShowSlider = true
+    var audioShowOutputSelector = true
+    var audioShowQuickLevels = false
+
+    // Clipboard
+    var clipboardPreviewLength = 92
+    var clipboardShowTimestamp = true
+    var clipboardShowSearch = true
+    var clipboardRowStyle: VisualAdaptiveClipboardRowStyle = .list
+
+    // System
+    var systemPrimaryMetric: VisualSystemMetric = .cpu
+    var systemMetricOrder: [VisualSystemMetric] = [.cpu, .memory, .storage, .battery, .network, .swap, .thermal, .uptime]
+    var systemShowGraphs = true
+    var systemGraphType: VisualSystemGraphType = .line
+    var systemWarningThreshold = 85.0
+
+    // Launcher
+    var launcherIconSize: CGFloat = 32
+    var launcherShowLabels = true
+    var launcherColumns = 4
+    var launcherFavoriteBundleIDs: [String] = ["com.apple.dt.Xcode", "com.unity3d.UnityEditor5.x", "com.apple.Safari", "com.apple.Terminal"]
+    var launcherShowSearch = true
+    var launcherShowRunningApps = true
+    var launcherShowDownloads = true
+    var launcherShowTimerActions = true
+
+    // Activities
+    var activitiesShowProgress = true
+    var activitiesShowDetails = true
+    var activitiesShowTimestamps = true
+
+    // Notes
+    var notesLineSpacing: CGFloat = 2
+    var notesEditorPadding: CGFloat = 2
+    var notesShowCounts = true
+    var notesPlaceholder = "Start typing…"
+
+    // Capture
+    var capturePrimaryAction: VisualCapturePrimaryAction = .region
+    var captureShowRecent = true
+    var captureThumbnailSize: CGFloat = 150
+    var captureShowOCR = true
+
+    // Stopwatch
+    var stopwatchPrecision: VisualStopwatchPrecision = .tenths
+    var stopwatchShowLaps = true
+    var stopwatchLapCount = 6
+    var stopwatchShowLapExtremes = true
+    var stopwatchTimeScale = 1.0
+
+    static func sizeKey(columns: Int, rows: Int) -> String { "\(min(8, max(1, columns)))x\(min(4, max(1, rows)))" }
+    func sizeOverride(columns: Int, rows: Int) -> VisualAdaptiveSizeOverride? { sizeOverrides[Self.sizeKey(columns: columns, rows: rows)] }
+
+    static func defaults(for module: ModuleID) -> VisualAdaptiveWidgetOptions {
+        var value = VisualAdaptiveWidgetOptions()
+        value.informationPriority = module.visualAdaptiveDefaultInformationOrder
+        switch module {
+        case .timer: value.maxItems = 5
+        case .media: value.maxItems = 8; value.mediaVisualizer = false
+        case .audio: value.maxItems = 8
+        case .clipboard: value.maxItems = 8
+        case .system: value.maxItems = 8
+        case .launcher: value.maxItems = 8
+        case .activities: value.maxItems = 6
+        case .notes: value.maxItems = 1
+        case .capture: value.maxItems = 4
+        case .stopwatch: value.maxItems = 6
+        default: break
+        }
+        return value
+    }
+
+    func effective(columns: Int, rows: Int) -> VisualAdaptiveWidgetOptions {
+        guard let override = sizeOverride(columns: columns, rows: rows) else { return self }
+        var value = self
+        if let presentation = override.presentation { value.preferredPresentation = presentation }
+        if let density = override.density { value.density = density }
+        if let maxItems = override.maxItems { value.maxItems = maxItems }
+        if let showControls = override.showControls { value.showControls = showControls }
+        if let hiddenInformation = override.hiddenInformation { value.hiddenInformation = hiddenInformation }
+        return value
+    }
+
+    func resolvedInformationPriority(for module: ModuleID) -> [String] {
+        var result: [String] = []
+        let valid = Set(module.widgetElements.map(\.key))
+        for key in informationPriority where valid.contains(key) && !result.contains(key) { result.append(key) }
+        for key in module.visualAdaptiveDefaultInformationOrder where valid.contains(key) && !result.contains(key) { result.append(key) }
+        for key in module.widgetElements.map(\.key) where !result.contains(key) { result.append(key) }
+        return result
+    }
+
+    func visibleInformation(for module: ModuleID, capacity: Int) -> Set<String> {
+        let always = module.visualAdaptiveAlwaysInformation
+        let hidden = Set(hiddenInformation)
+        let ordered = resolvedInformationPriority(for: module).filter { !always.contains($0) && !hidden.contains($0) }
+        let room = max(0, capacity - always.count)
+        return Set(always + Array(ordered.prefix(room)))
+    }
+
+    var resolvedSystemMetrics: [VisualSystemMetric] {
+        var result: [VisualSystemMetric] = [systemPrimaryMetric]
+        for metric in systemMetricOrder where !result.contains(metric) { result.append(metric) }
+        for metric in VisualSystemMetric.allCases where !result.contains(metric) { result.append(metric) }
+        return result
+    }
+
+    func validated() throws -> VisualAdaptiveWidgetOptions {
+        guard timerProgressThickness.isFinite, mediaArtworkCornerRadius.isFinite, mediaArtworkScale.isFinite,
+              mediaArtworkBlur.isFinite, systemWarningThreshold.isFinite, launcherIconSize.isFinite,
+              notesLineSpacing.isFinite, notesEditorPadding.isFinite, captureThumbnailSize.isFinite,
+              stopwatchTimeScale.isFinite else { throw CocoaError(.fileReadCorruptFile) }
+        var value = self
+        value.maxItems = min(30, max(1, maxItems))
+        value.timerProgressThickness = min(18, max(1, timerProgressThickness))
+        value.timerName = String(timerName.prefix(60))
+        value.mediaArtworkCornerRadius = min(60, max(0, mediaArtworkCornerRadius))
+        value.mediaArtworkScale = min(1.8, max(0.5, mediaArtworkScale))
+        value.mediaArtworkBlur = min(40, max(0, mediaArtworkBlur))
+        value.clipboardPreviewLength = min(500, max(16, clipboardPreviewLength))
+        value.systemWarningThreshold = min(100, max(1, systemWarningThreshold))
+        value.launcherIconSize = min(72, max(16, launcherIconSize))
+        value.launcherColumns = min(8, max(1, launcherColumns))
+        value.launcherFavoriteBundleIDs = Array(launcherFavoriteBundleIDs.map { String($0.prefix(180)) }.filter { !$0.isEmpty }.prefix(20))
+        value.notesLineSpacing = min(18, max(0, notesLineSpacing))
+        value.notesEditorPadding = min(24, max(0, notesEditorPadding))
+        value.notesPlaceholder = String(notesPlaceholder.prefix(180))
+        value.captureThumbnailSize = min(320, max(64, captureThumbnailSize))
+        value.stopwatchLapCount = min(20, max(1, stopwatchLapCount))
+        value.stopwatchTimeScale = min(2.5, max(0.6, stopwatchTimeScale))
+        value.informationPriority = Array(informationPriority.prefix(40))
+        value.hiddenInformation = Array(Set(hiddenInformation)).prefix(40).map { $0 }
+        var cleaned: [String: VisualAdaptiveSizeOverride] = [:]
+        for (key, item) in sizeOverrides where key.range(of: #"^[1-8]x[1-4]$"#, options: .regularExpression) != nil {
+            var next = item
+            if let count = next.maxItems { next.maxItems = min(30, max(1, count)) }
+            if let hidden = next.hiddenInformation { next.hiddenInformation = Array(Set(hidden)).prefix(40).map { $0 } }
+            cleaned[key] = next
+        }
+        value.sizeOverrides = cleaned
+        return value
+    }
+}
+
+extension ModuleID {
+    var visualAdaptiveSupported: Bool {
+        switch self {
+        case .timer, .media, .audio, .clipboard, .system, .launcher, .activities, .notes, .capture, .stopwatch: return true
+        default: return false
+        }
+    }
+
+    var visualAdaptiveAlwaysInformation: [String] {
+        switch self {
+        case .timer: return ["countdown"]
+        case .media: return ["artwork", "track"]
+        case .audio: return ["volumeValue"]
+        case .clipboard: return ["entries"]
+        case .launcher: return ["apps"]
+        case .activities: return ["summary"]
+        case .notes: return ["editor"]
+        case .capture: return ["actions"]
+        case .stopwatch: return ["time"]
+        default: return []
+        }
+    }
+
+    var visualAdaptiveDefaultInformationOrder: [String] {
+        switch self {
+        case .timer: return ["countdown", "controls", "progress", "status", "endTime", "presets"]
+        case .media: return ["artwork", "track", "controls", "artist", "progress", "timing", "album", "shuffle", "repeat", "visualizer", "source", "playback", "status", "detection", "palette", "lyrics"]
+        case .audio: return ["volumeValue", "output", "volume", "summary", "levels", "actions", "status"]
+        case .clipboard: return ["entries", "search", "summary", "actions", "footer"]
+        case .system: return ["cpu", "memoryUsage", "battery", "diskUsage", "network", "graphs", "swap", "thermal", "uptime", "power", "storage", "device", "memory", "batteryProgress"]
+        case .launcher: return ["apps", "search", "shortcuts", "timers", "plugins", "summary"]
+        case .activities: return ["summary", "items", "status"]
+        case .notes: return ["editor", "stats", "actions"]
+        case .capture: return ["actions", "result", "progress", "resultActions", "status", "hint"]
+        case .stopwatch: return ["time", "controls", "state"]
+        default: return widgetElements.map(\.key)
+        }
+    }
+}
+
 struct WidgetStyle: Codable, Equatable {
     var fontFamily: WidgetFontFamily = .system
     var customFont = "Helvetica Neue"
@@ -944,6 +1218,8 @@ struct WidgetStyle: Codable, Equatable {
     var clock = ClockOptions()
     // Visual Workspace Calendar options live separately so the regular opened-notch Calendar keeps its legacy presentation untouched.
     var visualCalendar: VisualCalendarOptions?
+    // Shared Visual Workspace adaptive options for non-Clock/Calendar widgets.
+    var visualAdaptive: VisualAdaptiveWidgetOptions?
     var content: WidgetContentOptions?
     var chrome: WidgetChromeOptions?
 
@@ -959,6 +1235,7 @@ struct WidgetStyle: Codable, Equatable {
 
     var resolvedContent: WidgetContentOptions { content ?? WidgetContentOptions() }
     var resolvedVisualCalendar: VisualCalendarOptions { visualCalendar ?? VisualCalendarOptions() }
+    func resolvedVisualAdaptive(for module: ModuleID) -> VisualAdaptiveWidgetOptions { visualAdaptive ?? .defaults(for: module) }
     var resolvedChrome: WidgetChromeOptions { chrome ?? WidgetChromeOptions() }
     var resolvedLayoutMode: WidgetLayoutMode { layoutMode ?? .standard }
     var resolvedCardBackgroundStyle: WidgetCardBackgroundStyle { cardBackgroundStyle ?? .solid }
@@ -984,6 +1261,7 @@ struct WidgetStyle: Codable, Equatable {
         var v = self
         v.clock = try clock.validated()
         if visualCalendar != nil { v.visualCalendar = try resolvedVisualCalendar.validated() }
+        if visualAdaptive != nil { v.visualAdaptive = try resolvedVisualAdaptive(for: .timer).validated() }
         v.fontSize = min(48, max(10, fontSize)); v.padding = min(32, max(0, padding))
         v.cornerRadius = min(40, max(0, cornerRadius)); v.backgroundOpacity = min(1, max(0, backgroundOpacity))
         v.width = width <= 0 ? 0 : min(640, max(120, width))

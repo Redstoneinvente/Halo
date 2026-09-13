@@ -413,6 +413,7 @@ final class AudioService: ObservableObject {
     @Published var volume: Float32 = 0
     @Published var canSetVolume = false
     @Published var error: String?
+    private var preMuteVolume: Float32 = 0.5
     func refresh() {
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var size: UInt32 = 0
@@ -447,10 +448,21 @@ final class AudioService: ObservableObject {
     func setVolume(_ value: Float32) {
         guard canSetVolume else { return }
         var clamped = min(1, max(0, value))
+        if clamped > 0.001 { preMuteVolume = clamped }
         var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar, mScope: kAudioObjectPropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
         if AudioObjectSetPropertyData(selected, &address, 0, nil, UInt32(MemoryLayout<Float32>.size), &clamped) == noErr { volume = clamped }
         else { error = "This output doesn't allow software volume control." }
     }
+    func toggleMute() {
+        guard canSetVolume else { return }
+        if volume > 0.001 {
+            preMuteVolume = volume
+            setVolume(0)
+        } else {
+            setVolume(max(0.05, preMuteVolume))
+        }
+    }
+
 }
 
 @MainActor

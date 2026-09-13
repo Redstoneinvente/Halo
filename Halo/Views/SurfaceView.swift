@@ -1899,10 +1899,14 @@ struct BuiltinOrIntegrationWidget: View {
     @Environment(\.widgetStyle) private var style
     @Environment(\.openNotchPresentation) private var presentation
     @Environment(\.openNotchCompressionLevel) private var compression
+    @Environment(\.openNotchGridColumnSpan) private var gridColumnSpan
+    @Environment(\.openNotchGridRowSpan) private var gridRowSpan
     @ViewBuilder var body: some View {
         switch module {
         case .clock: WidgetClock(style: style, workspace: store.workspace, store: store)
-        case .timer: timer
+        case .timer:
+            if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceTimerView(store: store) }
+            else { timer }
         case .shelf: shelf
         default: ModuleRegistry().view(for: module, store: store)
         }

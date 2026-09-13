@@ -100,6 +100,21 @@ final class AppStore: ObservableObject {
             monitorTimer()
         }
     }
+    func addTimer(minutes: Int) {
+        let delta = TimeInterval(minutes * 60)
+        guard delta != 0 else { return }
+        if let current = deadline {
+            let next = current.addingTimeInterval(delta)
+            deadline = max(next, Date().addingTimeInterval(1))
+            timerDurationSeconds = max(1, timerDurationSeconds + delta)
+            defaults.set(deadline, forKey: "timer.deadline")
+            defaults.set(timerDurationSeconds, forKey: "timer.durationSeconds")
+            monitorTimer()
+        } else if pausedSeconds > 0 {
+            pausedSeconds = max(1, pausedSeconds + delta)
+            timerDurationSeconds = max(pausedSeconds, timerDurationSeconds + delta)
+        }
+    }
     func resetTimer() {
         deadline = nil; pausedSeconds = 0; timerDurationSeconds = 0; finished = false; ticker?.cancel()
         defaults.removeObject(forKey: "timer.deadline")

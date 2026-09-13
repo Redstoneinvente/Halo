@@ -90,18 +90,36 @@ struct IntegrationModuleView: View {
 
     @ViewBuilder private var content: some View {
         switch id {
-        case .media: MediaModuleView(service: workspace.media, app: workspace.settings.mediaApp)
-        case .audio: AudioModuleView(service: workspace.audio)
+        case .media:
+            if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceAdaptiveModuleView(module: .media, store: store, workspace: workspace) }
+            else { MediaModuleView(service: workspace.media, app: workspace.settings.mediaApp) }
+        case .audio:
+            if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceAdaptiveModuleView(module: .audio, store: store, workspace: workspace) }
+            else { AudioModuleView(service: workspace.audio) }
         case .calendar:
             if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceCalendarView(service: workspace.calendar) }
             else { CalendarModuleView(service: workspace.calendar) }
-        case .clipboard: ClipboardModuleView(service: workspace.clipboard, enabled: workspace.settings.clipboardEnabled)
-        case .system: SystemModuleView(service: workspace.system)
-        case .launcher: LauncherModuleView(store: store, workspace: workspace)
-        case .activities: activitiesContent
-        case .notes: notesContent
-        case .capture: CaptureModuleView(service: workspace.capture, store: store)
-        case .stopwatch: stopwatchContent
+        case .clipboard:
+            if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceAdaptiveModuleView(module: .clipboard, store: store, workspace: workspace) }
+            else { ClipboardModuleView(service: workspace.clipboard, enabled: workspace.settings.clipboardEnabled) }
+        case .system:
+            if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceAdaptiveModuleView(module: .system, store: store, workspace: workspace) }
+            else { SystemModuleView(service: workspace.system) }
+        case .launcher:
+            if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceAdaptiveModuleView(module: .launcher, store: store, workspace: workspace) }
+            else { LauncherModuleView(store: store, workspace: workspace) }
+        case .activities:
+            if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceAdaptiveModuleView(module: .activities, store: store, workspace: workspace) }
+            else { activitiesContent }
+        case .notes:
+            if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceAdaptiveModuleView(module: .notes, store: store, workspace: workspace) }
+            else { notesContent }
+        case .capture:
+            if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceAdaptiveModuleView(module: .capture, store: store, workspace: workspace) }
+            else { CaptureModuleView(service: workspace.capture, store: store) }
+        case .stopwatch:
+            if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceAdaptiveModuleView(module: .stopwatch, store: store, workspace: workspace) }
+            else { stopwatchContent }
         default: EmptyView()
         }
     }

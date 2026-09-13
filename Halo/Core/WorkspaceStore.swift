@@ -71,6 +71,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     let bluetooth = BluetoothStateService.shared
     @Published var stopwatchStart: Date?
     @Published var stopwatchElapsed: TimeInterval = 0
+    @Published var stopwatchLaps: [TimeInterval] = []
     func setOpenedNotchVisible(_ visible: Bool, token: UUID) {
         if visible { openedNotchVisibilityTokens.insert(token) } else { openedNotchVisibilityTokens.remove(token) }
         let next = !openedNotchVisibilityTokens.isEmpty
@@ -82,6 +83,20 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     func toggleStopwatch() {
         if let start = stopwatchStart { stopwatchElapsed += Date().timeIntervalSince(start); stopwatchStart = nil }
         else { stopwatchStart = Date() }
+    }
+    func lapStopwatch() {
+        guard let start = stopwatchStart else { return }
+        let total = stopwatchElapsed + Date().timeIntervalSince(start)
+        let previous = stopwatchLaps.reduce(0, +)
+        let lap = max(0, total - previous)
+        guard lap > 0.01 else { return }
+        stopwatchLaps.append(lap)
+        if stopwatchLaps.count > 50 { stopwatchLaps.removeFirst(stopwatchLaps.count - 50) }
+    }
+    func resetStopwatch() {
+        stopwatchStart = nil
+        stopwatchElapsed = 0
+        stopwatchLaps = []
     }
     private let hotkey = HotkeyService()
     private let retroGameHotkey = HotkeyService(identifierID: 2, notificationName: .init("HaloRetroGameToggle"))
