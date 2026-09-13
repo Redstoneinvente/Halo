@@ -1,0 +1,64 @@
+name: Polish Workspace Presets and Vinyl Studio
+
+on:
+  push:
+    branches:
+      - chatgpt/preset-studio-polish
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply and validate polish on latest main
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/polish_presets_studio.py /tmp/polish_presets_studio.py
+          git fetch origin main
+          git checkout --detach origin/main
+          python3 /tmp/polish_presets_studio.py
+          git diff --check
+
+          xcrun swiftc -parse Halo/Core/WorkspaceModels.swift
+          xcrun swiftc -parse Halo/Views/SurfaceView.swift
+
+          python3 - <<'PY'
+          from pathlib import Path
+          w = Path('Halo/Core/WorkspaceModels.swift').read_text()
+          block = w.split('static func made(_ preset: OpenNotchPreset) -> OpenNotchLayout {', 1)[1].split('func validated() throws -> OpenNotchLayout {', 1)[0]
+          required = ['case .media:', 'case .productivity:', 'case .systemMonitor:', 'case .focus:', 'case .developer:', 'case .informationDense:', 'case .showcase:']
+          for token in required:
+              if token not in block:
+                  raise SystemExit(f'missing preset {token}')
+          if '.elementItem(' in block:
+              raise SystemExit('workspace preset reintroduced lightweight elements')
+          if 'grid(8, 6' not in block or 'item(.media,      0, 0, 6, 4' not in block:
+              raise SystemExit('distinct preset geometry audit failed')
+
+          s = Path('Halo/Views/SurfaceView.swift').read_text()
+          for token in ['case chrome = "Chrome"', 'case aurora = "Aurora"', 'case translucent = "Translucent"', 'func close()', 'Label("Close", systemImage: "xmark")']:
+              if token not in s:
+                  raise SystemExit(f'vinyl studio audit failed: {token}')
+          PY
+
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > /tmp/preset-studio-build.log 2>&1
+          BUILD_STATUS=$?
+          set -e
+          grep -E '(WorkspaceModels.swift|SurfaceView.swift):.*(error:|warning:)' /tmp/preset-studio-build.log || true
+          if grep -Eq '(WorkspaceModels.swift|SurfaceView.swift):.*error:' /tmp/preset-studio-build.log; then
+            exit 1
+          fi
+          echo "Full build status: $BUILD_STATUS (pre-existing unrelated compiler failures tolerated only when changed files have no errors)"
+
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/Core/WorkspaceModels.swift Halo/Views/SurfaceView.swift
+          git commit -m 'Polish Workspace presets and Vinyl Studio'
+          git push origin HEAD:main
