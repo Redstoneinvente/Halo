@@ -1,0 +1,29 @@
+name: Diagnose Notch Ambient
+on:
+  push:
+    branches: [chatgpt/notch-ambient]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inspect integration points
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B inspect origin/main
+          echo '=== HaloSurfaceRouter ==='
+          grep -R -n -A180 -B20 'struct HaloSurfaceRouter' Halo || true
+          echo '=== ClosedNotchView call sites ==='
+          grep -R -n -A40 -B30 'ClosedNotchView(' Halo || true
+          echo '=== SurfaceGeometry compact frame ==='
+          grep -R -n -A180 -B20 'struct SurfaceGeometry' Halo || true
+          echo '=== Router hover / ownership ==='
+          grep -R -n -A70 -B30 'hover(' Halo/Views/SurfaceView.swift Halo/NotchEngine/WindowManager.swift || true
+          echo '=== Media spectrum/public state ==='
+          grep -R -n -A60 -B20 'class AudioSpectrumService\|final class AudioSpectrumService\|spectrum' Halo/Services Halo/Core | head -n 500 || true
