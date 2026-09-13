@@ -12,10 +12,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Correct editor generator
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Scripts/one_time_direct_widget_grid.py')
+          text = p.read_text()
+          bad = '''        Menu("Lightweight element") { ForEach(OpenNotchElementKind.allCases) { element in Button(element.title) { addElement(element) } }
+          ''')'''
+          good = '''        Menu("Lightweight element") { ForEach(OpenNotchElementKind.allCases) { element in Button(element.title) { addElement(element) } } }
+          ''')'''
+          if text.count(bad) != 1:
+              raise SystemExit(f'Expected one malformed add-menu replacement, found {text.count(bad)}')
+          p.write_text(text.replace(bad, good, 1))
+          PY
       - name: Apply direct-grid architecture
         run: python3 Scripts/one_time_direct_widget_grid.py
-      - name: Inspect generated editor
-        run: sed -n '748,815p' Halo/Views/WidgetSettingsView.swift
       - name: Validate Swift syntax
         run: |
           xcrun swiftc -parse Halo/Core/WorkspaceModels.swift
