@@ -1,3 +1,4 @@
+# Calendar repair validation workflow
 name: Apply Calendar Event and Settings Fix
 on:
   push:
