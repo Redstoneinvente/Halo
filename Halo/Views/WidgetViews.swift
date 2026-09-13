@@ -115,6 +115,39 @@ extension EnvironmentValues {
     }
 }
 
+/// Deliberate Visual Workspace compositions. These are not just density levels:
+/// a wide 2×1 slot and a tall 1×2 slot intentionally receive different layouts.
+enum VisualWorkspaceWidgetSize: Equatable {
+    case glance
+    case horizontal
+    case vertical
+    case standard
+    case expanded
+
+    static func resolve(width: CGFloat?, height: CGFloat?, presentation: OpenNotchPresentation) -> VisualWorkspaceWidgetSize? {
+        guard let width, let height, width > 0, height > 0 else { return nil }
+        let aspect = width / max(1, height)
+        let area = width * height
+
+        // Roughly the footprint produced by a 1×1 cell. Keep the test area-aware so
+        // resizing the workspace itself does not suddenly turn a wide cell into a square one.
+        if (area < 20_000 && aspect > 0.72 && aspect < 1.38) || (width < 132 && height < 132) {
+            return .glance
+        }
+        if aspect >= 1.38 && height < 178 { return .horizontal }
+        if aspect <= 0.72 && width < 208 { return .vertical }
+        if presentation == .expanded || (width >= 340 && height >= 195 && area >= 72_000) { return .expanded }
+        return .standard
+    }
+
+    var isCompact: Bool {
+        switch self {
+        case .glance, .horizontal, .vertical: return true
+        case .standard, .expanded: return false
+        }
+    }
+}
+
 extension OpenNotchPriority {
     func remainsVisible(at compression: Int) -> Bool {
         switch self {
@@ -163,14 +196,37 @@ struct WidgetElementSurface<Content: View>: View {
     @Environment(\.openNotchCompressionLevel) private var compression
     @Environment(\.openNotchAvailableWidth) private var availableWidth
     @Environment(\.openNotchAvailableHeight) private var availableHeight
+    @Environment(\.openNotchPresentation) private var presentation
 
+    private var footprint: VisualWorkspaceWidgetSize? {
+        VisualWorkspaceWidgetSize.resolve(width: availableWidth, height: availableHeight, presentation: presentation)
+    }
     private var adaptiveScale: Double {
         let widthScale = availableWidth.map { min(1, max(0.52, Double($0) / 250)) } ?? 1
         let heightScale = availableHeight.map { min(1, max(0.52, Double($0) / 145)) } ?? 1
         let pressure = max(0.68, 1 - Double(compression) * 0.055)
-        return min(widthScale, heightScale) * pressure
+        let footprintScale: Double
+        switch footprint {
+        case .glance: footprintScale = 0.82
+        case .horizontal, .vertical: footprintScale = 0.91
+        case .standard, .expanded, .none: footprintScale = 1
+        }
+        return min(widthScale, heightScale) * pressure * footprintScale
     }
     private var priority: OpenNotchPriority { element.priority ?? defaultPriority }
+    private var remainsVisibleForFootprint: Bool {
+        guard let footprint else { return true }
+        switch footprint {
+        case .glance:
+            return priority == .alwaysVisible || priority == .high
+        case .horizontal, .vertical:
+            return priority != .optional && priority != .low
+        case .standard:
+            return priority != .optional || compression < 1
+        case .expanded:
+            return true
+        }
+    }
     private var alignment: WidgetContentAlignment { element.alignment ?? widgetStyle.resolvedContent.alignment }
     private var textAlignment: WidgetContentAlignment { element.textAlignment ?? alignment }
     private var foreground: Color {
@@ -193,8 +249,8 @@ struct WidgetElementSurface<Content: View>: View {
     }
     private var controlSize: ControlSize {
         let density = element.contentDensity ?? 1
-        if compression >= 3 || density <= 0.7 { return .mini }
-        if compression >= 1 || density <= 0.9 { return .small }
+        if footprint == .glance || compression >= 3 || density <= 0.7 { return .mini }
+        if footprint?.isCompact == true || compression >= 1 || density <= 0.9 { return .small }
         if density >= 1.3 { return .large }
         return widgetStyle.resolvedContent.controlSize.swiftUI
     }
@@ -210,7 +266,7 @@ struct WidgetElementSurface<Content: View>: View {
     }
 
     var body: some View {
-        if element.visible && priority.remainsVisible(at: compression) {
+        if element.visible && priority.remainsVisible(at: compression) && remainsVisibleForFootprint {
             content
                 .font(font)
                 .foregroundStyle(foreground)
@@ -218,8 +274,8 @@ struct WidgetElementSurface<Content: View>: View {
                 .multilineTextAlignment(textAlignment.textAlignment)
                 .controlSize(controlSize)
                 .opacity(element.opacity)
-                .lineLimit(compression >= 4 ? 1 : compression >= 2 ? 2 : nil)
-                .minimumScaleFactor(compression >= 3 ? 0.72 : 0.86)
+                .lineLimit(footprint == .glance || compression >= 4 ? 1 : compression >= 2 ? 2 : nil)
+                .minimumScaleFactor(footprint == .glance ? 0.82 : compression >= 3 ? 0.72 : 0.86)
                 .padding(element.padding * adaptiveScale)
                 .background { elementBackground }
                 .overlay {
@@ -410,6 +466,13 @@ struct WidgetCard<Content: View>: View {
 struct WidgetClock: View {
     let style: WidgetStyle
     var compact = false
+    @Environment(\.openNotchPresentation) private var presentation
+    @Environment(\.openNotchAvailableWidth) private var availableWidth
+    @Environment(\.openNotchAvailableHeight) private var availableHeight
+
+    private var footprint: VisualWorkspaceWidgetSize? {
+        VisualWorkspaceWidgetSize.resolve(width: availableWidth, height: availableHeight, presentation: presentation)
+    }
     private var formatter: DateFormatter {
         let value = DateFormatter()
         value.locale = Locale(identifier: "en_US_POSIX")
@@ -417,8 +480,17 @@ struct WidgetClock: View {
         value.dateFormat = (style.clock.twentyFourHour ? "HH:mm" : "h:mm") + (style.clock.showSeconds ? ":ss" : "") + (style.clock.twentyFourHour ? "" : " a")
         return value
     }
+    private var glanceFormatter: DateFormatter {
+        let value = DateFormatter()
+        value.locale = Locale(identifier: "en_US_POSIX")
+        value.timeZone = TimeZone(identifier: style.clock.timeZone) ?? .current
+        value.dateFormat = style.clock.twentyFourHour ? "HH:mm" : "h:mm a"
+        return value
+    }
     private var dayFormatter: DateFormatter {
-        let value = formatter
+        let value = DateFormatter()
+        value.locale = .autoupdatingCurrent
+        value.timeZone = TimeZone(identifier: style.clock.timeZone) ?? .current
         switch style.resolvedContent.clockDateStyle {
         case .weekdayMonthDay: value.dateFormat = "EEE, MMM d"
         case .monthDay: value.dateFormat = "MMM d"
@@ -427,55 +499,139 @@ struct WidgetClock: View {
         }
         return value
     }
+    private var weekdayFormatter: DateFormatter {
+        let value = DateFormatter()
+        value.locale = .autoupdatingCurrent
+        value.timeZone = TimeZone(identifier: style.clock.timeZone) ?? .current
+        value.dateFormat = "EEEE"
+        return value
+    }
     private var timeZoneLabel: String { style.clock.timeZone.isEmpty ? TimeZone.current.identifier : style.clock.timeZone }
 
     var body: some View {
         let clockFormatter = formatter
+        let smallClockFormatter = glanceFormatter
         let dateFormatter = dayFormatter
+        let weekday = weekdayFormatter
         let start = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970 / 60) * 60)
-        TimelineView(.periodic(from: start, by: style.clock.showSeconds ? 1 : 30)) { context in
-            let spacing = max(2, min(20, style.resolvedContent.spacing * 0.55))
+        TimelineView(.periodic(from: start, by: style.clock.showSeconds && footprint != .glance ? 1 : 30)) { context in
             Group {
-                switch style.resolvedLayoutMode {
-                case .compact:
-                    HStack(spacing: spacing) {
-                        if style.showTitle && !compact { clockHeader(scale: 0.68) }
-                        WidgetElement(key: "time") { Text(clockFormatter.string(from: context.date)).monospacedDigit() }
-                        if style.clock.showDate && !compact {
-                            WidgetElement(key: "date") { Text(dateFormatter.string(from: context.date)) }
-                        }
-                    }
-                case .hero:
-                    VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
-                        if style.showTitle && !compact { clockHeader(scale: 0.75) }
-                        WidgetElement(key: "time") { Text(clockFormatter.string(from: context.date)).font(style.font(scale: 1.35)).monospacedDigit() }
-                        extras(dateFormatter: dateFormatter, date: context.date)
-                    }
-                case .minimal:
-                    VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
-                        WidgetElement(key: "time") { Text(clockFormatter.string(from: context.date)).monospacedDigit() }
-                        extras(dateFormatter: dateFormatter, date: context.date)
-                    }
-                case .dense, .standard:
-                    VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: style.resolvedLayoutMode == .dense ? max(2, spacing * 0.55) : spacing) {
-                        if style.showTitle && !compact { clockHeader(scale: 0.75) }
-                        WidgetElement(key: "time") { Text(clockFormatter.string(from: context.date)).monospacedDigit() }
-                        extras(dateFormatter: dateFormatter, date: context.date)
+                if let footprint {
+                    workspaceClock(footprint, date: context.date, clockFormatter: clockFormatter, glanceFormatter: smallClockFormatter, dateFormatter: dateFormatter, weekdayFormatter: weekday)
+                } else {
+                    legacyClock(date: context.date, clockFormatter: clockFormatter, dateFormatter: dateFormatter)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: footprint == .glance ? .center : style.resolvedContent.alignment.alignment)
+            .animation(.easeInOut(duration: 0.18), value: footprint)
+        }
+    }
+
+    @ViewBuilder private func workspaceClock(_ size: VisualWorkspaceWidgetSize, date: Date, clockFormatter: DateFormatter, glanceFormatter: DateFormatter, dateFormatter: DateFormatter, weekdayFormatter: DateFormatter) -> some View {
+        let spacing = max(2, min(16, style.resolvedContent.spacing * 0.55))
+        switch size {
+        case .glance:
+            VStack(spacing: 2) {
+                WidgetElement(key: "time", defaultPriority: .alwaysVisible) {
+                    Text(glanceFormatter.string(from: date))
+                        .font(style.font(scale: 1.34))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+                if style.clock.showDate {
+                    WidgetElement(key: "date", defaultPriority: .high) {
+                        Text(date, format: .dateTime.weekday(.abbreviated).locale(.autoupdatingCurrent))
+                            .font(style.font(scale: 0.62))
+                            .foregroundStyle(.secondary)
+                            .textCase(.uppercase)
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: style.resolvedContent.alignment.alignment)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        case .horizontal:
+            HStack(spacing: spacing) {
+                WidgetElement(key: "time", defaultPriority: .alwaysVisible) {
+                    Text(glanceFormatter.string(from: date)).font(style.font(scale: 1.08)).monospacedDigit().lineLimit(1)
+                }
+                if style.clock.showDate {
+                    Divider().opacity(0.35)
+                    WidgetElement(key: "date", defaultPriority: .high) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(weekdayFormatter.string(from: date)).font(style.font(scale: 0.64)).lineLimit(1)
+                            Text(dateFormatter.string(from: date)).font(style.font(scale: 0.58)).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                }
+            }
+        case .vertical:
+            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
+                WidgetElement(key: "time", defaultPriority: .alwaysVisible) {
+                    Text(glanceFormatter.string(from: date)).font(style.font(scale: 1.16)).monospacedDigit().lineLimit(1)
+                }
+                if style.clock.showDate {
+                    WidgetElement(key: "date", defaultPriority: .high) {
+                        VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: 2) {
+                            Text(weekdayFormatter.string(from: date)).font(style.font(scale: 0.72)).lineLimit(1)
+                            Text(dateFormatter.string(from: date)).font(style.font(scale: 0.64)).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                }
+            }
+        case .standard:
+            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
+                if style.showTitle && !compact { clockHeader(scale: 0.72) }
+                WidgetElement(key: "time", defaultPriority: .alwaysVisible) { Text(clockFormatter.string(from: date)).font(style.font(scale: 1.12)).monospacedDigit() }
+                if style.clock.showDate && !compact { WidgetElement(key: "date", defaultPriority: .high) { Text(dateFormatter.string(from: date)) } }
+                WidgetElement(key: "timezone", defaultVisible: false, defaultPriority: .normal) { Label(timeZoneLabel, systemImage: "globe") }
+            }
+        case .expanded:
+            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
+                if style.showTitle && !compact { clockHeader(scale: 0.78) }
+                WidgetElement(key: "time", defaultPriority: .alwaysVisible) { Text(clockFormatter.string(from: date)).font(style.font(scale: 1.35)).monospacedDigit() }
+                extras(dateFormatter: dateFormatter, date: date)
+            }
+        }
+    }
+
+    @ViewBuilder private func legacyClock(date: Date, clockFormatter: DateFormatter, dateFormatter: DateFormatter) -> some View {
+        let spacing = max(2, min(20, style.resolvedContent.spacing * 0.55))
+        switch style.resolvedLayoutMode {
+        case .compact:
+            HStack(spacing: spacing) {
+                if style.showTitle && !compact { clockHeader(scale: 0.68) }
+                WidgetElement(key: "time", defaultPriority: .alwaysVisible) { Text(clockFormatter.string(from: date)).monospacedDigit() }
+                if style.clock.showDate && !compact {
+                    WidgetElement(key: "date", defaultPriority: .high) { Text(dateFormatter.string(from: date)) }
+                }
+            }
+        case .hero:
+            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
+                if style.showTitle && !compact { clockHeader(scale: 0.75) }
+                WidgetElement(key: "time", defaultPriority: .alwaysVisible) { Text(clockFormatter.string(from: date)).font(style.font(scale: 1.35)).monospacedDigit() }
+                extras(dateFormatter: dateFormatter, date: date)
+            }
+        case .minimal:
+            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
+                WidgetElement(key: "time", defaultPriority: .alwaysVisible) { Text(clockFormatter.string(from: date)).monospacedDigit() }
+                extras(dateFormatter: dateFormatter, date: date)
+            }
+        case .dense, .standard:
+            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: style.resolvedLayoutMode == .dense ? max(2, spacing * 0.55) : spacing) {
+                if style.showTitle && !compact { clockHeader(scale: 0.75) }
+                WidgetElement(key: "time", defaultPriority: .alwaysVisible) { Text(clockFormatter.string(from: date)).monospacedDigit() }
+                extras(dateFormatter: dateFormatter, date: date)
+            }
         }
     }
 
     @ViewBuilder private func extras(dateFormatter: DateFormatter, date: Date) -> some View {
         if style.clock.showDate && !compact {
-            WidgetElement(key: "date") { Text(dateFormatter.string(from: date)) }
+            WidgetElement(key: "date", defaultPriority: .high) { Text(dateFormatter.string(from: date)) }
         }
-        WidgetElement(key: "timezone", defaultVisible: false) {
+        WidgetElement(key: "timezone", defaultVisible: false, defaultPriority: .normal) {
             Label(timeZoneLabel, systemImage: "globe")
         }
-        WidgetElement(key: "dayProgress", defaultVisible: false) {
+        WidgetElement(key: "dayProgress", defaultVisible: false, defaultPriority: .low) {
             let interval = Calendar.current.dateInterval(of: .day, for: date)
             let progress = interval.map { min(1, max(0, date.timeIntervalSince($0.start) / $0.duration)) } ?? 0
             VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: 4) {
