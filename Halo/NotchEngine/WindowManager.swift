@@ -19,6 +19,9 @@ final class SurfaceState: ObservableObject {
     @Published var compactWidth: CGFloat = 190
     @Published var closedOcclusion: CGRect?
     @Published var compactHeight: CGFloat = 40
+    @Published var physicalNotchWidth: CGFloat = 190
+    @Published var physicalNotchHeight: CGFloat = 32
+    @Published var screenFrame: CGRect = .zero
     @Published var theme = Theme()
     @Published var layoutOverride: WorkspaceLayout?
     @Published var contextPreferredSize: CGSize?
@@ -282,6 +285,7 @@ final class SurfaceAnimator {
 final class WindowManager {
     @MainActor private final class Host {
         let panel: HaloPanel
+        let ambientPanel: NSPanel
         let state = SurfaceState()
         let animator = SurfaceAnimator()
         var geometry: SurfaceGeometry?
@@ -294,10 +298,19 @@ final class WindowManager {
             panel.backgroundColor = .clear; panel.isOpaque = false; panel.hasShadow = true
             panel.hidesOnDeactivate = false; panel.level = .statusBar
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+            ambientPanel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            ambientPanel.isReleasedWhenClosed = false
+            ambientPanel.backgroundColor = .clear; ambientPanel.isOpaque = false; ambientPanel.hasShadow = false
+            ambientPanel.hidesOnDeactivate = false; ambientPanel.level = .statusBar
+            ambientPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            ambientPanel.ignoresMouseEvents = true
+            ambientPanel.acceptsMouseMovedEvents = false
+            ambientPanel.animationBehavior = .none
         }
         func stop() {
             animator.cancel(); state.collapseTask?.cancel(); state.dropExitTask?.cancel()
-            subscription?.cancel(); contextSizeSubscription?.cancel(); panel.close()
+            subscription?.cancel(); contextSizeSubscription?.cancel(); panel.close(); ambientPanel.close()
         }
     }
 
@@ -358,6 +371,9 @@ final class WindowManager {
             }
             .store(in: &subscriptions)
         store.$configuration.dropFirst().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+        NotchAmbientStore.shared.$settings.dropFirst().removeDuplicates()
+            .debounce(for: .milliseconds(45), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.$settings.map { [store] settings in
             let layout = settings.profiles.first { $0.id == store.workspace.scheduledProfileID }?.layout ?? settings.layout
@@ -1100,6 +1116,7 @@ final class WindowManager {
             let oldOffset = host.geometry?.activeCompactCenterOffset ?? 0
             configureDynamicWidth(host)
             guard let geometry = host.geometry else { continue }
+            updateAmbientPanelFrame(host: host, geometry: geometry)
             let newWidth = geometry.compactWidth
             let newHeight = geometry.compactHeight
             let newOffset = geometry.activeCompactCenterOffset ?? 0
@@ -1220,6 +1237,25 @@ final class WindowManager {
         return expanded ? adjustedExpandedFrame(host: host, requested: host.state.contextPreferredSize) : geometry.frame(expanded: false)
     }
 
+    private func notchAmbientFrame(for geometry: SurfaceGeometry) -> CGRect {
+        let settings = NotchAmbientStore.shared.settings.normalized()
+        let closed = geometry.frame(expanded: false)
+        let notchWidth = geometry.physicalNotchWidth > 0 ? geometry.physicalNotchWidth : min(190, closed.width)
+        let notchHeight = geometry.safeAreaTop > 0 ? geometry.safeAreaTop : min(34, closed.height)
+        let width = min(geometry.screen.width, max(320, notchWidth + settings.horizontalExtent * 2))
+        let height = min(geometry.screen.height, max(100, notchHeight + settings.verticalExtent))
+        let top = min(geometry.screen.maxY, closed.maxY)
+        var x = closed.midX - width / 2
+        x = min(max(geometry.screen.minX, x), geometry.screen.maxX - width)
+        let y = max(geometry.screen.minY, top - height)
+        return CGRect(x: x, y: y, width: width, height: min(height, top - y))
+    }
+
+    private func updateAmbientPanelFrame(host: Host, geometry: SurfaceGeometry) {
+        let frame = notchAmbientFrame(for: geometry)
+        if host.ambientPanel.frame != frame { host.ambientPanel.setFrame(frame, display: false) }
+    }
+
     private func reconcile() {
         let screens = store.configuration.allDisplays ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
         var active = Set<String>()
@@ -1248,6 +1284,12 @@ final class WindowManager {
             appearance.surface = (try? appearance.surface.validated()) ?? SurfaceOptions()
             let previousOffset = host.geometry?.offset(expanded: host.state.expanded) ?? .zero
             host.geometry = Self.geometry(screen: screen, theme: theme, appearance: appearance)
+            if host.state.screenFrame != screen.frame { host.state.screenFrame = screen.frame }
+            let ambientPhysicalWidth = host.geometry!.physicalNotchWidth > 0 ? host.geometry!.physicalNotchWidth : min(190, host.geometry!.compactWidth)
+            let ambientPhysicalHeight = host.geometry!.safeAreaTop > 0 ? host.geometry!.safeAreaTop : min(34, host.geometry!.compactHeight)
+            if host.state.physicalNotchWidth != ambientPhysicalWidth { host.state.physicalNotchWidth = ambientPhysicalWidth }
+            if host.state.physicalNotchHeight != ambientPhysicalHeight { host.state.physicalNotchHeight = ambientPhysicalHeight }
+            updateAmbientPanelFrame(host: host, geometry: host.geometry!)
             if host.state.theme != theme { host.state.theme = theme }
             if host.state.layoutOverride != displayLayout { host.state.layoutOverride = displayLayout }
             configureDynamicWidth(host)
@@ -1272,6 +1314,12 @@ final class WindowManager {
                                                 userInfo: ["frame": target, "screen": id])
             }
             if existing == nil {
+                let ambientRoot = NotchAmbientOverlayView(store: store, state: host.state, workspace: store.workspace)
+                let ambientView = NSHostingView(rootView: ambientRoot)
+                ambientView.sizingOptions = []
+                host.ambientPanel.contentView = ambientView
+                updateAmbientPanelFrame(host: host, geometry: host.geometry!)
+
                 let root = HaloSurfaceRouter(viewport: host.state.viewport,
                                              store: store,
                                              state: host.state,
@@ -1332,7 +1380,11 @@ final class WindowManager {
                                        preset: .smooth, animations: host.state.theme.animations && !host.state.editingGeometry,
                                        opening: true, style: geometry.style)
                 }
+                // Ambient is ordered first and is mouse-pass-through; the normal Halo panel
+                // remains the interactive/top owner of the notch.
+                host.ambientPanel.orderFrontRegardless()
                 host.panel.orderFrontRegardless()
+                host.ambientPanel.order(.below, relativeTo: host.panel.windowNumber)
                 hosts[id] = host
             }
         }

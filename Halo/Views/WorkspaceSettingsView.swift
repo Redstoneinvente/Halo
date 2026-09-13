@@ -18,7 +18,7 @@ struct SettingsView: View {
     @State private var renamingProfile: UUID?
     @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
-    private let sections = ["General", "Account & License", "Appearance", "Modules", "Widgets", "Closed notch", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
+    private let sections = ["General", "Account & License", "Appearance", "Modules", "Widgets", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -74,6 +74,7 @@ struct SettingsView: View {
         case "Context Notch Interface": return "rectangle.stack"
         case "HUD": return "rectangle.inset.filled.and.person.filled"
         case "Closed notch": return "rectangle.topthird.inset.filled"
+        case "Notch Ambient": return "sparkles"
         case "Media & Files": return "play.rectangle"
         case "Profiles": return "person.crop.rectangle.stack"
         case "Schedules": return "calendar.badge.clock"
@@ -115,6 +116,7 @@ struct SettingsView: View {
         case "Appearance": AppearanceSettingsPane(store: store, workspace: workspace)
         case "Widgets": WidgetSettingsView(layout: $workspace.settings.layout)
         case "Closed notch": ClosedNotchSettingsView(layout: $workspace.settings.layout, media: workspace.media, app: workspace.settings.mediaApp)
+        case "Notch Ambient": NotchAmbientSettingsView(store: store, workspace: workspace)
         case "HUD": HaloHUDWorkspaceSettingsView(layout: $workspace.settings.layout, profileNames: workspace.settings.profiles.map(\.name))
         case "Modules":
             Text("Drag a module row to reorder it, or use the arrow buttons.")
