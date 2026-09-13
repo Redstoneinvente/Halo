@@ -18,7 +18,7 @@ struct SettingsView: View {
     @State private var renamingProfile: UUID?
     @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
-    private let sections = ["General", "Account & License", "Appearance", "Activation Sequence", "Modules", "Widgets", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Updates", "Privacy", "About"]
+    private let sections = ["General", "Account & License", "Appearance", "Activation Sequence", "Modules", "Widgets", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -82,7 +82,6 @@ struct SettingsView: View {
         case "Automation": return "bolt"
         case "Displays": return "display.2"
         case "Plugins": return "puzzlepiece.extension"
-        case "Updates": return "arrow.triangle.2.circlepath"
         case "Privacy": return "hand.raised"
         case "About": return "info.circle"
         default: return "wrench.and.screwdriver"
@@ -204,7 +203,6 @@ struct SettingsView: View {
             Button("Add rule") { if let profile = workspace.settings.profiles.first { workspace.settings.rules.append(AutomationRule(profileID: profile.id)) } }.disabled(workspace.settings.profiles.isEmpty)
             Text("Values: app bundle ID; battery percentage; charging true/false; display count; local hour 0–23. Rules do not restore the previous profile.").font(.caption)
         case "Displays": DisplaySettingsPane(store: store, workspace: workspace)
-        case "Updates": HaloUpdateSettingsView()
         case "Plugins":
             Text("Declarative plugins add URL commands to the launcher. Each command requires confirmation. Native executable plugins are not loaded.")
             Button("Import plugin manifest…") { workspace.importPlugin() }

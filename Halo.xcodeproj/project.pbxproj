@@ -61,9 +61,6 @@
 		F8614B823053291B00D4943C /* Halo.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6C3053291B00D4943C /* Halo.png */; };
 		A11C0F1A0000000000000311 /* Views/VisualWorkspaceAdaptiveWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */; };
 		A11C0F1A0000000000000321 /* Views/ActivationSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */; };
-		A11C0F1A0000000000000331 /* Services/UpdateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000332 /* Services/UpdateManager.swift */; };
-		A11C0F1A0000000000000333 /* Views/WhatsNewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000334 /* Views/WhatsNewView.swift */; };
-		A11C0F1A0000000000000341 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000342 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -142,8 +139,6 @@
 		A11C0F1A0000000000000001 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Halo/Config/Base.xcconfig; sourceTree = SOURCE_ROOT; };
 		A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/VisualWorkspaceAdaptiveWidgets.swift; sourceTree = "<group>"; };
 		A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ActivationSequence.swift; sourceTree = "<group>"; };
-		A11C0F1A0000000000000332 /* Services/UpdateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/UpdateManager.swift; sourceTree = "<group>"; };
-		A11C0F1A0000000000000334 /* Views/WhatsNewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/WhatsNewView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -155,7 +150,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A11C0F1A0000000000000341 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -220,8 +214,6 @@
 				A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */,
 				A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */,
 				00000000000000000000006D /* Services/Integrations.swift */,
-				A11C0F1A0000000000000332 /* Services/UpdateManager.swift */,
-				A11C0F1A0000000000000334 /* Views/WhatsNewView.swift */,
 				00000000000000000000006E /* Services/CaptureService.swift */,
 				00000000000000000000006F /* Core/ExtensionContracts.swift */,
 				F8614B60305322E600D4943C /* AppIcon 2.icns */,
@@ -339,9 +331,6 @@
 			);
 			dependencies = (
 			);
-			packageProductDependencies = (
-				A11C0F1A0000000000000342 /* Sparkle */,
-			);
 			name = Halo;
 			productName = Halo;
 			productReference = 000000000000000000000006 /* Halo.app */;
@@ -381,9 +370,6 @@
 			);
 			mainGroup = 000000000000000000000002;
 			productRefGroup = 000000000000000000000004 /* Products */;
-			packageReferences = (
-				A11C0F1A0000000000000343 /* XCRemoteSwiftPackageReference "Sparkle" */,
-			);
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -427,8 +413,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				0000000000000000000002C6 /* NotchEngine/DisplayClock.swift in Sources */,
-				A11C0F1A0000000000000331 /* Services/UpdateManager.swift in Sources */,
-				A11C0F1A0000000000000333 /* Views/WhatsNewView.swift in Sources */,
 				0000000000000000000002D1 /* Services/AudioSpectrumService.swift in Sources */,
 				0000000000000000000002E3 /* Services/HUDEngine.swift in Sources */,
 				0000000000000000000002E4 /* Views/CompanionSprite.swift in Sources */,
@@ -526,7 +510,6 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo uses ScreenCaptureKit to analyze system audio for optional music-reactive visual effects. Halo does not save or transmit screen content.";
 				MARKETING_VERSION = 0.2.0;
-				CURRENT_PROJECT_VERSION = 200;
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
@@ -560,7 +543,6 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo uses ScreenCaptureKit to analyze system audio for optional music-reactive visual effects. Halo does not save or transmit screen content.";
 				MARKETING_VERSION = 0.2.0;
-				CURRENT_PROJECT_VERSION = 200;
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
@@ -590,26 +572,6 @@
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
-
-
-/* Begin XCRemoteSwiftPackageReference section */
-		A11C0F1A0000000000000343 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/sparkle-project/Sparkle";
-			requirement = {
-				kind = exactVersion;
-				version = 2.9.6;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		A11C0F1A0000000000000342 /* Sparkle */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A11C0F1A0000000000000343 /* XCRemoteSwiftPackageReference "Sparkle" */;
-			productName = Sparkle;
-		};
-/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCConfigurationList section */
 		00000000000000000000000A /* Build configuration list for PBXProject "Halo" */ = {
