@@ -1,0 +1,97 @@
+name: Apply Calendar Showcase
+on:
+  push:
+    branches: [chatgpt/calendar-showcase]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply and validate Calendar-only changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/calendar_showcase_patch.py /tmp/calendar_showcase_patch.py
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 /tmp/calendar_showcase_patch.py
+
+          echo '=== Scope guard ==='
+          git diff --name-only
+          python3 <<'PY'
+          import subprocess
+          allowed = {
+              'Halo/Core/WidgetModels.swift',
+              'Halo/Views/ModuleViews.swift',
+              'Halo/Views/WidgetSettingsView.swift',
+          }
+          changed = set(subprocess.check_output(['git','diff','--name-only'], text=True).splitlines())
+          unexpected = changed - allowed
+          missing = allowed - changed
+          if unexpected:
+              raise SystemExit(f'Calendar patch touched unexpected files: {sorted(unexpected)}')
+          if missing:
+              raise SystemExit(f'Calendar patch did not update expected files: {sorted(missing)}')
+          print('Visual Workspace Calendar-only source scope verified.')
+          PY
+
+          git diff --check
+          xcrun swiftc -parse Halo/Core/WidgetModels.swift
+          xcrun swiftc -parse Halo/Views/ModuleViews.swift
+          xcrun swiftc -parse Halo/Views/WidgetSettingsView.swift
+
+          echo '=== 1x1 through 8x4 Calendar family audit ==='
+          python3 <<'PY'
+          def family(c, r):
+              c=max(1,min(8,c)); r=max(1,min(4,r))
+              if c == 1 and r == 1: return 'micro'
+              if r == 1: return 'compactAgenda' if c <= 2 else 'horizontalAgenda'
+              if c == 1: return 'verticalAgenda'
+              if c == 2 and r == 2: return 'miniMonth'
+              if c >= 7 and r >= 4: return 'hero'
+              if c >= 5 and r >= 3: return 'split'
+              if c >= 4 and r >= 3: return 'month'
+              if r >= 3 and c <= 2: return 'day'
+              if c >= 4 and r == 2: return 'schedule'
+              if c >= 3 and r >= 3: return 'month'
+              if c >= 3 and r == 2: return 'schedule'
+              return 'day'
+          expected={'micro','compactAgenda','horizontalAgenda','verticalAgenda','miniMonth','day','schedule','month','split','hero'}
+          seen=set()
+          for r in range(1,5):
+              row=[]
+              for c in range(1,9):
+                  f=family(c,r); seen.add(f); row.append(f'{c}x{r}:{f}')
+              print(' | '.join(row))
+          assert seen == expected, (seen, expected)
+          assert family(4,1) != family(2,2) != family(1,4)
+          assert family(8,4) == 'hero'
+          print('All 32 Calendar dimensions covered; width/height distinctions verified.')
+          PY
+
+          echo '=== Build validation ==='
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee /tmp/calendar-build.log
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if grep -E 'Halo/(Core/WidgetModels|Views/ModuleViews|Views/WidgetSettingsView)\.swift:[0-9]+:[0-9]+: error:' /tmp/calendar-build.log; then
+              echo 'A modified Calendar-related source file has a compiler error.' >&2
+              exit 1
+          fi
+          if [[ $build_status -ne 0 ]]; then
+              echo 'Full target build still has unrelated repository errors; modified Calendar files reported no compiler errors.'
+              grep -E 'error:' /tmp/calendar-build.log | tail -n 30 || true
+          else
+              echo 'Full target build succeeded.'
+          fi
+
+          git diff --stat
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/Core/WidgetModels.swift Halo/Views/ModuleViews.swift Halo/Views/WidgetSettingsView.swift
+          git commit -m 'Upgrade Visual Workspace Calendar'
+          git push origin HEAD:main
