@@ -187,5 +187,11 @@ text = text[:space_start] + space + text[space_end:]
 text = text.replace('sin(phase*1.6)>-0.15', 'sin(phase * 1.6) > -0.15')
 text = text.replace('sin(phase * 1.6)>-0.15', 'sin(phase * 1.6) > -0.15')
 
+# 5) Remove a dead temporary from the tiny-building painter so isolated validation is clean.
+text = text.replace(
+    'for side in [-1.0,1.0] { let sx=CGFloat(side); let rect=',
+    'for side in [-1.0,1.0] { let rect=',
+)
+
 p.write_text(text)
 print('Notch Ambient compiler fixes applied')
