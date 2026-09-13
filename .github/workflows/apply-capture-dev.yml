@@ -1,0 +1,38 @@
+name: Apply Capture Suite Branch Patches
+
+on:
+  push:
+    branches:
+      - chatgpt/capture-suite
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message != 'Apply Capture suite branch patches'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply production patches on branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/fix_capture_service.py
+          python3 .github/patch_capture_media.py
+          python3 .github/patch_capture_routes.py
+          python3 .github/patch_capture_settings.py
+          python3 .github/patch_capture_models.py
+          python3 .github/patch_capture_project.py
+          git diff --check
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/Services/CaptureService.swift Halo/Services/CaptureServiceUtilities.swift Halo/Core/WorkspaceStore.swift Halo/Core/WidgetModels.swift Halo/Views/VisualWorkspaceAdaptiveWidgets.swift Halo/Views/ModuleViews.swift Halo/Views/WidgetSettingsView.swift Halo/Views/CaptureWorkspaceView.swift Halo/Views/CaptureSettingsControls.swift Halo.xcodeproj/project.pbxproj
+          if git diff --cached --quiet; then
+            echo 'No production patch changes needed.'
+            exit 0
+          fi
+          git commit -m 'Apply Capture suite branch patches'
+          git push origin HEAD:chatgpt/capture-suite
