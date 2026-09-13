@@ -1,0 +1,53 @@
+name: Sparkle Gate 3
+
+on:
+  push:
+    branches:
+      - feature/sparkle-2-gate1
+    paths:
+      - 'Halo/Config/Base.xcconfig'
+      - 'Halo/Info.plist'
+      - 'Halo/Services/SparkleUpdateController.swift'
+      - 'Scripts/sparkle_gate3_local.sh'
+      - 'Docs/SparkleGate3.md'
+      - '.github/workflows/sparkle-gate3.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Gate 3 scaffolding
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          plutil -lint Halo/Info.plist
+          bash -n Scripts/sparkle_gate3_local.sh
+          swiftc -parse Halo/Services/SparkleUpdateController.swift
+
+          grep -q 'Halo/Config/Secrets.xcconfig' .gitignore
+          grep -q '^HALO_SPARKLE_FEED_URL =' Halo/Config/Base.xcconfig
+          grep -q '^HALO_SPARKLE_PUBLIC_KEY =' Halo/Config/Base.xcconfig
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Halo/Info.plist | grep -q '\$(MARKETING_VERSION)'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Halo/Info.plist | grep -q '\$(CURRENT_PROJECT_VERSION)'
+          /usr/libexec/PlistBuddy -c 'Print :SUFeedURL' Halo/Info.plist | grep -q '\$(HALO_SPARKLE_FEED_URL)'
+          /usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' Halo/Info.plist | grep -q '\$(HALO_SPARKLE_PUBLIC_KEY)'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SUEnableAutomaticChecks' Halo/Info.plist)" = false
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SUAutomaticallyUpdate' Halo/Info.plist)" = false
+          grep -q 'feedURL.scheme?.lowercased() == "https"' Halo/Services/SparkleUpdateController.swift
+          grep -q 'generate_appcast' Scripts/sparkle_gate3_local.sh
+          grep -q 'sparkle:edSignature=' Scripts/sparkle_gate3_local.sh
+
+          xcodebuild -resolvePackageDependencies -project Halo.xcodeproj -scheme Halo
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Release -showBuildSettings \
+            MARKETING_VERSION=0.2.0 CURRENT_PROJECT_VERSION=200 \
+            HALO_SPARKLE_FEED_URL=https://example.com/appcast.xml \
+            HALO_SPARKLE_PUBLIC_KEY=dGVzdC1wdWJsaWMta2V5 > /tmp/gate3-settings.txt
+
+          grep 'MARKETING_VERSION = 0.2.0' /tmp/gate3-settings.txt
+          grep 'CURRENT_PROJECT_VERSION = 200' /tmp/gate3-settings.txt
+          grep 'HALO_SPARKLE_FEED_URL = https://example.com/appcast.xml' /tmp/gate3-settings.txt
+          grep 'HALO_SPARKLE_PUBLIC_KEY = dGVzdC1wdWJsaWMta2V5' /tmp/gate3-settings.txt
