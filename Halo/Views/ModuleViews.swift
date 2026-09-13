@@ -29,15 +29,47 @@ struct IntegrationModuleView: View {
     @ObservedObject var workspace: WorkspaceStore
     private var options: WidgetContentOptions { style.resolvedContent }
     var body: some View {
-        VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
-            if style.showTitle {
-                HStack(spacing: max(4, options.spacing * 0.55)) {
-                    if options.iconSize > 0 { Image(systemName: id.symbol).font(.system(size: options.iconSize, weight: .semibold)).foregroundStyle(style.accentColor.color) }
-                    Text(id.title).font(style.font())
+        Group {
+            switch style.resolvedLayoutMode {
+            case .compact:
+                HStack(alignment: .top, spacing: max(6, options.spacing)) {
+                    if style.showTitle { header(scale: 0.82) }
+                    content
+                }
+            case .hero:
+                VStack(alignment: options.alignment.horizontal, spacing: options.spacing * 1.15) {
+                    if style.showTitle { header(scale: 1.08) }
+                    content
+                }
+            case .minimal:
+                VStack(alignment: options.alignment.horizontal, spacing: max(3, options.spacing * 0.65)) {
+                    if style.showTitle { header(scale: 0.72) }
+                    content
+                }
+            case .dense:
+                VStack(alignment: options.alignment.horizontal, spacing: max(2, options.spacing * 0.55)) {
+                    if style.showTitle { header(scale: 0.78) }
+                    content
+                }
+            case .standard:
+                VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
+                    if style.showTitle { header(scale: 1) }
+                    content
                 }
             }
-            content
-        }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
+        }
+        .frame(maxWidth: .infinity, alignment: options.alignment.alignment)
+    }
+
+    @ViewBuilder private func header(scale: Double) -> some View {
+        HStack(spacing: max(4, options.spacing * 0.55)) {
+            if style.showsHeaderIcon && options.iconSize > 0 {
+                Image(systemName: id.symbol)
+                    .font(.system(size: options.iconSize, weight: .semibold))
+                    .foregroundStyle(style.accentColor.color)
+            }
+            Text(id.title).font(style.font(scale: scale))
+        }
     }
     @ViewBuilder private var content: some View {
         switch id {

@@ -95,6 +95,34 @@ struct WidgetSettingsView: View {
             Text("Customize \(selected.title) independently. These settings apply to the widget in Halo's opened dashboard and travel with profiles and display-specific layouts.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+        Section("Quick looks") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 8)], spacing: 8) {
+                ForEach(WidgetVisualPreset.allCases) { preset in
+                    Button(preset.rawValue) { applyVisualPreset(preset) }
+                        .buttonStyle(.bordered)
+                }
+            }
+            Text("Presets are starting points. Every setting below remains editable per widget.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Layout") {
+            Picker("Widget layout", selection: Binding(
+                get: { style.wrappedValue.resolvedLayoutMode },
+                set: { style.wrappedValue.layoutMode = $0 }
+            )) {
+                ForEach(WidgetLayoutMode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Toggle("Show header", isOn: style.showTitle)
+            if style.wrappedValue.showTitle {
+                Toggle("Show header icon", isOn: Binding(
+                    get: { style.wrappedValue.showsHeaderIcon },
+                    set: { style.wrappedValue.showHeaderIcon = $0 }
+                ))
+            }
+            Text("Compact moves the header beside content, Hero gives the widget stronger emphasis, Minimal strips it back, and Dense reduces internal spacing.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
         Section("Typography") {
             Picker("Font", selection: style.fontFamily) {
                 ForEach(WidgetFontFamily.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
@@ -110,7 +138,6 @@ struct WidgetSettingsView: View {
             PreciseSlider(title: "Text size", value: style.fontSize, range: 10...48, step: 1, suffix: "pt")
             colorPicker("Text", style.textColor)
             colorPicker("Accent", style.accentColor)
-            Toggle("Show title", isOn: style.showTitle)
         }
         Section("Content layout") {
             Picker("Alignment", selection: content.alignment) {
@@ -123,8 +150,32 @@ struct WidgetSettingsView: View {
             PreciseSlider(title: "Header icon size", value: content.iconSize, range: 8...48, step: 1, suffix: "pt")
         }
         Section("Card") {
-            colorPicker("Background", style.backgroundColor)
-            PreciseSlider(title: "Background opacity", value: style.backgroundOpacity, range: 0...1, step: 0.01, decimals: 2)
+            Picker("Background", selection: Binding(
+                get: { style.wrappedValue.resolvedCardBackgroundStyle },
+                set: { style.wrappedValue.cardBackgroundStyle = $0 }
+            )) {
+                ForEach(WidgetCardBackgroundStyle.allCases) { Text($0.rawValue).tag($0) }
+            }
+            if style.wrappedValue.resolvedCardBackgroundStyle != .none {
+                colorPicker(style.wrappedValue.resolvedCardBackgroundStyle == .accent ? "Tint base" : "Background", style.backgroundColor)
+                if style.wrappedValue.resolvedCardBackgroundStyle == .gradient {
+                    ColorPicker("Second color", selection: Binding(
+                        get: { style.wrappedValue.resolvedBackgroundSecondaryColor.color },
+                        set: { style.wrappedValue.backgroundSecondaryColor = WidgetColor($0) }
+                    ), supportsOpacity: false)
+                    PreciseSlider(title: "Gradient angle", value: Binding(
+                        get: { style.wrappedValue.resolvedGradientAngle },
+                        set: { style.wrappedValue.gradientAngle = $0 }
+                    ), range: -180...180, step: 5, suffix: "°")
+                }
+                if style.wrappedValue.resolvedCardBackgroundStyle == .glass {
+                    PreciseSlider(title: "Glass tint", value: Binding(
+                        get: { style.wrappedValue.resolvedGlassTintOpacity },
+                        set: { style.wrappedValue.glassTintOpacity = $0 }
+                    ), range: 0...0.6, step: 0.02, decimals: 2)
+                }
+                PreciseSlider(title: "Background opacity", value: style.backgroundOpacity, range: 0...1, step: 0.01, decimals: 2)
+            }
             PreciseSlider(title: "Padding", value: style.padding, range: 0...32, step: 1, suffix: "pt")
             PreciseSlider(title: "Corner radius", value: style.cornerRadius, range: 0...40, step: 1, suffix: "pt")
             Toggle("Fill available width", isOn: Binding(get: { style.wrappedValue.width == 0 }, set: { style.wrappedValue.width = $0 ? 0 : 280 }))
@@ -136,9 +187,21 @@ struct WidgetSettingsView: View {
                 PreciseSlider(title: "Minimum height", value: style.minimumHeight, range: 0...400, step: 1, suffix: "pt")
             }
             Divider()
-            ColorPicker("Border color", selection: Binding(get: { chrome.wrappedValue.borderColor.color }, set: { chrome.wrappedValue.borderColor = WidgetColor($0) }), supportsOpacity: false)
-            PreciseSlider(title: "Border opacity", value: chrome.borderOpacity, range: 0...1, step: 0.05, decimals: 2)
-            PreciseSlider(title: "Border width", value: chrome.borderWidth, range: 0...6, step: 0.25, suffix: "pt", decimals: 2)
+            Picker("Outline", selection: Binding(
+                get: { style.wrappedValue.resolvedOutlineStyle },
+                set: { value in
+                    style.wrappedValue.outlineStyle = value
+                    if value != .none && chrome.wrappedValue.borderWidth <= 0 { chrome.wrappedValue.borderWidth = 1 }
+                    if value != .none && chrome.wrappedValue.borderOpacity <= 0 { chrome.wrappedValue.borderOpacity = 0.35 }
+                }
+            )) {
+                ForEach(WidgetOutlineStyle.allCases) { Text($0.rawValue).tag($0) }
+            }
+            if style.wrappedValue.resolvedOutlineStyle != .none {
+                ColorPicker("Outline color", selection: Binding(get: { chrome.wrappedValue.borderColor.color }, set: { chrome.wrappedValue.borderColor = WidgetColor($0) }), supportsOpacity: false)
+                PreciseSlider(title: "Outline opacity", value: chrome.borderOpacity, range: 0...1, step: 0.05, decimals: 2)
+                PreciseSlider(title: "Outline width", value: chrome.borderWidth, range: 0...6, step: 0.25, suffix: "pt", decimals: 2)
+            }
             PreciseSlider(title: "Shadow opacity", value: chrome.shadowOpacity, range: 0...0.8, step: 0.05, decimals: 2)
             if chrome.wrappedValue.shadowOpacity > 0 {
                 PreciseSlider(title: "Shadow radius", value: chrome.shadowRadius, range: 0...40, step: 1, suffix: "pt")
@@ -262,6 +325,67 @@ struct WidgetSettingsView: View {
         case .developer:
             EmptyView()
         }
+    }
+
+    private func applyVisualPreset(_ preset: WidgetVisualPreset) {
+        var value = style.wrappedValue
+        var card = value.resolvedChrome
+        switch preset {
+        case .clean:
+            value.layoutMode = .standard
+            value.cardBackgroundStyle = .solid
+            value.backgroundOpacity = 0.06
+            value.outlineStyle = .none
+            value.showHeaderIcon = true
+            card.borderOpacity = 0
+            card.borderWidth = 0
+            card.shadowOpacity = 0
+        case .glass:
+            value.layoutMode = .standard
+            value.cardBackgroundStyle = .glass
+            value.glassTintOpacity = 0.10
+            value.outlineStyle = .solid
+            card.borderOpacity = 0.16
+            card.borderWidth = 0.75
+            card.shadowOpacity = 0.16
+            card.shadowRadius = 12
+        case .filled:
+            value.layoutMode = .hero
+            value.cardBackgroundStyle = .gradient
+            value.backgroundOpacity = 0.28
+            value.backgroundSecondaryColor = value.accentColor
+            value.outlineStyle = .none
+            card.borderOpacity = 0
+            card.shadowOpacity = 0.12
+        case .outline:
+            value.layoutMode = .standard
+            value.cardBackgroundStyle = .none
+            value.outlineStyle = .solid
+            card.borderOpacity = 0.45
+            card.borderWidth = 1
+            card.shadowOpacity = 0
+        case .floating:
+            value.layoutMode = .compact
+            value.cardBackgroundStyle = .glass
+            value.outlineStyle = .glow
+            card.borderColor = value.accentColor
+            card.borderOpacity = 0.45
+            card.borderWidth = 1
+            card.shadowOpacity = 0.28
+            card.shadowRadius = 18
+            card.shadowY = 5
+        case .minimal:
+            value.layoutMode = .minimal
+            value.cardBackgroundStyle = .none
+            value.outlineStyle = .none
+            value.showHeaderIcon = false
+            value.padding = max(4, value.padding * 0.65)
+            card.borderOpacity = 0
+            card.borderWidth = 0
+            card.shadowOpacity = 0
+        }
+        value.chrome = card
+        style.wrappedValue = value
     }
 
     private func colorPicker(_ title: String, _ value: Binding<WidgetColor>) -> some View {

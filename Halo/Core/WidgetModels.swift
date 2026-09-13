@@ -2,6 +2,43 @@ import Foundation
 
 enum WidgetFontFamily: String, Codable, CaseIterable { case system, rounded, serif, monospaced, custom }
 enum WidgetFontWeight: String, Codable, CaseIterable { case light, regular, medium, semibold, bold }
+
+enum WidgetLayoutMode: String, Codable, CaseIterable, Identifiable {
+    case standard = "Standard"
+    case compact = "Compact"
+    case hero = "Hero"
+    case minimal = "Minimal"
+    case dense = "Dense"
+    var id: String { rawValue }
+}
+
+enum WidgetCardBackgroundStyle: String, Codable, CaseIterable, Identifiable {
+    case none = "None"
+    case solid = "Solid"
+    case gradient = "Gradient"
+    case glass = "Glass"
+    case accent = "Accent Tint"
+    var id: String { rawValue }
+}
+
+enum WidgetOutlineStyle: String, Codable, CaseIterable, Identifiable {
+    case none = "None"
+    case solid = "Solid"
+    case dashed = "Dashed"
+    case double = "Double"
+    case glow = "Glow"
+    var id: String { rawValue }
+}
+
+enum WidgetVisualPreset: String, CaseIterable, Identifiable {
+    case clean = "Clean"
+    case glass = "Glass"
+    case filled = "Filled"
+    case outline = "Outline"
+    case floating = "Floating"
+    case minimal = "Minimal"
+    var id: String { rawValue }
+}
 struct WidgetColor: Codable, Equatable {
     var red: Double
     var green: Double
@@ -155,8 +192,28 @@ struct WidgetStyle: Codable, Equatable {
     var clock = ClockOptions()
     var content: WidgetContentOptions?
     var chrome: WidgetChromeOptions?
+
+    // Optional so profiles created before the opened-widget design system decode unchanged.
+    var layoutMode: WidgetLayoutMode?
+    var cardBackgroundStyle: WidgetCardBackgroundStyle?
+    var backgroundSecondaryColor: WidgetColor?
+    var outlineStyle: WidgetOutlineStyle?
+    var showHeaderIcon: Bool?
+    var gradientAngle: Double?
+    var glassTintOpacity: Double?
+
     var resolvedContent: WidgetContentOptions { content ?? WidgetContentOptions() }
     var resolvedChrome: WidgetChromeOptions { chrome ?? WidgetChromeOptions() }
+    var resolvedLayoutMode: WidgetLayoutMode { layoutMode ?? .standard }
+    var resolvedCardBackgroundStyle: WidgetCardBackgroundStyle { cardBackgroundStyle ?? .solid }
+    var resolvedBackgroundSecondaryColor: WidgetColor { backgroundSecondaryColor ?? accentColor }
+    var resolvedOutlineStyle: WidgetOutlineStyle {
+        if let outlineStyle { return outlineStyle }
+        return resolvedChrome.borderOpacity > 0 && resolvedChrome.borderWidth > 0 ? .solid : .none
+    }
+    var showsHeaderIcon: Bool { showHeaderIcon ?? true }
+    var resolvedGradientAngle: Double { min(360, max(-360, gradientAngle ?? 135)) }
+    var resolvedGlassTintOpacity: Double { min(0.6, max(0, glassTintOpacity ?? 0.10)) }
     func validated() throws -> WidgetStyle {
         guard [fontSize, backgroundOpacity, padding, cornerRadius, width, minimumHeight].allSatisfy(\.isFinite),
               clock.timeZone.isEmpty || TimeZone(identifier: clock.timeZone) != nil else { throw CocoaError(.fileReadCorruptFile) }
@@ -166,6 +223,15 @@ struct WidgetStyle: Codable, Equatable {
         v.width = width <= 0 ? 0 : min(640, max(120, width))
         v.minimumHeight = min(400, max(0, minimumHeight))
         v.textColor = try textColor.validated(); v.accentColor = try accentColor.validated(); v.backgroundColor = try backgroundColor.validated()
+        if backgroundSecondaryColor != nil { v.backgroundSecondaryColor = try resolvedBackgroundSecondaryColor.validated() }
+        if let angle = gradientAngle {
+            guard angle.isFinite else { throw CocoaError(.fileReadCorruptFile) }
+            v.gradientAngle = min(360, max(-360, angle))
+        }
+        if let tint = glassTintOpacity {
+            guard tint.isFinite else { throw CocoaError(.fileReadCorruptFile) }
+            v.glassTintOpacity = min(0.6, max(0, tint))
+        }
         v.customFont = String(customFont.prefix(120))
         if content != nil { v.content = try resolvedContent.validated() }
         if chrome != nil { v.chrome = try resolvedChrome.validated() }

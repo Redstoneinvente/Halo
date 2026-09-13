@@ -90,11 +90,25 @@ struct WidgetCard<Content: View>: View {
     var availableHeight: CGFloat? = nil
     @ViewBuilder var content: Content
     private var fittedStyle: WidgetStyle {
-        guard let height = availableHeight else { return style }
         var fitted = style
-        fitted.padding = min(style.padding, max(0, height * 0.08))
+        switch style.resolvedLayoutMode {
+        case .standard: break
+        case .compact:
+            fitted.padding *= 0.78
+            fitted.fontSize *= 0.94
+        case .hero:
+            fitted.fontSize *= 1.10
+            fitted.padding *= 1.08
+        case .minimal:
+            fitted.padding *= 0.72
+        case .dense:
+            fitted.padding *= 0.62
+            fitted.fontSize *= 0.90
+        }
+        guard let height = availableHeight else { return fitted }
+        fitted.padding = min(fitted.padding, max(0, height * 0.08))
         fitted.minimumHeight = 0
-        fitted.fontSize = min(style.fontSize, max(10, height * 0.18))
+        fitted.fontSize = min(fitted.fontSize, max(10, height * 0.18))
         return fitted
     }
     private var contentOptions: WidgetContentOptions { fittedStyle.resolvedContent }
@@ -105,6 +119,57 @@ struct WidgetCard<Content: View>: View {
             .controlSize(contentOptions.controlSize.swiftUI)
             .opacity(chrome.contentOpacity)
     }
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: fittedStyle.cornerRadius, style: .continuous)
+    }
+
+    @ViewBuilder private var cardBackground: some View {
+        switch fittedStyle.resolvedCardBackgroundStyle {
+        case .none:
+            Color.clear
+        case .solid:
+            shape.fill(fittedStyle.backgroundColor.color.opacity(fittedStyle.backgroundOpacity))
+        case .gradient:
+            shape.fill(
+                LinearGradient(
+                    colors: [
+                        fittedStyle.backgroundColor.color.opacity(fittedStyle.backgroundOpacity),
+                        fittedStyle.resolvedBackgroundSecondaryColor.color.opacity(fittedStyle.backgroundOpacity)
+                    ],
+                    startPoint: UnitPoint(x: 0.5 - 0.5 * cos(fittedStyle.resolvedGradientAngle * .pi / 180),
+                                          y: 0.5 - 0.5 * sin(fittedStyle.resolvedGradientAngle * .pi / 180)),
+                    endPoint: UnitPoint(x: 0.5 + 0.5 * cos(fittedStyle.resolvedGradientAngle * .pi / 180),
+                                        y: 0.5 + 0.5 * sin(fittedStyle.resolvedGradientAngle * .pi / 180))
+                )
+            )
+        case .glass:
+            shape.fill(.ultraThinMaterial)
+                .overlay(shape.fill(fittedStyle.backgroundColor.color.opacity(fittedStyle.resolvedGlassTintOpacity)))
+        case .accent:
+            shape.fill(fittedStyle.accentColor.color.opacity(fittedStyle.backgroundOpacity))
+        }
+    }
+
+    @ViewBuilder private var cardOutline: some View {
+        let color = chrome.borderColor.color.opacity(chrome.borderOpacity)
+        let width = max(0.5, chrome.borderWidth)
+        switch fittedStyle.resolvedOutlineStyle {
+        case .none:
+            EmptyView()
+        case .solid:
+            shape.stroke(color, lineWidth: width)
+        case .dashed:
+            shape.stroke(color, style: StrokeStyle(lineWidth: width, lineCap: .round, dash: [7, 5]))
+        case .double:
+            shape.stroke(color, lineWidth: width)
+                .overlay(shape.inset(by: max(3, width + 2)).stroke(color.opacity(0.70), lineWidth: max(0.5, width * 0.65)))
+        case .glow:
+            shape.stroke(color, lineWidth: width)
+                .shadow(color: chrome.borderColor.color.opacity(max(0.20, chrome.borderOpacity)), radius: max(5, width * 3))
+        }
+    }
+
     var body: some View {
         Group {
             if let height = availableHeight {
@@ -123,11 +188,8 @@ struct WidgetCard<Content: View>: View {
                     .padding(style.padding)
             }
         }
-        .background(style.backgroundColor.color.opacity(style.backgroundOpacity), in: RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous)
-                .stroke(chrome.borderColor.color.opacity(chrome.borderOpacity), lineWidth: chrome.borderWidth)
-        )
+        .background { cardBackground }
+        .overlay { cardOutline }
         .shadow(color: .black.opacity(chrome.shadowOpacity), radius: chrome.shadowRadius, y: chrome.shadowY)
         .frame(maxWidth: style.width > 0 ? style.width : .infinity)
         .frame(maxWidth: .infinity, alignment: contentOptions.alignment.alignment)
@@ -158,22 +220,49 @@ struct WidgetClock: View {
         let dateFormatter = dayFormatter
         let start = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970 / 60) * 60)
         TimelineView(.periodic(from: start, by: style.clock.showSeconds ? 1 : 60)) { context in
-            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: max(2, min(20, style.resolvedContent.spacing * 0.55))) {
-                if style.showTitle && !compact {
-                    HStack(spacing: max(4, style.resolvedContent.spacing * 0.55)) {
-                        Image(systemName: "clock")
-                            .font(.system(size: style.resolvedContent.iconSize, weight: .semibold))
-                            .foregroundStyle(style.accentColor.color)
-                        Text("Clock").font(style.font(scale: 0.75))
+            let spacing = max(2, min(20, style.resolvedContent.spacing * 0.55))
+            Group {
+                switch style.resolvedLayoutMode {
+                case .compact:
+                    HStack(spacing: spacing) {
+                        if style.showTitle && !compact { clockHeader(scale: 0.68) }
+                        Text(clockFormatter.string(from: context.date)).font(style.font()).monospacedDigit()
+                        Spacer(minLength: 4)
+                        if style.clock.showDate && !compact {
+                            Text(dateFormatter.string(from: context.date)).font(style.font(scale: 0.68)).foregroundStyle(.secondary)
+                        }
                     }
-                }
-                Text(clockFormatter.string(from: context.date)).font(style.font()).monospacedDigit()
-                if style.clock.showDate && !compact {
-                    Text(dateFormatter.string(from: context.date))
-                        .font(style.font(scale: 0.75))
+                case .hero:
+                    VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
+                        if style.showTitle && !compact { clockHeader(scale: 0.75) }
+                        Text(clockFormatter.string(from: context.date)).font(style.font(scale: 1.35)).monospacedDigit()
+                        if style.clock.showDate && !compact { Text(dateFormatter.string(from: context.date)).font(style.font(scale: 0.80)) }
+                    }
+                case .minimal:
+                    VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
+                        Text(clockFormatter.string(from: context.date)).font(style.font()).monospacedDigit()
+                        if style.clock.showDate && !compact { Text(dateFormatter.string(from: context.date)).font(style.font(scale: 0.68)).foregroundStyle(.secondary) }
+                    }
+                case .dense, .standard:
+                    VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: style.resolvedLayoutMode == .dense ? max(2, spacing * 0.55) : spacing) {
+                        if style.showTitle && !compact { clockHeader(scale: 0.75) }
+                        Text(clockFormatter.string(from: context.date)).font(style.font()).monospacedDigit()
+                        if style.clock.showDate && !compact { Text(dateFormatter.string(from: context.date)).font(style.font(scale: 0.75)) }
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: style.resolvedContent.alignment.alignment)
+        }
+    }
+
+    @ViewBuilder private func clockHeader(scale: Double) -> some View {
+        HStack(spacing: max(4, style.resolvedContent.spacing * 0.55)) {
+            if style.showsHeaderIcon {
+                Image(systemName: "clock")
+                    .font(.system(size: style.resolvedContent.iconSize, weight: .semibold))
+                    .foregroundStyle(style.accentColor.color)
+            }
+            Text("Clock").font(style.font(scale: scale))
         }
     }
 }
