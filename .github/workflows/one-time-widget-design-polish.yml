@@ -1,0 +1,35 @@
+name: One-time Widget Design Polish
+
+on:
+  push:
+    paths:
+      - 'Scripts/one_time_widget_design_polish.py'
+      - '.github/workflows/one-time-widget-design-polish.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply widget design polish
+        run: python3 Scripts/one_time_widget_design_polish.py
+      - name: Validate Swift syntax
+        run: |
+          xcrun swiftc -parse Halo/Views/WidgetViews.swift
+          xcrun swiftc -parse Halo/Views/WidgetSettingsView.swift
+      - name: Validate diff
+        run: git diff --check
+      - name: Commit implementation and clean helper
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Views/WidgetViews.swift Halo/Views/WidgetSettingsView.swift
+          git rm Scripts/one_time_widget_design_polish.py
+          git rm .github/workflows/one-time-widget-design-polish.yml
+          git commit -m 'Polish opened widget backgrounds'
+          git push origin HEAD:main
