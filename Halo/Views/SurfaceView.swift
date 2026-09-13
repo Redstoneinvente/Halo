@@ -1102,17 +1102,17 @@ private struct OpenNotchWorkspaceView: View {
     private var directRows: Int { opened.requiredGridRows }
     private var directGap: CGFloat { CGFloat(opened.resolvedGridGap) }
     private var directPadding: OpenNotchInsets {
-    let configured = opened.resolvedGridPadding
-    // Visual Workspace owns a contour-safe inset independent of the legacy opened-notch UI.
-    // Preserve larger user padding, but never let grid content hug rounded/scooped edges.
-    let shoulderInset = min(24.0, max(12.0, 8.0 + layout.appearance.surface.shoulder * 0.5))
-    return OpenNotchInsets(
-        top: max(configured.top, 10),
-        leading: max(configured.leading, shoulderInset),
-        bottom: max(configured.bottom, 12),
-        trailing: max(configured.trailing, shoulderInset)
-    )
-}
+        let configured = opened.resolvedGridPadding
+        // Visual Workspace owns a contour-safe inset independent of the legacy opened-notch UI.
+        // Preserve larger user padding, but never let grid content hug rounded/scooped edges.
+        let shoulderInset = min(24.0, max(12.0, 8.0 + layout.appearance.surface.shoulder * 0.5))
+        return OpenNotchInsets(
+            top: max(configured.top, 10),
+            leading: max(configured.leading, shoulderInset),
+            bottom: max(configured.bottom, 12),
+            trailing: max(configured.trailing, shoulderInset)
+        )
+    }
 
     private var directFixedCanvas: some View {
         GeometryReader { proxy in
