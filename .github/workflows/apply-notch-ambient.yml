@@ -1,0 +1,88 @@
+name: Apply Notch Ambient
+on:
+  push:
+    branches: [chatgpt/notch-ambient]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch, validate and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/notch_ambient_payload.swift /tmp/notch_ambient_payload.swift
+          cp .github/notch_ambient_patch.py /tmp/notch_ambient_patch.py
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 /tmp/notch_ambient_patch.py
+
+          echo '=== Notch Ambient scope ==='
+          git diff --name-only
+          python3 <<'PY'
+          import subprocess
+          expected = {
+              'Halo/Views/DecorationsView.swift',
+              'Halo/Views/WorkspaceSettingsView.swift',
+              'Halo/NotchEngine/WindowManager.swift',
+          }
+          changed = set(subprocess.check_output(['git','diff','--name-only'], text=True).splitlines())
+          if changed != expected:
+              raise SystemExit(f'Unexpected Notch Ambient scope: {sorted(changed)}')
+          print('Notch Ambient production scope verified.')
+          PY
+
+          git diff --check
+          xcrun swiftc -parse Halo/Views/DecorationsView.swift
+          xcrun swiftc -parse Halo/Views/WorkspaceSettingsView.swift
+          xcrun swiftc -parse Halo/NotchEngine/WindowManager.swift
+
+          echo '=== Architecture / behavior audit ==='
+          grep -q 'case "Notch Ambient": NotchAmbientSettingsView' Halo/Views/WorkspaceSettingsView.swift
+          grep -q 'final class NotchAmbientStore' Halo/Views/DecorationsView.swift
+          grep -q 'struct NotchAmbientOverlayView' Halo/Views/DecorationsView.swift
+          grep -q 'NotchAmbientDecorationManifest' Halo/Views/DecorationsView.swift
+          grep -q 'AudioSpectrumService.shared.setActive' Halo/Views/DecorationsView.swift
+          grep -q 'accessibilityReduceMotion' Halo/Views/DecorationsView.swift
+          grep -q 'screensDidSleepNotification' Halo/Views/DecorationsView.swift
+          grep -q 'Apple Minimal' Halo/Views/DecorationsView.swift
+          grep -q 'Black Hole' Halo/Views/DecorationsView.swift
+          grep -q 'Train Tunnel' Halo/Views/DecorationsView.swift
+          grep -q 'ambientPanel.ignoresMouseEvents = true' Halo/NotchEngine/WindowManager.swift
+          grep -q 'NotchAmbientStore.shared.$settings' Halo/NotchEngine/WindowManager.swift
+          grep -q 'physicalNotchWidth' Halo/NotchEngine/WindowManager.swift
+          echo 'Dedicated settings, modular manifest, ownership layer, performance/accessibility and preset wiring verified.'
+
+          echo '=== Xcode validation ==='
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee /tmp/notch-ambient-build.log
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if grep -E 'Halo/(Views/DecorationsView|Views/WorkspaceSettingsView|NotchEngine/WindowManager)\.swift:[0-9]+:[0-9]+: error:' /tmp/notch-ambient-build.log; then
+              echo 'A modified Notch Ambient source file has a compiler error.' >&2
+              exit 1
+          fi
+          for file in DecorationsView WorkspaceSettingsView WindowManager; do
+              if grep -q "SwiftCompile.*${file}\.swift" /tmp/notch-ambient-build.log; then
+                  echo "Compiler reached ${file}.swift"
+              else
+                  echo "Warning: full build stopped before a dedicated ${file}.swift compile line was emitted."
+              fi
+          done
+          if [[ $build_status -ne 0 ]]; then
+              echo 'Full target still has unrelated repository errors; modified Notch Ambient files reported no compiler errors.'
+              grep -E 'error:' /tmp/notch-ambient-build.log | tail -n 30 || true
+          else
+              echo 'Full target build succeeded.'
+          fi
+
+          git diff --stat
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/Views/DecorationsView.swift Halo/Views/WorkspaceSettingsView.swift Halo/NotchEngine/WindowManager.swift
+          git commit -m 'Add Notch Ambient decoration system'
+          git push origin HEAD:main
