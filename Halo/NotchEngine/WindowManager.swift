@@ -1385,12 +1385,11 @@ final class WindowManager {
                 host.ambientPanel.contentView = ambientView
                 updateAmbientPanelFrame(host: host, geometry: host.geometry!)
 
-                let root = ZStack {
+                let root = ActivationSequenceSurfaceHost(displayID: id, surfaceState: host.state) {
                     HaloSurfaceRouter(viewport: host.state.viewport,
                                       store: store,
                                       state: host.state,
                                       workspace: store.workspace)
-                    ActivationSequenceOverlay(displayID: id, surfaceState: host.state)
                 }
                 .environment(\.haloScreenFrame, screen.frame)
                 let view = HaloDropHostingView(rootView: root)

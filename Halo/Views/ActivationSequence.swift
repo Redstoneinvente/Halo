@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVFoundation
+import CoreAudio
 import ServiceManagement
 import UniformTypeIdentifiers
 
@@ -573,7 +574,10 @@ final class ActivationSequenceCoordinator: ObservableObject {
         soundTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(max(0, cueDelay) * 1_000_000_000))
             guard !Task.isCancelled, let self, self.presentation?.id == token else { return }
-            if settings.respectSystemVolume, let systemVolume, systemVolume <= 0.003 { return }
+            if settings.respectSystemVolume {
+                if Self.systemOutputIsMuted() { return }
+                if let systemVolume, systemVolume <= 0.003 { return }
+            }
             self.soundPlayer.play(sound: settings.sound, volume: settings.soundVolume, customPath: settings.customSoundPath)
         }
 
@@ -582,6 +586,28 @@ final class ActivationSequenceCoordinator: ObservableObject {
             guard !Task.isCancelled, let self, self.presentation?.id == token else { return }
             self.presentation = nil
         }
+    }
+
+    private static func systemOutputIsMuted() -> Bool {
+        var device = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var defaultAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &defaultAddress, 0, nil, &size, &device) == noErr,
+              device != 0 else { return false }
+        var muted: UInt32 = 0
+        size = UInt32(MemoryLayout<UInt32>.size)
+        var muteAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyMute,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectHasProperty(device, &muteAddress),
+              AudioObjectGetPropertyData(device, &muteAddress, 0, nil, &size, &muted) == noErr else { return false }
+        return muted != 0
     }
 
     private func resolvedPreset(_ settings: ActivationSequenceSettings) -> ActivationPreset {
@@ -743,6 +769,70 @@ private struct ActivationParticleLayer: View {
     }
 }
 
+struct ActivationSequenceSurfaceHost<Content: View>: View {
+    let displayID: String
+    @ObservedObject var surfaceState: SurfaceState
+    let content: Content
+    @ObservedObject private var coordinator = ActivationSequenceCoordinator.shared
+
+    init(displayID: String, surfaceState: SurfaceState, @ViewBuilder content: () -> Content) {
+        self.displayID = displayID
+        self.surfaceState = surfaceState
+        self.content = content()
+    }
+
+    var body: some View {
+        Group {
+            if let presentation = coordinator.presentation,
+               presentation.targetDisplayIDs.contains(displayID) {
+                let interval = ProcessInfo.processInfo.isLowPowerModeEnabled ? 1.0 / 30.0 : 1.0 / 60.0
+                TimelineView(.animation(minimumInterval: interval, paused: false)) { timeline in
+                    let duration = max(0.01, presentation.settings.duration)
+                    let raw = timeline.date.timeIntervalSince(presentation.startDate) / duration
+                    let progress = motionProgress(raw, profile: presentation.settings.motion)
+                    ZStack {
+                        // Opacity does not disable hit testing. The user's first interaction still
+                        // reaches the real Halo surface and WindowManager cancels the flourish.
+                        content.opacity(normalOpacity(for: presentation.preset, progress: progress))
+                        ActivationSequenceOverlay(displayID: displayID, surfaceState: surfaceState)
+                    }
+                }
+            } else {
+                content
+            }
+        }
+    }
+
+    private func normalOpacity(for preset: ActivationPreset, progress: Double) -> Double {
+        switch preset {
+        case .minimalFade:
+            return smoothstep(progress)
+        case .materialize, .aperture, .liquid, .warpIn, .blackHole:
+            return smoothstep((progress - 0.54) / 0.46)
+        case .digitalBoot:
+            return smoothstep((progress - 0.62) / 0.38)
+        case .none:
+            return 1
+        default:
+            return smoothstep((progress - 0.68) / 0.32)
+        }
+    }
+
+    private func motionProgress(_ value: Double, profile: ActivationMotionProfile) -> Double {
+        let x = min(1, max(0, value))
+        switch profile {
+        case .calm: return x * x * x * (x * (x * 6 - 15) + 10)
+        case .fluid: return x * x * (3 - 2 * x)
+        case .snappy: return min(1, 1 - pow(1 - x, 3))
+        }
+    }
+
+    private func smoothstep(_ value: Double) -> Double {
+        let x = min(1, max(0, value))
+        return x * x * (3 - 2 * x)
+    }
+}
+
 struct ActivationSequenceOverlay: View {
     let displayID: String
     @ObservedObject var surfaceState: SurfaceState
@@ -769,9 +859,28 @@ struct ActivationSequenceOverlay: View {
         .accessibilityHidden(true)
     }
 
-    private var shape: ActivationSurfaceShape {
+    private var effectiveShape: SurfaceShapeKind {
         let options = surfaceState.activationSurfaceOptions
-        return ActivationSurfaceShape(kind: options.shape, topRadius: options.topRadius, bottomRadius: options.bottomRadius, shoulder: options.shoulder)
+        guard options.useStyleContour ?? true else { return options.shape }
+        switch surfaceState.theme.style {
+        case .pill, .island: return .capsule
+        case .simulated, .notch: return .scoop
+        case .shelf: return .chamfer
+        case .detached, .menuBar: return .rounded
+        default: return options.shape
+        }
+    }
+
+    private var shape: HaloContour {
+        let options = surfaceState.activationSurfaceOptions
+        let radius: CGFloat = (options.useStyleContour ?? true)
+            ? (surfaceState.theme.style == .menuBar ? 4 : surfaceState.theme.style == .pill ? 40 : surfaceState.theme.cornerRadius)
+            : surfaceState.theme.cornerRadius
+        return HaloContour(kind: effectiveShape,
+                           radius: radius,
+                           topRadius: options.topRadius,
+                           bottomRadius: options.bottomRadius,
+                           shoulder: options.shoulder)
     }
 
     @ViewBuilder
