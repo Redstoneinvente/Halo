@@ -2,9 +2,9 @@ from pathlib import Path
 import subprocess
 import sys
 
-EXPECTED = {
+NEW_RENDERER = 'Halo/Views/VisualWorkspaceAdaptiveWidgets.swift'
+EXPECTED_TRACKED = {
     'Halo/Core/WidgetModels.swift',
-    'Halo/Views/VisualWorkspaceAdaptiveWidgets.swift',
     'Halo/Views/ModuleViews.swift',
     'Halo/Views/SurfaceView.swift',
     'Halo/Core/AppStore.swift',
@@ -37,9 +37,14 @@ def family(c, r):
 
 def preflight():
     changed = set(subprocess.check_output(['git','diff','--name-only'], text=True).splitlines())
-    if changed != EXPECTED:
-        raise SystemExit(f'Unexpected production scope: {sorted(changed)}')
-    print('Production scope verified.')
+    if changed != EXPECTED_TRACKED:
+        raise SystemExit(f'Unexpected tracked production scope: {sorted(changed)}')
+    if not Path(NEW_RENDERER).is_file():
+        raise SystemExit('Adaptive renderer file is missing')
+    status = subprocess.check_output(['git','status','--porcelain','--',NEW_RENDERER], text=True).strip()
+    if not status.startswith('?? '):
+        raise SystemExit(f'Adaptive renderer should be a new production file, got status: {status!r}')
+    print('Production scope verified, including new adaptive renderer.')
     expected = {(c,r) for c in range(1,9) for r in range(1,5)}
     for widget in WIDGETS:
         seen = {(c,r): family(c,r) for c,r in expected}
