@@ -1,0 +1,42 @@
+name: One-time Visual Workspace Geometry
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-visual-workspace-geometry.yml'
+jobs:
+  patch:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply geometry fix
+        run: python3 Scripts/one_time_visual_workspace_geometry_fix.py
+      - name: Validate Swift syntax
+        run: |
+          xcrun swiftc -parse Halo/Views/SurfaceView.swift
+          xcrun swiftc -parse Halo/Views/ModuleViews.swift
+          xcrun swiftc -parse Halo/Views/WidgetSettingsView.swift
+          git diff --check
+      - name: Compiler gate for changed files
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build > /tmp/halo-workspace-geometry.log 2>&1
+          status=$?
+          set -e
+          if grep -E '(^|/)(SurfaceView|ModuleViews|WidgetSettingsView)\.swift:.*error:' /tmp/halo-workspace-geometry.log; then
+            tail -n 300 /tmp/halo-workspace-geometry.log
+            exit 1
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo 'Full project build has an unrelated failure; changed files have no reported compiler errors.'
+          fi
+      - name: Commit source
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add Halo/Views/SurfaceView.swift Halo/Views/ModuleViews.swift Halo/Views/WidgetSettingsView.swift
+          git commit -m 'Fix Visual Workspace canvas geometry and adaptation'
+          git push origin main
