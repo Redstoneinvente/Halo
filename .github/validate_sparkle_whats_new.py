@@ -1,8 +1,11 @@
 from pathlib import Path
 
-# Normalize a Swift tuple loop for compatibility across compiler modes.
+# Patch generated updater source for SwiftUI settings support.
 p = Path('Halo/Services/UpdateManager.swift')
 s = p.read_text()
+s = s.replace('import Combine\nimport Sparkle', 'import Combine\nimport SwiftUI\nimport Sparkle', 1)
+
+# Normalize a Swift tuple loop for compatibility across compiler modes.
 s = s.replace(
 '''                ForEach(intervals, id: \\.1) { label, interval in
                     Text(label).tag(interval)
