@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   apply:
-    if: github.event.head_commit.message != 'Apply Capture suite branch patches'
+    if: github.event.head_commit.message != 'Materialize Capture suite production files'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -21,6 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 .github/fix_capture_service.py
+          python3 .github/fix_capture_workspace.py
           python3 .github/patch_capture_media.py
           python3 .github/patch_capture_routes.py
           python3 .github/patch_capture_settings.py
@@ -34,5 +35,5 @@ jobs:
             echo 'No production patch changes needed.'
             exit 0
           fi
-          git commit -m 'Apply Capture suite branch patches'
+          git commit -m 'Materialize Capture suite production files'
           git push origin HEAD:chatgpt/capture-suite
