@@ -495,8 +495,8 @@ extension WidgetStyle {
         value.width = 0
         value.minimumHeight = 0
         value.showTitle = false
-        if value.cardBackgroundStyle == nil { value.cardBackgroundStyle = .none }
-        if value.outlineStyle == nil { value.outlineStyle = .none }
+        if value.cardBackgroundStyle == nil { value.cardBackgroundStyle = WidgetCardBackgroundStyle.none }
+        if value.outlineStyle == nil { value.outlineStyle = WidgetOutlineStyle.none }
         if value.showHeaderIcon == nil { value.showHeaderIcon = false }
         value.padding = min(16, max(8, value.padding))
         value.cornerRadius = min(28, max(14, value.cornerRadius))
