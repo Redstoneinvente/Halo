@@ -39,6 +39,192 @@ enum WidgetVisualPreset: String, CaseIterable, Identifiable {
     case minimal = "Minimal"
     var id: String { rawValue }
 }
+
+enum WidgetElementForegroundStyle: String, Codable, CaseIterable, Identifiable {
+    case inherit = "Widget Text"
+    case secondary = "Secondary"
+    case accent = "Accent"
+    case custom = "Custom"
+    var id: String { rawValue }
+}
+
+enum WidgetElementBackgroundStyle: String, Codable, CaseIterable, Identifiable {
+    case none = "None"
+    case subtle = "Subtle"
+    case accent = "Accent"
+    case glass = "Glass"
+    case custom = "Custom"
+    var id: String { rawValue }
+}
+
+enum WidgetElementEmphasis: String, Codable, CaseIterable, Identifiable {
+    case regular = "Regular"
+    case medium = "Medium"
+    case semibold = "Semibold"
+    case bold = "Bold"
+    var id: String { rawValue }
+}
+
+struct WidgetElementStyle: Codable, Equatable {
+    var visible = true
+    var fontScale = 1.0
+    var opacity = 1.0
+    var foreground: WidgetElementForegroundStyle = .inherit
+    var customForeground = WidgetColor.white
+    var background: WidgetElementBackgroundStyle = .none
+    var backgroundColor = WidgetColor.white
+    var backgroundOpacity = 0.10
+    var padding = 0.0
+    var cornerRadius = 8.0
+    var emphasis: WidgetElementEmphasis = .regular
+    var dividerAfter = false
+
+    func validated() throws -> WidgetElementStyle {
+        guard [fontScale, opacity, backgroundOpacity, padding, cornerRadius].allSatisfy(\.isFinite) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        var value = self
+        value.fontScale = min(2.5, max(0.55, fontScale))
+        value.opacity = min(1, max(0.15, opacity))
+        value.backgroundOpacity = min(1, max(0, backgroundOpacity))
+        value.padding = min(24, max(0, padding))
+        value.cornerRadius = min(32, max(0, cornerRadius))
+        value.customForeground = try customForeground.validated()
+        value.backgroundColor = try backgroundColor.validated()
+        return value
+    }
+}
+
+struct WidgetElementDescriptor: Identifiable {
+    let key: String
+    let title: String
+    let detail: String
+    let defaultVisible: Bool
+    var id: String { key }
+
+    init(_ key: String, _ title: String, _ detail: String, defaultVisible: Bool = true) {
+        self.key = key
+        self.title = title
+        self.detail = detail
+        self.defaultVisible = defaultVisible
+    }
+}
+
+extension ModuleID {
+    var widgetElements: [WidgetElementDescriptor] {
+        switch self {
+        case .clock:
+            return [
+                .init("time", "Time", "The primary live clock value."),
+                .init("date", "Date", "Formatted calendar date."),
+                .init("timezone", "Time zone", "Current time-zone identifier.", defaultVisible: false),
+                .init("dayProgress", "Day progress", "A live progress bar for the current day.", defaultVisible: false)
+            ]
+        case .timer:
+            return [
+                .init("countdown", "Countdown", "Remaining focus time."),
+                .init("progress", "Session progress", "Progress through the current focus session."),
+                .init("endTime", "Finish time", "Expected completion time.", defaultVisible: false),
+                .init("status", "Status text", "Idle, paused, or completed state."),
+                .init("presets", "Preset buttons", "Quick focus-duration buttons."),
+                .init("controls", "Session controls", "Pause, resume, and reset actions.")
+            ]
+        case .shelf:
+            return [
+                .init("summary", "Shelf summary", "File and pinned-item counts."),
+                .init("files", "File list", "Files currently held by the shelf."),
+                .init("actions", "Shelf actions", "Add and clear actions."),
+                .init("footer", "Overflow footer", "Count of additional hidden shelf items.")
+            ]
+        case .media:
+            return [
+                .init("track", "Track title", "Current track or media title."),
+                .init("artist", "Artist", "Current artist / creator."),
+                .init("source", "Player source", "Apple Music, Spotify, or system source."),
+                .init("playback", "Playback state", "Playing, paused, or waiting state."),
+                .init("palette", "Artwork palette", "Colors extracted from current artwork.", defaultVisible: false),
+                .init("controls", "Playback controls", "Previous, play/pause, and next."),
+                .init("detection", "Detection action", "Retry player detection.", defaultVisible: false),
+                .init("status", "Media status", "Connection and error information.")
+            ]
+        case .audio:
+            return [
+                .init("summary", "Audio summary", "Selected output and available-device count."),
+                .init("output", "Output selector", "Choose the active output device."),
+                .init("volume", "Volume slider", "Software volume control when supported."),
+                .init("volumeValue", "Volume value", "Numeric volume percentage."),
+                .init("levels", "Quick levels", "One-click 0/25/50/75/100% volume.", defaultVisible: false),
+                .init("actions", "Audio actions", "Refresh available devices."),
+                .init("status", "Audio status", "Hardware-volume notes and errors.")
+            ]
+        case .calendar:
+            return [
+                .init("summary", "Day summary", "Today's date and remaining-event count."),
+                .init("nextEvent", "Next event", "Next event with relative countdown."),
+                .init("events", "Event list", "Upcoming events and join links."),
+                .init("actions", "Calendar actions", "Enable or refresh calendar access."),
+                .init("status", "Calendar status", "Connection / empty-day state.")
+            ]
+        case .clipboard:
+            return [
+                .init("summary", "Clipboard summary", "Entry count and age of the newest entry."),
+                .init("search", "Search field", "Filter clipboard history."),
+                .init("entries", "Clipboard entries", "Recent copied text with actions."),
+                .init("actions", "Clipboard actions", "Clear history."),
+                .init("footer", "Privacy footer", "Storage and privacy explanation.")
+            ]
+        case .system:
+            return [
+                .init("battery", "Battery", "Battery percentage and charging state."),
+                .init("batteryProgress", "Battery bar", "Visual battery-level progress."),
+                .init("power", "Power mode", "AC/battery and Low Power Mode status."),
+                .init("memory", "Memory", "Installed physical memory."),
+                .init("storage", "Storage", "Available disk capacity."),
+                .init("uptime", "Uptime", "Current system uptime."),
+                .init("device", "Mac details", "macOS version and logical processor count.", defaultVisible: false)
+            ]
+        case .launcher:
+            return [
+                .init("summary", "Launcher summary", "Running-app and plugin-command counts.", defaultVisible: false),
+                .init("search", "Search field", "Search apps and commands."),
+                .init("timers", "Timer shortcuts", "Quick focus-timer launches."),
+                .init("apps", "Running apps", "Activate running applications."),
+                .init("plugins", "Plugin commands", "Commands exposed by Halo plugins."),
+                .init("shortcuts", "Quick locations", "Open an app or Downloads.")
+            ]
+        case .activities:
+            return [
+                .init("summary", "Activity summary", "Number of current live activities."),
+                .init("items", "Activity list", "Activity titles, details, progress and dismiss actions."),
+                .init("status", "Empty state", "Message shown when no activity is live.")
+            ]
+        case .notes:
+            return [
+                .init("editor", "Notes editor", "Editable quick-note area."),
+                .init("stats", "Note statistics", "Word and character counts."),
+                .init("actions", "Note actions", "Copy and clear the note.", defaultVisible: false)
+            ]
+        case .capture:
+            return [
+                .init("hint", "Permission hint", "Screen Recording permission guidance."),
+                .init("actions", "Capture actions", "Capture region and OCR image actions."),
+                .init("progress", "Busy indicator", "Progress while capture/OCR is running."),
+                .init("result", "OCR result", "Recognized text."),
+                .init("resultActions", "Result actions", "Copy or clear recognized text."),
+                .init("status", "Capture status", "Errors and capture status.")
+            ]
+        case .stopwatch:
+            return [
+                .init("time", "Elapsed time", "Live stopwatch value."),
+                .init("state", "Stopwatch state", "Running or paused state."),
+                .init("controls", "Stopwatch controls", "Start, pause, and reset.")
+            ]
+        case .developer:
+            return []
+        }
+    }
+}
+
 struct WidgetColor: Codable, Equatable {
     var red: Double
     var green: Double
@@ -201,6 +387,7 @@ struct WidgetStyle: Codable, Equatable {
     var showHeaderIcon: Bool?
     var gradientAngle: Double?
     var glassTintOpacity: Double?
+    var elementStyles: [String: WidgetElementStyle]?
 
     var resolvedContent: WidgetContentOptions { content ?? WidgetContentOptions() }
     var resolvedChrome: WidgetChromeOptions { chrome ?? WidgetChromeOptions() }
@@ -214,6 +401,15 @@ struct WidgetStyle: Codable, Equatable {
     var showsHeaderIcon: Bool { showHeaderIcon ?? true }
     var resolvedGradientAngle: Double { min(360, max(-360, gradientAngle ?? 135)) }
     var resolvedGlassTintOpacity: Double { min(0.6, max(0, glassTintOpacity ?? 0.10)) }
+    func elementStyle(for key: String, defaultVisible: Bool = true) -> WidgetElementStyle {
+        if let saved = elementStyles?[key] { return saved }
+        var value = WidgetElementStyle()
+        value.visible = defaultVisible
+        return value
+    }
+    func elementStyle(for descriptor: WidgetElementDescriptor) -> WidgetElementStyle {
+        elementStyle(for: descriptor.key, defaultVisible: descriptor.defaultVisible)
+    }
     func validated() throws -> WidgetStyle {
         guard [fontSize, backgroundOpacity, padding, cornerRadius, width, minimumHeight].allSatisfy(\.isFinite),
               clock.timeZone.isEmpty || TimeZone(identifier: clock.timeZone) != nil else { throw CocoaError(.fileReadCorruptFile) }
@@ -232,6 +428,7 @@ struct WidgetStyle: Codable, Equatable {
             guard tint.isFinite else { throw CocoaError(.fileReadCorruptFile) }
             v.glassTintOpacity = min(0.6, max(0, tint))
         }
+        if elementStyles != nil { v.elementStyles = try elementStyles?.mapValues { try $0.validated() } }
         v.customFont = String(customFont.prefix(120))
         if content != nil { v.content = try resolvedContent.validated() }
         if chrome != nil { v.chrome = try resolvedChrome.validated() }

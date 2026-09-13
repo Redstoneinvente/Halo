@@ -961,70 +961,112 @@ struct BuiltinOrIntegrationWidget: View {
         default: ModuleRegistry().view(for: module, store: store)
         }
     }
+
     private var timer: some View {
         let options = style.resolvedContent
+        let remaining = max(0, store.deadline?.timeIntervalSinceNow ?? store.pausedSeconds)
+        let duration = max(0, store.timerDurationSeconds)
+        let progress = duration > 0 ? min(1, max(0, 1 - remaining / duration)) : (store.finished ? 1 : 0)
         return VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
-            HStack(spacing: options.spacing) {
-                if style.showTitle {
-                    HStack(spacing: max(4, options.spacing * 0.55)) {
-                        Image(systemName: "timer").font(.system(size: options.iconSize)).foregroundStyle(style.accentColor.color)
-                        Text("Focus").font(style.font())
-                    }
+            if style.showTitle {
+                HStack(spacing: max(4, options.spacing * 0.55)) {
+                    if style.showsHeaderIcon { Image(systemName: "timer").font(.system(size: options.iconSize)).foregroundStyle(style.accentColor.color) }
+                    Text("Focus").font(style.font())
                 }
-                Spacer()
-                if let deadline = store.deadline { Text(deadline, style: .timer).monospacedDigit() }
-                else if options.showSecondaryText, store.pausedSeconds > 0 { Text("Paused · \(Int(store.pausedSeconds))s").font(style.font(scale: 0.85)) }
-                else if options.showSecondaryText && store.finished { Text("Session complete").foregroundStyle(.green) }
-                else if options.showSecondaryText { Text("Make room for deep work").font(style.font(scale: 0.85)).foregroundStyle(.secondary) }
+            }
+            WidgetElement(key: "countdown") {
+                if let deadline = store.deadline { Text(deadline, style: .timer).font(style.font(scale: 1.35)).monospacedDigit() }
+                else if store.pausedSeconds > 0 { Text(formatDuration(store.pausedSeconds)).font(style.font(scale: 1.35)).monospacedDigit() }
+                else { Text("Ready").font(style.font(scale: 1.15)) }
+            }
+            WidgetElement(key: "progress") { ProgressView(value: progress) }
+            WidgetElement(key: "endTime", defaultVisible: false) {
+                if let deadline = store.deadline { HStack { Text("Finishes"); Spacer(); Text(deadline, style: .time) } }
+                else if store.pausedSeconds > 0 { Text("Paused with \(formatDuration(store.pausedSeconds)) remaining") }
+                else { Text("Choose a duration to begin") }
+            }
+            if options.showSecondaryText {
+                WidgetElement(key: "status") {
+                    Label(store.finished ? "Session complete" : store.deadline != nil ? "Deep work in progress" : store.pausedSeconds > 0 ? "Session paused" : "Make room for deep work",
+                          systemImage: store.finished ? "checkmark.circle.fill" : store.deadline != nil ? "brain.head.profile" : store.pausedSeconds > 0 ? "pause.circle" : "sparkles")
+                }
             }
             if options.showControls {
-                HStack(spacing: options.spacing) {
-                    if store.deadline != nil || store.pausedSeconds > 0 {
-                        Button(store.deadline == nil ? "Resume" : "Pause") { store.pauseResume() }
-                        Button("Reset") { store.resetTimer() }
-                    } else {
-                        ForEach(Array([options.timerPresetA, options.timerPresetB, options.timerPresetC].enumerated()), id: \.offset) { _, minutes in
-                            Button("\(minutes) min") { store.startTimer(minutes: minutes) }
-                        }
+                if store.deadline == nil && store.pausedSeconds <= 0 {
+                    WidgetElement(key: "presets") {
+                        HStack(spacing: options.spacing) {
+                            ForEach([options.timerPresetA, options.timerPresetB, options.timerPresetC], id: \.self) { minutes in
+                                Button("\(minutes) min") { store.startTimer(minutes: minutes) }
+                            }
+                        }.buttonStyle(.bordered)
                     }
-                }.buttonStyle(.bordered)
+                } else {
+                    WidgetElement(key: "controls") {
+                        HStack(spacing: options.spacing) {
+                            Button(store.deadline == nil ? "Resume" : "Pause") { store.pauseResume() }
+                            Button("Reset") { store.resetTimer() }
+                        }.buttonStyle(.bordered)
+                    }
+                }
             }
         }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
     }
+
     private var shelf: some View {
         let options = style.resolvedContent
         return VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
-            HStack(spacing: options.spacing) {
-                if style.showTitle {
-                    HStack(spacing: max(4, options.spacing * 0.55)) {
-                        Image(systemName: "tray").font(.system(size: options.iconSize)).foregroundStyle(style.accentColor.color)
-                        Text("File shelf").font(style.font())
-                    }
+            if style.showTitle {
+                HStack(spacing: max(4, options.spacing * 0.55)) {
+                    if style.showsHeaderIcon { Image(systemName: "tray").font(.system(size: options.iconSize)).foregroundStyle(style.accentColor.color) }
+                    Text("File shelf").font(style.font())
                 }
-                Spacer()
-                if options.showQuickActions { Button { store.chooseFiles() } label: { Image(systemName: "plus") }.accessibilityLabel("Add files") }
+            }
+            WidgetElement(key: "summary") {
+                HStack {
+                    Label("\(store.files.count) item\(store.files.count == 1 ? "" : "s")", systemImage: "tray.full")
+                    Spacer()
+                    Text("\(store.pinnedFiles.count) pinned")
+                }
             }
             if store.files.isEmpty, options.showSecondaryText {
-                Text("Drop files here. Originals stay untouched.").font(style.font(scale: 0.85)).foregroundStyle(.secondary).padding(.vertical, 8)
-            }
-            ForEach(Array(store.files.prefix(options.maxItems)), id: \.self) { url in
-                HStack(spacing: options.spacing) {
-                    ShelfFileInfo(url: url, iconSize: options.shelfIconSize, showDetail: options.shelfShowDetails)
-                    Spacer()
-                    if options.shelfShowActions && options.showControls {
-                        Button { store.toggleFilePin(url) } label: { Image(systemName: store.pinnedFiles.contains(url) ? "pin.fill" : "pin") }.help("Keep this file on the shelf")
-                        Button { store.shelfPreview.show(url) } label: { Image(systemName: "eye") }.help("Quick Look")
-                        Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: { Image(systemName: "folder") }.help("Reveal in Finder")
-                        Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.forward.app") }.help("Open file")
-                        ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
-                        Button { store.removeFile(url) } label: { Image(systemName: "xmark") }.help("Remove reference from shelf")
+                WidgetElement(key: "files") { Text("Drop files here. Originals stay untouched.").foregroundStyle(.secondary) }
+            } else {
+                WidgetElement(key: "files") {
+                    VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
+                        ForEach(Array(store.files.prefix(options.maxItems)), id: \.self) { url in
+                            HStack(spacing: options.spacing) {
+                                ShelfFileInfo(url: url, iconSize: options.shelfIconSize, showDetail: options.shelfShowDetails)
+                                Spacer()
+                                if options.shelfShowActions && options.showControls {
+                                    Button { store.toggleFilePin(url) } label: { Image(systemName: store.pinnedFiles.contains(url) ? "pin.fill" : "pin") }.help("Pin")
+                                    Button { store.shelfPreview.show(url) } label: { Image(systemName: "eye") }.help("Quick Look")
+                                    Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: { Image(systemName: "folder") }.help("Reveal")
+                                    Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.forward.app") }.help("Open")
+                                    ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
+                                    Button { store.removeFile(url) } label: { Image(systemName: "xmark") }.help("Remove")
+                                }
+                            }.onDrag { NSItemProvider(object: url as NSURL) }
+                        }
                     }
-                }.onDrag { NSItemProvider(object: url as NSURL) }
+                }
+            }
+            if options.showQuickActions {
+                WidgetElement(key: "actions") {
+                    HStack {
+                        Button("Add files…") { store.chooseFiles() }
+                        Button("Clear shelf") { store.clearShelf() }.disabled(store.files.isEmpty)
+                    }
+                }
             }
             if options.showFooter && store.files.count > options.maxItems {
-                Text("+\(store.files.count - options.maxItems) more items").font(style.font(scale: 0.75)).foregroundStyle(.secondary)
+                WidgetElement(key: "footer") { Text("+\(store.files.count - options.maxItems) more items") }
             }
         }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let value = max(0, Int(seconds.rounded()))
+        return value >= 3600 ? String(format: "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60) : String(format: "%02d:%02d", value / 60, value % 60)
     }
 }
 

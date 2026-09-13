@@ -123,6 +123,51 @@ struct WidgetSettingsView: View {
             Text("Compact moves the header beside content, Hero gives the widget stronger emphasis, Minimal strips it back, and Dense reduces internal spacing.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+        Section("Elements") {
+            Text("Each functional piece can be shown or hidden and styled independently. This includes real controls such as sliders, progress bars, status rows, lists and actions — not just text.")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(selected.widgetElements) { descriptor in
+                let value = elementBinding(descriptor)
+                DisclosureGroup {
+                    Toggle("Visible", isOn: value.visible)
+                    if value.wrappedValue.visible {
+                        Picker("Text color", selection: value.foreground) {
+                            ForEach(WidgetElementForegroundStyle.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        if value.wrappedValue.foreground == .custom {
+                            ColorPicker("Custom text", selection: Binding(get: { value.wrappedValue.customForeground.color }, set: { value.wrappedValue.customForeground = WidgetColor($0) }), supportsOpacity: false)
+                        }
+                        Picker("Emphasis", selection: value.emphasis) {
+                            ForEach(WidgetElementEmphasis.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        PreciseSlider(title: "Text scale", value: value.fontScale, range: 0.55...2.5, step: 0.05, suffix: "×", decimals: 2)
+                        PreciseSlider(title: "Opacity", value: value.opacity, range: 0.15...1, step: 0.05, decimals: 2)
+                        Picker("Element background", selection: value.background) {
+                            ForEach(WidgetElementBackgroundStyle.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        if value.wrappedValue.background == .custom {
+                            ColorPicker("Background color", selection: Binding(get: { value.wrappedValue.backgroundColor.color }, set: { value.wrappedValue.backgroundColor = WidgetColor($0) }), supportsOpacity: false)
+                        }
+                        if value.wrappedValue.background != .none {
+                            PreciseSlider(title: "Background opacity", value: value.backgroundOpacity, range: 0...1, step: 0.05, decimals: 2)
+                            PreciseSlider(title: "Element padding", value: value.padding, range: 0...24, step: 1, suffix: "pt")
+                            PreciseSlider(title: "Element radius", value: value.cornerRadius, range: 0...32, step: 1, suffix: "pt")
+                        }
+                        Toggle("Divider after element", isOn: value.dividerAfter)
+                        Button("Reset element style") { resetElement(descriptor) }
+                    }
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(descriptor.title)
+                            Text(descriptor.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        Text(value.wrappedValue.visible ? "On" : "Off").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
         Section("Typography") {
             Picker("Font", selection: style.fontFamily) {
                 ForEach(WidgetFontFamily.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
@@ -232,6 +277,23 @@ struct WidgetSettingsView: View {
         Button("Reset this widget") { layout.widgets?.removeValue(forKey: selected.rawValue) }
         Text("Changes apply live. Save a profile to keep a preset. Display-specific layouts use their saved profile's widget settings.").font(.caption)
     }
+    private func elementBinding(_ descriptor: WidgetElementDescriptor) -> Binding<WidgetElementStyle> {
+        Binding(get: {
+            style.wrappedValue.elementStyle(for: descriptor)
+        }, set: { value in
+            var updated = style.wrappedValue
+            if updated.elementStyles == nil { updated.elementStyles = [:] }
+            updated.elementStyles?[descriptor.key] = value
+            style.wrappedValue = updated
+        })
+    }
+
+    private func resetElement(_ descriptor: WidgetElementDescriptor) {
+        var updated = style.wrappedValue
+        updated.elementStyles?.removeValue(forKey: descriptor.key)
+        style.wrappedValue = updated
+    }
+
     @ViewBuilder private var moduleSpecificSettings: some View {
         switch selected {
         case .clock:

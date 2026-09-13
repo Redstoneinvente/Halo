@@ -85,6 +85,68 @@ extension EnvironmentValues {
         set { self[WidgetStyleKey.self] = newValue }
     }
 }
+
+extension WidgetElementEmphasis {
+    var fontWeight: Font.Weight {
+        switch self {
+        case .regular: return .regular
+        case .medium: return .medium
+        case .semibold: return .semibold
+        case .bold: return .bold
+        }
+    }
+}
+
+struct WidgetElement<Content: View>: View {
+    let key: String
+    var defaultVisible = true
+    @ViewBuilder var content: Content
+    @Environment(\.widgetStyle) private var style
+
+    private var element: WidgetElementStyle { style.elementStyle(for: key, defaultVisible: defaultVisible) }
+    private var foreground: Color {
+        switch element.foreground {
+        case .inherit: return style.textColor.color
+        case .secondary: return style.textColor.color.opacity(0.62)
+        case .accent: return style.accentColor.color
+        case .custom: return element.customForeground.color
+        }
+    }
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: element.cornerRadius, style: .continuous) }
+
+    @ViewBuilder private var elementBackground: some View {
+        switch element.background {
+        case .none:
+            EmptyView()
+        case .subtle:
+            shape.fill(style.textColor.color.opacity(element.backgroundOpacity * 0.16))
+        case .accent:
+            shape.fill(style.accentColor.color.opacity(element.backgroundOpacity))
+        case .glass:
+            shape.fill(.ultraThinMaterial).opacity(max(0.15, element.backgroundOpacity))
+        case .custom:
+            shape.fill(element.backgroundColor.color.opacity(element.backgroundOpacity))
+        }
+    }
+
+    var body: some View {
+        if element.visible {
+            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: 4) {
+                content
+                    .font(style.font(scale: element.fontScale))
+                    .fontWeight(element.emphasis.fontWeight)
+                    .foregroundStyle(foreground)
+                    .opacity(element.opacity)
+                    .padding(element.padding)
+                    .background { elementBackground }
+                    .frame(maxWidth: .infinity, alignment: style.resolvedContent.alignment.alignment)
+                if element.dividerAfter { Divider().opacity(0.45) }
+            }
+            .frame(maxWidth: .infinity, alignment: style.resolvedContent.alignment.alignment)
+        }
+    }
+}
+
 struct WidgetCard<Content: View>: View {
     let style: WidgetStyle
     var availableHeight: CGFloat? = nil
@@ -216,43 +278,61 @@ struct WidgetClock: View {
         }
         return value
     }
+    private var timeZoneLabel: String { style.clock.timeZone.isEmpty ? TimeZone.current.identifier : style.clock.timeZone }
+
     var body: some View {
         let clockFormatter = formatter
         let dateFormatter = dayFormatter
         let start = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970 / 60) * 60)
-        TimelineView(.periodic(from: start, by: style.clock.showSeconds ? 1 : 60)) { context in
+        TimelineView(.periodic(from: start, by: style.clock.showSeconds ? 1 : 30)) { context in
             let spacing = max(2, min(20, style.resolvedContent.spacing * 0.55))
             Group {
                 switch style.resolvedLayoutMode {
                 case .compact:
                     HStack(spacing: spacing) {
                         if style.showTitle && !compact { clockHeader(scale: 0.68) }
-                        Text(clockFormatter.string(from: context.date)).font(style.font()).monospacedDigit()
-                        Spacer(minLength: 4)
+                        WidgetElement(key: "time") { Text(clockFormatter.string(from: context.date)).monospacedDigit() }
                         if style.clock.showDate && !compact {
-                            Text(dateFormatter.string(from: context.date)).font(style.font(scale: 0.68)).foregroundStyle(.secondary)
+                            WidgetElement(key: "date") { Text(dateFormatter.string(from: context.date)) }
                         }
                     }
                 case .hero:
                     VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
                         if style.showTitle && !compact { clockHeader(scale: 0.75) }
-                        Text(clockFormatter.string(from: context.date)).font(style.font(scale: 1.35)).monospacedDigit()
-                        if style.clock.showDate && !compact { Text(dateFormatter.string(from: context.date)).font(style.font(scale: 0.80)) }
+                        WidgetElement(key: "time") { Text(clockFormatter.string(from: context.date)).font(style.font(scale: 1.35)).monospacedDigit() }
+                        extras(dateFormatter: dateFormatter, date: context.date)
                     }
                 case .minimal:
                     VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
-                        Text(clockFormatter.string(from: context.date)).font(style.font()).monospacedDigit()
-                        if style.clock.showDate && !compact { Text(dateFormatter.string(from: context.date)).font(style.font(scale: 0.68)).foregroundStyle(.secondary) }
+                        WidgetElement(key: "time") { Text(clockFormatter.string(from: context.date)).monospacedDigit() }
+                        extras(dateFormatter: dateFormatter, date: context.date)
                     }
                 case .dense, .standard:
                     VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: style.resolvedLayoutMode == .dense ? max(2, spacing * 0.55) : spacing) {
                         if style.showTitle && !compact { clockHeader(scale: 0.75) }
-                        Text(clockFormatter.string(from: context.date)).font(style.font()).monospacedDigit()
-                        if style.clock.showDate && !compact { Text(dateFormatter.string(from: context.date)).font(style.font(scale: 0.75)) }
+                        WidgetElement(key: "time") { Text(clockFormatter.string(from: context.date)).monospacedDigit() }
+                        extras(dateFormatter: dateFormatter, date: context.date)
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: style.resolvedContent.alignment.alignment)
+        }
+    }
+
+    @ViewBuilder private func extras(dateFormatter: DateFormatter, date: Date) -> some View {
+        if style.clock.showDate && !compact {
+            WidgetElement(key: "date") { Text(dateFormatter.string(from: date)) }
+        }
+        WidgetElement(key: "timezone", defaultVisible: false) {
+            Label(timeZoneLabel, systemImage: "globe")
+        }
+        WidgetElement(key: "dayProgress", defaultVisible: false) {
+            let interval = Calendar.current.dateInterval(of: .day, for: date)
+            let progress = interval.map { min(1, max(0, date.timeIntervalSince($0.start) / $0.duration)) } ?? 0
+            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: 4) {
+                HStack { Text("Day progress"); Spacer(); Text("\(Int(progress * 100))%") }
+                ProgressView(value: progress)
+            }
         }
     }
 

@@ -15,6 +15,7 @@ final class AppStore: ObservableObject {
     let shelfPreview = ShelfPreview()
     @Published var deadline: Date?
     @Published var pausedSeconds: TimeInterval = 0
+    @Published var timerDurationSeconds: TimeInterval = 0
     @Published var finished = false
     private var ticker: AnyCancellable?
     private let defaults: UserDefaults
@@ -40,8 +41,15 @@ final class AppStore: ObservableObject {
             pinnedFiles = Set((defaults.stringArray(forKey: "shelf.pinned") ?? []).map { URL(fileURLWithPath: $0) }).intersection(files)
         }
         if let end = defaults.object(forKey: "timer.deadline") as? Date {
-            if end > Date() { deadline = end; monitorTimer() }
-            else { finished = true; defaults.removeObject(forKey: "timer.deadline") }
+            if end > Date() {
+                deadline = end
+                timerDurationSeconds = max(end.timeIntervalSinceNow, defaults.double(forKey: "timer.durationSeconds"))
+                monitorTimer()
+            } else {
+                finished = true
+                defaults.removeObject(forKey: "timer.deadline")
+                defaults.removeObject(forKey: "timer.durationSeconds")
+            }
         }
     }
     private func scheduleSave() {
@@ -58,8 +66,10 @@ final class AppStore: ObservableObject {
     func startTimer(minutes: Int) {
         finished = false
         pausedSeconds = 0
-        deadline = Date().addingTimeInterval(Double(minutes * 60))
+        timerDurationSeconds = Double(minutes * 60)
+        deadline = Date().addingTimeInterval(timerDurationSeconds)
         defaults.set(deadline, forKey: "timer.deadline")
+        defaults.set(timerDurationSeconds, forKey: "timer.durationSeconds")
         monitorTimer()
     }
     private func monitorTimer() {
@@ -68,7 +78,9 @@ final class AppStore: ObservableObject {
             guard let self, let end = self.deadline, now >= end else { return }
             self.deadline = nil
             self.finished = true
+            self.timerDurationSeconds = 0
             self.defaults.removeObject(forKey: "timer.deadline")
+            self.defaults.removeObject(forKey: "timer.durationSeconds")
             self.workspace.publish("Focus complete", detail: "Time for a break")
             self.workspace.notify("Your Halo focus session is complete")
             self.ticker?.cancel()
@@ -88,7 +100,11 @@ final class AppStore: ObservableObject {
             monitorTimer()
         }
     }
-    func resetTimer() { deadline = nil; pausedSeconds = 0; finished = false; ticker?.cancel(); defaults.removeObject(forKey: "timer.deadline") }
+    func resetTimer() {
+        deadline = nil; pausedSeconds = 0; timerDurationSeconds = 0; finished = false; ticker?.cancel()
+        defaults.removeObject(forKey: "timer.deadline")
+        defaults.removeObject(forKey: "timer.durationSeconds")
+    }
     func persistFiles() {
         defaults.set(workspace.settings.persistShelf ? files.map(\.path) : [], forKey: "shelf.paths")
         defaults.set(workspace.settings.persistShelf ? pinnedFiles.map(\.path) : [], forKey: "shelf.pinned")
