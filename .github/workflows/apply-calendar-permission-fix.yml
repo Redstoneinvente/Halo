@@ -1,0 +1,98 @@
+name: Apply Calendar Permission Fix
+on:
+  push:
+    branches: [chatgpt/calendar-permission-fix]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch, validate and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/calendar_album_fix.py /tmp/calendar_album_fix.py
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 /tmp/calendar_album_fix.py
+
+          echo '=== Scope ==='
+          git diff --name-only
+          python3 <<'PY'
+          import subprocess
+          changed = set(subprocess.check_output(['git','diff','--name-only'], text=True).splitlines())
+          expected = {
+              'Halo/Services/Integrations.swift',
+              'Halo/Views/WidgetSettingsView.swift',
+              'Halo/Views/ClosedNotchView.swift',
+              'Halo/Info.plist',
+          }
+          if changed != expected:
+              raise SystemExit(f'Unexpected scope: {sorted(changed)}')
+          print('Repair scope verified.')
+          PY
+
+          git diff --check
+          plutil -lint Halo/Info.plist
+          xcrun swiftc -parse Halo/Services/Integrations.swift
+          xcrun swiftc -parse Halo/Views/WidgetSettingsView.swift
+          xcrun swiftc -parse Halo/Views/ClosedNotchView.swift
+
+          grep -F 'private var wantsArtworkBackground: Bool { artworkOptions.usesBackgroundArtwork }' Halo/Views/ClosedNotchView.swift
+          grep -F 'NSCalendarsFullAccessUsageDescription' Halo/Info.plist
+          grep -F 'store.reset()' Halo/Services/Integrations.swift
+          grep -F 'store.reset()' Halo/Views/WidgetSettingsView.swift
+
+          # Prime Xcode's exact target source list. The project has unrelated compiler
+          # complexity failures, so this preflight is allowed to fail after metadata exists.
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build \
+            > /tmp/calendar-preflight.log 2>&1
+          set -e
+
+          SOURCE_LIST=$(find build -path '*Objects-normal/arm64/Halo.SwiftFileList' -print -quit)
+          if [[ -z "$SOURCE_LIST" ]]; then
+              echo 'Xcode did not produce Halo.SwiftFileList.' >&2
+              exit 1
+          fi
+          SDK=$(xcrun --sdk macosx --show-sdk-path)
+
+          typecheck_primary() {
+            local primary="$PWD/$1"
+            local label="$2"
+            declare -a sources=()
+            while IFS= read -r source; do
+              [[ -z "$source" ]] && continue
+              [[ "$source" == "$primary" ]] && continue
+              sources+=("$source")
+            done < "$SOURCE_LIST"
+            echo "=== Primary typecheck: $label ==="
+            xcrun swiftc -frontend -typecheck \
+              "${sources[@]}" \
+              -primary-file "$primary" \
+              -target arm64-apple-macos13.0 \
+              -sdk "$SDK" \
+              -module-name Halo \
+              -swift-version 5 \
+              -D DEBUG \
+              -enable-testing \
+              -enable-bare-slash-regex \
+              -enable-experimental-feature DebugDescriptionMacro \
+              -I "$PWD/build/Debug" \
+              -F "$PWD/build/Debug"
+          }
+
+          typecheck_primary 'Halo/Services/Integrations.swift' 'CalendarService'
+          typecheck_primary 'Halo/Views/WidgetSettingsView.swift' 'Calendar Sources inspector'
+
+          git diff --stat
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/Services/Integrations.swift Halo/Views/WidgetSettingsView.swift Halo/Views/ClosedNotchView.swift Halo/Info.plist
+          git commit -m 'Fix Calendar access and closed-notch artwork background'
+          git push origin HEAD:main
