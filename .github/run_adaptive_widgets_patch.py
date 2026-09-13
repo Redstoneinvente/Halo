@@ -14,5 +14,6 @@ replacement = """
 source, count = pattern.subn(lambda _: replacement, source, count=1)
 if count != 1:
     raise SystemExit('Could not adapt the Xcode project patch block')
+source = source.replace('path = VisualWorkspaceAdaptiveWidgets.swift; sourceTree = "<group>";', 'path = Views/VisualWorkspaceAdaptiveWidgets.swift; sourceTree = "<group>";')
 namespace = {'__name__': '__main__', '__file__': str(source_path)}
 exec(compile(source, str(source_path), 'exec'), namespace)
