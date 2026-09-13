@@ -165,9 +165,10 @@ struct WidgetElementSurface<Content: View>: View {
     @Environment(\.openNotchAvailableHeight) private var availableHeight
 
     private var adaptiveScale: Double {
-        let widthScale = availableWidth.map { min(1, max(0.68, Double($0) / 220)) } ?? 1
-        let heightScale = availableHeight.map { min(1, max(0.68, Double($0) / 110)) } ?? 1
-        return min(widthScale, heightScale)
+        let widthScale = availableWidth.map { min(1, max(0.52, Double($0) / 250)) } ?? 1
+        let heightScale = availableHeight.map { min(1, max(0.52, Double($0) / 145)) } ?? 1
+        let pressure = max(0.68, 1 - Double(compression) * 0.055)
+        return min(widthScale, heightScale) * pressure
     }
     private var priority: OpenNotchPriority { element.priority ?? defaultPriority }
     private var alignment: WidgetContentAlignment { element.alignment ?? widgetStyle.resolvedContent.alignment }
@@ -192,8 +193,8 @@ struct WidgetElementSurface<Content: View>: View {
     }
     private var controlSize: ControlSize {
         let density = element.contentDensity ?? 1
-        if density <= 0.7 { return .mini }
-        if density <= 0.9 { return .small }
+        if compression >= 3 || density <= 0.7 { return .mini }
+        if compression >= 1 || density <= 0.9 { return .small }
         if density >= 1.3 { return .large }
         return widgetStyle.resolvedContent.controlSize.swiftUI
     }
@@ -217,7 +218,8 @@ struct WidgetElementSurface<Content: View>: View {
                 .multilineTextAlignment(textAlignment.textAlignment)
                 .controlSize(controlSize)
                 .opacity(element.opacity)
-                .lineLimit(compression >= 4 ? 1 : nil)
+                .lineLimit(compression >= 4 ? 1 : compression >= 2 ? 2 : nil)
+                .minimumScaleFactor(compression >= 3 ? 0.72 : 0.86)
                 .padding(element.padding * adaptiveScale)
                 .background { elementBackground }
                 .overlay {
@@ -293,10 +295,16 @@ struct WidgetCard<Content: View>: View {
     }
     private var contentOptions: WidgetContentOptions { fittedStyle.resolvedContent }
     private var chrome: WidgetChromeOptions { fittedStyle.resolvedChrome }
+    private var innerAvailableWidth: CGFloat? {
+        availableWidth.map { max(1, $0 - CGFloat(fittedStyle.padding * 2)) }
+    }
+    private var innerAvailableHeight: CGFloat? {
+        availableHeight.map { max(1, $0 - CGFloat(fittedStyle.padding * 2)) }
+    }
     private var styledContent: some View {
         content.environment(\.widgetStyle, fittedStyle)
-            .environment(\.openNotchAvailableWidth, availableWidth)
-            .environment(\.openNotchAvailableHeight, availableHeight)
+            .environment(\.openNotchAvailableWidth, innerAvailableWidth)
+            .environment(\.openNotchAvailableHeight, innerAvailableHeight)
             .font(fittedStyle.font())
             .foregroundStyle(style.textColor.color).tint(style.accentColor.color)
             .controlSize(contentOptions.controlSize.swiftUI)
@@ -370,19 +378,21 @@ struct WidgetCard<Content: View>: View {
     var body: some View {
         Group {
             if let height = availableHeight {
-                let padding = fittedStyle.padding
-                if compression >= 5 {
-                    ScrollView(.vertical) {
-                        styledContent.frame(maxWidth: .infinity, alignment: contentFrameAlignment)
-                    }
-                    .padding(padding).frame(height: max(0, height)).clipped()
-                } else {
+                let padding = CGFloat(fittedStyle.padding)
+                let innerHeight = max(1, height - padding * 2)
+                // Adaptation happens before this point. The scroll view is only a safety
+                // net: when content fits it has no scroll range, and when it does not fit
+                // the user can still reach every control instead of losing it to clipping.
+                ScrollView(.vertical) {
                     styledContent
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: contentFrameAlignment)
-                        .padding(padding)
-                        .frame(height: max(0, height))
-                        .clipped()
+                        .frame(maxWidth: .infinity, minHeight: innerHeight, alignment: contentFrameAlignment)
                 }
+                .scrollIndicators(.hidden)
+                .frame(maxWidth: .infinity, alignment: contentFrameAlignment)
+                .frame(height: innerHeight, alignment: contentFrameAlignment)
+                .padding(padding)
+                .frame(height: max(0, height))
+                .clipped()
             } else {
                 styledContent
                     .frame(maxWidth: .infinity, minHeight: style.minimumHeight, alignment: contentOptions.alignment.alignment)
