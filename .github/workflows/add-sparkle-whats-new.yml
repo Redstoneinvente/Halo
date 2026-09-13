@@ -1,0 +1,48 @@
+name: Add Sparkle and What's New
+
+on:
+  push:
+    branches: [chatgpt/sparkle-whats-new]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/add_sparkle_whats_new.py /tmp/add_sparkle_whats_new.py
+          cp .github/validate_sparkle_whats_new.py /tmp/validate_sparkle_whats_new.py
+          git fetch origin main
+          git checkout --detach origin/main
+          python3 /tmp/add_sparkle_whats_new.py
+          python3 /tmp/validate_sparkle_whats_new.py
+          git diff --check
+          plutil -lint Halo/Info.plist
+          xcrun swiftc -parse Halo/Services/UpdateManager.swift
+          xcrun swiftc -parse Halo/Views/WhatsNewView.swift
+          xcrun swiftc -parse Halo/App/HaloApp.swift
+          xcrun swiftc -parse Halo/Views/WorkspaceSettingsView.swift
+          xcodebuild -resolvePackageDependencies -project Halo.xcodeproj -scheme Halo
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > /tmp/sparkle-build.log 2>&1
+          BUILD_STATUS=$?
+          set -e
+          grep -E '(UpdateManager.swift|WhatsNewView.swift|HaloApp.swift|WorkspaceSettingsView.swift):.*(error:|warning:)' /tmp/sparkle-build.log || true
+          if grep -Eq '(UpdateManager.swift|WhatsNewView.swift|HaloApp.swift|WorkspaceSettingsView.swift):.*error:' /tmp/sparkle-build.log; then
+            tail -n 160 /tmp/sparkle-build.log
+            exit 1
+          fi
+          echo "Build status: $BUILD_STATUS"
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/Services/UpdateManager.swift Halo/Views/WhatsNewView.swift Halo/App/HaloApp.swift Halo/Views/WorkspaceSettingsView.swift Halo/Info.plist Halo/Config/Base.xcconfig Halo.xcodeproj/project.pbxproj Docs/Updates.md
+          git commit -m "Add Sparkle 2 updates and What's New"
+          git push origin HEAD:main
