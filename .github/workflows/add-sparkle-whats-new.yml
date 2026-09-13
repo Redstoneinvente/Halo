@@ -18,14 +18,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp .github/add_sparkle_whats_new.py /tmp/add_sparkle_whats_new.py
           cp .github/fix_sparkle_startup_abort.py /tmp/fix_sparkle_startup_abort.py
-          cp .github/validate_sparkle_whats_new.py /tmp/validate_sparkle_whats_new.py
           git fetch origin main
           git checkout --detach origin/main
-          python3 /tmp/add_sparkle_whats_new.py
           python3 /tmp/fix_sparkle_startup_abort.py
-          python3 /tmp/validate_sparkle_whats_new.py
           grep -q 'private var controller: SPUStandardUpdaterController?' Halo/Services/UpdateManager.swift
           ! grep -q 'private let controller: SPUStandardUpdaterController' Halo/Services/UpdateManager.swift
           grep -q 'CFBundleShortVersionString' Halo/Info.plist
@@ -34,20 +30,19 @@ jobs:
           git diff --check
           plutil -lint Halo/Info.plist
           xcrun swiftc -parse Halo/Services/UpdateManager.swift
-          xcrun swiftc -parse Halo/Views/WhatsNewView.swift
-          xcrun swiftc -parse Halo/App/HaloApp.swift
           xcodebuild -resolvePackageDependencies -project Halo.xcodeproj -scheme Halo
           set +e
           xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > /tmp/sparkle-build.log 2>&1
           BUILD_STATUS=$?
           set -e
-          if grep -Eq '(UpdateManager.swift|WhatsNewView.swift|HaloApp.swift):.*error:' /tmp/sparkle-build.log; then
+          grep -E 'UpdateManager.swift:.*(error:|warning:)' /tmp/sparkle-build.log || true
+          if grep -Eq 'UpdateManager.swift:.*error:' /tmp/sparkle-build.log; then
             tail -n 180 /tmp/sparkle-build.log
             exit 1
           fi
           if [ -f build/Debug/Halo.app/Contents/Info.plist ]; then
-            /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Debug/Halo.app/Contents/Info.plist
-            /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' build/Debug/Halo.app/Contents/Info.plist
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Debug/Halo.app/Contents/Info.plist)" = "0.2.0"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' build/Debug/Halo.app/Contents/Info.plist)" = "200"
           fi
           echo "Build status: $BUILD_STATUS"
           git config user.name 'Doshagyasing Gowardun'
