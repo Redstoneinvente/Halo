@@ -39,3 +39,5 @@ jobs:
           git rm -f .github/workflows/one-time-move-visual-workspace-fast.yml
           git commit -m 'Move visual workspace controls into Appearance'
           git push origin HEAD:main
+
+# one-shot trigger
