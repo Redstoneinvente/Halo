@@ -1,0 +1,14 @@
+name: Validate Visual Workspace Baseline
+
+on:
+  push:
+    branches:
+      - chatgpt/visual-workspace-baseline-validation
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Halo baseline
+        run: xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
