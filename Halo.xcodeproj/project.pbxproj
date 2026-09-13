@@ -61,6 +61,8 @@
 		F8614B823053291B00D4943C /* Halo.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6C3053291B00D4943C /* Halo.png */; };
 		A11C0F1A0000000000000311 /* Views/VisualWorkspaceAdaptiveWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */; };
 		A11C0F1A0000000000000321 /* Views/ActivationSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */; };
+		A11C0F1A0000000000000351 /* Services/SparkleLinkProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000352 /* Services/SparkleLinkProbe.swift */; };
+		A11C0F1A0000000000000353 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000354 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -139,6 +141,7 @@
 		A11C0F1A0000000000000001 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Halo/Config/Base.xcconfig; sourceTree = SOURCE_ROOT; };
 		A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/VisualWorkspaceAdaptiveWidgets.swift; sourceTree = "<group>"; };
 		A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ActivationSequence.swift; sourceTree = "<group>"; };
+		A11C0F1A0000000000000352 /* Services/SparkleLinkProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SparkleLinkProbe.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -150,6 +153,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A11C0F1A0000000000000353 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -213,6 +217,7 @@
 				00000000000000000000006C /* Views/ModuleViews.swift */,
 				A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */,
 				A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */,
+				A11C0F1A0000000000000352 /* Services/SparkleLinkProbe.swift */,
 				00000000000000000000006D /* Services/Integrations.swift */,
 				00000000000000000000006E /* Services/CaptureService.swift */,
 				00000000000000000000006F /* Core/ExtensionContracts.swift */,
@@ -331,6 +336,9 @@
 			);
 			dependencies = (
 			);
+			packageProductDependencies = (
+				A11C0F1A0000000000000354 /* Sparkle */,
+			);
 			name = Halo;
 			productName = Halo;
 			productReference = 000000000000000000000006 /* Halo.app */;
@@ -370,6 +378,9 @@
 			);
 			mainGroup = 000000000000000000000002;
 			productRefGroup = 000000000000000000000004 /* Products */;
+			packageReferences = (
+				A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -437,6 +448,7 @@
 				0000000000000000000000D0 /* Views/ModuleViews.swift in Sources */,
 				A11C0F1A0000000000000311 /* Views/VisualWorkspaceAdaptiveWidgets.swift in Sources */,
 				A11C0F1A0000000000000321 /* Views/ActivationSequence.swift in Sources */,
+				A11C0F1A0000000000000351 /* Services/SparkleLinkProbe.swift in Sources */,
 				0000000000000000000000D1 /* Services/Integrations.swift in Sources */,
 				0000000000000000000000D2 /* Services/CaptureService.swift in Sources */,
 				0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */,
@@ -572,6 +584,25 @@
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A11C0F1A0000000000000354 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCConfigurationList section */
 		00000000000000000000000A /* Build configuration list for PBXProject "Halo" */ = {
