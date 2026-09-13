@@ -1,0 +1,38 @@
+name: One-time Visual Workspace Background Fast Apply
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-visual-workspace-background-fast.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply background sync
+        run: python3 Scripts/one_time_visual_workspace_background_sync.py
+      - name: Validate patch structure
+        run: |
+          git diff --check
+          grep -q 'visualWorkspaceBackground' Halo/Views/WorkspaceSettingsView.swift
+          grep -q 'Visual Workspace' Halo/Views/WorkspaceSettingsView.swift
+          grep -q 'Glass blur' Halo/Views/WorkspaceSettingsView.swift
+          grep -q 'case .image, .video:' Halo/Views/WidgetSettingsView.swift
+          grep -q 'glassStrengthLayer' Halo/Views/SurfaceView.swift
+          ! grep -q 'ColorPicker("Solid / tint color"' Halo/Views/WidgetSettingsView.swift
+      - name: Commit implementation and clean one-shot files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Views/WorkspaceSettingsView.swift Halo/Views/WidgetSettingsView.swift Halo/Views/SurfaceView.swift
+          git rm -f --ignore-unmatch Scripts/one_time_visual_workspace_background_sync.py
+          git rm -f --ignore-unmatch .github/workflows/one-time-visual-workspace-background-sync.yml
+          git rm -f --ignore-unmatch .github/workflows/one-time-visual-workspace-background-fast.yml
+          git commit -m 'Sync Visual Workspace background controls'
+          git push origin HEAD:main
