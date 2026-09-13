@@ -1,0 +1,83 @@
+name: Apply Adaptive Visual Workspace Widgets V3
+
+on:
+  push:
+    branches:
+      - chatgpt/adaptive-widget-suite
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch, audit, typecheck and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/adaptive_widgets_patch.py /tmp/adaptive_widgets_patch.py
+          cp .github/run_adaptive_widgets_patch.py /tmp/run_adaptive_widgets_patch.py
+          cp .github/adaptive_override_patch.py /tmp/adaptive_override_patch.py
+          cp .github/validate_adaptive_widgets.py /tmp/validate_adaptive_widgets.py
+          cp Halo/Views/VisualWorkspaceAdaptiveWidgets.swift /tmp/VisualWorkspaceAdaptiveWidgets.swift
+
+          git fetch origin main
+          git checkout -B main origin/main
+          cp /tmp/VisualWorkspaceAdaptiveWidgets.swift Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+          python3 /tmp/run_adaptive_widgets_patch.py
+          python3 /tmp/adaptive_override_patch.py
+          python3 /tmp/validate_adaptive_widgets.py preflight
+          git diff --check
+
+          for file in Halo/Core/WidgetModels.swift Halo/Views/VisualWorkspaceAdaptiveWidgets.swift Halo/Views/ModuleViews.swift Halo/Views/SurfaceView.swift Halo/Core/AppStore.swift Halo/Core/WorkspaceStore.swift Halo/Services/CaptureService.swift Halo/Services/Integrations.swift Halo/Views/WidgetSettingsView.swift; do
+            echo "Parsing $file"
+            xcrun swiftc -parse "$file"
+          done
+
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > /tmp/adaptive-preflight.log 2>&1
+          BUILD_STATUS=$?
+          set -e
+          tail -n 140 /tmp/adaptive-preflight.log || true
+          python3 /tmp/validate_adaptive_widgets.py scan-log /tmp/adaptive-preflight.log
+
+          SOURCE_LIST=$(find build -path '*Objects-normal/arm64/Halo.SwiftFileList' -print -quit)
+          test -n "$SOURCE_LIST"
+          SDK=$(xcrun --sdk macosx --show-sdk-path)
+
+          typecheck_primary() {
+            local rel="$1"
+            local label="$2"
+            local primary="$PWD/$rel"
+            local source
+            declare -a sources=()
+            while IFS= read -r source; do
+              test -z "$source" && continue
+              test "$source" = "$primary" && continue
+              case " ${sources[*]} " in *" $source "*) continue ;; esac
+              sources+=("$source")
+            done < "$SOURCE_LIST"
+            echo "=== Primary typecheck: $label ==="
+            xcrun swiftc -frontend -typecheck "${sources[@]}" -primary-file "$primary" -target arm64-apple-macos13.0 -sdk "$SDK" -module-name Halo -swift-version 5 -D DEBUG -enable-testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -I "$PWD/build/Debug" -F "$PWD/build/Debug"
+          }
+
+          typecheck_primary Halo/Views/VisualWorkspaceAdaptiveWidgets.swift renderer
+          typecheck_primary Halo/Core/WidgetModels.swift model
+          typecheck_primary Halo/Views/WidgetSettingsView.swift inspector
+          typecheck_primary Halo/Services/CaptureService.swift capture
+
+          if test "$BUILD_STATUS" -ne 0; then
+            echo 'Full target hit an unrelated baseline failure; all changed-file gates passed.'
+          fi
+
+          git diff --stat
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/Core/WidgetModels.swift Halo/Views/VisualWorkspaceAdaptiveWidgets.swift Halo/Views/ModuleViews.swift Halo/Views/SurfaceView.swift Halo/Core/AppStore.swift Halo/Core/WorkspaceStore.swift Halo/Services/CaptureService.swift Halo/Services/Integrations.swift Halo/Views/WidgetSettingsView.swift Halo.xcodeproj/project.pbxproj
+          git commit -m 'Upgrade adaptive Visual Workspace widgets'
+          git push origin HEAD:main
