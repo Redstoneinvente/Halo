@@ -1,0 +1,282 @@
+name: Fix Visual Workspace margins and drag placement
+
+on:
+  push:
+    branches:
+      - chatgpt/visual-workspace-margins-dnd
+
+permissions:
+  contents: write
+
+jobs:
+  patch-main:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch latest main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('Halo/Views/WidgetSettingsView.swift')
+          text = path.read_text()
+
+          editor_marker = 'struct OpenedNotchWorkspaceEditor: View {\n'
+          helper_types = '''private struct VisualWorkspaceGridDropTarget: Equatable {
+              let column: Int
+              let row: Int
+          }
+
+          private struct VisualWorkspaceGridDropDelegate: DropDelegate {
+              let columns: Int
+              let rows: Int
+              let leading: CGFloat
+              let top: CGFloat
+              let gap: CGFloat
+              let cellWidth: CGFloat
+              let cellHeight: CGFloat
+              let target: Binding<VisualWorkspaceGridDropTarget?>
+              let accept: ([NSItemProvider], Int, Int) -> Bool
+
+              func validateDrop(info: DropInfo) -> Bool {
+                  !info.itemProviders(for: [UTType.text]).isEmpty
+              }
+
+              func dropEntered(info: DropInfo) {
+                  target.wrappedValue = cell(at: info.location)
+              }
+
+              func dropUpdated(info: DropInfo) -> DropProposal? {
+                  target.wrappedValue = cell(at: info.location)
+                  return DropProposal(operation: .move)
+              }
+
+              func dropExited(info: DropInfo) {
+                  target.wrappedValue = nil
+              }
+
+              func performDrop(info: DropInfo) -> Bool {
+                  guard let cell = cell(at: info.location) else {
+                      target.wrappedValue = nil
+                      return false
+                  }
+                  target.wrappedValue = nil
+                  return accept(info.itemProviders(for: [UTType.text]), cell.column, cell.row)
+              }
+
+              private func cell(at point: CGPoint) -> VisualWorkspaceGridDropTarget? {
+                  let safeColumns = max(1, columns)
+                  let safeRows = max(1, rows)
+                  let x = point.x - leading
+                  let y = point.y - top
+                  let gridWidth = CGFloat(safeColumns) * cellWidth + CGFloat(max(0, safeColumns - 1)) * gap
+                  let gridHeight = CGFloat(safeRows) * cellHeight + CGFloat(max(0, safeRows - 1)) * gap
+                  guard x >= 0, y >= 0, x <= gridWidth, y <= gridHeight else { return nil }
+
+                  let strideX = max(1, cellWidth + gap)
+                  let strideY = max(1, cellHeight + gap)
+                  let column = min(safeColumns - 1, max(0, Int((x + gap * 0.5) / strideX)))
+                  let row = min(safeRows - 1, max(0, Int((y + gap * 0.5) / strideY)))
+                  return VisualWorkspaceGridDropTarget(column: column, row: row)
+              }
+          }
+
+          '''
+          if 'private struct VisualWorkspaceGridDropDelegate' not in text:
+              if text.count(editor_marker) != 1:
+                  raise SystemExit('Could not uniquely locate OpenedNotchWorkspaceEditor')
+              text = text.replace(editor_marker, helper_types + editor_marker, 1)
+
+          state_old = '    @State private var backgroundMode = false\n\n    private var opened: OpenNotchLayout { layout.resolvedOpenNotchLayout }\n'
+          state_new = '    @State private var backgroundMode = false\n    @State private var gridDropTarget: VisualWorkspaceGridDropTarget?\n\n    private var opened: OpenNotchLayout { layout.resolvedOpenNotchLayout }\n'
+          if state_old in text:
+              text = text.replace(state_old, state_new, 1)
+          elif '@State private var gridDropTarget' not in text:
+              raise SystemExit('Could not add grid drop target state')
+
+          direct_pattern = re.compile(r'    private func directGridPreview\(canvasSize: CGSize\) -> some View \{.*?\n    \}\n\n    private func gridItemPreview', re.S)
+          direct_replacement = '''    private func directGridPreview(canvasSize: CGSize) -> some View {
+              let margins = visualWorkspaceMargins
+              let leading = CGFloat(margins.leading)
+              let trailing = CGFloat(margins.trailing)
+              let top = CGFloat(margins.top)
+              let bottom = CGFloat(margins.bottom)
+              let columns = opened.resolvedGridColumns
+              let rows = max(opened.resolvedGridRows, opened.requiredGridRows)
+              let gap = max(2, CGFloat(opened.resolvedGridGap) * 0.65)
+              let innerWidth = max(1, canvasSize.width - leading - trailing)
+              let innerHeight = max(1, canvasSize.height - top - bottom)
+              let cellWidth = max(1, (innerWidth - gap * CGFloat(max(0, columns - 1))) / CGFloat(columns))
+              let cellHeight = max(1, (innerHeight - gap * CGFloat(max(0, rows - 1))) / CGFloat(max(1, rows)))
+              let items = opened.resolvedGridItems
+              return ZStack(alignment: .topLeading) {
+                  Canvas { context, _ in
+                      for column in 0...columns {
+                          let x = leading + CGFloat(column) * (cellWidth + gap) - (column == columns ? gap : 0)
+                          var path = Path(); path.move(to: CGPoint(x: x, y: top)); path.addLine(to: CGPoint(x: x, y: canvasSize.height - bottom))
+                          context.stroke(path, with: .color(.white.opacity(0.045)), lineWidth: 0.5)
+                      }
+                      for row in 0...rows {
+                          let y = top + CGFloat(row) * (cellHeight + gap) - (row == rows ? gap : 0)
+                          var path = Path(); path.move(to: CGPoint(x: leading, y: y)); path.addLine(to: CGPoint(x: canvasSize.width - trailing, y: y))
+                          context.stroke(path, with: .color(.white.opacity(0.045)), lineWidth: 0.5)
+                      }
+                  }
+                  .allowsHitTesting(false)
+
+                  ForEach(0..<(columns * rows), id: \\.self) { index in
+                      let column = index % columns
+                      let row = index / columns
+                      let targetCell = VisualWorkspaceGridDropTarget(column: column, row: row)
+                      RoundedRectangle(cornerRadius: 7, style: .continuous)
+                          .fill(gridDropTarget == targetCell ? Color.accentColor.opacity(0.16) : Color.clear)
+                          .overlay {
+                              if gridDropTarget == targetCell {
+                                  RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                      .stroke(Color.accentColor.opacity(0.8), lineWidth: 1.5)
+                              }
+                          }
+                          .frame(width: cellWidth, height: cellHeight)
+                          .position(x: leading + CGFloat(column) * (cellWidth + gap) + cellWidth / 2,
+                                    y: top + CGFloat(row) * (cellHeight + gap) + cellHeight / 2)
+                          .allowsHitTesting(false)
+                  }
+
+                  ForEach(items) { item in
+                      if let raw = item.gridPlacement {
+                          let placement = raw.clamped(columns: columns)
+                          let width = cellWidth * CGFloat(placement.columnSpan) + gap * CGFloat(max(0, placement.columnSpan - 1))
+                          let height = cellHeight * CGFloat(placement.rowSpan) + gap * CGFloat(max(0, placement.rowSpan - 1))
+                          let x = leading + CGFloat(placement.column) * (cellWidth + gap)
+                          let y = top + CGFloat(placement.row) * (cellHeight + gap)
+                          gridItemPreview(item, size: CGSize(width: width, height: height))
+                              .frame(width: width, height: height)
+                              .position(x: x + width / 2, y: y + height / 2)
+                      }
+                  }
+
+                  if items.isEmpty {
+                      VStack(spacing: 9) {
+                          Image(systemName: "square.grid.3x3").font(.system(size: 28, weight: .light)).foregroundStyle(.secondary)
+                          Text("Empty workspace").font(.headline)
+                          Text("Add widgets directly to the grid.").font(.caption).foregroundStyle(.secondary)
+                          Menu("Add Widget") { ForEach(ModuleID.allCases) { module in Button(module.title) { addModule(module) } } }
+                              .buttonStyle(.borderedProminent)
+                      }
+                      .frame(width: canvasSize.width, height: canvasSize.height)
+                  }
+              }
+              .frame(width: canvasSize.width, height: canvasSize.height)
+              .contentShape(Rectangle())
+              .onDrop(of: [UTType.text], delegate: VisualWorkspaceGridDropDelegate(
+                  columns: columns,
+                  rows: rows,
+                  leading: leading,
+                  top: top,
+                  gap: gap,
+                  cellWidth: cellWidth,
+                  cellHeight: cellHeight,
+                  target: $gridDropTarget,
+                  accept: acceptGridDrop
+              ))
+              .clipped()
+          }
+
+          private func gridItemPreview'''
+          text, count = direct_pattern.subn(direct_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'Expected to replace one directGridPreview, replaced {count}')
+
+          inspector_old = '''    @ViewBuilder private var inspector: some View {
+              Form {
+                  if backgroundMode { backgroundInspector }
+          '''
+          inspector_new = '''    @ViewBuilder private var inspector: some View {
+              Form {
+                  workspaceMarginsInspector
+                  if backgroundMode { backgroundInspector }
+          '''
+          if inspector_old in text:
+              text = text.replace(inspector_old, inspector_new, 1)
+          elif 'workspaceMarginsInspector\n            if backgroundMode' not in text:
+              raise SystemExit('Could not add workspace margins to inspector')
+
+          item_inspector_marker = '    @ViewBuilder private func itemInspector(_ item: OpenNotchItem) -> some View {\n'
+          margin_helpers = '''    private var safeWorkspaceSideInset: Double {
+              min(24.0, max(12.0, 8.0 + layout.appearance.surface.shoulder * 0.5))
+          }
+
+          private var visualWorkspaceMargins: OpenNotchInsets {
+              let configured = opened.resolvedGridPadding
+              return OpenNotchInsets(
+                  top: max(configured.top, 10),
+                  leading: max(configured.leading, safeWorkspaceSideInset),
+                  bottom: max(configured.bottom, 12),
+                  trailing: max(configured.trailing, safeWorkspaceSideInset)
+              )
+          }
+
+          private func gridMarginBinding(_ keyPath: WritableKeyPath<OpenNotchInsets, Double>) -> Binding<Double> {
+              Binding(
+                  get: { visualWorkspaceMargins[keyPath: keyPath] },
+                  set: { value in
+                      mutateOpen { open in
+                          var margins = open.resolvedGridPadding
+                          margins[keyPath: keyPath] = value
+                          open.gridPadding = margins
+                      }
+                  }
+              )
+          }
+
+          private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
+              mutateOpen { $0.gridPadding = margins }
+          }
+
+          @ViewBuilder private var workspaceMarginsInspector: some View {
+              Section("Workspace Margins") {
+                  PreciseSlider(title: "Top", value: gridMarginBinding(\\.top), range: 10...96, step: 1, suffix: "pt")
+                  PreciseSlider(title: "Leading", value: gridMarginBinding(\\.leading), range: safeWorkspaceSideInset...96, step: 1, suffix: "pt")
+                  PreciseSlider(title: "Bottom", value: gridMarginBinding(\\.bottom), range: 12...96, step: 1, suffix: "pt")
+                  PreciseSlider(title: "Trailing", value: gridMarginBinding(\\.trailing), range: safeWorkspaceSideInset...96, step: 1, suffix: "pt")
+                  HStack {
+                      Button("Safe minimum") {
+                          setWorkspaceMargins(OpenNotchInsets(top: 10, leading: safeWorkspaceSideInset, bottom: 12, trailing: safeWorkspaceSideInset))
+                      }
+                      Button("Comfortable") {
+                          let side = max(18, safeWorkspaceSideInset)
+                          setWorkspaceMargins(OpenNotchInsets(top: 16, leading: side, bottom: 16, trailing: side))
+                      }
+                  }
+                  Text("These margins apply only to Visual Workspace. Halo keeps the minimum contour-safe inset, so widgets stay clear of rounded and scooped notch edges even at the tightest setting.")
+                      .font(.caption).foregroundStyle(.secondary)
+              }
+          }
+
+          '''
+          if 'private var workspaceMarginsInspector' not in text:
+              if text.count(item_inspector_marker) != 1:
+                  raise SystemExit('Could not uniquely locate itemInspector')
+              text = text.replace(item_inspector_marker, margin_helpers + item_inspector_marker, 1)
+
+          path.write_text(text)
+          PY
+
+          git diff --check
+          xcrun swiftc -parse Halo/Views/WidgetSettingsView.swift
+          grep -q 'private struct VisualWorkspaceGridDropDelegate' Halo/Views/WidgetSettingsView.swift
+          grep -q 'Section("Workspace Margins")' Halo/Views/WidgetSettingsView.swift
+          grep -q 'target: \$gridDropTarget' Halo/Views/WidgetSettingsView.swift
+
+          git config user.name "Doshagyasing Gowardun"
+          git config user.email "45894815+Redstoneinvente@users.noreply.github.com"
+          git add Halo/Views/WidgetSettingsView.swift
+          git commit -m "Fix Visual Workspace margins and drag placement"
+          git push origin HEAD:main
