@@ -16,12 +16,12 @@ jobs:
       - name: Inspect native capture capabilities
         shell: bash
         run: |
-          echo '=== screencapture help ==='
-          /usr/sbin/screencapture -h 2>&1 || true
-          echo '=== sdk ==='
           SDK="$(xcrun --sdk macosx --show-sdk-path)"
-          xcrun --sdk macosx --show-sdk-version
-          echo '=== ScreenCaptureKit module files ==='
-          find "$SDK/System/Library/Frameworks/ScreenCaptureKit.framework/Modules" -maxdepth 4 -type f -print || true
-          echo '=== ScreenCaptureKit audio APIs ==='
-          grep -R -n -E "capturesAudio|captureMicrophone|SCRecordingOutput|SCStreamOutputType|SCStreamConfiguration|SCShareableContent|sourceRect" "$SDK/System/Library/Frameworks/ScreenCaptureKit.framework" 2>/dev/null | head -260 || true
+          echo '=== SCRecordingOutput ==='
+          sed -n '20,115p' "$SDK/System/Library/Frameworks/ScreenCaptureKit.framework/Versions/A/Headers/SCRecordingOutput.h"
+          echo '=== SCContentFilter ==='
+          grep -n -A8 -B4 "initWithDisplay\|initWithDesktopIndependentWindow" "$SDK/System/Library/Frameworks/ScreenCaptureKit.framework/Versions/A/Headers/SCContentFilter.h" || true
+          echo '=== SCStream configuration audio ==='
+          sed -n '250,370p' "$SDK/System/Library/Frameworks/ScreenCaptureKit.framework/Versions/A/Headers/SCStream.h"
+          echo '=== Screen objects ==='
+          grep -n -A8 -B4 "@interface SCDisplay\|displayID\|width\|height" "$SDK/System/Library/Frameworks/ScreenCaptureKit.framework/Versions/A/Headers/SCShareableContent.h" | head -100 || true
