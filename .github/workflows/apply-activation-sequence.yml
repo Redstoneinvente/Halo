@@ -21,17 +21,19 @@ jobs:
         run: |
           set -euo pipefail
           cp .github/activation_sequence_patch.py /tmp/activation_sequence_patch.py
+          cp .github/activation_sequence_polish.py /tmp/activation_sequence_polish.py
           cp Halo/Views/ActivationSequence.swift /tmp/ActivationSequence.swift
 
           git fetch origin main
           git checkout -B main origin/main
           cp /tmp/ActivationSequence.swift Halo/Views/ActivationSequence.swift
           python3 /tmp/activation_sequence_patch.py
+          python3 /tmp/activation_sequence_polish.py
 
           python3 - <<'PY'
           import subprocess
           from pathlib import Path
-          expected = {
+          allowed = {
               'Halo/App/HaloApp.swift',
               'Halo/NotchEngine/WindowManager.swift',
               'Halo/Views/WorkspaceSettingsView.swift',
@@ -41,11 +43,14 @@ jobs:
           tracked = set(subprocess.check_output(['git','diff','--name-only'], text=True).splitlines())
           untracked = set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'], text=True).splitlines())
           changed = tracked | untracked
-          if changed != expected:
+          if not changed or not changed.issubset(allowed):
               raise SystemExit(f'Unexpected production scope: {sorted(changed)}')
+          required = {'Halo/Views/ActivationSequence.swift', 'Halo/NotchEngine/WindowManager.swift'}
+          if not required.issubset(changed):
+              raise SystemExit(f'Polish did not modify the expected runtime files: {sorted(changed)}')
           text = Path('Halo/NotchEngine/WindowManager.swift').read_text()
-          if 'ActivationSequenceOverlay(displayID: id' not in text:
-              raise SystemExit('Activation overlay was not mounted')
+          if 'ActivationSequenceSurfaceHost(displayID: id' not in text:
+              raise SystemExit('Crossfading activation host was not mounted')
           if 'SurfaceAnimator' not in text or 'func move(panel:' not in text:
               raise SystemExit('Normal surface animator unexpectedly missing')
           app = Path('Halo/App/HaloApp.swift').read_text()
@@ -58,10 +63,15 @@ jobs:
           for preset in ['haloReveal','powerOn','lightSweep','softPulse','aperture','liquid','materialize','digitalBoot','neonIgnition','spark','ripple','warpIn','blackHole','minimalFade','none']:
               if f'case {preset}' not in activation and f'case .{preset}' not in activation:
                   raise SystemExit(f'Missing activation preset: {preset}')
-          for requirement in ['allowsHitTesting(false)', 'accessibilityDisplayShouldReduceMotion', 'processInfo.isLowPowerModeEnabled', 'randomFavorite', 'customSoundPath', 'Display With Notch Only']:
+          for requirement in [
+              'allowsHitTesting(false)', 'accessibilityDisplayShouldReduceMotion',
+              'processInfo.isLowPowerModeEnabled', 'randomFavorite', 'customSoundPath',
+              'Display With Notch Only', 'systemOutputIsMuted()', 'HaloContour(kind: effectiveShape',
+              'normalOpacity(for: presentation.preset'
+          ]:
               if requirement not in activation:
                   raise SystemExit(f'Missing activation requirement: {requirement}')
-          print('Activation scope and architecture audit passed.')
+          print('Activation scope, handoff, contour and architecture audit passed.')
           PY
 
           git diff --check
@@ -120,5 +130,5 @@ jobs:
           git config user.name 'Doshagyasing Gowardun'
           git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
           git add Halo/App/HaloApp.swift Halo/NotchEngine/WindowManager.swift Halo/Views/WorkspaceSettingsView.swift Halo/Views/ActivationSequence.swift Halo.xcodeproj/project.pbxproj
-          git commit -m 'Add Halo Activation Sequence'
+          git commit -m 'Polish Halo Activation Sequence handoff'
           git push origin HEAD:main
