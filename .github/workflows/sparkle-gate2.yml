@@ -1,0 +1,61 @@
+name: Sparkle Gate 2
+
+on:
+  push:
+    branches:
+      - feature/sparkle-2-gate1
+    paths:
+      - '.github/scripts/apply_sparkle_gate2.py'
+      - '.github/workflows/sparkle-gate2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply and validate Gate 2
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 .github/scripts/apply_sparkle_gate2.py
+          git diff --check
+
+          # Gate 2 must remain manual-only and dormant until explicitly invoked.
+          grep -q 'startingUpdater: false' Halo/Services/SparkleUpdateController.swift
+          grep -q 'title: "Check for Updates…"' Halo/App/HaloApp.swift
+          ! grep -q 'SUEnableAutomaticChecks' Halo/Info.plist
+          ! grep -q 'SUAutomaticallyUpdate' Halo/Info.plist
+
+          xcodebuild -resolvePackageDependencies -project Halo.xcodeproj -scheme Halo
+          swiftc -parse Halo/Services/SparkleUpdateController.swift
+          swiftc -parse Halo/App/HaloApp.swift
+
+          # Real target compile. Halo has unrelated baseline errors, so reject only
+          # diagnostics attributable to Gate 2 / Sparkle integration.
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > /tmp/halo-gate2.log 2>&1
+          STATUS=$?
+          set -e
+
+          if grep -E 'error:' /tmp/halo-gate2.log | grep -E 'SparkleUpdateController.swift|HaloApp.swift|Sparkle|Missing package product'; then
+            tail -n 350 /tmp/halo-gate2.log
+            exit 1
+          fi
+
+          echo "Halo baseline build status: $STATUS"
+
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/Services/SparkleUpdateController.swift Halo/Services/SparkleLinkProbe.swift Halo/App/HaloApp.swift Halo.xcodeproj/project.pbxproj
+          if ! git diff --cached --quiet; then
+            git commit -m 'Add manual Sparkle update controller'
+            git push origin HEAD:feature/sparkle-2-gate1
+          fi
