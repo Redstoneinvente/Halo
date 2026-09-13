@@ -14,6 +14,8 @@ jobs:
           fetch-depth: 0
       - name: Apply direct-grid architecture
         run: python3 Scripts/one_time_direct_widget_grid.py
+      - name: Inspect generated editor
+        run: sed -n '748,815p' Halo/Views/WidgetSettingsView.swift
       - name: Validate Swift syntax
         run: |
           xcrun swiftc -parse Halo/Core/WorkspaceModels.swift
@@ -34,7 +36,7 @@ jobs:
           if [ "$status" -ne 0 ]; then
             echo 'Full project build has an unrelated failure; changed files have no reported compiler errors.'
           fi
-      - name: Commit source and cleanup
+      - name: Commit source
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
