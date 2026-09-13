@@ -55,15 +55,12 @@ jobs:
             local label="$2"
             local primary="$PWD/$rel"
             local source
+            local filtered="/tmp/${label}-sources.txt"
             declare -a sources=()
-            declare -A seen=()
+            awk -v primary="$primary" 'NF && $0 != primary && !seen[$0]++ { print }' "$SOURCE_LIST" > "$filtered"
             while IFS= read -r source; do
-              test -z "$source" && continue
-              test "$source" = "$primary" && continue
-              if test -n "${seen[$source]:-}"; then continue; fi
-              seen[$source]=1
               sources+=("$source")
-            done < "$SOURCE_LIST"
+            done < "$filtered"
             echo "=== Primary typecheck: $label ==="
             xcrun swiftc -frontend -typecheck "${sources[@]}" -primary-file "$primary" -target arm64-apple-macos13.0 -sdk "$SDK" -module-name Halo -swift-version 5 -D DEBUG -enable-testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -I "$PWD/build/Debug" -F "$PWD/build/Debug"
           }
