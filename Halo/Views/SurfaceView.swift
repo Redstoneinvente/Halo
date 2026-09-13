@@ -1382,7 +1382,7 @@ private struct OpenNotchGroupView: View {
         GeometryReader { proxy in
             let innerWidth = max(0, proxy.size.width - CGFloat(group.padding.leading + group.padding.trailing))
             let innerHeight = max(0, proxy.size.height - CGFloat(group.padding.top + group.padding.bottom))
-            let candidates = group.items.filter(context.isVisible)
+            let candidates = group.items.filter { $0.kind == .module && $0.module != nil }.filter(context.isVisible)
             let mainAvailable = group.axis == .horizontal ? innerWidth : innerHeight
             let crossAvailable = group.axis == .horizontal ? innerHeight : innerWidth
             let wanted = preferredLength(of: candidates) + max(0, CGFloat(candidates.count - 1)) * CGFloat(group.spacing)
@@ -1520,7 +1520,8 @@ private struct OpenNotchGroupView: View {
         return values
     }
     private var estimatedHeight: CGFloat {
-        let h = group.items.reduce(0.0) { $0 + min($1.sizing.preferredHeight, 260) } + max(0, Double(group.items.count - 1)) * group.spacing
+        let widgetItems = group.items.filter { $0.kind == .module && $0.module != nil }
+        let h = widgetItems.reduce(0.0) { $0 + min($1.sizing.preferredHeight, 260) } + max(0, Double(widgetItems.count - 1)) * group.spacing
         return CGFloat(min(720, max(54, h + group.padding.top + group.padding.bottom)))
     }
     private func compressionLevel(available: CGFloat, wanted: CGFloat) -> Int {

@@ -1175,7 +1175,6 @@ struct OpenedNotchWorkspaceEditor: View {
 
     @ViewBuilder private var addMenu: some View {
         Menu("Widget") { ForEach(ModuleID.allCases) { module in Button(module.title) { addModule(module) } } }
-        Menu("Lightweight element") { ForEach(OpenNotchElementKind.allCases) { element in Button(element.title) { addElement(element) } } }
     }
 
     @ViewBuilder private var regionArrangementMenu: some View {
@@ -1493,7 +1492,7 @@ private func gridItemPreview(_ item: OpenNotchItem, size: CGSize) -> some View {
     }
 
     @ViewBuilder private func itemList(_ group: OpenNotchGroup, region: OpenNotchRegion) -> some View {
-        ForEach(group.items) { item in itemPreview(item, group: group, region: region) }
+        ForEach(group.items.filter { $0.kind == .module && $0.module != nil }) { item in itemPreview(item, group: group, region: region) }
     }
 
     private func itemPreview(_ item: OpenNotchItem, group: OpenNotchGroup, region: OpenNotchRegion) -> some View {
@@ -2612,15 +2611,6 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
             open.normalizeGridItems(pinnedID: item.id)
         }
         layout.enabled.insert(module)
-        selectedItem = item.id; selectedGroup = nil; selectedRegion = nil
-    }
-    private func addElement(_ element: OpenNotchElementKind) {
-        let item = OpenNotchItem.elementItem(element)
-        mutateOpen { open in
-            open.materializeGridItems()
-            open.gridItems?.append(item)
-            open.normalizeGridItems(pinnedID: item.id)
-        }
         selectedItem = item.id; selectedGroup = nil; selectedRegion = nil
     }
     private func addGroup(regionID: UUID? = nil) { let rid = regionID ?? selectedRegion ?? { ensureRegion(.middleCenter); return opened.regions.first(where: { $0.placement == .middleCenter })?.id }()!; let group = OpenNotchGroup(name: "Group", axis: .horizontal); mutateOpen { open in if let ri = open.regions.firstIndex(where: { $0.id == rid }) { open.regions[ri].groups.append(group) } }; selectedGroup = group.id; selectedRegion = rid }

@@ -330,7 +330,9 @@ enum OpenNotchPriority: String, Codable, CaseIterable, Identifiable {
 }
 
 enum OpenNotchItemKind: String, Codable, CaseIterable, Identifiable {
+    // element/spacer/divider remain decodable for legacy saved layouts only.
     case module, element, spacer, divider
+    static var allCases: [OpenNotchItemKind] { [.module] }
     var id: String { rawValue }
 }
 
@@ -342,11 +344,13 @@ enum OpenNotchBlockVerticalAlignment: String, Codable, CaseIterable, Identifiabl
 }
 
 enum OpenNotchElementKind: String, Codable, CaseIterable, Identifiable {
+    // Legacy decoding shim. Lightweight elements are no longer Workspace content.
     case clock, date, battery, batteryPercentage, chargingState
     case appIcon, appName, volume, brightness, timer, stopwatch
     case mediaTitle, artist, albumArt, playbackControls, playbackProgress
     case cpu, ram, storage, networkActivity
     case customText, customIcon, customImage, customGIF, button, spacer, divider
+    static var allCases: [OpenNotchElementKind] { [] }
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -544,7 +548,10 @@ struct OpenNotchGroup: Codable, Equatable, Identifiable {
         guard spacing.isFinite else { throw CocoaError(.fileReadCorruptFile) }
         var value = self
         value.name = String(name.prefix(80)); value.spacing = min(48, max(0, spacing))
-        value.padding = try padding.validated(); value.items = try items.prefix(80).map { try $0.validated() }
+        value.padding = try padding.validated()
+        value.items = try items.prefix(80)
+            .filter { $0.kind == .module && $0.module != nil }
+            .map { try $0.validated() }
         return value
     }
 }
@@ -714,10 +721,15 @@ struct OpenNotchLayout: Codable, Equatable {
         return value.isFinite ? min(320, max(56, value)) : 104
     }
     var resolvedGridPadding: OpenNotchInsets { gridPadding ?? OpenNotchInsets(top: 8, leading: 8, bottom: 8, trailing: 8) }
-    var allItems: [OpenNotchItem] { gridItems ?? regions.flatMap(\.groups).flatMap(\.items) }
+    var allItems: [OpenNotchItem] {
+        Self.workspaceWidgetItems(gridItems ?? regions.flatMap(\.groups).flatMap(\.items))
+    }
     var resolvedGridItems: [OpenNotchItem] {
-        if let gridItems { return gridItems }
-        return Self.packedGridItems(from: regions.flatMap(\.groups).flatMap(\.items), columns: resolvedGridColumns)
+        if let gridItems { return Self.workspaceWidgetItems(gridItems) }
+        return Self.packedGridItems(
+            from: Self.workspaceWidgetItems(regions.flatMap(\.groups).flatMap(\.items)),
+            columns: resolvedGridColumns
+        )
     }
     var requiredGridRows: Int {
         max(resolvedGridRows, resolvedGridItems.compactMap { item in
@@ -726,12 +738,17 @@ struct OpenNotchLayout: Codable, Equatable {
     }
 
     mutating func materializeGridItems() {
-        if gridItems == nil { gridItems = resolvedGridItems }
+        if let gridItems {
+            self.gridItems = Self.workspaceWidgetItems(gridItems)
+        } else {
+            gridItems = resolvedGridItems
+        }
         normalizeGridItems()
     }
 
     mutating func normalizeGridItems(pinnedID: UUID? = nil) {
         guard var items = gridItems else { return }
+        items = Self.workspaceWidgetItems(items)
         let columns = resolvedGridColumns
         var occupied = Set<Int>()
         let ordered: [Int]
@@ -753,8 +770,12 @@ struct OpenNotchLayout: Codable, Equatable {
         gridItems = items
     }
 
+    private static func workspaceWidgetItems(_ source: [OpenNotchItem]) -> [OpenNotchItem] {
+        source.filter { $0.kind == .module && $0.module != nil }
+    }
+
     private static func packedGridItems(from source: [OpenNotchItem], columns: Int) -> [OpenNotchItem] {
-        var items = source
+        var items = workspaceWidgetItems(source)
         var occupied = Set<Int>()
         for index in items.indices {
             let span = defaultGridSpan(for: items[index])
@@ -877,7 +898,7 @@ struct OpenNotchLayout: Codable, Equatable {
         var group = OpenNotchGroup(name: "Legacy widgets", axis: horizontal ? .horizontal : .vertical,
                                    alignment: .stretch, spacing: 12, padding: OpenNotchInsets(),
                                    items: modules.map { .moduleItem($0) })
-        if modules.isEmpty { group.items = [.elementItem(.clock, priority: .high)] }
+        if modules.isEmpty { group.items = [.moduleItem(.clock, presentation: .expanded, priority: .high)] }
         return OpenNotchLayout(preset: .custom,
             regions: [OpenNotchRegion(placement: .middleCenter, padding: OpenNotchInsets(), groups: [group])])
     }
@@ -892,48 +913,46 @@ struct OpenNotchLayout: Codable, Equatable {
         switch preset {
         case .minimal:
             return OpenNotchLayout(preset: preset, regions: [
-                r(.middleCenter, [g("Essentials", .horizontal, [.elementItem(.clock, priority: .alwaysVisible), .elementItem(.date, priority: .low), .elementItem(.batteryPercentage, priority: .high)])])
+                r(.middleCenter, [g("Essentials", .vertical, [.moduleItem(.clock, presentation: .expanded, priority: .alwaysVisible)])])
             ])
         case .media:
             return OpenNotchLayout(preset: preset, regions: [
                 r(.middleCenter, [g("Media", .vertical, [.moduleItem(.media, presentation: .expanded, priority: .alwaysVisible)])]),
-                r(.bottomCenter, [g("Audio", .horizontal, [.elementItem(.volume, priority: .high), .moduleItem(.audio, presentation: .compact, priority: .low)])])
+                r(.bottomCenter, [g("Audio", .horizontal, [.moduleItem(.audio, presentation: .compact, priority: .high)])])
             ])
         case .productivity:
             return OpenNotchLayout(preset: preset, regions: [
-                r(.topCenter, [g("Overview", .horizontal, [.elementItem(.clock, priority: .high), .elementItem(.date, priority: .normal)])]),
+                r(.topCenter, [g("Overview", .horizontal, [.moduleItem(.clock, priority: .high)])]),
                 r(.middleLeft, [g("Schedule", .vertical, [.moduleItem(.calendar, priority: .high), .moduleItem(.timer, priority: .high)])]),
                 r(.middleRight, [g("Work", .vertical, [.moduleItem(.notes, priority: .normal), .moduleItem(.shelf, priority: .low)])])
             ])
         case .systemMonitor:
             return OpenNotchLayout(preset: preset, regions: [
-                r(.topCenter, [g("Status", .horizontal, [.elementItem(.battery, priority: .high), .elementItem(.cpu, priority: .alwaysVisible), .elementItem(.ram, priority: .high), .elementItem(.networkActivity, priority: .low)])]),
                 r(.middleCenter, [g("System", .vertical, [.moduleItem(.system, presentation: .expanded, priority: .alwaysVisible)])])
             ])
         case .focus:
             return OpenNotchLayout(preset: preset, regions: [
-                r(.topCenter, [g("Time", .horizontal, [.elementItem(.clock, priority: .high), .elementItem(.date, priority: .low)])]),
+                r(.topCenter, [g("Time", .horizontal, [.moduleItem(.clock, priority: .high)])]),
                 r(.middleCenter, [g("Focus", .vertical, [.moduleItem(.timer, presentation: .expanded, priority: .alwaysVisible), .moduleItem(.notes, presentation: .compact, priority: .low)])])
             ])
         case .developer:
             return OpenNotchLayout(preset: preset, regions: [
-                r(.topCenter, [g("Machine", .horizontal, [.elementItem(.cpu, priority: .high), .elementItem(.ram, priority: .high), .elementItem(.networkActivity, priority: .normal)])]),
                 r(.middleLeft, [g("Tools", .vertical, [.moduleItem(.launcher, priority: .high), .moduleItem(.capture, priority: .normal)])]),
                 r(.middleRight, [g("Context", .vertical, [.moduleItem(.system, priority: .normal), .moduleItem(.notes, priority: .low)])])
             ])
         case .informationDense:
             return OpenNotchLayout(preset: preset, regions: [
-                r(.topLeft, [g("Time", .horizontal, [.elementItem(.clock, priority: .high), .elementItem(.date, priority: .low)])]),
-                r(.topRight, [g("System", .horizontal, [.elementItem(.batteryPercentage, priority: .high), .elementItem(.cpu, priority: .normal), .elementItem(.ram, priority: .normal)])]),
+                r(.topLeft, [g("Time", .vertical, [.moduleItem(.clock, presentation: .compact, priority: .high)])]),
+                r(.topRight, [g("System", .vertical, [.moduleItem(.system, presentation: .compact, priority: .high)])]),
                 r(.middleLeft, [g("Agenda", .vertical, [.moduleItem(.calendar, presentation: .compact, priority: .high), .moduleItem(.timer, presentation: .compact, priority: .normal)])]),
                 r(.middleRight, [g("Utilities", .vertical, [.moduleItem(.clipboard, presentation: .compact, priority: .normal), .moduleItem(.shelf, presentation: .compact, priority: .low)])]),
-                r(.bottomCenter, [g("Media", .horizontal, [.elementItem(.mediaTitle, priority: .normal), .elementItem(.playbackControls, priority: .high), .elementItem(.volume, priority: .normal)])])
+                r(.bottomCenter, [g("Media", .horizontal, [.moduleItem(.media, presentation: .compact, priority: .high), .moduleItem(.audio, presentation: .compact, priority: .normal)])])
             ])
         case .showcase:
             return OpenNotchLayout(preset: preset, regions: [
-                r(.topCenter, [g("Header", .horizontal, [.elementItem(.date, priority: .low), .elementItem(.clock, priority: .high), .elementItem(.batteryPercentage, priority: .normal)])]),
+                r(.topCenter, [g("Header", .horizontal, [.moduleItem(.clock, presentation: .compact, priority: .high)])]),
                 r(.middleCenter, [g("Hero", .vertical, [.moduleItem(.media, presentation: .expanded, priority: .alwaysVisible)])]),
-                r(.bottomCenter, [g("Controls", .horizontal, [.elementItem(.playbackControls, priority: .high), .elementItem(.volume, priority: .normal)])])
+                r(.bottomCenter, [g("Controls", .horizontal, [.moduleItem(.audio, presentation: .compact, priority: .high)])])
             ])
         case .custom:
             return migrated(modules: ModuleID.allCases.filter { $0 != .developer }, horizontal: false)
