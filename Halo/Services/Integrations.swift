@@ -12,14 +12,25 @@ import Darwin
 final class CalendarService: ObservableObject {
     @Published var events: [EKEvent] = []
     @Published var upcomingEvents: [EKEvent] = []
+    @Published var visualDayEvents: [EKEvent] = []
+    @Published var visualUpcomingEvents: [EKEvent] = []
+    @Published var calendarRevision = 0
     @Published var status = "Calendar access is off. Enable it to show today's schedule."
     private let store = EKEventStore()
     private var observer: AnyCancellable?
+
+    var hasAccess: Bool { isAuthorized }
+
     init() {
         observer = NotificationCenter.default.publisher(for: .EKEventStoreChanged)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.refresh() }
     }
+
     func requestAccess() {
+        if isAuthorized {
+            refresh()
+            return
+        }
         let completion: (Bool, Error?) -> Void = { [weak self] allowed, error in
             Task { @MainActor in
                 self?.status = allowed ? "Calendar connected" : (error?.localizedDescription ?? "Access denied. Change it in System Settings → Privacy & Security → Calendars.")
@@ -29,19 +40,49 @@ final class CalendarService: ObservableObject {
         if #available(macOS 14.0, *) { store.requestFullAccessToEvents(completion: completion) }
         else { store.requestAccess(to: .event, completion: completion) }
     }
+
     func refresh() {
-        guard isAuthorized else { events = []; upcomingEvents = []; return }
+        guard isAuthorized else {
+            events = []
+            upcomingEvents = []
+            visualDayEvents = []
+            visualUpcomingEvents = []
+            status = "Calendar access is off. Enable it to show events."
+            calendarRevision &+= 1
+            return
+        }
+
         let calendar = Calendar.autoupdatingCurrent
         let now = Date()
         let today = calendar.startOfDay(for: now)
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? now.addingTimeInterval(86_400)
-        let horizon = calendar.date(byAdding: .day, value: 14, to: today) ?? now.addingTimeInterval(14 * 86_400)
-        let all = store.events(matching: store.predicateForEvents(withStart: today, end: horizon, calendars: nil))
-            .filter { $0.endDate > now }
-            .sorted { $0.startDate < $1.startDate }
-        upcomingEvents = all
-        events = all.filter { $0.startDate < tomorrow && $0.endDate > now }
-        status = events.isEmpty ? "No more events today" : "Today's schedule"
+        let legacyHorizon = calendar.date(byAdding: .day, value: 14, to: today) ?? now.addingTimeInterval(14 * 86_400)
+        let visualHorizon = calendar.date(byAdding: .day, value: 90, to: today) ?? now.addingTimeInterval(90 * 86_400)
+        let calendars = store.calendars(for: .event)
+        let predicate = store.predicateForEvents(withStart: today, end: visualHorizon, calendars: calendars.isEmpty ? nil : calendars)
+        let raw = store.events(matching: predicate).sorted { lhs, rhs in
+            if lhs.startDate == rhs.startDate { return (lhs.title ?? "") < (rhs.title ?? "") }
+            return lhs.startDate < rhs.startDate
+        }
+
+        // Visual Workspace keeps all events for the current day, including events
+        // that already ended. This matters for all-day holidays/observances and for
+        // a calendar that is opened late in the day.
+        visualDayEvents = raw.filter { $0.startDate < tomorrow && $0.endDate > today }
+        visualUpcomingEvents = raw.filter { $0.endDate > now }
+
+        // Preserve the regular opened-notch Calendar's existing "remaining today"
+        // and 14-day upcoming semantics.
+        events = visualDayEvents.filter { $0.endDate > now }
+        upcomingEvents = visualUpcomingEvents.filter { $0.startDate < legacyHorizon }
+
+        let sourceCount = calendars.count
+        if visualDayEvents.isEmpty {
+            status = sourceCount == 0 ? "No Calendar sources are available" : "No events today · \(sourceCount) calendar\(sourceCount == 1 ? "" : "s") connected"
+        } else {
+            status = "\(visualDayEvents.count) event\(visualDayEvents.count == 1 ? "" : "s") today · \(sourceCount) calendar\(sourceCount == 1 ? "" : "s") connected"
+        }
+        calendarRevision &+= 1
     }
 
     func events(around anchor: Date) -> [EKEvent] {
@@ -50,8 +91,12 @@ final class CalendarService: ObservableObject {
         let monthStart = calendar.dateInterval(of: .month, for: anchor)?.start ?? calendar.startOfDay(for: anchor)
         let gridStart = calendar.dateInterval(of: .weekOfYear, for: monthStart)?.start ?? monthStart
         let gridEnd = calendar.date(byAdding: .day, value: 42, to: gridStart) ?? gridStart.addingTimeInterval(42 * 86_400)
-        return store.events(matching: store.predicateForEvents(withStart: gridStart, end: gridEnd, calendars: nil))
-            .sorted { $0.startDate < $1.startDate }
+        let calendars = store.calendars(for: .event)
+        return store.events(matching: store.predicateForEvents(withStart: gridStart, end: gridEnd, calendars: calendars.isEmpty ? nil : calendars))
+            .sorted { lhs, rhs in
+                if lhs.startDate == rhs.startDate { return (lhs.title ?? "") < (rhs.title ?? "") }
+                return lhs.startDate < rhs.startDate
+            }
     }
 
     private var isAuthorized: Bool {
@@ -60,6 +105,7 @@ final class CalendarService: ObservableObject {
         if #available(macOS 14.0, *) { return authorization == .fullAccess }
         return false
     }
+
     func meetingURL(for event: EKEvent) -> URL? {
         let candidates = [event.url?.absoluteString, event.location, event.notes].compactMap { $0 }.joined(separator: " ")
         guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil }

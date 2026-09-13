@@ -692,10 +692,12 @@ enum VisualCalendarWeekendStyle: String, Codable, CaseIterable, Identifiable {
 
 enum VisualCalendarFilterMode: String, Codable, CaseIterable, Identifiable {
     case all = "All Calendars"
+    case selected = "Selected Calendars"
     case work = "Work"
     case personal = "Personal"
     case birthdays = "Birthdays"
-    case custom = "Custom Selection"
+    case holidaysFestivals = "Holidays & Festivals"
+    case custom = "Calendar Names"
     var id: String { rawValue }
 }
 
@@ -761,6 +763,7 @@ struct VisualCalendarOptions: Codable, Equatable {
 
     var filterMode: VisualCalendarFilterMode = .all
     var customCalendarNames: [String] = []
+    var selectedCalendarIdentifiers: [String] = []
     var useNativeCalendarColors = true
     var eventColorOverride: WidgetColor?
 
@@ -801,6 +804,7 @@ struct VisualCalendarOptions: Codable, Equatable {
         value.gridLineOpacity = min(0.5, max(0, gridLineOpacity))
         value.backgroundOpacity = min(0.6, max(0, backgroundOpacity))
         value.customCalendarNames = customCalendarNames.map { String($0.prefix(120)) }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        value.selectedCalendarIdentifiers = Array(Set(selectedCalendarIdentifiers.map { String($0.prefix(240)) }.filter { !$0.isEmpty })).sorted()
         value.eventColorOverride = try eventColorOverride?.validated()
         value.todayColor = try todayColor?.validated()
         value.selectedDayColor = try selectedDayColor?.validated()

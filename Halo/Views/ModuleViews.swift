@@ -738,17 +738,23 @@ struct VisualWorkspaceCalendarView: View {
 
     var body: some View {
         Group {
-            switch effectiveView {
-            case .automatic: todayTile
-            case .today: todayPresentation
-            case .agenda: agendaPresentation
-            case .dayTimeline: dayTimelinePresentation
-            case .week: weekPresentation
-            case .month: monthPresentation
-            case .monthAgenda: monthAgendaPresentation
-            case .split: splitPresentation
-            case .upcoming: upcomingPresentation
-            case .minimal: minimalPresentation
+            if service.hasAccess {
+                Group {
+                    switch effectiveView {
+                    case .automatic: todayTile
+                    case .today: todayPresentation
+                    case .agenda: agendaPresentation
+                    case .dayTimeline: dayTimelinePresentation
+                    case .week: weekPresentation
+                    case .month: monthPresentation
+                    case .monthAgenda: monthAgendaPresentation
+                    case .split: splitPresentation
+                    case .upcoming: upcomingPresentation
+                    case .minimal: minimalPresentation
+                    }
+                }
+            } else {
+                calendarAccessState
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -758,7 +764,29 @@ struct VisualWorkspaceCalendarView: View {
         .animation(.easeInOut(duration: 0.2), value: selectedEventIdentifier)
         .onAppear { service.refresh(); loadMonth() }
         .onChange(of: monthAnchor) { _ in loadMonth() }
-        .onChange(of: service.events.count) { _ in loadMonth() }
+        .onChange(of: service.calendarRevision) { _ in loadMonth() }
+    }
+
+    private var calendarAccessState: some View {
+        Button { service.requestAccess() } label: {
+            VStack(spacing: family == .micro ? 3 : 7) {
+                Image(systemName: "calendar.badge.exclamationmark")
+                    .font(.system(size: family == .micro ? 18 : 26, weight: .medium))
+                    .foregroundStyle(accent)
+                if family != .micro {
+                    Text("Calendar Access")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    Text("Allow Halo to read your calendars, including subscribed holiday and observance calendars.")
+                        .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(3)
+                    Text("Enable Calendar")
+                        .font(.caption).foregroundStyle(accent)
+                }
+            }
+            .padding(family == .micro ? 2 : 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .buttonStyle(.plain)
+        .help(service.status)
     }
 
     private static func family(columns: Int, rows: Int, width: CGFloat?, height: CGFloat?) -> VisualCalendarFamily {
@@ -791,8 +819,8 @@ struct VisualWorkspaceCalendarView: View {
         }
     }
 
-    private var filteredUpcoming: [EKEvent] { service.upcomingEvents.filter(matchesFilter) }
-    private var filteredToday: [EKEvent] { service.events.filter(matchesFilter) }
+    private var filteredUpcoming: [EKEvent] { service.visualUpcomingEvents.filter(matchesFilter) }
+    private var filteredToday: [EKEvent] { service.visualDayEvents.filter(matchesFilter) }
     private var filteredMonth: [EKEvent] { monthEvents.filter(matchesFilter) }
     private var eventsForSelectedDate: [EKEvent] { events(on: selectedDate) }
     private var selectedEvent: EKEvent? {
@@ -819,9 +847,9 @@ struct VisualWorkspaceCalendarView: View {
     private var minimalPresentation: some View {
         VStack(spacing: 4) {
             Text(selectedDate, format: .dateTime.weekday(.abbreviated).locale(.autoupdatingCurrent))
-                .font(font(settings.dateTypography, size: family == .micro ? 10 : 12)).textCase(.uppercase).foregroundStyle(.secondary)
+                .font(dateFont(family == .micro ? 10 : 12)).textCase(.uppercase).foregroundStyle(.secondary)
             Text(selectedDate, format: .dateTime.day())
-                .font(font(settings.dateTypography, size: family == .micro ? 36 : 46)).monospacedDigit()
+                .font(dateFont(family == .micro ? 36 : 46)).monospacedDigit()
             if family != .micro { Text(selectedDate, format: .dateTime.month(.abbreviated)).font(.caption).foregroundStyle(accent) }
         }
     }
@@ -846,7 +874,7 @@ struct VisualWorkspaceCalendarView: View {
     private var upcomingPresentation: some View {
         VStack(alignment: .leading, spacing: densitySpacing(8)) {
             HStack {
-                Text("UPCOMING").font(font(settings.monthTypography, size: 11)).foregroundStyle(.secondary)
+                Text("UPCOMING").font(monthFont(11)).foregroundStyle(.secondary)
                 Spacer()
                 Text("\(filteredUpcoming.count)").font(.caption).foregroundStyle(accent)
             }
@@ -904,7 +932,7 @@ struct VisualWorkspaceCalendarView: View {
         VStack(alignment: .leading, spacing: densitySpacing(7)) {
             HStack {
                 Button { selectedDate = calendar.date(byAdding: .day, value: -visibleWeekDays, to: selectedDate) ?? selectedDate; monthAnchor = selectedDate } label: { Image(systemName: "chevron.left") }.buttonStyle(.plain)
-                Text(weekTitle).font(font(settings.monthTypography, size: 12))
+                Text(weekTitle).font(monthFont(12))
                 Spacer()
                 Button("Today") { selectToday() }.buttonStyle(.plain).font(.caption).foregroundStyle(accent)
                 Button { selectedDate = calendar.date(byAdding: .day, value: visibleWeekDays, to: selectedDate) ?? selectedDate; monthAnchor = selectedDate } label: { Image(systemName: "chevron.right") }.buttonStyle(.plain)
@@ -919,9 +947,8 @@ struct VisualWorkspaceCalendarView: View {
         Button { selectedDate = calendar.startOfDay(for: Date()); monthAnchor = selectedDate } label: {
             VStack(spacing: 1) {
                 Text(Date(), format: .dateTime.weekday(.abbreviated).locale(.autoupdatingCurrent))
-                    .font(font(settings.dateTypography, size: 10)).textCase(.uppercase).foregroundStyle(.secondary)
-                Text(Date(), format: .dateTime.day())
-                    .font(font(settings.dateTypography, size: 36)).monospacedDigit().foregroundStyle(primary)
+                    .font(dateFont(10)).textCase(.uppercase).foregroundStyle(.secondary)
+                todayHeroNumber
                 if !filteredToday.isEmpty {
                     Circle().fill(accent).frame(width: 4, height: 4).padding(.top, 3)
                 }
@@ -962,17 +989,17 @@ struct VisualWorkspaceCalendarView: View {
 
     private var dateBadge: some View {
         VStack(spacing: -1) {
-            Text(Date(), format: .dateTime.weekday(.abbreviated)).font(font(settings.dateTypography, size: 9)).textCase(.uppercase).foregroundStyle(.secondary)
-            Text(Date(), format: .dateTime.day()).font(font(settings.dateTypography, size: 28)).monospacedDigit()
+            Text(Date(), format: .dateTime.weekday(.abbreviated)).font(dateFont(9)).textCase(.uppercase).foregroundStyle(.secondary)
+            Text(Date(), format: .dateTime.day()).font(dateFont(28)).monospacedDigit()
         }.frame(minWidth: columns <= 2 ? 34 : 42)
     }
 
     private func todayHeader(prominent: Bool) -> some View {
         HStack(alignment: .center, spacing: 9) {
             VStack(alignment: .leading, spacing: 1) {
-                Text("TODAY").font(font(settings.monthTypography, size: 9)).foregroundStyle(accent)
+                Text("TODAY").font(monthFont(9)).foregroundStyle(accent)
                 Text(Date(), format: .dateTime.weekday(.wide).month(.wide).day().locale(.autoupdatingCurrent))
-                    .font(font(settings.dateTypography, size: prominent ? 16 : 12)).lineLimit(1)
+                    .font(dateFont(prominent ? 16 : 12)).lineLimit(1)
             }
             Spacer()
             if family != .verticalAgenda { Text(filteredToday.isEmpty ? "Clear" : "\(filteredToday.count) event\(filteredToday.count == 1 ? "" : "s")").font(.caption2).foregroundStyle(.secondary) }
@@ -983,7 +1010,7 @@ struct VisualWorkspaceCalendarView: View {
         HStack(spacing: 8) {
             Button { changeSelectedDay(-1) } label: { Image(systemName: "chevron.left") }.buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 0) {
-                Text(selectedDate, format: .dateTime.weekday(.wide)).font(font(settings.dateTypography, size: 13))
+                Text(selectedDate, format: .dateTime.weekday(.wide)).font(dateFont(13))
                 Text(selectedDate, format: .dateTime.month(.abbreviated).day().year()).font(.caption2).foregroundStyle(.secondary)
             }
             Spacer()
@@ -996,7 +1023,7 @@ struct VisualWorkspaceCalendarView: View {
         Button { selectedEventIdentifier = eventKey(event) } label: {
             VStack(alignment: .leading, spacing: 1) {
                 if informationVisible(.startTime, level: 1) { Text(timeLabel(event)).font(.system(size: 9, weight: .semibold, design: .rounded)).foregroundStyle(eventColor(event)) }
-                Text(event.title ?? "Untitled event").font(font(settings.eventTypography, size: 10)).lineLimit(1)
+                Text(event.title ?? "Untitled event").font(eventFont(10)).lineLimit(1)
             }.frame(maxWidth: columns >= 6 ? 120 : 96, alignment: .leading)
         }.buttonStyle(.plain)
     }
@@ -1021,7 +1048,7 @@ struct VisualWorkspaceCalendarView: View {
                     Text(timeLabel(event)).font(.system(size: compact ? 9 : 10, weight: .semibold, design: .rounded)).monospacedDigit().foregroundStyle(.secondary).frame(width: compact ? 38 : 48, alignment: .leading)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(event.title ?? "Untitled event").font(font(settings.eventTypography, size: compact ? 10 : settings.eventTypography.size)).lineLimit(compact ? 1 : 2)
+                    Text(event.title ?? "Untitled event").font(eventFont(compact ? 10 : 12)).lineLimit(compact ? 1 : 2)
                     if !compact {
                         HStack(spacing: 5) {
                             if informationVisible(.endTime, level: level), !event.isAllDay { Text("to \(event.endDate.formatted(date: .omitted, time: .shortened))") }
@@ -1080,7 +1107,7 @@ struct VisualWorkspaceCalendarView: View {
     private var monthHeader: some View {
         HStack(spacing: 7) {
             Button { changeMonth(-1) } label: { Image(systemName: "chevron.left") }.buttonStyle(.plain)
-            Text(monthAnchor, format: .dateTime.month(.wide).year()).font(font(settings.monthTypography, size: settings.monthTypography.size)).lineLimit(1)
+            Text(monthAnchor, format: .dateTime.month(.wide).year()).font(monthFont(13)).lineLimit(1)
             Spacer()
             Button("Today") { selectToday() }.buttonStyle(.plain).font(.caption).foregroundStyle(accent)
             Button { changeMonth(1) } label: { Image(systemName: "chevron.right") }.buttonStyle(.plain)
@@ -1100,9 +1127,7 @@ struct VisualWorkspaceCalendarView: View {
                 if settings.showWeekNumbers && calendar.component(.weekday, from: day) == calendar.firstWeekday {
                     Text("W\(calendar.component(.weekOfYear, from: day))").font(.system(size: 6, weight: .medium)).foregroundStyle(.tertiary)
                 }
-                Text(day, format: .dateTime.day())
-                    .font(font(settings.dateTypography, size: cellWidth < 30 ? 8 : 10))
-                    .foregroundStyle(dayTextColor(day: day, inMonth: inMonth, weekend: weekend, today: today))
+                calendarDayNumber(day, inMonth: inMonth, weekend: weekend, today: today, events: events, requestedIndicator: indicator, cellWidth: cellWidth)
                 monthIndicators(events: events, style: indicator, cellWidth: cellWidth)
                 if cellWidth >= 52, rows >= 3, let event = events.first {
                     Text(event.title ?? "Event").font(.system(size: 6.5, weight: .medium)).lineLimit(1).foregroundStyle(eventColor(event))
@@ -1121,12 +1146,7 @@ struct VisualWorkspaceCalendarView: View {
 
     @ViewBuilder private func monthIndicators(events: [EKEvent], style requested: VisualCalendarEventIndicatorStyle, cellWidth: CGFloat) -> some View {
         if !events.isEmpty {
-            let effective: VisualCalendarEventIndicatorStyle = {
-                if cellWidth < 24 { return .minimalMarker }
-                if requested == .automatic { return cellWidth < 38 ? .dots : .bars }
-                if cellWidth < 32 && requested != .minimalMarker { return .dots }
-                return requested
-            }()
+            let effective = resolvedIndicatorStyle(requested, cellWidth: cellWidth)
             let shown = Array(events.prefix(settings.visibleEventIndicators))
             switch effective {
             case .automatic, .dots:
@@ -1136,18 +1156,25 @@ struct VisualWorkspaceCalendarView: View {
             case .underline:
                 Capsule().fill(eventColor(shown[0])).frame(height: 2).padding(.horizontal, 3)
             case .filledDate:
-                Circle().fill(eventColor(shown[0]).opacity(0.35)).frame(width: 5, height: 5)
+                Color.clear.frame(height: 4)
             case .minimalMarker:
                 Circle().fill(eventColor(shown[0])).frame(width: 2.5, height: 2.5)
             }
         } else { Color.clear.frame(height: 4) }
     }
 
+    private func resolvedIndicatorStyle(_ requested: VisualCalendarEventIndicatorStyle, cellWidth: CGFloat) -> VisualCalendarEventIndicatorStyle {
+        if cellWidth < 24 { return .minimalMarker }
+        if requested == .automatic { return cellWidth < 38 ? .dots : .bars }
+        if cellWidth < 32 && requested != .minimalMarker && requested != .filledDate { return .dots }
+        return requested
+    }
+
     private var selectedDayAgenda: some View {
         VStack(alignment: .leading, spacing: densitySpacing(6)) {
             HStack {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(selectedDate, format: .dateTime.weekday(.wide)).font(font(settings.dateTypography, size: 12))
+                    Text(selectedDate, format: .dateTime.weekday(.wide)).font(dateFont(12))
                     Text(selectedDate, format: .dateTime.month(.abbreviated).day()).font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -1199,7 +1226,7 @@ struct VisualWorkspaceCalendarView: View {
             VStack(alignment: .leading, spacing: 4) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(day, format: .dateTime.weekday(.abbreviated)).font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
-                    Text(day, format: .dateTime.day()).font(font(settings.dateTypography, size: 15)).foregroundStyle(today ? accent : primary)
+                    Text(day, format: .dateTime.day()).font(dateFont(15)).foregroundStyle(today ? accent : primary)
                 }
                 ForEach(Array(events.prefix(rows >= 4 ? 3 : 2).enumerated()), id: \.offset) { _, event in
                     HStack(spacing: 3) {
@@ -1217,7 +1244,7 @@ struct VisualWorkspaceCalendarView: View {
 
     private func eventDetail(_ event: EKEvent) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(event.title ?? "Untitled event").font(font(settings.eventTypography, size: 13)).lineLimit(2)
+            Text(event.title ?? "Untitled event").font(eventFont(13)).lineLimit(2)
             Text(event.isAllDay ? "All day" : "\(event.startDate.formatted(date: .omitted, time: .shortened)) – \(event.endDate.formatted(date: .omitted, time: .shortened))")
                 .font(.caption).foregroundStyle(.secondary)
             Text(event.calendar.title).font(.caption2).foregroundStyle(eventColor(event))
@@ -1301,16 +1328,38 @@ struct VisualWorkspaceCalendarView: View {
         return filteredMonth.filter { $0.startDate < end && $0.endDate > start }.sorted { $0.startDate < $1.startDate }
     }
     private func matchesFilter(_ event: EKEvent) -> Bool {
-        let title = event.calendar.title.lowercased()
+        let calendarTitle = event.calendar.title.lowercased()
         switch settings.filterMode {
-        case .all: return true
-        case .work: return ["work", "office", "job", "business"].contains { title.contains($0) }
-        case .personal: return ["personal", "home", "family", "private"].contains { title.contains($0) }
-        case .birthdays: return event.calendar.type == .birthday || title.contains("birthday")
+        case .all:
+            return true
+        case .selected:
+            return Set(settings.selectedCalendarIdentifiers).contains(event.calendar.calendarIdentifier)
+        case .work:
+            return ["work", "office", "job", "business", "company", "team"].contains { calendarTitle.contains($0) }
+        case .personal:
+            return ["personal", "home", "family", "private", "icloud"].contains { calendarTitle.contains($0) }
+        case .birthdays:
+            return event.calendar.type == .birthday || calendarTitle.contains("birthday") || (event.title ?? "").localizedCaseInsensitiveContains("birthday")
+        case .holidaysFestivals:
+            return isHolidayOrFestival(event)
         case .custom:
             let wanted = Set(settings.customCalendarNames.map { $0.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) })
-            return wanted.isEmpty || wanted.contains(title)
+            return wanted.isEmpty || wanted.contains(calendarTitle)
         }
+    }
+
+    private func isHolidayOrFestival(_ event: EKEvent) -> Bool {
+        let haystack = "\(event.calendar.title) \(event.title ?? "")".lowercased()
+        let keywords = [
+            "holiday", "holidays", "observance", "festival", "festivals", "public holiday", "bank holiday",
+            "new year", "christmas", "easter", "eid", "diwali", "divali", "holi", "vesak", "ramadan",
+            "maha shivaratree", "shivaratri", "cavadee", "ugadi", "ganesh chaturthi", "all saints", "spring festival"
+        ]
+        if keywords.contains(where: { haystack.contains($0) }) { return true }
+        // macOS exposes many regional holiday calendars as read-only subscriptions.
+        // Restrict the fallback to all-day entries to avoid classifying ordinary
+        // subscribed schedules (sports, releases, etc.) as holidays.
+        return event.calendar.type == .subscription && event.isAllDay
     }
     private func loadMonth() { monthEvents = service.events(around: monthAnchor) }
     private func changeMonth(_ amount: Int) {
@@ -1338,6 +1387,61 @@ struct VisualWorkspaceCalendarView: View {
         switch settings.density { case .compact: return base * 0.72; case .spacious: return base * 1.28; default: return base }
     }
 
+    @ViewBuilder private var todayHeroNumber: some View {
+        let color = settings.todayColor?.color ?? accent
+        let number = Text(Date(), format: .dateTime.day()).font(dateFont(36)).monospacedDigit()
+        if !settings.highlightToday {
+            number.foregroundStyle(primary)
+        } else {
+            switch settings.todayStyle {
+            case .circle:
+                number.foregroundStyle(primary).padding(5).background(color.opacity(0.20), in: Circle())
+            case .pill:
+                number.foregroundStyle(primary).padding(.horizontal, 9).padding(.vertical, 3).background(color.opacity(0.20), in: Capsule())
+            case .filledNumber:
+                number.foregroundStyle(.white).padding(.horizontal, 7).padding(.vertical, 3).background(color.opacity(0.88), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            case .outline:
+                number.foregroundStyle(primary).padding(5).overlay(Circle().stroke(color.opacity(0.9), lineWidth: 1.25))
+            case .accentText:
+                number.foregroundStyle(color)
+            case .subtleGlow:
+                number.foregroundStyle(primary).shadow(color: color.opacity(0.65), radius: 5)
+            case .minimalDot:
+                VStack(spacing: 1) { number.foregroundStyle(primary); Circle().fill(color).frame(width: 4, height: 4) }
+            }
+        }
+    }
+
+    @ViewBuilder private func calendarDayNumber(_ day: Date, inMonth: Bool, weekend: Bool, today: Bool, events: [EKEvent], requestedIndicator: VisualCalendarEventIndicatorStyle, cellWidth: CGFloat) -> some View {
+        let normalColor = dayTextColor(day: day, inMonth: inMonth, weekend: weekend, today: today)
+        let number = Text(day, format: .dateTime.day()).font(dateFont(cellWidth < 30 ? 8 : 10)).foregroundStyle(normalColor)
+        let indicator = resolvedIndicatorStyle(requestedIndicator, cellWidth: cellWidth)
+        if indicator == .filledDate, let event = events.first {
+            number.padding(.horizontal, 3).padding(.vertical, 2)
+                .background(eventColor(event).opacity(0.30), in: Circle())
+        } else if today && settings.highlightToday {
+            let color = settings.todayColor?.color ?? accent
+            switch settings.todayStyle {
+            case .circle:
+                number.padding(3).background(color.opacity(0.20), in: Circle())
+            case .pill:
+                number.padding(.horizontal, 5).padding(.vertical, 2).background(color.opacity(0.20), in: Capsule())
+            case .filledNumber:
+                number.foregroundStyle(.white).padding(.horizontal, 4).padding(.vertical, 2).background(color.opacity(0.86), in: Circle())
+            case .outline:
+                number.padding(3).overlay(Circle().stroke(color.opacity(0.9), lineWidth: 1))
+            case .accentText:
+                number.foregroundStyle(color)
+            case .subtleGlow:
+                number.shadow(color: color.opacity(0.65), radius: 3)
+            case .minimalDot:
+                VStack(spacing: 0) { number; Circle().fill(color).frame(width: 2.5, height: 2.5) }
+            }
+        } else {
+            number
+        }
+    }
+
     private var primary: Color { style.textColor.color }
     private var accent: Color { style.accentColor.color }
     private func eventColor(_ event: EKEvent) -> Color {
@@ -1355,17 +1459,18 @@ struct VisualWorkspaceCalendarView: View {
     }
     private func dayBackground(selected: Bool, today: Bool) -> Color {
         if selected && settings.highlightSelectedDay { return (settings.selectedDayColor?.color ?? accent).opacity(0.24) }
-        guard today && settings.highlightToday else { return .clear }
-        let color = settings.todayColor?.color ?? accent
-        switch settings.todayStyle {
-        case .circle, .pill, .filledNumber: return color.opacity(0.20)
-        case .outline, .accentText, .minimalDot: return .clear
-        case .subtleGlow: return color.opacity(0.11)
+        if today && settings.highlightToday && settings.todayStyle == .subtleGlow {
+            return (settings.todayColor?.color ?? accent).opacity(0.045)
         }
+        return .clear
     }
-    private func font(_ typography: VisualCalendarTypography, size: Double) -> Font {
+    private func dateFont(_ designSize: Double) -> Font { styledCalendarFont(settings.dateTypography, size: designSize * settings.dateTypography.size / 14.0) }
+    private func eventFont(_ designSize: Double) -> Font { styledCalendarFont(settings.eventTypography, size: designSize * settings.eventTypography.size / 12.0) }
+    private func monthFont(_ designSize: Double) -> Font { styledCalendarFont(settings.monthTypography, size: designSize * settings.monthTypography.size / 13.0) }
+
+    private func styledCalendarFont(_ typography: VisualCalendarTypography, size: Double) -> Font {
         let weight = typography.weight.swiftUIFontWeight
-        let actual = max(7, size)
+        let actual = max(7, min(56, size))
         if typography.fontFamily == .custom { return .custom(typography.customFont, size: actual).weight(weight) }
         let design: Font.Design
         switch typography.fontFamily { case .rounded: design = .rounded; case .serif: design = .serif; case .monospaced: design = .monospaced; default: design = .default }

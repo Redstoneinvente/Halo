@@ -1,6 +1,72 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import EventKit
+
+
+private struct VisualCalendarSourceItem: Identifiable {
+    let id: String
+    let title: String
+    let detail: String
+    let holidayCandidate: Bool
+}
+
+@MainActor
+private final class VisualCalendarSourceBrowser: ObservableObject {
+    @Published var sources: [VisualCalendarSourceItem] = []
+    @Published var status = "Calendar access has not been checked."
+    private let store = EKEventStore()
+
+    var hasAccess: Bool {
+        let value = EKEventStore.authorizationStatus(for: .event)
+        if value == .authorized { return true }
+        if #available(macOS 14.0, *) { return value == .fullAccess }
+        return false
+    }
+
+    func requestAccess() {
+        if hasAccess { refresh(); return }
+        let completion: (Bool, Error?) -> Void = { [weak self] allowed, error in
+            Task { @MainActor in
+                self?.status = allowed ? "Calendar access granted." : (error?.localizedDescription ?? "Calendar access denied.")
+                self?.refresh()
+            }
+        }
+        if #available(macOS 14.0, *) { store.requestFullAccessToEvents(completion: completion) }
+        else { store.requestAccess(to: .event, completion: completion) }
+    }
+
+    func refresh() {
+        guard hasAccess else {
+            sources = []
+            status = "Calendar access is off. Halo cannot discover events or calendar sources yet."
+            return
+        }
+        sources = store.calendars(for: .event).map { calendar in
+            let lower = calendar.title.lowercased()
+            let keywords = ["holiday", "observance", "festival", "birthday"]
+            let candidate = calendar.type == .subscription || calendar.type == .birthday || keywords.contains(where: { lower.contains($0) })
+            return VisualCalendarSourceItem(
+                id: calendar.calendarIdentifier,
+                title: calendar.title,
+                detail: sourceKind(calendar),
+                holidayCandidate: candidate
+            )
+        }.sorted { lhs, rhs in lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending }
+        status = "\(sources.count) calendar source\(sources.count == 1 ? "" : "s") available to Halo."
+    }
+
+    private func sourceKind(_ calendar: EKCalendar) -> String {
+        switch calendar.type {
+        case .local: return "Local"
+        case .calDAV: return "CalDAV"
+        case .exchange: return "Exchange"
+        case .subscription: return "Subscribed"
+        case .birthday: return "Birthdays"
+        @unknown default: return "Calendar"
+        }
+    }
+}
 
 struct PreciseSlider: View {
     let title: String
@@ -968,6 +1034,7 @@ struct OpenedNotchWorkspaceEditor: View {
     @State private var selectedRegion: UUID?
     @State private var backgroundMode = false
     @State private var gridDropTarget: VisualWorkspaceGridDropTarget?
+    @StateObject private var calendarSources = VisualCalendarSourceBrowser()
 
     private var opened: OpenNotchLayout { layout.resolvedOpenNotchLayout }
 
@@ -980,7 +1047,7 @@ struct OpenedNotchWorkspaceEditor: View {
             }.frame(minWidth: 650)
             inspector.frame(minWidth: 320, idealWidth: 380, maxWidth: 430)
         }
-        .onAppear { materialize() }
+        .onAppear { materialize(); calendarSources.refresh() }
     }
 
     private var toolbar: some View {
@@ -1677,14 +1744,69 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
                 }
             }
         }
+        Section("Calendar Sources") {
+            HStack(spacing: 8) {
+                Image(systemName: calendarSources.hasAccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(calendarSources.hasAccess ? Color.green : Color.orange)
+                Text(calendarSources.status).font(.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                if calendarSources.hasAccess {
+                    Button("Refresh") { calendarSources.refresh() }.controlSize(.small)
+                } else {
+                    Button("Enable") { calendarSources.requestAccess() }.controlSize(.small)
+                }
+            }
+            if calendarSources.hasAccess {
+                DisclosureGroup("Detected calendars (\(calendarSources.sources.count))") {
+                    ForEach(calendarSources.sources) { source in
+                        HStack(spacing: 7) {
+                            Image(systemName: source.holidayCandidate ? "sparkles" : "calendar")
+                                .foregroundStyle(source.holidayCandidate ? style.wrappedValue.accentColor.color : .secondary)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(source.title)
+                                Text(source.detail).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+            }
+        }
         Section("Calendar Filtering") {
             Picker("Show", selection: calendar.filterMode) { ForEach(VisualCalendarFilterMode.allCases) { Text($0.rawValue).tag($0) } }
-            if calendar.wrappedValue.filterMode == .custom {
+            switch calendar.wrappedValue.filterMode {
+            case .selected:
+                if calendarSources.sources.isEmpty {
+                    Text("No Calendar sources are currently available. Enable Calendar access above, then refresh.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    ForEach(calendarSources.sources) { source in
+                        Toggle(isOn: calendarSourceSelectionBinding(calendar, source.id)) {
+                            HStack(spacing: 6) {
+                                Text(source.title)
+                                Text(source.detail).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            case .holidaysFestivals:
+                let candidates = calendarSources.sources.filter(\.holidayCandidate)
+                if candidates.isEmpty {
+                    Text("macOS is not currently exposing a holiday/observance calendar to Halo. Add or enable one in Calendar, then press Refresh above.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    Text("Detected likely holiday sources: \(candidates.map(\.title).joined(separator: ", ")).")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            case .custom:
                 TextField("Calendar names (comma separated)", text: visualCalendarNamesBinding(calendar))
-                Text("Names are matched against the macOS Calendar names attached to EventKit events.").font(.caption2).foregroundStyle(.secondary)
-            } else if calendar.wrappedValue.filterMode == .work || calendar.wrappedValue.filterMode == .personal {
-                Text("Work and Personal intelligently match common calendar names. Use Custom Selection when your calendars use different names.")
+                Text("Legacy name matching. Selected Calendars is more reliable because it uses EventKit identifiers.")
                     .font(.caption2).foregroundStyle(.secondary)
+            case .work, .personal:
+                Text("Work and Personal match common calendar names. Selected Calendars is recommended when your calendars use custom names.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            case .all, .birthdays:
+                EmptyView()
             }
             Toggle("Use native calendar colors", isOn: calendar.useNativeCalendarColors)
             if !calendar.wrappedValue.useNativeCalendarColors {
@@ -1735,6 +1857,18 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
     private func visualCalendarNamesBinding(_ calendar: Binding<VisualCalendarOptions>) -> Binding<String> {
         Binding(get: { calendar.wrappedValue.customCalendarNames.joined(separator: ", ") }, set: { text in
             calendar.wrappedValue.customCalendarNames = text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        })
+    }
+
+    private func calendarSourceSelectionBinding(_ calendar: Binding<VisualCalendarOptions>, _ identifier: String) -> Binding<Bool> {
+        Binding(get: { calendar.wrappedValue.selectedCalendarIdentifiers.contains(identifier) }, set: { enabled in
+            var identifiers = calendar.wrappedValue.selectedCalendarIdentifiers
+            if enabled {
+                if !identifiers.contains(identifier) { identifiers.append(identifier) }
+            } else {
+                identifiers.removeAll { $0 == identifier }
+            }
+            calendar.wrappedValue.selectedCalendarIdentifiers = identifiers
         })
     }
 
