@@ -34,8 +34,8 @@ jobs:
           git diff --check
           xcrun swiftc -parse Halo/Views/DecorationsView.swift
 
-          # Prime Xcode's generated target source list and asset symbols. The repository
-          # has unrelated compiler-complexity failures, so this preflight may fail.
+          # Prime Xcode's exact Halo target source list. The repository has unrelated
+          # compiler-complexity failures, so this preflight may fail after producing it.
           echo '=== Prime Xcode target metadata ==='
           set +e
           xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug \
@@ -43,10 +43,9 @@ jobs:
             > /tmp/ambient-preflight.log 2>&1
           set -e
 
-          GENERATED=$(find build -path '*DerivedSources/GeneratedAssetSymbols.swift' -print -quit)
           SOURCE_LIST=$(find build -path '*Objects-normal/arm64/Halo.SwiftFileList' -print -quit)
-          if [[ -z "$GENERATED" || -z "$SOURCE_LIST" ]]; then
-              echo 'Xcode did not produce the generated symbols/source list required for isolated validation.' >&2
+          if [[ -z "$SOURCE_LIST" ]]; then
+              echo 'Xcode did not produce Halo.SwiftFileList.' >&2
               exit 1
           fi
 
@@ -66,7 +65,6 @@ jobs:
           xcrun swiftc -frontend -typecheck \
             "${SWIFT_SOURCES[@]}" \
             -primary-file "$PRIMARY" \
-            "$PWD/$GENERATED" \
             -target arm64-apple-macos13.0 \
             -sdk "$SDK" \
             -module-name Halo \
