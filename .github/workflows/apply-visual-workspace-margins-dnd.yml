@@ -194,19 +194,12 @@ jobs:
           if count != 1:
               raise SystemExit(f'Expected to replace one directGridPreview, replaced {count}')
 
-          inspector_old = '''    @ViewBuilder private var inspector: some View {
-              Form {
-                  if backgroundMode { backgroundInspector }
-          '''
-          inspector_new = '''    @ViewBuilder private var inspector: some View {
-              Form {
-                  workspaceMarginsInspector
-                  if backgroundMode { backgroundInspector }
-          '''
-          if inspector_old in text:
-              text = text.replace(inspector_old, inspector_new, 1)
-          elif 'workspaceMarginsInspector\n            if backgroundMode' not in text:
-              raise SystemExit('Could not add workspace margins to inspector')
+          inspector_pattern = re.compile(r'(    @ViewBuilder private var inspector: some View \{\s*        Form \{\n)')
+          match = inspector_pattern.search(text)
+          if match and 'workspaceMarginsInspector' not in text[match.end():match.end() + 120]:
+              text = text[:match.end()] + '            workspaceMarginsInspector\n' + text[match.end():]
+          elif not match:
+              raise SystemExit('Could not locate inspector Form')
 
           item_inspector_marker = '    @ViewBuilder private func itemInspector(_ item: OpenNotchItem) -> some View {\n'
           margin_helpers = '''    private var safeWorkspaceSideInset: Double {
