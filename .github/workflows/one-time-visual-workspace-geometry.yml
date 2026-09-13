@@ -12,6 +12,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Align helper with current adaptive sizing
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('Scripts/one_time_visual_workspace_geometry_fix.py')
+          text = path.read_text()
+          old = '''        let widthScale = min(1, max(0.68, slotSize.width / 300))
+                  let heightScale = min(1, max(0.68, slotSize.height / 170))
+                  let scale = min(widthScale, heightScale)
+                  style.padding *= scale
+                  style.fontSize *= max(0.76, scale)'''
+          current = '''        let widthScale = min(1, max(0.52, slotSize.width / 320))
+                  let heightScale = min(1, max(0.50, slotSize.height / 190))
+                  let scale = min(widthScale, heightScale)
+                  style.padding = max(2, style.padding * scale)
+                  style.fontSize = max(8, style.fontSize * max(0.62, scale))'''
+          if old not in text:
+              raise SystemExit('helper sizing target not found')
+          path.write_text(text.replace(old, current, 1))
+          PY
       - name: Apply geometry fix
         run: python3 Scripts/one_time_visual_workspace_geometry_fix.py
       - name: Validate Swift syntax
