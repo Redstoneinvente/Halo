@@ -5,6 +5,7 @@ on:
     paths:
       - 'Scripts/one_time_move_visual_workspace_to_appearance.py'
       - '.github/workflows/one-time-move-visual-workspace-to-appearance.yml'
+      - '.github/trigger-opened-space'
 
 permissions:
   contents: write
@@ -36,5 +37,6 @@ jobs:
           git rm -f Scripts/one_time_move_visual_workspace_to_appearance.py
           git rm -f .github/workflows/one-time-move-visual-workspace-to-appearance.yml
           git rm -f .github/workflows/one-time-move-visual-workspace-fast.yml
+          git rm -f .github/trigger-opened-space
           git commit -m 'Move visual workspace controls into Appearance'
           git push origin HEAD:main
