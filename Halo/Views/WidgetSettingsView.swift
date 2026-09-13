@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import EventKit
+import Combine
 
 
 private struct VisualCalendarSourceItem: Identifiable {
@@ -15,21 +16,32 @@ private struct VisualCalendarSourceItem: Identifiable {
 private final class VisualCalendarSourceBrowser: ObservableObject {
     @Published var sources: [VisualCalendarSourceItem] = []
     @Published var status = "Calendar access has not been checked."
-    private let store = EKEventStore()
+    @Published private(set) var authorizationStatus: EKAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
 
-    var hasAccess: Bool {
-        let value = EKEventStore.authorizationStatus(for: .event)
-        if value == .authorized { return true }
-        if #available(macOS 14.0, *) { return value == .fullAccess }
-        return false
+    private let store = EKEventStore()
+    private var activationObserver: AnyCancellable?
+    private var eventObserver: AnyCancellable?
+
+    var hasAccess: Bool { Self.canReadEvents(authorizationStatus) }
+
+    init() {
+        activationObserver = NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refresh() }
+        eventObserver = NotificationCenter.default.publisher(for: .EKEventStoreChanged)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refresh() }
     }
 
     func requestAccess() {
+        syncAuthorizationStatus()
         if hasAccess { refresh(); return }
         let completion: (Bool, Error?) -> Void = { [weak self] allowed, error in
             Task { @MainActor in
-                self?.status = allowed ? "Calendar access granted." : (error?.localizedDescription ?? "Calendar access denied.")
-                self?.refresh()
+                guard let self else { return }
+                self.syncAuthorizationStatus()
+                if let error, !allowed { self.status = error.localizedDescription }
+                self.refresh()
             }
         }
         if #available(macOS 14.0, *) { store.requestFullAccessToEvents(completion: completion) }
@@ -37,9 +49,10 @@ private final class VisualCalendarSourceBrowser: ObservableObject {
     }
 
     func refresh() {
+        syncAuthorizationStatus()
         guard hasAccess else {
             sources = []
-            status = "Calendar access is off. Halo cannot discover events or calendar sources yet."
+            status = authorizationMessage
             return
         }
         sources = store.calendars(for: .event).map { calendar in
@@ -53,7 +66,36 @@ private final class VisualCalendarSourceBrowser: ObservableObject {
                 holidayCandidate: candidate
             )
         }.sorted { lhs, rhs in lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending }
-        status = "\(sources.count) calendar source\(sources.count == 1 ? "" : "s") available to Halo."
+        status = "Calendar access granted · \(sources.count) source\(sources.count == 1 ? "" : "s") available to Halo."
+    }
+
+    private func syncAuthorizationStatus() {
+        let next = EKEventStore.authorizationStatus(for: .event)
+        if authorizationStatus != next { authorizationStatus = next }
+    }
+
+    private static func canReadEvents(_ status: EKAuthorizationStatus) -> Bool {
+        if status == .authorized { return true }
+        if #available(macOS 14.0, *), status == .fullAccess { return true }
+        return false
+    }
+
+    private var authorizationMessage: String {
+        if #available(macOS 14.0, *), authorizationStatus == .writeOnly {
+            return "Calendar is write-only. Halo needs Full Access to discover calendars and read events."
+        }
+        switch authorizationStatus {
+        case .notDetermined:
+            return "Calendar access has not been granted yet."
+        case .denied:
+            return "Calendar access is denied. Enable Halo in System Settings → Privacy & Security → Calendars."
+        case .restricted:
+            return "Calendar access is restricted on this Mac."
+        case .authorized:
+            return "Calendar access granted."
+        @unknown default:
+            return "Calendar access is unavailable."
+        }
     }
 
     private func sourceKind(_ calendar: EKCalendar) -> String {

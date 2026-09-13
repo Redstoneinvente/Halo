@@ -429,6 +429,31 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             screen: NSScreen.main ?? NSScreen.screens.first,
             scope: .geometry
         )
+        Section("Surface background effects") {
+            if workspace.settings.layout.appearance.background == .glass {
+                Label("Glass uses Halo's native macOS material", systemImage: "square.on.square")
+                    .foregroundStyle(.secondary)
+                Text("Background Blur applies to Solid, Gradient, Image, and Video surfaces. Visual Workspace glass strength remains independently configurable in its Background page.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                PreciseSlider(
+                    title: "Background blur",
+                    value: $workspace.settings.layout.appearance.blur,
+                    range: 0...20,
+                    step: 0.5,
+                    suffix: "pt",
+                    decimals: 1
+                )
+                HStack {
+                    Button("Reset blur") { workspace.settings.layout.appearance.blur = 0 }
+                    Spacer()
+                    Text("Affects the surface background only")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Text("This is Halo's existing persisted Surface blur; the renderer already applies it to Solid, Gradient, Image, Video, and timed backgrounds.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 
     @ViewBuilder private var background: some View {

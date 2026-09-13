@@ -16,25 +16,35 @@ final class CalendarService: ObservableObject {
     @Published var visualUpcomingEvents: [EKEvent] = []
     @Published var calendarRevision = 0
     @Published var status = "Calendar access is off. Enable it to show today's schedule."
-    private let store = EKEventStore()
-    private var observer: AnyCancellable?
+    @Published private(set) var authorizationStatus: EKAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
 
-    var hasAccess: Bool { isAuthorized }
+    private let store = EKEventStore()
+    private var eventObserver: AnyCancellable?
+    private var activationObserver: AnyCancellable?
+
+    var hasAccess: Bool { Self.canReadEvents(authorizationStatus) }
 
     init() {
-        observer = NotificationCenter.default.publisher(for: .EKEventStoreChanged)
-            .receive(on: RunLoop.main).sink { [weak self] _ in self?.refresh() }
+        eventObserver = NotificationCenter.default.publisher(for: .EKEventStoreChanged)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refresh() }
+        activationObserver = NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refresh() }
     }
 
     func requestAccess() {
-        if isAuthorized {
+        syncAuthorizationStatus()
+        if hasAccess {
             refresh()
             return
         }
         let completion: (Bool, Error?) -> Void = { [weak self] allowed, error in
             Task { @MainActor in
-                self?.status = allowed ? "Calendar connected" : (error?.localizedDescription ?? "Access denied. Change it in System Settings → Privacy & Security → Calendars.")
-                self?.refresh()
+                guard let self else { return }
+                self.syncAuthorizationStatus()
+                if let error, !allowed { self.status = error.localizedDescription }
+                self.refresh()
             }
         }
         if #available(macOS 14.0, *) { store.requestFullAccessToEvents(completion: completion) }
@@ -42,12 +52,13 @@ final class CalendarService: ObservableObject {
     }
 
     func refresh() {
-        guard isAuthorized else {
+        syncAuthorizationStatus()
+        guard hasAccess else {
             events = []
             upcomingEvents = []
             visualDayEvents = []
             visualUpcomingEvents = []
-            status = "Calendar access is off. Enable it to show events."
+            status = authorizationMessage
             calendarRevision &+= 1
             return
         }
@@ -65,28 +76,27 @@ final class CalendarService: ObservableObject {
             return lhs.startDate < rhs.startDate
         }
 
-        // Visual Workspace keeps all events for the current day, including events
-        // that already ended. This matters for all-day holidays/observances and for
-        // a calendar that is opened late in the day.
         visualDayEvents = raw.filter { $0.startDate < tomorrow && $0.endDate > today }
         visualUpcomingEvents = raw.filter { $0.endDate > now }
 
-        // Preserve the regular opened-notch Calendar's existing "remaining today"
-        // and 14-day upcoming semantics.
+        // Preserve the regular opened-notch Calendar's existing semantics.
         events = visualDayEvents.filter { $0.endDate > now }
         upcomingEvents = visualUpcomingEvents.filter { $0.startDate < legacyHorizon }
 
         let sourceCount = calendars.count
         if visualDayEvents.isEmpty {
-            status = sourceCount == 0 ? "No Calendar sources are available" : "No events today · \(sourceCount) calendar\(sourceCount == 1 ? "" : "s") connected"
+            status = sourceCount == 0
+                ? "Calendar access granted, but no event calendars are exposed by macOS."
+                : "Calendar connected · no events today · \(sourceCount) calendar\(sourceCount == 1 ? "" : "s")"
         } else {
-            status = "\(visualDayEvents.count) event\(visualDayEvents.count == 1 ? "" : "s") today · \(sourceCount) calendar\(sourceCount == 1 ? "" : "s") connected"
+            status = "Calendar connected · \(visualDayEvents.count) event\(visualDayEvents.count == 1 ? "" : "s") today · \(sourceCount) calendar\(sourceCount == 1 ? "" : "s")"
         }
         calendarRevision &+= 1
     }
 
     func events(around anchor: Date) -> [EKEvent] {
-        guard isAuthorized else { return [] }
+        syncAuthorizationStatus()
+        guard hasAccess else { return [] }
         let calendar = Calendar.autoupdatingCurrent
         let monthStart = calendar.dateInterval(of: .month, for: anchor)?.start ?? calendar.startOfDay(for: anchor)
         let gridStart = calendar.dateInterval(of: .weekOfYear, for: monthStart)?.start ?? monthStart
@@ -99,11 +109,33 @@ final class CalendarService: ObservableObject {
             }
     }
 
-    private var isAuthorized: Bool {
-        let authorization = EKEventStore.authorizationStatus(for: .event)
-        if authorization == .authorized { return true }
-        if #available(macOS 14.0, *) { return authorization == .fullAccess }
+    private func syncAuthorizationStatus() {
+        let next = EKEventStore.authorizationStatus(for: .event)
+        if authorizationStatus != next { authorizationStatus = next }
+    }
+
+    private static func canReadEvents(_ status: EKAuthorizationStatus) -> Bool {
+        if status == .authorized { return true }
+        if #available(macOS 14.0, *), status == .fullAccess { return true }
         return false
+    }
+
+    private var authorizationMessage: String {
+        if #available(macOS 14.0, *), authorizationStatus == .writeOnly {
+            return "Calendar access is write-only. Halo needs Full Access to read events."
+        }
+        switch authorizationStatus {
+        case .notDetermined:
+            return "Calendar access has not been granted yet."
+        case .denied:
+            return "Calendar access is denied. Enable Halo in System Settings → Privacy & Security → Calendars."
+        case .restricted:
+            return "Calendar access is restricted on this Mac."
+        case .authorized:
+            return "Calendar connected."
+        @unknown default:
+            return "Calendar access is unavailable."
+        }
     }
 
     func meetingURL(for event: EKEvent) -> URL? {
