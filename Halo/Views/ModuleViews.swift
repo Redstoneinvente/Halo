@@ -415,10 +415,19 @@ struct CalendarModuleView: View {
     private var effectiveView: CalendarWidgetViewStyle {
         let width = availableWidth ?? 360
         let height = availableHeight ?? 220
-        if presentation == .compact || width < 230 || height < 120 {
+        let aspect = width / max(1, height)
+        if height < 92 || (aspect > 2.25 && height < 170) {
             return requestedView == .agenda ? .agenda : .weekStrip
         }
-        if requestedView == .split && width < 390 { return .monthGrid }
+        if width < 205 || (aspect < 0.68 && width < 255) {
+            return .agenda
+        }
+        if presentation == .compact || width < 245 || height < 128 {
+            return requestedView == .agenda ? .agenda : .weekStrip
+        }
+        if requestedView == .split && (width < 410 || height < 185) {
+            return height >= 175 && width >= 285 ? .monthGrid : .agenda
+        }
         return requestedView
     }
 

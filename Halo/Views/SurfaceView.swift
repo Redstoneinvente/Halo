@@ -716,11 +716,17 @@ struct SurfaceView: View {
                                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
                         }
                     } else if layout.resolvedUsesCustomOpenNotchWorkspace {
-                        // Visual Workspace owns the entire expanded surface. Regions now map
-                        // directly to the notch canvas instead of a padded legacy dashboard body.
-                        OpenNotchWorkspaceView(layout: layout, store: store,
-                                               mode: layout.resolvedOpenNotchLayout.resolvedContentMode,
-                                               page: $page)
+                        // The Visual Workspace receives one authoritative canvas: exactly the
+                        // expanded surface proposed by the notch window. Region percentages are
+                        // resolved only against this rectangle, never against intrinsic content.
+                        GeometryReader { surfaceProxy in
+                            OpenNotchWorkspaceView(layout: layout, store: store,
+                                                   mode: layout.resolvedOpenNotchLayout.resolvedContentMode,
+                                                   page: $page)
+                                .frame(width: surfaceProxy.size.width,
+                                       height: surfaceProxy.size.height,
+                                       alignment: .topLeading)
+                        }
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                             .overlay(alignment: .bottomTrailing) {
                                 HStack(spacing: 5) {
@@ -1097,19 +1103,23 @@ private struct OpenNotchWorkspaceView: View {
 
     private var freeformCanvas: some View {
         GeometryReader { proxy in
+            let canvas = proxy.size
             ZStack(alignment: .topLeading) {
                 ForEach(regions) { region in
-                    let frame = region.frame ?? fallbackFrame(for: region.placement)
+                    let raw = region.frame ?? fallbackFrame(for: region.placement)
+                    let x = min(1, max(0, raw.x))
+                    let y = min(1, max(0, raw.y))
+                    let width = min(1 - x, max(0.01, raw.width))
+                    let height = min(1 - y, max(0.01, raw.height))
+                    let regionWidth = max(1, canvas.width * CGFloat(width))
+                    let regionHeight = max(1, canvas.height * CGFloat(height))
                     OpenNotchRegionView(region: region, layout: layout, store: store)
-                        .frame(width: max(1, proxy.size.width * CGFloat(frame.width)),
-                               height: max(1, proxy.size.height * CGFloat(frame.height)))
-                        .offset(x: proxy.size.width * CGFloat(frame.x),
-                                y: proxy.size.height * CGFloat(frame.y))
-                        .clipped()
+                        .frame(width: regionWidth, height: regionHeight)
+                        .position(x: canvas.width * CGFloat(x) + regionWidth / 2,
+                                  y: canvas.height * CGFloat(y) + regionHeight / 2)
                 }
             }
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
-            .clipped()
+            .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
         }
     }
 
@@ -1233,14 +1243,12 @@ private struct OpenNotchRegionView: View {
                 ForEach(region.groups) { group in
                     OpenNotchGroupView(group: group, layout: layout, store: store, constrained: true, standardBlocks: true)
                         .frame(width: innerWidth, height: groupHeight)
-                        .clipped()
                 }
             }
             .padding(.top, region.padding.top).padding(.leading, region.padding.leading)
             .padding(.bottom, region.padding.bottom).padding(.trailing, region.padding.trailing)
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: region.placement.regionAlignment)
         }
-        .clipped()
     }
 }
 
@@ -1288,7 +1296,6 @@ private struct OpenNotchGroupView: View {
             .padding(.bottom, group.padding.bottom).padding(.trailing, group.padding.trailing)
         }
         .frame(minHeight: constrained ? 0 : estimatedHeight, maxHeight: constrained ? .infinity : nil)
-        .clipped()
     }
 
     @ViewBuilder private func stack(items: [OpenNotchItem], spacing: CGFloat, compression: Int,
@@ -1452,7 +1459,6 @@ private struct OpenNotchItemView: View {
             }
         }
         .frame(width: slotSize.width, height: slotSize.height, alignment: itemStyle.alignment?.alignment ?? .center)
-        .clipped()
         .contentShape(Rectangle())
         .opacity(hover ? 1 : 0.985)
         .onHover { hover = $0 }
@@ -1461,9 +1467,14 @@ private struct OpenNotchItemView: View {
     }
 
     private var resolvedPresentation: OpenNotchPresentation {
-        let hardCompact = slotSize.width < 175 || slotSize.height < 72
-        let compact = slotSize.width < 250 || slotSize.height < 118 || compression >= 3
-        let expandedPossible = slotSize.width >= 360 && slotSize.height >= 210 && compression < 2
+        let width = max(1, slotSize.width)
+        let height = max(1, slotSize.height)
+        let aspect = width / height
+        let area = width * height
+        let hardCompact = width < 132 || height < 58
+        let shapeCompact = (aspect > 2.35 && height < 158) || (aspect < 0.62 && width < 205)
+        let compact = hardCompact || shapeCompact || width < 225 || height < 104 || compression >= 3
+        let expandedPossible = width >= 330 && height >= 185 && area >= 68_000 && compression < 2
         if hardCompact { return .compact }
         switch item.presentation {
         case .automatic:
@@ -1490,11 +1501,12 @@ private struct OpenNotchItemView: View {
         case .expanded: style.layoutMode = .hero
         case .regular, .automatic: style.layoutMode = .standard
         }
-        let widthScale = min(1, max(0.52, slotSize.width / 320))
-        let heightScale = min(1, max(0.50, slotSize.height / 190))
-        let scale = min(widthScale, heightScale)
-        style.padding = max(2, style.padding * scale)
-        style.fontSize = max(8, style.fontSize * max(0.62, scale))
+        let widthScale = min(1, max(0.50, slotSize.width / 300))
+        let heightScale = min(1, max(0.50, slotSize.height / 170))
+        let shapePressure = min(1, max(0.68, min(slotSize.width / max(1, slotSize.height), slotSize.height / max(1, slotSize.width)) * 1.8))
+        let scale = min(widthScale, heightScale) * shapePressure
+        style.padding *= max(0.48, scale)
+        style.fontSize *= max(0.62, scale)
         var content = style.resolvedContent
         content.spacing = max(2, content.spacing * scale)
         content.iconSize = max(9, content.iconSize * scale)

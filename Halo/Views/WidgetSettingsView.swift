@@ -930,31 +930,35 @@ struct OpenedNotchWorkspaceEditor: View {
     private func freeformPreview(canvasSize: CGSize) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(opened.regions) { region in
-                let frame = effectiveRegionFrame(region.id)
+                let raw = effectiveRegionFrame(region.id)
+                let x = min(1, max(0, raw.x))
+                let y = min(1, max(0, raw.y))
+                let width = min(1 - x, max(0.01, raw.width))
+                let height = min(1 - y, max(0.01, raw.height))
+                let regionWidth = canvasSize.width * CGFloat(width)
+                let regionHeight = canvasSize.height * CGFloat(height)
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text(regionTitle(region)).font(.system(size: 9, weight: .semibold))
                         Spacer()
-                        Text("\(Int((frame.width * 100).rounded()))×\(Int((frame.height * 100).rounded()))%")
+                        Text("\(Int((width * 100).rounded()))×\(Int((height * 100).rounded()))%")
                             .font(.system(size: 8, design: .monospaced)).foregroundStyle(.secondary)
                     }
                     ForEach(region.groups) { group in groupPreview(group, region: region) }
                     Spacer(minLength: 0)
                 }
-                .padding(7)
-                .frame(width: max(44, canvasSize.width * CGFloat(frame.width)),
-                       height: max(44, canvasSize.height * CGFloat(frame.height)), alignment: .topLeading)
-                .background((selectedRegion == region.id ? Color.accentColor.opacity(0.16) : Color.white.opacity(0.045)), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(selectedRegion == region.id ? Color.accentColor.opacity(0.75) : .white.opacity(0.08), lineWidth: selectedRegion == region.id ? 1.5 : 1))
+                .padding(min(7, max(2, min(regionWidth, regionHeight) * 0.04)))
+                .frame(width: max(1, regionWidth), height: max(1, regionHeight), alignment: .topLeading)
+                .background((selectedRegion == region.id ? Color.accentColor.opacity(0.16) : Color.white.opacity(0.045)), in: RoundedRectangle(cornerRadius: min(12, max(4, min(regionWidth, regionHeight) * 0.08))))
+                .overlay(RoundedRectangle(cornerRadius: min(12, max(4, min(regionWidth, regionHeight) * 0.08))).stroke(selectedRegion == region.id ? Color.accentColor.opacity(0.75) : .white.opacity(0.08), lineWidth: selectedRegion == region.id ? 1.5 : 1))
                 .contentShape(Rectangle())
-                .clipped()
-                .offset(x: canvasSize.width * CGFloat(frame.x), y: canvasSize.height * CGFloat(frame.y))
+                .position(x: canvasSize.width * CGFloat(x) + regionWidth / 2,
+                          y: canvasSize.height * CGFloat(y) + regionHeight / 2)
                 .onTapGesture { selectedRegion = region.id; selectedGroup = nil; selectedItem = nil; backgroundMode = false }
                 .onDrop(of: [UTType.text], isTargeted: nil) { providers in acceptDrop(providers, regionID: region.id) }
             }
         }
         .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
-        .clipped()
     }
 
     private func regionTitle(_ region: OpenNotchRegion) -> String {
