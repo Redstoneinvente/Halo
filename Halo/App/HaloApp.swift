@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var commercialBag = Set<AnyCancellable>()
     private var licensedServicesStarted = false
     private var setupShownThisLaunch = false
+    private let updater = HaloUpdateController.shared
     private let setupCompletedKey = "HaloSetupCompletedV1"
     // Development switch: keep this true while we iterate on onboarding.
     private let forceSetupEveryLaunch = true
@@ -51,6 +52,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
 
         let hudRoot = NSMenuItem(title: "HUD", action: nil, keyEquivalent: "")
         let hudMenu = NSMenu(title: "HUD")
@@ -161,6 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggle() { engine?.toggleAll() }
+    @objc private func checkForUpdates() { updater.checkForUpdates() }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func previewVolumeHUD() { postHUDPreview("volume") }
     @objc private func previewBrightnessHUD() { postHUDPreview("brightness") }
