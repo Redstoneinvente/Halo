@@ -12,6 +12,19 @@ Halo detects playing Apple Music and Spotify instances automatically. Media & Fi
 
 Glass samples the desktop through native macOS material. Opacity now adjusts a light tint instead of covering glass with opaque black. Reduce Transparency intentionally uses a solid fallback. Image/video blur controls do not apply to native glass.
 
+
+## Opened notch workspace
+
+The normal opened notch is now a workspace model rather than a fixed list of cards. Existing saved layouts remain valid: when an older profile has no `OpenNotchLayout`, Halo resolves its existing enabled-module order into a compatible center group, and the existing Fixed Canvas, Scroll, and Pages modes remain available.
+
+The visual opened-notch editor arranges content as regions → groups → items. Regions can occupy top/middle/bottom and left/center/right positions, each with independent padding. Groups choose horizontal or vertical flow, alignment, spacing, and padding. Items can be full modules or lightweight elements such as time/date, battery, active-app identity, volume, timer/stopwatch, media metadata/controls, CPU/RAM/storage/network metrics, custom text/icons/images/GIFs, buttons, spacers, and dividers. Items use one shared renderer and can be dragged between groups/regions, reordered, resized, hidden, duplicated, grouped, and configured with Fixed, Fit Content, Flexible, or Fill Remaining Space sizing plus min/preferred/max dimensions.
+
+Opened modules support Automatic, Compact, Regular, and Expanded presentation. Automatic responds to available space. Under pressure the layout reduces spacing first, then removes lower-priority metadata, then switches to compact presentation, then truncates, and only scrolls as a final fallback. Items have Always Visible, High, Normal, Low, and Optional priorities plus generic visibility rules for battery level, charging, playback, timer/stopwatch state, CPU load, and Low Power Mode.
+
+Per-item styling reuses Halo's widget/element style model and adds alignment, external spacing, offsets, font overrides, border/shadow/tint/icon sizing, and density. The opened surface also has independent background overrides for solid/gradient/image/video/material sources plus blur, saturation, brightness, contrast, tint, grain, warmth, border, inner highlight, shadow, and restrained glow. Opened presets (Minimal, Media, Productivity, System Monitor, Focus, Developer, Information Dense, Showcase) are ordinary `OpenNotchLayout` values and remain editable after applying them.
+
+The opened media module exposes real artwork, richer metadata, seek/timing when the player exposes duration and position, optional measured system-audio visualization, and shuffle/repeat only when the player's Automation interface supports them. Unsupported controls stay hidden. The opened system monitor adds CPU, memory, swap, disk, network, battery/power and thermal information with optional compact history graphs. Detailed monitor sampling and opened-only media details run only while the normal opened notch is visible; when it closes, Halo falls back to the existing lower-frequency shared polling.
+
 ## Validation on a Mac
 
 Run `bash Scripts/validate.sh` after pulling. The editing environment validated project structure and Swift grammar but could not run Xcode or XCTest.

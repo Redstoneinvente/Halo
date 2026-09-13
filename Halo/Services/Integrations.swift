@@ -6,6 +6,7 @@ import CoreAudio
 import Carbon
 import UserNotifications
 import ImageIO
+import Darwin
 
 @MainActor
 final class CalendarService: ObservableObject {
@@ -84,15 +85,46 @@ final class SystemService: ObservableObject {
     @Published var storage = ""
     @Published var uptime = ""
     @Published var lowPower = false
+
+    // Detailed monitor values are sampled only while the normal opened notch is visible.
+    @Published var cpuUsage = 0.0
+    @Published var memoryUsage = 0.0
+    @Published var swapUsage = 0.0
+    @Published var diskUsage = 0.0
+    @Published var networkDownPerSecond = 0.0
+    @Published var networkUpPerSecond = 0.0
+    @Published var thermalState = "Nominal"
+    @Published var cpuHistory: [Double] = []
+    @Published var memoryHistory: [Double] = []
+    @Published var networkHistory: [Double] = []
+    // Display brightness is intentionally nil on machines where Halo cannot safely control it.
+    @Published var brightness: Double?
+
+    private struct CPUTicks {
+        var user: UInt64; var system: UInt64; var idle: UInt64; var nice: UInt64
+        var total: UInt64 { user + system + idle + nice }
+        var active: UInt64 { user + system + nice }
+    }
+    private var previousCPUTicks: CPUTicks?
+    private var previousNetworkBytes: (down: UInt64, up: UInt64, date: Date)?
     private var refreshing = false
-    func refresh() {
-        guard !refreshing else { return }; refreshing = true
+
+    func refresh(detailed: Bool = false) {
+        guard !refreshing else { return }
+        refreshing = true
+        let previousCPU = previousCPUTicks
+        let previousNetwork = previousNetworkBytes
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
             let uptime = "\(Int(ProcessInfo.processInfo.systemUptime / 3600))h uptime"
-            let memory = ByteCountFormatter.string(fromByteCount: Int64(ProcessInfo.processInfo.physicalMemory), countStyle: .memory) + " installed"
-            let free = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage
-            let storage = free.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) + " free" } ?? ""
+            let physicalMemory = ProcessInfo.processInfo.physicalMemory
+            let memoryLabel = ByteCountFormatter.string(fromByteCount: Int64(physicalMemory), countStyle: .memory) + " installed"
+            let home = URL(fileURLWithPath: NSHomeDirectory())
+            let resource = try? home.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey])
+            let free = resource?.volumeAvailableCapacityForImportantUsage
+            let totalDisk = resource?.volumeTotalCapacity.map(Int64.init)
+            let storageLabel = free.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) + " free" } ?? ""
+
             var battery: Int?, charging = false, onBattery = false
             if let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
                let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef] {
@@ -106,18 +138,117 @@ final class SystemService: ObservableObject {
                     break
                 }
             }
+
+            let ticks = detailed ? Self.cpuTicks() : nil
+            let cpuPercent: Double = {
+                guard let ticks, let old = previousCPU else { return 0 }
+                let totalDelta = ticks.total >= old.total ? ticks.total - old.total : 0
+                let activeDelta = ticks.active >= old.active ? ticks.active - old.active : 0
+                guard totalDelta > 0 else { return 0 }
+                return min(100, max(0, Double(activeDelta) / Double(totalDelta) * 100))
+            }()
+            let memoryPercent = detailed ? Self.memoryPercent(physical: physicalMemory) : 0
+            let swapPercent = detailed ? Self.swapPercent() : 0
+            let diskPercent: Double = {
+                guard detailed, let free, let totalDisk, totalDisk > 0 else { return 0 }
+                return min(100, max(0, (1 - Double(free) / Double(totalDisk)) * 100))
+            }()
+            let network = detailed ? Self.networkBytes() : (0, 0)
+            let now = Date()
+            let rates: (Double, Double) = {
+                guard detailed, let old = previousNetwork else { return (0, 0) }
+                let elapsed = max(0.2, now.timeIntervalSince(old.date))
+                let down = network.0 >= old.down ? Double(network.0 - old.down) / elapsed : 0
+                let up = network.1 >= old.up ? Double(network.1 - old.up) / elapsed : 0
+                return (down, up)
+            }()
+            let thermal = detailed ? Self.thermalDescription(ProcessInfo.processInfo.thermalState) : "Nominal"
             let power = (battery, charging, onBattery)
+
             Task { @MainActor in
-                guard let self else { return }; self.refreshing = false
+                guard let self else { return }
+                self.refreshing = false
                 if self.lowPower != lowPower { self.lowPower = lowPower }
                 if self.uptime != uptime { self.uptime = uptime }
-                if self.memory != memory { self.memory = memory }
-                if self.storage != storage { self.storage = storage }
+                if self.memory != memoryLabel { self.memory = memoryLabel }
+                if self.storage != storageLabel { self.storage = storageLabel }
                 if self.battery != power.0 { self.battery = power.0 }
                 if self.charging != power.1 { self.charging = power.1 }
                 if self.onBattery != power.2 { self.onBattery = power.2 }
+                guard detailed else { return }
+                if let ticks { self.previousCPUTicks = ticks }
+                self.previousNetworkBytes = (network.0, network.1, now)
+                self.cpuUsage = cpuPercent
+                self.memoryUsage = memoryPercent
+                self.swapUsage = swapPercent
+                self.diskUsage = diskPercent
+                self.networkDownPerSecond = rates.0
+                self.networkUpPerSecond = rates.1
+                self.thermalState = thermal
+                Self.append(cpuPercent, to: &self.cpuHistory)
+                Self.append(memoryPercent, to: &self.memoryHistory)
+                Self.append(min(100, (rates.0 + rates.1) / 1_000_000 * 10), to: &self.networkHistory)
             }
         }
+    }
+
+    // Brightness remains hidden when the current display does not expose a safe software control.
+    func setBrightness(_ value: Double) { _ = value }
+
+    private static func append(_ value: Double, to history: inout [Double]) {
+        history.append(value)
+        if history.count > 60 { history.removeFirst(history.count - 60) }
+    }
+
+    private static func cpuTicks() -> CPUTicks? {
+        var info = host_cpu_load_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info_data_t>.stride / MemoryLayout<integer_t>.stride)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &count) }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return CPUTicks(user: UInt64(info.cpu_ticks.0), system: UInt64(info.cpu_ticks.1), idle: UInt64(info.cpu_ticks.2), nice: UInt64(info.cpu_ticks.3))
+    }
+
+    private static func memoryPercent(physical: UInt64) -> Double {
+        var info = vm_statistics64_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count) }
+        }
+        guard result == KERN_SUCCESS, physical > 0 else { return 0 }
+        var pageSize: vm_size_t = 0
+        host_page_size(mach_host_self(), &pageSize)
+        let usedPages = UInt64(info.active_count) + UInt64(info.inactive_count) + UInt64(info.wire_count) + UInt64(info.compressor_page_count)
+        return min(100, Double(usedPages * UInt64(pageSize)) / Double(physical) * 100)
+    }
+
+    private static func swapPercent() -> Double {
+        var usage = xsw_usage()
+        var size = MemoryLayout<xsw_usage>.stride
+        guard sysctlbyname("vm.swapusage", &usage, &size, nil, 0) == 0, usage.xsu_total > 0 else { return 0 }
+        return min(100, Double(usage.xsu_used) / Double(usage.xsu_total) * 100)
+    }
+
+    private static func networkBytes() -> (UInt64, UInt64) {
+        var pointer: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&pointer) == 0, let first = pointer else { return (0, 0) }
+        defer { freeifaddrs(pointer) }
+        var down: UInt64 = 0, up: UInt64 = 0
+        var current: UnsafeMutablePointer<ifaddrs>? = first
+        while let node = current {
+            let flags = Int32(node.pointee.ifa_flags)
+            if (flags & IFF_LOOPBACK) == 0, let raw = node.pointee.ifa_data {
+                let data = raw.assumingMemoryBound(to: if_data.self).pointee
+                down += UInt64(data.ifi_ibytes); up += UInt64(data.ifi_obytes)
+            }
+            current = node.pointee.ifa_next
+        }
+        return (down, up)
+    }
+
+    private static func thermalDescription(_ state: ProcessInfo.ThermalState) -> String {
+        switch state { case .nominal: return "Nominal"; case .fair: return "Fair"; case .serious: return "Serious"; case .critical: return "Critical"; @unknown default: return "Unknown" }
     }
 }
 
@@ -177,6 +308,15 @@ final class MediaService: ObservableObject {
     @Published var busy = false
     @Published var isPlaying = false
     @Published private(set) var artworkColors: [WidgetColor] = []
+    @Published private(set) var artworkImage: NSImage?
+    @Published private(set) var album = ""
+    @Published private(set) var duration = 0.0
+    @Published private(set) var position = 0.0
+    @Published private(set) var shuffleSupported = false
+    @Published private(set) var shuffleEnabled = false
+    @Published private(set) var repeatSupported = false
+    @Published private(set) var repeatMode = ""
+    private var openedDetailEnabled = false
     private var artworkEnabled = false
     private var trackID = ""
     private var artworkKey = ""
@@ -194,13 +334,19 @@ final class MediaService: ObservableObject {
     private var generation = 0
     func disconnect() {
         generation += 1; connectedApp = nil; isPlaying = false
-        artworkTask?.cancel(); artworkKey = ""; trackID = ""; artworkColors = []
+        artworkTask?.cancel(); artworkKey = ""; trackID = ""; artworkColors = []; artworkImage = nil
+        album = ""; duration = 0; position = 0; shuffleSupported = false; shuffleEnabled = false; repeatSupported = false; repeatMode = ""
         title = "Connect a player"; artist = "Apple Music or Spotify"
     }
     private let queue = DispatchQueue(label: "Halo.Media.AppleEvents", qos: .utility)
     func retryDetection(preferred: String) {
         deniedApps.removeAll()
         poll(app: preferred, automatic: automaticMode)
+    }
+    func setOpenedDetailEnabled(_ enabled: Bool) {
+        guard openedDetailEnabled != enabled else { return }
+        openedDetailEnabled = enabled
+        if enabled, let app = connectedApp { refreshPlaybackDetails(app: app) }
     }
     func poll(app: String, automatic: Bool = true) {
         automaticMode = automatic
@@ -239,6 +385,7 @@ final class MediaService: ObservableObject {
         if error != nil { error = nil }
         trackID = snapshot.trackID
         requestArtwork(app: snapshot.app)
+        if openedDetailEnabled { refreshPlaybackDetails(app: snapshot.app) }
     }
     func perform(_ command: String, app preferred: String) {
         let app = command == "refresh" ? preferred : (connectedApp ?? preferred)
@@ -266,6 +413,105 @@ final class MediaService: ObservableObject {
             }
         }
     }
+    func seek(to seconds: Double) {
+        guard openedDetailEnabled, let app = connectedApp, duration > 0 else { return }
+        let target = min(duration, max(0, seconds))
+        queue.async { [weak self] in
+            let source = """
+            if application id "\(app)" is running then
+                tell application id "\(app)" to set player position to \(target)
+            end if
+            """
+            var failure: NSDictionary?
+            _ = NSAppleScript(source: source)?.executeAndReturnError(&failure)
+            Task { @MainActor in if failure == nil { self?.position = target } }
+        }
+    }
+
+    func toggleShuffle() {
+        guard openedDetailEnabled, shuffleSupported, let app = connectedApp else { return }
+        queue.async { [weak self] in
+            let command = app == "com.apple.Music" ? "set shuffle enabled to not shuffle enabled" : "set shuffling to not shuffling"
+            let source = "if application id \"\(app)\" is running then tell application id \"\(app)\" to \(command)"
+            var failure: NSDictionary?
+            _ = NSAppleScript(source: source)?.executeAndReturnError(&failure)
+            Task { @MainActor in if failure == nil { self?.refreshPlaybackDetails(app: app) } }
+        }
+    }
+
+    func cycleRepeat() {
+        guard openedDetailEnabled, repeatSupported, let app = connectedApp else { return }
+        queue.async { [weak self] in
+            let command: String
+            if app == "com.apple.Music" {
+                command = "if song repeat is off then set song repeat to all else if song repeat is all then set song repeat to one else set song repeat to off"
+            } else {
+                command = "set repeating to not repeating"
+            }
+            let source = "if application id \"\(app)\" is running then tell application id \"\(app)\" to \(command)"
+            var failure: NSDictionary?
+            _ = NSAppleScript(source: source)?.executeAndReturnError(&failure)
+            Task { @MainActor in if failure == nil { self?.refreshPlaybackDetails(app: app) } }
+        }
+    }
+
+    private func refreshPlaybackDetails(app: String) {
+        guard openedDetailEnabled else { return }
+        let expectedGeneration = generation
+        queue.async { [weak self] in
+            let shuffleRead = app == "com.apple.Music" ? "shuffle enabled" : "shuffling"
+            let repeatRead = app == "com.apple.Music" ? "song repeat as text" : "repeating as text"
+            let source = """
+            if application id "\(app)" is not running then return {"", 0, 0, false, false, false, ""}
+            with timeout of 3 seconds
+                tell application id "\(app)"
+                    set albumName to ""
+                    set durationValue to 0
+                    set positionValue to 0
+                    set shuffleAvailable to false
+                    set shuffleValue to false
+                    set repeatAvailable to false
+                    set repeatValue to ""
+                    try
+                        set albumName to album of current track
+                    end try
+                    try
+                        set durationValue to duration of current track
+                        set positionValue to player position
+                    end try
+                    try
+                        set shuffleValue to \(shuffleRead)
+                        set shuffleAvailable to true
+                    end try
+                    try
+                        set repeatValue to \(repeatRead)
+                        set repeatAvailable to true
+                    end try
+                    return {albumName, durationValue, positionValue, shuffleAvailable, shuffleValue, repeatAvailable, repeatValue}
+                end tell
+            end timeout
+            """
+            var failure: NSDictionary?
+            let result = NSAppleScript(source: source)?.executeAndReturnError(&failure)
+            guard failure == nil, let result else { return }
+            let album = result.atIndex(1)?.stringValue ?? ""
+            var duration = result.atIndex(2)?.doubleValue ?? 0
+            let position = result.atIndex(3)?.doubleValue ?? 0
+            // Spotify exposes duration in milliseconds; Apple Music exposes seconds.
+            if app == "com.spotify.client", duration > 10_000 { duration /= 1000 }
+            let shuffleSupported = result.atIndex(4)?.booleanValue ?? false
+            let shuffleEnabled = result.atIndex(5)?.booleanValue ?? false
+            let repeatSupported = result.atIndex(6)?.booleanValue ?? false
+            let repeatMode = result.atIndex(7)?.stringValue ?? ""
+            Task { @MainActor in
+                guard let self, self.openedDetailEnabled, self.generation == expectedGeneration, self.connectedApp == app else { return }
+                self.album = album; self.duration = max(0, duration); self.position = min(max(0, position), max(0, duration))
+                self.shuffleSupported = shuffleSupported; self.shuffleEnabled = shuffleEnabled
+                self.repeatSupported = repeatSupported; self.repeatMode = repeatMode
+            }
+        }
+    }
+
     private func requestArtwork(app: String) {
         let key = app + ":" + trackID
         guard artworkEnabled, key != artworkKey else { return }
@@ -293,10 +539,13 @@ final class MediaService: ObservableObject {
                 guard let self, self.artworkEnabled, self.generation == expectedGeneration,
                       self.artworkKey == key, returnedID == expectedID else { return }
                 self.artworkTask = Task { [weak self] in
-                    let colors = await ArtworkReader.palette(data: bytes, urlString: urlString)
+                    async let colorsValue = ArtworkReader.palette(data: bytes, urlString: urlString)
+                    async let imageValue = ArtworkReader.image(data: bytes, urlString: urlString)
+                    let (colors, image) = await (colorsValue, imageValue)
                     guard !Task.isCancelled, let self, self.artworkEnabled,
                           self.generation == expectedGeneration, self.artworkKey == key else { return }
                     self.artworkColors = colors
+                    self.artworkImage = image
                 }
             }
         }
@@ -343,6 +592,19 @@ private struct MediaProbe {
 
 /// Bounded network reads and small image samples; no artwork decoding in view bodies.
 private enum ArtworkReader {
+    static func image(data: Data?, urlString: String?) async -> NSImage? {
+        var imageData = data
+        if imageData == nil, let urlString, let url = URL(string: urlString), url.scheme == "https" {
+            do {
+                let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+                let (downloaded, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200, downloaded.count <= 5_000_000 else { return nil }
+                imageData = downloaded
+            } catch { return nil }
+        }
+        guard !Task.isCancelled, let imageData, imageData.count <= 5_000_000 else { return nil }
+        return NSImage(data: imageData)
+    }
     static func palette(data: Data?, urlString: String?) async -> [WidgetColor] {
         var imageData = data
         if let urlString, let url = URL(string: urlString), url.scheme == "https" {

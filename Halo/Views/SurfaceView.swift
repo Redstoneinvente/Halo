@@ -657,6 +657,7 @@ struct SurfaceView: View {
         }
     }
     @State private var page = 0
+    @State private var openVisibilityToken = UUID()
     private var modules: [ModuleID] { layout.normalizedOrder().filter { layout.enabled.contains($0) } }
     private var accent: Color { Color(hue: theme.tint, saturation: 0.65, brightness: 1) }
     var body: some View {
@@ -764,17 +765,10 @@ struct SurfaceView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background {
-            ZStack {
-                SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
-                if !state.expanded || layout.closedNotch?.applyBackgroundWhenOpened == true {
-                    AlbumNotchBackground(options: closedBackgroundOptions, media: workspace.media, system: workspace.system)
-                }
-            }
-        }
+        .background { surfaceBackgroundLayer }
         .clipShape(contour)
         .contentShape(contour)
-        .overlay(contour.stroke(state.dropTargeted ? accent : .white.opacity(0.12), lineWidth: state.dropTargeted ? 1.6 : 1))
+        .overlay { surfaceOverlayLayer }
         .foregroundStyle(.white).preferredColorScheme(.dark)
         .buttonStyle(.borderless)
         .contextMenu {
@@ -800,92 +794,531 @@ struct SurfaceView: View {
                 state.expanded = true
             }
         }
+        .onAppear { workspace.setOpenedNotchVisible(state.expanded && activeContext == nil, token: openVisibilityToken) }
+        .onDisappear { workspace.setOpenedNotchVisible(false, token: openVisibilityToken) }
         .onChange(of: state.expanded) { expanded in
+            workspace.setOpenedNotchVisible(expanded && activeContext == nil, token: openVisibilityToken)
             if !expanded {
                 state.contextPreferredSize = nil
                 retroGameRequested = false
             }
         }
+        .onChange(of: activeContext) { _ in
+            workspace.setOpenedNotchVisible(state.expanded && activeContext == nil, token: openVisibilityToken)
+        }
     }
 
-    private func horizontalWidget(_ module: ModuleID) -> some View {
-        GeometryReader { proxy in
-            WidgetCard(style: layout.widgetStyle(for: module), availableHeight: proxy.size.height) {
-                BuiltinOrIntegrationWidget(module: module, store: store)
+    @ViewBuilder private var surfaceBackgroundLayer: some View {
+        ZStack {
+            if state.expanded && activeContext == nil {
+                OpenNotchBackgroundView(options: layout.resolvedOpenNotchLayout.appearance, fallback: layout.appearance, theme: theme, system: workspace.system)
+            } else {
+                SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
+            }
+            if !state.expanded || layout.closedNotch?.applyBackgroundWhenOpened == true {
+                AlbumNotchBackground(options: closedBackgroundOptions, media: workspace.media, system: workspace.system)
             }
         }
     }
-    @ViewBuilder private var openDashboardContent: some View {
-        switch layout.resolvedOpenNotchContentMode {
-        case .fixed:
-            GeometryReader { proxy in
-                if modules.isEmpty {
-                    Text("Enable widgets in Settings → Modules.")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                } else {
-                    let columns = max(1, min(layout.resolvedOpenFixedColumns, modules.count))
-                    let rows = max(1, Int(ceil(Double(modules.count) / Double(columns))))
-                    let gap = CGFloat(layout.appearance.spacing)
-                    let cellHeight = max(1, (proxy.size.height - gap * CGFloat(max(0, rows - 1))) / CGFloat(rows))
-                    LazyVGrid(
-                        columns: Array(repeating: GridItem(.flexible(), spacing: gap), count: columns),
-                        spacing: gap
-                    ) {
-                        ForEach(modules) { module in
-                            horizontalWidget(module)
-                                .frame(height: cellHeight)
+
+    @ViewBuilder private var surfaceOverlayLayer: some View {
+        contour.stroke(state.dropTargeted ? accent : .white.opacity(0.12), lineWidth: state.dropTargeted ? 1.6 : 1)
+        if state.expanded && activeContext == nil {
+            OpenNotchSurfaceChrome(contour: contour, options: layout.resolvedOpenNotchLayout.appearance)
+        }
+    }
+
+    private var openDashboardContent: some View {
+        OpenNotchWorkspaceView(layout: layout, store: store, mode: layout.resolvedOpenNotchContentMode, page: $page)
+    }
+}
+
+
+private struct OpenNotchBackgroundView: View {
+    let options: OpenNotchAppearance
+    let fallback: Appearance
+    let theme: Theme
+    @ObservedObject var system: SystemService
+    var body: some View {
+        SurfaceBackground(appearance: options.baseAppearance(fallback), theme: theme, expanded: true, system: system)
+            .contrast(options.contrast ?? 1)
+            .overlay((options.tintColor ?? WidgetColor(red: 0.35, green: 0.55, blue: 1)).color.opacity(options.tintOpacity ?? 0))
+            .overlay(Color.orange.opacity(max(0, options.warmth ?? 0) * 0.06))
+            .overlay(Color.blue.opacity(max(0, -(options.warmth ?? 0)) * 0.05))
+            .overlay {
+                if (options.grain ?? 0) > 0 {
+                    Canvas { context, size in
+                        let amount = min(0.35, max(0, options.grain ?? 0))
+                        let step: CGFloat = 7
+                        var x: CGFloat = 1
+                        var seed: UInt64 = UInt64(size.width * 31 + size.height * 17)
+                        while x < size.width {
+                            var y: CGFloat = 1
+                            while y < size.height {
+                                seed = seed &* 2862933555777941757 &+ 3037000493
+                                let n = Double((seed >> 33) & 255) / 255.0
+                                if n > 0.64 { context.fill(Path(CGRect(x: x, y: y, width: 1, height: 1)), with: .color(.white.opacity(amount * 0.18))) }
+                                y += step
+                            }
+                            x += step
                         }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    }.allowsHitTesting(false)
                 }
             }
-        case .scroll:
+    }
+}
+
+private struct OpenNotchSurfaceChrome: View {
+    let contour: HaloContour
+    let options: OpenNotchAppearance
+    var body: some View {
+        ZStack {
+            if (options.borderWidth ?? 0) > 0 {
+                contour.stroke((options.borderColor ?? .white).color.opacity(options.borderOpacity ?? 0.2), lineWidth: options.borderWidth ?? 0)
+            }
+            if (options.innerHighlight ?? 0) > 0 {
+                contour.stroke(.white.opacity(options.innerHighlight ?? 0), lineWidth: 1).padding(1)
+            }
+            if (options.glow ?? 0) > 0 {
+                contour.stroke(.white.opacity((options.glow ?? 0) * 0.32), lineWidth: 1.2)
+                    .shadow(color: .white.opacity(options.glow ?? 0), radius: 12)
+            }
+            if (options.shadowOpacity ?? 0) > 0 {
+                contour.stroke(.black.opacity(options.shadowOpacity ?? 0), lineWidth: 1)
+                    .shadow(color: .black.opacity(options.shadowOpacity ?? 0), radius: options.shadowBlur ?? 12, y: 3)
+            }
+        }.allowsHitTesting(false)
+    }
+}
+
+@MainActor
+private struct OpenNotchRuntimeContext {
+    let store: AppStore
+    var battery: Double? { store.workspace.system.battery.map(Double.init) }
+    var cpu: Double { store.workspace.system.cpuUsage }
+    var valueForMetric: (OpenNotchVisibilityMetric) -> Double? {
+        { metric in
+            switch metric {
+            case .always: return 1
+            case .batteryLevel: return battery
+            case .charging: return store.workspace.system.charging ? 1 : 0
+            case .mediaPlaying: return store.workspace.media.isPlaying ? 1 : 0
+            case .timerActive: return (store.deadline != nil || store.pausedSeconds > 0) ? 1 : 0
+            case .stopwatchRunning: return store.workspace.stopwatchStart != nil ? 1 : 0
+            case .cpuUsage: return cpu
+            case .lowPowerMode: return store.workspace.system.lowPower ? 1 : 0
+            }
+        }
+    }
+    func matches(_ rule: OpenNotchVisibilityRule) -> Bool {
+        guard let lhs = valueForMetric(rule.metric) else { return false }
+        let rhs = rule.value
+        switch rule.comparison {
+        case .equal: return abs(lhs - rhs) < 0.0001
+        case .notEqual: return abs(lhs - rhs) >= 0.0001
+        case .lessThan: return lhs < rhs
+        case .lessThanOrEqual: return lhs <= rhs
+        case .greaterThan: return lhs > rhs
+        case .greaterThanOrEqual: return lhs >= rhs
+        }
+    }
+    func isVisible(_ item: OpenNotchItem) -> Bool {
+        guard !item.hidden else { return false }
+        guard !item.visibilityRules.isEmpty else { return true }
+        switch item.visibilityLogic {
+        case .all: return item.visibilityRules.allSatisfy(matches)
+        case .any: return item.visibilityRules.contains(where: matches)
+        }
+    }
+}
+
+private struct OpenNotchWorkspaceView: View {
+    let layout: WorkspaceLayout
+    @ObservedObject var store: AppStore
+    let mode: OpenNotchContentMode
+    @Binding var page: Int
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var opened: OpenNotchLayout { layout.resolvedOpenNotchLayout }
+    private var regions: [OpenNotchRegion] { opened.regions.sorted { $0.placement.sortIndex < $1.placement.sortIndex } }
+    private var groups: [OpenNotchGroup] { regions.flatMap(\.groups) }
+
+    var body: some View {
+        Group {
+            switch mode {
+            case .fixed: fixedCanvas
+            case .scroll: scrollCanvas
+            case .pages: pagesCanvas
+            }
+        }
+        .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.86), value: opened)
+    }
+
+    private var fixedCanvas: some View {
+        GeometryReader { proxy in
+            VStack(spacing: max(4, layout.appearance.spacing)) {
+                regionRow(.topLeft, .topCenter, .topRight, height: proxy.size.height / 3)
+                regionRow(.middleLeft, .middleCenter, .middleRight, height: proxy.size.height / 3)
+                regionRow(.bottomLeft, .bottomCenter, .bottomRight, height: proxy.size.height / 3)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder private func regionRow(_ left: OpenNotchRegionPlacement, _ center: OpenNotchRegionPlacement,
+                                        _ right: OpenNotchRegionPlacement, height: CGFloat) -> some View {
+        let placements = [left, center, right]
+        if placements.contains(where: { region($0) != nil }) {
+            HStack(alignment: .top, spacing: max(4, layout.appearance.spacing)) {
+                ForEach(placements) { placement in
+                    if let value = region(placement) {
+                        OpenNotchRegionView(region: value, layout: layout, store: store)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: placement.regionAlignment)
+                    } else {
+                        Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+            }.frame(height: max(1, height - layout.appearance.spacing * 0.66))
+        }
+    }
+
+    private var scrollCanvas: some View {
+        Group {
             if layout.horizontalWidgets ?? false {
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: layout.appearance.spacing) {
-                        widgetCards(horizontal: true)
+                        ForEach(groups) { group in OpenNotchGroupView(group: group, layout: layout, store: store).frame(minWidth: 220) }
                     }
                 }
             } else {
                 ScrollView {
-                    LazyVStack(spacing: layout.appearance.spacing) {
-                        widgetCards(horizontal: false)
+                    LazyVStack(alignment: .leading, spacing: layout.appearance.spacing) {
+                        ForEach(groups) { group in OpenNotchGroupView(group: group, layout: layout, store: store) }
                     }
-                }
-            }
-        case .pages:
-            VStack(spacing: 8) {
-                if !modules.isEmpty {
-                    let index = min(page, modules.count - 1)
-                    horizontalWidget(modules[index])
-                    HStack {
-                        Button { page = max(0, index - 1) } label: { Image(systemName: "chevron.left") }
-                            .disabled(index == 0).accessibilityLabel("Previous widget")
-                        Spacer()
-                        Text("\(modules[index].title) · \(index + 1) / \(modules.count)").font(.caption)
-                        Spacer()
-                        Button { page = min(modules.count - 1, index + 1) } label: { Image(systemName: "chevron.right") }
-                            .disabled(index == modules.count - 1).accessibilityLabel("Next widget")
-                    }
-                } else {
-                    Text("Enable widgets in Settings → Modules.").foregroundStyle(.secondary)
                 }
             }
         }
     }
 
-    @ViewBuilder private func widgetCards(horizontal: Bool) -> some View {
-        ForEach(layout.normalizedOrder().filter { layout.enabled.contains($0) }) { module in
-            if horizontal {
-                horizontalWidget(module).frame(width: max(240, state.dashboardWidth - 64))
+    private var pagesCanvas: some View {
+        VStack(spacing: 8) {
+            if groups.isEmpty {
+                Text("Enable widgets or add opened-notch elements in Settings.").foregroundStyle(.secondary)
             } else {
-                WidgetCard(style: layout.widgetStyle(for: module)) {
-                    BuiltinOrIntegrationWidget(module: module, store: store)
+                let index = min(max(0, page), groups.count - 1)
+                OpenNotchGroupView(group: groups[index], layout: layout, store: store)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                HStack {
+                    Button { page = max(0, index - 1) } label: { Image(systemName: "chevron.left") }.disabled(index == 0)
+                    Spacer(); Text("\(groups[index].name) · \(index + 1) / \(groups.count)").font(.caption); Spacer()
+                    Button { page = min(groups.count - 1, index + 1) } label: { Image(systemName: "chevron.right") }.disabled(index == groups.count - 1)
                 }
             }
         }
     }
+
+    private func region(_ placement: OpenNotchRegionPlacement) -> OpenNotchRegion? { regions.first { $0.placement == placement } }
+}
+
+private struct OpenNotchRegionView: View {
+    let region: OpenNotchRegion
+    let layout: WorkspaceLayout
+    @ObservedObject var store: AppStore
+    var body: some View {
+        VStack(spacing: max(4, layout.appearance.spacing)) {
+            ForEach(region.groups) { group in OpenNotchGroupView(group: group, layout: layout, store: store) }
+        }
+        .padding(.top, region.padding.top).padding(.leading, region.padding.leading)
+        .padding(.bottom, region.padding.bottom).padding(.trailing, region.padding.trailing)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: region.placement.regionAlignment)
+    }
+}
+
+private struct OpenNotchGroupView: View {
+    let group: OpenNotchGroup
+    let layout: WorkspaceLayout
+    @ObservedObject var store: AppStore
+    private var context: OpenNotchRuntimeContext { OpenNotchRuntimeContext(store: store) }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let candidates = group.items.filter(context.isVisible)
+            let mainAvailable = group.axis == .horizontal ? proxy.size.width : proxy.size.height
+            let wanted = candidates.reduce(0.0) { partial, item in
+                partial + (group.axis == .horizontal ? item.sizing.preferredWidth : item.sizing.preferredHeight)
+            } + max(0, Double(candidates.count - 1)) * group.spacing
+            let compression = compressionLevel(available: mainAvailable, wanted: wanted)
+            let spacing = max(2, group.spacing * (compression >= 1 ? 0.66 : 1))
+            let visible = candidates.filter { $0.priority.remainsVisible(at: compression) }
+            Group {
+                if compression >= 5 {
+                    ScrollView(group.axis == .horizontal ? .horizontal : .vertical) { stack(items: visible, spacing: spacing, compression: compression) }
+                } else {
+                    stack(items: visible, spacing: spacing, compression: compression)
+                }
+            }
+            .padding(.top, group.padding.top).padding(.leading, group.padding.leading)
+            .padding(.bottom, group.padding.bottom).padding(.trailing, group.padding.trailing)
+        }
+        .frame(minHeight: group.axis == .vertical ? estimatedHeight : 54)
+    }
+
+    @ViewBuilder private func stack(items: [OpenNotchItem], spacing: Double, compression: Int) -> some View {
+        if group.axis == .horizontal {
+            HStack(alignment: group.alignment.verticalAlignment, spacing: spacing) {
+                ForEach(items) { item in OpenNotchItemView(item: item, layout: layout, store: store, compression: compression) }
+            }.frame(maxWidth: .infinity, alignment: group.alignment.horizontalFrameAlignment)
+        } else {
+            VStack(alignment: group.alignment.horizontalAlignment, spacing: spacing) {
+                ForEach(items) { item in OpenNotchItemView(item: item, layout: layout, store: store, compression: compression) }
+            }.frame(maxWidth: .infinity, alignment: group.alignment.horizontalFrameAlignment)
+        }
+    }
+
+    private var estimatedHeight: CGFloat {
+        let h = group.items.reduce(0.0) { $0 + min($1.sizing.preferredHeight, 260) } + max(0, Double(group.items.count - 1)) * group.spacing
+        return CGFloat(min(720, max(54, h + group.padding.top + group.padding.bottom)))
+    }
+    private func compressionLevel(available: CGFloat, wanted: Double) -> Int {
+        guard wanted > 0, available > 0 else { return 0 }
+        let ratio = Double(available) / wanted
+        if ratio >= 1 { return 0 }
+        if ratio >= 0.86 { return 1 }   // spacing
+        if ratio >= 0.72 { return 2 }   // secondary / optional metadata
+        if ratio >= 0.58 { return 3 }   // compact presentation
+        if ratio >= 0.44 { return 4 }   // truncate text
+        return 5                         // scroll as a last resort
+    }
+}
+
+private struct OpenNotchItemView: View {
+    let item: OpenNotchItem
+    let layout: WorkspaceLayout
+    @ObservedObject var store: AppStore
+    let compression: Int
+    @State private var hover = false
+
+    var body: some View {
+        let presentation = resolvedPresentation
+        let style = adaptedWidgetStyle(presentation: presentation)
+        let itemStyle = item.style ?? WidgetElementStyle()
+        Group {
+            switch item.kind {
+            case .module:
+                if let module = item.module, layout.enabled.contains(module) {
+                    WidgetCard(style: style) { BuiltinOrIntegrationWidget(module: module, store: store) }
+                        .environment(\.openNotchPresentation, presentation)
+                        .environment(\.openNotchCompressionLevel, compression)
+                }
+            case .element:
+                if let element = item.element {
+                    WidgetElementSurface(element: itemStyle, widgetStyle: style, defaultPriority: item.priority) {
+                        OpenNotchLightweightElement(kind: element, item: item, store: store)
+                    }
+                    .environment(\.openNotchPresentation, presentation)
+                    .environment(\.openNotchCompressionLevel, compression)
+                }
+            case .spacer:
+                Spacer(minLength: CGFloat(max(8, item.sizing.minimumWidth)))
+            case .divider:
+                Divider().opacity(itemStyle.opacity)
+            }
+        }
+        .modifier(OpenNotchSizingModifier(sizing: item.sizing))
+        .contentShape(Rectangle())
+        .opacity(hover ? 1 : 0.985)
+        .onHover { hover = $0 }
+        .modifier(OpenNotchInteractionModifier(item: item, store: store))
+        .transition(.opacity.combined(with: .scale(scale: 0.975)))
+    }
+
+    private var resolvedPresentation: OpenNotchPresentation {
+        if item.presentation != .automatic { return item.presentation }
+        if compression >= 3 { return .compact }
+        if item.sizing.preferredWidth >= 420 || item.sizing.preferredHeight >= 240 { return .expanded }
+        if item.sizing.preferredWidth < 220 || item.sizing.preferredHeight < 90 { return .compact }
+        return .regular
+    }
+    private func adaptedWidgetStyle(presentation: OpenNotchPresentation) -> WidgetStyle {
+        guard let module = item.module else { return WidgetStyle() }
+        var style = layout.widgetStyle(for: module)
+        switch presentation {
+        case .compact: style.layoutMode = .compact
+        case .expanded: style.layoutMode = .hero
+        case .regular, .automatic: style.layoutMode = .standard
+        }
+        if compression >= 2 {
+            var content = style.resolvedContent
+            content.showSecondaryText = false; content.mediaShowArtist = false; content.mediaShowSource = false
+            content.calendarShowTimes = false; content.shelfShowDetails = false; content.activitiesShowDetail = false
+            style.content = content
+        }
+        if compression >= 4 {
+            var content = style.resolvedContent
+            content.mediaTitleLines = 1; content.maxItems = min(3, content.maxItems)
+            style.content = content
+        }
+        return style
+    }
+}
+
+private struct OpenNotchSizingModifier: ViewModifier {
+    let sizing: OpenNotchSizing
+    func body(content: Content) -> some View {
+        switch sizing.mode {
+        case .fixed:
+            content.frame(width: sizing.preferredWidth, height: sizing.preferredHeight)
+        case .fitContent:
+            content.frame(minWidth: sizing.minimumWidth, idealWidth: sizing.preferredWidth, maxWidth: sizing.maximumWidth,
+                          minHeight: sizing.minimumHeight, idealHeight: sizing.preferredHeight, maxHeight: sizing.maximumHeight)
+                .fixedSize(horizontal: false, vertical: false)
+        case .flexible:
+            content.frame(minWidth: sizing.minimumWidth, idealWidth: sizing.preferredWidth, maxWidth: sizing.maximumWidth,
+                          minHeight: sizing.minimumHeight, idealHeight: sizing.preferredHeight, maxHeight: sizing.maximumHeight)
+        case .fill:
+            content.frame(minWidth: sizing.minimumWidth, maxWidth: .infinity, minHeight: sizing.minimumHeight, maxHeight: .infinity)
+        }
+    }
+}
+
+private struct OpenNotchLightweightElement: View {
+    let kind: OpenNotchElementKind
+    let item: OpenNotchItem
+    @ObservedObject var store: AppStore
+    @State private var image: NSImage?
+    var body: some View {
+        let workspace = store.workspace
+        switch kind {
+        case .clock:
+            TimelineView(.periodic(from: .now, by: 1)) { context in Text(context.date, style: .time).monospacedDigit() }
+        case .date: Text(Date(), style: .date)
+        case .battery:
+            if let battery = workspace.system.battery { Label("\(battery)%", systemImage: workspace.system.charging ? "battery.100.bolt" : "battery.100") }
+        case .batteryPercentage:
+            if let battery = workspace.system.battery { Text("\(battery)%").monospacedDigit() }
+        case .chargingState:
+            if workspace.system.charging { Label("Charging", systemImage: "bolt.fill") }
+        case .appIcon:
+            if let icon = NSWorkspace.shared.frontmostApplication?.icon { Image(nsImage: icon).resizable().scaledToFit().frame(width: item.style?.iconSize ?? 24, height: item.style?.iconSize ?? 24) }
+        case .appName: Text(NSWorkspace.shared.frontmostApplication?.localizedName ?? "")
+        case .volume:
+            if workspace.audio.canSetVolume {
+                HStack { Image(systemName: "speaker.wave.2"); Slider(value: Binding(get: { Double(workspace.audio.volume) }, set: { workspace.audio.setVolume(Float($0)) }), in: 0...1) { Text("Volume") }; Text("\(Int(workspace.audio.volume * 100))%").monospacedDigit() }
+            }
+        case .brightness:
+            if let brightness = workspace.system.brightness {
+                HStack { Image(systemName: "sun.max"); Slider(value: Binding(get: { brightness }, set: { workspace.system.setBrightness($0) }), in: 0...1) { Text("Brightness") } }
+            }
+        case .timer:
+            if let deadline = store.deadline { Text(deadline, style: .timer).monospacedDigit() }
+            else if store.pausedSeconds > 0 { Text("Paused · \(Int(store.pausedSeconds))s").monospacedDigit() }
+            else { Text("Timer ready") }
+        case .stopwatch:
+            TimelineView(.periodic(from: .now, by: 0.2)) { context in
+                let elapsed = workspace.stopwatchElapsed + (workspace.stopwatchStart.map { context.date.timeIntervalSince($0) } ?? 0)
+                Text(String(format: "%02d:%02d:%02d", Int(elapsed) / 3600, Int(elapsed) / 60 % 60, Int(elapsed) % 60)).monospacedDigit()
+            }
+        case .mediaTitle: if workspace.media.connectedApp != nil { Text(workspace.media.title).lineLimit(1) }
+        case .artist: if !workspace.media.artist.isEmpty { Text(workspace.media.artist).lineLimit(1) }
+        case .albumArt:
+            if let art = workspace.media.artworkImage { Image(nsImage: art).resizable().scaledToFill().clipShape(RoundedRectangle(cornerRadius: 8)) }
+        case .playbackControls:
+            if workspace.media.connectedApp != nil {
+                HStack {
+                    Button { workspace.media.perform("previous track", app: workspace.settings.mediaApp) } label: { Image(systemName: "backward.end.fill") }
+                    Button { workspace.media.perform("playpause", app: workspace.settings.mediaApp) } label: { Image(systemName: workspace.media.isPlaying ? "pause.fill" : "play.fill") }
+                    Button { workspace.media.perform("next track", app: workspace.settings.mediaApp) } label: { Image(systemName: "forward.end.fill") }
+                }
+            }
+        case .playbackProgress:
+            if workspace.media.duration > 0 {
+                Slider(value: Binding(get: { workspace.media.position }, set: { workspace.media.seek(to: $0) }), in: 0...max(1, workspace.media.duration)) { Text("Playback progress") }
+            }
+        case .cpu: Label(String(format: "CPU %.0f%%", workspace.system.cpuUsage), systemImage: "cpu")
+        case .ram: Label(String(format: "RAM %.0f%%", workspace.system.memoryUsage), systemImage: "memorychip")
+        case .storage: Label(String(format: "Disk %.0f%%", workspace.system.diskUsage), systemImage: "internaldrive")
+        case .networkActivity:
+            Label("↓ \(Self.rate(workspace.system.networkDownPerSecond))  ↑ \(Self.rate(workspace.system.networkUpPerSecond))", systemImage: "network")
+        case .customText: Text(item.customText)
+        case .customIcon: Image(systemName: item.customIcon.isEmpty ? "sparkles" : item.customIcon).font(.system(size: item.style?.iconSize ?? 20))
+        case .customImage, .customGIF:
+            if let image { Image(nsImage: image).resizable().scaledToFit() }
+            else { Image(systemName: "photo").foregroundStyle(.secondary).task { image = NSImage(contentsOfFile: item.customAssetPath) } }
+        case .button:
+            Button(item.buttonLabel) { if let url = URL(string: item.buttonURL), ["https", "http", "shortcuts"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) } }
+        case .spacer: Spacer(minLength: 8)
+        case .divider: Divider()
+        }
+    }
+    private static func rate(_ value: Double) -> String { ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .file) + "/s" }
+}
+
+private struct OpenNotchInteractionModifier: ViewModifier {
+    let item: OpenNotchItem
+    @ObservedObject var store: AppStore
+    func body(content: Content) -> some View {
+        content
+            .onTapGesture(count: 2) { perform(item.interactions.doubleClick) }
+            .simultaneousGesture(TapGesture(count: 1).onEnded {
+                let modifiers = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                perform(modifiers.isEmpty ? item.interactions.singleClick : item.interactions.modifierClick)
+            })
+            .contextMenu {
+                if item.interactions.rightClick != .none { Button(item.interactions.rightClick.rawValue) { perform(item.interactions.rightClick) } }
+            }
+            .background {
+                if item.interactions.scroll != .none { OpenNotchScrollCapture { perform(item.interactions.scroll, delta: $0) }.allowsHitTesting(true) }
+            }
+            .onDrag {
+                if item.interactions.drag != .none { perform(item.interactions.drag) }
+                return NSItemProvider(object: item.id.uuidString as NSString)
+            }
+    }
+    private func perform(_ action: OpenNotchInteractionAction, delta: Double = 0) {
+        let workspace = store.workspace
+        switch action {
+        case .none: break
+        case .togglePlayback: workspace.media.perform("playpause", app: workspace.settings.mediaApp)
+        case .nextTrack: workspace.media.perform("next track", app: workspace.settings.mediaApp)
+        case .previousTrack: workspace.media.perform("previous track", app: workspace.settings.mediaApp)
+        case .openPlayer:
+            if let id = workspace.media.connectedApp, let app = NSRunningApplication.runningApplications(withBundleIdentifier: id).first { app.activate(options: .activateIgnoringOtherApps) }
+        case .adjustVolume:
+            guard workspace.audio.canSetVolume else { return }
+            workspace.audio.setVolume(min(1, max(0, workspace.audio.volume + Float(delta > 0 ? 0.04 : -0.04))))
+        case .seekMedia: if workspace.media.duration > 0 { workspace.media.seek(to: min(workspace.media.duration, max(0, workspace.media.position + (delta > 0 ? 5 : -5)))) }
+        case .toggleTimer:
+            if store.deadline != nil || store.pausedSeconds > 0 { store.pauseResume() } else { store.startTimer(minutes: 25) }
+        case .toggleStopwatch: workspace.toggleStopwatch()
+        case .openSystemSettings:
+            if let url = URL(string: "x-apple.systempreferences:") { NSWorkspace.shared.open(url) }
+        }
+    }
+}
+
+private struct OpenNotchScrollCapture: NSViewRepresentable {
+    let onScroll: (Double) -> Void
+    final class View: NSView {
+        var callback: ((Double) -> Void)?
+        override func scrollWheel(with event: NSEvent) { callback?(event.scrollingDeltaY == 0 ? event.scrollingDeltaX : event.scrollingDeltaY) }
+    }
+    func makeNSView(context: Context) -> View { let v = View(); v.callback = onScroll; return v }
+    func updateNSView(_ nsView: View, context: Context) { nsView.callback = onScroll }
+}
+
+private extension OpenNotchRegionPlacement {
+    var sortIndex: Int { OpenNotchRegionPlacement.allCases.firstIndex(of: self) ?? 0 }
+    var regionAlignment: Alignment {
+        switch self {
+        case .topLeft: return .topLeading; case .topCenter: return .top; case .topRight: return .topTrailing
+        case .middleLeft: return .leading; case .middleCenter: return .center; case .middleRight: return .trailing
+        case .bottomLeft: return .bottomLeading; case .bottomCenter: return .bottom; case .bottomRight: return .bottomTrailing
+        }
+    }
+}
+private extension OpenNotchGroupAlignment {
+    var horizontalAlignment: HorizontalAlignment { switch self { case .center: return .center; case .trailing: return .trailing; default: return .leading } }
+    var verticalAlignment: VerticalAlignment { switch self { case .center: return .center; case .trailing: return .bottom; default: return .top } }
+    var horizontalFrameAlignment: Alignment { switch self { case .center: return .center; case .trailing: return .trailing; default: return .leading } }
 }
 
 private struct DropContextView: View {
@@ -953,6 +1386,7 @@ struct BuiltinOrIntegrationWidget: View {
     let module: ModuleID
     @ObservedObject var store: AppStore
     @Environment(\.widgetStyle) private var style
+    @Environment(\.openNotchPresentation) private var presentation
     @ViewBuilder var body: some View {
         switch module {
         case .clock: WidgetClock(style: style)
@@ -979,13 +1413,13 @@ struct BuiltinOrIntegrationWidget: View {
                 else if store.pausedSeconds > 0 { Text(formatDuration(store.pausedSeconds)).font(style.font(scale: 1.35)).monospacedDigit() }
                 else { Text("Ready").font(style.font(scale: 1.15)) }
             }
-            WidgetElement(key: "progress") { ProgressView(value: progress) }
-            WidgetElement(key: "endTime", defaultVisible: false) {
+            if presentation != .compact { WidgetElement(key: "progress", defaultPriority: .normal) { ProgressView(value: progress) } }
+            if presentation == .expanded { WidgetElement(key: "endTime", defaultVisible: false, defaultPriority: .low) {
                 if let deadline = store.deadline { HStack { Text("Finishes"); Spacer(); Text(deadline, style: .time) } }
                 else if store.pausedSeconds > 0 { Text("Paused with \(formatDuration(store.pausedSeconds)) remaining") }
                 else { Text("Choose a duration to begin") }
-            }
-            if options.showSecondaryText {
+            } }
+            if options.showSecondaryText && presentation != .compact {
                 WidgetElement(key: "status") {
                     Label(store.finished ? "Session complete" : store.deadline != nil ? "Deep work in progress" : store.pausedSeconds > 0 ? "Session paused" : "Make room for deep work",
                           systemImage: store.finished ? "checkmark.circle.fill" : store.deadline != nil ? "brain.head.profile" : store.pausedSeconds > 0 ? "pause.circle" : "sparkles")
@@ -1028,7 +1462,9 @@ struct BuiltinOrIntegrationWidget: View {
                     Text("\(store.pinnedFiles.count) pinned")
                 }
             }
-            if store.files.isEmpty, options.showSecondaryText {
+            if presentation == .compact {
+                if options.showQuickActions { WidgetElement(key: "actions", defaultPriority: .high) { Button("Add files…") { store.chooseFiles() } } }
+            } else if store.files.isEmpty, options.showSecondaryText {
                 WidgetElement(key: "files") { Text("Drop files here. Originals stay untouched.").foregroundStyle(.secondary) }
             } else {
                 WidgetElement(key: "files") {
@@ -1050,8 +1486,8 @@ struct BuiltinOrIntegrationWidget: View {
                     }
                 }
             }
-            if options.showQuickActions {
-                WidgetElement(key: "actions") {
+            if options.showQuickActions && presentation == .expanded {
+                WidgetElement(key: "actions", defaultPriority: .normal) {
                     HStack {
                         Button("Add files…") { store.chooseFiles() }
                         Button("Clear shelf") { store.clearShelf() }.disabled(store.files.isEmpty)

@@ -86,6 +86,49 @@ extension EnvironmentValues {
     }
 }
 
+
+private struct OpenNotchPresentationEnvironmentKey: EnvironmentKey { static let defaultValue: OpenNotchPresentation = .regular }
+private struct OpenNotchCompressionEnvironmentKey: EnvironmentKey { static let defaultValue = 0 }
+extension EnvironmentValues {
+    var openNotchPresentation: OpenNotchPresentation {
+        get { self[OpenNotchPresentationEnvironmentKey.self] }
+        set { self[OpenNotchPresentationEnvironmentKey.self] = newValue }
+    }
+    var openNotchCompressionLevel: Int {
+        get { self[OpenNotchCompressionEnvironmentKey.self] }
+        set { self[OpenNotchCompressionEnvironmentKey.self] = newValue }
+    }
+}
+
+extension OpenNotchPriority {
+    func remainsVisible(at compression: Int) -> Bool {
+        switch self {
+        case .alwaysVisible, .high: return true
+        case .normal: return compression < 5
+        case .low: return compression < 3
+        case .optional: return compression < 2
+        }
+    }
+}
+
+extension WidgetFontWeight {
+    var swiftUIFontWeight: Font.Weight {
+        switch self {
+        case .light: return .light
+        case .regular: return .regular
+        case .medium: return .medium
+        case .semibold: return .semibold
+        case .bold: return .bold
+        }
+    }
+}
+
+extension WidgetContentAlignment {
+    var textAlignment: TextAlignment {
+        switch self { case .leading: return .leading; case .center: return .center; case .trailing: return .trailing }
+    }
+}
+
 extension WidgetElementEmphasis {
     var fontWeight: Font.Weight {
         switch self {
@@ -97,52 +140,97 @@ extension WidgetElementEmphasis {
     }
 }
 
-struct WidgetElement<Content: View>: View {
-    let key: String
-    var defaultVisible = true
+struct WidgetElementSurface<Content: View>: View {
+    let element: WidgetElementStyle
+    let widgetStyle: WidgetStyle
+    var defaultPriority: OpenNotchPriority = .normal
     @ViewBuilder var content: Content
-    @Environment(\.widgetStyle) private var style
+    @Environment(\.openNotchCompressionLevel) private var compression
 
-    private var element: WidgetElementStyle { style.elementStyle(for: key, defaultVisible: defaultVisible) }
+    private var priority: OpenNotchPriority { element.priority ?? defaultPriority }
+    private var alignment: WidgetContentAlignment { element.alignment ?? widgetStyle.resolvedContent.alignment }
+    private var textAlignment: WidgetContentAlignment { element.textAlignment ?? alignment }
     private var foreground: Color {
         switch element.foreground {
-        case .inherit: return style.textColor.color
-        case .secondary: return style.textColor.color.opacity(0.62)
-        case .accent: return style.accentColor.color
+        case .inherit: return widgetStyle.textColor.color
+        case .secondary: return widgetStyle.textColor.color.opacity(0.62)
+        case .accent: return widgetStyle.accentColor.color
         case .custom: return element.customForeground.color
         }
     }
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: element.cornerRadius, style: .continuous) }
+    private var font: Font {
+        let family = element.fontFamily ?? widgetStyle.fontFamily
+        let size = element.fontSize ?? (widgetStyle.fontSize * element.fontScale)
+        let weight = element.fontWeight?.swiftUIFontWeight ?? element.emphasis.fontWeight
+        if family == .custom { return .custom(element.customFont ?? widgetStyle.customFont, size: size).weight(weight) }
+        let design: Font.Design
+        switch family { case .rounded: design = .rounded; case .serif: design = .serif; case .monospaced: design = .monospaced; default: design = .default }
+        return .system(size: size, weight: weight, design: design)
+    }
+    private var controlSize: ControlSize {
+        let density = element.contentDensity ?? 1
+        if density <= 0.7 { return .mini }
+        if density <= 0.9 { return .small }
+        if density >= 1.3 { return .large }
+        return widgetStyle.resolvedContent.controlSize.swiftUI
+    }
 
     @ViewBuilder private var elementBackground: some View {
         switch element.background {
-        case .none:
-            EmptyView()
-        case .subtle:
-            shape.fill(style.textColor.color.opacity(element.backgroundOpacity * 0.16))
-        case .accent:
-            shape.fill(style.accentColor.color.opacity(element.backgroundOpacity))
-        case .glass:
-            shape.fill(.ultraThinMaterial).opacity(max(0.15, element.backgroundOpacity))
-        case .custom:
-            shape.fill(element.backgroundColor.color.opacity(element.backgroundOpacity))
+        case .none: EmptyView()
+        case .subtle: shape.fill(widgetStyle.textColor.color.opacity(element.backgroundOpacity * 0.16))
+        case .accent: shape.fill(widgetStyle.accentColor.color.opacity(element.backgroundOpacity))
+        case .glass: shape.fill(.ultraThinMaterial).opacity(max(0.15, element.backgroundOpacity))
+        case .custom: shape.fill(element.backgroundColor.color.opacity(element.backgroundOpacity))
         }
     }
 
     var body: some View {
+        if element.visible && priority.remainsVisible(at: compression) {
+            content
+                .font(font)
+                .foregroundStyle(foreground)
+                .tint((element.tintColor ?? widgetStyle.accentColor).color.opacity(element.tintOpacity ?? 1))
+                .multilineTextAlignment(textAlignment.textAlignment)
+                .controlSize(controlSize)
+                .opacity(element.opacity)
+                .lineLimit(compression >= 4 ? 1 : nil)
+                .padding(element.padding)
+                .background { elementBackground }
+                .overlay {
+                    if (element.borderWidth ?? 0) > 0 && (element.borderOpacity ?? 0) > 0 {
+                        shape.stroke((element.borderColor ?? widgetStyle.textColor).color.opacity(element.borderOpacity ?? 0), lineWidth: element.borderWidth ?? 0)
+                    }
+                }
+                .shadow(color: .black.opacity(element.shadowOpacity ?? 0), radius: element.shadowBlur ?? 0)
+                .offset(x: element.xOffset ?? 0, y: element.yOffset ?? 0)
+                .padding(.vertical, (element.externalSpacing ?? 0) * 0.5)
+                .frame(maxWidth: .infinity, alignment: alignment.alignment)
+        }
+    }
+}
+
+struct WidgetElement<Content: View>: View {
+    let key: String
+    var defaultVisible = true
+    var defaultPriority: OpenNotchPriority = .normal
+    @ViewBuilder var content: Content
+    @Environment(\.widgetStyle) private var style
+
+    init(key: String, defaultVisible: Bool = true, defaultPriority: OpenNotchPriority = .normal,
+         @ViewBuilder content: () -> Content) {
+        self.key = key; self.defaultVisible = defaultVisible; self.defaultPriority = defaultPriority; self.content = content()
+    }
+
+    var body: some View {
+        let element = style.elementStyle(for: key, defaultVisible: defaultVisible)
         if element.visible {
-            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: 4) {
-                content
-                    .font(style.font(scale: element.fontScale))
-                    .fontWeight(element.emphasis.fontWeight)
-                    .foregroundStyle(foreground)
-                    .opacity(element.opacity)
-                    .padding(element.padding)
-                    .background { elementBackground }
-                    .frame(maxWidth: .infinity, alignment: style.resolvedContent.alignment.alignment)
+            VStack(alignment: (element.alignment ?? style.resolvedContent.alignment).horizontal, spacing: 4) {
+                WidgetElementSurface(element: element, widgetStyle: style, defaultPriority: defaultPriority) { content }
                 if element.dividerAfter { Divider().opacity(0.45) }
             }
-            .frame(maxWidth: .infinity, alignment: style.resolvedContent.alignment.alignment)
+            .frame(maxWidth: .infinity, alignment: (element.alignment ?? style.resolvedContent.alignment).alignment)
         }
     }
 }

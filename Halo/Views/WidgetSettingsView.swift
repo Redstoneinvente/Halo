@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct PreciseSlider: View {
     let title: String
@@ -74,6 +75,7 @@ struct WidgetSettingsView: View {
     @State private var selected: ModuleID = .clock
     private static let timeZones = TimeZone.knownTimeZoneIdentifiers
     @State private var installedFonts: [String] = []
+    @State private var showingOpenWorkspaceEditor = false
     private var style: Binding<WidgetStyle> {
         Binding(get: { layout.widgetStyle(for: selected) }, set: { layout.setWidgetStyle($0, for: selected) })
     }
@@ -90,6 +92,15 @@ struct WidgetSettingsView: View {
     var body: some View {
         Picker("Widget", selection: $selected) {
             ForEach(ModuleID.allCases) { Text($0.title).tag($0) }
+        }
+        Section("Opened notch workspace") {
+            Button { showingOpenWorkspaceEditor = true } label: { Label("Open Visual Workspace Editor…", systemImage: "rectangle.3.group") }
+            Text("Arrange regions, groups, modules and lightweight elements visually. Widget styling below remains available for deep per-module tuning.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .sheet(isPresented: $showingOpenWorkspaceEditor) {
+            OpenedNotchWorkspaceEditor(layout: $layout)
+                .frame(minWidth: 980, idealWidth: 1120, minHeight: 680, idealHeight: 760)
         }
         Section("Opened notch widget") {
             Text("Customize \(selected.title) independently. These settings apply to the widget in Halo's opened dashboard and travel with profiles and display-specific layouts.")
@@ -140,6 +151,10 @@ struct WidgetSettingsView: View {
                         Picker("Emphasis", selection: value.emphasis) {
                             ForEach(WidgetElementEmphasis.allCases) { Text($0.rawValue).tag($0) }
                         }
+                        Picker("Collapse priority", selection: Binding(
+                            get: { value.wrappedValue.priority ?? .normal },
+                            set: { value.wrappedValue.priority = $0 }
+                        )) { ForEach(OpenNotchPriority.allCases) { Text($0.rawValue).tag($0) } }
                         PreciseSlider(title: "Text scale", value: value.fontScale, range: 0.55...2.5, step: 0.05, suffix: "×", decimals: 2)
                         PreciseSlider(title: "Opacity", value: value.opacity, range: 0.15...1, step: 0.05, decimals: 2)
                         Picker("Element background", selection: value.background) {
@@ -702,5 +717,354 @@ struct ClosedNotchSettingsView: View {
     }
     @ViewBuilder private func powerStyles() -> some View {
         Text("Off").tag(PowerReactionStyle.off); Text("Icon").tag(PowerReactionStyle.icon); Text("Percentage").tag(PowerReactionStyle.percent); Text("Icon + percentage").tag(PowerReactionStyle.iconPercent); Text("Label").tag(PowerReactionStyle.label)
+    }
+}
+
+private struct OpenedNotchWorkspaceEditor: View {
+    @Binding var layout: WorkspaceLayout
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var selectedItem: UUID?
+    @State private var selectedGroup: UUID?
+    @State private var selectedRegion: UUID?
+    @State private var backgroundMode = false
+
+    private var opened: OpenNotchLayout { layout.resolvedOpenNotchLayout }
+
+    var body: some View {
+        HSplitView {
+            VStack(spacing: 0) {
+                toolbar
+                Divider()
+                ScrollView([.horizontal, .vertical]) { preview.padding(26).frame(minWidth: 640, minHeight: 560) }
+            }.frame(minWidth: 650)
+            inspector.frame(minWidth: 320, idealWidth: 380, maxWidth: 430)
+        }
+        .onAppear { materialize() }
+    }
+
+    private var toolbar: some View {
+        HStack(spacing: 10) {
+            Picker("Layout", selection: Binding(get: { layout.resolvedOpenNotchContentMode }, set: { layout.openNotchContentMode = $0 })) {
+                ForEach(OpenNotchContentMode.allCases) { Text($0.rawValue).tag($0) }
+            }.frame(width: 250)
+            Picker("Preset", selection: Binding(get: { opened.preset }, set: { applyPreset($0) })) {
+                ForEach(OpenNotchPreset.allCases) { Text($0.rawValue).tag($0) }
+            }.frame(width: 190)
+            Menu { addMenu } label: { Label("Add", systemImage: "plus") }
+            Button { duplicateSelected() } label: { Image(systemName: "plus.square.on.square") }.disabled(selectedItem == nil).help("Duplicate selected item")
+            Button { backgroundMode = true; selectedItem = nil; selectedGroup = nil; selectedRegion = nil } label: { Image(systemName: "paintbrush") }.help("Opened surface appearance")
+            Spacer()
+            Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+        }.padding(12)
+    }
+
+    @ViewBuilder private var addMenu: some View {
+        Menu("Module") { ForEach(ModuleID.allCases) { module in Button(module.title) { addModule(module) } } }
+        Menu("Lightweight element") { ForEach(OpenNotchElementKind.allCases) { element in Button(element.title) { addElement(element) } } }
+        Divider()
+        Button("Group") { addGroup() }
+        Menu("Region") { ForEach(OpenNotchRegionPlacement.allCases) { placement in Button(placement.title) { ensureRegion(placement, select: true) } } }
+    }
+
+    private var preview: some View {
+        VStack(spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) { Text("Opened Notch").font(.headline); Text(opened.preset.rawValue).font(.caption).foregroundStyle(.secondary) }
+                Spacer(); Text("Drag items between regions · drag corner to resize").font(.caption).foregroundStyle(.secondary)
+            }
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(Color.black.opacity(0.92))
+                .overlay {
+                    VStack(spacing: 8) {
+                        editorRow([.topLeft, .topCenter, .topRight])
+                        editorRow([.middleLeft, .middleCenter, .middleRight])
+                        editorRow([.bottomLeft, .bottomCenter, .bottomRight])
+                    }.padding(14)
+                }
+                .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.12)))
+                .frame(width: 610, height: 470)
+                .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.84), value: opened)
+        }
+    }
+
+    @ViewBuilder private func editorRow(_ placements: [OpenNotchRegionPlacement]) -> some View {
+        HStack(spacing: 8) {
+            ForEach(placements) { placement in regionCell(placement).frame(maxWidth: .infinity, maxHeight: .infinity) }
+        }.frame(maxHeight: .infinity)
+    }
+
+    private func regionCell(_ placement: OpenNotchRegionPlacement) -> some View {
+        let region = opened.regions.first { $0.placement == placement }
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack { Text(placement.title).font(.system(size: 9, weight: .semibold)); Spacer(); if region != nil { Image(systemName: "circle.fill").font(.system(size: 5)).foregroundStyle(.green) } }
+            if let region {
+                ForEach(region.groups) { group in groupPreview(group, region: region) }
+            } else {
+                Spacer(); Text("Drop here").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity); Spacer()
+            }
+        }
+        .padding(7)
+        .background((selectedRegion == region?.id ? Color.accentColor.opacity(0.16) : Color.white.opacity(0.035)), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(selectedRegion == region?.id ? Color.accentColor.opacity(0.6) : .white.opacity(0.06)))
+        .contentShape(Rectangle())
+        .onTapGesture { if let region { selectedRegion = region.id; selectedGroup = nil; selectedItem = nil; backgroundMode = false } }
+        .onDrop(of: [UTType.text], isTargeted: nil) { providers in acceptDrop(providers, placement: placement) }
+    }
+
+    private func groupPreview(_ group: OpenNotchGroup, region: OpenNotchRegion) -> some View {
+        let stack = Group {
+            if group.axis == .horizontal {
+                HStack(spacing: min(6, group.spacing)) { itemList(group, region: region) }
+            } else {
+                VStack(alignment: .leading, spacing: min(6, group.spacing)) { itemList(group, region: region) }
+            }
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack { Text(group.name).font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary); Spacer(); Image(systemName: group.axis == .horizontal ? "arrow.left.and.right" : "arrow.up.and.down").font(.system(size: 8)) }
+            stack
+        }
+        .padding(5)
+        .background(selectedGroup == group.id ? Color.accentColor.opacity(0.12) : Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
+        .contentShape(Rectangle())
+        .onTapGesture { selectedGroup = group.id; selectedRegion = region.id; selectedItem = nil; backgroundMode = false }
+        .onDrop(of: [UTType.text], isTargeted: nil) { providers in acceptDrop(providers, groupID: group.id) }
+    }
+
+    @ViewBuilder private func itemList(_ group: OpenNotchGroup, region: OpenNotchRegion) -> some View {
+        ForEach(group.items) { item in itemPreview(item, group: group, region: region) }
+    }
+
+    private func itemPreview(_ item: OpenNotchItem, group: OpenNotchGroup, region: OpenNotchRegion) -> some View {
+        let label = item.module?.title ?? item.element?.title ?? item.kind.rawValue.capitalized
+        return HStack(spacing: 4) {
+            Image(systemName: item.module?.symbol ?? item.element?.symbol ?? (item.kind == .divider ? "minus" : "rectangle"))
+            Text(label).lineLimit(1)
+            if item.hidden { Image(systemName: "eye.slash").foregroundStyle(.secondary) }
+        }
+        .font(.system(size: 9, weight: item.priority == .alwaysVisible || item.priority == .high ? .semibold : .regular))
+        .padding(.horizontal, 6).padding(.vertical, 5)
+        .frame(minWidth: max(42, min(150, item.sizing.preferredWidth * 0.28)), alignment: .leading)
+        .background(selectedItem == item.id ? Color.accentColor.opacity(0.28) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(alignment: .bottomTrailing) {
+            if selectedItem == item.id {
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    .font(.system(size: 7)).padding(3).background(.ultraThinMaterial, in: Circle()).offset(x: 4, y: 4)
+                    .gesture(DragGesture().onChanged { value in resize(item.id, translation: value.translation) })
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { selectedItem = item.id; selectedGroup = group.id; selectedRegion = region.id; backgroundMode = false }
+        .onDrag { NSItemProvider(object: item.id.uuidString as NSString) }
+        .onDrop(of: [UTType.text], isTargeted: nil) { providers in acceptDrop(providers, groupID: group.id, before: item.id) }
+        .contextMenu {
+            Button(item.hidden ? "Show" : "Hide") { mutateItem(item.id) { $0.hidden.toggle() } }
+            Button("Duplicate") { duplicate(item.id) }
+            Button("Move to New Group") { groupSelectedItem() }
+            Divider(); Button("Remove", role: .destructive) { remove(item.id) }
+        }
+    }
+
+    @ViewBuilder private var inspector: some View {
+        Form {
+            if backgroundMode { backgroundInspector }
+            else if let item = selectedItem.flatMap(findItem) { itemInspector(item) }
+            else if let group = selectedGroup.flatMap(findGroup) { groupInspector(group) }
+            else if let region = selectedRegion.flatMap(findRegion) { regionInspector(region) }
+            else {
+                Section("Opened workspace") {
+                    Text("Select an item, group, or region in the preview. Drag modules between regions and use the resize handle on a selected item.").foregroundStyle(.secondary)
+                    Button("Customize Surface Appearance") { backgroundMode = true }
+                }
+            }
+        }.formStyle(.grouped).scrollContentBackground(.hidden)
+    }
+
+    @ViewBuilder private func itemInspector(_ item: OpenNotchItem) -> some View {
+        let binding = itemBinding(item.id)
+        Section("Item") {
+            Text(item.module?.title ?? item.element?.title ?? item.kind.rawValue.capitalized).font(.headline)
+            Toggle("Visible", isOn: Binding(get: { !binding.wrappedValue.hidden }, set: { binding.wrappedValue.hidden = !$0 }))
+            Picker("Presentation", selection: binding.presentation) { ForEach(OpenNotchPresentation.allCases) { Text($0.rawValue).tag($0) } }
+            Picker("Priority", selection: binding.priority) { ForEach(OpenNotchPriority.allCases) { Text($0.rawValue).tag($0) } }
+        }
+        Section("Responsive sizing") {
+            Picker("Behavior", selection: binding.sizing.mode) { ForEach(OpenNotchSizingMode.allCases) { Text($0.rawValue).tag($0) } }
+            sizingSlider("Min width", binding.sizing.minimumWidth, 20...1200)
+            sizingSlider("Preferred width", binding.sizing.preferredWidth, 20...1200)
+            sizingSlider("Max width", binding.sizing.maximumWidth, 20...1600)
+            sizingSlider("Min height", binding.sizing.minimumHeight, 18...900)
+            sizingSlider("Preferred height", binding.sizing.preferredHeight, 18...1100)
+            sizingSlider("Max height", binding.sizing.maximumHeight, 18...1400)
+        }
+        Section("Element styling") { styleInspector(binding.style) }
+        Section("Visibility rules") {
+            Picker("Match", selection: binding.visibilityLogic) { ForEach(OpenNotchVisibilityLogic.allCases) { Text($0.rawValue).tag($0) } }
+            ForEach(Array(binding.wrappedValue.visibilityRules.enumerated()), id: \.element.id) { index, rule in
+                let rb = ruleBinding(item.id, index: index)
+                HStack { Picker("Metric", selection: rb.metric) { ForEach(OpenNotchVisibilityMetric.allCases) { Text($0.rawValue).tag($0) } }; Button { removeRule(item.id, index: index) } label: { Image(systemName: "minus.circle") } }
+                Picker("Condition", selection: rb.comparison) { ForEach(OpenNotchVisibilityComparison.allCases) { Text($0.rawValue).tag($0) } }
+                if rb.wrappedValue.metric.isBoolean { Toggle("Required state", isOn: Binding(get: { rb.wrappedValue.value >= 0.5 }, set: { rb.wrappedValue.value = $0 ? 1 : 0 })) }
+                else { PreciseSlider(title: "Value", value: rb.value, range: 0...100, step: 1, suffix: "%") }
+                if index < binding.wrappedValue.visibilityRules.count - 1 { Divider() }
+            }
+            Button("Add Rule") { binding.wrappedValue.visibilityRules.append(OpenNotchVisibilityRule()) }
+        }
+        Section("Interactions") {
+            interactionPicker("Single click", binding.interactions.singleClick)
+            interactionPicker("Double click", binding.interactions.doubleClick)
+            interactionPicker("Right click", binding.interactions.rightClick)
+            interactionPicker("Scroll", binding.interactions.scroll)
+            interactionPicker("Drag", binding.interactions.drag)
+            interactionPicker("Modifier click", binding.interactions.modifierClick)
+        }
+        if item.element == .customText { Section("Content") { TextField("Text", text: binding.customText) } }
+        if item.element == .customIcon { Section("Content") { TextField("SF Symbol", text: binding.customIcon) } }
+        if item.element == .customImage || item.element == .customGIF { Section("Content") { TextField("Image / GIF path", text: binding.customAssetPath) } }
+        if item.element == .button { Section("Content") { TextField("Label", text: binding.buttonLabel); TextField("URL", text: binding.buttonURL) } }
+        Section { HStack { Button("Duplicate") { duplicate(item.id) }; Button("New Group") { groupSelectedItem() }; Spacer(); Button("Remove", role: .destructive) { remove(item.id) } } }
+    }
+
+    @ViewBuilder private func groupInspector(_ group: OpenNotchGroup) -> some View {
+        let b = groupBinding(group.id)
+        Section("Group") {
+            TextField("Name", text: b.name)
+            Picker("Direction", selection: b.axis) { ForEach(OpenNotchAxis.allCases) { Text($0.rawValue).tag($0) } }
+            Picker("Alignment", selection: b.alignment) { ForEach(OpenNotchGroupAlignment.allCases) { Text($0.rawValue).tag($0) } }
+            PreciseSlider(title: "Spacing", value: b.spacing, range: 0...48, step: 1, suffix: "pt")
+        }
+        Section("Group padding") { insetsEditor(b.padding) }
+    }
+
+    @ViewBuilder private func regionInspector(_ region: OpenNotchRegion) -> some View {
+        let b = regionBinding(region.id)
+        Section("Region") { Picker("Placement", selection: b.placement) { ForEach(OpenNotchRegionPlacement.allCases) { Text($0.title).tag($0) } } }
+        Section("Region padding") { insetsEditor(b.padding) }
+        Section { Button("Add Group") { addGroup(regionID: region.id) } }
+    }
+
+    @ViewBuilder private var backgroundInspector: some View {
+        let b = openBinding()
+        Section("Opened notch surface") {
+            Picker("Background", selection: Binding(get: { b.wrappedValue.appearance.background ?? layout.appearance.background }, set: { b.wrappedValue.appearance.background = $0 })) {
+                ForEach(BackgroundKind.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+            }
+            ColorPicker("Solid / tint color", selection: Binding(get: { (b.wrappedValue.appearance.solidColor ?? layout.appearance.solidColor ?? .white).color }, set: { b.wrappedValue.appearance.solidColor = WidgetColor($0) }), supportsOpacity: false)
+            ColorPicker("Gradient start", selection: Binding(get: { (b.wrappedValue.appearance.gradientStartColor ?? layout.appearance.gradientStartColor ?? WidgetColor(red: 0.07, green: 0.09, blue: 0.14)).color }, set: { b.wrappedValue.appearance.gradientStartColor = WidgetColor($0) }), supportsOpacity: false)
+            ColorPicker("Gradient end", selection: Binding(get: { (b.wrappedValue.appearance.gradientEndColor ?? layout.appearance.gradientEndColor ?? WidgetColor(red: 0.01, green: 0.02, blue: 0.04)).color }, set: { b.wrappedValue.appearance.gradientEndColor = WidgetColor($0) }), supportsOpacity: false)
+            TextField("Image / video path", text: b.appearance.assetPath)
+        }
+        Section("Material") {
+            optionalSlider("Blur", b.appearance.blur, fallback: layout.appearance.blur, range: 0...30, suffix: "pt")
+            optionalSlider("Saturation", b.appearance.saturation, fallback: layout.appearance.saturation, range: 0...2.5, step: 0.05, suffix: "×", decimals: 2)
+            optionalSlider("Brightness", b.appearance.brightness, fallback: layout.appearance.brightness, range: -0.5...0.5, step: 0.02, decimals: 2)
+            optionalSlider("Contrast", b.appearance.contrast, fallback: 1, range: 0.5...2, step: 0.05, suffix: "×", decimals: 2)
+            optionalSlider("Grain", b.appearance.grain, fallback: 0, range: 0...0.35, step: 0.01, decimals: 2)
+            optionalSlider("Warmth", b.appearance.warmth, fallback: 0, range: -1...1, step: 0.05, decimals: 2)
+            ColorPicker("Tint", selection: Binding(get: { (b.wrappedValue.appearance.tintColor ?? WidgetColor(red: 0.35, green: 0.55, blue: 1)).color }, set: { b.wrappedValue.appearance.tintColor = WidgetColor($0) }), supportsOpacity: false)
+            optionalSlider("Tint opacity", b.appearance.tintOpacity, fallback: 0, range: 0...0.5, step: 0.01, decimals: 2)
+        }
+        Section("Edge & depth") {
+            ColorPicker("Border", selection: Binding(get: { (b.wrappedValue.appearance.borderColor ?? .white).color }, set: { b.wrappedValue.appearance.borderColor = WidgetColor($0) }), supportsOpacity: false)
+            optionalSlider("Border width", b.appearance.borderWidth, fallback: 0, range: 0...6, step: 0.25, suffix: "pt", decimals: 2)
+            optionalSlider("Border opacity", b.appearance.borderOpacity, fallback: 0.2, range: 0...1, step: 0.05, decimals: 2)
+            optionalSlider("Inner highlight", b.appearance.innerHighlight, fallback: 0, range: 0...0.5, step: 0.02, decimals: 2)
+            optionalSlider("Shadow blur", b.appearance.shadowBlur, fallback: 12, range: 0...50, step: 1, suffix: "pt")
+            optionalSlider("Shadow opacity", b.appearance.shadowOpacity, fallback: 0, range: 0...0.7, step: 0.02, decimals: 2)
+            optionalSlider("Subtle glow", b.appearance.glow, fallback: 0, range: 0...0.5, step: 0.02, decimals: 2)
+        }
+    }
+
+    @ViewBuilder private func styleInspector(_ optional: Binding<WidgetElementStyle?>) -> some View {
+        let b = Binding<WidgetElementStyle>(get: { optional.wrappedValue ?? WidgetElementStyle() }, set: { optional.wrappedValue = $0 })
+        Picker("Alignment", selection: Binding(get: { b.wrappedValue.alignment ?? .leading }, set: { b.wrappedValue.alignment = $0 })) { ForEach(WidgetContentAlignment.allCases) { Text($0.title).tag($0) } }
+        Picker("Text alignment", selection: Binding(get: { b.wrappedValue.textAlignment ?? .leading }, set: { b.wrappedValue.textAlignment = $0 })) { ForEach(WidgetContentAlignment.allCases) { Text($0.title).tag($0) } }
+        PreciseSlider(title: "Scale", value: b.fontScale, range: 0.55...2.5, step: 0.05, suffix: "×", decimals: 2)
+        PreciseSlider(title: "Opacity", value: b.opacity, range: 0.15...1, step: 0.05, decimals: 2)
+        PreciseSlider(title: "Internal padding", value: b.padding, range: 0...24, step: 1, suffix: "pt")
+        optionalSlider("External spacing", b.externalSpacing, fallback: 0, range: 0...48, step: 1, suffix: "pt")
+        optionalSlider("X offset", b.xOffset, fallback: 0, range: -100...100, step: 1, suffix: "pt")
+        optionalSlider("Y offset", b.yOffset, fallback: 0, range: -100...100, step: 1, suffix: "pt")
+        Picker("Font", selection: Binding(get: { b.wrappedValue.fontFamily ?? .system }, set: { b.wrappedValue.fontFamily = $0 })) { ForEach(WidgetFontFamily.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+        optionalSlider("Font size", b.fontSize, fallback: 14, range: 8...72, step: 1, suffix: "pt")
+        Picker("Weight", selection: Binding(get: { b.wrappedValue.fontWeight ?? .regular }, set: { b.wrappedValue.fontWeight = $0 })) { ForEach(WidgetFontWeight.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+        Picker("Foreground", selection: b.foreground) { ForEach(WidgetElementForegroundStyle.allCases) { Text($0.rawValue).tag($0) } }
+        if b.wrappedValue.foreground == .custom { ColorPicker("Foreground color", selection: Binding(get: { b.wrappedValue.customForeground.color }, set: { b.wrappedValue.customForeground = WidgetColor($0) }), supportsOpacity: false) }
+        Picker("Background", selection: b.background) { ForEach(WidgetElementBackgroundStyle.allCases) { Text($0.rawValue).tag($0) } }
+        if b.wrappedValue.background == .custom { ColorPicker("Background color", selection: Binding(get: { b.wrappedValue.backgroundColor.color }, set: { b.wrappedValue.backgroundColor = WidgetColor($0) }), supportsOpacity: false) }
+        PreciseSlider(title: "Background opacity", value: b.backgroundOpacity, range: 0...1, step: 0.05, decimals: 2)
+        PreciseSlider(title: "Corner radius", value: b.cornerRadius, range: 0...32, step: 1, suffix: "pt")
+        optionalSlider("Border width", b.borderWidth, fallback: 0, range: 0...8, step: 0.25, suffix: "pt", decimals: 2)
+        optionalSlider("Border opacity", b.borderOpacity, fallback: 0, range: 0...1, step: 0.05, decimals: 2)
+        optionalSlider("Shadow blur", b.shadowBlur, fallback: 0, range: 0...48, step: 1, suffix: "pt")
+        optionalSlider("Shadow opacity", b.shadowOpacity, fallback: 0, range: 0...0.8, step: 0.05, decimals: 2)
+        optionalSlider("Tint opacity", b.tintOpacity, fallback: 1, range: 0...1, step: 0.05, decimals: 2)
+        optionalSlider("Icon size", b.iconSize, fallback: 20, range: 6...96, step: 1, suffix: "pt")
+        optionalSlider("Content density", b.contentDensity, fallback: 1, range: 0.5...1.5, step: 0.05, suffix: "×", decimals: 2)
+    }
+
+    @ViewBuilder private func insetsEditor(_ b: Binding<OpenNotchInsets>) -> some View {
+        PreciseSlider(title: "Top", value: b.top, range: 0...96, step: 1, suffix: "pt")
+        PreciseSlider(title: "Leading", value: b.leading, range: 0...96, step: 1, suffix: "pt")
+        PreciseSlider(title: "Bottom", value: b.bottom, range: 0...96, step: 1, suffix: "pt")
+        PreciseSlider(title: "Trailing", value: b.trailing, range: 0...96, step: 1, suffix: "pt")
+    }
+    @ViewBuilder private func sizingSlider(_ title: String, _ value: Binding<Double>, _ range: ClosedRange<Double>) -> some View { PreciseSlider(title: title, value: value, range: range, step: 1, suffix: "pt") }
+    @ViewBuilder private func optionalSlider(_ title: String, _ value: Binding<Double?>, fallback: Double, range: ClosedRange<Double>, step: Double = 1, suffix: String = "", decimals: Int = 0) -> some View {
+        PreciseSlider(title: title, value: Binding(get: { value.wrappedValue ?? fallback }, set: { value.wrappedValue = $0 }), range: range, step: step, suffix: suffix, decimals: decimals)
+    }
+    @ViewBuilder private func interactionPicker(_ title: String, _ value: Binding<OpenNotchInteractionAction>) -> some View { Picker(title, selection: value) { ForEach(OpenNotchInteractionAction.allCases) { Text($0.rawValue).tag($0) } } }
+
+    private func materialize() { if layout.openNotch == nil { layout.materializeOpenNotchLayout() } }
+    private func openBinding() -> Binding<OpenNotchLayout> { Binding(get: { layout.resolvedOpenNotchLayout }, set: { layout.openNotch = $0 }) }
+    private func itemBinding(_ id: UUID) -> Binding<OpenNotchItem> { Binding(get: { findItem(id) ?? OpenNotchItem() }, set: { replacement in mutateItem(id) { $0 = replacement } }) }
+    private func groupBinding(_ id: UUID) -> Binding<OpenNotchGroup> { Binding(get: { findGroup(id) ?? OpenNotchGroup() }, set: { replacement in mutateOpen { open in for ri in open.regions.indices { if let gi = open.regions[ri].groups.firstIndex(where: { $0.id == id }) { open.regions[ri].groups[gi] = replacement; return } } } }) }
+    private func regionBinding(_ id: UUID) -> Binding<OpenNotchRegion> { Binding(get: { findRegion(id) ?? OpenNotchRegion() }, set: { replacement in mutateOpen { open in if let i = open.regions.firstIndex(where: { $0.id == id }) { open.regions[i] = replacement } } }) }
+    private func ruleBinding(_ itemID: UUID, index: Int) -> Binding<OpenNotchVisibilityRule> { Binding(get: { findItem(itemID)?.visibilityRules.indices.contains(index) == true ? findItem(itemID)!.visibilityRules[index] : OpenNotchVisibilityRule() }, set: { replacement in mutateItem(itemID) { if $0.visibilityRules.indices.contains(index) { $0.visibilityRules[index] = replacement } } }) }
+    private func findItem(_ id: UUID) -> OpenNotchItem? { opened.allItems.first { $0.id == id } }
+    private func findGroup(_ id: UUID) -> OpenNotchGroup? { opened.regions.flatMap(\.groups).first { $0.id == id } }
+    private func findRegion(_ id: UUID) -> OpenNotchRegion? { opened.regions.first { $0.id == id } }
+    private func mutateOpen(_ body: (inout OpenNotchLayout) -> Void) { var value = opened; body(&value); value.preset = .custom; layout.openNotch = value }
+    private func mutateItem(_ id: UUID, _ body: (inout OpenNotchItem) -> Void) { mutateOpen { open in for ri in open.regions.indices { for gi in open.regions[ri].groups.indices { if let ii = open.regions[ri].groups[gi].items.firstIndex(where: { $0.id == id }) { body(&open.regions[ri].groups[gi].items[ii]); return } } } } }
+    private func removeRule(_ id: UUID, index: Int) { mutateItem(id) { if $0.visibilityRules.indices.contains(index) { $0.visibilityRules.remove(at: index) } } }
+
+    private func ensureRegion(_ placement: OpenNotchRegionPlacement, select: Bool = false) {
+        mutateOpen { open in
+            if !open.regions.contains(where: { $0.placement == placement }) { open.regions.append(OpenNotchRegion(placement: placement, padding: OpenNotchInsets(), groups: [OpenNotchGroup(name: placement.title)])) }
+        }
+        if select, let r = opened.regions.first(where: { $0.placement == placement }) { selectedRegion = r.id }
+    }
+    private func defaultGroupID() -> UUID {
+        if let selectedGroup, findGroup(selectedGroup) != nil { return selectedGroup }
+        ensureRegion(.middleCenter)
+        if let id = opened.regions.first(where: { $0.placement == .middleCenter })?.groups.first?.id { return id }
+        let id = UUID(); mutateOpen { open in if let ri = open.regions.firstIndex(where: { $0.placement == .middleCenter }) { open.regions[ri].groups.append(OpenNotchGroup(id: id, name: "Main")) } }; return id
+    }
+    private func addModule(_ module: ModuleID) { var item = OpenNotchItem.moduleItem(module); let gid = defaultGroupID(); mutateOpen { open in append(item, to: gid, open: &open) }; layout.enabled.insert(module); selectedItem = item.id; selectedGroup = gid }
+    private func addElement(_ element: OpenNotchElementKind) { let item = OpenNotchItem.elementItem(element); let gid = defaultGroupID(); mutateOpen { open in append(item, to: gid, open: &open) }; selectedItem = item.id; selectedGroup = gid }
+    private func addGroup(regionID: UUID? = nil) { let rid = regionID ?? selectedRegion ?? { ensureRegion(.middleCenter); return opened.regions.first(where: { $0.placement == .middleCenter })?.id }()!; let group = OpenNotchGroup(name: "Group"); mutateOpen { open in if let ri = open.regions.firstIndex(where: { $0.id == rid }) { open.regions[ri].groups.append(group) } }; selectedGroup = group.id; selectedRegion = rid }
+    private func append(_ item: OpenNotchItem, to groupID: UUID, open: inout OpenNotchLayout) { for ri in open.regions.indices { if let gi = open.regions[ri].groups.firstIndex(where: { $0.id == groupID }) { open.regions[ri].groups[gi].items.append(item); return } } }
+    private func remove(_ id: UUID) { mutateOpen { open in for ri in open.regions.indices { for gi in open.regions[ri].groups.indices { open.regions[ri].groups[gi].items.removeAll { $0.id == id } } } }; selectedItem = nil }
+    private func duplicate(_ id: UUID) { guard var copy = findItem(id) else { return }; copy.id = UUID(); let gid = selectedGroup ?? defaultGroupID(); mutateOpen { open in append(copy, to: gid, open: &open) }; selectedItem = copy.id }
+    private func duplicateSelected() { if let selectedItem { duplicate(selectedItem) } }
+    private func groupSelectedItem() { guard let id = selectedItem, let item = findItem(id) else { return }; let regionID = selectedRegion ?? opened.regions.first?.id; guard let regionID else { return }; let group = OpenNotchGroup(name: "Group", items: [item]); mutateOpen { open in for ri in open.regions.indices { for gi in open.regions[ri].groups.indices { open.regions[ri].groups[gi].items.removeAll { $0.id == id } }; if open.regions[ri].id == regionID { open.regions[ri].groups.append(group) } } }; selectedGroup = group.id }
+    private func resize(_ id: UUID, translation: CGSize) { mutateItem(id) { item in item.sizing.mode = .flexible; item.sizing.preferredWidth = min(item.sizing.maximumWidth, max(item.sizing.minimumWidth, item.sizing.preferredWidth + translation.width * 0.08)); item.sizing.preferredHeight = min(item.sizing.maximumHeight, max(item.sizing.minimumHeight, item.sizing.preferredHeight + translation.height * 0.08)) } }
+    private func applyPreset(_ preset: OpenNotchPreset) { guard preset != .custom else { mutateOpen { $0.preset = .custom }; return }; layout.applyOpenNotchPreset(preset); selectedItem = nil; selectedGroup = nil; selectedRegion = nil }
+
+    private func acceptDrop(_ providers: [NSItemProvider], placement: OpenNotchRegionPlacement) -> Bool {
+        guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }
+        provider.loadObject(ofClass: NSString.self) { object, _ in guard let text = object as? String, let id = UUID(uuidString: text) else { return }; DispatchQueue.main.async { ensureRegion(placement); guard let gid = opened.regions.first(where: { $0.placement == placement })?.groups.first?.id else { return }; move(id, to: gid, before: nil) } }; return true
+    }
+    private func acceptDrop(_ providers: [NSItemProvider], groupID: UUID, before target: UUID? = nil) -> Bool {
+        guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }
+        provider.loadObject(ofClass: NSString.self) { object, _ in guard let text = object as? String, let id = UUID(uuidString: text) else { return }; DispatchQueue.main.async { move(id, to: groupID, before: target) } }; return true
+    }
+    private func move(_ id: UUID, to groupID: UUID, before target: UUID?) {
+        guard let item = findItem(id) else { return }
+        mutateOpen { open in
+            for ri in open.regions.indices { for gi in open.regions[ri].groups.indices { open.regions[ri].groups[gi].items.removeAll { $0.id == id } } }
+            for ri in open.regions.indices { if let gi = open.regions[ri].groups.firstIndex(where: { $0.id == groupID }) { if let target, let index = open.regions[ri].groups[gi].items.firstIndex(where: { $0.id == target }) { open.regions[ri].groups[gi].items.insert(item, at: index) } else { open.regions[ri].groups[gi].items.append(item) }; return } }
+        }
+        selectedItem = id; selectedGroup = groupID
     }
 }

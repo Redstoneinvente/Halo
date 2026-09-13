@@ -99,6 +99,8 @@ struct WorkspaceLayout: Codable, Equatable {
     var openHorizontalPadding: Double?
     var openVerticalPadding: Double?
     var openFixedColumns: Int?
+    // New opened-notch workspace model. Optional for backwards compatibility.
+    var openNotch: OpenNotchLayout?
     var widgets: [String: WidgetStyle]?
     var closedNotch: ClosedNotchOptions?
 
@@ -114,6 +116,24 @@ struct WorkspaceLayout: Codable, Equatable {
     }
     var resolvedOpenFixedColumns: Int {
         min(4, max(1, openFixedColumns ?? 2))
+    }
+
+    var resolvedOpenNotchLayout: OpenNotchLayout {
+        if let openNotch, !openNotch.regions.isEmpty { return openNotch }
+        return OpenNotchLayout.migrated(
+            modules: normalizedOrder().filter { enabled.contains($0) },
+            horizontal: horizontalWidgets ?? false
+        )
+    }
+
+    mutating func materializeOpenNotchLayout() {
+        if openNotch == nil || openNotch?.regions.isEmpty == true { openNotch = resolvedOpenNotchLayout }
+    }
+
+    mutating func applyOpenNotchPreset(_ preset: OpenNotchPreset) {
+        openNotch = OpenNotchLayout.made(preset)
+        let modules = openNotch?.allItems.compactMap(\.module) ?? []
+        enabled.formUnion(modules)
     }
 
     func widgetStyle(for id: ModuleID) -> WidgetStyle {
@@ -139,6 +159,474 @@ struct WorkspaceLayout: Codable, Equatable {
         updated.insert(module, at: index); order = updated
     }
 }
+
+enum OpenNotchAxis: String, Codable, CaseIterable, Identifiable {
+    case horizontal = "Horizontal"
+    case vertical = "Vertical"
+    var id: String { rawValue }
+}
+
+enum OpenNotchRegionPlacement: String, Codable, CaseIterable, Identifiable {
+    case topLeft, topCenter, topRight
+    case middleLeft, middleCenter, middleRight
+    case bottomLeft, bottomCenter, bottomRight
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .topLeft: return "Top Left"
+        case .topCenter: return "Top Center"
+        case .topRight: return "Top Right"
+        case .middleLeft: return "Middle Left"
+        case .middleCenter: return "Middle Center"
+        case .middleRight: return "Middle Right"
+        case .bottomLeft: return "Bottom Left"
+        case .bottomCenter: return "Bottom Center"
+        case .bottomRight: return "Bottom Right"
+        }
+    }
+}
+
+enum OpenNotchGroupAlignment: String, Codable, CaseIterable, Identifiable {
+    case leading = "Leading"
+    case center = "Center"
+    case trailing = "Trailing"
+    case stretch = "Stretch"
+    var id: String { rawValue }
+}
+
+struct OpenNotchInsets: Codable, Equatable {
+    var top = 6.0
+    var leading = 6.0
+    var bottom = 6.0
+    var trailing = 6.0
+    func validated() throws -> OpenNotchInsets {
+        guard [top, leading, bottom, trailing].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        var v = self
+        v.top = min(96, max(0, top)); v.leading = min(96, max(0, leading))
+        v.bottom = min(96, max(0, bottom)); v.trailing = min(96, max(0, trailing))
+        return v
+    }
+}
+
+enum OpenNotchSizingMode: String, Codable, CaseIterable, Identifiable {
+    case fixed = "Fixed"
+    case fitContent = "Fit Content"
+    case flexible = "Flexible"
+    case fill = "Fill Remaining Space"
+    var id: String { rawValue }
+}
+
+struct OpenNotchSizing: Codable, Equatable {
+    var mode: OpenNotchSizingMode = .flexible
+    var minimumWidth = 80.0
+    var preferredWidth = 260.0
+    var maximumWidth = 900.0
+    var minimumHeight = 44.0
+    var preferredHeight = 150.0
+    var maximumHeight = 700.0
+    func validated() throws -> OpenNotchSizing {
+        let values = [minimumWidth, preferredWidth, maximumWidth, minimumHeight, preferredHeight, maximumHeight]
+        guard values.allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        var v = self
+        v.minimumWidth = min(1200, max(20, minimumWidth))
+        v.maximumWidth = min(1600, max(v.minimumWidth, maximumWidth))
+        v.preferredWidth = min(v.maximumWidth, max(v.minimumWidth, preferredWidth))
+        v.minimumHeight = min(1100, max(18, minimumHeight))
+        v.maximumHeight = min(1400, max(v.minimumHeight, maximumHeight))
+        v.preferredHeight = min(v.maximumHeight, max(v.minimumHeight, preferredHeight))
+        return v
+    }
+}
+
+enum OpenNotchPresentation: String, Codable, CaseIterable, Identifiable {
+    case automatic = "Automatic"
+    case compact = "Compact"
+    case regular = "Regular"
+    case expanded = "Expanded"
+    var id: String { rawValue }
+}
+
+enum OpenNotchPriority: String, Codable, CaseIterable, Identifiable {
+    case alwaysVisible = "Always Visible"
+    case high = "High"
+    case normal = "Normal"
+    case low = "Low"
+    case optional = "Optional"
+    var id: String { rawValue }
+}
+
+enum OpenNotchItemKind: String, Codable, CaseIterable, Identifiable {
+    case module, element, spacer, divider
+    var id: String { rawValue }
+}
+
+enum OpenNotchElementKind: String, Codable, CaseIterable, Identifiable {
+    case clock, date, battery, batteryPercentage, chargingState
+    case appIcon, appName, volume, brightness, timer, stopwatch
+    case mediaTitle, artist, albumArt, playbackControls, playbackProgress
+    case cpu, ram, storage, networkActivity
+    case customText, customIcon, customImage, customGIF, button, spacer, divider
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .clock: return "Clock"
+        case .date: return "Date"
+        case .battery: return "Battery"
+        case .batteryPercentage: return "Battery Percentage"
+        case .chargingState: return "Charging State"
+        case .appIcon: return "Active App Icon"
+        case .appName: return "Active App Name"
+        case .volume: return "Volume"
+        case .brightness: return "Brightness"
+        case .timer: return "Timer"
+        case .stopwatch: return "Stopwatch"
+        case .mediaTitle: return "Media Title"
+        case .artist: return "Artist"
+        case .albumArt: return "Album Art"
+        case .playbackControls: return "Playback Controls"
+        case .playbackProgress: return "Playback Progress"
+        case .cpu: return "CPU"
+        case .ram: return "RAM"
+        case .storage: return "Storage"
+        case .networkActivity: return "Network Activity"
+        case .customText: return "Custom Text"
+        case .customIcon: return "Custom Icon"
+        case .customImage: return "Custom Image"
+        case .customGIF: return "Custom GIF"
+        case .button: return "Button"
+        case .spacer: return "Spacer"
+        case .divider: return "Divider"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .clock: return "clock"
+        case .date: return "calendar"
+        case .battery, .batteryPercentage: return "battery.100"
+        case .chargingState: return "bolt.fill"
+        case .appIcon: return "app.fill"
+        case .appName: return "app.badge"
+        case .volume: return "speaker.wave.2"
+        case .brightness: return "sun.max"
+        case .timer: return "timer"
+        case .stopwatch: return "stopwatch"
+        case .mediaTitle: return "music.note"
+        case .artist: return "person.wave.2"
+        case .albumArt: return "photo"
+        case .playbackControls: return "playpause.fill"
+        case .playbackProgress: return "slider.horizontal.3"
+        case .cpu: return "cpu"
+        case .ram: return "memorychip"
+        case .storage: return "internaldrive"
+        case .networkActivity: return "network"
+        case .customText: return "textformat"
+        case .customIcon: return "star"
+        case .customImage: return "photo"
+        case .customGIF: return "photo.stack"
+        case .button: return "button.programmable"
+        case .spacer: return "arrow.left.and.right"
+        case .divider: return "minus"
+        }
+    }
+}
+
+enum OpenNotchVisibilityMetric: String, Codable, CaseIterable, Identifiable {
+    case always = "Always"
+    case batteryLevel = "Battery Level"
+    case charging = "Charging"
+    case mediaPlaying = "Media Playing"
+    case timerActive = "Timer Active"
+    case stopwatchRunning = "Stopwatch Running"
+    case cpuUsage = "CPU Usage"
+    case lowPowerMode = "Low Power Mode"
+    var id: String { rawValue }
+    var isBoolean: Bool { [.charging, .mediaPlaying, .timerActive, .stopwatchRunning, .lowPowerMode].contains(self) }
+}
+
+enum OpenNotchVisibilityComparison: String, Codable, CaseIterable, Identifiable {
+    case equal = "Equals"
+    case notEqual = "Not Equal"
+    case lessThan = "Below"
+    case lessThanOrEqual = "At Most"
+    case greaterThan = "Above"
+    case greaterThanOrEqual = "At Least"
+    var id: String { rawValue }
+}
+
+enum OpenNotchVisibilityLogic: String, Codable, CaseIterable, Identifiable {
+    case all = "All rules"
+    case any = "Any rule"
+    var id: String { rawValue }
+}
+
+struct OpenNotchVisibilityRule: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var metric: OpenNotchVisibilityMetric = .always
+    var comparison: OpenNotchVisibilityComparison = .equal
+    // Boolean metrics use 0 / 1. Numeric metrics use their native percentage value.
+    var value = 1.0
+}
+
+enum OpenNotchInteractionAction: String, Codable, CaseIterable, Identifiable {
+    case none = "None"
+    case togglePlayback = "Play / Pause"
+    case nextTrack = "Next Track"
+    case previousTrack = "Previous Track"
+    case openPlayer = "Open Player"
+    case adjustVolume = "Adjust Volume"
+    case seekMedia = "Seek Media"
+    case toggleTimer = "Toggle Timer"
+    case toggleStopwatch = "Toggle Stopwatch"
+    case openSystemSettings = "Open System Settings"
+    var id: String { rawValue }
+}
+
+struct OpenNotchInteractions: Codable, Equatable {
+    var singleClick: OpenNotchInteractionAction = .none
+    var doubleClick: OpenNotchInteractionAction = .none
+    var rightClick: OpenNotchInteractionAction = .none
+    var scroll: OpenNotchInteractionAction = .none
+    var drag: OpenNotchInteractionAction = .none
+    var modifierClick: OpenNotchInteractionAction = .none
+}
+
+struct OpenNotchItem: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var kind: OpenNotchItemKind = .module
+    var module: ModuleID?
+    var element: OpenNotchElementKind?
+    var customText = ""
+    var customIcon = "sparkles"
+    var customAssetPath = ""
+    var buttonLabel = "Action"
+    var buttonURL = ""
+    var hidden = false
+    var sizing = OpenNotchSizing()
+    var presentation: OpenNotchPresentation = .automatic
+    var priority: OpenNotchPriority = .normal
+    var visibilityLogic: OpenNotchVisibilityLogic = .all
+    var visibilityRules: [OpenNotchVisibilityRule] = []
+    var style: WidgetElementStyle?
+    var interactions = OpenNotchInteractions()
+
+    static func moduleItem(_ module: ModuleID, presentation: OpenNotchPresentation = .automatic,
+                           priority: OpenNotchPriority = .normal) -> OpenNotchItem {
+        var value = OpenNotchItem()
+        value.kind = .module; value.module = module; value.presentation = presentation; value.priority = priority
+        value.sizing = OpenNotchSizing(mode: .flexible, minimumWidth: 150, preferredWidth: 300, maximumWidth: 900,
+                                       minimumHeight: 70, preferredHeight: 170, maximumHeight: 720)
+        return value
+    }
+    static func elementItem(_ element: OpenNotchElementKind, priority: OpenNotchPriority = .normal) -> OpenNotchItem {
+        var value = OpenNotchItem()
+        value.kind = element == .spacer ? .spacer : element == .divider ? .divider : .element
+        value.element = element; value.priority = priority
+        value.sizing = OpenNotchSizing(mode: element == .spacer ? .fill : .fitContent,
+                                       minimumWidth: 20, preferredWidth: 110, maximumWidth: 500,
+                                       minimumHeight: 18, preferredHeight: 34, maximumHeight: 180)
+        return value
+    }
+    func validated() throws -> OpenNotchItem {
+        var value = self
+        value.sizing = try sizing.validated()
+        if let style { value.style = try style.validated() }
+        value.customText = String(customText.prefix(500))
+        value.customIcon = String(customIcon.prefix(120))
+        value.customAssetPath = String(customAssetPath.prefix(2048))
+        value.buttonLabel = String(buttonLabel.prefix(120))
+        value.buttonURL = String(buttonURL.prefix(2048))
+        value.visibilityRules = Array(visibilityRules.prefix(8))
+        return value
+    }
+}
+
+struct OpenNotchGroup: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var name = "Group"
+    var axis: OpenNotchAxis = .vertical
+    var alignment: OpenNotchGroupAlignment = .stretch
+    var spacing = 10.0
+    var padding = OpenNotchInsets()
+    var items: [OpenNotchItem] = []
+    func validated() throws -> OpenNotchGroup {
+        guard spacing.isFinite else { throw CocoaError(.fileReadCorruptFile) }
+        var value = self
+        value.name = String(name.prefix(80)); value.spacing = min(48, max(0, spacing))
+        value.padding = try padding.validated(); value.items = try items.prefix(80).map { try $0.validated() }
+        return value
+    }
+}
+
+struct OpenNotchRegion: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var placement: OpenNotchRegionPlacement = .middleCenter
+    var padding = OpenNotchInsets()
+    var groups: [OpenNotchGroup] = []
+    func validated() throws -> OpenNotchRegion {
+        var value = self
+        value.padding = try padding.validated(); value.groups = try groups.prefix(16).map { try $0.validated() }
+        return value
+    }
+}
+
+enum OpenNotchPreset: String, Codable, CaseIterable, Identifiable {
+    case minimal = "Minimal"
+    case media = "Media"
+    case productivity = "Productivity"
+    case systemMonitor = "System Monitor"
+    case focus = "Focus"
+    case developer = "Developer"
+    case informationDense = "Information Dense"
+    case showcase = "Showcase"
+    case custom = "Custom"
+    var id: String { rawValue }
+}
+
+struct OpenNotchAppearance: Codable, Equatable {
+    // nil values inherit the existing workspace appearance, preserving old layouts exactly.
+    var background: BackgroundKind?
+    var solidColor: WidgetColor?
+    var gradientStartColor: WidgetColor?
+    var gradientEndColor: WidgetColor?
+    var assetPath = ""
+    var blur: Double?
+    var saturation: Double?
+    var brightness: Double?
+    var contrast: Double?
+    var tintColor: WidgetColor?
+    var tintOpacity: Double?
+    var grain: Double?
+    var warmth: Double?
+    var borderColor: WidgetColor?
+    var borderWidth: Double?
+    var borderOpacity: Double?
+    var innerHighlight: Double?
+    var shadowBlur: Double?
+    var shadowOpacity: Double?
+    var glow: Double?
+
+    func baseAppearance(_ fallback: Appearance) -> Appearance {
+        var value = fallback
+        if let background { value.background = background }
+        if let solidColor { value.solidColor = solidColor }
+        if let gradientStartColor { value.gradientStartColor = gradientStartColor }
+        if let gradientEndColor { value.gradientEndColor = gradientEndColor }
+        if !assetPath.isEmpty { value.assetPath = assetPath }
+        if let blur { value.blur = blur }
+        if let saturation { value.saturation = saturation }
+        if let brightness { value.brightness = brightness }
+        return value
+    }
+    func validated() throws -> OpenNotchAppearance {
+        let values = [blur ?? 0, saturation ?? 1, brightness ?? 0, contrast ?? 1, tintOpacity ?? 0,
+                      grain ?? 0, warmth ?? 0, borderWidth ?? 0, borderOpacity ?? 0,
+                      innerHighlight ?? 0, shadowBlur ?? 0, shadowOpacity ?? 0, glow ?? 0]
+        guard values.allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        var v = self
+        if let blur { v.blur = min(30, max(0, blur)) }
+        if let saturation { v.saturation = min(2.5, max(0, saturation)) }
+        if let brightness { v.brightness = min(0.5, max(-0.5, brightness)) }
+        if let contrast { v.contrast = min(2, max(0.5, contrast)) }
+        if let tintOpacity { v.tintOpacity = min(0.5, max(0, tintOpacity)) }
+        if let grain { v.grain = min(0.35, max(0, grain)) }
+        if let warmth { v.warmth = min(1, max(-1, warmth)) }
+        if let borderWidth { v.borderWidth = min(6, max(0, borderWidth)) }
+        if let borderOpacity { v.borderOpacity = min(1, max(0, borderOpacity)) }
+        if let innerHighlight { v.innerHighlight = min(0.5, max(0, innerHighlight)) }
+        if let shadowBlur { v.shadowBlur = min(50, max(0, shadowBlur)) }
+        if let shadowOpacity { v.shadowOpacity = min(0.7, max(0, shadowOpacity)) }
+        if let glow { v.glow = min(0.5, max(0, glow)) }
+        v.solidColor = try solidColor?.validated(); v.gradientStartColor = try gradientStartColor?.validated()
+        v.gradientEndColor = try gradientEndColor?.validated(); v.tintColor = try tintColor?.validated(); v.borderColor = try borderColor?.validated()
+        v.assetPath = String(assetPath.prefix(2048))
+        return v
+    }
+}
+
+struct OpenNotchLayout: Codable, Equatable {
+    var version = 1
+    var preset: OpenNotchPreset = .custom
+    var regions: [OpenNotchRegion] = []
+    var appearance = OpenNotchAppearance()
+
+    var allItems: [OpenNotchItem] { regions.flatMap(\.groups).flatMap(\.items) }
+
+    static func migrated(modules: [ModuleID], horizontal: Bool) -> OpenNotchLayout {
+        var group = OpenNotchGroup(name: "Legacy widgets", axis: horizontal ? .horizontal : .vertical,
+                                   alignment: .stretch, spacing: 12, padding: OpenNotchInsets(),
+                                   items: modules.map { .moduleItem($0) })
+        if modules.isEmpty { group.items = [.elementItem(.clock, priority: .high)] }
+        return OpenNotchLayout(preset: .custom,
+            regions: [OpenNotchRegion(placement: .middleCenter, padding: OpenNotchInsets(), groups: [group])])
+    }
+
+    static func made(_ preset: OpenNotchPreset) -> OpenNotchLayout {
+        func g(_ name: String, _ axis: OpenNotchAxis = .vertical, _ items: [OpenNotchItem]) -> OpenNotchGroup {
+            OpenNotchGroup(name: name, axis: axis, alignment: .stretch, spacing: 10, padding: OpenNotchInsets(), items: items)
+        }
+        func r(_ placement: OpenNotchRegionPlacement, _ groups: [OpenNotchGroup]) -> OpenNotchRegion {
+            OpenNotchRegion(placement: placement, padding: OpenNotchInsets(), groups: groups)
+        }
+        switch preset {
+        case .minimal:
+            return OpenNotchLayout(preset: preset, regions: [
+                r(.middleCenter, [g("Essentials", .horizontal, [.elementItem(.clock, priority: .alwaysVisible), .elementItem(.date, priority: .low), .elementItem(.batteryPercentage, priority: .high)])])
+            ])
+        case .media:
+            return OpenNotchLayout(preset: preset, regions: [
+                r(.middleCenter, [g("Media", .vertical, [.moduleItem(.media, presentation: .expanded, priority: .alwaysVisible)])]),
+                r(.bottomCenter, [g("Audio", .horizontal, [.elementItem(.volume, priority: .high), .moduleItem(.audio, presentation: .compact, priority: .low)])])
+            ])
+        case .productivity:
+            return OpenNotchLayout(preset: preset, regions: [
+                r(.topCenter, [g("Overview", .horizontal, [.elementItem(.clock, priority: .high), .elementItem(.date, priority: .normal)])]),
+                r(.middleLeft, [g("Schedule", .vertical, [.moduleItem(.calendar, priority: .high), .moduleItem(.timer, priority: .high)])]),
+                r(.middleRight, [g("Work", .vertical, [.moduleItem(.notes, priority: .normal), .moduleItem(.shelf, priority: .low)])])
+            ])
+        case .systemMonitor:
+            return OpenNotchLayout(preset: preset, regions: [
+                r(.topCenter, [g("Status", .horizontal, [.elementItem(.battery, priority: .high), .elementItem(.cpu, priority: .alwaysVisible), .elementItem(.ram, priority: .high), .elementItem(.networkActivity, priority: .low)])]),
+                r(.middleCenter, [g("System", .vertical, [.moduleItem(.system, presentation: .expanded, priority: .alwaysVisible)])])
+            ])
+        case .focus:
+            return OpenNotchLayout(preset: preset, regions: [
+                r(.topCenter, [g("Time", .horizontal, [.elementItem(.clock, priority: .high), .elementItem(.date, priority: .low)])]),
+                r(.middleCenter, [g("Focus", .vertical, [.moduleItem(.timer, presentation: .expanded, priority: .alwaysVisible), .moduleItem(.notes, presentation: .compact, priority: .low)])])
+            ])
+        case .developer:
+            return OpenNotchLayout(preset: preset, regions: [
+                r(.topCenter, [g("Machine", .horizontal, [.elementItem(.cpu, priority: .high), .elementItem(.ram, priority: .high), .elementItem(.networkActivity, priority: .normal)])]),
+                r(.middleLeft, [g("Tools", .vertical, [.moduleItem(.launcher, priority: .high), .moduleItem(.capture, priority: .normal)])]),
+                r(.middleRight, [g("Context", .vertical, [.moduleItem(.system, priority: .normal), .moduleItem(.notes, priority: .low)])])
+            ])
+        case .informationDense:
+            return OpenNotchLayout(preset: preset, regions: [
+                r(.topLeft, [g("Time", .horizontal, [.elementItem(.clock, priority: .high), .elementItem(.date, priority: .low)])]),
+                r(.topRight, [g("System", .horizontal, [.elementItem(.batteryPercentage, priority: .high), .elementItem(.cpu, priority: .normal), .elementItem(.ram, priority: .normal)])]),
+                r(.middleLeft, [g("Agenda", .vertical, [.moduleItem(.calendar, presentation: .compact, priority: .high), .moduleItem(.timer, presentation: .compact, priority: .normal)])]),
+                r(.middleRight, [g("Utilities", .vertical, [.moduleItem(.clipboard, presentation: .compact, priority: .normal), .moduleItem(.shelf, presentation: .compact, priority: .low)])]),
+                r(.bottomCenter, [g("Media", .horizontal, [.elementItem(.mediaTitle, priority: .normal), .elementItem(.playbackControls, priority: .high), .elementItem(.volume, priority: .normal)])])
+            ])
+        case .showcase:
+            return OpenNotchLayout(preset: preset, regions: [
+                r(.topCenter, [g("Header", .horizontal, [.elementItem(.date, priority: .low), .elementItem(.clock, priority: .high), .elementItem(.batteryPercentage, priority: .normal)])]),
+                r(.middleCenter, [g("Hero", .vertical, [.moduleItem(.media, presentation: .expanded, priority: .alwaysVisible)])]),
+                r(.bottomCenter, [g("Controls", .horizontal, [.elementItem(.playbackControls, priority: .high), .elementItem(.volume, priority: .normal)])])
+            ])
+        case .custom:
+            return migrated(modules: ModuleID.allCases.filter { $0 != .developer }, horizontal: false)
+        }
+    }
+
+    func validated() throws -> OpenNotchLayout {
+        guard version == 1 else { throw CocoaError(.fileReadCorruptFile) }
+        var value = self
+        value.regions = try regions.prefix(9).map { try $0.validated() }
+        value.appearance = try appearance.validated()
+        return value
+    }
+}
+
 struct ThemeArchive: Codable {
     var version = 2
     var theme: Theme
@@ -185,6 +673,12 @@ struct ThemeArchive: Codable {
         archive.layout.appearance = appearance
         archive.layout.order = layout.normalizedOrder()
         archive.layout.widgets = try layout.widgets?.mapValues { try $0.validated() }
+        if var opened = try layout.openNotch?.validated() {
+            // Theme archives cannot safely carry machine-local image/video paths.
+            opened.appearance.assetPath = ""
+            if opened.appearance.background == .image || opened.appearance.background == .video { opened.appearance.background = .gradient }
+            archive.layout.openNotch = opened
+        }
         archive.layout.closedNotch = try layout.closedNotch?.validated()
         archive.layout.contextMusic = try layout.contextMusic?.validated()
         archive.layout.hud = try layout.hud?.validated()

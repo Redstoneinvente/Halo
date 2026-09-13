@@ -79,8 +79,30 @@ struct WidgetElementStyle: Codable, Equatable {
     var emphasis: WidgetElementEmphasis = .regular
     var dividerAfter = false
 
+    // Opened-notch element layout/chrome overrides. Optional fields keep older saved element styles decodable.
+    var alignment: WidgetContentAlignment?
+    var externalSpacing: Double?
+    var xOffset: Double?
+    var yOffset: Double?
+    var textAlignment: WidgetContentAlignment?
+    var fontFamily: WidgetFontFamily?
+    var customFont: String?
+    var fontSize: Double?
+    var fontWeight: WidgetFontWeight?
+    var borderColor: WidgetColor?
+    var borderWidth: Double?
+    var borderOpacity: Double?
+    var shadowBlur: Double?
+    var shadowOpacity: Double?
+    var tintColor: WidgetColor?
+    var tintOpacity: Double?
+    var iconSize: Double?
+    var contentDensity: Double?
+    var priority: OpenNotchPriority?
+
     func validated() throws -> WidgetElementStyle {
-        guard [fontScale, opacity, backgroundOpacity, padding, cornerRadius].allSatisfy(\.isFinite) else {
+        let extended = [externalSpacing, xOffset, yOffset, fontSize, borderWidth, borderOpacity, shadowBlur, shadowOpacity, tintOpacity, iconSize, contentDensity].compactMap { $0 }
+        guard [fontScale, opacity, backgroundOpacity, padding, cornerRadius].allSatisfy(\.isFinite), extended.allSatisfy(\.isFinite) else {
             throw CocoaError(.fileReadCorruptFile)
         }
         var value = self
@@ -91,6 +113,20 @@ struct WidgetElementStyle: Codable, Equatable {
         value.cornerRadius = min(32, max(0, cornerRadius))
         value.customForeground = try customForeground.validated()
         value.backgroundColor = try backgroundColor.validated()
+        if let externalSpacing { value.externalSpacing = min(48, max(0, externalSpacing)) }
+        if let xOffset { value.xOffset = min(200, max(-200, xOffset)) }
+        if let yOffset { value.yOffset = min(200, max(-200, yOffset)) }
+        if let fontSize { value.fontSize = min(72, max(8, fontSize)) }
+        if let borderWidth { value.borderWidth = min(8, max(0, borderWidth)) }
+        if let borderOpacity { value.borderOpacity = min(1, max(0, borderOpacity)) }
+        if let shadowBlur { value.shadowBlur = min(48, max(0, shadowBlur)) }
+        if let shadowOpacity { value.shadowOpacity = min(0.8, max(0, shadowOpacity)) }
+        if let tintOpacity { value.tintOpacity = min(1, max(0, tintOpacity)) }
+        if let iconSize { value.iconSize = min(96, max(6, iconSize)) }
+        if let contentDensity { value.contentDensity = min(1.5, max(0.5, contentDensity)) }
+        value.borderColor = try borderColor?.validated()
+        value.tintColor = try tintColor?.validated()
+        if let customFont { value.customFont = String(customFont.prefix(120)) }
         return value
     }
 }
@@ -142,8 +178,16 @@ extension ModuleID {
                 .init("artist", "Artist", "Current artist / creator."),
                 .init("source", "Player source", "Apple Music, Spotify, or system source."),
                 .init("playback", "Playback state", "Playing, paused, or waiting state."),
+                .init("artwork", "Album artwork", "Current track artwork."),
+                .init("album", "Album", "Current album metadata.", defaultVisible: false),
+                .init("progress", "Playback progress", "Seekable track progress where supported."),
+                .init("timing", "Elapsed / remaining", "Track timing where supported."),
                 .init("palette", "Artwork palette", "Colors extracted from current artwork.", defaultVisible: false),
                 .init("controls", "Playback controls", "Previous, play/pause, and next."),
+                .init("shuffle", "Shuffle", "Shuffle control where supported.", defaultVisible: false),
+                .init("repeat", "Repeat", "Repeat control where supported.", defaultVisible: false),
+                .init("visualizer", "Audio visualizer", "Measured system-audio spectrum while the opened notch is visible.", defaultVisible: false),
+                .init("lyrics", "Lyrics area", "Reserved for players that expose real lyric data.", defaultVisible: false),
                 .init("detection", "Detection action", "Retry player detection.", defaultVisible: false),
                 .init("status", "Media status", "Connection and error information.")
             ]
@@ -181,6 +225,13 @@ extension ModuleID {
                 .init("memory", "Memory", "Installed physical memory."),
                 .init("storage", "Storage", "Available disk capacity."),
                 .init("uptime", "Uptime", "Current system uptime."),
+                .init("cpu", "CPU usage", "Current CPU utilization."),
+                .init("memoryUsage", "Memory usage", "Current physical-memory utilization."),
+                .init("swap", "Swap", "Current swap utilization.", defaultVisible: false),
+                .init("diskUsage", "Disk usage", "Current disk utilization."),
+                .init("network", "Network throughput", "Current network receive/transmit rate."),
+                .init("thermal", "Thermal state", "macOS thermal-pressure state.", defaultVisible: false),
+                .init("graphs", "Compact graphs", "Recent CPU, memory and network history.", defaultVisible: false),
                 .init("device", "Mac details", "macOS version and logical processor count.", defaultVisible: false)
             ]
         case .launcher:

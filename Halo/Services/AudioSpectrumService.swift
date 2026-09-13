@@ -23,6 +23,7 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
     private var stream: SCStream?
     private var starting = false
     private var wanted = false
+    private var activeOwners = Set<String>()
     private var blockedForCurrentActivation = false
     private var permissionRequestedThisRun = false
     private var idleStopTask: Task<Void, Never>?
@@ -33,20 +34,24 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
         return smoothed
     }
 
-    func setActive(_ active: Bool) {
+    func setActive(_ active: Bool) { setActive(active, owner: "legacy") }
+
+    func setActive(_ active: Bool, owner: String) {
         stateLock.lock()
-        wanted = active
+        if active { activeOwners.insert(owner) } else { activeOwners.remove(owner) }
+        wanted = !activeOwners.isEmpty
+        let nowWanted = wanted
         idleStopTask?.cancel()
         idleStopTask = nil
 
-        let shouldStart = active && stream == nil && !starting && !blockedForCurrentActivation
+        let shouldStart = nowWanted && stream == nil && !starting && !blockedForCurrentActivation
         if shouldStart { starting = true }
         let current = stream
         stateLock.unlock()
 
         if shouldStart {
             Task { await startIfNeeded() }
-        } else if !active, let current {
+        } else if !nowWanted, let current {
             let task = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 8_000_000_000)
                 guard !Task.isCancelled, let self else { return }

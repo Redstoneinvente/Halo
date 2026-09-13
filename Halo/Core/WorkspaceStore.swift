@@ -60,6 +60,8 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     @Published var plugins: [PluginManifest] = []
     @Published var error: String?
     @Published var runningApps: [NSRunningApplication] = []
+    @Published private(set) var openedNotchVisible = false
+    private var openedNotchVisibilityTokens = Set<UUID>()
     let calendar = CalendarService()
     let clipboard = ClipboardService()
     let system = SystemService()
@@ -69,6 +71,14 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     let bluetooth = BluetoothStateService.shared
     @Published var stopwatchStart: Date?
     @Published var stopwatchElapsed: TimeInterval = 0
+    func setOpenedNotchVisible(_ visible: Bool, token: UUID) {
+        if visible { openedNotchVisibilityTokens.insert(token) } else { openedNotchVisibilityTokens.remove(token) }
+        let next = !openedNotchVisibilityTokens.isEmpty
+        guard next != openedNotchVisible else { return }
+        openedNotchVisible = next
+        media.setOpenedDetailEnabled(next)
+        if next { system.refresh(detailed: true); audio.refresh() }
+    }
     func toggleStopwatch() {
         if let start = stopwatchStart { stopwatchElapsed += Date().timeIntervalSince(start); stopwatchStart = nil }
         else { stopwatchStart = Date() }
@@ -181,7 +191,9 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             let minute = Int(Date().timeIntervalSince1970 / 60)
             if self.lastScheduleMinute != minute { self.lastScheduleMinute = minute; self.evaluateSchedules() }
             self.clipboard.poll(enabled: self.settings.clipboardEnabled, excluded: self.settings.clipboardExcludedApps)
-            if self.tick % 5 == 0 { self.system.refresh(); self.evaluateRules() }
+            if self.openedNotchVisible { self.system.refresh(detailed: true) }
+            else if self.tick % 5 == 0 { self.system.refresh() }
+            if self.tick % 5 == 0 { self.evaluateRules() }
             if self.tick % 30 == 0, self.settings.layout.enabled.contains(.calendar) { self.calendar.refresh() }
         }
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification, object: defaults)

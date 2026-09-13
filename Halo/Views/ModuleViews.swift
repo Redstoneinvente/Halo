@@ -183,44 +183,125 @@ struct CaptureModuleView: View {
 
 struct MediaModuleView: View {
     @Environment(\.widgetStyle) private var style
+    @Environment(\.openNotchPresentation) private var presentation
     @ObservedObject var service: MediaService
     let app: String
+    private var options: WidgetContentOptions { style.resolvedContent }
+
     var body: some View {
-        let options = style.resolvedContent
-        VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
-            WidgetElement(key: "track") { Text(service.title).lineLimit(options.mediaTitleLines) }
-            if options.mediaShowArtist && !service.artist.isEmpty { WidgetElement(key: "artist") { Text(service.artist) } }
-            if options.mediaShowSource, let source = service.connectedApp {
-                WidgetElement(key: "source") {
-                    Label(source == "com.apple.Music" ? "Apple Music" : source == "com.spotify.client" ? "Spotify" : "System Audio", systemImage: "app.badge")
-                }
+        Group {
+            switch presentation {
+            case .compact: compact
+            case .expanded: expanded
+            case .regular, .automatic: regular
             }
-            WidgetElement(key: "playback") {
-                Label(service.connectedApp == nil ? "Waiting for a player" : (service.isPlaying ? "Playing" : "Paused"),
-                      systemImage: service.connectedApp == nil ? "music.note" : (service.isPlaying ? "play.fill" : "pause.fill"))
-            }
-            WidgetElement(key: "palette", defaultVisible: false) {
-                HStack(spacing: 6) {
-                    Text("Artwork colors")
-                    ForEach(Array(service.artworkColors.prefix(5).enumerated()), id: \.offset) { _, color in
-                        Circle().fill(color.color).frame(width: 14, height: 14)
-                    }
-                }
-            }
-            if options.showControls {
-                WidgetElement(key: "controls") {
-                    HStack(spacing: options.spacing) {
-                        Button { service.perform("previous track", app: app) } label: { Image(systemName: "backward.end.fill") }
-                        Button { service.perform("playpause", app: app) } label: { Image(systemName: service.isPlaying ? "pause.fill" : "play.fill") }
-                        Button { service.perform("next track", app: app) } label: { Image(systemName: "forward.end.fill") }
-                    }.disabled(service.busy)
-                }
-            }
-            if options.showQuickActions { WidgetElement(key: "detection", defaultVisible: false) { Button("Retry player detection") { service.retryDetection(preferred: app) } } }
-            if options.showStatus, let error = service.error { WidgetElement(key: "status") { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) } }
         }
         .frame(maxWidth: .infinity, alignment: options.alignment.alignment)
         .onAppear { service.setArtworkEnabled(true) }
+    }
+
+    private var compact: some View {
+        HStack(spacing: max(6, options.spacing)) {
+            if let image = service.artworkImage {
+                WidgetElement(key: "artwork", defaultPriority: .normal) { Image(nsImage: image).resizable().scaledToFill().frame(width: 38, height: 38).clipShape(RoundedRectangle(cornerRadius: 7)) }
+                    .frame(width: 44)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                WidgetElement(key: "track", defaultPriority: .alwaysVisible) { Text(service.title).lineLimit(1) }
+                if options.mediaShowArtist && !service.artist.isEmpty { WidgetElement(key: "artist", defaultPriority: .low) { Text(service.artist).lineLimit(1) } }
+            }
+            Spacer(minLength: 4)
+            if options.showControls, service.connectedApp != nil {
+                WidgetElement(key: "controls", defaultPriority: .high) { Button { service.perform("playpause", app: app) } label: { Image(systemName: service.isPlaying ? "pause.fill" : "play.fill") } }
+            }
+        }
+    }
+
+    private var regular: some View {
+        HStack(alignment: .top, spacing: options.spacing) {
+            if let image = service.artworkImage {
+                WidgetElement(key: "artwork", defaultPriority: .normal) { Image(nsImage: image).resizable().scaledToFill().frame(width: 72, height: 72).clipShape(RoundedRectangle(cornerRadius: 10)) }
+                    .frame(width: 78)
+            }
+            VStack(alignment: .leading, spacing: max(4, options.spacing * 0.65)) { metadata; progress; controls }
+        }
+    }
+
+    private var expanded: some View {
+        VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
+            if let image = service.artworkImage {
+                WidgetElement(key: "artwork", defaultPriority: .normal) {
+                    Image(nsImage: image).resizable().scaledToFill().frame(maxWidth: 260, minHeight: 120, maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 16))
+                }
+            }
+            metadata
+            progress
+            controls
+            if service.shuffleSupported || service.repeatSupported {
+                HStack {
+                    if service.shuffleSupported { WidgetElement(key: "shuffle", defaultVisible: false, defaultPriority: .low) { Button { service.toggleShuffle() } label: { Label("Shuffle", systemImage: service.shuffleEnabled ? "shuffle.circle.fill" : "shuffle") } } }
+                    if service.repeatSupported { WidgetElement(key: "repeat", defaultVisible: false, defaultPriority: .low) { Button { service.cycleRepeat() } label: { Label(service.repeatMode.isEmpty ? "Repeat" : service.repeatMode, systemImage: "repeat") } } }
+                }
+            }
+            WidgetElement(key: "visualizer", defaultVisible: false, defaultPriority: .optional) { OpenMediaSpectrumView(accent: style.accentColor.color) }
+            // Lyrics intentionally render nothing until a supported player exposes real lyric data.
+            if options.showQuickActions { WidgetElement(key: "detection", defaultVisible: false, defaultPriority: .optional) { Button("Retry player detection") { service.retryDetection(preferred: app) } } }
+            if options.showStatus, let error = service.error { WidgetElement(key: "status", defaultPriority: .normal) { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) } }
+        }
+    }
+
+    @ViewBuilder private var metadata: some View {
+        WidgetElement(key: "track", defaultPriority: .alwaysVisible) { Text(service.title).lineLimit(options.mediaTitleLines) }
+        if options.mediaShowArtist && !service.artist.isEmpty { WidgetElement(key: "artist", defaultPriority: .normal) { Text(service.artist) } }
+        if !service.album.isEmpty { WidgetElement(key: "album", defaultVisible: false, defaultPriority: .low) { Text(service.album) } }
+        if options.mediaShowSource, let source = service.connectedApp {
+            WidgetElement(key: "source", defaultPriority: .low) { Label(source == "com.apple.Music" ? "Apple Music" : source == "com.spotify.client" ? "Spotify" : "System Audio", systemImage: "app.badge") }
+        }
+        WidgetElement(key: "playback", defaultPriority: .low) { Label(service.connectedApp == nil ? "Waiting for a player" : (service.isPlaying ? "Playing" : "Paused"), systemImage: service.connectedApp == nil ? "music.note" : (service.isPlaying ? "play.fill" : "pause.fill")) }
+    }
+
+    @ViewBuilder private var progress: some View {
+        if service.duration > 0 {
+            WidgetElement(key: "progress", defaultPriority: .normal) { Slider(value: Binding(get: { service.position }, set: { service.seek(to: $0) }), in: 0...max(1, service.duration)) { Text("Playback position") } }
+            WidgetElement(key: "timing", defaultPriority: .low) {
+                HStack { Text(Self.time(service.position)); Spacer(); Text("−" + Self.time(max(0, service.duration - service.position))) }.monospacedDigit()
+            }
+        }
+    }
+
+    @ViewBuilder private var controls: some View {
+        if options.showControls, service.connectedApp != nil {
+            WidgetElement(key: "controls", defaultPriority: .high) {
+                HStack(spacing: options.spacing) {
+                    Button { service.perform("previous track", app: app) } label: { Image(systemName: "backward.end.fill") }
+                    Button { service.perform("playpause", app: app) } label: { Image(systemName: service.isPlaying ? "pause.fill" : "play.fill") }
+                    Button { service.perform("next track", app: app) } label: { Image(systemName: "forward.end.fill") }
+                }.disabled(service.busy)
+            }
+        }
+    }
+    private static func time(_ seconds: Double) -> String { let value = max(0, Int(seconds)); return String(format: "%d:%02d", value / 60, value % 60) }
+}
+
+private struct OpenMediaSpectrumView: View {
+    let accent: Color
+    @State private var snapshot = AudioSpectrumSnapshot()
+    @State private var owner = UUID().uuidString
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+            GeometryReader { proxy in
+                let values = [snapshot.bass, snapshot.mids, snapshot.treble, snapshot.overall]
+                HStack(alignment: .bottom, spacing: 4) {
+                    ForEach(Array(values.enumerated()), id: \.offset) { _, value in
+                        Capsule().fill(accent.opacity(0.78)).frame(maxWidth: .infinity, minHeight: 2, maxHeight: max(2, proxy.size.height * value))
+                    }
+                }
+            }
+        }
+        .frame(height: 34)
+        .onAppear { AudioSpectrumService.shared.setActive(true, owner: owner) }
+        .onDisappear { AudioSpectrumService.shared.setActive(false, owner: owner) }
+        .onReceive(Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()) { _ in snapshot = AudioSpectrumService.shared.snapshot() }
     }
 }
 
@@ -257,13 +338,12 @@ struct AudioModuleView: View {
 
 struct CalendarModuleView: View {
     @Environment(\.widgetStyle) private var style
+    @Environment(\.openNotchPresentation) private var presentation
     @ObservedObject var service: CalendarService
     var body: some View {
         let options = style.resolvedContent
         VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
-            WidgetElement(key: "summary") {
-                HStack { Text(Date(), style: .date); Spacer(); Text("\(service.events.count) remaining") }
-            }
+            if presentation != .compact { WidgetElement(key: "summary") { HStack { Text(Date(), style: .date); Spacer(); Text("\(service.events.count) remaining") } } }
             if let next = service.events.first {
                 WidgetElement(key: "nextEvent") {
                     HStack {
@@ -273,8 +353,8 @@ struct CalendarModuleView: View {
                     }
                 }
             }
-            if options.showStatus { WidgetElement(key: "status") { Text(service.status) } }
-            WidgetElement(key: "events") {
+            if options.showStatus && presentation == .expanded { WidgetElement(key: "status", defaultPriority: .low) { Text(service.status) } }
+            if presentation != .compact { WidgetElement(key: "events") {
                 VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
                     ForEach(Array(service.events.prefix(options.maxItems)), id: \.eventIdentifier) { event in
                         HStack(spacing: options.spacing) {
@@ -287,14 +367,15 @@ struct CalendarModuleView: View {
                         }
                     }
                 }
-            }
-            if options.showQuickActions { WidgetElement(key: "actions") { Button("Enable / Refresh calendar") { service.requestAccess() } } }
+            } }
+            if options.showQuickActions && presentation == .expanded { WidgetElement(key: "actions", defaultPriority: .low) { Button("Enable / Refresh calendar") { service.requestAccess() } } }
         }.frame(maxWidth: .infinity, alignment: options.alignment.alignment).onAppear { service.refresh() }
     }
 }
 
 struct ClipboardModuleView: View {
     @Environment(\.widgetStyle) private var style
+    @Environment(\.openNotchPresentation) private var presentation
     @ObservedObject var service: ClipboardService
     let enabled: Bool
     @State private var search = ""
@@ -311,11 +392,11 @@ struct ClipboardModuleView: View {
                         if let newest = service.entries.first { Text(newest.date, style: .relative).foregroundStyle(.secondary) }
                     }
                 }
-                if options.showSearch { WidgetElement(key: "search") { TextField("Search clipboard", text: $search) } }
+                if options.showSearch && presentation != .compact { WidgetElement(key: "search") { TextField("Search clipboard", text: $search) } }
                 let effectiveSearch = options.showSearch ? search : ""
                 WidgetElement(key: "entries") {
                     VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
-                        ForEach(Array(service.entries.filter { effectiveSearch.isEmpty || $0.text.localizedCaseInsensitiveContains(effectiveSearch) }.prefix(options.maxItems))) { entry in
+                        ForEach(Array(service.entries.filter { effectiveSearch.isEmpty || $0.text.localizedCaseInsensitiveContains(effectiveSearch) }.prefix(presentation == .compact ? 1 : options.maxItems))) { entry in
                             HStack(spacing: options.spacing) {
                                 VStack(alignment: .leading, spacing: 2) { Text(entry.text).lineLimit(2); Text(entry.date, style: .relative).font(.caption).foregroundStyle(.secondary) }
                                 Spacer()
@@ -327,8 +408,8 @@ struct ClipboardModuleView: View {
                         }
                     }
                 }
-                if options.showQuickActions { WidgetElement(key: "actions") { Button("Clear history") { service.reset() } } }
-                if options.showFooter { WidgetElement(key: "footer") { Text("Text only · up to 50 items · memory only") } }
+                if options.showQuickActions && presentation == .expanded { WidgetElement(key: "actions", defaultPriority: .low) { Button("Clear history") { service.reset() } } }
+                if options.showFooter && presentation == .expanded { WidgetElement(key: "footer", defaultPriority: .optional) { Text("Text only · up to 50 items · memory only") } }
             }
         }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
     }
@@ -336,34 +417,66 @@ struct ClipboardModuleView: View {
 
 struct SystemModuleView: View {
     @Environment(\.widgetStyle) private var style
+    @Environment(\.openNotchPresentation) private var presentation
     @ObservedObject var service: SystemService
+    private var options: WidgetContentOptions { style.resolvedContent }
+
     var body: some View {
-        let options = style.resolvedContent
         VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
             if options.systemBattery, let battery = service.battery {
-                WidgetElement(key: "battery") {
-                    HStack { Label("\(battery)%", systemImage: service.charging ? "battery.100.bolt" : "battery.100"); Spacer(); Text(service.charging ? "Charging" : service.onBattery ? "Battery" : "AC power") }
-                }
-                if options.showProgress { WidgetElement(key: "batteryProgress") { ProgressView(value: Double(battery), total: 100) } }
+                WidgetElement(key: "battery", defaultPriority: .high) { HStack { Label("\(battery)%", systemImage: service.charging ? "battery.100.bolt" : "battery.100"); Spacer(); Text(service.charging ? "Charging" : service.onBattery ? "Battery" : "AC power") } }
+                if options.showProgress, presentation != .compact { WidgetElement(key: "batteryProgress", defaultPriority: .low) { ProgressView(value: Double(battery), total: 100) } }
             }
-            WidgetElement(key: "power") {
-                HStack { Label(service.lowPower ? "Low Power Mode" : "Normal power", systemImage: service.lowPower ? "leaf.fill" : "bolt.fill"); Spacer(); Text(service.onBattery ? "On battery" : "External power") }
+            WidgetElement(key: "cpu", defaultPriority: .alwaysVisible) { MetricRow(label: "CPU", value: service.cpuUsage, icon: "cpu") }
+            WidgetElement(key: "memoryUsage", defaultPriority: .high) { MetricRow(label: "RAM", value: service.memoryUsage, icon: "memorychip") }
+            if presentation != .compact {
+                WidgetElement(key: "diskUsage", defaultPriority: .normal) { MetricRow(label: "Disk", value: service.diskUsage, icon: "internaldrive") }
+                WidgetElement(key: "network", defaultPriority: .normal) { HStack { Label("Network", systemImage: "network"); Spacer(); Text("↓ \(Self.rate(service.networkDownPerSecond))  ↑ \(Self.rate(service.networkUpPerSecond))").monospacedDigit() } }
+                WidgetElement(key: "power", defaultPriority: .normal) { HStack { Label(service.lowPower ? "Low Power Mode" : "Normal power", systemImage: service.lowPower ? "leaf.fill" : "bolt.fill"); Spacer(); Text(service.onBattery ? "On battery" : "External power") } }
             }
-            if options.systemMemory { WidgetElement(key: "memory") { Label(service.memory, systemImage: "memorychip") } }
-            if options.systemStorage { WidgetElement(key: "storage") { Label(service.storage, systemImage: "internaldrive") } }
-            if options.systemUptime { WidgetElement(key: "uptime") { Label(service.uptime, systemImage: "clock.arrow.circlepath") } }
-            WidgetElement(key: "device", defaultVisible: false) {
-                VStack(alignment: options.alignment.horizontal, spacing: 3) {
-                    Text(ProcessInfo.processInfo.operatingSystemVersionString)
-                    Text("\(ProcessInfo.processInfo.processorCount) logical processors").foregroundStyle(.secondary)
+            if presentation == .expanded {
+                WidgetElement(key: "graphs", defaultVisible: false, defaultPriority: .optional) {
+                    VStack(spacing: 8) { MiniMetricGraph(title: "CPU", values: service.cpuHistory, accent: style.accentColor.color); MiniMetricGraph(title: "Memory", values: service.memoryHistory, accent: style.accentColor.color.opacity(0.75)); MiniMetricGraph(title: "Network", values: service.networkHistory, accent: style.accentColor.color.opacity(0.55)) }
                 }
+                WidgetElement(key: "swap", defaultVisible: false, defaultPriority: .low) { MetricRow(label: "Swap", value: service.swapUsage, icon: "arrow.triangle.swap") }
+                WidgetElement(key: "thermal", defaultVisible: false, defaultPriority: .low) { HStack { Label("Thermal", systemImage: "thermometer.medium"); Spacer(); Text(service.thermalState) } }
+                if options.systemMemory { WidgetElement(key: "memory", defaultPriority: .low) { Label(service.memory, systemImage: "memorychip") } }
+                if options.systemStorage { WidgetElement(key: "storage", defaultPriority: .low) { Label(service.storage, systemImage: "internaldrive") } }
+                if options.systemUptime { WidgetElement(key: "uptime", defaultPriority: .low) { Label(service.uptime, systemImage: "clock.arrow.circlepath") } }
+                WidgetElement(key: "device", defaultVisible: false, defaultPriority: .optional) { VStack(alignment: options.alignment.horizontal, spacing: 3) { Text(ProcessInfo.processInfo.operatingSystemVersionString); Text("\(ProcessInfo.processInfo.processorCount) logical processors").foregroundStyle(.secondary) } }
             }
         }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
+    }
+    private static func rate(_ value: Double) -> String { ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .file) + "/s" }
+}
+
+private struct MetricRow: View {
+    let label: String; let value: Double; let icon: String
+    var body: some View { VStack(spacing: 4) { HStack { Label(label, systemImage: icon); Spacer(); Text(String(format: "%.0f%%", value)).monospacedDigit() }; ProgressView(value: value, total: 100) } }
+}
+
+private struct MiniMetricGraph: View {
+    let title: String; let values: [Double]; let accent: Color
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            GeometryReader { proxy in
+                Path { path in
+                    guard values.count > 1 else { return }
+                    let step = proxy.size.width / CGFloat(values.count - 1)
+                    for (index, value) in values.enumerated() {
+                        let point = CGPoint(x: CGFloat(index) * step, y: proxy.size.height * (1 - CGFloat(min(100, max(0, value)) / 100)))
+                        index == 0 ? path.move(to: point) : path.addLine(to: point)
+                    }
+                }.stroke(accent, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
+            }.frame(height: 30)
+        }
     }
 }
 
 struct LauncherModuleView: View {
     @Environment(\.widgetStyle) private var style
+    @Environment(\.openNotchPresentation) private var presentation
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
     @State private var query = ""
@@ -389,7 +502,7 @@ struct LauncherModuleView: View {
                     }
                 }
             }
-            if options.launcherPlugins {
+            if options.launcherPlugins && presentation != .compact {
                 WidgetElement(key: "plugins") {
                     VStack(alignment: options.alignment.horizontal, spacing: max(4, options.spacing * 0.65)) {
                         ForEach(workspace.plugins) { plugin in
@@ -400,7 +513,7 @@ struct LauncherModuleView: View {
                     }
                 }
             }
-            if options.showQuickActions {
+            if options.showQuickActions && presentation == .expanded {
                 WidgetElement(key: "shortcuts") {
                     HStack(spacing: options.spacing) {
                         Button("Open application…") {
