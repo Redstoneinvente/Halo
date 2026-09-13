@@ -904,56 +904,98 @@ struct OpenNotchLayout: Codable, Equatable {
     }
 
     static func made(_ preset: OpenNotchPreset) -> OpenNotchLayout {
-        func g(_ name: String, _ axis: OpenNotchAxis = .vertical, _ items: [OpenNotchItem]) -> OpenNotchGroup {
-            OpenNotchGroup(name: name, axis: axis, alignment: .stretch, spacing: 10, padding: OpenNotchInsets(), items: items)
+        func item(_ module: ModuleID, _ column: Int, _ row: Int, _ columns: Int, _ rows: Int,
+                  _ presentation: OpenNotchPresentation = .automatic,
+                  _ priority: OpenNotchPriority = .normal) -> OpenNotchItem {
+            var value = OpenNotchItem.moduleItem(module, presentation: presentation, priority: priority)
+            value.gridPlacement = OpenNotchGridPlacement(column: column, row: row, columnSpan: columns, rowSpan: rows)
+            return value
         }
-        func r(_ placement: OpenNotchRegionPlacement, _ groups: [OpenNotchGroup]) -> OpenNotchRegion {
-            OpenNotchRegion(placement: placement, padding: OpenNotchInsets(), groups: groups)
+        func grid(_ columns: Int = 8, _ rows: Int = 4, cellHeight: Double = 96, gap: Double = 9,
+                  _ items: [OpenNotchItem]) -> OpenNotchLayout {
+            OpenNotchLayout(preset: preset, regions: [], gridItems: items,
+                            gridColumns: columns, gridRows: rows, gridGap: gap,
+                            gridCellHeight: cellHeight,
+                            gridPadding: OpenNotchInsets(top: 10, leading: 12, bottom: 12, trailing: 12))
         }
+
         switch preset {
         case .minimal:
-            return OpenNotchLayout(preset: preset, regions: [
-                r(.middleCenter, [g("Essentials", .vertical, [.moduleItem(.clock, presentation: .expanded, priority: .alwaysVisible)])])
+            // Intentionally sparse: one large clock floating in the center instead of a generic stack.
+            return grid(8, 4, cellHeight: 92, gap: 10, [
+                item(.clock, 2, 1, 4, 2, .expanded, .alwaysVisible)
             ])
+
         case .media:
-            return OpenNotchLayout(preset: preset, regions: [
-                r(.middleCenter, [g("Media", .vertical, [.moduleItem(.media, presentation: .expanded, priority: .alwaysVisible)])]),
-                r(.bottomCenter, [g("Audio", .horizontal, [.moduleItem(.audio, presentation: .compact, priority: .high)])])
+            // Hero player with a dedicated right-side audio/activity rail.
+            return grid(8, 4, cellHeight: 104, gap: 10, [
+                item(.media,      0, 0, 6, 4, .expanded, .alwaysVisible),
+                item(.audio,      6, 0, 2, 2, .expanded, .high),
+                item(.activities, 6, 2, 2, 2, .regular,  .normal)
             ])
+
         case .productivity:
-            return OpenNotchLayout(preset: preset, regions: [
-                r(.topCenter, [g("Overview", .horizontal, [.moduleItem(.clock, priority: .high)])]),
-                r(.middleLeft, [g("Schedule", .vertical, [.moduleItem(.calendar, priority: .high), .moduleItem(.timer, priority: .high)])]),
-                r(.middleRight, [g("Work", .vertical, [.moduleItem(.notes, priority: .normal), .moduleItem(.shelf, priority: .low)])])
+            // Calendar dominates the canvas; notes/timer sit in a purposeful work rail.
+            return grid(8, 4, cellHeight: 102, gap: 9, [
+                item(.calendar, 0, 0, 5, 3, .expanded, .alwaysVisible),
+                item(.notes,    5, 0, 3, 2, .expanded, .high),
+                item(.timer,    5, 2, 3, 1, .compact,  .high),
+                item(.shelf,    0, 3, 5, 1, .compact,  .normal),
+                item(.launcher, 5, 3, 3, 1, .compact,  .normal)
             ])
+
         case .systemMonitor:
-            return OpenNotchLayout(preset: preset, regions: [
-                r(.middleCenter, [g("System", .vertical, [.moduleItem(.system, presentation: .expanded, priority: .alwaysVisible)])])
+            // Large telemetry dashboard plus a narrow operational status rail.
+            return grid(8, 4, cellHeight: 100, gap: 8, [
+                item(.system,     0, 0, 5, 4, .expanded, .alwaysVisible),
+                item(.activities, 5, 0, 3, 2, .expanded, .high),
+                item(.audio,      5, 2, 3, 1, .compact,  .normal),
+                item(.clock,      5, 3, 3, 1, .compact,  .high)
             ])
+
         case .focus:
-            return OpenNotchLayout(preset: preset, regions: [
-                r(.topCenter, [g("Time", .horizontal, [.moduleItem(.clock, priority: .high)])]),
-                r(.middleCenter, [g("Focus", .vertical, [.moduleItem(.timer, presentation: .expanded, priority: .alwaysVisible), .moduleItem(.notes, presentation: .compact, priority: .low)])])
+            // Timer and writing surface get almost all the visual weight; supporting state is quiet.
+            return grid(8, 4, cellHeight: 104, gap: 10, [
+                item(.timer,      0, 0, 5, 3, .expanded, .alwaysVisible),
+                item(.notes,      5, 0, 3, 3, .expanded, .high),
+                item(.clock,      0, 3, 4, 1, .compact,  .high),
+                item(.activities, 4, 3, 4, 1, .compact,  .low)
             ])
+
         case .developer:
-            return OpenNotchLayout(preset: preset, regions: [
-                r(.middleLeft, [g("Tools", .vertical, [.moduleItem(.launcher, priority: .high), .moduleItem(.capture, priority: .normal)])]),
-                r(.middleRight, [g("Context", .vertical, [.moduleItem(.system, priority: .normal), .moduleItem(.notes, priority: .low)])])
+            // Four equally strong quadrants: observe, launch, capture and jot context.
+            return grid(8, 4, cellHeight: 98, gap: 8, [
+                item(.system,   0, 0, 4, 2, .expanded, .high),
+                item(.launcher, 4, 0, 4, 2, .expanded, .high),
+                item(.capture,  0, 2, 4, 2, .expanded, .high),
+                item(.notes,    4, 2, 4, 2, .expanded, .normal)
             ])
+
         case .informationDense:
-            return OpenNotchLayout(preset: preset, regions: [
-                r(.topLeft, [g("Time", .vertical, [.moduleItem(.clock, presentation: .compact, priority: .high)])]),
-                r(.topRight, [g("System", .vertical, [.moduleItem(.system, presentation: .compact, priority: .high)])]),
-                r(.middleLeft, [g("Agenda", .vertical, [.moduleItem(.calendar, presentation: .compact, priority: .high), .moduleItem(.timer, presentation: .compact, priority: .normal)])]),
-                r(.middleRight, [g("Utilities", .vertical, [.moduleItem(.clipboard, presentation: .compact, priority: .normal), .moduleItem(.shelf, presentation: .compact, priority: .low)])]),
-                r(.bottomCenter, [g("Media", .horizontal, [.moduleItem(.media, presentation: .compact, priority: .high), .moduleItem(.audio, presentation: .compact, priority: .normal)])])
+            // A deliberate six-row mosaic rather than a vertical pile of compact cards.
+            return grid(8, 6, cellHeight: 88, gap: 7, [
+                item(.clock,      0, 0, 2, 1, .compact, .high),
+                item(.timer,      2, 0, 2, 1, .compact, .high),
+                item(.audio,      4, 0, 2, 1, .compact, .normal),
+                item(.activities, 6, 0, 2, 1, .compact, .normal),
+                item(.calendar,   0, 1, 4, 3, .expanded, .high),
+                item(.system,     4, 1, 4, 3, .expanded, .high),
+                item(.clipboard,  0, 4, 2, 2, .expanded, .normal),
+                item(.shelf,      2, 4, 2, 2, .expanded, .normal),
+                item(.launcher,   4, 4, 2, 2, .expanded, .normal),
+                item(.notes,      6, 4, 2, 2, .expanded, .normal)
             ])
+
         case .showcase:
-            return OpenNotchLayout(preset: preset, regions: [
-                r(.topCenter, [g("Header", .horizontal, [.moduleItem(.clock, presentation: .compact, priority: .high)])]),
-                r(.middleCenter, [g("Hero", .vertical, [.moduleItem(.media, presentation: .expanded, priority: .alwaysVisible)])]),
-                r(.bottomCenter, [g("Controls", .horizontal, [.moduleItem(.audio, presentation: .compact, priority: .high)])])
+            // Asymmetric demo composition: one cinematic hero with a compact feature rail.
+            return grid(8, 4, cellHeight: 108, gap: 10, [
+                item(.media,      0, 0, 6, 4, .expanded, .alwaysVisible),
+                item(.clock,      6, 0, 2, 1, .compact,  .high),
+                item(.audio,      6, 1, 2, 1, .compact,  .high),
+                item(.activities, 6, 2, 2, 1, .compact,  .normal),
+                item(.capture,    6, 3, 2, 1, .compact,  .normal)
             ])
+
         case .custom:
             return migrated(modules: ModuleID.allCases.filter { $0 != .developer }, horizontal: false)
         }
