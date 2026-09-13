@@ -319,6 +319,14 @@ enum WidgetClockDateStyle: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum CalendarWidgetViewStyle: String, Codable, CaseIterable, Identifiable {
+    case agenda = "Agenda"
+    case monthGrid = "Month Grid"
+    case weekStrip = "Week Strip"
+    case split = "Split"
+    var id: String { rawValue }
+}
+
 /// Content controls for the opened-notch widget dashboard. One instance belongs to one ModuleID,
 /// so the editor can expose only the controls relevant to that widget while profiles keep them all.
 struct WidgetContentOptions: Codable, Equatable {
@@ -351,6 +359,17 @@ struct WidgetContentOptions: Codable, Equatable {
 
     var calendarShowTimes = true
     var calendarShowJoin = true
+    // Optional additions keep pre-calendar-redesign profiles decodable.
+    var calendarViewStyle: CalendarWidgetViewStyle?
+    var calendarShowAdjacentDays: Bool?
+    var calendarShowEventDots: Bool?
+    var calendarShowWeekdayHeader: Bool?
+    var calendarShowAgendaBelowGrid: Bool?
+    var resolvedCalendarViewStyle: CalendarWidgetViewStyle { calendarViewStyle ?? .agenda }
+    var showsCalendarAdjacentDays: Bool { calendarShowAdjacentDays ?? true }
+    var showsCalendarEventDots: Bool { calendarShowEventDots ?? true }
+    var showsCalendarWeekdayHeader: Bool { calendarShowWeekdayHeader ?? true }
+    var showsCalendarAgendaBelowGrid: Bool { calendarShowAgendaBelowGrid ?? true }
 
     var systemBattery = true
     var systemMemory = true
@@ -487,10 +506,9 @@ struct WidgetStyle: Codable, Equatable {
     }
 }
 extension WidgetStyle {
-    /// A restrained, integrated default for module blocks inside the Visual Workspace.
-    /// Explicit per-widget choices still win because this is only used to seed/resolve a
-    /// Visual Workspace block that has no item-level override yet.
-    func visualWorkspacePolished() -> WidgetStyle {
+    /// A polished, integrated starting point for module blocks inside the Visual Workspace.
+    /// Existing user overrides always win; these values only seed missing per-instance choices.
+    func visualWorkspacePolished(for module: ModuleID) -> WidgetStyle {
         var value = self
         value.width = 0
         value.minimumHeight = 0
@@ -501,14 +519,103 @@ extension WidgetStyle {
         value.padding = min(16, max(8, value.padding))
         value.cornerRadius = min(28, max(14, value.cornerRadius))
         value.fontSize = min(32, max(12, value.fontSize))
+
         var content = value.resolvedContent
         content.spacing = min(10, max(4, content.spacing * 0.75))
         content.controlSize = .small
         content.iconSize = min(18, max(12, content.iconSize))
+        if module == .clock { content.alignment = .center }
+        if module == .calendar, content.calendarViewStyle == nil { content.calendarViewStyle = .split }
         value.content = content
+
         var chrome = value.resolvedChrome
         chrome.shadowOpacity = min(0.18, chrome.shadowOpacity)
         value.chrome = chrome
+
+        var elements = value.elementStyles ?? [:]
+        func seed(_ key: String,
+                  foreground: WidgetElementForegroundStyle = .inherit,
+                  background: WidgetElementBackgroundStyle = .none,
+                  backgroundOpacity: Double = 1,
+                  padding: Double = 0,
+                  radius: Double = 10,
+                  emphasis: WidgetElementEmphasis = .regular,
+                  scale: Double = 1) {
+            guard elements[key] == nil else { return }
+            var element = WidgetElementStyle()
+            element.foreground = foreground
+            element.background = background
+            element.backgroundOpacity = backgroundOpacity
+            element.padding = padding
+            element.cornerRadius = radius
+            element.emphasis = emphasis
+            element.fontScale = scale
+            elements[key] = element
+        }
+
+        // Shared hierarchy: important values are stronger, metadata recedes, and functional
+        // groups get just enough surface treatment to feel designed without becoming card soup.
+        seed("summary", foreground: .secondary, scale: 0.88)
+        switch module {
+        case .clock:
+            seed("time", emphasis: .semibold, scale: 1.28)
+            seed("date", foreground: .secondary, scale: 0.88)
+            seed("timezone", foreground: .secondary, scale: 0.78)
+        case .timer:
+            seed("countdown", emphasis: .bold, scale: 1.55)
+            seed("status", foreground: .secondary, scale: 0.88)
+            seed("presets", background: .subtle, padding: 7, radius: 12)
+            seed("controls", background: .subtle, padding: 6, radius: 12)
+        case .shelf:
+            seed("files", background: .subtle, padding: 7, radius: 12)
+            seed("footer", foreground: .secondary, scale: 0.82)
+        case .media:
+            seed("track", emphasis: .bold, scale: 1.12)
+            seed("artist", foreground: .secondary, emphasis: .medium, scale: 0.92)
+            seed("album", foreground: .secondary, scale: 0.82)
+            seed("source", foreground: .secondary, scale: 0.78)
+            seed("playback", foreground: .secondary, scale: 0.82)
+            seed("timing", foreground: .secondary, scale: 0.78)
+            seed("controls", background: .subtle, padding: 5, radius: 12)
+        case .audio:
+            seed("summary", emphasis: .semibold, scale: 1.02)
+            seed("volumeValue", emphasis: .bold, scale: 1.45)
+            seed("volume", background: .subtle, padding: 7, radius: 12)
+            seed("status", foreground: .secondary, scale: 0.82)
+        case .calendar:
+            seed("summary", emphasis: .semibold, scale: 1.0)
+            seed("nextEvent", background: .subtle, padding: 7, radius: 12, emphasis: .medium)
+            seed("events", background: .none, padding: 0)
+            seed("status", foreground: .secondary, scale: 0.82)
+        case .clipboard:
+            seed("entries", background: .none, padding: 0)
+            seed("footer", foreground: .secondary, scale: 0.78)
+        case .system:
+            seed("cpu", background: .subtle, padding: 7, radius: 12, emphasis: .semibold)
+            seed("memoryUsage", background: .subtle, padding: 7, radius: 12, emphasis: .semibold)
+            seed("diskUsage", background: .subtle, padding: 7, radius: 12, emphasis: .semibold)
+            seed("network", foreground: .secondary, scale: 0.84)
+            seed("power", foreground: .secondary, scale: 0.84)
+        case .launcher:
+            seed("search", background: .subtle, padding: 5, radius: 10)
+            seed("timers", background: .subtle, padding: 6, radius: 12)
+        case .activities:
+            seed("items", background: .subtle, padding: 7, radius: 12)
+            seed("status", foreground: .secondary, scale: 0.86)
+        case .notes:
+            seed("editor", background: .subtle, padding: 6, radius: 12)
+            seed("stats", foreground: .secondary, scale: 0.82)
+        case .capture:
+            seed("actions", background: .subtle, padding: 7, radius: 12, emphasis: .medium)
+            seed("hint", foreground: .secondary, scale: 0.82)
+        case .stopwatch:
+            seed("time", emphasis: .bold, scale: 1.45)
+            seed("state", foreground: .secondary, scale: 0.84)
+            seed("controls", background: .subtle, padding: 6, radius: 12)
+        case .developer:
+            break
+        }
+        value.elementStyles = elements
         return value
     }
 }

@@ -1429,7 +1429,7 @@ private struct OpenNotchItemView: View {
     }
     private func adaptedWidgetStyle(presentation: OpenNotchPresentation) -> WidgetStyle {
         guard let module = item.module else { return WidgetStyle() }
-        var style = item.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished()
+        var style = item.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished(for: module)
         // The designed slot owns geometry in the custom workspace. A legacy
         // per-widget width must never push a card outside its region.
         style.width = 0

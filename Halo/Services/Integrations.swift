@@ -11,6 +11,7 @@ import Darwin
 @MainActor
 final class CalendarService: ObservableObject {
     @Published var events: [EKEvent] = []
+    @Published var upcomingEvents: [EKEvent] = []
     @Published var status = "Calendar access is off. Enable it to show today's schedule."
     private let store = EKEventStore()
     private var observer: AnyCancellable?
@@ -29,15 +30,35 @@ final class CalendarService: ObservableObject {
         else { store.requestAccess(to: .event, completion: completion) }
     }
     func refresh() {
-        let authorization = EKEventStore.authorizationStatus(for: .event)
-        var allowed = authorization == .authorized
-        if #available(macOS 14.0, *) { allowed = allowed || authorization == .fullAccess }
-        guard allowed else { events = []; return }
-        let start = Calendar.current.startOfDay(for: Date())
-        let end = Calendar.current.date(byAdding: .day, value: 1, to: start)!
-        events = store.events(matching: store.predicateForEvents(withStart: start, end: end, calendars: nil))
-            .filter { $0.endDate > Date() }.sorted { $0.startDate < $1.startDate }
+        guard isAuthorized else { events = []; upcomingEvents = []; return }
+        let calendar = Calendar.autoupdatingCurrent
+        let now = Date()
+        let today = calendar.startOfDay(for: now)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? now.addingTimeInterval(86_400)
+        let horizon = calendar.date(byAdding: .day, value: 14, to: today) ?? now.addingTimeInterval(14 * 86_400)
+        let all = store.events(matching: store.predicateForEvents(withStart: today, end: horizon, calendars: nil))
+            .filter { $0.endDate > now }
+            .sorted { $0.startDate < $1.startDate }
+        upcomingEvents = all
+        events = all.filter { $0.startDate < tomorrow && $0.endDate > now }
         status = events.isEmpty ? "No more events today" : "Today's schedule"
+    }
+
+    func events(around anchor: Date) -> [EKEvent] {
+        guard isAuthorized else { return [] }
+        let calendar = Calendar.autoupdatingCurrent
+        let monthStart = calendar.dateInterval(of: .month, for: anchor)?.start ?? calendar.startOfDay(for: anchor)
+        let gridStart = calendar.dateInterval(of: .weekOfYear, for: monthStart)?.start ?? monthStart
+        let gridEnd = calendar.date(byAdding: .day, value: 42, to: gridStart) ?? gridStart.addingTimeInterval(42 * 86_400)
+        return store.events(matching: store.predicateForEvents(withStart: gridStart, end: gridEnd, calendars: nil))
+            .sorted { $0.startDate < $1.startDate }
+    }
+
+    private var isAuthorized: Bool {
+        let authorization = EKEventStore.authorizationStatus(for: .event)
+        if authorization == .authorized { return true }
+        if #available(macOS 14.0, *) { return authorization == .fullAccess }
+        return false
     }
     func meetingURL(for event: EKEvent) -> URL? {
         let candidates = [event.url?.absoluteString, event.location, event.notes].compactMap { $0 }.joined(separator: " ")

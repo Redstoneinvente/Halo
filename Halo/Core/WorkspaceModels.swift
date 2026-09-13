@@ -126,7 +126,9 @@ struct WorkspaceLayout: Codable, Equatable {
     }
 
     var resolvedOpenNotchLayout: OpenNotchLayout {
-        if let openNotch, !openNotch.regions.isEmpty { return openNotch }
+        // An explicitly saved empty workspace is intentional. Only migrate the
+        // legacy dashboard when no custom OpenNotchLayout has ever been created.
+        if let openNotch { return openNotch }
         return OpenNotchLayout.migrated(
             modules: normalizedOrder().filter { enabled.contains($0) },
             horizontal: horizontalWidgets ?? false
@@ -134,7 +136,7 @@ struct WorkspaceLayout: Codable, Equatable {
     }
 
     mutating func materializeOpenNotchLayout() {
-        if openNotch == nil || openNotch?.regions.isEmpty == true { openNotch = resolvedOpenNotchLayout }
+        if openNotch == nil { openNotch = resolvedOpenNotchLayout }
     }
 
     mutating func setCustomOpenNotchWorkspaceEnabled(_ enabled: Bool) {

@@ -338,7 +338,16 @@ struct WidgetSettingsView: View {
             }
         case .calendar:
             Section("Calendar") {
+                Picker("View", selection: content.calendarViewStyle.withDefault(.agenda)) {
+                    ForEach(CalendarWidgetViewStyle.allCases) { Text($0.rawValue).tag($0) }
+                }
                 PreciseSlider(title: "Visible events", value: Binding(get: { Double(content.wrappedValue.maxItems) }, set: { content.wrappedValue.maxItems = Int($0) }), range: 1...30, step: 1)
+                Toggle("Show weekday labels", isOn: content.calendarShowWeekdayHeader.withDefault(true))
+                Toggle("Show adjacent-month days", isOn: content.calendarShowAdjacentDays.withDefault(true))
+                Toggle("Show event dots", isOn: content.calendarShowEventDots.withDefault(true))
+                if content.wrappedValue.resolvedCalendarViewStyle == .monthGrid {
+                    Toggle("Show selected-day agenda", isOn: content.calendarShowAgendaBelowGrid.withDefault(true))
+                }
                 Toggle("Show calendar status", isOn: content.showStatus)
                 Toggle("Show event times", isOn: content.calendarShowTimes)
                 Toggle("Show Join buttons", isOn: content.calendarShowJoin)
@@ -832,7 +841,16 @@ struct OpenedNotchWorkspaceEditor: View {
                     GeometryReader { proxy in
                         let inset: CGFloat = 14
                         let canvasSize = CGSize(width: max(1, proxy.size.width - inset * 2), height: max(1, proxy.size.height - inset * 2))
-                        if opened.resolvedContentMode == .fixed && opened.usesFreeformRegions {
+                        if opened.regions.isEmpty {
+                            VStack(spacing: 10) {
+                                Image(systemName: "rectangle.dashed").font(.system(size: 28, weight: .light)).foregroundStyle(.secondary)
+                                Text("No regions").font(.headline)
+                                Text("This workspace is intentionally empty.").font(.caption).foregroundStyle(.secondary)
+                                Button("Add Region") { addRegion() }.buttonStyle(.borderedProminent)
+                            }
+                            .frame(width: canvasSize.width, height: canvasSize.height)
+                            .padding(inset)
+                        } else if opened.resolvedContentMode == .fixed && opened.usesFreeformRegions {
                             freeformPreview(canvasSize: canvasSize)
                                 .padding(inset)
                         } else {
@@ -1083,6 +1101,25 @@ struct OpenedNotchWorkspaceEditor: View {
                 ForEach(WidgetContentAlignment.allCases) { Text($0.title).tag($0) }
             }
         }
+        if module == .calendar {
+            let content = style.content.withDefault(WidgetContentOptions())
+            Section("Calendar Presentation") {
+                Picker("View", selection: content.calendarViewStyle.withDefault(.split)) {
+                    ForEach(CalendarWidgetViewStyle.allCases) { Text($0.rawValue).tag($0) }
+                }
+                Text("Agenda emphasizes upcoming events, Month Grid is a real navigable calendar, Week Strip is compact, and Split pairs the month with the selected day's agenda.")
+                    .font(.caption).foregroundStyle(.secondary)
+                PreciseSlider(title: "Visible events", value: Binding(get: { Double(content.wrappedValue.maxItems) }, set: { content.wrappedValue.maxItems = Int($0) }), range: 1...20, step: 1)
+                Toggle("Weekday labels", isOn: content.calendarShowWeekdayHeader.withDefault(true))
+                Toggle("Adjacent-month days", isOn: content.calendarShowAdjacentDays.withDefault(true))
+                Toggle("Event dots", isOn: content.calendarShowEventDots.withDefault(true))
+                if content.wrappedValue.resolvedCalendarViewStyle == .monthGrid {
+                    Toggle("Agenda below month", isOn: content.calendarShowAgendaBelowGrid.withDefault(true))
+                }
+                Toggle("Event times", isOn: content.calendarShowTimes)
+                Toggle("Join buttons", isOn: content.calendarShowJoin)
+            }
+        }
         Section("Block Styling") {
             Picker("Background", selection: Binding(get: { style.wrappedValue.resolvedCardBackgroundStyle }, set: { style.wrappedValue.cardBackgroundStyle = $0 })) {
                 ForEach(WidgetCardBackgroundStyle.allCases) { Text($0.rawValue).tag($0) }
@@ -1316,7 +1353,7 @@ struct OpenedNotchWorkspaceEditor: View {
 
     @ViewBuilder private func widgetPreviewBackground(_ item: OpenNotchItem) -> some View {
         if let module = item.module {
-            let style = item.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished()
+            let style = item.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished(for: module)
             let shape = RoundedRectangle(cornerRadius: min(10, style.cornerRadius), style: .continuous)
             switch style.resolvedCardBackgroundStyle {
             case .none: shape.fill(Color.white.opacity(0.035))
@@ -1332,7 +1369,7 @@ struct OpenedNotchWorkspaceEditor: View {
 
     private func widgetStyleBinding(_ itemID: UUID, module: ModuleID) -> Binding<WidgetStyle> {
         Binding(
-            get: { findItem(itemID)?.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished() },
+            get: { findItem(itemID)?.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished(for: module) },
             set: { replacement in mutateItem(itemID) { $0.widgetStyle = replacement } }
         )
     }
@@ -1341,7 +1378,7 @@ struct OpenedNotchWorkspaceEditor: View {
         Binding(
             get: { findItem(itemID)?.widgetStyle?.elementStyles?[descriptor.key] },
             set: { replacement in
-                var widget = findItem(itemID)?.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished()
+                var widget = findItem(itemID)?.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished(for: module)
                 if widget.elementStyles == nil { widget.elementStyles = [:] }
                 widget.elementStyles?[descriptor.key] = replacement
                 mutateItem(itemID) { $0.widgetStyle = widget }
@@ -1358,7 +1395,7 @@ struct OpenedNotchWorkspaceEditor: View {
     }
 
     private func applyWidgetPreset(_ preset: WidgetVisualPreset, itemID: UUID, module: ModuleID) {
-        var style = findItem(itemID)?.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished()
+        var style = findItem(itemID)?.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished(for: module)
         var chrome = style.resolvedChrome
         switch preset {
         case .clean:
