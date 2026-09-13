@@ -724,40 +724,16 @@ struct SurfaceView: View {
                                 Button { state.pinned.toggle() } label: { Image(systemName: state.pinned ? "pin.fill" : "pin") }
                                     .help("Keep expanded").accessibilityLabel("Keep expanded")
                             }
-                            if layout.horizontalWidgets ?? false {
-                                if layout.horizontalPages ?? false {
-                                    VStack(spacing: 8) {
-                                        if !modules.isEmpty {
-                                            let index = min(page, modules.count - 1)
-                                            horizontalWidget(modules[index])
-                                            HStack {
-                                                Button { page = max(0, index - 1) } label: { Image(systemName: "chevron.left") }
-                                                    .disabled(index == 0).accessibilityLabel("Previous widget")
-                                                Spacer()
-                                                Text("\(modules[index].title) · \(index + 1) / \(modules.count)").font(.caption)
-                                                Spacer()
-                                                Button { page = min(modules.count - 1, index + 1) } label: { Image(systemName: "chevron.right") }
-                                                    .disabled(index == modules.count - 1).accessibilityLabel("Next widget")
-                                            }
-                                        } else { Text("Enable widgets in Settings → Modules.").foregroundStyle(.secondary) }
-                                    }
-                                } else { ScrollView(.horizontal) {
-                                    LazyHStack(alignment: .top, spacing: layout.appearance.spacing) {
-                                        widgetCards(horizontal: true)
-                                    }
-                                } }
-                            } else {
-                                ScrollView {
-                                    LazyVStack(spacing: layout.appearance.spacing) {
-                                        widgetCards(horizontal: false)
-                                    }
-                                }
-                            }
+                            openDashboardContent
                             HStack {
                                 Spacer()
                                 Button("Settings") { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) }
                             }
-                        }.padding(.horizontal, max(20, layout.appearance.surface.shoulder + 12)).padding(.vertical, 20).frame(width: state.dashboardWidth).transition(.opacity)
+                        }
+                        .padding(.horizontal, CGFloat(layout.resolvedOpenHorizontalPadding))
+                        .padding(.vertical, CGFloat(layout.resolvedOpenVerticalPadding))
+                        .frame(width: state.dashboardWidth)
+                        .transition(.opacity)
                     }
                 }
             }
@@ -839,6 +815,66 @@ struct SurfaceView: View {
             }
         }
     }
+    @ViewBuilder private var openDashboardContent: some View {
+        switch layout.resolvedOpenNotchContentMode {
+        case .fixed:
+            GeometryReader { proxy in
+                if modules.isEmpty {
+                    Text("Enable widgets in Settings → Modules.")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    let columns = max(1, min(layout.resolvedOpenFixedColumns, modules.count))
+                    let rows = max(1, Int(ceil(Double(modules.count) / Double(columns))))
+                    let gap = CGFloat(layout.appearance.spacing)
+                    let cellHeight = max(1, (proxy.size.height - gap * CGFloat(max(0, rows - 1))) / CGFloat(rows))
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: gap), count: columns),
+                        spacing: gap
+                    ) {
+                        ForEach(modules) { module in
+                            horizontalWidget(module)
+                                .frame(height: cellHeight)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+            }
+        case .scroll:
+            if layout.horizontalWidgets ?? false {
+                ScrollView(.horizontal) {
+                    LazyHStack(alignment: .top, spacing: layout.appearance.spacing) {
+                        widgetCards(horizontal: true)
+                    }
+                }
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: layout.appearance.spacing) {
+                        widgetCards(horizontal: false)
+                    }
+                }
+            }
+        case .pages:
+            VStack(spacing: 8) {
+                if !modules.isEmpty {
+                    let index = min(page, modules.count - 1)
+                    horizontalWidget(modules[index])
+                    HStack {
+                        Button { page = max(0, index - 1) } label: { Image(systemName: "chevron.left") }
+                            .disabled(index == 0).accessibilityLabel("Previous widget")
+                        Spacer()
+                        Text("\(modules[index].title) · \(index + 1) / \(modules.count)").font(.caption)
+                        Spacer()
+                        Button { page = min(modules.count - 1, index + 1) } label: { Image(systemName: "chevron.right") }
+                            .disabled(index == modules.count - 1).accessibilityLabel("Next widget")
+                    }
+                } else {
+                    Text("Enable widgets in Settings → Modules.").foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     @ViewBuilder private func widgetCards(horizontal: Bool) -> some View {
         ForEach(layout.normalizedOrder().filter { layout.enabled.contains($0) }) { module in
             if horizontal {

@@ -368,7 +368,19 @@ final class WindowManager {
                 resolved.layout = profile.layout
                 return resolved
             }
-            return SurfaceRenderConfiguration(appearance: layout.appearance, displays: resolvedDisplays, closedNotch: layout.closedNotch, clock: layout.widgetStyle(for: .clock), horizontalWidgets: layout.horizontalWidgets, horizontalHeight: layout.horizontalHeight)
+            return SurfaceRenderConfiguration(
+                appearance: layout.appearance,
+                displays: resolvedDisplays,
+                closedNotch: layout.closedNotch,
+                clock: layout.widgetStyle(for: .clock),
+                horizontalWidgets: layout.horizontalWidgets,
+                horizontalPages: layout.horizontalPages,
+                horizontalHeight: layout.horizontalHeight,
+                openNotchContentMode: layout.openNotchContentMode,
+                openHorizontalPadding: layout.openHorizontalPadding,
+                openVerticalPadding: layout.openVerticalPadding,
+                openFixedColumns: layout.openFixedColumns
+            )
         }
             .removeDuplicates().dropFirst()
             .throttle(for: .milliseconds(33), scheduler: DispatchQueue.main, latest: true)
@@ -1226,9 +1238,12 @@ final class WindowManager {
             let displayLayout = displayProfile?.layout ?? override?.layout
             var appearance = displayLayout?.appearance ?? store.workspace.effectiveLayout.appearance
             let effectiveLayout = displayLayout ?? store.workspace.effectiveLayout
-            if effectiveLayout.horizontalWidgets ?? false {
+            // Preserve the old horizontal-height behavior only for layouts saved before
+            // the explicit opened-notch content mode existed. New modes always use the main
+            // expanded-height control, so Fixed Canvas, Scroll and Pages get the same roomy space.
+            if effectiveLayout.openNotchContentMode == nil, effectiveLayout.horizontalWidgets ?? false {
                 let requested = effectiveLayout.horizontalHeight ?? 260
-                appearance.expandedHeight = requested.isFinite ? min(500, max(200, requested)) : 260
+                appearance.expandedHeight = requested.isFinite ? min(1100, max(200, requested)) : 260
             }
             appearance.surface = (try? appearance.surface.validated()) ?? SurfaceOptions()
             let previousOffset = host.geometry?.offset(expanded: host.state.expanded) ?? .zero

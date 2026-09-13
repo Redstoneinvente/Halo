@@ -82,7 +82,12 @@ struct SurfaceRenderConfiguration: Equatable {
     var closedNotch: ClosedNotchOptions? = nil
     var clock: WidgetStyle? = nil
     var horizontalWidgets: Bool? = nil
+    var horizontalPages: Bool? = nil
     var horizontalHeight: Double? = nil
+    var openNotchContentMode: OpenNotchContentMode? = nil
+    var openHorizontalPadding: Double? = nil
+    var openVerticalPadding: Double? = nil
+    var openFixedColumns: Int? = nil
 }
 enum GlassRendering {
     /// The material supplies its own background. Tint must never hide the backdrop.

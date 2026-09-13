@@ -250,24 +250,67 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     }
 
     @ViewBuilder private var basics: some View {
-        Section("Expanded dashboard") {
+        Section("Opened notch workspace") {
             Toggle("Keep closed-notch contents visible when opened", isOn: $keepClosedContentsWhenOpen)
-            Text("Keeps the normal Closed Notch widgets and media visible in the top strip when Halo's regular dashboard is open. Context Interfaces use their own setting.").font(.caption).foregroundStyle(.secondary)
-            Toggle("Horizontal widget layout", isOn: Binding(get: { workspace.settings.layout.horizontalWidgets ?? false }, set: { workspace.settings.layout.horizontalWidgets = $0 }))
-            if workspace.settings.layout.horizontalWidgets ?? false {
-                Picker("Navigation", selection: Binding(get: { workspace.settings.layout.horizontalPages ?? false }, set: { workspace.settings.layout.horizontalPages = $0 })) {
-                    Text("Scroll").tag(false); Text("Pages").tag(true)
-                }.pickerStyle(.segmented)
-                Slider(value: Binding(get: { workspace.settings.layout.horizontalHeight ?? 260 }, set: { workspace.settings.layout.horizontalHeight = $0 }), in: 200...500) { Text("Horizontal dashboard height") }
+            Text("Keeps the normal Closed Notch widgets and media visible in the top strip. Context Interfaces keep their own layout rules.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            Picker("Content behavior", selection: Binding(
+                get: { workspace.settings.layout.resolvedOpenNotchContentMode },
+                set: { mode in
+                    workspace.settings.layout.openNotchContentMode = mode
+                    workspace.settings.layout.horizontalPages = mode == .pages
+                    if mode == .pages { workspace.settings.layout.horizontalWidgets = true }
+                }
+            )) {
+                ForEach(OpenNotchContentMode.allCases) { Text($0.rawValue).tag($0) }
             }
-            Text("Arrange widgets in a sideways-scrolling row. Turn off for the original vertical layout. Widget order and customizations apply to both.").font(.caption).foregroundStyle(.secondary)
+            .pickerStyle(.segmented)
+
+            switch workspace.settings.layout.resolvedOpenNotchContentMode {
+            case .fixed:
+                Picker("Fixed canvas columns", selection: Binding(
+                    get: { workspace.settings.layout.resolvedOpenFixedColumns },
+                    set: { workspace.settings.layout.openFixedColumns = $0 }
+                )) {
+                    ForEach(1...4, id: \.self) { Text("\($0)").tag($0) }
+                }
+                Text("All enabled widgets stay inside one fixed canvas. Halo divides the available height between rows instead of scrolling.")
+                    .font(.caption).foregroundStyle(.secondary)
+            case .scroll:
+                Picker("Scroll direction", selection: Binding(
+                    get: { workspace.settings.layout.horizontalWidgets ?? false },
+                    set: { workspace.settings.layout.horizontalWidgets = $0; workspace.settings.layout.horizontalPages = false }
+                )) {
+                    Text("Vertical").tag(false)
+                    Text("Horizontal").tag(true)
+                }
+                .pickerStyle(.segmented)
+                Text("Scroll keeps the notch size fixed while letting content move inside it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            case .pages:
+                Text("Pages keeps one widget in focus at a time with previous/next navigation, using the full opened-notch workspace.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Divider()
+            Slider(value: $store.configuration.theme.width, in: 340...1200, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Opened width") }
+            Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 280...1100, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Opened height") }
+            Slider(value: Binding(
+                get: { workspace.settings.layout.resolvedOpenHorizontalPadding },
+                set: { workspace.settings.layout.openHorizontalPadding = $0 }
+            ), in: 8...72) { Text("Side padding") }
+            Slider(value: Binding(
+                get: { workspace.settings.layout.resolvedOpenVerticalPadding },
+                set: { workspace.settings.layout.openVerticalPadding = $0 }
+            ), in: 8...72) { Text("Top & bottom padding") }
+            Slider(value: $workspace.settings.layout.appearance.spacing, in: 4...40) { Text("Module spacing") }
+            Text("Width is still limited by the display. Lower padding gives widgets more breathing room without changing the outer notch shape.")
+                .font(.caption).foregroundStyle(.secondary)
         }
         Section("Surface basics") {
             Picker("Surface", selection: $store.configuration.theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
-            Slider(value: $store.configuration.theme.width, in: 340...640, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Expanded width") }
-            Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 280...800, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Expanded height") }
             Slider(value: $store.configuration.theme.cornerRadius, in: 0...48) { Text("Corner radius") }
-            Slider(value: $workspace.settings.layout.appearance.spacing, in: 4...28) { Text("Module spacing") }
             Slider(value: $store.configuration.theme.tint, in: 0...1) { Text("Accent hue") }
             Slider(value: $store.configuration.theme.opacity, in: 0.5...1) { Text("Opacity") }
         }
@@ -463,10 +506,43 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
                     Picker("Icon", selection: Binding(get: { profile.icon ?? icons[0] }, set: { profile.icon = $0 })) { ForEach(icons, id: \.self) { Label($0, systemImage: $0).tag($0) } }
                 case "Layout":
                     Picker("Surface", selection: $profile.theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
-                    Slider(value: $profile.theme.width, in: 340...640) { Text("Expanded width") }
-                    Toggle("Horizontal widgets", isOn: Binding(get: { profile.layout.horizontalWidgets ?? false }, set: { profile.layout.horizontalWidgets = $0 }))
-                    Toggle("Page navigation", isOn: Binding(get: { profile.layout.horizontalPages ?? false }, set: { profile.layout.horizontalPages = $0 }))
-                    Slider(value: Binding(get: { profile.layout.horizontalHeight ?? 260 }, set: { profile.layout.horizontalHeight = $0 }), in: 200...500) { Text("Horizontal height") }
+                    Slider(value: $profile.theme.width, in: 340...1200) { Text("Opened width") }
+                    Picker("Opened content", selection: Binding(
+                        get: { profile.layout.resolvedOpenNotchContentMode },
+                        set: { mode in
+                            profile.layout.openNotchContentMode = mode
+                            profile.layout.horizontalPages = mode == .pages
+                            if mode == .pages { profile.layout.horizontalWidgets = true }
+                        }
+                    )) {
+                        ForEach(OpenNotchContentMode.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    if profile.layout.resolvedOpenNotchContentMode == .fixed {
+                        Picker("Fixed canvas columns", selection: Binding(
+                            get: { profile.layout.resolvedOpenFixedColumns },
+                            set: { profile.layout.openFixedColumns = $0 }
+                        )) {
+                            ForEach(1...4, id: \.self) { Text("\($0)").tag($0) }
+                        }
+                    } else if profile.layout.resolvedOpenNotchContentMode == .scroll {
+                        Picker("Scroll direction", selection: Binding(
+                            get: { profile.layout.horizontalWidgets ?? false },
+                            set: { profile.layout.horizontalWidgets = $0; profile.layout.horizontalPages = false }
+                        )) {
+                            Text("Vertical").tag(false)
+                            Text("Horizontal").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                    Slider(value: Binding(
+                        get: { profile.layout.resolvedOpenHorizontalPadding },
+                        set: { profile.layout.openHorizontalPadding = $0 }
+                    ), in: 8...72) { Text("Side padding") }
+                    Slider(value: Binding(
+                        get: { profile.layout.resolvedOpenVerticalPadding },
+                        set: { profile.layout.openVerticalPadding = $0 }
+                    ), in: 8...72) { Text("Top & bottom padding") }
                     Section("Modules and order") {
                         ForEach(profile.layout.normalizedOrder()) { module in
                             HStack {
@@ -478,7 +554,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
                     Section("Theme and background") {
                         Slider(value: $profile.theme.tint, in: 0...1) { Text("Accent hue") }
                         Slider(value: $profile.theme.opacity, in: 0.5...1) { Text("Opacity") }
-                        Slider(value: $profile.layout.appearance.expandedHeight, in: 280...800) { Text("Vertical dashboard height") }
+                        Slider(value: $profile.layout.appearance.expandedHeight, in: 280...1100) { Text("Opened height") }
                         Picker("Background", selection: $profile.layout.appearance.background) { ForEach(BackgroundKind.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
                         Button("Choose background image or video…") {
                             let panel = NSOpenPanel(); panel.allowedContentTypes = [.image, .movie]; panel.canChooseDirectories = false

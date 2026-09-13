@@ -81,14 +81,41 @@ struct DisplayOverride: Codable, Identifiable, Equatable {
     // When set, this display follows the saved profile live instead of keeping a copied layout.
     var profileID: UUID?
 }
+enum OpenNotchContentMode: String, Codable, CaseIterable, Identifiable {
+    case fixed = "Fixed Canvas"
+    case scroll = "Scroll"
+    case pages = "Pages"
+    var id: String { rawValue }
+}
+
 struct WorkspaceLayout: Codable, Equatable {
     var contextMusic: ContextMusicOptions?
     var hud: HaloHUDSettings?
     var horizontalWidgets: Bool?
     var horizontalPages: Bool?
     var horizontalHeight: Double?
+    // Optional so existing workspaces and exported profiles decode unchanged.
+    var openNotchContentMode: OpenNotchContentMode?
+    var openHorizontalPadding: Double?
+    var openVerticalPadding: Double?
+    var openFixedColumns: Int?
     var widgets: [String: WidgetStyle]?
     var closedNotch: ClosedNotchOptions?
+
+    var resolvedOpenNotchContentMode: OpenNotchContentMode {
+        if let openNotchContentMode { return openNotchContentMode }
+        return (horizontalPages ?? false) ? .pages : .scroll
+    }
+    var resolvedOpenHorizontalPadding: Double {
+        min(72, max(8, openHorizontalPadding ?? max(20, appearance.surface.shoulder + 12)))
+    }
+    var resolvedOpenVerticalPadding: Double {
+        min(72, max(8, openVerticalPadding ?? 20))
+    }
+    var resolvedOpenFixedColumns: Int {
+        min(4, max(1, openFixedColumns ?? 2))
+    }
+
     func widgetStyle(for id: ModuleID) -> WidgetStyle {
         if let saved = widgets?[id.rawValue] { return saved }
         var style = WidgetStyle()
@@ -124,10 +151,10 @@ struct ThemeArchive: Codable {
         appearance.blur = min(20, max(0, appearance.blur))
         appearance.saturation = min(2, max(0, appearance.saturation))
         appearance.brightness = min(0.5, max(-0.5, appearance.brightness))
-        appearance.expandedHeight = min(800, max(280, appearance.expandedHeight))
+        appearance.expandedHeight = min(1100, max(280, appearance.expandedHeight))
         appearance.compactWidth = min(640, max(16, appearance.compactWidth))
         appearance.surface = try appearance.surface.validated()
-        appearance.spacing = min(28, max(4, appearance.spacing))
+        appearance.spacing = min(48, max(4, appearance.spacing))
         appearance.solidColor = try appearance.solidColor?.validated()
         appearance.gradientStartColor = try appearance.gradientStartColor?.validated()
         appearance.gradientEndColor = try appearance.gradientEndColor?.validated()
@@ -142,7 +169,18 @@ struct ThemeArchive: Codable {
         }
         if let height = layout.horizontalHeight {
             guard height.isFinite else { throw CocoaError(.fileReadCorruptFile) }
-            archive.layout.horizontalHeight = min(500, max(200, height))
+            archive.layout.horizontalHeight = min(1100, max(200, height))
+        }
+        if let value = layout.openHorizontalPadding {
+            guard value.isFinite else { throw CocoaError(.fileReadCorruptFile) }
+            archive.layout.openHorizontalPadding = min(72, max(8, value))
+        }
+        if let value = layout.openVerticalPadding {
+            guard value.isFinite else { throw CocoaError(.fileReadCorruptFile) }
+            archive.layout.openVerticalPadding = min(72, max(8, value))
+        }
+        if let columns = layout.openFixedColumns {
+            archive.layout.openFixedColumns = min(4, max(1, columns))
         }
         archive.layout.appearance = appearance
         archive.layout.order = layout.normalizedOrder()

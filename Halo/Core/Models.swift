@@ -22,7 +22,7 @@ struct Theme: Codable, Equatable {
             throw CocoaError(.fileReadCorruptFile)
         }
         var result = self
-        result.width = min(640, max(340, width))
+        result.width = min(1200, max(340, width))
         result.cornerRadius = min(48, max(0, cornerRadius))
         result.tint = min(1, max(0, tint))
         result.opacity = min(1, max(0.5, opacity))
