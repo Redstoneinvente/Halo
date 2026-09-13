@@ -19,6 +19,9 @@ jobs:
           echo '=== screencapture help ==='
           /usr/sbin/screencapture -h 2>&1 || true
           echo '=== sdk ==='
+          SDK="$(xcrun --sdk macosx --show-sdk-path)"
           xcrun --sdk macosx --show-sdk-version
-          echo '=== ScreenCaptureKit headers ==='
-          grep -R "capturesAudio\|captureMicrophone\|SCRecordingOutput" "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks/ScreenCaptureKit.framework/Headers" | head -120 || true
+          echo '=== ScreenCaptureKit module files ==='
+          find "$SDK/System/Library/Frameworks/ScreenCaptureKit.framework/Modules" -maxdepth 4 -type f -print || true
+          echo '=== ScreenCaptureKit audio APIs ==='
+          grep -R -n -E "capturesAudio|captureMicrophone|SCRecordingOutput|SCStreamOutputType|SCStreamConfiguration|SCShareableContent|sourceRect" "$SDK/System/Library/Frameworks/ScreenCaptureKit.framework" 2>/dev/null | head -260 || true
