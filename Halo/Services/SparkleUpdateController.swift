@@ -20,11 +20,13 @@ final class HaloUpdateController: NSObject {
     var isConfigured: Bool {
         guard
             let feedValue = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
+            !feedValue.isEmpty,
+            !feedValue.contains("$("),
             let feedURL = URL(string: feedValue),
-            let scheme = feedURL.scheme?.lowercased(),
-            scheme == "https" || scheme == "http",
+            feedURL.scheme?.lowercased() == "https",
             let publicKey = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
-            !publicKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            !publicKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            !publicKey.contains("$(")
         else {
             return false
         }
@@ -36,7 +38,7 @@ final class HaloUpdateController: NSObject {
             let alert = NSAlert()
             alert.alertStyle = .informational
             alert.messageText = "Updates are not configured yet"
-            alert.informativeText = "Sparkle is linked correctly, but Halo does not have a release appcast and public signing key yet. Those are added in the next update-integration gate."
+            alert.informativeText = "Sparkle is linked correctly, but Halo still needs an HTTPS appcast URL and its Ed25519 public signing key. Configure those locally for Gate 3 before starting the updater."
             alert.addButton(withTitle: "OK")
             alert.runModal()
             return
