@@ -151,9 +151,15 @@ extension ModuleID {
         switch self {
         case .clock:
             return [
-                .init("time", "Time", "The primary live clock value."),
-                .init("date", "Date", "Formatted calendar date."),
-                .init("timezone", "Time zone", "Current time-zone identifier.", defaultVisible: false),
+                .init("time", "Time", "The primary adaptive clock value."),
+                .init("date", "Date", "Adaptive date treatment that simplifies with size."),
+                .init("timezone", "Time zone", "Primary time-zone or location context.", defaultVisible: false),
+                .init("nextEvent", "Next event", "Next calendar event when Calendar access is available.", defaultVisible: false),
+                .init("timer", "Timer", "Current Halo focus timer state.", defaultVisible: false),
+                .init("weather", "Weather", "Weather / temperature context when a provider is available.", defaultVisible: false),
+                .init("battery", "Battery", "Current Mac battery percentage and charging state.", defaultVisible: false),
+                .init("worldClocks", "World clocks", "Secondary configured time zones.", defaultVisible: false),
+                .init("solar", "Sunrise / sunset", "Solar times when weather/location context supplies them.", defaultVisible: false),
                 .init("dayProgress", "Day progress", "A live progress bar for the current day.", defaultVisible: false)
             ]
         case .timer:
@@ -287,12 +293,310 @@ struct WidgetColor: Codable, Equatable {
         return WidgetColor(red: min(1, max(0, red)), green: min(1, max(0, green)), blue: min(1, max(0, blue)))
     }
 }
+enum ClockVisualStyle: String, Codable, CaseIterable, Identifiable {
+    case digital = "Digital"
+    case minimal = "Minimal"
+    case analog = "Analog"
+    case flip = "Flip Clock"
+    case editorial = "Editorial"
+    case stacked = "Stacked"
+    case split = "Split"
+    case terminal = "Terminal"
+    case lcd = "LCD"
+    case dotMatrix = "Dot Matrix"
+    case outline = "Outline"
+    case oversizedTypography = "Oversized Typography"
+    var id: String { rawValue }
+}
+
+enum ClockSeparatorStyle: String, Codable, CaseIterable, Identifiable {
+    case colon = ":"
+    case dot = "."
+    case middleDot = "·"
+    case space = "Space"
+    var id: String { rawValue }
+    var glyph: String {
+        switch self { case .colon: return ":"; case .dot: return "."; case .middleDot: return "·"; case .space: return " " }
+    }
+}
+
+enum ClockSecondMotion: String, Codable, CaseIterable, Identifiable {
+    case ticking = "Ticking"
+    case smooth = "Smooth"
+    var id: String { rawValue }
+}
+
+enum ClockDateTextCase: String, Codable, CaseIterable, Identifiable {
+    case natural = "Natural"
+    case uppercase = "UPPERCASE"
+    case lowercase = "lowercase"
+    var id: String { rawValue }
+}
+
+enum ClockDateOrder: String, Codable, CaseIterable, Identifiable {
+    case weekdayMonthDay = "Weekday · Month · Day"
+    case monthDayYear = "Month · Day · Year"
+    case dayMonthYear = "Day · Month · Year"
+    case yearMonthDay = "Year · Month · Day"
+    case monthDayWeekday = "Month · Day · Weekday"
+    var id: String { rawValue }
+}
+
+enum ClockWeekdayStyle: String, Codable, CaseIterable, Identifiable {
+    case short = "Short"
+    case full = "Full"
+    var id: String { rawValue }
+}
+
+enum ClockMonthStyle: String, Codable, CaseIterable, Identifiable {
+    case short = "Short"
+    case full = "Full"
+    case numeric = "Numeric"
+    var id: String { rawValue }
+}
+
+enum ClockNumeralStyle: String, Codable, CaseIterable, Identifiable {
+    case none = "No numerals"
+    case arabic = "Arabic"
+    case roman = "Roman"
+    var id: String { rawValue }
+}
+
+enum ClockFontWidth: String, Codable, CaseIterable, Identifiable {
+    case compressed = "Compressed"
+    case condensed = "Condensed"
+    case standard = "Standard"
+    case expanded = "Expanded"
+    var id: String { rawValue }
+}
+
+enum ClockComplication: String, Codable, CaseIterable, Identifiable, Hashable {
+    case date, day, seconds, timezone, location, utcOffset, weekNumber, nextEvent, timer
+    case weather, temperature, battery, sunrise, sunset, worldClocks
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .date: return "Date"
+        case .day: return "Day"
+        case .seconds: return "Seconds"
+        case .timezone: return "Time zone"
+        case .location: return "Location label"
+        case .utcOffset: return "UTC offset"
+        case .weekNumber: return "Week number"
+        case .nextEvent: return "Next calendar event"
+        case .timer: return "Timer"
+        case .weather: return "Weather"
+        case .temperature: return "Temperature"
+        case .battery: return "Battery"
+        case .sunrise: return "Sunrise"
+        case .sunset: return "Sunset"
+        case .worldClocks: return "Secondary world clocks"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .date: return "calendar"
+        case .day: return "sun.max"
+        case .seconds: return "stopwatch"
+        case .timezone, .utcOffset, .worldClocks: return "globe"
+        case .location: return "location"
+        case .weekNumber: return "number.square"
+        case .nextEvent: return "calendar.badge.clock"
+        case .timer: return "timer"
+        case .weather: return "cloud.sun"
+        case .temperature: return "thermometer.medium"
+        case .battery: return "battery.100"
+        case .sunrise: return "sunrise"
+        case .sunset: return "sunset"
+        }
+    }
+}
+
+struct ClockAnalogOptions: Codable, Equatable {
+    var numerals: ClockNumeralStyle = .arabic
+    var hourTicks = true
+    var minuteTicks = false
+    var tickThickness = 1.0
+    var showHourHand = true
+    var showMinuteHand = true
+    var showSecondHand = true
+    var handThickness = 2.0
+    var hourHandLength = 0.46
+    var minuteHandLength = 0.67
+    var secondHandLength = 0.74
+    var centerCap = true
+    var faceColor = WidgetColor.white
+    var faceOpacity = 0.055
+    var hourHandColor = WidgetColor.white
+    var minuteHandColor = WidgetColor.white
+    var secondHandColor = WidgetColor.accent
+    var tickColor = WidgetColor.white
+    var smoothSecondHand = true
+
+    func validated() throws -> ClockAnalogOptions {
+        let values: [Double] = [tickThickness, handThickness, hourHandLength, minuteHandLength, secondHandLength, faceOpacity]
+        guard values.allSatisfy({ $0.isFinite }) else { throw CocoaError(.fileReadCorruptFile) }
+        var value = self
+        value.tickThickness = min(5, max(0.35, tickThickness))
+        value.handThickness = min(8, max(0.5, handThickness))
+        value.hourHandLength = min(0.72, max(0.20, hourHandLength))
+        value.minuteHandLength = min(0.84, max(0.30, minuteHandLength))
+        value.secondHandLength = min(0.92, max(0.35, secondHandLength))
+        value.faceOpacity = min(0.55, max(0, faceOpacity))
+        value.faceColor = try faceColor.validated()
+        value.hourHandColor = try hourHandColor.validated()
+        value.minuteHandColor = try minuteHandColor.validated()
+        value.secondHandColor = try secondHandColor.validated()
+        value.tickColor = try tickColor.validated()
+        return value
+    }
+}
+
+struct ClockSizeOverride: Codable, Equatable {
+    var style: ClockVisualStyle?
+    var complications: [ClockComplication]?
+}
+
 struct ClockOptions: Codable, Equatable {
+    // Legacy keys remain non-optional so existing profiles keep exactly the behavior they had.
     var twentyFourHour = false
     var showSeconds = false
     var showDate = true
     var timeZone = ""
+
+    // New Clock Showcase settings are optional for backwards-compatible decoding.
+    var visualStyle: ClockVisualStyle?
+    var showAMPM: Bool?
+    var leadingZero: Bool?
+    var separator: ClockSeparatorStyle?
+    var blinkingSeparator: Bool?
+    var secondMotion: ClockSecondMotion?
+    var hourEmphasis: Double?
+    var minuteEmphasis: Double?
+    var secondsEmphasis: Double?
+    var digitSpacing: Double?
+
+    var showWeekday: Bool?
+    var weekdayStyle: ClockWeekdayStyle?
+    var showDay: Bool?
+    var showMonth: Bool?
+    var monthStyle: ClockMonthStyle?
+    var showYear: Bool?
+    var dateOrder: ClockDateOrder?
+    var dateTextCase: ClockDateTextCase?
+
+    var automaticTypography: Bool?
+    var fontWidth: ClockFontWidth?
+    var monospacedDigits: Bool?
+    var tracking: Double?
+    var lineSpacing: Double?
+    var timeScale: Double?
+    var dateScale: Double?
+    var secondaryScale: Double?
+    var timeDateRatio: Double?
+
+    var enabledComplications: [ClockComplication]?
+    var complicationPriority: [ClockComplication]?
+    var worldTimeZones: [String]?
+    var locationLabel: String?
+    var sizeOverrides: [String: ClockSizeOverride]?
+
+    var primaryColor: WidgetColor?
+    var secondaryColor: WidgetColor?
+    var separatorColor: WidgetColor?
+    var textGlow: Double?
+    var textShadow: Double?
+    var analog: ClockAnalogOptions?
+
+    var resolvedVisualStyle: ClockVisualStyle { visualStyle ?? .digital }
+    var resolvedShowAMPM: Bool { showAMPM ?? true }
+    var resolvedLeadingZero: Bool { leadingZero ?? twentyFourHour }
+    var resolvedSeparator: ClockSeparatorStyle { separator ?? .colon }
+    var resolvedBlinkingSeparator: Bool { blinkingSeparator ?? false }
+    var resolvedSecondMotion: ClockSecondMotion { secondMotion ?? .ticking }
+    var resolvedHourEmphasis: Double { min(1.6, max(0.7, hourEmphasis ?? 1)) }
+    var resolvedMinuteEmphasis: Double { min(1.6, max(0.7, minuteEmphasis ?? 1)) }
+    var resolvedSecondsEmphasis: Double { min(1.3, max(0.45, secondsEmphasis ?? 0.68)) }
+    var resolvedDigitSpacing: Double { min(18, max(-4, digitSpacing ?? 0)) }
+
+    var resolvedShowWeekday: Bool { showWeekday ?? true }
+    var resolvedWeekdayStyle: ClockWeekdayStyle { weekdayStyle ?? .full }
+    var resolvedShowDay: Bool { showDay ?? true }
+    var resolvedShowMonth: Bool { showMonth ?? true }
+    var resolvedMonthStyle: ClockMonthStyle { monthStyle ?? .full }
+    var resolvedShowYear: Bool { showYear ?? false }
+    var resolvedDateOrder: ClockDateOrder { dateOrder ?? .weekdayMonthDay }
+    var resolvedDateTextCase: ClockDateTextCase { dateTextCase ?? .natural }
+
+    var usesAutomaticTypography: Bool { automaticTypography ?? true }
+    var resolvedFontWidth: ClockFontWidth { fontWidth ?? .standard }
+    var usesMonospacedDigits: Bool { monospacedDigits ?? true }
+    var resolvedTracking: Double { min(18, max(-5, tracking ?? 0)) }
+    var resolvedLineSpacing: Double { min(18, max(0, lineSpacing ?? 2)) }
+    var resolvedTimeScale: Double { min(2.5, max(0.55, timeScale ?? 1)) }
+    var resolvedDateScale: Double { min(2.2, max(0.55, dateScale ?? 1)) }
+    var resolvedSecondaryScale: Double { min(2, max(0.5, secondaryScale ?? 1)) }
+    var resolvedTimeDateRatio: Double { min(3.5, max(1.1, timeDateRatio ?? 2.3)) }
+
+    var resolvedEnabledComplications: [ClockComplication] {
+        enabledComplications ?? [.date]
+    }
+    var resolvedComplicationPriority: [ClockComplication] {
+        var result: [ClockComplication] = []
+        for value in complicationPriority ?? [.date, .nextEvent, .seconds, .timezone, .weather, .worldClocks, .battery, .timer, .day, .location, .utcOffset, .weekNumber, .temperature, .sunrise, .sunset] where !result.contains(value) {
+            result.append(value)
+        }
+        for value in ClockComplication.allCases where !result.contains(value) { result.append(value) }
+        return result
+    }
+    var resolvedWorldTimeZones: [String] {
+        let saved = worldTimeZones ?? ["Asia/Tokyo", "Europe/London"]
+        return saved.filter { TimeZone(identifier: $0) != nil }
+    }
+    var resolvedAnalog: ClockAnalogOptions { analog ?? ClockAnalogOptions() }
+    var resolvedTextGlow: Double { min(1, max(0, textGlow ?? 0)) }
+    var resolvedTextShadow: Double { min(1, max(0, textShadow ?? 0)) }
+
+    static func sizeKey(columns: Int, rows: Int) -> String { "\(max(1, columns))x\(max(1, rows))" }
+    func sizeOverride(columns: Int?, rows: Int?) -> ClockSizeOverride? {
+        guard let columns, let rows else { return nil }
+        return sizeOverrides?[Self.sizeKey(columns: columns, rows: rows)]
+    }
+
+    func validated() throws -> ClockOptions {
+        guard timeZone.isEmpty || TimeZone(identifier: timeZone) != nil else { throw CocoaError(.fileReadCorruptFile) }
+        let numbers = [hourEmphasis, minuteEmphasis, secondsEmphasis, digitSpacing, tracking, lineSpacing, timeScale, dateScale, secondaryScale, timeDateRatio, textGlow, textShadow].compactMap { $0 }
+        guard numbers.allSatisfy({ $0.isFinite }) else { throw CocoaError(.fileReadCorruptFile) }
+        var value = self
+        if let hourEmphasis { value.hourEmphasis = min(1.6, max(0.7, hourEmphasis)) }
+        if let minuteEmphasis { value.minuteEmphasis = min(1.6, max(0.7, minuteEmphasis)) }
+        if let secondsEmphasis { value.secondsEmphasis = min(1.3, max(0.45, secondsEmphasis)) }
+        if let digitSpacing { value.digitSpacing = min(18, max(-4, digitSpacing)) }
+        if let tracking { value.tracking = min(18, max(-5, tracking)) }
+        if let lineSpacing { value.lineSpacing = min(18, max(0, lineSpacing)) }
+        if let timeScale { value.timeScale = min(2.5, max(0.55, timeScale)) }
+        if let dateScale { value.dateScale = min(2.2, max(0.55, dateScale)) }
+        if let secondaryScale { value.secondaryScale = min(2, max(0.5, secondaryScale)) }
+        if let timeDateRatio { value.timeDateRatio = min(3.5, max(1.1, timeDateRatio)) }
+        if let textGlow { value.textGlow = min(1, max(0, textGlow)) }
+        if let textShadow { value.textShadow = min(1, max(0, textShadow)) }
+        value.locationLabel = locationLabel.map { String($0.prefix(80)) }
+        value.worldTimeZones = resolvedWorldTimeZones
+        if let primaryColor { value.primaryColor = try primaryColor.validated() }
+        if let secondaryColor { value.secondaryColor = try secondaryColor.validated() }
+        if let separatorColor { value.separatorColor = try separatorColor.validated() }
+        if analog != nil { value.analog = try resolvedAnalog.validated() }
+        if let overrides = sizeOverrides {
+            value.sizeOverrides = overrides.filter { key, _ in
+                let parts = key.split(separator: "x")
+                guard parts.count == 2, let columns = Int(parts[0]), let rows = Int(parts[1]) else { return false }
+                return (1...12).contains(columns) && (1...12).contains(rows)
+            }
+        }
+        return value
+    }
 }
+
 
 enum WidgetContentAlignment: String, Codable, CaseIterable, Identifiable {
     case leading, center, trailing
@@ -481,9 +785,9 @@ struct WidgetStyle: Codable, Equatable {
         elementStyle(for: descriptor.key, defaultVisible: descriptor.defaultVisible)
     }
     func validated() throws -> WidgetStyle {
-        guard [fontSize, backgroundOpacity, padding, cornerRadius, width, minimumHeight].allSatisfy(\.isFinite),
-              clock.timeZone.isEmpty || TimeZone(identifier: clock.timeZone) != nil else { throw CocoaError(.fileReadCorruptFile) }
+        guard [fontSize, backgroundOpacity, padding, cornerRadius, width, minimumHeight].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
+        v.clock = try clock.validated()
         v.fontSize = min(48, max(10, fontSize)); v.padding = min(32, max(0, padding))
         v.cornerRadius = min(40, max(0, cornerRadius)); v.backgroundOpacity = min(1, max(0, backgroundOpacity))
         v.width = width <= 0 ? 0 : min(640, max(120, width))
@@ -561,6 +865,19 @@ extension WidgetStyle {
             seed("time", emphasis: .semibold, scale: 1.28)
             seed("date", foreground: .secondary, scale: 0.88)
             seed("timezone", foreground: .secondary, scale: 0.78)
+            seed("nextEvent", foreground: .secondary, scale: 0.82)
+            seed("timer", foreground: .secondary, scale: 0.82)
+            seed("weather", foreground: .secondary, scale: 0.82)
+            seed("battery", foreground: .secondary, scale: 0.82)
+            seed("worldClocks", foreground: .secondary, scale: 0.78)
+            seed("solar", foreground: .secondary, scale: 0.78)
+            if value.clock.enabledComplications == nil {
+                value.clock.enabledComplications = [.date, .nextEvent, .timezone, .battery, .worldClocks]
+            }
+            if value.clock.complicationPriority == nil {
+                value.clock.complicationPriority = [.date, .nextEvent, .seconds, .timezone, .worldClocks, .battery, .timer, .weather, .day, .location, .utcOffset, .weekNumber, .temperature, .sunrise, .sunset]
+            }
+            if value.clock.worldTimeZones == nil { value.clock.worldTimeZones = ["Asia/Tokyo", "Europe/London"] }
         case .timer:
             seed("countdown", emphasis: .bold, scale: 1.55)
             seed("status", foreground: .secondary, scale: 0.88)

@@ -70,6 +70,177 @@ struct PreciseSlider: View {
     }
 }
 
+
+private struct ClockSettingsControls: View {
+    @Binding var style: WidgetStyle
+    private static let timeZones = TimeZone.knownTimeZoneIdentifiers
+
+    private var clock: Binding<ClockOptions> { $style.clock }
+    private var analog: Binding<ClockAnalogOptions> { clock.analog.withDefault(ClockAnalogOptions()) }
+
+    var body: some View {
+        Section("Clock Style") {
+            Picker("Style", selection: clock.visualStyle.withDefault(.digital)) {
+                ForEach(ClockVisualStyle.allCases) { Text($0.rawValue).tag($0) }
+            }
+            Text("Style changes the actual clock treatment, not just its font. The adaptive layout family still responds independently to the grid footprint.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("Time") {
+            Toggle("24-hour time", isOn: clock.twentyFourHour)
+            Toggle("Show seconds", isOn: clock.showSeconds)
+            if !clock.wrappedValue.twentyFourHour {
+                Toggle("Show AM / PM", isOn: clock.showAMPM.withDefault(true))
+            }
+            Toggle("Leading zero", isOn: clock.leadingZero.withDefault(clock.wrappedValue.twentyFourHour))
+            Picker("Separator", selection: clock.separator.withDefault(.colon)) {
+                ForEach(ClockSeparatorStyle.allCases) { Text($0.rawValue).tag($0) }
+            }
+            Toggle("Blink separator", isOn: clock.blinkingSeparator.withDefault(false))
+            Picker("Seconds motion", selection: clock.secondMotion.withDefault(.ticking)) {
+                ForEach(ClockSecondMotion.allCases) { Text($0.rawValue).tag($0) }
+            }
+            PreciseSlider(title: "Hour emphasis", value: clock.hourEmphasis.withDefault(1), range: 0.7...1.6, step: 0.05, suffix: "×", decimals: 2)
+            PreciseSlider(title: "Minute emphasis", value: clock.minuteEmphasis.withDefault(1), range: 0.7...1.6, step: 0.05, suffix: "×", decimals: 2)
+            PreciseSlider(title: "Seconds emphasis", value: clock.secondsEmphasis.withDefault(0.68), range: 0.45...1.3, step: 0.05, suffix: "×", decimals: 2)
+            PreciseSlider(title: "Digit spacing", value: clock.digitSpacing.withDefault(0), range: -4...18, step: 0.5, suffix: "pt", decimals: 1)
+            SearchableStringPicker(title: "Primary time zone", selection: clock.timeZone, values: [""] + Self.timeZones, emptyLabel: "System time zone")
+        }
+
+        Section("Date") {
+            Toggle("Show date", isOn: clock.showDate)
+            if clock.wrappedValue.showDate {
+                Toggle("Weekday", isOn: clock.showWeekday.withDefault(true))
+                if clock.wrappedValue.resolvedShowWeekday {
+                    Picker("Weekday style", selection: clock.weekdayStyle.withDefault(.full)) { ForEach(ClockWeekdayStyle.allCases) { Text($0.rawValue).tag($0) } }
+                }
+                Toggle("Day", isOn: clock.showDay.withDefault(true))
+                Toggle("Month", isOn: clock.showMonth.withDefault(true))
+                if clock.wrappedValue.resolvedShowMonth {
+                    Picker("Month style", selection: clock.monthStyle.withDefault(.full)) { ForEach(ClockMonthStyle.allCases) { Text($0.rawValue).tag($0) } }
+                }
+                Toggle("Year", isOn: clock.showYear.withDefault(false))
+                Picker("Order", selection: clock.dateOrder.withDefault(.weekdayMonthDay)) { ForEach(ClockDateOrder.allCases) { Text($0.rawValue).tag($0) } }
+                Picker("Case", selection: clock.dateTextCase.withDefault(.natural)) { ForEach(ClockDateTextCase.allCases) { Text($0.rawValue).tag($0) } }
+                Text("The renderer automatically simplifies this format at smaller footprints, so a full date can become “SUN 13” rather than being crushed.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+
+        Section("Clock Typography") {
+            Picker("Font", selection: $style.fontFamily) { ForEach(WidgetFontFamily.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+            if style.fontFamily == .custom {
+                SearchableStringPicker(title: "Installed font", selection: $style.customFont, values: NSFontManager.shared.availableFontFamilies.sorted())
+            }
+            Picker("Weight", selection: $style.weight) { ForEach(WidgetFontWeight.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+            Picker("Font width", selection: clock.fontWidth.withDefault(.standard)) { ForEach(ClockFontWidth.allCases) { Text($0.rawValue).tag($0) } }
+            Toggle("Monospaced digits", isOn: clock.monospacedDigits.withDefault(true))
+            Toggle("Automatic sizing", isOn: clock.automaticTypography.withDefault(true))
+            if !clock.wrappedValue.usesAutomaticTypography {
+                PreciseSlider(title: "Time scale", value: clock.timeScale.withDefault(1), range: 0.55...2.5, step: 0.05, suffix: "×", decimals: 2)
+                PreciseSlider(title: "Date scale", value: clock.dateScale.withDefault(1), range: 0.55...2.2, step: 0.05, suffix: "×", decimals: 2)
+                PreciseSlider(title: "Secondary scale", value: clock.secondaryScale.withDefault(1), range: 0.5...2, step: 0.05, suffix: "×", decimals: 2)
+            }
+            PreciseSlider(title: "Time / date ratio", value: clock.timeDateRatio.withDefault(2.3), range: 1.1...3.5, step: 0.05, suffix: "×", decimals: 2)
+            PreciseSlider(title: "Tracking", value: clock.tracking.withDefault(0), range: -5...18, step: 0.5, suffix: "pt", decimals: 1)
+            PreciseSlider(title: "Line spacing", value: clock.lineSpacing.withDefault(2), range: 0...18, step: 1, suffix: "pt")
+        }
+
+        Section("Information Priority") {
+            Label("Time is always shown", systemImage: "checkmark.circle.fill").foregroundStyle(.secondary)
+            ForEach(clock.wrappedValue.resolvedComplicationPriority) { complication in
+                HStack(spacing: 8) {
+                    Toggle(complication.title, isOn: complicationEnabled(complication))
+                    Spacer(minLength: 4)
+                    Button { move(complication, direction: -1) } label: { Image(systemName: "chevron.up") }
+                        .buttonStyle(.borderless).disabled(isFirst(complication))
+                    Button { move(complication, direction: 1) } label: { Image(systemName: "chevron.down") }
+                        .buttonStyle(.borderless).disabled(isLast(complication))
+                }
+            }
+            Text("Clock chooses as many enabled items as the current footprint can support, in this order. Weather and solar items stay hidden until a real runtime provider supplies those values.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("World Clocks & Location") {
+            TextField("Location label (optional)", text: clock.locationLabel.withDefault(""))
+            ForEach(0..<3, id: \.self) { index in
+                SearchableStringPicker(title: "World clock \(index + 1)", selection: worldZoneBinding(index), values: [""] + Self.timeZones, emptyLabel: "Off")
+            }
+        }
+
+        if clock.wrappedValue.resolvedVisualStyle == .analog {
+            Section("Analog Face") {
+                Picker("Numerals", selection: analog.numerals) { ForEach(ClockNumeralStyle.allCases) { Text($0.rawValue).tag($0) } }
+                Toggle("Hour ticks", isOn: analog.hourTicks)
+                Toggle("Minute ticks", isOn: analog.minuteTicks)
+                PreciseSlider(title: "Tick thickness", value: analog.tickThickness, range: 0.35...5, step: 0.05, suffix: "pt", decimals: 2)
+                Toggle("Hour hand", isOn: analog.showHourHand)
+                Toggle("Minute hand", isOn: analog.showMinuteHand)
+                Toggle("Second hand", isOn: analog.showSecondHand)
+                PreciseSlider(title: "Hand thickness", value: analog.handThickness, range: 0.5...8, step: 0.1, suffix: "pt", decimals: 1)
+                PreciseSlider(title: "Hour hand length", value: analog.hourHandLength, range: 0.2...0.72, step: 0.01, decimals: 2)
+                PreciseSlider(title: "Minute hand length", value: analog.minuteHandLength, range: 0.3...0.84, step: 0.01, decimals: 2)
+                PreciseSlider(title: "Second hand length", value: analog.secondHandLength, range: 0.35...0.92, step: 0.01, decimals: 2)
+                Toggle("Center cap", isOn: analog.centerCap)
+                Toggle("Smooth second hand", isOn: analog.smoothSecondHand)
+                PreciseSlider(title: "Face opacity", value: analog.faceOpacity, range: 0...0.55, step: 0.01, decimals: 2)
+                ColorPicker("Face", selection: Binding(get: { analog.wrappedValue.faceColor.color }, set: { analog.wrappedValue.faceColor = WidgetColor($0) }), supportsOpacity: false)
+                ColorPicker("Ticks", selection: Binding(get: { analog.wrappedValue.tickColor.color }, set: { analog.wrappedValue.tickColor = WidgetColor($0) }), supportsOpacity: false)
+                ColorPicker("Hour hand", selection: Binding(get: { analog.wrappedValue.hourHandColor.color }, set: { analog.wrappedValue.hourHandColor = WidgetColor($0) }), supportsOpacity: false)
+                ColorPicker("Minute hand", selection: Binding(get: { analog.wrappedValue.minuteHandColor.color }, set: { analog.wrappedValue.minuteHandColor = WidgetColor($0) }), supportsOpacity: false)
+                ColorPicker("Second hand", selection: Binding(get: { analog.wrappedValue.secondHandColor.color }, set: { analog.wrappedValue.secondHandColor = WidgetColor($0) }), supportsOpacity: false)
+            }
+        }
+
+        Section("Clock Appearance") {
+            ColorPicker("Primary", selection: Binding(get: { (clock.wrappedValue.primaryColor ?? style.textColor).color }, set: { clock.wrappedValue.primaryColor = WidgetColor($0) }), supportsOpacity: false)
+            ColorPicker("Secondary", selection: Binding(get: { (clock.wrappedValue.secondaryColor ?? style.textColor).color }, set: { clock.wrappedValue.secondaryColor = WidgetColor($0) }), supportsOpacity: false)
+            ColorPicker("Separator", selection: Binding(get: { (clock.wrappedValue.separatorColor ?? style.accentColor).color }, set: { clock.wrappedValue.separatorColor = WidgetColor($0) }), supportsOpacity: false)
+            PreciseSlider(title: "Text shadow", value: clock.textShadow.withDefault(0), range: 0...1, step: 0.05, decimals: 2)
+            PreciseSlider(title: "Subtle glow", value: clock.textGlow.withDefault(0), range: 0...1, step: 0.05, decimals: 2)
+            Text("Card background, gradients, border, corner radius and card shadow remain in Block Styling below so the Clock keeps one coherent appearance system.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func complicationEnabled(_ complication: ClockComplication) -> Binding<Bool> {
+        Binding(get: { clock.wrappedValue.resolvedEnabledComplications.contains(complication) }, set: { enabled in
+            var values = clock.wrappedValue.resolvedEnabledComplications
+            if enabled {
+                if !values.contains(complication) { values.append(complication) }
+            } else {
+                values.removeAll { $0 == complication }
+            }
+            clock.wrappedValue.enabledComplications = values
+        })
+    }
+
+    private func move(_ complication: ClockComplication, direction: Int) {
+        var values = clock.wrappedValue.resolvedComplicationPriority
+        guard let index = values.firstIndex(of: complication) else { return }
+        let target = index + direction
+        guard values.indices.contains(target) else { return }
+        values.swapAt(index, target)
+        clock.wrappedValue.complicationPriority = values
+    }
+    private func isFirst(_ complication: ClockComplication) -> Bool { clock.wrappedValue.resolvedComplicationPriority.first == complication }
+    private func isLast(_ complication: ClockComplication) -> Bool { clock.wrappedValue.resolvedComplicationPriority.last == complication }
+
+    private func worldZoneBinding(_ index: Int) -> Binding<String> {
+        Binding(get: {
+            let values = clock.wrappedValue.worldTimeZones ?? ["Asia/Tokyo", "Europe/London", ""]
+            return values.indices.contains(index) ? values[index] : ""
+        }, set: { newValue in
+            var values = clock.wrappedValue.worldTimeZones ?? ["Asia/Tokyo", "Europe/London", ""]
+            while values.count < 3 { values.append("") }
+            values[index] = newValue
+            clock.wrappedValue.worldTimeZones = values
+        })
+    }
+}
+
 struct WidgetSettingsView: View {
     @Binding var layout: WorkspaceLayout
     @State private var selected: ModuleID = .clock
@@ -265,18 +436,12 @@ struct WidgetSettingsView: View {
         }
         moduleSpecificSettings
         if selected == .clock {
-            Section("Clock") {
-                Toggle("24-hour time", isOn: style.clock.twentyFourHour)
-                Toggle("Show seconds", isOn: style.clock.showSeconds)
-                Toggle("Show date", isOn: style.clock.showDate)
-                if style.wrappedValue.clock.showDate {
-                    Picker("Date style", selection: content.clockDateStyle) {
-                        ForEach(WidgetClockDateStyle.allCases) { Text($0.title).tag($0) }
-                    }
-                }
-                SearchableStringPicker(title: "Time zone", selection: style.clock.timeZone, values: [""] + Self.timeZones, emptyLabel: "System time zone")
-                WidgetClock(style: style.wrappedValue).foregroundStyle(style.wrappedValue.textColor.color)
-                    .padding().background(.black, in: RoundedRectangle(cornerRadius: 12))
+            ClockSettingsControls(style: style)
+            Section("Clock Preview") {
+                WidgetClock(style: style.wrappedValue)
+                    .frame(height: 190)
+                    .padding(12)
+                    .background(.black, in: RoundedRectangle(cornerRadius: 14))
             }
         }
         Button("Reset this widget") { layout.widgets?.removeValue(forKey: selected.rawValue) }
@@ -1359,6 +1524,10 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
                 ForEach(WidgetContentAlignment.allCases) { Text($0.title).tag($0) }
             }
         }
+        if module == .clock {
+            ClockSettingsControls(style: style)
+            clockSizeOverrideInspector(itemID: itemID, style: style)
+        }
         if module == .calendar {
             let content = style.content.withDefault(WidgetContentOptions())
             Section("Calendar Presentation") {
@@ -1435,6 +1604,52 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
         }
         Section {
             Button("Reset Block to Visual Workspace Defaults") { mutateItem(itemID) { $0.widgetStyle = nil; $0.verticalAlignment = .center } }
+        }
+    }
+
+
+    @ViewBuilder private func clockSizeOverrideInspector(itemID: UUID, style: Binding<WidgetStyle>) -> some View {
+        let placement = findItem(itemID)?.gridPlacement ?? OpenNotchGridPlacement()
+        let columns = min(8, max(1, placement.columnSpan))
+        let rows = min(4, max(1, placement.rowSpan))
+        let key = ClockOptions.sizeKey(columns: columns, rows: rows)
+        let override = Binding<ClockSizeOverride?>(get: {
+            style.wrappedValue.clock.sizeOverrides?[key]
+        }, set: { replacement in
+            var clock = style.wrappedValue.clock
+            var values = clock.sizeOverrides ?? [:]
+            if let replacement { values[key] = replacement } else { values.removeValue(forKey: key) }
+            clock.sizeOverrides = values.isEmpty ? nil : values
+            style.wrappedValue.clock = clock
+        })
+        Section("\(columns)×\(rows) Clock Override") {
+            Toggle("Override Automatic", isOn: Binding(get: { override.wrappedValue != nil }, set: { enabled in
+                if enabled {
+                    override.wrappedValue = ClockSizeOverride(style: style.wrappedValue.clock.resolvedVisualStyle,
+                                                             complications: style.wrappedValue.clock.resolvedEnabledComplications)
+                } else { override.wrappedValue = nil }
+            }))
+            if override.wrappedValue != nil {
+                let value = override.withDefault(ClockSizeOverride())
+                Picker("Style for \(columns)×\(rows)", selection: value.style.withDefault(style.wrappedValue.clock.resolvedVisualStyle)) {
+                    ForEach(ClockVisualStyle.allCases) { Text($0.rawValue).tag($0) }
+                }
+                Text("Complications for this size").font(.caption).foregroundStyle(.secondary)
+                ForEach(ClockComplication.allCases) { complication in
+                    Toggle(complication.title, isOn: Binding(get: {
+                        (value.wrappedValue.complications ?? style.wrappedValue.clock.resolvedEnabledComplications).contains(complication)
+                    }, set: { enabled in
+                        var items = value.wrappedValue.complications ?? style.wrappedValue.clock.resolvedEnabledComplications
+                        if enabled { if !items.contains(complication) { items.append(complication) } }
+                        else { items.removeAll { $0 == complication } }
+                        value.wrappedValue.complications = items
+                    }))
+                }
+                Button("Reset \(columns)×\(rows) to Automatic") { override.wrappedValue = nil }
+            } else {
+                Text("Automatic uses footprint, aspect ratio, point size, style and information priority. Override only when this exact grid size needs a deliberately different treatment.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 

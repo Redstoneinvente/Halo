@@ -1558,6 +1558,8 @@ private struct OpenNotchItemView: View {
                     .environment(\.openNotchCompressionLevel, compression)
                     .environment(\.openNotchAvailableWidth, slotSize.width)
                     .environment(\.openNotchAvailableHeight, slotSize.height)
+                    .environment(\.openNotchGridColumnSpan, item.gridPlacement?.columnSpan)
+                    .environment(\.openNotchGridRowSpan, item.gridPlacement?.rowSpan)
                     .environment(\.openNotchBlockVerticalAlignment, item.resolvedVerticalAlignment)
                 }
             case .element:
@@ -1899,7 +1901,7 @@ struct BuiltinOrIntegrationWidget: View {
     @Environment(\.openNotchCompressionLevel) private var compression
     @ViewBuilder var body: some View {
         switch module {
-        case .clock: WidgetClock(style: style)
+        case .clock: WidgetClock(style: style, workspace: store.workspace, store: store)
         case .timer: timer
         case .shelf: shelf
         default: ModuleRegistry().view(for: module, store: store)

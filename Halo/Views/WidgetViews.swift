@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import EventKit
 
 /// Large catalogs are built only when opened; scrolling creates visible rows lazily.
 struct SearchableStringPicker: View {
@@ -91,6 +92,8 @@ private struct OpenNotchPresentationEnvironmentKey: EnvironmentKey { static let 
 private struct OpenNotchCompressionEnvironmentKey: EnvironmentKey { static let defaultValue = 0 }
 private struct OpenNotchAvailableWidthEnvironmentKey: EnvironmentKey { static let defaultValue: CGFloat? = nil }
 private struct OpenNotchAvailableHeightEnvironmentKey: EnvironmentKey { static let defaultValue: CGFloat? = nil }
+private struct OpenNotchGridColumnSpanEnvironmentKey: EnvironmentKey { static let defaultValue: Int? = nil }
+private struct OpenNotchGridRowSpanEnvironmentKey: EnvironmentKey { static let defaultValue: Int? = nil }
 private struct OpenNotchBlockVerticalAlignmentEnvironmentKey: EnvironmentKey { static let defaultValue: OpenNotchBlockVerticalAlignment = .top }
 extension EnvironmentValues {
     var openNotchPresentation: OpenNotchPresentation {
@@ -108,6 +111,14 @@ extension EnvironmentValues {
     var openNotchAvailableHeight: CGFloat? {
         get { self[OpenNotchAvailableHeightEnvironmentKey.self] }
         set { self[OpenNotchAvailableHeightEnvironmentKey.self] = newValue }
+    }
+    var openNotchGridColumnSpan: Int? {
+        get { self[OpenNotchGridColumnSpanEnvironmentKey.self] }
+        set { self[OpenNotchGridColumnSpanEnvironmentKey.self] = newValue }
+    }
+    var openNotchGridRowSpan: Int? {
+        get { self[OpenNotchGridRowSpanEnvironmentKey.self] }
+        set { self[OpenNotchGridRowSpanEnvironmentKey.self] = newValue }
     }
     var openNotchBlockVerticalAlignment: OpenNotchBlockVerticalAlignment {
         get { self[OpenNotchBlockVerticalAlignmentEnvironmentKey.self] }
@@ -463,192 +474,920 @@ struct WidgetCard<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: contentOptions.alignment.alignment)
     }
 }
+private enum ClockLayoutFamily: String, Equatable {
+    case micro
+    case horizontalCompact
+    case verticalCompact
+    case standard
+    case wide
+    case tall
+    case large
+    case hero
+
+    static func exact(columns: Int, rows: Int) -> ClockLayoutFamily {
+        let columns = max(1, columns)
+        let rows = max(1, rows)
+        if columns == 1 && rows == 1 { return .micro }
+        if rows == 1 { return columns <= 3 ? .horizontalCompact : .wide }
+        if columns == 1 { return rows <= 2 ? .verticalCompact : .tall }
+        if columns >= 7 && rows >= 4 { return .hero }
+        if (columns >= 5 && rows >= 3) || columns * rows >= 16 { return .large }
+        if columns >= 4 && rows == 2 { return .wide }
+        if rows >= 3 && columns <= 2 { return .tall }
+        if columns >= 3 && rows >= 3 { return .large }
+        return .standard
+    }
+
+    static func fallback(width: CGFloat, height: CGFloat, previous: ClockLayoutFamily?) -> ClockLayoutFamily {
+        let width = max(1, width)
+        let height = max(1, height)
+        let aspect = width / height
+        if previous == .micro, width < 158, height < 158 { return .micro }
+        if previous == .horizontalCompact, aspect > 1.40, height < 188 { return .horizontalCompact }
+        if previous == .wide, aspect > 1.48, width > 285 { return .wide }
+        if previous == .verticalCompact, aspect < 0.82, width < 214, height < 280 { return .verticalCompact }
+        if previous == .tall, aspect < 0.94, height > 220 { return .tall }
+        if previous == .hero, width > 470, height > 270 { return .hero }
+        if previous == .large, width > 320, height > 205 { return .large }
+
+        if width < 138 && height < 138 { return .micro }
+        if width >= 520 && height >= 310 { return .hero }
+        if aspect >= 2.25 && height < 190 { return width >= 345 ? .wide : .horizontalCompact }
+        if aspect <= 0.70 && width < 210 { return height >= 280 ? .tall : .verticalCompact }
+        if width >= 355 && height >= 225 { return .large }
+        if aspect >= 1.58 { return .wide }
+        if aspect <= 0.84 { return .tall }
+        return .standard
+    }
+
+    var complicationCapacity: Int {
+        switch self {
+        case .micro: return 0
+        case .horizontalCompact, .verticalCompact: return 1
+        case .standard: return 2
+        case .wide, .tall: return 3
+        case .large: return 4
+        case .hero: return 6
+        }
+    }
+}
+
+private extension ClockFontWidth {
+    var swiftUI: Font.Width {
+        switch self {
+        case .compressed: return .compressed
+        case .condensed: return .condensed
+        case .standard: return .standard
+        case .expanded: return .expanded
+        }
+    }
+}
+
+private struct ClockTimeParts {
+    let hour: String
+    let minute: String
+    let second: String
+    let ampm: String
+}
+
+private struct AdaptiveAnalogClockFace: View {
+    let date: Date
+    let style: WidgetStyle
+    let clock: ClockOptions
+    let diameter: CGFloat
+    let showSeconds: Bool
+
+    private var options: ClockAnalogOptions { clock.resolvedAnalog }
+    private var timeZone: TimeZone { TimeZone(identifier: clock.timeZone) ?? .current }
+
+    var body: some View {
+        let size = max(44, diameter)
+        ZStack {
+            Circle()
+                .fill(options.faceColor.color.opacity(options.faceOpacity))
+                .overlay(Circle().stroke((clock.secondaryColor ?? style.textColor).color.opacity(0.13), lineWidth: 1))
+            Canvas { context, canvas in
+                let center = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
+                let radius = min(canvas.width, canvas.height) / 2
+                if options.minuteTicks {
+                    for tick in 0..<60 {
+                        let major = tick.isMultiple(of: 5)
+                        let outer = radius * 0.88
+                        let inner = radius * (major ? 0.76 : 0.82)
+                        let angle = Double(tick) / 60 * .pi * 2 - .pi / 2
+                        var path = Path()
+                        path.move(to: CGPoint(x: center.x + cos(angle) * inner, y: center.y + sin(angle) * inner))
+                        path.addLine(to: CGPoint(x: center.x + cos(angle) * outer, y: center.y + sin(angle) * outer))
+                        context.stroke(path, with: .color(options.tickColor.color.opacity(major ? 0.66 : 0.28)), lineWidth: major ? options.tickThickness * 1.35 : options.tickThickness * 0.65)
+                    }
+                } else if options.hourTicks {
+                    for tick in 0..<12 {
+                        let outer = radius * 0.88
+                        let inner = radius * 0.76
+                        let angle = Double(tick) / 12 * .pi * 2 - .pi / 2
+                        var path = Path()
+                        path.move(to: CGPoint(x: center.x + cos(angle) * inner, y: center.y + sin(angle) * inner))
+                        path.addLine(to: CGPoint(x: center.x + cos(angle) * outer, y: center.y + sin(angle) * outer))
+                        context.stroke(path, with: .color(options.tickColor.color.opacity(0.62)), lineWidth: options.tickThickness)
+                    }
+                }
+
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = timeZone
+                let components = calendar.dateComponents([.hour, .minute, .second, .nanosecond], from: date)
+                let hour = Double(components.hour ?? 0) + Double(components.minute ?? 0) / 60
+                let minute = Double(components.minute ?? 0) + Double(components.second ?? 0) / 60
+                let smoothSecond = Double(components.second ?? 0) + (options.smoothSecondHand ? Double(components.nanosecond ?? 0) / 1_000_000_000 : 0)
+
+                func hand(angleDegrees: Double, length: Double, width: Double, color: Color) {
+                    let angle = angleDegrees * .pi / 180 - .pi / 2
+                    var path = Path()
+                    path.move(to: center)
+                    path.addLine(to: CGPoint(x: center.x + cos(angle) * radius * length, y: center.y + sin(angle) * radius * length))
+                    context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round))
+                }
+                if options.showHourHand { hand(angleDegrees: hour / 12 * 360, length: options.hourHandLength, width: options.handThickness * 1.25, color: options.hourHandColor.color) }
+                if options.showMinuteHand { hand(angleDegrees: minute / 60 * 360, length: options.minuteHandLength, width: options.handThickness, color: options.minuteHandColor.color) }
+                if showSeconds && options.showSecondHand { hand(angleDegrees: smoothSecond / 60 * 360, length: options.secondHandLength, width: max(0.6, options.handThickness * 0.48), color: options.secondHandColor.color) }
+            }
+            if options.numerals != .none && size >= 82 {
+                GeometryReader { proxy in
+                    let radius = min(proxy.size.width, proxy.size.height) * 0.365
+                    let roman = ["XII", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI"]
+                    ForEach(0..<12, id: \.self) { index in
+                        let angle = Double(index) / 12 * .pi * 2 - .pi / 2
+                        let label = options.numerals == .roman ? roman[index] : String(index == 0 ? 12 : index)
+                        Text(label)
+                            .font(.system(size: max(7, size * 0.075), weight: .medium, design: .rounded))
+                            .foregroundStyle((clock.secondaryColor ?? style.textColor).color.opacity(0.72))
+                            .position(x: proxy.size.width / 2 + cos(angle) * radius,
+                                      y: proxy.size.height / 2 + sin(angle) * radius)
+                    }
+                }
+            }
+            if options.centerCap {
+                Circle().fill(options.secondHandColor.color).frame(width: max(4, size * 0.045), height: max(4, size * 0.045))
+                    .overlay(Circle().stroke(Color.black.opacity(0.28), lineWidth: 0.5))
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityLabel("Analog clock")
+    }
+}
+
+private struct ClockFlipDigit: View {
+    let digit: Character
+    let height: CGFloat
+    let color: Color
+    let accent: Color
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: max(5, height * 0.10), style: .continuous)
+                .fill(Color.black.opacity(0.32))
+                .overlay(RoundedRectangle(cornerRadius: max(5, height * 0.10)).stroke(Color.white.opacity(0.08), lineWidth: 1))
+            Rectangle().fill(Color.black.opacity(0.35)).frame(height: 1)
+            Text(String(digit))
+                .font(.system(size: height * 0.62, weight: .medium, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(color)
+                .contentTransition(.numericText())
+                .shadow(color: accent.opacity(0.10), radius: 8)
+        }
+        .frame(width: height * 0.54, height: height)
+        .animation(.snappy(duration: 0.24), value: digit)
+    }
+}
+
+private struct ClockDotMatrixBackdrop: View {
+    var body: some View {
+        Canvas { context, size in
+            let spacing: CGFloat = 8
+            var x: CGFloat = 4
+            while x < size.width {
+                var y: CGFloat = 4
+                while y < size.height {
+                    context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1.3, height: 1.3)), with: .color(.white.opacity(0.055)))
+                    y += spacing
+                }
+                x += spacing
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 struct WidgetClock: View {
     let style: WidgetStyle
     var compact = false
+    var workspace: WorkspaceStore? = nil
+    var store: AppStore? = nil
+    var weatherSummary: String? = nil
+    var temperatureText: String? = nil
+    var sunrise: Date? = nil
+    var sunset: Date? = nil
+
     @Environment(\.openNotchPresentation) private var presentation
     @Environment(\.openNotchAvailableWidth) private var availableWidth
     @Environment(\.openNotchAvailableHeight) private var availableHeight
+    @Environment(\.openNotchGridColumnSpan) private var gridColumns
+    @Environment(\.openNotchGridRowSpan) private var gridRows
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var clockNamespace
+    @State private var fallbackFamily: ClockLayoutFamily = .standard
 
-    private var footprint: VisualWorkspaceWidgetSize? {
-        VisualWorkspaceWidgetSize.resolve(width: availableWidth, height: availableHeight, presentation: presentation)
+    private var clock: ClockOptions { style.clock }
+    private var width: CGFloat { max(72, availableWidth ?? (compact ? 220 : 320)) }
+    private var height: CGFloat { max(44, availableHeight ?? (compact ? 58 : 180)) }
+    private var sizeOverride: ClockSizeOverride? { clock.sizeOverride(columns: gridColumns, rows: gridRows) }
+    private var visualStyle: ClockVisualStyle { sizeOverride?.style ?? clock.resolvedVisualStyle }
+    private var family: ClockLayoutFamily {
+        if compact { return .horizontalCompact }
+        if let gridColumns, let gridRows { return .exact(columns: gridColumns, rows: gridRows) }
+        return fallbackFamily
     }
-    private var formatter: DateFormatter {
-        let value = DateFormatter()
-        value.locale = Locale(identifier: "en_US_POSIX")
-        value.timeZone = TimeZone(identifier: style.clock.timeZone) ?? .current
-        value.dateFormat = (style.clock.twentyFourHour ? "HH:mm" : "h:mm") + (style.clock.showSeconds ? ":ss" : "") + (style.clock.twentyFourHour ? "" : " a")
-        return value
-    }
-    private var glanceFormatter: DateFormatter {
-        let value = DateFormatter()
-        value.locale = Locale(identifier: "en_US_POSIX")
-        value.timeZone = TimeZone(identifier: style.clock.timeZone) ?? .current
-        value.dateFormat = style.clock.twentyFourHour ? "HH:mm" : "h:mm a"
-        return value
-    }
-    private var dayFormatter: DateFormatter {
-        let value = DateFormatter()
-        value.locale = .autoupdatingCurrent
-        value.timeZone = TimeZone(identifier: style.clock.timeZone) ?? .current
-        switch style.resolvedContent.clockDateStyle {
-        case .weekdayMonthDay: value.dateFormat = "EEE, MMM d"
-        case .monthDay: value.dateFormat = "MMM d"
-        case .full: value.dateFormat = "EEEE, MMMM d"
-        case .numeric: value.dateStyle = .short; value.timeStyle = .none
-        }
-        return value
-    }
-    private var weekdayFormatter: DateFormatter {
-        let value = DateFormatter()
-        value.locale = .autoupdatingCurrent
-        value.timeZone = TimeZone(identifier: style.clock.timeZone) ?? .current
-        value.dateFormat = "EEEE"
-        return value
-    }
-    private var timeZoneLabel: String { style.clock.timeZone.isEmpty ? TimeZone.current.identifier : style.clock.timeZone }
+    private var timeZone: TimeZone { TimeZone(identifier: clock.timeZone) ?? .current }
+    private var primaryColor: Color { (clock.primaryColor ?? style.textColor).color }
+    private var secondaryColor: Color { (clock.secondaryColor ?? style.textColor).color.opacity(0.62) }
+    private var separatorColor: Color { (clock.separatorColor ?? style.accentColor).color }
+    private var accentColor: Color { style.accentColor.color }
+    private var geometrySignature: String { "\(Int(width.rounded()))x\(Int(height.rounded()))" }
 
     var body: some View {
-        let clockFormatter = formatter
-        let smallClockFormatter = glanceFormatter
-        let dateFormatter = dayFormatter
-        let weekday = weekdayFormatter
-        let start = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970 / 60) * 60)
-        TimelineView(.periodic(from: start, by: style.clock.showSeconds && footprint != .glance ? 1 : 30)) { context in
-            Group {
-                if let footprint {
-                    workspaceClock(footprint, date: context.date, clockFormatter: clockFormatter, glanceFormatter: smallClockFormatter, dateFormatter: dateFormatter, weekdayFormatter: weekday)
-                } else {
-                    legacyClock(date: context.date, clockFormatter: clockFormatter, dateFormatter: dateFormatter)
-                }
+        Group {
+            if visualStyle == .analog && clock.showSeconds && clock.resolvedAnalog.smoothSecondHand && !reduceMotion {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in clockBody(date: context.date) }
+            } else {
+                TimelineView(.periodic(from: .now, by: clock.showSeconds || clock.resolvedBlinkingSeparator ? 1 : 15)) { context in clockBody(date: context.date) }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: footprint == .glance ? .center : style.resolvedContent.alignment.alignment)
-            .animation(.easeInOut(duration: 0.18), value: footprint)
         }
+        .onAppear { updateFallbackFamily() }
+        .onChange(of: geometrySignature) { _ in updateFallbackFamily() }
+        .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.86), value: family)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: visualStyle)
     }
 
-    @ViewBuilder private func workspaceClock(_ size: VisualWorkspaceWidgetSize, date: Date, clockFormatter: DateFormatter, glanceFormatter: DateFormatter, dateFormatter: DateFormatter, weekdayFormatter: DateFormatter) -> some View {
-        let spacing = max(2, min(16, style.resolvedContent.spacing * 0.55))
-        switch size {
-        case .glance:
-            VStack(spacing: 2) {
-                WidgetElement(key: "time", defaultPriority: .alwaysVisible) {
-                    Text(glanceFormatter.string(from: date))
-                        .font(style.font(scale: 1.34))
-                        .monospacedDigit()
-                        .lineLimit(1)
-                }
-                if style.clock.showDate {
-                    WidgetElement(key: "date", defaultPriority: .high) {
-                        Text(date, format: .dateTime.weekday(.abbreviated).locale(.autoupdatingCurrent))
-                            .font(style.font(scale: 0.62))
-                            .foregroundStyle(.secondary)
-                            .textCase(.uppercase)
+    private func updateFallbackFamily() {
+        guard gridColumns == nil || gridRows == nil else { return }
+        fallbackFamily = .fallback(width: width, height: height, previous: fallbackFamily)
+    }
+
+    @ViewBuilder private func clockBody(date: Date) -> some View {
+        let complications = visibleComplications(date: date)
+        switch family {
+        case .micro:
+            primaryClock(date: date, family: .micro)
+                .matchedGeometryEffect(id: "clock-primary", in: clockNamespace)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        case .horizontalCompact:
+            if compact {
+                primaryClock(date: date, family: .horizontalCompact)
+                    .matchedGeometryEffect(id: "clock-primary", in: clockNamespace)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: style.resolvedContent.alignment.alignment)
+            } else {
+                HStack(spacing: max(8, style.resolvedContent.spacing * 0.65)) {
+                    primaryClock(date: date, family: .horizontalCompact)
+                        .matchedGeometryEffect(id: "clock-primary", in: clockNamespace)
+                    if let complication = complications.first {
+                        Spacer(minLength: 6)
+                        compactComplication(complication, date: date, horizontal: true)
+                            .transition(.opacity.combined(with: .move(edge: .trailing)))
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        case .horizontal:
-            HStack(spacing: spacing) {
-                WidgetElement(key: "time", defaultPriority: .alwaysVisible) {
-                    Text(glanceFormatter.string(from: date)).font(style.font(scale: 1.08)).monospacedDigit().lineLimit(1)
-                }
-                if style.clock.showDate {
-                    Divider().opacity(0.35)
-                    WidgetElement(key: "date", defaultPriority: .high) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(weekdayFormatter.string(from: date)).font(style.font(scale: 0.64)).lineLimit(1)
-                            Text(dateFormatter.string(from: date)).font(style.font(scale: 0.58)).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }
+        case .verticalCompact:
+            VStack(spacing: max(6, style.resolvedContent.spacing * 0.60)) {
+                primaryClock(date: date, family: .verticalCompact)
+                    .matchedGeometryEffect(id: "clock-primary", in: clockNamespace)
+                if let complication = complications.first {
+                    compactComplication(complication, date: date, horizontal: false)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
-        case .vertical:
-            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
-                WidgetElement(key: "time", defaultPriority: .alwaysVisible) {
-                    Text(glanceFormatter.string(from: date)).font(style.font(scale: 1.16)).monospacedDigit().lineLimit(1)
-                }
-                if style.clock.showDate {
-                    WidgetElement(key: "date", defaultPriority: .high) {
-                        VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: 2) {
-                            Text(weekdayFormatter.string(from: date)).font(style.font(scale: 0.72)).lineLimit(1)
-                            Text(dateFormatter.string(from: date)).font(style.font(scale: 0.64)).foregroundStyle(.secondary).lineLimit(2)
-                        }
-                    }
-                }
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .standard:
-            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
-                if style.showTitle && !compact { clockHeader(scale: 0.72) }
-                WidgetElement(key: "time", defaultPriority: .alwaysVisible) { Text(clockFormatter.string(from: date)).font(style.font(scale: 1.12)).monospacedDigit() }
-                if style.clock.showDate && !compact { WidgetElement(key: "date", defaultPriority: .high) { Text(dateFormatter.string(from: date)) } }
-                WidgetElement(key: "timezone", defaultVisible: false, defaultPriority: .normal) { Label(timeZoneLabel, systemImage: "globe") }
+            VStack(spacing: max(6, style.resolvedContent.spacing * 0.72)) {
+                Spacer(minLength: 0)
+                primaryClock(date: date, family: .standard)
+                    .matchedGeometryEffect(id: "clock-primary", in: clockNamespace)
+                if let dateComp = complications.first(where: { $0 == .date || $0 == .day }) {
+                    compactComplication(dateComp, date: date, horizontal: false)
+                        .matchedGeometryEffect(id: "clock-date", in: clockNamespace)
+                } else if let complication = complications.first {
+                    compactComplication(complication, date: date, horizontal: false)
+                }
+                Spacer(minLength: 0)
             }
-        case .expanded:
-            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
-                if style.showTitle && !compact { clockHeader(scale: 0.78) }
-                WidgetElement(key: "time", defaultPriority: .alwaysVisible) { Text(clockFormatter.string(from: date)).font(style.font(scale: 1.35)).monospacedDigit() }
-                extras(dateFormatter: dateFormatter, date: date)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .wide:
+            HStack(alignment: .center, spacing: max(14, style.resolvedContent.spacing)) {
+                primaryClock(date: date, family: .wide)
+                    .matchedGeometryEffect(id: "clock-primary", in: clockNamespace)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if !complications.isEmpty {
+                    VStack(alignment: .trailing, spacing: 6) {
+                        ForEach(Array(complications.prefix(3)), id: \.self) { complication in
+                            compactComplication(complication, date: date, horizontal: true)
+                        }
+                    }
+                    .frame(maxWidth: min(230, width * 0.40), alignment: .trailing)
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .tall:
+            VStack(spacing: max(10, style.resolvedContent.spacing)) {
+                primaryClock(date: date, family: .tall)
+                    .matchedGeometryEffect(id: "clock-primary", in: clockNamespace)
+                if !complications.isEmpty {
+                    Divider().opacity(0.16)
+                    VStack(spacing: 7) {
+                        ForEach(Array(complications.prefix(3)), id: \.self) { complication in
+                            compactComplication(complication, date: date, horizontal: false)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .large:
+            VStack(spacing: max(10, style.resolvedContent.spacing * 0.9)) {
+                largeHeader(date: date, complications: complications)
+                Spacer(minLength: 0)
+                primaryClock(date: date, family: .large)
+                    .matchedGeometryEffect(id: "clock-primary", in: clockNamespace)
+                Spacer(minLength: 0)
+                complicationRow(complications, date: date, limit: 4)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .hero:
+            heroClock(date: date, complications: complications)
         }
     }
 
-    @ViewBuilder private func legacyClock(date: Date, clockFormatter: DateFormatter, dateFormatter: DateFormatter) -> some View {
-        let spacing = max(2, min(20, style.resolvedContent.spacing * 0.55))
-        switch style.resolvedLayoutMode {
-        case .compact:
-            HStack(spacing: spacing) {
-                if style.showTitle && !compact { clockHeader(scale: 0.68) }
-                WidgetElement(key: "time", defaultPriority: .alwaysVisible) { Text(clockFormatter.string(from: date)).monospacedDigit() }
-                if style.clock.showDate && !compact {
-                    WidgetElement(key: "date", defaultPriority: .high) { Text(dateFormatter.string(from: date)) }
-                }
-            }
-        case .hero:
-            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
-                if style.showTitle && !compact { clockHeader(scale: 0.75) }
-                WidgetElement(key: "time", defaultPriority: .alwaysVisible) { Text(clockFormatter.string(from: date)).font(style.font(scale: 1.35)).monospacedDigit() }
-                extras(dateFormatter: dateFormatter, date: date)
+    @ViewBuilder private func primaryClock(date: Date, family: ClockLayoutFamily) -> some View {
+        let parts = timeParts(date)
+        switch visualStyle {
+        case .digital:
+            if family == .verticalCompact || family == .tall {
+                stackedTime(parts: parts, family: family, editorial: false)
+            } else {
+                digitalTime(parts: parts, date: date, family: family)
             }
         case .minimal:
-            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: spacing) {
-                WidgetElement(key: "time", defaultPriority: .alwaysVisible) { Text(clockFormatter.string(from: date)).monospacedDigit() }
-                extras(dateFormatter: dateFormatter, date: date)
+            digitalTime(parts: parts, date: date, family: family, minimal: true)
+        case .analog:
+            let diameter = analogDiameter(for: family)
+            AdaptiveAnalogClockFace(date: date, style: style, clock: clock, diameter: diameter, showSeconds: shouldShowSeconds(in: family))
+        case .flip:
+            flipTime(parts: parts, family: family)
+        case .editorial:
+            editorialTime(parts: parts, date: date, family: family)
+        case .stacked:
+            stackedTime(parts: parts, family: family, editorial: false)
+        case .split:
+            splitTime(parts: parts, family: family)
+        case .terminal:
+            terminalTime(parts: parts, family: family)
+        case .lcd:
+            lcdTime(parts: parts, date: date, family: family)
+        case .dotMatrix:
+            dotMatrixTime(parts: parts, date: date, family: family)
+        case .outline:
+            outlineTime(parts: parts, date: date, family: family)
+        case .oversizedTypography:
+            oversizedTime(parts: parts, date: date, family: family)
+        }
+    }
+
+    private func timeParts(_ date: Date) -> ClockTimeParts {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let components = calendar.dateComponents([.hour, .minute, .second], from: date)
+        let hour24 = components.hour ?? 0
+        let displayHour = clock.twentyFourHour ? hour24 : (hour24 % 12 == 0 ? 12 : hour24 % 12)
+        let hour = clock.resolvedLeadingZero ? String(format: "%02d", displayHour) : String(displayHour)
+        let minute = String(format: "%02d", components.minute ?? 0)
+        let second = String(format: "%02d", components.second ?? 0)
+        return ClockTimeParts(hour: hour, minute: minute, second: second, ampm: hour24 < 12 ? "AM" : "PM")
+    }
+
+    private func shouldShowSeconds(in family: ClockLayoutFamily) -> Bool {
+        guard clock.showSeconds else { return false }
+        switch family {
+        case .micro: return false
+        case .horizontalCompact: return width >= 300
+        case .verticalCompact: return height >= 220
+        default: return true
+        }
+    }
+
+    private func timeFontSize(for family: ClockLayoutFamily) -> CGFloat {
+        if !clock.usesAutomaticTypography {
+            let multiplier: CGFloat
+            switch family { case .micro: multiplier = 1.45; case .horizontalCompact, .verticalCompact: multiplier = 1.55; case .standard: multiplier = 2; case .wide, .tall: multiplier = 2.25; case .large: multiplier = 2.65; case .hero: multiplier = 3.1 }
+            return CGFloat(style.fontSize * clock.resolvedTimeScale) * multiplier
+        }
+        let raw: CGFloat
+        switch family {
+        case .micro: raw = min(height * 0.40, width * 0.235)
+        case .horizontalCompact: raw = min(height * 0.46, width * 0.17)
+        case .verticalCompact: raw = min(height * 0.22, width * 0.42)
+        case .standard: raw = min(height * 0.34, width * 0.18)
+        case .wide: raw = min(height * 0.46, width * 0.14)
+        case .tall: raw = min(height * 0.21, width * 0.42)
+        case .large: raw = min(height * 0.31, width * 0.15)
+        case .hero: raw = min(height * 0.28, width * 0.105)
+        }
+        return max(18, raw * CGFloat(clock.resolvedTimeScale))
+    }
+
+    private func dateFontSize(for family: ClockLayoutFamily) -> CGFloat {
+        let time = timeFontSize(for: family)
+        let base = time / CGFloat(clock.resolvedTimeDateRatio) * CGFloat(clock.resolvedDateScale)
+        return min(24, max(9, base))
+    }
+
+    private func secondaryFontSize(for family: ClockLayoutFamily) -> CGFloat {
+        min(18, max(8, dateFontSize(for: family) * 0.88 * CGFloat(clock.resolvedSecondaryScale)))
+    }
+
+    private func clockFont(size: CGFloat, weight: Font.Weight? = nil, forceDesign: Font.Design? = nil) -> Font {
+        let resolvedWeight = weight ?? style.weight.swiftUIFontWeight
+        let font: Font
+        if style.fontFamily == .custom {
+            font = .custom(style.customFont, size: size).weight(resolvedWeight)
+        } else {
+            let design: Font.Design
+            if let forceDesign { design = forceDesign }
+            else {
+                switch style.fontFamily {
+            case .rounded: design = .rounded
+            case .serif: design = .serif
+            case .monospaced: design = .monospaced
+            case .system, .custom: design = .default
             }
-        case .dense, .standard:
-            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: style.resolvedLayoutMode == .dense ? max(2, spacing * 0.55) : spacing) {
-                if style.showTitle && !compact { clockHeader(scale: 0.75) }
-                WidgetElement(key: "time", defaultPriority: .alwaysVisible) { Text(clockFormatter.string(from: date)).monospacedDigit() }
-                extras(dateFormatter: dateFormatter, date: date)
+            }
+            font = .system(size: size, weight: resolvedWeight, design: design)
+        }
+        return font.width(clock.resolvedFontWidth.swiftUI)
+    }
+
+    @ViewBuilder private func digit(_ text: String, size: CGFloat, emphasis: Double = 1, color: Color? = nil, weight: Font.Weight? = nil, forceDesign: Font.Design? = nil) -> some View {
+        let view = Text(text)
+            .font(clockFont(size: size * CGFloat(emphasis), weight: weight, forceDesign: forceDesign))
+            .tracking(clock.resolvedTracking)
+            .foregroundStyle(color ?? primaryColor)
+            .lineLimit(1)
+            .minimumScaleFactor(0.62)
+        if clock.usesMonospacedDigits { view.monospacedDigit() } else { view }
+    }
+
+    @ViewBuilder private func digitalTime(parts: ClockTimeParts, date: Date, family: ClockLayoutFamily, minimal: Bool = false) -> some View {
+        let size = timeFontSize(for: family)
+        let showSeconds = !minimal && shouldShowSeconds(in: family)
+        let showAMPM = !clock.twentyFourHour && clock.resolvedShowAMPM && family != .micro && !minimal
+        let separatorOpacity = clock.resolvedBlinkingSeparator && !reduceMotion && Int(date.timeIntervalSince1970) % 2 != 0 ? 0.18 : 1.0
+        HStack(alignment: .firstTextBaseline, spacing: max(0, clock.resolvedDigitSpacing)) {
+            digit(parts.hour, size: size, emphasis: clock.resolvedHourEmphasis)
+            Text(clock.resolvedSeparator.glyph)
+                .font(clockFont(size: size * 0.86, weight: .regular))
+                .foregroundStyle(separatorColor)
+                .opacity(separatorOpacity)
+            digit(parts.minute, size: size, emphasis: clock.resolvedMinuteEmphasis)
+            if showSeconds {
+                Text(clock.resolvedSeparator.glyph)
+                    .font(clockFont(size: size * 0.54, weight: .regular))
+                    .foregroundStyle(separatorColor.opacity(0.78))
+                    .opacity(separatorOpacity)
+                digit(parts.second, size: size, emphasis: clock.resolvedSecondsEmphasis, color: secondaryColor)
+            }
+            if showAMPM {
+                Text(parts.ampm)
+                    .font(clockFont(size: max(8, size * 0.23), weight: .semibold))
+                    .foregroundStyle(secondaryColor)
+                    .padding(.leading, max(1, size * 0.02))
+            }
+        }
+        .shadow(color: accentColor.opacity(clock.resolvedTextGlow * 0.32), radius: clock.resolvedTextGlow * 16)
+        .shadow(color: .black.opacity(clock.resolvedTextShadow * 0.42), radius: clock.resolvedTextShadow * 10, y: clock.resolvedTextShadow * 2)
+    }
+
+    @ViewBuilder private func stackedTime(parts: ClockTimeParts, family: ClockLayoutFamily, editorial: Bool) -> some View {
+        let size = max(24, min(width * 0.48, height * (family == .verticalCompact ? 0.26 : 0.22))) * CGFloat(clock.resolvedTimeScale)
+        VStack(spacing: max(0, size * 0.02)) {
+            digit(parts.hour, size: size, emphasis: clock.resolvedHourEmphasis, forceDesign: editorial ? .serif : nil)
+            Rectangle().fill(separatorColor.opacity(0.42)).frame(width: min(width * 0.58, size * 1.3), height: 1)
+            digit(parts.minute, size: size, emphasis: clock.resolvedMinuteEmphasis, forceDesign: editorial ? .serif : nil)
+            if shouldShowSeconds(in: family) {
+                digit(parts.second, size: size * 0.42, emphasis: clock.resolvedSecondsEmphasis, color: secondaryColor)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder private func splitTime(parts: ClockTimeParts, family: ClockLayoutFamily) -> some View {
+        let size = timeFontSize(for: family)
+        let vertical = family == .verticalCompact || family == .tall
+        if vertical {
+            VStack(spacing: 7) { splitCell(parts.hour, size: size); splitCell(parts.minute, size: size) }
+        } else {
+            HStack(spacing: 8) { splitCell(parts.hour, size: size); splitCell(parts.minute, size: size) }
+        }
+    }
+
+    private func splitCell(_ text: String, size: CGFloat) -> some View {
+        digit(text, size: size * 0.86, weight: .semibold)
+            .padding(.horizontal, max(8, size * 0.18)).padding(.vertical, max(6, size * 0.10))
+            .background(primaryColor.opacity(0.055), in: RoundedRectangle(cornerRadius: max(8, size * 0.15), style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: max(8, size * 0.15)).stroke(primaryColor.opacity(0.10), lineWidth: 1))
+    }
+
+    @ViewBuilder private func flipTime(parts: ClockTimeParts, family: ClockLayoutFamily) -> some View {
+        let vertical = family == .verticalCompact || family == .tall
+        let cellHeight = max(30, min(vertical ? width * 0.34 : height * 0.56, vertical ? height * 0.22 : width * 0.11))
+        let seconds = shouldShowSeconds(in: family)
+        if vertical {
+            VStack(spacing: 7) {
+                flipPair(parts.hour, height: cellHeight)
+                flipPair(parts.minute, height: cellHeight)
+                if seconds { flipPair(parts.second, height: cellHeight * 0.72) }
+            }
+        } else {
+            HStack(spacing: max(5, cellHeight * 0.10)) {
+                flipPair(parts.hour, height: cellHeight)
+                Text(clock.resolvedSeparator.glyph).font(.system(size: cellHeight * 0.48, weight: .medium, design: .rounded)).foregroundStyle(separatorColor)
+                flipPair(parts.minute, height: cellHeight)
+                if seconds {
+                    Text(clock.resolvedSeparator.glyph).font(.system(size: cellHeight * 0.34, weight: .regular)).foregroundStyle(separatorColor.opacity(0.75))
+                    flipPair(parts.second, height: cellHeight * 0.72)
+                }
             }
         }
     }
 
-    @ViewBuilder private func extras(dateFormatter: DateFormatter, date: Date) -> some View {
-        if style.clock.showDate && !compact {
-            WidgetElement(key: "date", defaultPriority: .high) { Text(dateFormatter.string(from: date)) }
-        }
-        WidgetElement(key: "timezone", defaultVisible: false, defaultPriority: .normal) {
-            Label(timeZoneLabel, systemImage: "globe")
-        }
-        WidgetElement(key: "dayProgress", defaultVisible: false, defaultPriority: .low) {
-            let interval = Calendar.current.dateInterval(of: .day, for: date)
-            let progress = interval.map { min(1, max(0, date.timeIntervalSince($0.start) / $0.duration)) } ?? 0
-            VStack(alignment: style.resolvedContent.alignment.horizontal, spacing: 4) {
-                HStack { Text("Day progress"); Spacer(); Text("\(Int(progress * 100))%") }
-                ProgressView(value: progress)
+    private func flipPair(_ text: String, height: CGFloat) -> some View {
+        HStack(spacing: max(2, height * 0.035)) {
+            ForEach(Array(text).indices, id: \.self) { index in
+                ClockFlipDigit(digit: Array(text)[index], height: height, color: primaryColor, accent: accentColor)
             }
         }
     }
 
-    @ViewBuilder private func clockHeader(scale: Double) -> some View {
-        HStack(spacing: max(4, style.resolvedContent.spacing * 0.55)) {
-            if style.showsHeaderIcon {
-                Image(systemName: "clock")
-                    .font(.system(size: style.resolvedContent.iconSize, weight: .semibold))
-                    .foregroundStyle(style.accentColor.color)
+    @ViewBuilder private func editorialTime(parts: ClockTimeParts, date: Date, family: ClockLayoutFamily) -> some View {
+        let size = timeFontSize(for: family)
+        VStack(alignment: family == .wide ? .leading : .center, spacing: max(4, size * 0.08)) {
+            Text(adaptiveDate(date, detail: family == .hero || family == .large ? .full : .short))
+                .font(clockFont(size: max(9, dateFontSize(for: family) * 0.86), weight: .semibold, forceDesign: .serif))
+                .tracking(max(1.5, clock.resolvedTracking + 1.5))
+                .foregroundStyle(secondaryColor)
+                .textCase(.uppercase)
+                .lineLimit(1)
+            Rectangle().fill(primaryColor.opacity(0.18)).frame(maxWidth: min(width * 0.72, 420), maxHeight: 1)
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                digit(parts.hour, size: size * 1.02, emphasis: clock.resolvedHourEmphasis, forceDesign: .serif)
+                Text(clock.resolvedSeparator.glyph).font(clockFont(size: size * 0.72, weight: .light, forceDesign: .serif)).foregroundStyle(separatorColor)
+                digit(parts.minute, size: size * 1.02, emphasis: clock.resolvedMinuteEmphasis, forceDesign: .serif)
             }
-            Text("Clock").font(style.font(scale: scale))
         }
+    }
+
+    @ViewBuilder private func terminalTime(parts: ClockTimeParts, family: ClockLayoutFamily) -> some View {
+        let size = timeFontSize(for: family) * 0.86
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("›").font(.system(size: size * 0.68, weight: .bold, design: .monospaced)).foregroundStyle(accentColor)
+            Text(rawTime(parts: parts, family: family))
+                .font(.system(size: size, weight: .medium, design: .monospaced))
+                .foregroundStyle(primaryColor)
+                .tracking(max(0, clock.resolvedTracking))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+            if family == .wide || family == .large || family == .hero {
+                Text(timeZone.abbreviation() ?? "LOCAL").font(.system(size: max(8, size * 0.23), weight: .medium, design: .monospaced)).foregroundStyle(secondaryColor)
+            }
+        }
+    }
+
+    @ViewBuilder private func lcdTime(parts: ClockTimeParts, date: Date, family: ClockLayoutFamily) -> some View {
+        let size = timeFontSize(for: family) * 0.88
+        Text(rawTime(parts: parts, family: family))
+            .font(.system(size: size, weight: .medium, design: .monospaced))
+            .foregroundStyle(accentColor.opacity(0.95))
+            .monospacedDigit()
+            .tracking(max(1, clock.resolvedTracking))
+            .padding(.horizontal, max(10, size * 0.18)).padding(.vertical, max(7, size * 0.10))
+            .background(accentColor.opacity(0.055), in: RoundedRectangle(cornerRadius: max(8, size * 0.11), style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: max(8, size * 0.11)).stroke(accentColor.opacity(0.16), lineWidth: 1))
+            .shadow(color: accentColor.opacity(0.10), radius: 10)
+            .contentTransition(.numericText())
+    }
+
+    @ViewBuilder private func dotMatrixTime(parts: ClockTimeParts, date: Date, family: ClockLayoutFamily) -> some View {
+        let size = timeFontSize(for: family) * 0.82
+        Text(rawTime(parts: parts, family: family))
+            .font(.system(size: size, weight: .medium, design: .monospaced))
+            .foregroundStyle(primaryColor)
+            .monospacedDigit()
+            .tracking(max(2, clock.resolvedTracking + 2))
+            .padding(.horizontal, max(10, size * 0.16)).padding(.vertical, max(7, size * 0.10))
+            .background { ClockDotMatrixBackdrop().clipShape(RoundedRectangle(cornerRadius: 10)) }
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(primaryColor.opacity(0.10), lineWidth: 1))
+            .contentTransition(.numericText())
+    }
+
+    @ViewBuilder private func outlineTime(parts: ClockTimeParts, date: Date, family: ClockLayoutFamily) -> some View {
+        let size = timeFontSize(for: family) * 0.90
+        Text(rawTime(parts: parts, family: family))
+            .font(clockFont(size: size, weight: .medium))
+            .foregroundStyle(primaryColor.opacity(0.90))
+            .monospacedDigit()
+            .tracking(clock.resolvedTracking)
+            .padding(.horizontal, max(12, size * 0.22)).padding(.vertical, max(7, size * 0.10))
+            .overlay(RoundedRectangle(cornerRadius: max(10, size * 0.15), style: .continuous).stroke(primaryColor.opacity(0.28), lineWidth: 1.2))
+            .contentTransition(.numericText())
+    }
+
+    @ViewBuilder private func oversizedTime(parts: ClockTimeParts, date: Date, family: ClockLayoutFamily) -> some View {
+        let size = min(height * 0.58, width * (family == .hero ? 0.13 : family == .wide ? 0.16 : 0.23)) * CGFloat(clock.resolvedTimeScale)
+        Text(rawTime(parts: parts, family: family))
+            .font(clockFont(size: max(24, size), weight: .bold))
+            .foregroundStyle(primaryColor)
+            .tracking(min(-1, clock.resolvedTracking - 1))
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.55)
+            .contentTransition(.numericText())
+    }
+
+    private func rawTime(parts: ClockTimeParts, family: ClockLayoutFamily) -> String {
+        var result = parts.hour + clock.resolvedSeparator.glyph + parts.minute
+        if shouldShowSeconds(in: family) { result += clock.resolvedSeparator.glyph + parts.second }
+        if !clock.twentyFourHour && clock.resolvedShowAMPM && family != .micro { result += " " + parts.ampm }
+        return result
+    }
+
+    private func analogDiameter(for family: ClockLayoutFamily) -> CGFloat {
+        let multiplier: CGFloat
+        switch family { case .micro: multiplier = 0.82; case .horizontalCompact: multiplier = 0.82; case .verticalCompact: multiplier = 0.86; case .standard: multiplier = 0.74; case .wide: multiplier = 0.80; case .tall: multiplier = 0.76; case .large: multiplier = 0.66; case .hero: multiplier = 0.62 }
+        return max(44, min(width, height) * multiplier)
+    }
+
+    private enum DateDetail { case micro, short, medium, full }
+
+    private func adaptiveDate(_ date: Date, detail: DateDetail) -> String {
+        guard clock.showDate else { return "" }
+        var calendar = Calendar.autoupdatingCurrent
+        calendar.timeZone = timeZone
+        let advanced = clock.showWeekday != nil || clock.showDay != nil || clock.showMonth != nil || clock.showYear != nil || clock.dateOrder != nil || clock.monthStyle != nil || clock.weekdayStyle != nil
+        if !advanced {
+            let formatter = DateFormatter()
+            formatter.locale = .autoupdatingCurrent
+            formatter.timeZone = timeZone
+            switch detail {
+            case .micro: formatter.dateFormat = "EEE d"
+            case .short: formatter.dateFormat = "EEE, MMM d"
+            case .medium:
+                switch style.resolvedContent.clockDateStyle {
+                case .weekdayMonthDay: formatter.dateFormat = "EEE, MMM d"
+                case .monthDay: formatter.dateFormat = "MMM d"
+                case .full: formatter.dateFormat = "EEEE, MMMM d"
+                case .numeric: formatter.dateStyle = .short; formatter.timeStyle = .none
+                }
+            case .full:
+                formatter.dateFormat = style.resolvedContent.clockDateStyle == .numeric ? "yyyy-MM-dd" : "EEEE, MMMM d"
+            }
+            return applyDateCase(formatter.string(from: date))
+        }
+
+        let weekdayFormatter = DateFormatter(); weekdayFormatter.locale = .autoupdatingCurrent; weekdayFormatter.timeZone = timeZone
+        let monthFormatter = DateFormatter(); monthFormatter.locale = .autoupdatingCurrent; monthFormatter.timeZone = timeZone
+        let forceShort = detail == .micro || detail == .short
+        weekdayFormatter.dateFormat = forceShort || clock.resolvedWeekdayStyle == .short ? "EEE" : "EEEE"
+        switch clock.resolvedMonthStyle {
+        case .short: monthFormatter.dateFormat = "MMM"
+        case .full: monthFormatter.dateFormat = forceShort ? "MMM" : "MMMM"
+        case .numeric: monthFormatter.dateFormat = "MM"
+        }
+        let weekday = weekdayFormatter.string(from: date)
+        let month = monthFormatter.string(from: date)
+        let day = String(calendar.component(.day, from: date))
+        let year = String(calendar.component(.year, from: date))
+        var pieces: [String] = []
+        let addWeekday = clock.resolvedShowWeekday
+        let addDay = clock.resolvedShowDay
+        let addMonth = clock.resolvedShowMonth
+        let addYear = clock.resolvedShowYear && detail != .micro && detail != .short
+        switch clock.resolvedDateOrder {
+        case .weekdayMonthDay:
+            if addWeekday { pieces.append(weekday) }; if addMonth { pieces.append(month) }; if addDay { pieces.append(day) }; if addYear { pieces.append(year) }
+        case .monthDayYear:
+            if addMonth { pieces.append(month) }; if addDay { pieces.append(day) }; if addYear { pieces.append(year) }; if addWeekday && detail == .full { pieces.append(weekday) }
+        case .dayMonthYear:
+            if addDay { pieces.append(day) }; if addMonth { pieces.append(month) }; if addYear { pieces.append(year) }; if addWeekday && detail == .full { pieces.append(weekday) }
+        case .yearMonthDay:
+            if addYear { pieces.append(year) }; if addMonth { pieces.append(month) }; if addDay { pieces.append(day) }; if addWeekday && detail == .full { pieces.append(weekday) }
+        case .monthDayWeekday:
+            if addMonth { pieces.append(month) }; if addDay { pieces.append(day) }; if addWeekday { pieces.append(weekday) }; if addYear { pieces.append(year) }
+        }
+        if detail == .micro { pieces = Array(pieces.prefix(2)) }
+        return applyDateCase(pieces.joined(separator: detail == .full ? " · " : " "))
+    }
+
+    private func applyDateCase(_ value: String) -> String {
+        switch clock.resolvedDateTextCase { case .natural: return value; case .uppercase: return value.uppercased(); case .lowercase: return value.lowercased() }
+    }
+
+    private func enabledComplications() -> [ClockComplication] {
+        if let override = sizeOverride?.complications { return override }
+        let enabled = Set(clock.resolvedEnabledComplications)
+        return clock.resolvedComplicationPriority.filter { enabled.contains($0) }
+    }
+
+    private func visibleComplications(date: Date) -> [ClockComplication] {
+        let source = enabledComplications().filter { complicationAvailable($0, date: date) }
+        return Array(source.prefix(family.complicationCapacity))
+    }
+
+    private func complicationAvailable(_ complication: ClockComplication, date: Date) -> Bool {
+        switch complication {
+        case .date, .day: return clock.showDate
+        case .seconds: return clock.showSeconds
+        case .timezone, .location, .utcOffset, .weekNumber: return true
+        case .nextEvent: return nextEvent(at: date) != nil
+        case .timer: return store?.deadline != nil || (store?.pausedSeconds ?? 0) > 0
+        case .weather: return weatherSummary?.isEmpty == false
+        case .temperature: return temperatureText?.isEmpty == false
+        case .battery: return workspace?.system.battery != nil
+        case .sunrise: return sunrise != nil
+        case .sunset: return sunset != nil
+        case .worldClocks: return !clock.resolvedWorldTimeZones.isEmpty
+        }
+    }
+
+    private func nextEvent(at date: Date) -> EKEvent? {
+        workspace?.calendar.upcomingEvents.first { $0.endDate > date }
+    }
+
+    private func complicationValue(_ complication: ClockComplication, date: Date) -> String {
+        switch complication {
+        case .date: return adaptiveDate(date, detail: family == .hero || family == .large ? .full : .short)
+        case .day:
+            let formatter = DateFormatter(); formatter.locale = .autoupdatingCurrent; formatter.timeZone = timeZone; formatter.dateFormat = family == .micro ? "EEE" : "EEEE"; return applyDateCase(formatter.string(from: date))
+        case .seconds:
+            var calendar = Calendar(identifier: .gregorian); calendar.timeZone = timeZone; return String(format: "%02d", calendar.component(.second, from: date))
+        case .timezone: return timeZone.abbreviation(for: date) ?? timeZone.identifier
+        case .location:
+            if let label = clock.locationLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty { return label }
+            return timeZone.identifier.split(separator: "/").last.map { String($0).replacingOccurrences(of: "_", with: " ") } ?? timeZone.identifier
+        case .utcOffset:
+            let seconds = timeZone.secondsFromGMT(for: date); let sign = seconds < 0 ? "−" : "+"; let value = abs(seconds); return String(format: "UTC%@%02d:%02d", sign, value / 3600, value / 60 % 60)
+        case .weekNumber:
+            var calendar = Calendar.autoupdatingCurrent; calendar.timeZone = timeZone; return "Week \(calendar.component(.weekOfYear, from: date))"
+        case .nextEvent:
+            guard let event = nextEvent(at: date) else { return "" }
+            let formatter = DateFormatter(); formatter.locale = .autoupdatingCurrent; formatter.timeZone = timeZone; formatter.timeStyle = .short
+            return "\(event.title ?? "Event") · \(formatter.string(from: event.startDate))"
+        case .timer:
+            if let deadline = store?.deadline { return formatDuration(max(0, deadline.timeIntervalSince(date))) }
+            if let paused = store?.pausedSeconds, paused > 0 { return "Paused · \(formatDuration(paused))" }
+            return ""
+        case .weather: return weatherSummary ?? ""
+        case .temperature: return temperatureText ?? ""
+        case .battery:
+            guard let battery = workspace?.system.battery else { return "" }
+            return workspace?.system.charging == true ? "\(battery)% · Charging" : "\(battery)%"
+        case .sunrise: return solarTime(sunrise)
+        case .sunset: return solarTime(sunset)
+        case .worldClocks:
+            return clock.resolvedWorldTimeZones.prefix(3).compactMap { identifier in
+                guard let zone = TimeZone(identifier: identifier) else { return nil }
+                let formatter = DateFormatter(); formatter.timeZone = zone; formatter.dateFormat = clock.twentyFourHour ? "HH:mm" : "h:mm a"
+                let label = identifier.split(separator: "/").last.map { String($0).replacingOccurrences(of: "_", with: " ") } ?? identifier
+                return "\(label) \(formatter.string(from: date))"
+            }.joined(separator: "  ·  ")
+        }
+    }
+
+    private func solarTime(_ value: Date?) -> String {
+        guard let value else { return "" }
+        let formatter = DateFormatter(); formatter.locale = .autoupdatingCurrent; formatter.timeZone = timeZone; formatter.timeStyle = .short
+        return formatter.string(from: value)
+    }
+
+    private func complicationLabel(_ complication: ClockComplication) -> String {
+        switch complication {
+        case .nextEvent: return "NEXT"
+        case .worldClocks: return "WORLD CLOCKS"
+        case .utcOffset: return "OFFSET"
+        case .weekNumber: return "WEEK"
+        default: return complication.title.uppercased()
+        }
+    }
+
+    @ViewBuilder private func compactComplication(_ complication: ClockComplication, date: Date, horizontal: Bool) -> some View {
+        let value = complicationValue(complication, date: date)
+        if !value.isEmpty {
+            VStack(alignment: horizontal ? .trailing : .center, spacing: 2) {
+                if family != .horizontalCompact && family != .verticalCompact {
+                    Text(complicationLabel(complication))
+                        .font(clockFont(size: max(7, secondaryFontSize(for: family) * 0.70), weight: .semibold))
+                        .tracking(0.8)
+                        .foregroundStyle(secondaryColor.opacity(0.72))
+                }
+                Text(value)
+                    .font(clockFont(size: secondaryFontSize(for: family), weight: complication == .date ? .medium : .regular))
+                    .foregroundStyle(complication == .date ? secondaryColor.opacity(0.92) : secondaryColor)
+                    .lineLimit(complication == .nextEvent ? 2 : 1)
+                    .minimumScaleFactor(0.72)
+                    .multilineTextAlignment(horizontal ? .trailing : .center)
+            }
+        }
+    }
+
+    @ViewBuilder private func complicationRow(_ complications: [ClockComplication], date: Date, limit: Int) -> some View {
+        if !complications.isEmpty {
+            HStack(alignment: .top, spacing: max(12, width * 0.035)) {
+                ForEach(Array(complications.prefix(limit)), id: \.self) { complication in
+                    let value = complicationValue(complication, date: date)
+                    if !value.isEmpty {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label(complicationLabel(complication), systemImage: complication.symbol)
+                                .font(clockFont(size: max(7, secondaryFontSize(for: family) * 0.66), weight: .semibold))
+                                .foregroundStyle(secondaryColor.opacity(0.68))
+                                .labelStyle(.titleAndIcon)
+                            Text(value)
+                                .font(clockFont(size: secondaryFontSize(for: family), weight: .medium))
+                                .foregroundStyle(secondaryColor)
+                                .lineLimit(complication == .nextEvent ? 2 : 1)
+                                .minimumScaleFactor(0.72)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
+        }
+    }
+
+    @ViewBuilder private func largeHeader(date: Date, complications: [ClockComplication]) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            if clock.showDate {
+                Text(adaptiveDate(date, detail: .full))
+                    .font(clockFont(size: dateFontSize(for: family), weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(secondaryColor)
+                    .lineLimit(1).minimumScaleFactor(0.75)
+            }
+            Spacer(minLength: 12)
+            if complications.contains(.location) || complications.contains(.timezone) {
+                Text(complicationValue(complications.contains(.location) ? .location : .timezone, date: date))
+                    .font(clockFont(size: secondaryFontSize(for: family), weight: .medium))
+                    .foregroundStyle(secondaryColor)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    @ViewBuilder private func heroClock(date: Date, complications: [ClockComplication]) -> some View {
+        if visualStyle == .analog {
+            HStack(spacing: max(28, width * 0.055)) {
+                AdaptiveAnalogClockFace(date: date, style: style, clock: clock, diameter: min(height * 0.78, width * 0.42), showSeconds: shouldShowSeconds(in: .hero))
+                    .matchedGeometryEffect(id: "clock-primary", in: clockNamespace)
+                VStack(alignment: .leading, spacing: 14) {
+                    largeHeader(date: date, complications: complications)
+                    Spacer(minLength: 0)
+                    complicationRow(complications, date: date, limit: 6)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            VStack(spacing: 0) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(adaptiveDate(date, detail: .full))
+                        .font(clockFont(size: max(11, dateFontSize(for: .hero) * 0.92), weight: .semibold))
+                        .tracking(1.1)
+                        .foregroundStyle(secondaryColor)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(complicationValue(.location, date: date))
+                        .font(clockFont(size: max(10, secondaryFontSize(for: .hero)), weight: .semibold))
+                        .tracking(0.8)
+                        .foregroundStyle(secondaryColor)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 14)
+                primaryClock(date: date, family: .hero)
+                    .matchedGeometryEffect(id: "clock-primary", in: clockNamespace)
+                Spacer(minLength: 18)
+                complicationRow(complications.filter { $0 != .date && $0 != .location }, date: date, limit: 6)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let value = max(0, Int(seconds.rounded()))
+        if value >= 3600 { return String(format: "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60) }
+        return String(format: "%02d:%02d", value / 60, value % 60)
     }
 }
