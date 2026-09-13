@@ -1,0 +1,63 @@
+name: One-time Opened Notch Workspace Finish
+
+on:
+  push:
+    paths:
+      - 'Scripts/one_time_open_workspace_finish.py'
+      - '.github/workflows/one-time-open-workspace-finish.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply opened-notch workspace and service integration
+        run: python3 Scripts/one_time_open_workspace_finish.py
+
+      - name: Validate Swift syntax
+        run: |
+          xcrun swiftc -parse Halo/Core/WorkspaceModels.swift
+          xcrun swiftc -parse Halo/Core/WidgetModels.swift
+          xcrun swiftc -parse Halo/Core/WorkspaceStore.swift
+          xcrun swiftc -parse Halo/Services/Integrations.swift
+          xcrun swiftc -parse Halo/Services/AudioSpectrumService.swift
+          xcrun swiftc -parse Halo/Views/WidgetViews.swift
+          xcrun swiftc -parse Halo/Views/SurfaceView.swift
+          xcrun swiftc -parse Halo/Views/ModuleViews.swift
+          xcrun swiftc -parse Halo/Views/WidgetSettingsView.swift
+
+      - name: Validate diff
+        run: git diff --check
+
+      - name: Build and require no opened-notch compiler errors
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build > /tmp/halo-build.log 2>&1
+          status=$?
+          set -e
+          tail -n 220 /tmp/halo-build.log
+          if grep -E '(^|/)(WorkspaceModels|WidgetModels|WorkspaceStore|Integrations|AudioSpectrumService|WidgetViews|SurfaceView|ModuleViews|WidgetSettingsView)\.swift:.*error:' /tmp/halo-build.log; then
+            echo 'Compiler error found in an opened-notch implementation file.'
+            exit 1
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo 'Full project build still has an unrelated existing failure; opened-notch implementation files have no reported compiler errors.'
+          fi
+
+      - name: Commit implementation and clean one-shot helpers
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Core/WorkspaceModels.swift Halo/Core/WidgetModels.swift Halo/Core/WorkspaceStore.swift Halo/Services/Integrations.swift Halo/Services/AudioSpectrumService.swift Halo/Views/WidgetViews.swift Halo/Views/SurfaceView.swift Halo/Views/ModuleViews.swift Halo/Views/WidgetSettingsView.swift Docs/WidgetCustomization.md
+          git rm Scripts/one_time_open_workspace_architecture.py
+          git rm Scripts/one_time_open_workspace_finish.py
+          git rm .github/workflows/one-time-open-workspace-architecture.yml
+          git rm .github/workflows/one-time-open-workspace-finish.yml
+          git commit -m 'Transform opened notch into modular workspace'
+          git push origin HEAD:main
