@@ -526,6 +526,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo uses ScreenCaptureKit to analyze system audio for optional music-reactive visual effects. Halo does not save or transmit screen content.";
 				MARKETING_VERSION = 0.2.0;
+				CURRENT_PROJECT_VERSION = 200;
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
@@ -559,6 +560,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo uses ScreenCaptureKit to analyze system audio for optional music-reactive visual effects. Halo does not save or transmit screen content.";
 				MARKETING_VERSION = 0.2.0;
+				CURRENT_PROJECT_VERSION = 200;
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;

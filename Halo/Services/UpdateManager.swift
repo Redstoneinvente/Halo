@@ -16,15 +16,10 @@ final class HaloUpdateManager: NSObject, ObservableObject {
     @Published private(set) var updateCheckInterval: TimeInterval = 86_400
     @Published private(set) var lastUpdateCheckDate: Date?
 
-    private let controller: SPUStandardUpdaterController
+    private var controller: SPUStandardUpdaterController?
     private var started = false
 
     private override init() {
-        controller = SPUStandardUpdaterController(
-            startingUpdater: false,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
-        )
         super.init()
         evaluateConfiguration()
     }
@@ -51,13 +46,19 @@ final class HaloUpdateManager: NSObject, ObservableObject {
             refresh()
             return
         }
+        let controller = SPUStandardUpdaterController(
+            startingUpdater: false,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
+        self.controller = controller
         controller.startUpdater()
         started = true
         refresh()
     }
 
     func refresh() {
-        guard started else { return }
+        guard started, let controller else { return }
         let updater = controller.updater
         automaticallyChecksForUpdates = updater.automaticallyChecksForUpdates
         automaticallyDownloadsUpdates = updater.automaticallyDownloadsUpdates
@@ -77,30 +78,30 @@ final class HaloUpdateManager: NSObject, ObservableObject {
             return
         }
         if !started { start() }
-        controller.checkForUpdates(nil)
+        controller?.checkForUpdates(nil)
         refresh()
     }
 
     func setAutomaticallyChecksForUpdates(_ enabled: Bool) {
-        guard started else { return }
+        guard started, let controller else { return }
         controller.updater.automaticallyChecksForUpdates = enabled
         refresh()
     }
 
     func setAutomaticallyDownloadsUpdates(_ enabled: Bool) {
-        guard started else { return }
+        guard started, let controller else { return }
         controller.updater.automaticallyDownloadsUpdates = enabled
         refresh()
     }
 
     func setSendsSystemProfile(_ enabled: Bool) {
-        guard started else { return }
+        guard started, let controller else { return }
         controller.updater.sendsSystemProfile = enabled
         refresh()
     }
 
     func setUpdateCheckInterval(_ interval: TimeInterval) {
-        guard started else { return }
+        guard started, let controller else { return }
         controller.updater.updateCheckInterval = max(3_600, interval)
         refresh()
     }
