@@ -91,6 +91,7 @@ private struct OpenNotchPresentationEnvironmentKey: EnvironmentKey { static let 
 private struct OpenNotchCompressionEnvironmentKey: EnvironmentKey { static let defaultValue = 0 }
 private struct OpenNotchAvailableWidthEnvironmentKey: EnvironmentKey { static let defaultValue: CGFloat? = nil }
 private struct OpenNotchAvailableHeightEnvironmentKey: EnvironmentKey { static let defaultValue: CGFloat? = nil }
+private struct OpenNotchBlockVerticalAlignmentEnvironmentKey: EnvironmentKey { static let defaultValue: OpenNotchBlockVerticalAlignment = .top }
 extension EnvironmentValues {
     var openNotchPresentation: OpenNotchPresentation {
         get { self[OpenNotchPresentationEnvironmentKey.self] }
@@ -107,6 +108,10 @@ extension EnvironmentValues {
     var openNotchAvailableHeight: CGFloat? {
         get { self[OpenNotchAvailableHeightEnvironmentKey.self] }
         set { self[OpenNotchAvailableHeightEnvironmentKey.self] = newValue }
+    }
+    var openNotchBlockVerticalAlignment: OpenNotchBlockVerticalAlignment {
+        get { self[OpenNotchBlockVerticalAlignmentEnvironmentKey.self] }
+        set { self[OpenNotchBlockVerticalAlignmentEnvironmentKey.self] = newValue }
     }
 }
 
@@ -258,6 +263,7 @@ struct WidgetCard<Content: View>: View {
     var availableWidth: CGFloat? = nil
     @ViewBuilder var content: Content
     @Environment(\.openNotchCompressionLevel) private var compression
+    @Environment(\.openNotchBlockVerticalAlignment) private var blockVerticalAlignment
     private var fittedStyle: WidgetStyle {
         var fitted = style
         switch style.resolvedLayoutMode {
@@ -299,6 +305,19 @@ struct WidgetCard<Content: View>: View {
 
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: fittedStyle.cornerRadius, style: .continuous)
+    }
+    private var contentFrameAlignment: Alignment {
+        switch (blockVerticalAlignment, contentOptions.alignment) {
+        case (.top, .leading): return .topLeading
+        case (.top, .center): return .top
+        case (.top, .trailing): return .topTrailing
+        case (.center, .leading): return .leading
+        case (.center, .center): return .center
+        case (.center, .trailing): return .trailing
+        case (.bottom, .leading): return .bottomLeading
+        case (.bottom, .center): return .bottom
+        case (.bottom, .trailing): return .bottomTrailing
+        }
     }
 
     @ViewBuilder private var cardBackground: some View {
@@ -354,12 +373,12 @@ struct WidgetCard<Content: View>: View {
                 let padding = fittedStyle.padding
                 if compression >= 5 {
                     ScrollView(.vertical) {
-                        styledContent.frame(maxWidth: .infinity, alignment: contentOptions.alignment.alignment)
+                        styledContent.frame(maxWidth: .infinity, alignment: contentFrameAlignment)
                     }
                     .padding(padding).frame(height: max(0, height)).clipped()
                 } else {
                     styledContent
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: contentOptions.alignment.alignment)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: contentFrameAlignment)
                         .padding(padding)
                         .frame(height: max(0, height))
                         .clipped()

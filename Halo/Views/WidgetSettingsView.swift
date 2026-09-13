@@ -947,9 +947,9 @@ struct OpenedNotchWorkspaceEditor: View {
     private func groupPreview(_ group: OpenNotchGroup, region: OpenNotchRegion) -> some View {
         let stack = Group {
             if group.axis == .horizontal {
-                HStack(spacing: min(6, group.spacing)) { itemList(group, region: region) }
+                HStack(spacing: 0) { itemList(group, region: region) }
             } else {
-                VStack(alignment: .leading, spacing: min(6, group.spacing)) { itemList(group, region: region) }
+                VStack(alignment: .leading, spacing: 0) { itemList(group, region: region) }
             }
         }
         return VStack(alignment: .leading, spacing: 4) {
@@ -976,8 +976,11 @@ struct OpenedNotchWorkspaceEditor: View {
         }
         .font(.system(size: 9, weight: item.priority == .alwaysVisible || item.priority == .high ? .semibold : .regular))
         .padding(.horizontal, 6).padding(.vertical, 5)
-        .frame(minWidth: max(42, min(150, item.sizing.preferredWidth * 0.28)), alignment: .leading)
-        .background(selectedItem == item.id ? Color.accentColor.opacity(0.28) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background {
+            if selectedItem == item.id { RoundedRectangle(cornerRadius: 7).fill(Color.accentColor.opacity(0.28)) }
+            else { widgetPreviewBackground(item) }
+        }
         .overlay(alignment: .bottomTrailing) {
             if selectedItem == item.id {
                 Image(systemName: "arrow.down.right.and.arrow.up.left")
@@ -1020,16 +1023,20 @@ struct OpenedNotchWorkspaceEditor: View {
             Picker("Presentation", selection: binding.presentation) { ForEach(OpenNotchPresentation.allCases) { Text($0.rawValue).tag($0) } }
             Picker("Priority", selection: binding.priority) { ForEach(OpenNotchPriority.allCases) { Text($0.rawValue).tag($0) } }
         }
-        Section("Responsive sizing") {
-            Picker("Behavior", selection: binding.sizing.mode) { ForEach(OpenNotchSizingMode.allCases) { Text($0.rawValue).tag($0) } }
-            sizingSlider("Min width", binding.sizing.minimumWidth, 20...1200)
-            sizingSlider("Preferred width", binding.sizing.preferredWidth, 20...1200)
-            sizingSlider("Max width", binding.sizing.maximumWidth, 20...1600)
-            sizingSlider("Min height", binding.sizing.minimumHeight, 18...900)
-            sizingSlider("Preferred height", binding.sizing.preferredHeight, 18...1100)
-            sizingSlider("Max height", binding.sizing.maximumHeight, 18...1400)
+        if let module = item.module {
+            widgetBlockInspector(itemID: item.id, module: module)
+        } else {
+            Section("Responsive sizing") {
+                Picker("Behavior", selection: binding.sizing.mode) { ForEach(OpenNotchSizingMode.allCases) { Text($0.rawValue).tag($0) } }
+                sizingSlider("Min width", binding.sizing.minimumWidth, 20...1200)
+                sizingSlider("Preferred width", binding.sizing.preferredWidth, 20...1200)
+                sizingSlider("Max width", binding.sizing.maximumWidth, 20...1600)
+                sizingSlider("Min height", binding.sizing.minimumHeight, 18...900)
+                sizingSlider("Preferred height", binding.sizing.preferredHeight, 18...1100)
+                sizingSlider("Max height", binding.sizing.maximumHeight, 18...1400)
+            }
+            Section("Element styling") { styleInspector(binding.style) }
         }
-        Section("Element styling") { styleInspector(binding.style) }
         Section("Visibility rules") {
             Picker("Match", selection: binding.visibilityLogic) { ForEach(OpenNotchVisibilityLogic.allCases) { Text($0.rawValue).tag($0) } }
             ForEach(Array(binding.wrappedValue.visibilityRules.enumerated()), id: \.element.id) { index, rule in
@@ -1055,6 +1062,85 @@ struct OpenedNotchWorkspaceEditor: View {
         if item.element == .customImage || item.element == .customGIF { Section("Content") { TextField("Image / GIF path", text: binding.customAssetPath) } }
         if item.element == .button { Section("Content") { TextField("Label", text: binding.buttonLabel); TextField("URL", text: binding.buttonURL) } }
         Section { HStack { Button("Duplicate") { duplicate(item.id) }; Button("New Group") { groupSelectedItem() }; Spacer(); Button("Remove", role: .destructive) { remove(item.id) } } }
+    }
+
+    @ViewBuilder private func widgetBlockInspector(itemID: UUID, module: ModuleID) -> some View {
+        let style = widgetStyleBinding(itemID, module: module)
+        Section("Widget Block") {
+            Picker("Vertical content", selection: itemBinding(itemID).verticalAlignment.withDefault(.center)) {
+                ForEach(OpenNotchBlockVerticalAlignment.allCases) { Text($0.rawValue).tag($0) }
+            }
+            HStack(spacing: 6) {
+                ForEach(WidgetVisualPreset.allCases) { preset in
+                    Button(preset.rawValue) { applyWidgetPreset(preset, itemID: itemID, module: module) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+            }
+            Toggle("Show title", isOn: style.showTitle)
+            Toggle("Show header icon", isOn: Binding(get: { style.wrappedValue.showsHeaderIcon }, set: { style.wrappedValue.showHeaderIcon = $0 }))
+            Picker("Content alignment", selection: style.content.withDefault(WidgetContentOptions()).alignment) {
+                ForEach(WidgetContentAlignment.allCases) { Text($0.title).tag($0) }
+            }
+        }
+        Section("Block Styling") {
+            Picker("Background", selection: Binding(get: { style.wrappedValue.resolvedCardBackgroundStyle }, set: { style.wrappedValue.cardBackgroundStyle = $0 })) {
+                ForEach(WidgetCardBackgroundStyle.allCases) { Text($0.rawValue).tag($0) }
+            }
+            let background = style.wrappedValue.resolvedCardBackgroundStyle
+            if background == .solid || background == .gradient || background == .glass {
+                ColorPicker("Background color", selection: Binding(get: { style.wrappedValue.backgroundColor.color }, set: { style.wrappedValue.backgroundColor = WidgetColor($0) }), supportsOpacity: false)
+            }
+            if background == .gradient {
+                ColorPicker("Second color", selection: Binding(get: { style.wrappedValue.resolvedBackgroundSecondaryColor.color }, set: { style.wrappedValue.backgroundSecondaryColor = WidgetColor($0) }), supportsOpacity: false)
+                PreciseSlider(title: "Gradient angle", value: style.gradientAngle.withDefault(135), range: -180...180, step: 5, suffix: "°")
+            }
+            if background != .none {
+                PreciseSlider(title: "Background opacity", value: style.backgroundOpacity, range: 0...1, step: 0.02, decimals: 2)
+            }
+            Picker("Outline", selection: Binding(get: { style.wrappedValue.resolvedOutlineStyle }, set: { style.wrappedValue.outlineStyle = $0 })) {
+                ForEach(WidgetOutlineStyle.allCases) { Text($0.rawValue).tag($0) }
+            }
+            if style.wrappedValue.resolvedOutlineStyle != .none {
+                ColorPicker("Outline color", selection: Binding(get: { style.wrappedValue.resolvedChrome.borderColor.color }, set: { var chrome = style.wrappedValue.resolvedChrome; chrome.borderColor = WidgetColor($0); style.wrappedValue.chrome = chrome }), supportsOpacity: false)
+                PreciseSlider(title: "Outline width", value: widgetChromeDouble(style, \.borderWidth), range: 0.5...6, step: 0.25, suffix: "pt", decimals: 2)
+                PreciseSlider(title: "Outline opacity", value: widgetChromeDouble(style, \.borderOpacity), range: 0...1, step: 0.05, decimals: 2)
+            }
+            PreciseSlider(title: "Corner radius", value: style.cornerRadius, range: 0...40, step: 1, suffix: "pt")
+            PreciseSlider(title: "Internal padding", value: style.padding, range: 0...32, step: 1, suffix: "pt")
+        }
+        Section("Typography") {
+            Picker("Font", selection: style.fontFamily) { ForEach(WidgetFontFamily.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+            Picker("Weight", selection: style.weight) { ForEach(WidgetFontWeight.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+            PreciseSlider(title: "Base text size", value: style.fontSize, range: 10...40, step: 1, suffix: "pt")
+            ColorPicker("Text", selection: Binding(get: { style.wrappedValue.textColor.color }, set: { style.wrappedValue.textColor = WidgetColor($0) }), supportsOpacity: false)
+            ColorPicker("Accent", selection: Binding(get: { style.wrappedValue.accentColor.color }, set: { style.wrappedValue.accentColor = WidgetColor($0) }), supportsOpacity: false)
+        }
+        Section("Displayed Content") {
+            ForEach(module.widgetElements) { descriptor in
+                let element = widgetElementStyleBinding(itemID, module: module, descriptor: descriptor)
+                DisclosureGroup {
+                    styleInspector(element, defaultVisible: descriptor.defaultVisible)
+                } label: {
+                    Toggle(isOn: Binding(
+                        get: { element.wrappedValue?.visible ?? descriptor.defaultVisible },
+                        set: { visible in
+                            var value = element.wrappedValue ?? WidgetElementStyle()
+                            value.visible = visible
+                            element.wrappedValue = value
+                        }
+                    )) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(descriptor.title)
+                            Text(descriptor.detail).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+        Section {
+            Button("Reset Block to Visual Workspace Defaults") { mutateItem(itemID) { $0.widgetStyle = nil; $0.verticalAlignment = .center } }
+        }
     }
 
     @ViewBuilder private func groupInspector(_ group: OpenNotchGroup) -> some View {
@@ -1168,8 +1254,11 @@ struct OpenedNotchWorkspaceEditor: View {
         }
     }
 
-    @ViewBuilder private func styleInspector(_ optional: Binding<WidgetElementStyle?>) -> some View {
-        let b = Binding<WidgetElementStyle>(get: { optional.wrappedValue ?? WidgetElementStyle() }, set: { optional.wrappedValue = $0 })
+    @ViewBuilder private func styleInspector(_ optional: Binding<WidgetElementStyle?>, defaultVisible: Bool = true) -> some View {
+        let b = Binding<WidgetElementStyle>(get: {
+            if let value = optional.wrappedValue { return value }
+            var value = WidgetElementStyle(); value.visible = defaultVisible; return value
+        }, set: { optional.wrappedValue = $0 })
         Picker("Alignment", selection: Binding(get: { b.wrappedValue.alignment ?? .leading }, set: { b.wrappedValue.alignment = $0 })) { ForEach(WidgetContentAlignment.allCases) { Text($0.title).tag($0) } }
         Picker("Text alignment", selection: Binding(get: { b.wrappedValue.textAlignment ?? .leading }, set: { b.wrappedValue.textAlignment = $0 })) { ForEach(WidgetContentAlignment.allCases) { Text($0.title).tag($0) } }
         PreciseSlider(title: "Scale", value: b.fontScale, range: 0.55...2.5, step: 0.05, suffix: "×", decimals: 2)
@@ -1225,6 +1314,70 @@ struct OpenedNotchWorkspaceEditor: View {
     }
     @ViewBuilder private func interactionPicker(_ title: String, _ value: Binding<OpenNotchInteractionAction>) -> some View { Picker(title, selection: value) { ForEach(OpenNotchInteractionAction.allCases) { Text($0.rawValue).tag($0) } } }
 
+    @ViewBuilder private func widgetPreviewBackground(_ item: OpenNotchItem) -> some View {
+        if let module = item.module {
+            let style = item.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished()
+            let shape = RoundedRectangle(cornerRadius: min(10, style.cornerRadius), style: .continuous)
+            switch style.resolvedCardBackgroundStyle {
+            case .none: shape.fill(Color.white.opacity(0.035))
+            case .solid: shape.fill(style.backgroundColor.color.opacity(max(0.06, style.backgroundOpacity)))
+            case .gradient: shape.fill(LinearGradient(colors: [style.backgroundColor.color.opacity(max(0.08, style.backgroundOpacity)), style.resolvedBackgroundSecondaryColor.color.opacity(max(0.08, style.backgroundOpacity))], startPoint: .leading, endPoint: .trailing))
+            case .glass: shape.fill(.ultraThinMaterial).opacity(max(0.18, style.backgroundOpacity))
+            case .accent: shape.fill(style.accentColor.color.opacity(max(0.08, style.backgroundOpacity)))
+            }
+        } else {
+            RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.08))
+        }
+    }
+
+    private func widgetStyleBinding(_ itemID: UUID, module: ModuleID) -> Binding<WidgetStyle> {
+        Binding(
+            get: { findItem(itemID)?.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished() },
+            set: { replacement in mutateItem(itemID) { $0.widgetStyle = replacement } }
+        )
+    }
+
+    private func widgetElementStyleBinding(_ itemID: UUID, module: ModuleID, descriptor: WidgetElementDescriptor) -> Binding<WidgetElementStyle?> {
+        Binding(
+            get: { findItem(itemID)?.widgetStyle?.elementStyles?[descriptor.key] },
+            set: { replacement in
+                var widget = findItem(itemID)?.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished()
+                if widget.elementStyles == nil { widget.elementStyles = [:] }
+                widget.elementStyles?[descriptor.key] = replacement
+                mutateItem(itemID) { $0.widgetStyle = widget }
+            }
+        )
+    }
+
+    private func widgetChromeDouble(_ style: Binding<WidgetStyle>, _ keyPath: WritableKeyPath<WidgetChromeOptions, Double>) -> Binding<Double> {
+        Binding(get: { style.wrappedValue.resolvedChrome[keyPath: keyPath] }, set: { value in
+            var chrome = style.wrappedValue.resolvedChrome
+            chrome[keyPath: keyPath] = value
+            style.wrappedValue.chrome = chrome
+        })
+    }
+
+    private func applyWidgetPreset(_ preset: WidgetVisualPreset, itemID: UUID, module: ModuleID) {
+        var style = findItem(itemID)?.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished()
+        var chrome = style.resolvedChrome
+        switch preset {
+        case .clean:
+            style.cardBackgroundStyle = .none; style.outlineStyle = .none; style.backgroundOpacity = 0; chrome.shadowOpacity = 0
+        case .glass:
+            style.cardBackgroundStyle = .glass; style.backgroundOpacity = 0.42; style.outlineStyle = .solid; chrome.borderOpacity = 0.13; chrome.borderWidth = 1; chrome.shadowOpacity = 0.10
+        case .filled:
+            style.cardBackgroundStyle = .gradient; style.backgroundOpacity = 0.18; style.backgroundSecondaryColor = style.accentColor; style.outlineStyle = .none; chrome.shadowOpacity = 0.08
+        case .outline:
+            style.cardBackgroundStyle = .none; style.outlineStyle = .solid; chrome.borderColor = style.textColor; chrome.borderOpacity = 0.18; chrome.borderWidth = 1; chrome.shadowOpacity = 0
+        case .floating:
+            style.cardBackgroundStyle = .glass; style.backgroundOpacity = 0.34; style.outlineStyle = .glow; chrome.borderColor = style.accentColor; chrome.borderOpacity = 0.22; chrome.borderWidth = 1; chrome.shadowOpacity = 0.18; chrome.shadowRadius = 14
+        case .minimal:
+            style.cardBackgroundStyle = .none; style.outlineStyle = .none; style.showTitle = false; style.showHeaderIcon = false; style.padding = 6; chrome.shadowOpacity = 0
+        }
+        style.chrome = chrome
+        mutateItem(itemID) { $0.widgetStyle = style }
+    }
+
     private func materialize() { if layout.openNotch == nil { layout.materializeOpenNotchLayout() } }
     private func openBinding() -> Binding<OpenNotchLayout> { Binding(get: { layout.resolvedOpenNotchLayout }, set: { layout.openNotch = $0 }) }
     private func itemBinding(_ id: UUID) -> Binding<OpenNotchItem> { Binding(get: { findItem(id) ?? OpenNotchItem() }, set: { replacement in mutateItem(id) { $0 = replacement } }) }
@@ -1257,7 +1410,7 @@ struct OpenedNotchWorkspaceEditor: View {
             region.placement = placement
             region.padding = OpenNotchInsets()
             region.frame = .full
-            region.groups = [OpenNotchGroup(name: "Region \(open.regions.count + 1)")]
+            region.groups = [OpenNotchGroup(name: "Region \(open.regions.count + 1)", axis: .horizontal)]
             open.regions.append(region)
             applyDefaultArrangement(to: &open)
         }
@@ -1387,7 +1540,7 @@ struct OpenedNotchWorkspaceEditor: View {
     }
     private func addModule(_ module: ModuleID) { var item = OpenNotchItem.moduleItem(module); let gid = defaultGroupID(); mutateOpen { open in append(item, to: gid, open: &open) }; layout.enabled.insert(module); selectedItem = item.id; selectedGroup = gid }
     private func addElement(_ element: OpenNotchElementKind) { let item = OpenNotchItem.elementItem(element); let gid = defaultGroupID(); mutateOpen { open in append(item, to: gid, open: &open) }; selectedItem = item.id; selectedGroup = gid }
-    private func addGroup(regionID: UUID? = nil) { let rid = regionID ?? selectedRegion ?? { ensureRegion(.middleCenter); return opened.regions.first(where: { $0.placement == .middleCenter })?.id }()!; let group = OpenNotchGroup(name: "Group"); mutateOpen { open in if let ri = open.regions.firstIndex(where: { $0.id == rid }) { open.regions[ri].groups.append(group) } }; selectedGroup = group.id; selectedRegion = rid }
+    private func addGroup(regionID: UUID? = nil) { let rid = regionID ?? selectedRegion ?? { ensureRegion(.middleCenter); return opened.regions.first(where: { $0.placement == .middleCenter })?.id }()!; let group = OpenNotchGroup(name: "Group", axis: .horizontal); mutateOpen { open in if let ri = open.regions.firstIndex(where: { $0.id == rid }) { open.regions[ri].groups.append(group) } }; selectedGroup = group.id; selectedRegion = rid }
     private func append(_ item: OpenNotchItem, to groupID: UUID, open: inout OpenNotchLayout) { for ri in open.regions.indices { if let gi = open.regions[ri].groups.firstIndex(where: { $0.id == groupID }) { open.regions[ri].groups[gi].items.append(item); return } } }
     private func remove(_ id: UUID) { mutateOpen { open in for ri in open.regions.indices { for gi in open.regions[ri].groups.indices { open.regions[ri].groups[gi].items.removeAll { $0.id == id } } } }; selectedItem = nil }
     private func duplicate(_ id: UUID) { guard var copy = findItem(id) else { return }; copy.id = UUID(); let gid = selectedGroup ?? defaultGroupID(); mutateOpen { open in append(copy, to: gid, open: &open) }; selectedItem = copy.id }
@@ -1423,5 +1576,12 @@ struct OpenedNotchWorkspaceEditor: View {
             for ri in open.regions.indices { if let gi = open.regions[ri].groups.firstIndex(where: { $0.id == groupID }) { if let target, let index = open.regions[ri].groups[gi].items.firstIndex(where: { $0.id == target }) { open.regions[ri].groups[gi].items.insert(item, at: index) } else { open.regions[ri].groups[gi].items.append(item) }; return } }
         }
         selectedItem = id; selectedGroup = groupID
+    }
+}
+
+
+private extension Binding {
+    func withDefault<T>(_ fallback: T) -> Binding<T> where Value == T? {
+        Binding<T>(get: { wrappedValue ?? fallback }, set: { wrappedValue = $0 })
     }
 }

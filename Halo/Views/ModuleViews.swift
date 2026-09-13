@@ -187,9 +187,23 @@ struct CaptureModuleView: View {
 struct MediaModuleView: View {
     @Environment(\.widgetStyle) private var style
     @Environment(\.openNotchPresentation) private var presentation
+    @Environment(\.openNotchAvailableWidth) private var availableWidth
+    @Environment(\.openNotchAvailableHeight) private var availableHeight
     @ObservedObject var service: MediaService
     let app: String
     private var options: WidgetContentOptions { style.resolvedContent }
+    private var artworkStyle: WidgetElementStyle { style.elementStyle(for: "artwork") }
+    private var compactArtworkSize: CGFloat {
+        let requested = CGFloat(artworkStyle.iconSize ?? 54)
+        return min(max(38, requested), max(38, min(72, (availableHeight ?? 92) * 0.62)))
+    }
+    private var regularArtworkSize: CGFloat {
+        let requested = CGFloat(artworkStyle.iconSize ?? 82)
+        return min(max(52, requested), max(52, min(112, (availableHeight ?? 150) * 0.72)))
+    }
+    private var expandedArtworkHeight: CGFloat {
+        min(240, max(110, (availableHeight ?? 260) * 0.48))
+    }
 
     var body: some View {
         Group {
@@ -206,8 +220,12 @@ struct MediaModuleView: View {
     private var compact: some View {
         HStack(spacing: max(6, options.spacing)) {
             if let image = service.artworkImage {
-                WidgetElement(key: "artwork", defaultPriority: .normal) { Image(nsImage: image).resizable().scaledToFill().frame(width: 38, height: 38).clipShape(RoundedRectangle(cornerRadius: 7)) }
-                    .frame(width: 44)
+                WidgetElement(key: "artwork", defaultPriority: .normal) {
+                    Image(nsImage: image).resizable().scaledToFill()
+                        .frame(width: compactArtworkSize, height: compactArtworkSize)
+                        .clipShape(RoundedRectangle(cornerRadius: min(14, compactArtworkSize * 0.18), style: .continuous))
+                }
+                .frame(width: compactArtworkSize + 6)
             }
             VStack(alignment: .leading, spacing: 2) {
                 WidgetElement(key: "track", defaultPriority: .alwaysVisible) { Text(service.title).lineLimit(1) }
@@ -223,8 +241,12 @@ struct MediaModuleView: View {
     private var regular: some View {
         HStack(alignment: .top, spacing: options.spacing) {
             if let image = service.artworkImage {
-                WidgetElement(key: "artwork", defaultPriority: .normal) { Image(nsImage: image).resizable().scaledToFill().frame(width: 72, height: 72).clipShape(RoundedRectangle(cornerRadius: 10)) }
-                    .frame(width: 78)
+                WidgetElement(key: "artwork", defaultPriority: .normal) {
+                    Image(nsImage: image).resizable().scaledToFill()
+                        .frame(width: regularArtworkSize, height: regularArtworkSize)
+                        .clipShape(RoundedRectangle(cornerRadius: min(18, regularArtworkSize * 0.16), style: .continuous))
+                }
+                .frame(width: regularArtworkSize + 6)
             }
             VStack(alignment: .leading, spacing: max(4, options.spacing * 0.65)) { metadata; progress; controls }
         }
@@ -234,7 +256,9 @@ struct MediaModuleView: View {
         VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
             if let image = service.artworkImage {
                 WidgetElement(key: "artwork", defaultPriority: .normal) {
-                    Image(nsImage: image).resizable().scaledToFill().frame(maxWidth: 260, minHeight: 120, maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 16))
+                    Image(nsImage: image).resizable().scaledToFill()
+                        .frame(maxWidth: min(320, (availableWidth ?? 360) - 24), minHeight: expandedArtworkHeight, maxHeight: expandedArtworkHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
             }
             metadata
@@ -347,7 +371,14 @@ struct CalendarModuleView: View {
     var body: some View {
         let options = style.resolvedContent
         VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
-            if presentation != .compact { WidgetElement(key: "summary") { HStack { Text(Date(), style: .date); Spacer(); Text("\(service.events.count) remaining") } } }
+            WidgetElement(key: "summary") {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Text(Date.now, format: .dateTime.month(.abbreviated)).font(.system(size: 19, weight: .bold, design: .rounded))
+                    Text(Date.now, format: .dateTime.day()).font(.system(size: 14, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(service.events.isEmpty ? "Clear" : "\(service.events.count) upcoming").font(.caption).foregroundStyle(.secondary)
+                }
+            }
             if let next = service.events.first {
                 WidgetElement(key: "nextEvent") {
                     HStack {

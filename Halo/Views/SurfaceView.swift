@@ -1193,7 +1193,7 @@ private struct OpenNotchRegionView: View {
             let groupHeight = max(0, (innerHeight - groupGap * CGFloat(max(0, count - 1))) / CGFloat(count))
             VStack(spacing: groupGap) {
                 ForEach(region.groups) { group in
-                    OpenNotchGroupView(group: group, layout: layout, store: store, constrained: true)
+                    OpenNotchGroupView(group: group, layout: layout, store: store, constrained: true, standardBlocks: true)
                         .frame(width: innerWidth, height: groupHeight)
                         .clipped()
                 }
@@ -1211,6 +1211,7 @@ private struct OpenNotchGroupView: View {
     let layout: WorkspaceLayout
     @ObservedObject var store: AppStore
     var constrained = false
+    var standardBlocks = false
     private var context: OpenNotchRuntimeContext { OpenNotchRuntimeContext(store: store) }
 
     var body: some View {
@@ -1247,17 +1248,19 @@ private struct OpenNotchGroupView: View {
     @ViewBuilder private func stack(items: [OpenNotchItem], spacing: CGFloat, compression: Int,
                                     crossAvailable: CGFloat, lengths: [UUID: CGFloat]) -> some View {
         if group.axis == .horizontal {
-            HStack(alignment: group.alignment.verticalAlignment, spacing: spacing) {
-                ForEach(items) { item in
+            HStack(alignment: group.alignment.verticalAlignment, spacing: standardBlocks ? 0 : spacing) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                     let size = CGSize(width: max(1, lengths[item.id] ?? CGFloat(item.sizing.minimumWidth)), height: max(1, crossAvailable))
                     OpenNotchItemView(item: item, layout: layout, store: store, compression: compression, slotSize: size)
+                    if standardBlocks && index < items.count - 1 { Divider().opacity(0.20).padding(.vertical, 8) }
                 }
             }.frame(maxHeight: .infinity, alignment: group.alignment.horizontalFrameAlignment)
         } else {
-            VStack(alignment: group.alignment.horizontalAlignment, spacing: spacing) {
-                ForEach(items) { item in
+            VStack(alignment: group.alignment.horizontalAlignment, spacing: standardBlocks ? 0 : spacing) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                     let size = CGSize(width: max(1, crossAvailable), height: max(1, lengths[item.id] ?? CGFloat(item.sizing.minimumHeight)))
                     OpenNotchItemView(item: item, layout: layout, store: store, compression: compression, slotSize: size)
+                    if standardBlocks && index < items.count - 1 { Divider().opacity(0.20).padding(.horizontal, 8) }
                 }
             }.frame(maxWidth: .infinity, alignment: group.alignment.horizontalFrameAlignment)
         }
@@ -1281,7 +1284,12 @@ private struct OpenNotchGroupView: View {
     }
     private func allocatedLengths(items: [OpenNotchItem], available: CGFloat, spacing: CGFloat, compression: Int) -> [UUID: CGFloat] {
         guard !items.isEmpty else { return [:] }
-        let usable = max(0, available - spacing * CGFloat(max(0, items.count - 1)))
+        let effectiveSpacing: CGFloat = standardBlocks ? 0 : spacing
+        let usable = max(0, available - effectiveSpacing * CGFloat(max(0, items.count - 1)))
+        if standardBlocks {
+            let share = max(1, usable / CGFloat(items.count))
+            return Dictionary(uniqueKeysWithValues: items.map { ($0.id, share) })
+        }
         var values: [UUID: CGFloat] = [:]
         for item in items {
             let b = bounds(for: item)
@@ -1374,6 +1382,7 @@ private struct OpenNotchItemView: View {
                     .environment(\.openNotchCompressionLevel, compression)
                     .environment(\.openNotchAvailableWidth, slotSize.width)
                     .environment(\.openNotchAvailableHeight, slotSize.height)
+                    .environment(\.openNotchBlockVerticalAlignment, item.resolvedVerticalAlignment)
                 }
             case .element:
                 if let element = item.element {
@@ -1420,7 +1429,7 @@ private struct OpenNotchItemView: View {
     }
     private func adaptedWidgetStyle(presentation: OpenNotchPresentation) -> WidgetStyle {
         guard let module = item.module else { return WidgetStyle() }
-        var style = layout.widgetStyle(for: module)
+        var style = item.widgetStyle ?? layout.widgetStyle(for: module).visualWorkspacePolished()
         // The designed slot owns geometry in the custom workspace. A legacy
         // per-widget width must never push a card outside its region.
         style.width = 0

@@ -272,6 +272,13 @@ enum OpenNotchItemKind: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum OpenNotchBlockVerticalAlignment: String, Codable, CaseIterable, Identifiable {
+    case top = "Top"
+    case center = "Center"
+    case bottom = "Bottom"
+    var id: String { rawValue }
+}
+
 enum OpenNotchElementKind: String, Codable, CaseIterable, Identifiable {
     case clock, date, battery, batteryPercentage, chargingState
     case appIcon, appName, volume, brightness, timer, stopwatch
@@ -419,13 +426,19 @@ struct OpenNotchItem: Codable, Equatable, Identifiable {
     var visibilityLogic: OpenNotchVisibilityLogic = .all
     var visibilityRules: [OpenNotchVisibilityRule] = []
     var style: WidgetElementStyle?
+    // Visual Workspace module instances may override the shared module style without
+    // affecting the legacy opened dashboard or another copy of the same module.
+    var widgetStyle: WidgetStyle?
+    var verticalAlignment: OpenNotchBlockVerticalAlignment?
+    var resolvedVerticalAlignment: OpenNotchBlockVerticalAlignment { verticalAlignment ?? .center }
     var interactions = OpenNotchInteractions()
 
     static func moduleItem(_ module: ModuleID, presentation: OpenNotchPresentation = .automatic,
                            priority: OpenNotchPriority = .normal) -> OpenNotchItem {
         var value = OpenNotchItem()
         value.kind = .module; value.module = module; value.presentation = presentation; value.priority = priority
-        value.sizing = OpenNotchSizing(mode: .flexible, minimumWidth: 150, preferredWidth: 300, maximumWidth: 900,
+        value.verticalAlignment = .center
+        value.sizing = OpenNotchSizing(mode: .fill, minimumWidth: 120, preferredWidth: 300, maximumWidth: 1200,
                                        minimumHeight: 70, preferredHeight: 170, maximumHeight: 720)
         return value
     }
@@ -442,6 +455,7 @@ struct OpenNotchItem: Codable, Equatable, Identifiable {
         var value = self
         value.sizing = try sizing.validated()
         if let style { value.style = try style.validated() }
+        if let widgetStyle { value.widgetStyle = try widgetStyle.validated() }
         value.customText = String(customText.prefix(500))
         value.customIcon = String(customIcon.prefix(120))
         value.customAssetPath = String(customAssetPath.prefix(2048))

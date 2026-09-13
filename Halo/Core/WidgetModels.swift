@@ -486,6 +486,33 @@ struct WidgetStyle: Codable, Equatable {
         return v
     }
 }
+extension WidgetStyle {
+    /// A restrained, integrated default for module blocks inside the Visual Workspace.
+    /// Explicit per-widget choices still win because this is only used to seed/resolve a
+    /// Visual Workspace block that has no item-level override yet.
+    func visualWorkspacePolished() -> WidgetStyle {
+        var value = self
+        value.width = 0
+        value.minimumHeight = 0
+        value.showTitle = false
+        if value.cardBackgroundStyle == nil { value.cardBackgroundStyle = .none }
+        if value.outlineStyle == nil { value.outlineStyle = .none }
+        if value.showHeaderIcon == nil { value.showHeaderIcon = false }
+        value.padding = min(16, max(8, value.padding))
+        value.cornerRadius = min(28, max(14, value.cornerRadius))
+        value.fontSize = min(32, max(12, value.fontSize))
+        var content = value.resolvedContent
+        content.spacing = min(10, max(4, content.spacing * 0.75))
+        content.controlSize = .small
+        content.iconSize = min(18, max(12, content.iconSize))
+        value.content = content
+        var chrome = value.resolvedChrome
+        chrome.shadowOpacity = min(0.18, chrome.shadowOpacity)
+        value.chrome = chrome
+        return value
+    }
+}
+
 enum ClosedNotchItem: String, Codable, CaseIterable, Identifiable {
     case none, clock, date, timer, battery, media, visualizer, mirror, files, activity
     var id: String { rawValue }
