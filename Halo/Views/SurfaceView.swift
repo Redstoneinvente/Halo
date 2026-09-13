@@ -1084,13 +1084,120 @@ private struct OpenNotchWorkspaceView: View {
     var body: some View {
         Group {
             switch mode {
-            case .fixed: fixedCanvas
-            case .scroll: scrollCanvas
-            case .pages: pagesCanvas
+            case .fixed: directFixedCanvas
+            case .scroll: directScrollCanvas
+            case .pages: directPagesCanvas
             }
         }
         .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.86), value: opened)
         .clipped()
+    }
+
+    private var directItems: [OpenNotchItem] {
+        let runtime = OpenNotchRuntimeContext(store: store)
+        return opened.resolvedGridItems.filter(runtime.isVisible)
+    }
+
+    private var directColumns: Int { opened.resolvedGridColumns }
+    private var directRows: Int { opened.requiredGridRows }
+    private var directGap: CGFloat { CGFloat(opened.resolvedGridGap) }
+    private var directPadding: OpenNotchInsets { opened.resolvedGridPadding }
+
+    private var directFixedCanvas: some View {
+        GeometryReader { proxy in
+            let rows = max(1, directRows)
+            directGrid(items: directItems, canvasSize: proxy.size, rows: rows, rowOffset: 0,
+                       fixedCellHeight: nil)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+        }
+    }
+
+    private var directScrollCanvas: some View {
+        GeometryReader { proxy in
+            let rows = max(1, directRows)
+            let padding = directPadding
+            let contentHeight = CGFloat(padding.top + padding.bottom)
+                + CGFloat(rows) * CGFloat(opened.resolvedGridCellHeight)
+                + CGFloat(max(0, rows - 1)) * directGap
+            ScrollView(.vertical) {
+                directGrid(items: directItems, canvasSize: CGSize(width: proxy.size.width, height: contentHeight),
+                           rows: rows, rowOffset: 0, fixedCellHeight: CGFloat(opened.resolvedGridCellHeight))
+                    .frame(width: proxy.size.width, height: contentHeight)
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    private var directPagesCanvas: some View {
+        let rowsPerPage = max(1, opened.resolvedGridRows)
+        let pageCount = max(1, Int(ceil(Double(max(1, directRows)) / Double(rowsPerPage))))
+        let safePage = min(max(0, page), pageCount - 1)
+        return VStack(spacing: 5) {
+            GeometryReader { proxy in
+                let startRow = safePage * rowsPerPage
+                let pageItems = directItems.filter { item in
+                    guard let placement = item.gridPlacement else { return false }
+                    return placement.row < startRow + rowsPerPage && placement.row + placement.rowSpan > startRow
+                }
+                directGrid(items: pageItems, canvasSize: proxy.size, rows: rowsPerPage,
+                           rowOffset: startRow, fixedCellHeight: nil)
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+            }
+            if pageCount > 1 {
+                HStack(spacing: 10) {
+                    Button { page = max(0, safePage - 1) } label: { Image(systemName: "chevron.left") }.disabled(safePage == 0)
+                    Text("Page \(safePage + 1) of \(pageCount)").font(.caption2).foregroundStyle(.secondary)
+                    Button { page = min(pageCount - 1, safePage + 1) } label: { Image(systemName: "chevron.right") }.disabled(safePage == pageCount - 1)
+                }
+                .controlSize(.mini)
+            }
+        }
+    }
+
+    private func directGrid(items: [OpenNotchItem], canvasSize: CGSize, rows: Int,
+                            rowOffset: Int, fixedCellHeight: CGFloat?) -> some View {
+        let padding = directPadding
+        let innerWidth = max(1, canvasSize.width - CGFloat(padding.leading + padding.trailing))
+        let innerHeight = max(1, canvasSize.height - CGFloat(padding.top + padding.bottom))
+        let columns = max(1, directColumns)
+        let safeRows = max(1, rows)
+        let cellWidth = max(1, (innerWidth - directGap * CGFloat(max(0, columns - 1))) / CGFloat(columns))
+        let cellHeight = fixedCellHeight ?? max(1, (innerHeight - directGap * CGFloat(max(0, safeRows - 1))) / CGFloat(safeRows))
+        return ZStack(alignment: .topLeading) {
+            ForEach(items) { item in
+                if let raw = item.gridPlacement {
+                    let placement = raw.clamped(columns: columns)
+                    let localRow = placement.row - rowOffset
+                    let visibleStart = max(0, localRow)
+                    let visibleEnd = min(safeRows, localRow + placement.rowSpan)
+                    if visibleEnd > visibleStart {
+                        let visibleRows = visibleEnd - visibleStart
+                        let width = cellWidth * CGFloat(placement.columnSpan) + directGap * CGFloat(max(0, placement.columnSpan - 1))
+                        let height = cellHeight * CGFloat(visibleRows) + directGap * CGFloat(max(0, visibleRows - 1))
+                        let x = CGFloat(padding.leading) + CGFloat(placement.column) * (cellWidth + directGap)
+                        let y = CGFloat(padding.top) + CGFloat(visibleStart) * (cellHeight + directGap)
+                        let slot = CGSize(width: max(1, width), height: max(1, height))
+                        OpenNotchItemView(item: item, layout: layout, store: store,
+                                          compression: compressionForDirectSlot(slot), slotSize: slot)
+                            .frame(width: slot.width, height: slot.height)
+                            .position(x: x + slot.width / 2, y: y + slot.height / 2)
+                    }
+                }
+            }
+        }
+        .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
+    }
+
+    private func compressionForDirectSlot(_ size: CGSize) -> Int {
+        let widthRatio = size.width / 300
+        let heightRatio = size.height / 180
+        let ratio = min(widthRatio, heightRatio)
+        if ratio >= 1 { return 0 }
+        if ratio >= 0.82 { return 1 }
+        if ratio >= 0.66 { return 2 }
+        if ratio >= 0.50 { return 3 }
+        if ratio >= 0.36 { return 4 }
+        return 5
     }
 
     @ViewBuilder private var fixedCanvas: some View {
@@ -1536,6 +1643,26 @@ private struct OpenNotchItemView: View {
             content.mediaTitleLines = 1
             content.maxItems = min(1, content.maxItems)
             content.calendarShowJoin = false
+        }
+        if compression >= 5 || slotSize.width < 125 || slotSize.height < 68 {
+            style.showTitle = false
+            style.showHeaderIcon = false
+            style.padding = min(style.padding, 2)
+            style.fontSize = min(style.fontSize, 11)
+            content.spacing = min(content.spacing, 2)
+            content.controlSize = .mini
+            content.maxItems = 1
+            content.showSecondaryText = false
+            content.showStatus = false
+            content.showFooter = false
+            content.showQuickActions = false
+            content.showSearch = false
+            content.mediaShowArtist = false
+            content.mediaShowSource = false
+            content.calendarShowTimes = false
+            content.calendarShowJoin = false
+            content.shelfShowDetails = false
+            content.activitiesShowDetail = false
         }
         style.content = content
         return style

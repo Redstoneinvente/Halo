@@ -26,6 +26,7 @@ struct ModuleRegistry {
 struct IntegrationModuleView: View {
     @Environment(\.widgetStyle) private var style
     @Environment(\.openNotchPresentation) private var presentation
+    @Environment(\.openNotchAvailableHeight) private var availableHeight
     let id: ModuleID
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
@@ -113,7 +114,14 @@ struct IntegrationModuleView: View {
             } }
             WidgetElement(key: "editor", defaultPriority: .high) {
                 TextEditor(text: $workspace.settings.notes)
-                    .frame(height: presentation == .compact ? min(52, options.notesHeight) : presentation == .expanded ? max(140, options.notesHeight) : options.notesHeight)
+                    .frame(height: {
+                        let available = max(34, (availableHeight ?? options.notesHeight) - (presentation == .compact ? 10 : 44))
+                        switch presentation {
+                        case .compact: return min(58, available)
+                        case .expanded: return min(max(90, options.notesHeight), available)
+                        case .regular, .automatic: return min(options.notesHeight, available)
+                        }
+                    }())
                     .accessibilityLabel("Quick note")
             }
             if presentation == .expanded { WidgetElement(key: "actions", defaultVisible: false, defaultPriority: .low) {
@@ -209,13 +217,38 @@ struct MediaModuleView: View {
     var body: some View {
         Group {
             switch presentation {
-            case .compact: compact
+            case .compact:
+                if (availableWidth ?? 200) < 150 || (availableHeight ?? 100) < 82 { microCompact }
+                else { compact }
             case .expanded: expanded
             case .regular, .automatic: regular
             }
         }
         .frame(maxWidth: .infinity, alignment: options.alignment.alignment)
         .onAppear { service.setArtworkEnabled(true) }
+    }
+
+    private var microCompact: some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 5) {
+                if let image = service.artworkImage {
+                    Image(nsImage: image).resizable().scaledToFill()
+                        .frame(width: min(38, max(26, (availableHeight ?? 70) * 0.38)),
+                               height: min(38, max(26, (availableHeight ?? 70) * 0.38)))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                Text(service.title).font(.system(size: 10, weight: .semibold)).lineLimit(2).minimumScaleFactor(0.7)
+                Spacer(minLength: 0)
+            }
+            if options.showControls, service.connectedApp != nil {
+                Button { service.perform("playpause", app: app) } label: {
+                    Image(systemName: service.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var compact: some View {

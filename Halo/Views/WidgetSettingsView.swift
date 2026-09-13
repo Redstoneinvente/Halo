@@ -770,9 +770,14 @@ struct OpenedNotchWorkspaceEditor: View {
                 ForEach(OpenNotchPreset.allCases) { Text($0.rawValue).tag($0) }
             }.frame(width: 190)
             Menu { addMenu } label: { Label("Add", systemImage: "plus") }
-            if opened.resolvedContentMode == .fixed {
-                Menu { regionArrangementMenu } label: { Label("Regions", systemImage: "rectangle.3.group") }
-            }
+            Menu {
+                Button("4 × 3") { setGrid(columns: 4, rows: 3) }
+                Button("6 × 3") { setGrid(columns: 6, rows: 3) }
+                Button("6 × 4") { setGrid(columns: 6, rows: 4) }
+                Button("8 × 4") { setGrid(columns: 8, rows: 4) }
+                Divider()
+                Button("Auto Pack Widgets") { repackGrid() }
+            } label: { Label("Grid", systemImage: "square.grid.3x3") }
             Button { duplicateSelected() } label: { Image(systemName: "plus.square.on.square") }.disabled(selectedItem == nil).help("Duplicate selected item")
             Button { backgroundMode = true; selectedItem = nil; selectedGroup = nil; selectedRegion = nil } label: { Image(systemName: "paintbrush") }.help("Opened surface appearance")
             Spacer()
@@ -782,11 +787,8 @@ struct OpenedNotchWorkspaceEditor: View {
     }
 
     @ViewBuilder private var addMenu: some View {
-        Menu("Module") { ForEach(ModuleID.allCases) { module in Button(module.title) { addModule(module) } } }
+        Menu("Widget") { ForEach(ModuleID.allCases) { module in Button(module.title) { addModule(module) } } }
         Menu("Lightweight element") { ForEach(OpenNotchElementKind.allCases) { element in Button(element.title) { addElement(element) } } }
-        Divider()
-        Button("Group") { addGroup() }
-        Button("Region") { addRegion() }.disabled(opened.regions.count >= 9)
     }
 
     @ViewBuilder private var regionArrangementMenu: some View {
@@ -832,41 +834,124 @@ struct OpenedNotchWorkspaceEditor: View {
     private var preview: some View {
         VStack(spacing: 10) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) { Text("Opened Notch").font(.headline); Text(opened.preset.rawValue).font(.caption).foregroundStyle(.secondary) }
-                Spacer(); Text("Drag items between regions · drag corner to resize").font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Opened Notch").font(.headline)
+                    Text("\(opened.resolvedGridColumns) columns · \(max(opened.resolvedGridRows, opened.requiredGridRows)) rows")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("Drag a widget onto a grid cell · choose its standard size in the inspector")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .fill(Color.black.opacity(0.92))
                 .overlay {
                     GeometryReader { proxy in
-                        let inset: CGFloat = 14
-                        let canvasSize = CGSize(width: max(1, proxy.size.width - inset * 2), height: max(1, proxy.size.height - inset * 2))
-                        if opened.regions.isEmpty {
-                            VStack(spacing: 10) {
-                                Image(systemName: "rectangle.dashed").font(.system(size: 28, weight: .light)).foregroundStyle(.secondary)
-                                Text("No regions").font(.headline)
-                                Text("This workspace is intentionally empty.").font(.caption).foregroundStyle(.secondary)
-                                Button("Add Region") { addRegion() }.buttonStyle(.borderedProminent)
-                            }
-                            .frame(width: canvasSize.width, height: canvasSize.height)
-                            .padding(inset)
-                        } else if opened.resolvedContentMode == .fixed && opened.usesFreeformRegions {
-                            freeformPreview(canvasSize: canvasSize)
-                                .padding(inset)
-                        } else {
-                            let heights = editorTrackSizes(total: canvasSize.height, weights: editorRowWeights, gap: 8)
-                            VStack(spacing: 8) {
-                                editorRow([.topLeft, .topCenter, .topRight], height: heights[0], totalWidth: canvasSize.width)
-                                editorRow([.middleLeft, .middleCenter, .middleRight], height: heights[1], totalWidth: canvasSize.width)
-                                editorRow([.bottomLeft, .bottomCenter, .bottomRight], height: heights[2], totalWidth: canvasSize.width)
-                            }
-                            .padding(inset)
-                        }
+                        directGridPreview(canvasSize: proxy.size)
                     }
                 }
                 .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.12)))
                 .frame(width: 610, height: 470)
                 .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.84), value: opened)
+        }
+    }
+
+    private func directGridPreview(canvasSize: CGSize) -> some View {
+        let padding: CGFloat = 14
+        let columns = opened.resolvedGridColumns
+        let rows = max(opened.resolvedGridRows, opened.requiredGridRows)
+        let gap = max(2, CGFloat(opened.resolvedGridGap) * 0.65)
+        let innerWidth = max(1, canvasSize.width - padding * 2)
+        let innerHeight = max(1, canvasSize.height - padding * 2)
+        let cellWidth = max(1, (innerWidth - gap * CGFloat(max(0, columns - 1))) / CGFloat(columns))
+        let cellHeight = max(1, (innerHeight - gap * CGFloat(max(0, rows - 1))) / CGFloat(max(1, rows)))
+        let items = opened.resolvedGridItems
+        return ZStack(alignment: .topLeading) {
+            Canvas { context, _ in
+                for column in 0...columns {
+                    let x = padding + CGFloat(column) * (cellWidth + gap) - (column == columns ? gap : 0)
+                    var path = Path(); path.move(to: CGPoint(x: x, y: padding)); path.addLine(to: CGPoint(x: x, y: canvasSize.height - padding))
+                    context.stroke(path, with: .color(.white.opacity(0.045)), lineWidth: 0.5)
+                }
+                for row in 0...rows {
+                    let y = padding + CGFloat(row) * (cellHeight + gap) - (row == rows ? gap : 0)
+                    var path = Path(); path.move(to: CGPoint(x: padding, y: y)); path.addLine(to: CGPoint(x: canvasSize.width - padding, y: y))
+                    context.stroke(path, with: .color(.white.opacity(0.045)), lineWidth: 0.5)
+                }
+            }
+            .allowsHitTesting(false)
+
+            ForEach(0..<(columns * rows), id: \.self) { index in
+                let column = index % columns
+                let row = index / columns
+                Color.clear
+                    .contentShape(Rectangle())
+                    .frame(width: cellWidth, height: cellHeight)
+                    .position(x: padding + CGFloat(column) * (cellWidth + gap) + cellWidth / 2,
+                              y: padding + CGFloat(row) * (cellHeight + gap) + cellHeight / 2)
+                    .onDrop(of: [UTType.text], isTargeted: nil) { providers in
+                        acceptGridDrop(providers, column: column, row: row)
+                    }
+            }
+
+            ForEach(items) { item in
+                if let raw = item.gridPlacement {
+                    let placement = raw.clamped(columns: columns)
+                    let width = cellWidth * CGFloat(placement.columnSpan) + gap * CGFloat(max(0, placement.columnSpan - 1))
+                    let height = cellHeight * CGFloat(placement.rowSpan) + gap * CGFloat(max(0, placement.rowSpan - 1))
+                    let x = padding + CGFloat(placement.column) * (cellWidth + gap)
+                    let y = padding + CGFloat(placement.row) * (cellHeight + gap)
+                    gridItemPreview(item, size: CGSize(width: width, height: height))
+                        .frame(width: width, height: height)
+                        .position(x: x + width / 2, y: y + height / 2)
+                }
+            }
+
+            if items.isEmpty {
+                VStack(spacing: 9) {
+                    Image(systemName: "square.grid.3x3").font(.system(size: 28, weight: .light)).foregroundStyle(.secondary)
+                    Text("Empty workspace").font(.headline)
+                    Text("Add widgets directly to the grid.").font(.caption).foregroundStyle(.secondary)
+                    Menu("Add Widget") { ForEach(ModuleID.allCases) { module in Button(module.title) { addModule(module) } } }
+                        .buttonStyle(.borderedProminent)
+                }
+                .frame(width: canvasSize.width, height: canvasSize.height)
+            }
+        }
+        .frame(width: canvasSize.width, height: canvasSize.height)
+        .clipped()
+    }
+
+    private func gridItemPreview(_ item: OpenNotchItem, size: CGSize) -> some View {
+        let label = item.module?.title ?? item.element?.title ?? item.kind.rawValue.capitalized
+        let selected = selectedItem == item.id
+        let placement = item.gridPlacement ?? OpenNotchGridPlacement()
+        let shape = RoundedRectangle(cornerRadius: min(14, max(7, min(size.width, size.height) * 0.10)), style: .continuous)
+        return ZStack {
+            widgetPreviewBackground(item)
+            VStack(spacing: 5) {
+                Image(systemName: item.module?.symbol ?? item.element?.symbol ?? "rectangle")
+                    .font(.system(size: min(24, max(12, min(size.width, size.height) * 0.18)), weight: .semibold))
+                Text(label).font(.system(size: 10, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.7)
+                Text("\(placement.columnSpan)×\(placement.rowSpan)")
+                    .font(.system(size: 8, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
+            }
+            .padding(5)
+        }
+        .clipShape(shape)
+        .overlay(shape.stroke(selected ? Color.accentColor.opacity(0.85) : Color.white.opacity(0.10), lineWidth: selected ? 2 : 1))
+        .contentShape(Rectangle())
+        .onTapGesture { selectedItem = item.id; selectedGroup = nil; selectedRegion = nil; backgroundMode = false }
+        .onDrag { NSItemProvider(object: item.id.uuidString as NSString) }
+        .contextMenu {
+            Menu("Size") {
+                ForEach(OpenNotchGridSizePreset.allCases.filter { $0 != .custom }) { preset in
+                    Button(preset.rawValue) { applyGridSize(preset, to: item.id) }
+                }
+            }
+            Button("Duplicate") { duplicate(item.id) }
+            Divider()
+            Button("Remove", role: .destructive) { remove(item.id) }
         }
     }
 
@@ -1043,10 +1128,18 @@ struct OpenedNotchWorkspaceEditor: View {
             else if let group = selectedGroup.flatMap(findGroup) { groupInspector(group) }
             else if let region = selectedRegion.flatMap(findRegion) { regionInspector(region) }
             else {
-                Section("Opened workspace") {
-                    Text("Select an item, group, or region in the preview. Drag modules between regions and use the resize handle on a selected item.").foregroundStyle(.secondary)
-                    Button("Customize Surface Appearance") { backgroundMode = true }
+                Section("Visual Workspace Grid") {
+                    Stepper("Columns: \(opened.resolvedGridColumns)", value: gridColumnsBinding, in: 2...12)
+                    Stepper("Rows: \(opened.resolvedGridRows)", value: gridRowsBinding, in: 1...12)
+                    PreciseSlider(title: "Grid gap", value: gridGapBinding, range: 0...32, step: 1, suffix: "pt")
+                    if opened.resolvedContentMode == .scroll {
+                        PreciseSlider(title: "Scroll cell height", value: gridCellHeightBinding, range: 56...320, step: 2, suffix: "pt")
+                    }
+                    Button("Auto Pack Widgets") { repackGrid() }
+                    Text("Widgets use standard grid footprints. Their contents automatically switch presentation, density and detail based on the actual pixel space produced by that footprint.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
+                Section { Button("Customize Surface Appearance") { backgroundMode = true } }
             }
         }.formStyle(.grouped).scrollContentBackground(.hidden)
     }
@@ -1058,6 +1151,20 @@ struct OpenedNotchWorkspaceEditor: View {
             Toggle("Visible", isOn: Binding(get: { !binding.wrappedValue.hidden }, set: { binding.wrappedValue.hidden = !$0 }))
             Picker("Presentation", selection: binding.presentation) { ForEach(OpenNotchPresentation.allCases) { Text($0.rawValue).tag($0) } }
             Picker("Priority", selection: binding.priority) { ForEach(OpenNotchPriority.allCases) { Text($0.rawValue).tag($0) } }
+        }
+        Section("Grid Size & Position") {
+            Picker("Standard size", selection: gridSizePresetBinding(item.id)) {
+                ForEach(OpenNotchGridSizePreset.allCases) { Text($0.rawValue).tag($0) }
+            }
+            let placement = gridPlacementBinding(item.id)
+            Stepper("Width: \(placement.wrappedValue.columnSpan) column\(placement.wrappedValue.columnSpan == 1 ? "" : "s")",
+                    value: placement.columnSpan, in: 1...opened.resolvedGridColumns)
+            Stepper("Height: \(placement.wrappedValue.rowSpan) row\(placement.wrappedValue.rowSpan == 1 ? "" : "s")",
+                    value: placement.rowSpan, in: 1...12)
+            Divider()
+            Stepper("Column: \(placement.wrappedValue.column + 1)", value: placement.column,
+                    in: 0...max(0, opened.resolvedGridColumns - placement.wrappedValue.columnSpan))
+            Stepper("Row: \(placement.wrappedValue.row + 1)", value: placement.row, in: 0...48)
         }
         if let module = item.module {
             widgetBlockInspector(itemID: item.id, module: module)
@@ -1097,7 +1204,7 @@ struct OpenedNotchWorkspaceEditor: View {
         if item.element == .customIcon { Section("Content") { TextField("SF Symbol", text: binding.customIcon) } }
         if item.element == .customImage || item.element == .customGIF { Section("Content") { TextField("Image / GIF path", text: binding.customAssetPath) } }
         if item.element == .button { Section("Content") { TextField("Label", text: binding.buttonLabel); TextField("URL", text: binding.buttonURL) } }
-        Section { HStack { Button("Duplicate") { duplicate(item.id) }; Button("New Group") { groupSelectedItem() }; Spacer(); Button("Remove", role: .destructive) { remove(item.id) } } }
+        Section { HStack { Button("Duplicate") { duplicate(item.id) }; Spacer(); Button("Remove", role: .destructive) { remove(item.id) } } }
     }
 
     @ViewBuilder private func widgetBlockInspector(itemID: UUID, module: ModuleID) -> some View {
@@ -1433,17 +1540,29 @@ struct OpenedNotchWorkspaceEditor: View {
         mutateItem(itemID) { $0.widgetStyle = style }
     }
 
-    private func materialize() { if layout.openNotch == nil { layout.materializeOpenNotchLayout() } }
+    private func materialize() {
+        if layout.openNotch == nil { layout.materializeOpenNotchLayout() }
+        var value = layout.resolvedOpenNotchLayout
+        value.materializeGridItems()
+        layout.openNotch = value
+    }
     private func openBinding() -> Binding<OpenNotchLayout> { Binding(get: { layout.resolvedOpenNotchLayout }, set: { layout.openNotch = $0 }) }
     private func itemBinding(_ id: UUID) -> Binding<OpenNotchItem> { Binding(get: { findItem(id) ?? OpenNotchItem() }, set: { replacement in mutateItem(id) { $0 = replacement } }) }
     private func groupBinding(_ id: UUID) -> Binding<OpenNotchGroup> { Binding(get: { findGroup(id) ?? OpenNotchGroup() }, set: { replacement in mutateOpen { open in for ri in open.regions.indices { if let gi = open.regions[ri].groups.firstIndex(where: { $0.id == id }) { open.regions[ri].groups[gi] = replacement; return } } } }) }
     private func regionBinding(_ id: UUID) -> Binding<OpenNotchRegion> { Binding(get: { findRegion(id) ?? OpenNotchRegion() }, set: { replacement in mutateOpen { open in if let i = open.regions.firstIndex(where: { $0.id == id }) { open.regions[i] = replacement } } }) }
     private func ruleBinding(_ itemID: UUID, index: Int) -> Binding<OpenNotchVisibilityRule> { Binding(get: { findItem(itemID)?.visibilityRules.indices.contains(index) == true ? findItem(itemID)!.visibilityRules[index] : OpenNotchVisibilityRule() }, set: { replacement in mutateItem(itemID) { if $0.visibilityRules.indices.contains(index) { $0.visibilityRules[index] = replacement } } }) }
-    private func findItem(_ id: UUID) -> OpenNotchItem? { opened.allItems.first { $0.id == id } }
+    private func findItem(_ id: UUID) -> OpenNotchItem? { opened.resolvedGridItems.first { $0.id == id } }
     private func findGroup(_ id: UUID) -> OpenNotchGroup? { opened.regions.flatMap(\.groups).first { $0.id == id } }
     private func findRegion(_ id: UUID) -> OpenNotchRegion? { opened.regions.first { $0.id == id } }
     private func mutateOpen(_ body: (inout OpenNotchLayout) -> Void) { var value = opened; body(&value); value.preset = .custom; layout.openNotch = value }
-    private func mutateItem(_ id: UUID, _ body: (inout OpenNotchItem) -> Void) { mutateOpen { open in for ri in open.regions.indices { for gi in open.regions[ri].groups.indices { if let ii = open.regions[ri].groups[gi].items.firstIndex(where: { $0.id == id }) { body(&open.regions[ri].groups[gi].items[ii]); return } } } } }
+    private func mutateItem(_ id: UUID, _ body: (inout OpenNotchItem) -> Void) {
+        mutateOpen { open in
+            open.materializeGridItems()
+            guard let index = open.gridItems?.firstIndex(where: { $0.id == id }) else { return }
+            body(&open.gridItems![index])
+            open.normalizeGridItems(pinnedID: id)
+        }
+    }
     private func removeRule(_ id: UUID, index: Int) { mutateItem(id) { if $0.visibilityRules.indices.contains(index) { $0.visibilityRules.remove(at: index) } } }
 
     private func ensureRegion(_ placement: OpenNotchRegionPlacement, select: Bool = false) {
@@ -1593,16 +1712,110 @@ struct OpenedNotchWorkspaceEditor: View {
         if let id = opened.regions.first(where: { $0.placement == .middleCenter })?.groups.first?.id { return id }
         let id = UUID(); mutateOpen { open in if let ri = open.regions.firstIndex(where: { $0.placement == .middleCenter }) { open.regions[ri].groups.append(OpenNotchGroup(id: id, name: "Main")) } }; return id
     }
-    private func addModule(_ module: ModuleID) { var item = OpenNotchItem.moduleItem(module); let gid = defaultGroupID(); mutateOpen { open in append(item, to: gid, open: &open) }; layout.enabled.insert(module); selectedItem = item.id; selectedGroup = gid }
-    private func addElement(_ element: OpenNotchElementKind) { let item = OpenNotchItem.elementItem(element); let gid = defaultGroupID(); mutateOpen { open in append(item, to: gid, open: &open) }; selectedItem = item.id; selectedGroup = gid }
+    private func addModule(_ module: ModuleID) {
+        var item = OpenNotchItem.moduleItem(module)
+        mutateOpen { open in
+            open.materializeGridItems()
+            open.gridItems?.append(item)
+            open.normalizeGridItems(pinnedID: item.id)
+        }
+        layout.enabled.insert(module)
+        selectedItem = item.id; selectedGroup = nil; selectedRegion = nil
+    }
+    private func addElement(_ element: OpenNotchElementKind) {
+        let item = OpenNotchItem.elementItem(element)
+        mutateOpen { open in
+            open.materializeGridItems()
+            open.gridItems?.append(item)
+            open.normalizeGridItems(pinnedID: item.id)
+        }
+        selectedItem = item.id; selectedGroup = nil; selectedRegion = nil
+    }
     private func addGroup(regionID: UUID? = nil) { let rid = regionID ?? selectedRegion ?? { ensureRegion(.middleCenter); return opened.regions.first(where: { $0.placement == .middleCenter })?.id }()!; let group = OpenNotchGroup(name: "Group", axis: .horizontal); mutateOpen { open in if let ri = open.regions.firstIndex(where: { $0.id == rid }) { open.regions[ri].groups.append(group) } }; selectedGroup = group.id; selectedRegion = rid }
     private func append(_ item: OpenNotchItem, to groupID: UUID, open: inout OpenNotchLayout) { for ri in open.regions.indices { if let gi = open.regions[ri].groups.firstIndex(where: { $0.id == groupID }) { open.regions[ri].groups[gi].items.append(item); return } } }
-    private func remove(_ id: UUID) { mutateOpen { open in for ri in open.regions.indices { for gi in open.regions[ri].groups.indices { open.regions[ri].groups[gi].items.removeAll { $0.id == id } } } }; selectedItem = nil }
-    private func duplicate(_ id: UUID) { guard var copy = findItem(id) else { return }; copy.id = UUID(); let gid = selectedGroup ?? defaultGroupID(); mutateOpen { open in append(copy, to: gid, open: &open) }; selectedItem = copy.id }
+    private func remove(_ id: UUID) {
+        mutateOpen { open in open.materializeGridItems(); open.gridItems?.removeAll { $0.id == id }; open.normalizeGridItems() }
+        selectedItem = nil
+    }
+    private func duplicate(_ id: UUID) {
+        guard var copy = findItem(id) else { return }
+        copy.id = UUID(); copy.gridPlacement = nil
+        mutateOpen { open in open.materializeGridItems(); open.gridItems?.append(copy); open.normalizeGridItems(pinnedID: copy.id) }
+        selectedItem = copy.id
+    }
     private func duplicateSelected() { if let selectedItem { duplicate(selectedItem) } }
     private func groupSelectedItem() { guard let id = selectedItem, let item = findItem(id) else { return }; let regionID = selectedRegion ?? opened.regions.first?.id; guard let regionID else { return }; let group = OpenNotchGroup(name: "Group", items: [item]); mutateOpen { open in for ri in open.regions.indices { for gi in open.regions[ri].groups.indices { open.regions[ri].groups[gi].items.removeAll { $0.id == id } }; if open.regions[ri].id == regionID { open.regions[ri].groups.append(group) } } }; selectedGroup = group.id }
     private func resize(_ id: UUID, translation: CGSize) { mutateItem(id) { item in item.sizing.mode = .flexible; item.sizing.preferredWidth = min(item.sizing.maximumWidth, max(item.sizing.minimumWidth, item.sizing.preferredWidth + translation.width * 0.08)); item.sizing.preferredHeight = min(item.sizing.maximumHeight, max(item.sizing.minimumHeight, item.sizing.preferredHeight + translation.height * 0.08)) } }
-    private func applyPreset(_ preset: OpenNotchPreset) { guard preset != .custom else { mutateOpen { $0.preset = .custom }; return }; layout.applyOpenNotchPreset(preset); selectedItem = nil; selectedGroup = nil; selectedRegion = nil }
+    private func applyPreset(_ preset: OpenNotchPreset) {
+        guard preset != .custom else { mutateOpen { $0.preset = .custom }; return }
+        layout.applyOpenNotchPreset(preset)
+        selectedItem = nil; selectedGroup = nil; selectedRegion = nil
+    }
+
+    private var gridColumnsBinding: Binding<Int> {
+        Binding(get: { opened.resolvedGridColumns }, set: { value in
+            mutateOpen { open in open.gridColumns = value; open.materializeGridItems(); open.normalizeGridItems() }
+        })
+    }
+    private var gridRowsBinding: Binding<Int> {
+        Binding(get: { opened.resolvedGridRows }, set: { value in mutateOpen { $0.gridRows = value } })
+    }
+    private var gridGapBinding: Binding<Double> {
+        Binding(get: { opened.resolvedGridGap }, set: { value in mutateOpen { $0.gridGap = value } })
+    }
+    private var gridCellHeightBinding: Binding<Double> {
+        Binding(get: { opened.resolvedGridCellHeight }, set: { value in mutateOpen { $0.gridCellHeight = value } })
+    }
+    private func gridPlacementBinding(_ id: UUID) -> Binding<OpenNotchGridPlacement> {
+        Binding(get: { findItem(id)?.gridPlacement ?? OpenNotchGridPlacement() }, set: { replacement in
+            mutateItem(id) { $0.gridPlacement = replacement.clamped(columns: opened.resolvedGridColumns) }
+        })
+    }
+    private func gridSizePresetBinding(_ id: UUID) -> Binding<OpenNotchGridSizePreset> {
+        Binding(get: {
+            let p = findItem(id)?.gridPlacement ?? OpenNotchGridPlacement()
+            return .matching(columns: p.columnSpan, rows: p.rowSpan)
+        }, set: { preset in applyGridSize(preset, to: id) })
+    }
+    private func applyGridSize(_ preset: OpenNotchGridSizePreset, to id: UUID) {
+        guard let span = preset.span else { return }
+        mutateItem(id) { item in
+            var placement = item.gridPlacement ?? OpenNotchGridPlacement()
+            placement.columnSpan = min(opened.resolvedGridColumns, span.columns)
+            placement.rowSpan = span.rows
+            item.gridPlacement = placement
+        }
+    }
+    private func setGrid(columns: Int, rows: Int) {
+        mutateOpen { open in
+            open.gridColumns = columns; open.gridRows = rows
+            open.materializeGridItems(); open.normalizeGridItems(pinnedID: selectedItem)
+        }
+    }
+    private func repackGrid() {
+        mutateOpen { open in
+            open.materializeGridItems()
+            if open.gridItems != nil {
+                for index in open.gridItems!.indices { open.gridItems![index].gridPlacement = nil }
+            }
+            open.normalizeGridItems()
+        }
+    }
+    private func acceptGridDrop(_ providers: [NSItemProvider], column: Int, row: Int) -> Bool {
+        guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }
+        provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard let text = object as? String, let id = UUID(uuidString: text) else { return }
+            DispatchQueue.main.async {
+                mutateItem(id) { item in
+                    var placement = item.gridPlacement ?? OpenNotchGridPlacement()
+                    placement.column = column; placement.row = row
+                    item.gridPlacement = placement
+                }
+                selectedItem = id; selectedGroup = nil; selectedRegion = nil
+            }
+        }
+        return true
+    }
 
     private func acceptDrop(_ providers: [NSItemProvider], placement: OpenNotchRegionPlacement) -> Bool {
         guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }

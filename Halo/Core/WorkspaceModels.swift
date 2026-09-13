@@ -137,6 +137,7 @@ struct WorkspaceLayout: Codable, Equatable {
 
     mutating func materializeOpenNotchLayout() {
         if openNotch == nil { openNotch = resolvedOpenNotchLayout }
+        openNotch?.materializeGridItems()
     }
 
     mutating func setCustomOpenNotchWorkspaceEnabled(_ enabled: Bool) {
@@ -146,6 +147,7 @@ struct WorkspaceLayout: Codable, Equatable {
 
     mutating func applyOpenNotchPreset(_ preset: OpenNotchPreset) {
         openNotch = OpenNotchLayout.made(preset)
+        openNotch?.materializeGridItems()
         let modules = openNotch?.allItems.compactMap(\.module) ?? []
         enabled.formUnion(modules)
     }
@@ -249,6 +251,64 @@ struct OpenNotchSizing: Codable, Equatable {
         v.maximumHeight = min(1400, max(v.minimumHeight, maximumHeight))
         v.preferredHeight = min(v.maximumHeight, max(v.minimumHeight, preferredHeight))
         return v
+    }
+}
+
+enum OpenNotchGridSizePreset: String, Codable, CaseIterable, Identifiable {
+    case oneByOne = "1×1"
+    case twoByOne = "2×1"
+    case oneByTwo = "1×2"
+    case twoByTwo = "2×2"
+    case threeByOne = "3×1"
+    case threeByTwo = "3×2"
+    case twoByThree = "2×3"
+    case threeByThree = "3×3"
+    case fourByTwo = "4×2"
+    case fourByThree = "4×3"
+    case custom = "Custom"
+    var id: String { rawValue }
+    var span: (columns: Int, rows: Int)? {
+        switch self {
+        case .oneByOne: return (1, 1)
+        case .twoByOne: return (2, 1)
+        case .oneByTwo: return (1, 2)
+        case .twoByTwo: return (2, 2)
+        case .threeByOne: return (3, 1)
+        case .threeByTwo: return (3, 2)
+        case .twoByThree: return (2, 3)
+        case .threeByThree: return (3, 3)
+        case .fourByTwo: return (4, 2)
+        case .fourByThree: return (4, 3)
+        case .custom: return nil
+        }
+    }
+    static func matching(columns: Int, rows: Int) -> OpenNotchGridSizePreset {
+        allCases.first { $0.span?.columns == columns && $0.span?.rows == rows } ?? .custom
+    }
+}
+
+struct OpenNotchGridPlacement: Codable, Equatable {
+    var column = 0
+    var row = 0
+    var columnSpan = 2
+    var rowSpan = 1
+
+    func clamped(columns: Int) -> OpenNotchGridPlacement {
+        let columnCount = max(1, columns)
+        var value = self
+        value.columnSpan = min(columnCount, max(1, columnSpan))
+        value.rowSpan = min(12, max(1, rowSpan))
+        value.column = min(max(0, columnCount - value.columnSpan), max(0, column))
+        value.row = min(48, max(0, row))
+        return value
+    }
+    func validated() throws -> OpenNotchGridPlacement {
+        var value = self
+        value.column = min(48, max(0, column))
+        value.row = min(48, max(0, row))
+        value.columnSpan = min(12, max(1, columnSpan))
+        value.rowSpan = min(12, max(1, rowSpan))
+        return value
     }
 }
 
@@ -423,6 +483,9 @@ struct OpenNotchItem: Codable, Equatable, Identifiable {
     var buttonURL = ""
     var hidden = false
     var sizing = OpenNotchSizing()
+    // Visual Workspace v2 places items directly on a grid. Optional keeps every
+    // region-based saved workspace decodable and migratable.
+    var gridPlacement: OpenNotchGridPlacement?
     var presentation: OpenNotchPresentation = .automatic
     var priority: OpenNotchPriority = .normal
     var visibilityLogic: OpenNotchVisibilityLogic = .all
@@ -456,6 +519,7 @@ struct OpenNotchItem: Codable, Equatable, Identifiable {
     func validated() throws -> OpenNotchItem {
         var value = self
         value.sizing = try sizing.validated()
+        value.gridPlacement = try gridPlacement?.validated()
         if let style { value.style = try style.validated() }
         if let widgetStyle { value.widgetStyle = try widgetStyle.validated() }
         value.customText = String(customText.prefix(500))
@@ -621,6 +685,14 @@ struct OpenNotchLayout: Codable, Equatable {
     // opened-notch Fixed / Scroll / Pages setting.
     var contentMode: OpenNotchContentMode?
     var regions: [OpenNotchRegion] = []
+    // Visual Workspace v2. Items live directly on a standard grid; regions/groups
+    // remain only as a backwards-compatible migration source.
+    var gridItems: [OpenNotchItem]?
+    var gridColumns: Int?
+    var gridRows: Int?
+    var gridGap: Double?
+    var gridCellHeight: Double?
+    var gridPadding: OpenNotchInsets?
     // Relative track weights for left/center/right and top/middle/bottom.
     // Optional fields preserve the first custom-workspace archive format.
     var columnWeights: [Double]?
@@ -631,7 +703,114 @@ struct OpenNotchLayout: Codable, Equatable {
     var resolvedColumnWeights: [Double] { Self.resolvedTrackWeights(columnWeights) }
     var resolvedRowWeights: [Double] { Self.resolvedTrackWeights(rowWeights) }
     var usesFreeformRegions: Bool { regions.contains { $0.frame != nil } }
-    var allItems: [OpenNotchItem] { regions.flatMap(\.groups).flatMap(\.items) }
+    var resolvedGridColumns: Int { min(12, max(2, gridColumns ?? 4)) }
+    var resolvedGridRows: Int { min(12, max(1, gridRows ?? 3)) }
+    var resolvedGridGap: Double {
+        let value = gridGap ?? 8
+        return value.isFinite ? min(32, max(0, value)) : 8
+    }
+    var resolvedGridCellHeight: Double {
+        let value = gridCellHeight ?? 104
+        return value.isFinite ? min(320, max(56, value)) : 104
+    }
+    var resolvedGridPadding: OpenNotchInsets { gridPadding ?? OpenNotchInsets(top: 8, leading: 8, bottom: 8, trailing: 8) }
+    var allItems: [OpenNotchItem] { gridItems ?? regions.flatMap(\.groups).flatMap(\.items) }
+    var resolvedGridItems: [OpenNotchItem] {
+        if let gridItems { return gridItems }
+        return Self.packedGridItems(from: regions.flatMap(\.groups).flatMap(\.items), columns: resolvedGridColumns)
+    }
+    var requiredGridRows: Int {
+        max(resolvedGridRows, resolvedGridItems.compactMap { item in
+            item.gridPlacement.map { $0.row + $0.rowSpan }
+        }.max() ?? 0)
+    }
+
+    mutating func materializeGridItems() {
+        if gridItems == nil { gridItems = resolvedGridItems }
+        normalizeGridItems()
+    }
+
+    mutating func normalizeGridItems(pinnedID: UUID? = nil) {
+        guard var items = gridItems else { return }
+        let columns = resolvedGridColumns
+        var occupied = Set<Int>()
+        let ordered: [Int]
+        if let pinnedID, let pinned = items.firstIndex(where: { $0.id == pinnedID }) {
+            ordered = [pinned] + items.indices.filter { $0 != pinned }
+        } else {
+            ordered = Array(items.indices)
+        }
+        for index in ordered {
+            let fallback = Self.defaultGridSpan(for: items[index])
+            var placement = (items[index].gridPlacement ?? OpenNotchGridPlacement(columnSpan: fallback.columns, rowSpan: fallback.rows)).clamped(columns: columns)
+            if !Self.canPlace(placement, columns: columns, occupied: occupied) {
+                placement = Self.firstAvailablePlacement(columnSpan: placement.columnSpan, rowSpan: placement.rowSpan,
+                                                         columns: columns, occupied: occupied)
+            }
+            items[index].gridPlacement = placement
+            Self.mark(placement, columns: columns, occupied: &occupied)
+        }
+        gridItems = items
+    }
+
+    private static func packedGridItems(from source: [OpenNotchItem], columns: Int) -> [OpenNotchItem] {
+        var items = source
+        var occupied = Set<Int>()
+        for index in items.indices {
+            let span = defaultGridSpan(for: items[index])
+            let placement = firstAvailablePlacement(columnSpan: min(columns, span.columns), rowSpan: span.rows,
+                                                    columns: columns, occupied: occupied)
+            items[index].gridPlacement = placement
+            mark(placement, columns: columns, occupied: &occupied)
+        }
+        return items
+    }
+
+    private static func defaultGridSpan(for item: OpenNotchItem) -> (columns: Int, rows: Int) {
+        if let module = item.module {
+            switch module {
+            case .media, .calendar, .system: return (3, 2)
+            case .shelf, .clipboard, .launcher, .activities, .notes: return (2, 2)
+            case .clock, .timer, .audio, .capture, .stopwatch, .developer: return (2, 1)
+            }
+        }
+        switch item.element {
+        case .albumArt, .customImage, .customGIF: return (2, 2)
+        case .playbackControls, .playbackProgress, .customText: return (2, 1)
+        default: return (1, 1)
+        }
+    }
+
+    private static func canPlace(_ placement: OpenNotchGridPlacement, columns: Int, occupied: Set<Int>) -> Bool {
+        guard placement.column >= 0, placement.row >= 0,
+              placement.column + placement.columnSpan <= columns else { return false }
+        for row in placement.row..<(placement.row + placement.rowSpan) {
+            for column in placement.column..<(placement.column + placement.columnSpan) {
+                if occupied.contains(row * 64 + column) { return false }
+            }
+        }
+        return true
+    }
+
+    private static func mark(_ placement: OpenNotchGridPlacement, columns: Int, occupied: inout Set<Int>) {
+        for row in placement.row..<(placement.row + placement.rowSpan) {
+            for column in placement.column..<min(columns, placement.column + placement.columnSpan) {
+                occupied.insert(row * 64 + column)
+            }
+        }
+    }
+
+    private static func firstAvailablePlacement(columnSpan: Int, rowSpan: Int, columns: Int,
+                                                occupied: Set<Int>) -> OpenNotchGridPlacement {
+        let span = min(columns, max(1, columnSpan))
+        for row in 0..<48 {
+            for column in 0...max(0, columns - span) {
+                let candidate = OpenNotchGridPlacement(column: column, row: row, columnSpan: span, rowSpan: max(1, rowSpan))
+                if canPlace(candidate, columns: columns, occupied: occupied) { return candidate }
+            }
+        }
+        return OpenNotchGridPlacement(column: 0, row: 48, columnSpan: span, rowSpan: max(1, rowSpan))
+    }
 
     private static func resolvedTrackWeights(_ saved: [Double]?) -> [Double] {
         var values = Array((saved ?? []).prefix(3))
@@ -767,7 +946,14 @@ struct OpenNotchLayout: Codable, Equatable {
         if let columnWeights { guard columnWeights.allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }; value.columnWeights = Self.resolvedTrackWeights(columnWeights) }
         if let rowWeights { guard rowWeights.allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }; value.rowWeights = Self.resolvedTrackWeights(rowWeights) }
         value.regions = try regions.prefix(9).map { try $0.validated() }
+        value.gridItems = try gridItems.map { try $0.prefix(80).map { try $0.validated() } }
+        if let gridColumns { value.gridColumns = min(12, max(2, gridColumns)) }
+        if let gridRows { value.gridRows = min(12, max(1, gridRows)) }
+        if let gridGap { guard gridGap.isFinite else { throw CocoaError(.fileReadCorruptFile) }; value.gridGap = min(32, max(0, gridGap)) }
+        if let gridCellHeight { guard gridCellHeight.isFinite else { throw CocoaError(.fileReadCorruptFile) }; value.gridCellHeight = min(320, max(56, gridCellHeight)) }
+        value.gridPadding = try gridPadding?.validated()
         value.appearance = try appearance.validated()
+        if value.gridItems != nil { value.normalizeGridItems() }
         return value
     }
 }
