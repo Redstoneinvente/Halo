@@ -16,6 +16,8 @@ struct HaloApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = AppStore()
+    private let updater = HaloUpdateManager.shared
+    private let whatsNew = HaloWhatsNewCoordinator.shared
     private var engine: WindowManager?
     private var hudController: HaloHUDController?
     private var status: NSStatusItem?
@@ -36,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        updater.start()
         NotificationCenter.default.addObserver(self, selector: #selector(openSettings), name: Notification.Name("HaloOpenSettings"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(toggle), name: Notification.Name("HaloToggle"), object: nil)
         configureCommercialAccessGate()
@@ -51,6 +54,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
+        let whatsNewItem = NSMenuItem(title: "What's New…", action: #selector(showWhatsNew), keyEquivalent: "")
+        whatsNewItem.target = self
+        menu.addItem(whatsNewItem)
 
         let hudRoot = NSMenuItem(title: "HUD", action: nil, keyEquivalent: "")
         let hudMenu = NSMenu(title: "HUD")
@@ -104,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if commercialAccessGranted {
             startLicensedServices()
             presentSetupIfNeeded()
+            if setupWindow == nil { whatsNew.presentIfNeeded() }
         } else {
             setupWindow?.orderOut(nil)
             setupWindow = nil
@@ -137,6 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(true, forKey: self.setupCompletedKey)
             window?.close()
             self.setupWindow = nil
+            self.whatsNew.presentIfNeeded()
         })
         setupWindow = window
         NSApp.activate(ignoringOtherApps: true)
@@ -161,6 +173,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggle() { engine?.toggleAll() }
+    @objc private func checkForUpdates() { updater.checkForUpdates() }
+    @objc private func showWhatsNew() { whatsNew.present() }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func previewVolumeHUD() { postHUDPreview("volume") }
     @objc private func previewBrightnessHUD() { postHUDPreview("brightness") }

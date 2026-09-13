@@ -8,6 +8,20 @@
 	<string>Halo reads your calendars to show schedules, holidays, and meeting links. Halo does not modify events.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Halo reads your calendar events when you enable Calendar.</string>
+	<key>SUFeedURL</key>
+	<string>https://halo.redstoneinvente.com/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>$(HALO_SPARKLE_PUBLIC_KEY)</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUScheduledCheckInterval</key>
+	<real>86400</real>
+	<key>SUShowReleaseNotes</key>
+	<true/>
 	<key>HaloFirebaseAPIKey</key>
 	<string>$(HALO_FIREBASE_API_KEY)</string>
 	<key>HaloLicenseSeatProductSlug</key>
