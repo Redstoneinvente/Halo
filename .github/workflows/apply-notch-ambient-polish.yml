@@ -34,9 +34,9 @@ jobs:
           git diff --check
           xcrun swiftc -parse Halo/Views/DecorationsView.swift
 
-          # Prime Xcode's generated Swift asset symbols. The repository has unrelated
-          # compiler-complexity failures, so this preflight is allowed to fail.
-          echo '=== Prime generated sources ==='
+          # Prime Xcode's generated target source list and asset symbols. The repository
+          # has unrelated compiler-complexity failures, so this preflight may fail.
+          echo '=== Prime Xcode target metadata ==='
           set +e
           xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build \
@@ -44,8 +44,9 @@ jobs:
           set -e
 
           GENERATED=$(find build -path '*DerivedSources/GeneratedAssetSymbols.swift' -print -quit)
-          if [[ -z "$GENERATED" ]]; then
-              echo 'GeneratedAssetSymbols.swift was not produced.' >&2
+          SOURCE_LIST=$(find build -path '*Objects-normal/arm64/Halo.SwiftFileList' -print -quit)
+          if [[ -z "$GENERATED" || -z "$SOURCE_LIST" ]]; then
+              echo 'Xcode did not produce the generated symbols/source list required for isolated validation.' >&2
               exit 1
           fi
 
@@ -54,12 +55,12 @@ jobs:
           SDK=$(xcrun --sdk macosx --show-sdk-path)
           declare -a SWIFT_SOURCES=()
           while IFS= read -r source; do
-              absolute="$PWD/$source"
-              if [[ "$absolute" == "$PRIMARY" ]]; then
+              [[ -z "$source" ]] && continue
+              if [[ "$source" == "$PRIMARY" ]]; then
                   continue
               fi
-              SWIFT_SOURCES+=("$absolute")
-          done < <(find Halo -type f -name '*.swift' | sort)
+              SWIFT_SOURCES+=("$source")
+          done < "$SOURCE_LIST"
 
           set +e
           xcrun swiftc -frontend -typecheck \
