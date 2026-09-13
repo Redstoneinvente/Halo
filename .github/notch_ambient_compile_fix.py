@@ -13,19 +13,23 @@ def replace_between(start_marker: str, end_marker: str, replacement: str, label:
         raise SystemExit(f'missing end marker for {label}: {end_marker!r}')
     text = text[:start] + replacement + text[end:]
 
-# 1) Ownership checks: keep each boolean simple so the compiler never has to infer a giant chain.
-replace_between(
-    '    private var filesOwnsNotch: Bool {',
-    '    private var mirrorOwnsNotch:',
-    '''    private var fileShelfOwnsNotch: Bool {
+# 1) File ownership can be absent in some checkouts. Replace it when present; otherwise insert it.
+file_property = '''    private var fileShelfOwnsNotch: Bool {
         guard !store.pinnedFiles.isEmpty else { return false }
         let leftOwnsFiles = closed.left == .files
         let rightOwnsFiles = closed.right == .files
         return leftOwnsFiles || rightOwnsFiles
     }
-''',
-    'file ownership',
-)
+'''
+old_file_marker = '    private var filesOwnsNotch: Bool {'
+mirror_marker = '    private var mirrorOwnsNotch:'
+if old_file_marker in text:
+    replace_between(old_file_marker, mirror_marker, file_property, 'file ownership')
+elif '    private var fileShelfOwnsNotch: Bool {' not in text:
+    mirror = text.find(mirror_marker)
+    if mirror < 0:
+        raise SystemExit('missing mirror ownership insertion point')
+    text = text[:mirror] + file_property + text[mirror:]
 
 replace_between(
     '    private var shouldShow: Bool {',
@@ -79,15 +83,34 @@ replace_between(
     'drawIcicles',
 )
 
-# 3) Mixed Int/Double arithmetic in Black Hole and Portal ring widths.
+# 3) Black Hole ring widths: never mix Int and Double inside CGFloat initializers.
 text = text.replace('width:CGFloat(1.2+(i%3))', 'width: CGFloat(1.2 + Double(i % 3))')
-text = text.replace('width:CGFloat(1.2+(i%2))', 'width: CGFloat(1.2 + Double(i % 2))')
+text = text.replace('width: CGFloat(1.2+(i%3))', 'width: CGFloat(1.2 + Double(i % 3))')
 
-# 4) Portal particle loop: split the giant expression so Swift does not time out type-checking it.
+# 4) Replace the entire Portal case, eliminating both the Int/Double issue and the huge expression.
 replace_between(
-    '            let count=max(4,min(lowPower ? 14:28,Int(5+s.density*24)))',
+    '        case .portal:',
     '        case .reactor:',
-    '''            let maximumParticles: Int = lowPower ? 14 : 28
+    '''        case .portal:
+            let center = CGPoint(x: n.midX, y: n.midY + 5.0)
+            let interaction = cursorInfluence(cursor, point: center, settings: s).strength
+            for i in 0..<7 {
+                let pad = CGFloat(7 + i * 7)
+                let verticalRadius = CGFloat(13 + i * 2)
+                let ringHeight = CGFloat(26 + i * 4)
+                let ringRect = CGRect(
+                    x: center.x - n.width / 2.0 - pad,
+                    y: center.y - verticalRadius,
+                    width: n.width + pad * 2.0,
+                    height: ringHeight
+                )
+                let baseOpacity = 0.25 - Double(i) * 0.022
+                let ringOpacity = intensity * baseOpacity * (1.0 + interaction * 1.3)
+                let ringWidth = CGFloat(1.2 + Double(i % 2))
+                ellipse(&ctx, rect: ringRect, color: c(palette, i).opacity(ringOpacity), fill: false, width: ringWidth)
+            }
+
+            let maximumParticles: Int = lowPower ? 14 : 28
             let particleCount: Int = max(4, min(maximumParticles, Int(5.0 + s.density * 24.0)))
             let portalSpeed: Double = 9.0 + interaction * 6.0
             for i in 0..<particleCount {
@@ -96,18 +119,19 @@ replace_between(
                 let radius = CGFloat(25.0 + rand(i, seed: s.seed, salt: 62) * 80.0)
                 let x = center.x + CGFloat(cos(angle)) * radius
                 let driftInput: Double = phase * portalSpeed + Double(i) * 7.0
-                let drift: Double = driftInput.truncatingRemainder(dividingBy: 18.0)
+                let drift = driftInput.truncatingRemainder(dividingBy: 18.0)
                 let y = center.y + CGFloat(sin(angle)) * radius * 0.36 + CGFloat(drift)
-                let opacity: Double = intensity * (0.58 + interaction * 0.32)
+                let opacity = intensity * (0.58 + interaction * 0.32)
                 let particleRect = CGRect(x: x - 1.0, y: y - 1.0, width: 2.0, height: 2.0)
                 ellipse(&ctx, rect: particleRect, color: c(palette, i).opacity(opacity), fill: true)
             }
 ''',
-    'portal particles',
+    'portal case',
 )
 
-# 5) The lexer interprets `>-` badly here; keep the negative comparison explicit.
+# 5) Fix lexer ambiguity for the negative threshold comparison.
 text = text.replace('sin(phase*1.6)>-0.15', 'sin(phase * 1.6) > -0.15')
+text = text.replace('sin(phase * 1.6)>-0.15', 'sin(phase * 1.6) > -0.15')
 
 p.write_text(text)
 print('Notch Ambient compiler fixes applied')
