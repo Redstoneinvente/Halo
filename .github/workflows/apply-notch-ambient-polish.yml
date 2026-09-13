@@ -15,7 +15,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp .github/notch_ambient_polish.py /tmp/notch_ambient_polish.py
+          cp .github/notch_ambient_polish_v2.py /tmp/notch_ambient_polish.py
           git fetch origin main
           git checkout -B main origin/main
           python3 /tmp/notch_ambient_polish.py
@@ -37,12 +37,12 @@ jobs:
           echo '=== Interaction audit ==='
           grep -q 'case christmasOrnaments = "Christmas Ornaments"' Halo/Views/DecorationsView.swift
           grep -q 'static func placedNotch' Halo/Views/DecorationsView.swift
-          grep -q 'reactionSmoothing' Halo/Views/DecorationsView.swift
           grep -q 'let exponent = max(0.35' Halo/Views/DecorationsView.swift
           grep -q 'drawEdgeGlow.*cursor: cursor' Halo/Views/DecorationsView.swift
           grep -q 'ornaments: true' Halo/Views/DecorationsView.swift
           grep -q 'let interaction=cursorInfluence(cursor,point:center,settings:s).strength' Halo/Views/DecorationsView.swift
           grep -q 'let span = n.width.*s.spacing' Halo/Views/DecorationsView.swift
+          grep -q 'let react=cursorInfluence(cursor,point:tip,settings:s)' Halo/Views/DecorationsView.swift
           echo 'Placement, cursor falloff, hanging variants, moss bending and portal proximity are wired.'
 
           echo '=== Xcode validation ==='
