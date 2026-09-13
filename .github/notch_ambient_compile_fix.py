@@ -3,15 +3,14 @@ from pathlib import Path
 p = Path('Halo/Views/DecorationsView.swift')
 text = p.read_text().replace('\r\n', '\n')
 
-def replace_between(start_marker: str, end_marker: str, replacement: str, label: str):
-    global text
-    start = text.find(start_marker)
+def replace_between(source: str, start_marker: str, end_marker: str, replacement: str, label: str) -> str:
+    start = source.find(start_marker)
     if start < 0:
         raise SystemExit(f'missing start marker for {label}: {start_marker!r}')
-    end = text.find(end_marker, start)
+    end = source.find(end_marker, start)
     if end < 0:
         raise SystemExit(f'missing end marker for {label}: {end_marker!r}')
-    text = text[:start] + replacement + text[end:]
+    return source[:start] + replacement + source[end:]
 
 # 1) File ownership can be absent in some checkouts. Replace it when present; otherwise insert it.
 file_property = '''    private var fileShelfOwnsNotch: Bool {
@@ -24,14 +23,15 @@ file_property = '''    private var fileShelfOwnsNotch: Bool {
 old_file_marker = '    private var filesOwnsNotch: Bool {'
 mirror_marker = '    private var mirrorOwnsNotch:'
 if old_file_marker in text:
-    replace_between(old_file_marker, mirror_marker, file_property, 'file ownership')
+    text = replace_between(text, old_file_marker, mirror_marker, file_property, 'file ownership')
 elif '    private var fileShelfOwnsNotch: Bool {' not in text:
     mirror = text.find(mirror_marker)
     if mirror < 0:
         raise SystemExit('missing mirror ownership insertion point')
     text = text[:mirror] + file_property + text[mirror:]
 
-replace_between(
+text = replace_between(
+    text,
     '    private var shouldShow: Bool {',
     '    private var notchWidth:',
     '''    private var shouldShow: Bool {
@@ -47,7 +47,8 @@ replace_between(
 )
 
 # 2) Icicles: explicit types and no Double + Int arithmetic.
-replace_between(
+text = replace_between(
+    text,
     '    private static func drawIcicles(',
     '    private static func drawNature(',
     '''    private static func drawIcicles(_ ctx: inout GraphicsContext, notch n: CGRect, s: NotchAmbientSettings, phase: Double, intensity: Double, palette: [Color], lowPower: Bool) {
@@ -83,17 +84,68 @@ replace_between(
     'drawIcicles',
 )
 
-# 3) Black Hole ring widths: never mix Int and Double inside CGFloat initializers.
-text = text.replace('width:CGFloat(1.2+(i%3))', 'width: CGFloat(1.2 + Double(i % 3))')
-text = text.replace('width: CGFloat(1.2+(i%3))', 'width: CGFloat(1.2 + Double(i % 3))')
+# 3) Repair Black Hole + Portal ONLY inside drawSpace. Do not touch enum/style switches.
+space_start = text.find('    private static func drawSpace(')
+space_end = text.find('    private static func drawWater(', space_start)
+if space_start < 0 or space_end < 0:
+    raise SystemExit('drawSpace boundaries not found')
+space = text[space_start:space_end]
 
-# 4) Replace the entire Portal case, eliminating both the Int/Double issue and the huge expression.
-replace_between(
+space = replace_between(
+    space,
+    '        case .blackHole:',
+    '        case .portal:',
+    '''        case .blackHole:
+            let center = CGPoint(x: n.midX, y: n.midY + 4.0)
+            for i in 0..<8 {
+                let pad = CGFloat(9 + i * 7)
+                let ringHeight = CGFloat(18 + i * 3)
+                let ringRect = CGRect(
+                    x: center.x - n.width / 2.0 - pad,
+                    y: center.y - ringHeight / 2.0,
+                    width: n.width + pad * 2.0,
+                    height: ringHeight
+                )
+                let ringOpacity = (0.16 - Double(i) * 0.012) * intensity
+                let ringWidth = CGFloat(1.2 + Double(i % 3))
+                ellipse(&ctx, rect: ringRect, color: c(palette, i).opacity(ringOpacity), fill: false, width: ringWidth)
+            }
+
+            let maximumParticles: Int = lowPower ? 18 : 36
+            let particleCount: Int = max(6, min(maximumParticles, Int(8.0 + s.density * 30.0)))
+            for i in 0..<particleCount {
+                let angularSpeed = 0.18 + rand(i, seed: s.seed, salt: 51) * 0.18
+                let angle = phase * angularSpeed + rand(i, seed: s.seed, salt: 52) * Double.pi * 2.0
+                let radiusX = n.width / 2.0 + CGFloat(18.0 + rand(i, seed: s.seed, salt: 53) * 70.0)
+                let radiusY = CGFloat(12.0 + rand(i, seed: s.seed, salt: 54) * 25.0)
+                var point = CGPoint(
+                    x: center.x + CGFloat(cos(angle)) * radiusX,
+                    y: center.y + CGFloat(sin(angle)) * radiusY
+                )
+                let reaction = cursorInfluence(cursor, point: point, settings: s)
+                point.x += reaction.dx
+                point.y += reaction.dy
+                let radius = CGFloat(0.8 + rand(i, seed: s.seed, salt: 55) * 1.8)
+                let particleRect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2.0, height: radius * 2.0)
+                ellipse(&ctx, rect: particleRect, color: c(palette, i).opacity(0.25 + intensity * 0.58), fill: true)
+            }
+
+            if s.lensDistortion || s.distortion > 0.5 {
+                let lensRect = n.insetBy(dx: -24.0, dy: -10.0).offsetBy(dx: 0, dy: 5.0)
+                ellipse(&ctx, rect: lensRect, color: .white.opacity(intensity * s.distortion * 0.08), fill: false, width: 1.0)
+            }
+''',
+    'black hole painter',
+)
+
+space = replace_between(
+    space,
     '        case .portal:',
     '        case .reactor:',
     '''        case .portal:
             let center = CGPoint(x: n.midX, y: n.midY + 5.0)
             let interaction = cursorInfluence(cursor, point: center, settings: s).strength
+
             for i in 0..<7 {
                 let pad = CGFloat(7 + i * 7)
                 let verticalRadius = CGFloat(13 + i * 2)
@@ -115,10 +167,10 @@ replace_between(
             let portalSpeed: Double = 9.0 + interaction * 6.0
             for i in 0..<particleCount {
                 let angleSeed = rand(i, seed: s.seed, salt: 61)
-                let angle: Double = angleSeed * Double.pi * 2.0 + phase * 0.12
+                let angle = angleSeed * Double.pi * 2.0 + phase * 0.12
                 let radius = CGFloat(25.0 + rand(i, seed: s.seed, salt: 62) * 80.0)
                 let x = center.x + CGFloat(cos(angle)) * radius
-                let driftInput: Double = phase * portalSpeed + Double(i) * 7.0
+                let driftInput = phase * portalSpeed + Double(i) * 7.0
                 let drift = driftInput.truncatingRemainder(dividingBy: 18.0)
                 let y = center.y + CGFloat(sin(angle)) * radius * 0.36 + CGFloat(drift)
                 let opacity = intensity * (0.58 + interaction * 0.32)
@@ -126,10 +178,12 @@ replace_between(
                 ellipse(&ctx, rect: particleRect, color: c(palette, i).opacity(opacity), fill: true)
             }
 ''',
-    'portal case',
+    'portal painter',
 )
 
-# 5) Fix lexer ambiguity for the negative threshold comparison.
+text = text[:space_start] + space + text[space_end:]
+
+# 4) Fix lexer ambiguity for the negative threshold comparison.
 text = text.replace('sin(phase*1.6)>-0.15', 'sin(phase * 1.6) > -0.15')
 text = text.replace('sin(phase * 1.6)>-0.15', 'sin(phase * 1.6) > -0.15')
 
