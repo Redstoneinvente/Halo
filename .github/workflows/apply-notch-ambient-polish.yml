@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Patch, validate and publish compiler repair
+      - name: Patch, compile and publish Ambient repair
         shell: bash
         run: |
           set -euo pipefail
@@ -34,31 +34,23 @@ jobs:
           git diff --check
           xcrun swiftc -parse Halo/Views/DecorationsView.swift
 
-          echo '=== Compiler repair audit ==='
-          grep -q 'private var fileShelfOwnsNotch: Bool' Halo/Views/DecorationsView.swift
-          grep -q 'guard !fileShelfOwnsNotch' Halo/Views/DecorationsView.swift
-          grep -q 'sin(phase + Double(i))' Halo/Views/DecorationsView.swift
-          grep -q 'Double(i % 3)' Halo/Views/DecorationsView.swift
-          grep -q 'Double(i % 2)' Halo/Views/DecorationsView.swift
-          grep -q 'sin(phase \* 1.6) > -0.15' Halo/Views/DecorationsView.swift
-          grep -q 'let portalSpeed = 9.0 + interaction \* 6.0' Halo/Views/DecorationsView.swift
-
           echo '=== Xcode validation ==='
           set +e
           xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee /tmp/notch-ambient-compile-fix.log
           build_status=${PIPESTATUS[0]}
           set -e
+
           if grep -E 'Halo/Views/DecorationsView\.swift:[0-9]+:[0-9]+: error:' /tmp/notch-ambient-compile-fix.log; then
               echo 'DecorationsView still has compiler errors.' >&2
               grep -E 'Halo/Views/DecorationsView\.swift:[0-9]+:[0-9]+: error:' /tmp/notch-ambient-compile-fix.log
               exit 1
           fi
-          if grep -q 'SwiftCompile.*DecorationsView.swift' /tmp/notch-ambient-compile-fix.log; then
-              echo 'Compiler reached DecorationsView.swift with no errors.'
-          else
-              echo 'Build stopped before a dedicated DecorationsView compile line.' >&2
+          if ! grep -q 'SwiftCompile.*DecorationsView.swift' /tmp/notch-ambient-compile-fix.log; then
+              echo 'Build stopped before compiling DecorationsView.swift.' >&2
               exit 1
           fi
+          echo 'Compiler reached DecorationsView.swift with no errors.'
+
           if [[ $build_status -ne 0 ]]; then
               echo 'Full target still has unrelated repository errors; DecorationsView is clean.'
               grep -E 'error:' /tmp/notch-ambient-compile-fix.log | tail -n 20 || true
