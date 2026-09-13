@@ -222,6 +222,7 @@ struct SettingsView: View {
 }
 
 private enum HaloAppearancePage: String, CaseIterable, Identifiable {
+    case openedSpace = "Opened Space"
     case basics = "Basics"
     case surface = "Surface"
     case background = "Background"
@@ -233,7 +234,8 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
     @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
-    @State private var page: HaloAppearancePage = .basics
+    @State private var page: HaloAppearancePage = .openedSpace
+    @State private var showingOpenWorkspaceEditor = false
 
     var body: some View {
         Picker("Appearance area", selection: $page) {
@@ -242,6 +244,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         .pickerStyle(.segmented)
 
         switch page {
+        case .openedSpace: openedSpace
         case .basics: basics
         case .surface: surface
         case .background: background
@@ -249,51 +252,108 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         }
     }
 
-    @ViewBuilder private var basics: some View {
-        Section("Opened notch workspace") {
-            Toggle("Keep closed-notch contents visible when opened", isOn: $keepClosedContentsWhenOpen)
-            Text("Keeps the normal Closed Notch widgets and media visible in the top strip. Context Interfaces keep their own layout rules.")
+    @ViewBuilder private var openedSpace: some View {
+        Section("Opened notch space") {
+            Picker("Layout system", selection: Binding(
+                get: { workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace ? "visual" : "default" },
+                set: { workspace.settings.layout.setCustomOpenNotchWorkspaceEnabled($0 == "visual") }
+            )) {
+                Text("Default").tag("default")
+                Text("Visual Workspace").tag("visual")
+            }
+            .pickerStyle(.segmented)
+
+            Text(workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace
+                 ? "Visual Workspace uses your designed regions, groups and responsive widget slots. Your Default layout stays saved separately and returns unchanged when you switch back."
+                 : "Default keeps Halo's classic opened-notch layout. Switching to Visual Workspace does not erase these settings.")
                 .font(.caption).foregroundStyle(.secondary)
 
-            Picker("Content behavior", selection: Binding(
-                get: { workspace.settings.layout.resolvedOpenNotchContentMode },
-                set: { mode in
-                    workspace.settings.layout.openNotchContentMode = mode
-                    workspace.settings.layout.horizontalPages = mode == .pages
-                    if mode == .pages { workspace.settings.layout.horizontalWidgets = true }
-                }
-            )) {
+            Picker("Space behavior", selection: openedSpaceModeBinding) {
                 ForEach(OpenNotchContentMode.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
 
-            switch workspace.settings.layout.resolvedOpenNotchContentMode {
-            case .fixed:
-                Picker("Fixed canvas columns", selection: Binding(
-                    get: { workspace.settings.layout.resolvedOpenFixedColumns },
-                    set: { workspace.settings.layout.openFixedColumns = $0 }
-                )) {
-                    ForEach(1...4, id: \.self) { Text("\($0)").tag($0) }
+            if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+                switch workspace.settings.layout.resolvedOpenNotchLayout.resolvedContentMode {
+                case .fixed:
+                    Text("Fixed uses the region sizes and row/column proportions from the Visual Workspace Editor and keeps everything inside one designed canvas.")
+                        .font(.caption).foregroundStyle(.secondary)
+                case .scroll:
+                    Text("Scroll keeps your visual workspace structure while allowing its content to move inside the opened notch when it needs more room.")
+                        .font(.caption).foregroundStyle(.secondary)
+                case .pages:
+                    Text("Pages presents the designed workspace one group at a time with previous/next navigation.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("All enabled widgets stay inside one fixed canvas. Halo divides the available height between rows instead of scrolling.")
-                    .font(.caption).foregroundStyle(.secondary)
-            case .scroll:
-                Picker("Scroll direction", selection: Binding(
-                    get: { workspace.settings.layout.horizontalWidgets ?? false },
-                    set: { workspace.settings.layout.horizontalWidgets = $0; workspace.settings.layout.horizontalPages = false }
-                )) {
-                    Text("Vertical").tag(false)
-                    Text("Horizontal").tag(true)
-                }
-                .pickerStyle(.segmented)
-                Text("Scroll keeps the notch size fixed while letting content move inside it.")
-                    .font(.caption).foregroundStyle(.secondary)
-            case .pages:
-                Text("Pages keeps one widget in focus at a time with previous/next navigation, using the full opened-notch workspace.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
 
-            Divider()
+                Button { showingOpenWorkspaceEditor = true } label: {
+                    Label("Open Visual Workspace Editor…", systemImage: "rectangle.3.group")
+                }
+                .sheet(isPresented: $showingOpenWorkspaceEditor) {
+                    OpenedNotchWorkspaceEditor(layout: $workspace.settings.layout)
+                        .frame(minWidth: 980, idealWidth: 1120, minHeight: 680, idealHeight: 760)
+                }
+            } else {
+                switch workspace.settings.layout.resolvedOpenNotchContentMode {
+                case .fixed:
+                    Picker("Fixed canvas columns", selection: Binding(
+                        get: { workspace.settings.layout.resolvedOpenFixedColumns },
+                        set: { workspace.settings.layout.openFixedColumns = $0 }
+                    )) {
+                        ForEach(1...4, id: \.self) { Text("\($0)").tag($0) }
+                    }
+                    Text("All enabled widgets stay inside one fixed canvas. Halo divides the available height between rows instead of scrolling.")
+                        .font(.caption).foregroundStyle(.secondary)
+                case .scroll:
+                    Picker("Scroll direction", selection: Binding(
+                        get: { workspace.settings.layout.horizontalWidgets ?? false },
+                        set: { workspace.settings.layout.horizontalWidgets = $0; workspace.settings.layout.horizontalPages = false }
+                    )) {
+                        Text("Vertical").tag(false)
+                        Text("Horizontal").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    Text("Scroll keeps the notch size fixed while letting widgets move inside it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                case .pages:
+                    Text("Pages keeps one widget in focus at a time with previous/next navigation.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+
+        Section("Opened notch behavior") {
+            Toggle("Keep closed-notch contents visible when opened", isOn: $keepClosedContentsWhenOpen)
+            Text("Keeps the normal Closed Notch widgets and media visible in the top strip. Context Interfaces keep their own layout rules.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var openedSpaceModeBinding: Binding<OpenNotchContentMode> {
+        Binding(
+            get: {
+                if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+                    return workspace.settings.layout.resolvedOpenNotchLayout.resolvedContentMode
+                }
+                return workspace.settings.layout.resolvedOpenNotchContentMode
+            },
+            set: { mode in
+                if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+                    workspace.settings.layout.materializeOpenNotchLayout()
+                    var opened = workspace.settings.layout.resolvedOpenNotchLayout
+                    opened.contentMode = mode
+                    workspace.settings.layout.openNotch = opened
+                } else {
+                    workspace.settings.layout.openNotchContentMode = mode
+                    workspace.settings.layout.horizontalPages = mode == .pages
+                    if mode == .pages { workspace.settings.layout.horizontalWidgets = true }
+                }
+            }
+        )
+    }
+
+    @ViewBuilder private var basics: some View {
+        Section("Opened notch size & spacing") {
             Slider(value: $store.configuration.theme.width, in: 340...1200, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Opened width") }
             Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 280...1100, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Opened height") }
             Slider(value: Binding(

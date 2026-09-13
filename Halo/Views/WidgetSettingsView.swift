@@ -75,7 +75,6 @@ struct WidgetSettingsView: View {
     @State private var selected: ModuleID = .clock
     private static let timeZones = TimeZone.knownTimeZoneIdentifiers
     @State private var installedFonts: [String] = []
-    @State private var showingOpenWorkspaceEditor = false
     private var style: Binding<WidgetStyle> {
         Binding(get: { layout.widgetStyle(for: selected) }, set: { layout.setWidgetStyle($0, for: selected) })
     }
@@ -92,21 +91,6 @@ struct WidgetSettingsView: View {
     var body: some View {
         Picker("Widget", selection: $selected) {
             ForEach(ModuleID.allCases) { Text($0.title).tag($0) }
-        }
-        Section("Opened notch workspace") {
-            Toggle("Use Custom Workspace Layout", isOn: Binding(
-                get: { layout.resolvedUsesCustomOpenNotchWorkspace },
-                set: { layout.setCustomOpenNotchWorkspaceEnabled($0) }
-            ))
-            Button { showingOpenWorkspaceEditor = true } label: { Label("Open Visual Workspace Editor…", systemImage: "rectangle.3.group") }
-            Text(layout.resolvedUsesCustomOpenNotchWorkspace
-                 ? "Custom Workspace is active. Turning it off instantly restores your original Fixed / Scroll / Pages layout without deleting the custom design."
-                 : "Your original opened-notch layout is active. You can design a Custom Workspace without replacing or modifying that layout until you enable it.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .sheet(isPresented: $showingOpenWorkspaceEditor) {
-            OpenedNotchWorkspaceEditor(layout: $layout)
-                .frame(minWidth: 980, idealWidth: 1120, minHeight: 680, idealHeight: 760)
         }
         Section("Opened notch widget") {
             Text("Customize \(selected.title) independently. These settings apply to the widget in Halo's opened dashboard and travel with profiles and display-specific layouts.")
@@ -742,7 +726,7 @@ private extension OpenNotchRegionPlacement {
     }
 }
 
-private struct OpenedNotchWorkspaceEditor: View {
+struct OpenedNotchWorkspaceEditor: View {
     @Binding var layout: WorkspaceLayout
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
