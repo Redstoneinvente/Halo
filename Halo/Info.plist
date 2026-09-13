@@ -4,6 +4,10 @@
 <dict>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Halo reads your calendars to show schedules, holidays, and meeting links. Halo does not modify events.</string>
 	<key>NSCalendarsUsageDescription</key>
@@ -14,5 +18,13 @@
 	<string>$(HALO_LICENSESEAT_PRODUCT_SLUG)</string>
 	<key>HaloLicenseSeatPublishableKey</key>
 	<string>$(HALO_LICENSESEAT_PUBLISHABLE_KEY)</string>
+	<key>SUFeedURL</key>
+	<string>$(HALO_SPARKLE_FEED_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>$(HALO_SPARKLE_PUBLIC_KEY)</string>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
 </dict>
 </plist>
