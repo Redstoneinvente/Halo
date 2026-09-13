@@ -99,7 +99,10 @@ struct WorkspaceLayout: Codable, Equatable {
     var openHorizontalPadding: Double?
     var openVerticalPadding: Double?
     var openFixedColumns: Int?
-    // New opened-notch workspace model. Optional for backwards compatibility.
+    // The modular workspace is optional. nil preserves behavior for users who
+    // already customized it before this toggle existed; legacy profiles with no
+    // OpenNotchLayout stay on the original Fixed / Scroll / Pages renderer.
+    var useCustomOpenNotchWorkspace: Bool?
     var openNotch: OpenNotchLayout?
     var widgets: [String: WidgetStyle]?
     var closedNotch: ClosedNotchOptions?
@@ -117,6 +120,10 @@ struct WorkspaceLayout: Codable, Equatable {
     var resolvedOpenFixedColumns: Int {
         min(4, max(1, openFixedColumns ?? 2))
     }
+    var resolvedUsesCustomOpenNotchWorkspace: Bool {
+        if let useCustomOpenNotchWorkspace { return useCustomOpenNotchWorkspace }
+        return openNotch != nil
+    }
 
     var resolvedOpenNotchLayout: OpenNotchLayout {
         if let openNotch, !openNotch.regions.isEmpty { return openNotch }
@@ -128,6 +135,11 @@ struct WorkspaceLayout: Codable, Equatable {
 
     mutating func materializeOpenNotchLayout() {
         if openNotch == nil || openNotch?.regions.isEmpty == true { openNotch = resolvedOpenNotchLayout }
+    }
+
+    mutating func setCustomOpenNotchWorkspaceEnabled(_ enabled: Bool) {
+        useCustomOpenNotchWorkspace = enabled
+        if enabled { materializeOpenNotchLayout() }
     }
 
     mutating func applyOpenNotchPreset(_ preset: OpenNotchPreset) {
@@ -461,9 +473,17 @@ struct OpenNotchRegion: Codable, Equatable, Identifiable {
     var id = UUID()
     var placement: OpenNotchRegionPlacement = .middleCenter
     var padding = OpenNotchInsets()
+    // Fractions are relative to the region's grid track. Optional keeps layouts
+    // created by the first workspace version fully decodable.
+    var widthFraction: Double?
+    var heightFraction: Double?
     var groups: [OpenNotchGroup] = []
+    var resolvedWidthFraction: Double { min(1, max(0.15, widthFraction ?? 1)) }
+    var resolvedHeightFraction: Double { min(1, max(0.15, heightFraction ?? 1)) }
     func validated() throws -> OpenNotchRegion {
         var value = self
+        if let widthFraction { guard widthFraction.isFinite else { throw CocoaError(.fileReadCorruptFile) }; value.widthFraction = min(1, max(0.15, widthFraction)) }
+        if let heightFraction { guard heightFraction.isFinite else { throw CocoaError(.fileReadCorruptFile) }; value.heightFraction = min(1, max(0.15, heightFraction)) }
         value.padding = try padding.validated(); value.groups = try groups.prefix(16).map { try $0.validated() }
         return value
     }
@@ -546,10 +566,34 @@ struct OpenNotchAppearance: Codable, Equatable {
 struct OpenNotchLayout: Codable, Equatable {
     var version = 1
     var preset: OpenNotchPreset = .custom
+    // Custom-workspace mode is intentionally independent from the legacy
+    // opened-notch Fixed / Scroll / Pages setting.
+    var contentMode: OpenNotchContentMode?
     var regions: [OpenNotchRegion] = []
+    // Relative track weights for left/center/right and top/middle/bottom.
+    // Optional fields preserve the first custom-workspace archive format.
+    var columnWeights: [Double]?
+    var rowWeights: [Double]?
     var appearance = OpenNotchAppearance()
 
+    var resolvedContentMode: OpenNotchContentMode { contentMode ?? .fixed }
+    var resolvedColumnWeights: [Double] { Self.resolvedTrackWeights(columnWeights) }
+    var resolvedRowWeights: [Double] { Self.resolvedTrackWeights(rowWeights) }
     var allItems: [OpenNotchItem] { regions.flatMap(\.groups).flatMap(\.items) }
+
+    private static func resolvedTrackWeights(_ saved: [Double]?) -> [Double] {
+        var values = Array((saved ?? []).prefix(3))
+        while values.count < 3 { values.append(1) }
+        return values.map { value in value.isFinite ? min(6, max(0.1, value)) : 1 }
+    }
+    mutating func setColumnWeight(_ value: Double, at index: Int) {
+        guard (0..<3).contains(index) else { return }
+        var values = resolvedColumnWeights; values[index] = min(6, max(0.1, value)); columnWeights = values
+    }
+    mutating func setRowWeight(_ value: Double, at index: Int) {
+        guard (0..<3).contains(index) else { return }
+        var values = resolvedRowWeights; values[index] = min(6, max(0.1, value)); rowWeights = values
+    }
 
     static func migrated(modules: [ModuleID], horizontal: Bool) -> OpenNotchLayout {
         var group = OpenNotchGroup(name: "Legacy widgets", axis: horizontal ? .horizontal : .vertical,
@@ -621,6 +665,8 @@ struct OpenNotchLayout: Codable, Equatable {
     func validated() throws -> OpenNotchLayout {
         guard version == 1 else { throw CocoaError(.fileReadCorruptFile) }
         var value = self
+        if let columnWeights { guard columnWeights.allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }; value.columnWeights = Self.resolvedTrackWeights(columnWeights) }
+        if let rowWeights { guard rowWeights.allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }; value.rowWeights = Self.resolvedTrackWeights(rowWeights) }
         value.regions = try regions.prefix(9).map { try $0.validated() }
         value.appearance = try appearance.validated()
         return value

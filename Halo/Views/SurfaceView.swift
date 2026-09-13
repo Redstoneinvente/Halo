@@ -810,7 +810,7 @@ struct SurfaceView: View {
 
     @ViewBuilder private var surfaceBackgroundLayer: some View {
         ZStack {
-            if state.expanded && activeContext == nil {
+            if state.expanded && activeContext == nil && layout.resolvedUsesCustomOpenNotchWorkspace {
                 OpenNotchBackgroundView(options: layout.resolvedOpenNotchLayout.appearance, fallback: layout.appearance, theme: theme, system: workspace.system)
             } else {
                 SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
@@ -823,13 +823,75 @@ struct SurfaceView: View {
 
     @ViewBuilder private var surfaceOverlayLayer: some View {
         contour.stroke(state.dropTargeted ? accent : .white.opacity(0.12), lineWidth: state.dropTargeted ? 1.6 : 1)
-        if state.expanded && activeContext == nil {
+        if state.expanded && activeContext == nil && layout.resolvedUsesCustomOpenNotchWorkspace {
             OpenNotchSurfaceChrome(contour: contour, options: layout.resolvedOpenNotchLayout.appearance)
         }
     }
 
-    private var openDashboardContent: some View {
-        OpenNotchWorkspaceView(layout: layout, store: store, mode: layout.resolvedOpenNotchContentMode, page: $page)
+    private func legacyHorizontalWidget(_ module: ModuleID) -> some View {
+        GeometryReader { proxy in
+            WidgetCard(style: layout.widgetStyle(for: module), availableHeight: proxy.size.height, availableWidth: proxy.size.width) {
+                BuiltinOrIntegrationWidget(module: module, store: store)
+            }
+        }
+    }
+
+    @ViewBuilder private var openDashboardContent: some View {
+        if layout.resolvedUsesCustomOpenNotchWorkspace {
+            OpenNotchWorkspaceView(layout: layout, store: store, mode: layout.resolvedOpenNotchLayout.resolvedContentMode, page: $page)
+        } else {
+            legacyOpenDashboardContent
+        }
+    }
+
+    @ViewBuilder private var legacyOpenDashboardContent: some View {
+        switch layout.resolvedOpenNotchContentMode {
+        case .fixed:
+            GeometryReader { proxy in
+                if modules.isEmpty {
+                    Text("Enable widgets in Settings → Modules.")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    let columns = max(1, min(layout.resolvedOpenFixedColumns, modules.count))
+                    let rows = max(1, Int(ceil(Double(modules.count) / Double(columns))))
+                    let gap = CGFloat(layout.appearance.spacing)
+                    let cellHeight = max(1, (proxy.size.height - gap * CGFloat(max(0, rows - 1))) / CGFloat(rows))
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: gap), count: columns), spacing: gap) {
+                        ForEach(modules) { module in legacyHorizontalWidget(module).frame(height: cellHeight) }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+            }
+        case .scroll:
+            if layout.horizontalWidgets ?? false {
+                ScrollView(.horizontal) { LazyHStack(alignment: .top, spacing: layout.appearance.spacing) { legacyWidgetCards(horizontal: true) } }
+            } else {
+                ScrollView { LazyVStack(spacing: layout.appearance.spacing) { legacyWidgetCards(horizontal: false) } }
+            }
+        case .pages:
+            VStack(spacing: 8) {
+                if !modules.isEmpty {
+                    let index = min(max(0, page), modules.count - 1)
+                    legacyHorizontalWidget(modules[index])
+                    HStack {
+                        Button { page = max(0, index - 1) } label: { Image(systemName: "chevron.left") }.disabled(index == 0).accessibilityLabel("Previous widget")
+                        Spacer(); Text("\(modules[index].title) · \(index + 1) / \(modules.count)").font(.caption); Spacer()
+                        Button { page = min(modules.count - 1, index + 1) } label: { Image(systemName: "chevron.right") }.disabled(index == modules.count - 1).accessibilityLabel("Next widget")
+                    }
+                } else { Text("Enable widgets in Settings → Modules.").foregroundStyle(.secondary) }
+            }
+        }
+    }
+
+    @ViewBuilder private func legacyWidgetCards(horizontal: Bool) -> some View {
+        ForEach(modules) { module in
+            if horizontal {
+                legacyHorizontalWidget(module).frame(width: max(240, state.dashboardWidth - 64))
+            } else {
+                WidgetCard(style: layout.widgetStyle(for: module)) { BuiltinOrIntegrationWidget(module: module, store: store) }
+            }
+        }
     }
 }
 
@@ -941,6 +1003,7 @@ private struct OpenNotchWorkspaceView: View {
     private var opened: OpenNotchLayout { layout.resolvedOpenNotchLayout }
     private var regions: [OpenNotchRegion] { opened.regions.sorted { $0.placement.sortIndex < $1.placement.sortIndex } }
     private var groups: [OpenNotchGroup] { regions.flatMap(\.groups) }
+    private var gap: CGFloat { max(4, CGFloat(layout.appearance.spacing)) }
 
     var body: some View {
         Group {
@@ -951,34 +1014,43 @@ private struct OpenNotchWorkspaceView: View {
             }
         }
         .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.86), value: opened)
+        .clipped()
     }
 
     private var fixedCanvas: some View {
         GeometryReader { proxy in
-            VStack(spacing: max(4, layout.appearance.spacing)) {
-                regionRow(.topLeft, .topCenter, .topRight, height: proxy.size.height / 3)
-                regionRow(.middleLeft, .middleCenter, .middleRight, height: proxy.size.height / 3)
-                regionRow(.bottomLeft, .bottomCenter, .bottomRight, height: proxy.size.height / 3)
+            let heights = trackSizes(total: proxy.size.height, weights: effectiveRowWeights, gaps: 2)
+            VStack(spacing: gap) {
+                regionRow([.topLeft, .topCenter, .topRight], height: heights[0])
+                regionRow([.middleLeft, .middleCenter, .middleRight], height: heights[1])
+                regionRow([.bottomLeft, .bottomCenter, .bottomRight], height: heights[2])
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
         }
     }
 
-    @ViewBuilder private func regionRow(_ left: OpenNotchRegionPlacement, _ center: OpenNotchRegionPlacement,
-                                        _ right: OpenNotchRegionPlacement, height: CGFloat) -> some View {
-        let placements = [left, center, right]
-        if placements.contains(where: { region($0) != nil }) {
-            HStack(alignment: .top, spacing: max(4, layout.appearance.spacing)) {
-                ForEach(placements) { placement in
-                    if let value = region(placement) {
-                        OpenNotchRegionView(region: value, layout: layout, store: store)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: placement.regionAlignment)
-                    } else {
-                        Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+    private func regionRow(_ placements: [OpenNotchRegionPlacement], height: CGFloat) -> some View {
+        GeometryReader { proxy in
+            let widths = trackSizes(total: proxy.size.width, weights: effectiveColumnWeights, gaps: 2)
+            HStack(spacing: gap) {
+                ForEach(0..<3, id: \.self) { index in
+                    let placement = placements[index]
+                    let cellWidth = widths[index]
+                    ZStack(alignment: placement.regionAlignment) {
+                        if let value = region(placement) {
+                            OpenNotchRegionView(region: value, layout: layout, store: store)
+                                .frame(width: max(1, cellWidth * CGFloat(value.resolvedWidthFraction)),
+                                       height: max(1, height * CGFloat(value.resolvedHeightFraction)),
+                                       alignment: placement.regionAlignment)
+                                .clipped()
+                        }
                     }
+                    .frame(width: cellWidth, height: max(0, height), alignment: placement.regionAlignment)
+                    .clipped()
                 }
-            }.frame(height: max(1, height - layout.appearance.spacing * 0.66))
+            }
         }
+        .frame(height: max(0, height))
     }
 
     private var scrollCanvas: some View {
@@ -1005,7 +1077,7 @@ private struct OpenNotchWorkspaceView: View {
                 Text("Enable widgets or add opened-notch elements in Settings.").foregroundStyle(.secondary)
             } else {
                 let index = min(max(0, page), groups.count - 1)
-                OpenNotchGroupView(group: groups[index], layout: layout, store: store)
+                OpenNotchGroupView(group: groups[index], layout: layout, store: store, constrained: true)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 HStack {
                     Button { page = max(0, index - 1) } label: { Image(systemName: "chevron.left") }.disabled(index == 0)
@@ -1016,6 +1088,21 @@ private struct OpenNotchWorkspaceView: View {
         }
     }
 
+    private var effectiveRowWeights: [Double] {
+        let occupied = [0, 1, 2].map { row in regions.contains { $0.placement.rowIndex == row } }
+        return zip(opened.resolvedRowWeights, occupied).map { $1 ? $0 : 0 }
+    }
+    private var effectiveColumnWeights: [Double] {
+        let occupied = [0, 1, 2].map { column in regions.contains { $0.placement.columnIndex == column } }
+        return zip(opened.resolvedColumnWeights, occupied).map { $1 ? $0 : 0 }
+    }
+    private func trackSizes(total: CGFloat, weights: [Double], gaps: Int) -> [CGFloat] {
+        let usable = max(0, total - gap * CGFloat(gaps))
+        let positive = weights.map { max(0, $0) }
+        let sum = positive.reduce(0, +)
+        guard sum > 0 else { return [usable / 3, usable / 3, usable / 3] }
+        return positive.map { usable * CGFloat($0 / sum) }
+    }
     private func region(_ placement: OpenNotchRegionPlacement) -> OpenNotchRegion? { regions.first { $0.placement == placement } }
 }
 
@@ -1024,12 +1111,24 @@ private struct OpenNotchRegionView: View {
     let layout: WorkspaceLayout
     @ObservedObject var store: AppStore
     var body: some View {
-        VStack(spacing: max(4, layout.appearance.spacing)) {
-            ForEach(region.groups) { group in OpenNotchGroupView(group: group, layout: layout, store: store) }
+        GeometryReader { proxy in
+            let groupGap = max(4, CGFloat(layout.appearance.spacing))
+            let innerWidth = max(0, proxy.size.width - CGFloat(region.padding.leading + region.padding.trailing))
+            let innerHeight = max(0, proxy.size.height - CGFloat(region.padding.top + region.padding.bottom))
+            let count = max(1, region.groups.count)
+            let groupHeight = max(0, (innerHeight - groupGap * CGFloat(max(0, count - 1))) / CGFloat(count))
+            VStack(spacing: groupGap) {
+                ForEach(region.groups) { group in
+                    OpenNotchGroupView(group: group, layout: layout, store: store, constrained: true)
+                        .frame(width: innerWidth, height: groupHeight)
+                        .clipped()
+                }
+            }
+            .padding(.top, region.padding.top).padding(.leading, region.padding.leading)
+            .padding(.bottom, region.padding.bottom).padding(.trailing, region.padding.trailing)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: region.placement.regionAlignment)
         }
-        .padding(.top, region.padding.top).padding(.leading, region.padding.leading)
-        .padding(.bottom, region.padding.bottom).padding(.trailing, region.padding.trailing)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: region.placement.regionAlignment)
+        .clipped()
     }
 }
 
@@ -1037,56 +1136,144 @@ private struct OpenNotchGroupView: View {
     let group: OpenNotchGroup
     let layout: WorkspaceLayout
     @ObservedObject var store: AppStore
+    var constrained = false
     private var context: OpenNotchRuntimeContext { OpenNotchRuntimeContext(store: store) }
 
     var body: some View {
         GeometryReader { proxy in
+            let innerWidth = max(0, proxy.size.width - CGFloat(group.padding.leading + group.padding.trailing))
+            let innerHeight = max(0, proxy.size.height - CGFloat(group.padding.top + group.padding.bottom))
             let candidates = group.items.filter(context.isVisible)
-            let mainAvailable = group.axis == .horizontal ? proxy.size.width : proxy.size.height
-            let wanted = candidates.reduce(0.0) { partial, item in
-                partial + (group.axis == .horizontal ? item.sizing.preferredWidth : item.sizing.preferredHeight)
-            } + max(0, Double(candidates.count - 1)) * group.spacing
+            let mainAvailable = group.axis == .horizontal ? innerWidth : innerHeight
+            let wanted = preferredLength(of: candidates) + max(0, CGFloat(candidates.count - 1)) * CGFloat(group.spacing)
             let compression = compressionLevel(available: mainAvailable, wanted: wanted)
-            let spacing = max(2, group.spacing * (compression >= 1 ? 0.66 : 1))
+            let spacing = max(2, CGFloat(group.spacing) * (compression >= 1 ? 0.62 : 1))
             let visible = candidates.filter { $0.priority.remainsVisible(at: compression) }
+            let crossAvailable = group.axis == .horizontal ? innerHeight : innerWidth
+            let lengths = allocatedLengths(items: visible, available: mainAvailable, spacing: spacing, compression: compression)
+            let minimumNeeded = minimumLength(of: visible) + max(0, CGFloat(visible.count - 1)) * spacing
+
             Group {
-                if compression >= 5 {
-                    ScrollView(group.axis == .horizontal ? .horizontal : .vertical) { stack(items: visible, spacing: spacing, compression: compression) }
+                if compression >= 5 && minimumNeeded > mainAvailable + 1 {
+                    ScrollView(group.axis == .horizontal ? .horizontal : .vertical) {
+                        stack(items: visible, spacing: spacing, compression: compression, crossAvailable: crossAvailable, lengths: lengths)
+                    }
                 } else {
-                    stack(items: visible, spacing: spacing, compression: compression)
+                    stack(items: visible, spacing: spacing, compression: compression, crossAvailable: crossAvailable, lengths: lengths)
                 }
             }
+            .frame(width: innerWidth, height: innerHeight, alignment: group.alignment.horizontalFrameAlignment)
             .padding(.top, group.padding.top).padding(.leading, group.padding.leading)
             .padding(.bottom, group.padding.bottom).padding(.trailing, group.padding.trailing)
         }
-        .frame(minHeight: group.axis == .vertical ? estimatedHeight : 54)
+        .frame(minHeight: constrained ? 0 : estimatedHeight, maxHeight: constrained ? .infinity : nil)
+        .clipped()
     }
 
-    @ViewBuilder private func stack(items: [OpenNotchItem], spacing: Double, compression: Int) -> some View {
+    @ViewBuilder private func stack(items: [OpenNotchItem], spacing: CGFloat, compression: Int,
+                                    crossAvailable: CGFloat, lengths: [UUID: CGFloat]) -> some View {
         if group.axis == .horizontal {
             HStack(alignment: group.alignment.verticalAlignment, spacing: spacing) {
-                ForEach(items) { item in OpenNotchItemView(item: item, layout: layout, store: store, compression: compression) }
-            }.frame(maxWidth: .infinity, alignment: group.alignment.horizontalFrameAlignment)
+                ForEach(items) { item in
+                    let size = CGSize(width: max(1, lengths[item.id] ?? CGFloat(item.sizing.minimumWidth)), height: max(1, crossAvailable))
+                    OpenNotchItemView(item: item, layout: layout, store: store, compression: compression, slotSize: size)
+                }
+            }.frame(maxHeight: .infinity, alignment: group.alignment.horizontalFrameAlignment)
         } else {
             VStack(alignment: group.alignment.horizontalAlignment, spacing: spacing) {
-                ForEach(items) { item in OpenNotchItemView(item: item, layout: layout, store: store, compression: compression) }
+                ForEach(items) { item in
+                    let size = CGSize(width: max(1, crossAvailable), height: max(1, lengths[item.id] ?? CGFloat(item.sizing.minimumHeight)))
+                    OpenNotchItemView(item: item, layout: layout, store: store, compression: compression, slotSize: size)
+                }
             }.frame(maxWidth: .infinity, alignment: group.alignment.horizontalFrameAlignment)
         }
     }
 
+    private func preferredLength(of items: [OpenNotchItem]) -> CGFloat {
+        items.reduce(0) { partial, item in
+            partial + CGFloat(group.axis == .horizontal ? item.sizing.preferredWidth : item.sizing.preferredHeight)
+        }
+    }
+    private func minimumLength(of items: [OpenNotchItem]) -> CGFloat {
+        items.reduce(0) { partial, item in
+            partial + CGFloat(group.axis == .horizontal ? item.sizing.minimumWidth : item.sizing.minimumHeight)
+        }
+    }
+    private func bounds(for item: OpenNotchItem) -> (min: CGFloat, preferred: CGFloat, max: CGFloat) {
+        if group.axis == .horizontal {
+            return (CGFloat(item.sizing.minimumWidth), CGFloat(item.sizing.preferredWidth), CGFloat(item.sizing.maximumWidth))
+        }
+        return (CGFloat(item.sizing.minimumHeight), CGFloat(item.sizing.preferredHeight), CGFloat(item.sizing.maximumHeight))
+    }
+    private func allocatedLengths(items: [OpenNotchItem], available: CGFloat, spacing: CGFloat, compression: Int) -> [UUID: CGFloat] {
+        guard !items.isEmpty else { return [:] }
+        let usable = max(0, available - spacing * CGFloat(max(0, items.count - 1)))
+        var values: [UUID: CGFloat] = [:]
+        for item in items {
+            let b = bounds(for: item)
+            let start: CGFloat
+            switch item.sizing.mode {
+            case .fill: start = b.min
+            case .fixed, .fitContent, .flexible: start = min(b.max, max(b.min, b.preferred))
+            }
+            values[item.id] = start
+        }
+
+        var total = values.values.reduce(0, +)
+        if total > usable {
+            var deficit = total - usable
+            for _ in 0..<3 where deficit > 0.5 {
+                let shrinkable = items.filter { (values[$0.id] ?? 0) > bounds(for: $0).min + 0.5 }
+                guard !shrinkable.isEmpty else { break }
+                let capacity = shrinkable.reduce(CGFloat(0)) { $0 + max(0, (values[$1.id] ?? 0) - bounds(for: $1).min) }
+                guard capacity > 0 else { break }
+                for item in shrinkable {
+                    let current = values[item.id] ?? 0
+                    let minValue = bounds(for: item).min
+                    let share = (current - minValue) / capacity
+                    let cut = min(current - minValue, deficit * share)
+                    values[item.id] = current - cut
+                }
+                total = values.values.reduce(0, +); deficit = max(0, total - usable)
+            }
+            // Before the final scroll stage, the slot remains authoritative even
+            // if a user's minimum sizes cannot all fit. This prevents overlap.
+            if deficit > 0.5 && compression < 5 && total > 0 {
+                let scale = max(0.1, usable / total)
+                for item in items { values[item.id] = max(1, (values[item.id] ?? 1) * scale) }
+            }
+        } else if total < usable {
+            var extra = usable - total
+            let growers = items.filter { $0.sizing.mode == .fill || $0.sizing.mode == .flexible }
+            for _ in 0..<3 where extra > 0.5 && !growers.isEmpty {
+                let active = growers.filter { (values[$0.id] ?? 0) < bounds(for: $0).max - 0.5 }
+                guard !active.isEmpty else { break }
+                let weightTotal = active.reduce(CGFloat(0)) { $0 + ($1.sizing.mode == .fill ? 2 : 1) }
+                for item in active {
+                    let current = values[item.id] ?? 0
+                    let maxValue = bounds(for: item).max
+                    let weight: CGFloat = item.sizing.mode == .fill ? 2 : 1
+                    let add = min(maxValue - current, extra * weight / weightTotal)
+                    values[item.id] = current + add
+                }
+                total = values.values.reduce(0, +); extra = max(0, usable - total)
+            }
+        }
+        return values
+    }
     private var estimatedHeight: CGFloat {
         let h = group.items.reduce(0.0) { $0 + min($1.sizing.preferredHeight, 260) } + max(0, Double(group.items.count - 1)) * group.spacing
         return CGFloat(min(720, max(54, h + group.padding.top + group.padding.bottom)))
     }
-    private func compressionLevel(available: CGFloat, wanted: Double) -> Int {
+    private func compressionLevel(available: CGFloat, wanted: CGFloat) -> Int {
         guard wanted > 0, available > 0 else { return 0 }
-        let ratio = Double(available) / wanted
+        let ratio = available / wanted
         if ratio >= 1 { return 0 }
-        if ratio >= 0.86 { return 1 }   // spacing
-        if ratio >= 0.72 { return 2 }   // secondary / optional metadata
-        if ratio >= 0.58 { return 3 }   // compact presentation
-        if ratio >= 0.44 { return 4 }   // truncate text
-        return 5                         // scroll as a last resort
+        if ratio >= 0.86 { return 1 }
+        if ratio >= 0.72 { return 2 }
+        if ratio >= 0.58 { return 3 }
+        if ratio >= 0.44 { return 4 }
+        return 5
     }
 }
 
@@ -1095,6 +1282,7 @@ private struct OpenNotchItemView: View {
     let layout: WorkspaceLayout
     @ObservedObject var store: AppStore
     let compression: Int
+    let slotSize: CGSize
     @State private var hover = false
 
     var body: some View {
@@ -1105,9 +1293,13 @@ private struct OpenNotchItemView: View {
             switch item.kind {
             case .module:
                 if let module = item.module, layout.enabled.contains(module) {
-                    WidgetCard(style: style) { BuiltinOrIntegrationWidget(module: module, store: store) }
-                        .environment(\.openNotchPresentation, presentation)
-                        .environment(\.openNotchCompressionLevel, compression)
+                    WidgetCard(style: style, availableHeight: slotSize.height, availableWidth: slotSize.width) {
+                        BuiltinOrIntegrationWidget(module: module, store: store)
+                    }
+                    .environment(\.openNotchPresentation, presentation)
+                    .environment(\.openNotchCompressionLevel, compression)
+                    .environment(\.openNotchAvailableWidth, slotSize.width)
+                    .environment(\.openNotchAvailableHeight, slotSize.height)
                 }
             case .element:
                 if let element = item.element {
@@ -1116,14 +1308,17 @@ private struct OpenNotchItemView: View {
                     }
                     .environment(\.openNotchPresentation, presentation)
                     .environment(\.openNotchCompressionLevel, compression)
+                    .environment(\.openNotchAvailableWidth, slotSize.width)
+                    .environment(\.openNotchAvailableHeight, slotSize.height)
                 }
             case .spacer:
-                Spacer(minLength: CGFloat(max(8, item.sizing.minimumWidth)))
+                Color.clear
             case .divider:
                 Divider().opacity(itemStyle.opacity)
             }
         }
-        .modifier(OpenNotchSizingModifier(sizing: item.sizing))
+        .frame(width: slotSize.width, height: slotSize.height, alignment: itemStyle.alignment?.alignment ?? .center)
+        .clipped()
         .contentShape(Rectangle())
         .opacity(hover ? 1 : 0.985)
         .onHover { hover = $0 }
@@ -1132,51 +1327,64 @@ private struct OpenNotchItemView: View {
     }
 
     private var resolvedPresentation: OpenNotchPresentation {
-        if item.presentation != .automatic { return item.presentation }
-        if compression >= 3 { return .compact }
-        if item.sizing.preferredWidth >= 420 || item.sizing.preferredHeight >= 240 { return .expanded }
-        if item.sizing.preferredWidth < 220 || item.sizing.preferredHeight < 90 { return .compact }
-        return .regular
+        let hardCompact = slotSize.width < 175 || slotSize.height < 72
+        let compact = slotSize.width < 250 || slotSize.height < 118 || compression >= 3
+        let expandedPossible = slotSize.width >= 360 && slotSize.height >= 210 && compression < 2
+        if hardCompact { return .compact }
+        switch item.presentation {
+        case .automatic:
+            if compact { return .compact }
+            return expandedPossible ? .expanded : .regular
+        case .expanded:
+            if compact { return .compact }
+            return expandedPossible ? .expanded : .regular
+        case .regular:
+            return compact ? .compact : .regular
+        case .compact:
+            return .compact
+        }
     }
     private func adaptedWidgetStyle(presentation: OpenNotchPresentation) -> WidgetStyle {
         guard let module = item.module else { return WidgetStyle() }
         var style = layout.widgetStyle(for: module)
+        // The designed slot owns geometry in the custom workspace. A legacy
+        // per-widget width must never push a card outside its region.
+        style.width = 0
+        style.minimumHeight = 0
         switch presentation {
         case .compact: style.layoutMode = .compact
         case .expanded: style.layoutMode = .hero
         case .regular, .automatic: style.layoutMode = .standard
         }
-        if compression >= 2 {
-            var content = style.resolvedContent
-            content.showSecondaryText = false; content.mediaShowArtist = false; content.mediaShowSource = false
-            content.calendarShowTimes = false; content.shelfShowDetails = false; content.activitiesShowDetail = false
-            style.content = content
+        let widthScale = min(1, max(0.68, slotSize.width / 300))
+        let heightScale = min(1, max(0.68, slotSize.height / 170))
+        let scale = min(widthScale, heightScale)
+        style.padding *= scale
+        style.fontSize *= max(0.76, scale)
+        var content = style.resolvedContent
+        content.spacing *= scale
+        content.iconSize *= scale
+        if compression >= 2 || slotSize.height < 130 || slotSize.width < 230 {
+            content.showSecondaryText = false
+            content.mediaShowArtist = slotSize.height >= 92 && slotSize.width >= 185
+            content.mediaShowSource = false
+            content.calendarShowTimes = false
+            content.shelfShowDetails = false
+            content.activitiesShowDetail = false
         }
-        if compression >= 4 {
-            var content = style.resolvedContent
-            content.mediaTitleLines = 1; content.maxItems = min(3, content.maxItems)
-            style.content = content
+        if compression >= 3 || slotSize.height < 105 {
+            content.maxItems = min(2, content.maxItems)
+            content.showFooter = false
+            content.showQuickActions = false
+        } else if slotSize.height < 180 {
+            content.maxItems = min(3, content.maxItems)
         }
+        if compression >= 4 || slotSize.width < 190 {
+            content.mediaTitleLines = 1
+            content.maxItems = min(1, content.maxItems)
+        }
+        style.content = content
         return style
-    }
-}
-
-private struct OpenNotchSizingModifier: ViewModifier {
-    let sizing: OpenNotchSizing
-    func body(content: Content) -> some View {
-        switch sizing.mode {
-        case .fixed:
-            content.frame(width: sizing.preferredWidth, height: sizing.preferredHeight)
-        case .fitContent:
-            content.frame(minWidth: sizing.minimumWidth, idealWidth: sizing.preferredWidth, maxWidth: sizing.maximumWidth,
-                          minHeight: sizing.minimumHeight, idealHeight: sizing.preferredHeight, maxHeight: sizing.maximumHeight)
-                .fixedSize(horizontal: false, vertical: false)
-        case .flexible:
-            content.frame(minWidth: sizing.minimumWidth, idealWidth: sizing.preferredWidth, maxWidth: sizing.maximumWidth,
-                          minHeight: sizing.minimumHeight, idealHeight: sizing.preferredHeight, maxHeight: sizing.maximumHeight)
-        case .fill:
-            content.frame(minWidth: sizing.minimumWidth, maxWidth: .infinity, minHeight: sizing.minimumHeight, maxHeight: .infinity)
-        }
     }
 }
 
@@ -1307,6 +1515,12 @@ private struct OpenNotchScrollCapture: NSViewRepresentable {
 
 private extension OpenNotchRegionPlacement {
     var sortIndex: Int { OpenNotchRegionPlacement.allCases.firstIndex(of: self) ?? 0 }
+    var rowIndex: Int {
+        switch self { case .topLeft, .topCenter, .topRight: return 0; case .middleLeft, .middleCenter, .middleRight: return 1; case .bottomLeft, .bottomCenter, .bottomRight: return 2 }
+    }
+    var columnIndex: Int {
+        switch self { case .topLeft, .middleLeft, .bottomLeft: return 0; case .topCenter, .middleCenter, .bottomCenter: return 1; case .topRight, .middleRight, .bottomRight: return 2 }
+    }
     var regionAlignment: Alignment {
         switch self {
         case .topLeft: return .topLeading; case .topCenter: return .top; case .topRight: return .topTrailing
@@ -1387,6 +1601,7 @@ struct BuiltinOrIntegrationWidget: View {
     @ObservedObject var store: AppStore
     @Environment(\.widgetStyle) private var style
     @Environment(\.openNotchPresentation) private var presentation
+    @Environment(\.openNotchCompressionLevel) private var compression
     @ViewBuilder var body: some View {
         switch module {
         case .clock: WidgetClock(style: style)
@@ -1469,9 +1684,9 @@ struct BuiltinOrIntegrationWidget: View {
             } else {
                 WidgetElement(key: "files") {
                     VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
-                        ForEach(Array(store.files.prefix(options.maxItems)), id: \.self) { url in
+                        ForEach(Array(store.files.prefix(presentation == .compact ? 1 : presentation == .expanded ? options.maxItems : min(3, options.maxItems))), id: \.self) { url in
                             HStack(spacing: options.spacing) {
-                                ShelfFileInfo(url: url, iconSize: options.shelfIconSize, showDetail: options.shelfShowDetails)
+                                ShelfFileInfo(url: url, iconSize: options.shelfIconSize, showDetail: options.shelfShowDetails && presentation != .compact && compression < 2)
                                 Spacer()
                                 if options.shelfShowActions && options.showControls {
                                     Button { store.toggleFilePin(url) } label: { Image(systemName: store.pinnedFiles.contains(url) ? "pin.fill" : "pin") }.help("Pin")

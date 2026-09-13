@@ -94,8 +94,14 @@ struct WidgetSettingsView: View {
             ForEach(ModuleID.allCases) { Text($0.title).tag($0) }
         }
         Section("Opened notch workspace") {
+            Toggle("Use Custom Workspace Layout", isOn: Binding(
+                get: { layout.resolvedUsesCustomOpenNotchWorkspace },
+                set: { layout.setCustomOpenNotchWorkspaceEnabled($0) }
+            ))
             Button { showingOpenWorkspaceEditor = true } label: { Label("Open Visual Workspace Editor…", systemImage: "rectangle.3.group") }
-            Text("Arrange regions, groups, modules and lightweight elements visually. Widget styling below remains available for deep per-module tuning.")
+            Text(layout.resolvedUsesCustomOpenNotchWorkspace
+                 ? "Custom Workspace is active. Turning it off instantly restores your original Fixed / Scroll / Pages layout without deleting the custom design."
+                 : "Your original opened-notch layout is active. You can design a Custom Workspace without replacing or modifying that layout until you enable it.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .sheet(isPresented: $showingOpenWorkspaceEditor) {
@@ -720,6 +726,22 @@ struct ClosedNotchSettingsView: View {
     }
 }
 
+private extension OpenNotchRegionPlacement {
+    var editorRowIndex: Int {
+        switch self { case .topLeft, .topCenter, .topRight: return 0; case .middleLeft, .middleCenter, .middleRight: return 1; case .bottomLeft, .bottomCenter, .bottomRight: return 2 }
+    }
+    var editorColumnIndex: Int {
+        switch self { case .topLeft, .middleLeft, .bottomLeft: return 0; case .topCenter, .middleCenter, .bottomCenter: return 1; case .topRight, .middleRight, .bottomRight: return 2 }
+    }
+    var editorAlignment: Alignment {
+        switch self {
+        case .topLeft: return .topLeading; case .topCenter: return .top; case .topRight: return .topTrailing
+        case .middleLeft: return .leading; case .middleCenter: return .center; case .middleRight: return .trailing
+        case .bottomLeft: return .bottomLeading; case .bottomCenter: return .bottom; case .bottomRight: return .bottomTrailing
+        }
+    }
+}
+
 private struct OpenedNotchWorkspaceEditor: View {
     @Binding var layout: WorkspaceLayout
     @Environment(\.dismiss) private var dismiss
@@ -745,7 +767,10 @@ private struct OpenedNotchWorkspaceEditor: View {
 
     private var toolbar: some View {
         HStack(spacing: 10) {
-            Picker("Layout", selection: Binding(get: { layout.resolvedOpenNotchContentMode }, set: { layout.openNotchContentMode = $0 })) {
+            Picker("Workspace", selection: Binding(
+                get: { opened.resolvedContentMode },
+                set: { mode in var value = opened; value.contentMode = mode; layout.openNotch = value }
+            )) {
                 ForEach(OpenNotchContentMode.allCases) { Text($0.rawValue).tag($0) }
             }.frame(width: 250)
             Picker("Preset", selection: Binding(get: { opened.preset }, set: { applyPreset($0) })) {
@@ -755,7 +780,8 @@ private struct OpenedNotchWorkspaceEditor: View {
             Button { duplicateSelected() } label: { Image(systemName: "plus.square.on.square") }.disabled(selectedItem == nil).help("Duplicate selected item")
             Button { backgroundMode = true; selectedItem = nil; selectedGroup = nil; selectedRegion = nil } label: { Image(systemName: "paintbrush") }.help("Opened surface appearance")
             Spacer()
-            Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").font(.title3) }.buttonStyle(.plain).help("Close editor")
+            Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(12)
     }
 
@@ -776,11 +802,18 @@ private struct OpenedNotchWorkspaceEditor: View {
             RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .fill(Color.black.opacity(0.92))
                 .overlay {
-                    VStack(spacing: 8) {
-                        editorRow([.topLeft, .topCenter, .topRight])
-                        editorRow([.middleLeft, .middleCenter, .middleRight])
-                        editorRow([.bottomLeft, .bottomCenter, .bottomRight])
-                    }.padding(14)
+                    GeometryReader { proxy in
+                        let inset: CGFloat = 14
+                        let canvasWidth = max(1, proxy.size.width - inset * 2)
+                        let canvasHeight = max(1, proxy.size.height - inset * 2)
+                        let heights = editorTrackSizes(total: canvasHeight, weights: editorRowWeights, gap: 8)
+                        VStack(spacing: 8) {
+                            editorRow([.topLeft, .topCenter, .topRight], height: heights[0], totalWidth: canvasWidth)
+                            editorRow([.middleLeft, .middleCenter, .middleRight], height: heights[1], totalWidth: canvasWidth)
+                            editorRow([.bottomLeft, .bottomCenter, .bottomRight], height: heights[2], totalWidth: canvasWidth)
+                        }
+                        .padding(inset)
+                    }
                 }
                 .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.12)))
                 .frame(width: 610, height: 470)
@@ -788,28 +821,60 @@ private struct OpenedNotchWorkspaceEditor: View {
         }
     }
 
-    @ViewBuilder private func editorRow(_ placements: [OpenNotchRegionPlacement]) -> some View {
-        HStack(spacing: 8) {
-            ForEach(placements) { placement in regionCell(placement).frame(maxWidth: .infinity, maxHeight: .infinity) }
-        }.frame(maxHeight: .infinity)
+    private var editorRowWeights: [Double] {
+        let occupied = [0, 1, 2].map { row in opened.regions.contains { $0.placement.editorRowIndex == row } }
+        return zip(opened.resolvedRowWeights, occupied).map { $1 ? $0 : 0 }
+    }
+    private var editorColumnWeights: [Double] {
+        let occupied = [0, 1, 2].map { column in opened.regions.contains { $0.placement.editorColumnIndex == column } }
+        return zip(opened.resolvedColumnWeights, occupied).map { $1 ? $0 : 0 }
+    }
+    private func editorTrackSizes(total: CGFloat, weights: [Double], gap: CGFloat) -> [CGFloat] {
+        let usable = max(0, total - gap * 2)
+        let positive = weights.map { max(0, $0) }
+        let sum = positive.reduce(0, +)
+        guard sum > 0 else { return [usable / 3, usable / 3, usable / 3] }
+        return positive.map { usable * CGFloat($0 / sum) }
     }
 
-    private func regionCell(_ placement: OpenNotchRegionPlacement) -> some View {
-        let region = opened.regions.first { $0.placement == placement }
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack { Text(placement.title).font(.system(size: 9, weight: .semibold)); Spacer(); if region != nil { Image(systemName: "circle.fill").font(.system(size: 5)).foregroundStyle(.green) } }
-            if let region {
-                ForEach(region.groups) { group in groupPreview(group, region: region) }
-            } else {
-                Spacer(); Text("Drop here").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity); Spacer()
+    private func editorRow(_ placements: [OpenNotchRegionPlacement], height: CGFloat, totalWidth: CGFloat) -> some View {
+        let widths = editorTrackSizes(total: totalWidth, weights: editorColumnWeights, gap: 8)
+        return HStack(spacing: 8) {
+            ForEach(0..<3, id: \.self) { index in
+                regionCell(placements[index], cellSize: CGSize(width: widths[index], height: height))
+                    .frame(width: widths[index], height: max(0, height))
             }
         }
-        .padding(7)
-        .background((selectedRegion == region?.id ? Color.accentColor.opacity(0.16) : Color.white.opacity(0.035)), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(selectedRegion == region?.id ? Color.accentColor.opacity(0.6) : .white.opacity(0.06)))
-        .contentShape(Rectangle())
-        .onTapGesture { if let region { selectedRegion = region.id; selectedGroup = nil; selectedItem = nil; backgroundMode = false } }
-        .onDrop(of: [UTType.text], isTargeted: nil) { providers in acceptDrop(providers, placement: placement) }
+        .frame(width: totalWidth, height: max(0, height))
+    }
+
+    private func regionCell(_ placement: OpenNotchRegionPlacement, cellSize: CGSize) -> some View {
+        let region = opened.regions.first { $0.placement == placement }
+        return ZStack(alignment: placement.editorAlignment) {
+            if let region {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack { Text(placement.title).font(.system(size: 9, weight: .semibold)); Spacer(); Image(systemName: "circle.fill").font(.system(size: 5)).foregroundStyle(.green) }
+                    ForEach(region.groups) { group in groupPreview(group, region: region) }
+                    Spacer(minLength: 0)
+                }
+                .padding(7)
+                .frame(width: max(34, cellSize.width * CGFloat(region.resolvedWidthFraction)),
+                       height: max(34, cellSize.height * CGFloat(region.resolvedHeightFraction)), alignment: .topLeading)
+                .background((selectedRegion == region.id ? Color.accentColor.opacity(0.16) : Color.white.opacity(0.035)), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(selectedRegion == region.id ? Color.accentColor.opacity(0.6) : .white.opacity(0.06)))
+                .contentShape(Rectangle())
+                .clipped()
+                .onTapGesture { selectedRegion = region.id; selectedGroup = nil; selectedItem = nil; backgroundMode = false }
+                .onDrop(of: [UTType.text], isTargeted: nil) { providers in acceptDrop(providers, placement: placement) }
+            } else if cellSize.width > 24 && cellSize.height > 24 {
+                Text("Drop here").font(.caption2).foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .onDrop(of: [UTType.text], isTargeted: nil) { providers in acceptDrop(providers, placement: placement) }
+            }
+        }
+        .frame(width: cellSize.width, height: cellSize.height, alignment: placement.editorAlignment)
+        .clipped()
     }
 
     private func groupPreview(_ group: OpenNotchGroup, region: OpenNotchRegion) -> some View {
@@ -939,6 +1004,20 @@ private struct OpenedNotchWorkspaceEditor: View {
     @ViewBuilder private func regionInspector(_ region: OpenNotchRegion) -> some View {
         let b = regionBinding(region.id)
         Section("Region") { Picker("Placement", selection: b.placement) { ForEach(OpenNotchRegionPlacement.allCases) { Text($0.title).tag($0) } } }
+        Section("Region size") {
+            PreciseSlider(title: "Width in column", value: Binding(
+                get: { b.wrappedValue.resolvedWidthFraction * 100 },
+                set: { b.wrappedValue.widthFraction = $0 / 100 }
+            ), range: 15...100, step: 1, suffix: "%")
+            PreciseSlider(title: "Height in row", value: Binding(
+                get: { b.wrappedValue.resolvedHeightFraction * 100 },
+                set: { b.wrappedValue.heightFraction = $0 / 100 }
+            ), range: 15...100, step: 1, suffix: "%")
+            PreciseSlider(title: "Column width share", value: columnWeightBinding(for: b.wrappedValue.placement), range: 0.1...6, step: 0.1, suffix: "×", decimals: 1)
+            PreciseSlider(title: "Row height share", value: rowWeightBinding(for: b.wrappedValue.placement), range: 0.1...6, step: 0.1, suffix: "×", decimals: 1)
+            Button("Reset Region Size") { b.wrappedValue.widthFraction = nil; b.wrappedValue.heightFraction = nil; resetTrackWeights(for: b.wrappedValue.placement) }
+            Text("Track shares control the relative size of this row/column. Width and height percentages control how much of that designed slot this region occupies.").font(.caption).foregroundStyle(.secondary)
+        }
         Section("Region padding") { insetsEditor(b.padding) }
         Section { Button("Add Group") { addGroup(regionID: region.id) } }
     }
@@ -1001,6 +1080,23 @@ private struct OpenedNotchWorkspaceEditor: View {
         optionalSlider("Tint opacity", b.tintOpacity, fallback: 1, range: 0...1, step: 0.05, decimals: 2)
         optionalSlider("Icon size", b.iconSize, fallback: 20, range: 6...96, step: 1, suffix: "pt")
         optionalSlider("Content density", b.contentDensity, fallback: 1, range: 0.5...1.5, step: 0.05, suffix: "×", decimals: 2)
+    }
+
+    private func columnWeightBinding(for placement: OpenNotchRegionPlacement) -> Binding<Double> {
+        Binding(get: { opened.resolvedColumnWeights[placement.editorColumnIndex] }, set: { value in
+            var next = opened; next.setColumnWeight(value, at: placement.editorColumnIndex); layout.openNotch = next
+        })
+    }
+    private func rowWeightBinding(for placement: OpenNotchRegionPlacement) -> Binding<Double> {
+        Binding(get: { opened.resolvedRowWeights[placement.editorRowIndex] }, set: { value in
+            var next = opened; next.setRowWeight(value, at: placement.editorRowIndex); layout.openNotch = next
+        })
+    }
+    private func resetTrackWeights(for placement: OpenNotchRegionPlacement) {
+        var next = opened
+        var columns = next.resolvedColumnWeights; columns[placement.editorColumnIndex] = 1; next.columnWeights = columns
+        var rows = next.resolvedRowWeights; rows[placement.editorRowIndex] = 1; next.rowWeights = rows
+        layout.openNotch = next
     }
 
     @ViewBuilder private func insetsEditor(_ b: Binding<OpenNotchInsets>) -> some View {

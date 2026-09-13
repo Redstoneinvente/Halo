@@ -15,6 +15,11 @@ Glass samples the desktop through native macOS material. Opacity now adjusts a l
 
 ## Opened notch workspace
 
+**Custom Workspace Layout is optional.** Existing Fixed, Scroll, and Pages opened-notch layouts remain the default for older profiles and are stored independently. Turning Custom Workspace off restores the legacy layout immediately without deleting the custom design. The custom workspace has its own Fixed/Scroll/Pages mode.
+
+In the custom Fixed workspace, occupied rows and columns form the canvas. Each row and column has a relative size share, and every region can use a percentage of its grid slot plus independent padding. Items are allocated concrete width/height slots before they render; Fixed/Fit/Flexible/Fill sizing is clamped to the region, so cards cannot overlap or escape their designed area. Widgets receive their actual slot dimensions and automatically reduce padding/spacing/secondary content, switch presentation, truncate, and finally scroll only when the slot is genuinely too small.
+
+
 The normal opened notch is now a workspace model rather than a fixed list of cards. Existing saved layouts remain valid: when an older profile has no `OpenNotchLayout`, Halo resolves its existing enabled-module order into a compatible center group, and the existing Fixed Canvas, Scroll, and Pages modes remain available.
 
 The visual opened-notch editor arranges content as regions → groups → items. Regions can occupy top/middle/bottom and left/center/right positions, each with independent padding. Groups choose horizontal or vertical flow, alignment, spacing, and padding. Items can be full modules or lightweight elements such as time/date, battery, active-app identity, volume, timer/stopwatch, media metadata/controls, CPU/RAM/storage/network metrics, custom text/icons/images/GIFs, buttons, spacers, and dividers. Items use one shared renderer and can be dragged between groups/regions, reordered, resized, hidden, duplicated, grouped, and configured with Fixed, Fit Content, Flexible, or Fill Remaining Space sizing plus min/preferred/max dimensions.

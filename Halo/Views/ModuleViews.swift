@@ -24,6 +24,7 @@ struct ModuleRegistry {
 }
 struct IntegrationModuleView: View {
     @Environment(\.widgetStyle) private var style
+    @Environment(\.openNotchPresentation) private var presentation
     let id: ModuleID
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
@@ -81,21 +82,21 @@ struct IntegrationModuleView: View {
         case .system: SystemModuleView(service: workspace.system)
         case .launcher: LauncherModuleView(store: store, workspace: workspace)
         case .activities:
-            WidgetElement(key: "summary") {
+            WidgetElement(key: "summary", defaultPriority: .high) {
                 Label("\(workspace.activities.count) live activit\(workspace.activities.count == 1 ? "y" : "ies")", systemImage: "waveform.path")
             }
-            if workspace.activities.isEmpty, options.showStatus {
+            if workspace.activities.isEmpty, options.showStatus, presentation != .compact {
                 WidgetElement(key: "status") {
                     Text("Timer completions and live progress appear here.").foregroundStyle(.secondary)
                 }
             }
-            WidgetElement(key: "items") {
+            if presentation != .compact { WidgetElement(key: "items") {
                 VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
-                    ForEach(Array(workspace.activities.prefix(options.maxItems))) { activity in
+                    ForEach(Array(workspace.activities.prefix(presentation == .expanded ? options.maxItems : min(3, options.maxItems)))) { activity in
                         HStack(spacing: options.spacing) {
                             VStack(alignment: options.alignment.horizontal, spacing: max(2, options.spacing * 0.35)) {
                                 Text(activity.title)
-                                if options.activitiesShowDetail && !activity.detail.isEmpty { Text(activity.detail).foregroundStyle(.secondary) }
+                                if presentation == .expanded && options.activitiesShowDetail && !activity.detail.isEmpty { Text(activity.detail).foregroundStyle(.secondary) }
                                 if options.showProgress, let progress = activity.progress { ProgressView(value: progress) }
                             }
                             Spacer()
@@ -103,29 +104,31 @@ struct IntegrationModuleView: View {
                         }
                     }
                 }
-            }
+            } }
         case .notes:
-            WidgetElement(key: "stats") {
+            if presentation != .compact { WidgetElement(key: "stats", defaultPriority: .low) {
                 let words = workspace.settings.notes.split { $0.isWhitespace || $0.isNewline }.count
                 HStack { Label("\(words) words", systemImage: "text.word.spacing"); Spacer(); Text("\(workspace.settings.notes.count) chars") }
+            } }
+            WidgetElement(key: "editor", defaultPriority: .high) {
+                TextEditor(text: $workspace.settings.notes)
+                    .frame(height: presentation == .compact ? min(52, options.notesHeight) : presentation == .expanded ? max(140, options.notesHeight) : options.notesHeight)
+                    .accessibilityLabel("Quick note")
             }
-            WidgetElement(key: "editor") {
-                TextEditor(text: $workspace.settings.notes).frame(height: options.notesHeight).accessibilityLabel("Quick note")
-            }
-            WidgetElement(key: "actions", defaultVisible: false) {
+            if presentation == .expanded { WidgetElement(key: "actions", defaultVisible: false, defaultPriority: .low) {
                 HStack {
                     Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(workspace.settings.notes, forType: .string) }
                     Button("Clear") { workspace.settings.notes = "" }.disabled(workspace.settings.notes.isEmpty)
                 }
-            }
+            } }
         case .capture:
             CaptureModuleView(service: workspace.capture, store: store)
         case .stopwatch:
-            WidgetElement(key: "state") {
+            if presentation != .compact { WidgetElement(key: "state", defaultPriority: .low) {
                 Label(workspace.stopwatchStart == nil ? (workspace.stopwatchElapsed > 0 ? "Paused" : "Ready") : "Running",
                       systemImage: workspace.stopwatchStart == nil ? "pause.circle" : "play.circle.fill")
-            }
-            WidgetElement(key: "time") {
+            } }
+            WidgetElement(key: "time", defaultPriority: .alwaysVisible) {
                 TimelineView(.periodic(from: .now, by: 0.2)) { context in
                     let elapsed = workspace.stopwatchElapsed + (workspace.stopwatchStart.map { context.date.timeIntervalSince($0) } ?? 0)
                     let whole = Int(elapsed)
@@ -134,7 +137,7 @@ struct IntegrationModuleView: View {
                 }
             }
             if options.showControls {
-                WidgetElement(key: "controls") {
+                WidgetElement(key: "controls", defaultPriority: .high) {
                     HStack(spacing: options.spacing) {
                         Button(workspace.stopwatchStart == nil ? "Start" : "Pause") { workspace.toggleStopwatch() }
                         Button("Reset") { workspace.stopwatchStart = nil; workspace.stopwatchElapsed = 0 }
@@ -307,6 +310,7 @@ private struct OpenMediaSpectrumView: View {
 
 struct AudioModuleView: View {
     @Environment(\.widgetStyle) private var style
+    @Environment(\.openNotchPresentation) private var presentation
     @ObservedObject var service: AudioService
     var body: some View {
         let options = style.resolvedContent
@@ -314,23 +318,23 @@ struct AudioModuleView: View {
             WidgetElement(key: "summary") {
                 HStack { Label("\(service.devices.count) outputs", systemImage: "speaker.wave.2"); Spacer(); Text("\(Int(service.volume * 100))%") }
             }
-            WidgetElement(key: "output") {
+            if presentation != .compact { WidgetElement(key: "output") {
                 Picker("Output", selection: Binding(get: { service.selected }, set: { service.setOutput($0) })) {
                     ForEach(service.devices.prefix(options.maxItems)) { Text($0.name).tag($0.id) }
                 }
-            }
+            } }
             if service.canSetVolume && options.showControls {
                 WidgetElement(key: "volume") {
                     Slider(value: Binding(get: { Double(service.volume) }, set: { service.setVolume(Float($0)) }), in: 0...1) { Text("Volume") }
                 }
-                WidgetElement(key: "volumeValue") { Text("Volume \(Int(service.volume * 100))%").monospacedDigit() }
+                if presentation != .compact { WidgetElement(key: "volumeValue", defaultPriority: .low) { Text("Volume \(Int(service.volume * 100))%").monospacedDigit() } }
                 WidgetElement(key: "levels", defaultVisible: false) {
                     HStack { ForEach([0, 25, 50, 75, 100], id: \.self) { value in Button("\(value)%") { service.setVolume(Float(value) / 100) } } }
                 }
             } else if !service.canSetVolume && options.showStatus {
                 WidgetElement(key: "status") { Text("This output uses hardware volume controls.") }
             }
-            if options.showQuickActions { WidgetElement(key: "actions") { Button("Refresh devices") { service.refresh() } } }
+            if options.showQuickActions && presentation == .expanded { WidgetElement(key: "actions", defaultPriority: .low) { Button("Refresh devices") { service.refresh() } } }
             if options.showStatus, let error = service.error { WidgetElement(key: "status") { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) } }
         }.frame(maxWidth: .infinity, alignment: options.alignment.alignment).onAppear { service.refresh() }
     }

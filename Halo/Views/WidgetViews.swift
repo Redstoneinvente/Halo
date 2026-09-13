@@ -89,6 +89,8 @@ extension EnvironmentValues {
 
 private struct OpenNotchPresentationEnvironmentKey: EnvironmentKey { static let defaultValue: OpenNotchPresentation = .regular }
 private struct OpenNotchCompressionEnvironmentKey: EnvironmentKey { static let defaultValue = 0 }
+private struct OpenNotchAvailableWidthEnvironmentKey: EnvironmentKey { static let defaultValue: CGFloat? = nil }
+private struct OpenNotchAvailableHeightEnvironmentKey: EnvironmentKey { static let defaultValue: CGFloat? = nil }
 extension EnvironmentValues {
     var openNotchPresentation: OpenNotchPresentation {
         get { self[OpenNotchPresentationEnvironmentKey.self] }
@@ -97,6 +99,14 @@ extension EnvironmentValues {
     var openNotchCompressionLevel: Int {
         get { self[OpenNotchCompressionEnvironmentKey.self] }
         set { self[OpenNotchCompressionEnvironmentKey.self] = newValue }
+    }
+    var openNotchAvailableWidth: CGFloat? {
+        get { self[OpenNotchAvailableWidthEnvironmentKey.self] }
+        set { self[OpenNotchAvailableWidthEnvironmentKey.self] = newValue }
+    }
+    var openNotchAvailableHeight: CGFloat? {
+        get { self[OpenNotchAvailableHeightEnvironmentKey.self] }
+        set { self[OpenNotchAvailableHeightEnvironmentKey.self] = newValue }
     }
 }
 
@@ -146,7 +156,14 @@ struct WidgetElementSurface<Content: View>: View {
     var defaultPriority: OpenNotchPriority = .normal
     @ViewBuilder var content: Content
     @Environment(\.openNotchCompressionLevel) private var compression
+    @Environment(\.openNotchAvailableWidth) private var availableWidth
+    @Environment(\.openNotchAvailableHeight) private var availableHeight
 
+    private var adaptiveScale: Double {
+        let widthScale = availableWidth.map { min(1, max(0.68, Double($0) / 220)) } ?? 1
+        let heightScale = availableHeight.map { min(1, max(0.68, Double($0) / 110)) } ?? 1
+        return min(widthScale, heightScale)
+    }
     private var priority: OpenNotchPriority { element.priority ?? defaultPriority }
     private var alignment: WidgetContentAlignment { element.alignment ?? widgetStyle.resolvedContent.alignment }
     private var textAlignment: WidgetContentAlignment { element.textAlignment ?? alignment }
@@ -161,7 +178,7 @@ struct WidgetElementSurface<Content: View>: View {
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: element.cornerRadius, style: .continuous) }
     private var font: Font {
         let family = element.fontFamily ?? widgetStyle.fontFamily
-        let size = element.fontSize ?? (widgetStyle.fontSize * element.fontScale)
+        let size = (element.fontSize ?? (widgetStyle.fontSize * element.fontScale)) * adaptiveScale
         let weight = element.fontWeight?.swiftUIFontWeight ?? element.emphasis.fontWeight
         if family == .custom { return .custom(element.customFont ?? widgetStyle.customFont, size: size).weight(weight) }
         let design: Font.Design
@@ -196,7 +213,7 @@ struct WidgetElementSurface<Content: View>: View {
                 .controlSize(controlSize)
                 .opacity(element.opacity)
                 .lineLimit(compression >= 4 ? 1 : nil)
-                .padding(element.padding)
+                .padding(element.padding * adaptiveScale)
                 .background { elementBackground }
                 .overlay {
                     if (element.borderWidth ?? 0) > 0 && (element.borderOpacity ?? 0) > 0 {
@@ -205,7 +222,7 @@ struct WidgetElementSurface<Content: View>: View {
                 }
                 .shadow(color: .black.opacity(element.shadowOpacity ?? 0), radius: element.shadowBlur ?? 0)
                 .offset(x: element.xOffset ?? 0, y: element.yOffset ?? 0)
-                .padding(.vertical, (element.externalSpacing ?? 0) * 0.5)
+                .padding(.vertical, (element.externalSpacing ?? 0) * adaptiveScale * 0.5)
                 .frame(maxWidth: .infinity, alignment: alignment.alignment)
         }
     }
@@ -238,7 +255,9 @@ struct WidgetElement<Content: View>: View {
 struct WidgetCard<Content: View>: View {
     let style: WidgetStyle
     var availableHeight: CGFloat? = nil
+    var availableWidth: CGFloat? = nil
     @ViewBuilder var content: Content
+    @Environment(\.openNotchCompressionLevel) private var compression
     private var fittedStyle: WidgetStyle {
         var fitted = style
         switch style.resolvedLayoutMode {
@@ -255,16 +274,24 @@ struct WidgetCard<Content: View>: View {
             fitted.padding *= 0.62
             fitted.fontSize *= 0.90
         }
-        guard let height = availableHeight else { return fitted }
-        fitted.padding = min(fitted.padding, max(0, height * 0.08))
-        fitted.minimumHeight = 0
-        fitted.fontSize = min(fitted.fontSize, max(10, height * 0.18))
+        if let width = availableWidth {
+            fitted.padding = min(fitted.padding, max(3, width * 0.055))
+            fitted.fontSize = min(fitted.fontSize, max(9, width * 0.11))
+        }
+        if let height = availableHeight {
+            fitted.padding = min(fitted.padding, max(2, height * 0.08))
+            fitted.minimumHeight = 0
+            fitted.fontSize = min(fitted.fontSize, max(9, height * 0.18))
+        }
         return fitted
     }
     private var contentOptions: WidgetContentOptions { fittedStyle.resolvedContent }
     private var chrome: WidgetChromeOptions { fittedStyle.resolvedChrome }
     private var styledContent: some View {
-        content.environment(\.widgetStyle, fittedStyle).font(fittedStyle.font())
+        content.environment(\.widgetStyle, fittedStyle)
+            .environment(\.openNotchAvailableWidth, availableWidth)
+            .environment(\.openNotchAvailableHeight, availableHeight)
+            .font(fittedStyle.font())
             .foregroundStyle(style.textColor.color).tint(style.accentColor.color)
             .controlSize(contentOptions.controlSize.swiftUI)
             .opacity(chrome.contentOpacity)
@@ -325,14 +352,18 @@ struct WidgetCard<Content: View>: View {
         Group {
             if let height = availableHeight {
                 let padding = fittedStyle.padding
-                // Keep the card within the viewport; only overflowing contents scroll.
-                ScrollView(.vertical) {
+                if compression >= 5 {
+                    ScrollView(.vertical) {
+                        styledContent.frame(maxWidth: .infinity, alignment: contentOptions.alignment.alignment)
+                    }
+                    .padding(padding).frame(height: max(0, height)).clipped()
+                } else {
                     styledContent
-                        .frame(maxWidth: .infinity, minHeight: max(0, height - 2 * padding), alignment: contentOptions.alignment == .center ? .top : (contentOptions.alignment == .trailing ? .topTrailing : .topLeading))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: contentOptions.alignment.alignment)
+                        .padding(padding)
+                        .frame(height: max(0, height))
+                        .clipped()
                 }
-                .padding(padding)
-                .frame(height: max(0, height))
-                .clipped()
             } else {
                 styledContent
                     .frame(maxWidth: .infinity, minHeight: style.minimumHeight, alignment: contentOptions.alignment.alignment)
@@ -342,6 +373,7 @@ struct WidgetCard<Content: View>: View {
         .background { cardBackground }
         .overlay { cardOutline }
         .shadow(color: .black.opacity(chrome.shadowOpacity), radius: chrome.shadowRadius, y: chrome.shadowY)
+        .frame(width: availableWidth)
         .frame(maxWidth: style.width > 0 ? style.width : .infinity)
         .frame(maxWidth: .infinity, alignment: contentOptions.alignment.alignment)
     }
