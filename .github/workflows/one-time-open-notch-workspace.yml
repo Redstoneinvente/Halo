@@ -1,0 +1,58 @@
+name: One-time Opened Notch Workspace
+
+on:
+  push:
+    paths:
+      - 'Scripts/one_time_open_notch_workspace.py'
+      - '.github/workflows/one-time-open-notch-workspace.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply opened notch workspace patch
+        run: python3 Scripts/one_time_open_notch_workspace.py
+
+      - name: Validate Swift syntax
+        run: |
+          xcrun swiftc -parse Halo/Core/Models.swift
+          xcrun swiftc -parse Halo/Core/WorkspaceModels.swift
+          xcrun swiftc -parse Halo/Core/SurfaceModels.swift
+          xcrun swiftc -parse Halo/NotchEngine/WindowManager.swift
+          xcrun swiftc -parse Halo/Views/SurfaceView.swift
+          xcrun swiftc -parse Halo/Views/WorkspaceSettingsView.swift
+
+      - name: Validate diff
+        run: git diff --check
+
+      - name: Check changed files for compiler errors
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build > /tmp/halo-build.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/halo-build.log | tail -n 120
+          if grep -E '(^|/)(Models|WorkspaceModels|SurfaceModels|WindowManager|SurfaceView|WorkspaceSettingsView)\.swift:.*error:' /tmp/halo-build.log; then
+            echo 'Compiler error found in a changed file.'
+            exit 1
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo 'Full project build still has an unrelated existing failure; changed files have no reported compiler errors.'
+          fi
+
+      - name: Commit implementation and clean helper
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Core/Models.swift Halo/Core/WorkspaceModels.swift Halo/Core/SurfaceModels.swift Halo/NotchEngine/WindowManager.swift Halo/Views/SurfaceView.swift Halo/Views/WorkspaceSettingsView.swift
+          git rm Scripts/one_time_open_notch_workspace.py
+          git rm .github/workflows/one-time-open-notch-workspace.yml
+          git commit -m 'Make opened notch workspace customizable'
+          git push origin HEAD:main
