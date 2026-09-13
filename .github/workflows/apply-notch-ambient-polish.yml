@@ -11,57 +11,57 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Patch, validate and publish polish
+      - name: Patch, validate and publish compiler repair
         shell: bash
         run: |
           set -euo pipefail
-          cp .github/notch_ambient_polish_v2.py /tmp/notch_ambient_polish.py
+          cp .github/notch_ambient_compile_fix.py /tmp/notch_ambient_compile_fix.py
           git fetch origin main
           git checkout -B main origin/main
-          python3 /tmp/notch_ambient_polish.py
+          python3 /tmp/notch_ambient_compile_fix.py
 
-          echo '=== Polish scope ==='
+          echo '=== Repair scope ==='
           git diff --name-only
           python3 <<'PY'
           import subprocess
           changed = set(subprocess.check_output(['git','diff','--name-only'], text=True).splitlines())
           expected = {'Halo/Views/DecorationsView.swift'}
           if changed != expected:
-              raise SystemExit(f'Unexpected polish scope: {sorted(changed)}')
-          print('Notch Ambient polish scope verified.')
+              raise SystemExit(f'Unexpected repair scope: {sorted(changed)}')
+          print('Notch Ambient repair scope verified.')
           PY
 
           git diff --check
           xcrun swiftc -parse Halo/Views/DecorationsView.swift
 
-          echo '=== Interaction audit ==='
-          grep -q 'case christmasOrnaments = "Christmas Ornaments"' Halo/Views/DecorationsView.swift
-          grep -q 'static func placedNotch' Halo/Views/DecorationsView.swift
-          grep -q 'let exponent = max(0.35' Halo/Views/DecorationsView.swift
-          grep -q 'drawEdgeGlow.*cursor: cursor' Halo/Views/DecorationsView.swift
-          grep -q 'ornaments: true' Halo/Views/DecorationsView.swift
-          grep -q 'let interaction=cursorInfluence(cursor,point:center,settings:s).strength' Halo/Views/DecorationsView.swift
-          grep -q 'let span = n.width.*s.spacing' Halo/Views/DecorationsView.swift
-          grep -q 'let react=cursorInfluence(cursor,point:tip,settings:s)' Halo/Views/DecorationsView.swift
-          echo 'Placement, cursor falloff, hanging variants, moss bending and portal proximity are wired.'
+          echo '=== Compiler repair audit ==='
+          grep -q 'private var fileShelfOwnsNotch: Bool' Halo/Views/DecorationsView.swift
+          grep -q 'guard !fileShelfOwnsNotch' Halo/Views/DecorationsView.swift
+          grep -q 'sin(phase + Double(i))' Halo/Views/DecorationsView.swift
+          grep -q 'Double(i % 3)' Halo/Views/DecorationsView.swift
+          grep -q 'Double(i % 2)' Halo/Views/DecorationsView.swift
+          grep -q 'sin(phase \* 1.6) > -0.15' Halo/Views/DecorationsView.swift
+          grep -q 'let portalSpeed = 9.0 + interaction \* 6.0' Halo/Views/DecorationsView.swift
 
           echo '=== Xcode validation ==='
           set +e
-          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee /tmp/notch-ambient-polish-build.log
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee /tmp/notch-ambient-compile-fix.log
           build_status=${PIPESTATUS[0]}
           set -e
-          if grep -E 'Halo/Views/DecorationsView\.swift:[0-9]+:[0-9]+: error:' /tmp/notch-ambient-polish-build.log; then
-              echo 'Notch Ambient polish introduced a compiler error.' >&2
+          if grep -E 'Halo/Views/DecorationsView\.swift:[0-9]+:[0-9]+: error:' /tmp/notch-ambient-compile-fix.log; then
+              echo 'DecorationsView still has compiler errors.' >&2
+              grep -E 'Halo/Views/DecorationsView\.swift:[0-9]+:[0-9]+: error:' /tmp/notch-ambient-compile-fix.log
               exit 1
           fi
-          if grep -q 'SwiftCompile.*DecorationsView.swift' /tmp/notch-ambient-polish-build.log; then
+          if grep -q 'SwiftCompile.*DecorationsView.swift' /tmp/notch-ambient-compile-fix.log; then
               echo 'Compiler reached DecorationsView.swift with no errors.'
           else
-              echo 'Warning: build stopped before a dedicated DecorationsView compile line.'
+              echo 'Build stopped before a dedicated DecorationsView compile line.' >&2
+              exit 1
           fi
           if [[ $build_status -ne 0 ]]; then
-              echo 'Full target still has unrelated repository errors; Notch Ambient polish reported no compiler errors.'
-              grep -E 'error:' /tmp/notch-ambient-polish-build.log | tail -n 20 || true
+              echo 'Full target still has unrelated repository errors; DecorationsView is clean.'
+              grep -E 'error:' /tmp/notch-ambient-compile-fix.log | tail -n 20 || true
           else
               echo 'Full target build succeeded.'
           fi
@@ -70,5 +70,5 @@ jobs:
           git config user.name 'Doshagyasing Gowardun'
           git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
           git add Halo/Views/DecorationsView.swift
-          git commit -m 'Polish Notch Ambient interactions'
+          git commit -m 'Fix Notch Ambient compiler errors'
           git push origin HEAD:main
