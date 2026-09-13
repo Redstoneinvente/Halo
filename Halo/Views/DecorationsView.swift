@@ -878,6 +878,12 @@ struct NotchAmbientOverlayView: View {
         guard !store.pinnedFiles.isEmpty else { return false }
         return closed.left == .files || closed.right == .files
     }
+    private var fileShelfOwnsNotch: Bool {
+        guard !store.pinnedFiles.isEmpty else { return false }
+        let leftOwnsFiles = closed.left == .files
+        let rightOwnsFiles = closed.right == .files
+        return leftOwnsFiles || rightOwnsFiles
+    }
     private var mirrorOwnsNotch: Bool { closed.left == .mirror || closed.right == .mirror }
     private var powerOwnsNotch: Bool {
         let p = closed.powerReaction ?? PowerReactionOptions()
@@ -902,9 +908,12 @@ struct NotchAmbientOverlayView: View {
     private var notchLike: Bool { state.theme.style == .notch || state.theme.style == .simulated }
     private var hasCommercialAccess: Bool { account.isSignedIn && license.accessValid(for: account.userID) }
     private var shouldShow: Bool {
-        current.enabled && screenAwake && notchLike && hasCommercialAccess && !state.expanded && !state.dropTargeted &&
-        !activeHUD && !activeActivity && !mediaOwnsNotch && !timerOwnsNotch && !filesOwnsNotch && !mirrorOwnsNotch && !powerOwnsNotch &&
-        !(current.yieldToPersistentClosedContent && persistentClosedContent)
+        guard current.enabled, screenAwake, notchLike, hasCommercialAccess else { return false }
+        guard !state.expanded, !state.dropTargeted else { return false }
+        guard !activeHUD, !activeActivity, !mediaOwnsNotch, !timerOwnsNotch else { return false }
+        guard !fileShelfOwnsNotch, !mirrorOwnsNotch, !powerOwnsNotch else { return false }
+        if current.yieldToPersistentClosedContent && persistentClosedContent { return false }
+        return true
     }
     private var notchWidth: CGFloat { max(40, state.physicalNotchWidth > 0 ? state.physicalNotchWidth : min(190, state.compactWidth)) }
     private var notchHeight: CGFloat { max(16, state.physicalNotchHeight > 0 ? state.physicalNotchHeight : min(34, state.compactHeight)) }
@@ -1238,13 +1247,31 @@ private enum NotchAmbientPainter {
     }
 
     private static func drawIcicles(_ ctx: inout GraphicsContext, notch n: CGRect, s: NotchAmbientSettings, phase: Double, intensity: Double, palette: [Color], lowPower: Bool) {
-        let count = max(4, min(lowPower ? 16 : 30, s.count + Int(s.density * 12)))
+        let densityCount = Int(s.density * 12.0)
+        let maximumCount: Int = lowPower ? 16 : 30
+        let count: Int = max(4, min(maximumCount, s.count + densityCount))
+
         for i in 0..<count {
-            let t = Double(i) / Double(max(1,count-1)); let x = n.minX + n.width * CGFloat(t)
-            let len = CGFloat(s.length * (0.28 + rand(i,seed:s.seed,salt:21)*0.72))
-            var p=Path(); p.move(to: CGPoint(x:x-2,y:n.maxY)); p.addLine(to:CGPoint(x:x,y:n.maxY+len)); p.addLine(to:CGPoint(x:x+2,y:n.maxY)); p.closeSubpath()
-            ctx.fill(p, with:.color(c(palette,i).opacity(0.10 + intensity*0.30)))
-            if rand(i,seed:s.seed,salt:22)>0.72 { ellipse(&ctx,rect:CGRect(x:x-0.8,y:n.maxY+len*0.55+CGFloat(sin(phase+i))*2,width:1.6,height:1.6),color:.white.opacity(intensity*0.55),fill:true) }
+            let denominator = Double(max(1, count - 1))
+            let t = Double(i) / denominator
+            let x = n.minX + n.width * CGFloat(t)
+            let lengthFactor = 0.28 + rand(i, seed: s.seed, salt: 21) * 0.72
+            let length = CGFloat(s.length * lengthFactor)
+
+            var icicle = Path()
+            icicle.move(to: CGPoint(x: x - 2.0, y: n.maxY))
+            icicle.addLine(to: CGPoint(x: x, y: n.maxY + length))
+            icicle.addLine(to: CGPoint(x: x + 2.0, y: n.maxY))
+            icicle.closeSubpath()
+            let icicleOpacity = 0.10 + intensity * 0.30
+            ctx.fill(icicle, with: .color(c(palette, i).opacity(icicleOpacity)))
+
+            if rand(i, seed: s.seed, salt: 22) > 0.72 {
+                let wave = sin(phase + Double(i))
+                let dropletY = n.maxY + length * 0.55 + CGFloat(wave) * 2.0
+                let dropletRect = CGRect(x: x - 0.8, y: dropletY, width: 1.6, height: 1.6)
+                ellipse(&ctx, rect: dropletRect, color: .white.opacity(intensity * 0.55), fill: true)
+            }
         }
     }
 
@@ -1287,16 +1314,79 @@ private enum NotchAmbientPainter {
     private static func drawSpace(_ ctx: inout GraphicsContext, size: CGSize, notch n: CGRect, kind: NotchAmbientDecorationKind, s: NotchAmbientSettings, phase: Double, intensity: Double, palette: [Color], cursor: CGPoint?, lowPower: Bool) {
         switch kind {
         case .blackHole:
-            let center=CGPoint(x:n.midX,y:n.midY+4)
-            for i in 0..<8 { let pad=CGFloat(9+i*7); let h=CGFloat(18+i*3); ellipse(&ctx,rect:CGRect(x:center.x-n.width/2-pad,y:center.y-h/2,width:n.width+pad*2,height:h),color:c(palette,i).opacity((0.16-Double(i)*0.012)*intensity),fill:false,width:CGFloat(1.2+(i%3))) }
-            let count=max(6,min(lowPower ? 18:36,Int(8+s.density*30)))
-            for i in 0..<count { let a=phase*(0.18+rand(i,seed:s.seed,salt:51)*0.18)+rand(i,seed:s.seed,salt:52)*Double.pi*2; let rx=n.width/2+CGFloat(18+rand(i,seed:s.seed,salt:53)*70); let ry=CGFloat(12+rand(i,seed:s.seed,salt:54)*25); var point=CGPoint(x:center.x+cos(a)*rx,y:center.y+sin(a)*ry); let react=cursorInfluence(cursor,point:point,settings:s); point.x += react.dx; point.y += react.dy; let r=CGFloat(0.8+rand(i,seed:s.seed,salt:55)*1.8); ellipse(&ctx,rect:CGRect(x:point.x-r,y:point.y-r,width:r*2,height:r*2),color:c(palette,i).opacity(0.25+intensity*0.58),fill:true) }
-            if s.lensDistortion || s.distortion > 0.5 { ellipse(&ctx,rect:n.insetBy(dx:-24,dy:-10).offsetBy(dx:0,dy:5),color:.white.opacity(intensity*s.distortion*0.08),fill:false,width:1) }
+            let center = CGPoint(x: n.midX, y: n.midY + 4.0)
+            for i in 0..<8 {
+                let pad = CGFloat(9 + i * 7)
+                let ringHeight = CGFloat(18 + i * 3)
+                let ringRect = CGRect(
+                    x: center.x - n.width / 2.0 - pad,
+                    y: center.y - ringHeight / 2.0,
+                    width: n.width + pad * 2.0,
+                    height: ringHeight
+                )
+                let ringOpacity = (0.16 - Double(i) * 0.012) * intensity
+                let ringWidth = CGFloat(1.2 + Double(i % 3))
+                ellipse(&ctx, rect: ringRect, color: c(palette, i).opacity(ringOpacity), fill: false, width: ringWidth)
+            }
+
+            let maximumParticles: Int = lowPower ? 18 : 36
+            let particleCount: Int = max(6, min(maximumParticles, Int(8.0 + s.density * 30.0)))
+            for i in 0..<particleCount {
+                let angularSpeed = 0.18 + rand(i, seed: s.seed, salt: 51) * 0.18
+                let angle = phase * angularSpeed + rand(i, seed: s.seed, salt: 52) * Double.pi * 2.0
+                let radiusX = n.width / 2.0 + CGFloat(18.0 + rand(i, seed: s.seed, salt: 53) * 70.0)
+                let radiusY = CGFloat(12.0 + rand(i, seed: s.seed, salt: 54) * 25.0)
+                var point = CGPoint(
+                    x: center.x + CGFloat(cos(angle)) * radiusX,
+                    y: center.y + CGFloat(sin(angle)) * radiusY
+                )
+                let reaction = cursorInfluence(cursor, point: point, settings: s)
+                point.x += reaction.dx
+                point.y += reaction.dy
+                let radius = CGFloat(0.8 + rand(i, seed: s.seed, salt: 55) * 1.8)
+                let particleRect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2.0, height: radius * 2.0)
+                ellipse(&ctx, rect: particleRect, color: c(palette, i).opacity(0.25 + intensity * 0.58), fill: true)
+            }
+
+            if s.lensDistortion || s.distortion > 0.5 {
+                let lensRect = n.insetBy(dx: -24.0, dy: -10.0).offsetBy(dx: 0, dy: 5.0)
+                ellipse(&ctx, rect: lensRect, color: .white.opacity(intensity * s.distortion * 0.08), fill: false, width: 1.0)
+            }
         case .portal:
-            let center=CGPoint(x:n.midX,y:n.midY+5)
-            let interaction=cursorInfluence(cursor,point:center,settings:s).strength
-            for i in 0..<7 { let pad=CGFloat(7+i*7); ellipse(&ctx,rect:CGRect(x:center.x-n.width/2-pad,y:center.y-CGFloat(13+i*2),width:n.width+pad*2,height:CGFloat(26+i*4)),color:c(palette,i).opacity(intensity*(0.25-Double(i)*0.022)*(1+interaction*1.3)),fill:false,width:CGFloat(1.2+(i%2))) }
-            let count=max(4,min(lowPower ? 14:28,Int(5+s.density*24))); for i in 0..<count { let a=rand(i,seed:s.seed,salt:61)*Double.pi*2+phase*0.12; let r=CGFloat(25+rand(i,seed:s.seed,salt:62)*80); let x=center.x+cos(a)*r; let y=center.y+sin(a)*r*0.36+CGFloat((phase*(9+interaction*6)+Double(i)*7).truncatingRemainder(dividingBy:18)); ellipse(&ctx,rect:CGRect(x:x-1,y:y-1,width:2,height:2),color:c(palette,i).opacity(intensity*(0.58+interaction*0.32)),fill:true) }
+            let center = CGPoint(x: n.midX, y: n.midY + 5.0)
+            let interaction = cursorInfluence(cursor, point: center, settings: s).strength
+
+            for i in 0..<7 {
+                let pad = CGFloat(7 + i * 7)
+                let verticalRadius = CGFloat(13 + i * 2)
+                let ringHeight = CGFloat(26 + i * 4)
+                let ringRect = CGRect(
+                    x: center.x - n.width / 2.0 - pad,
+                    y: center.y - verticalRadius,
+                    width: n.width + pad * 2.0,
+                    height: ringHeight
+                )
+                let baseOpacity = 0.25 - Double(i) * 0.022
+                let ringOpacity = intensity * baseOpacity * (1.0 + interaction * 1.3)
+                let ringWidth = CGFloat(1.2 + Double(i % 2))
+                ellipse(&ctx, rect: ringRect, color: c(palette, i).opacity(ringOpacity), fill: false, width: ringWidth)
+            }
+
+            let maximumParticles: Int = lowPower ? 14 : 28
+            let particleCount: Int = max(4, min(maximumParticles, Int(5.0 + s.density * 24.0)))
+            let portalSpeed: Double = 9.0 + interaction * 6.0
+            for i in 0..<particleCount {
+                let angleSeed = rand(i, seed: s.seed, salt: 61)
+                let angle = angleSeed * Double.pi * 2.0 + phase * 0.12
+                let radius = CGFloat(25.0 + rand(i, seed: s.seed, salt: 62) * 80.0)
+                let x = center.x + CGFloat(cos(angle)) * radius
+                let driftInput = phase * portalSpeed + Double(i) * 7.0
+                let drift = driftInput.truncatingRemainder(dividingBy: 18.0)
+                let y = center.y + CGFloat(sin(angle)) * radius * 0.36 + CGFloat(drift)
+                let opacity = intensity * (0.58 + interaction * 0.32)
+                let particleRect = CGRect(x: x - 1.0, y: y - 1.0, width: 2.0, height: 2.0)
+                ellipse(&ctx, rect: particleRect, color: c(palette, i).opacity(opacity), fill: true)
+            }
         case .reactor:
             let y=n.maxY+5; for side in [-1.0,1.0] { let sx=CGFloat(side); let start=CGPoint(x:n.midX+sx*n.width/2,y:y); let p=[start,CGPoint(x:start.x+sx*20,y:y+12),CGPoint(x:start.x+sx*65,y:y+12),CGPoint(x:start.x+sx*82,y:y+2)]; glowLine(&ctx,p,color:c(palette,side<0 ? 0:1).opacity(intensity),width:CGFloat(s.thickness),bloom:s.softness/25); let t=CGFloat((phase*0.22).truncatingRemainder(dividingBy:1)); let x=p[1].x+(p[2].x-p[1].x)*t; ellipse(&ctx,rect:CGRect(x:x-2,y:y+10,width:4,height:4),color:.white.opacity(intensity*0.75),fill:true) }
         case .spaceship:
@@ -1340,7 +1430,7 @@ private enum NotchAmbientPainter {
         let night = Calendar.autoupdatingCurrent.component(.hour, from: date) < 7 || Calendar.autoupdatingCurrent.component(.hour, from: date) >= 19
         switch kind {
         case .tinyBuilding:
-            for side in [-1.0,1.0] { let sx=CGFloat(side); let rect=CGRect(x:(side<0 ? n.minX-58:n.maxX+8),y:n.maxY-2,width:50,height:72); ctx.fill(rounded(rect,radius:3),with:.color(c(palette,0).opacity(0.12+intensity*0.18))); for row in 0..<4 { for col in 0..<3 { let x=rect.minX+8+CGFloat(col)*14; let y=rect.minY+9+CGFloat(row)*15; ctx.fill(rounded(CGRect(x:x,y:y,width:6,height:8),radius:1),with:.color((night ? c(palette,2):c(palette,1)).opacity(night ? 0.30+intensity*0.42:0.08+intensity*0.12))) } }; line(&ctx,[CGPoint(x:rect.minX,y:rect.minY),CGPoint(x:side<0 ? n.minX:n.maxX,y:n.maxY)],color:c(palette,0).opacity(0.28),width:1.2) }
+            for side in [-1.0,1.0] { let rect=CGRect(x:(side<0 ? n.minX-58:n.maxX+8),y:n.maxY-2,width:50,height:72); ctx.fill(rounded(rect,radius:3),with:.color(c(palette,0).opacity(0.12+intensity*0.18))); for row in 0..<4 { for col in 0..<3 { let x=rect.minX+8+CGFloat(col)*14; let y=rect.minY+9+CGFloat(row)*15; ctx.fill(rounded(CGRect(x:x,y:y,width:6,height:8),radius:1),with:.color((night ? c(palette,2):c(palette,1)).opacity(night ? 0.30+intensity*0.42:0.08+intensity*0.12))) } }; line(&ctx,[CGPoint(x:rect.minX,y:rect.minY),CGPoint(x:side<0 ? n.minX:n.maxX,y:n.maxY)],color:c(palette,0).opacity(0.28),width:1.2) }
         case .trainTunnel:
             let arch=CGRect(x:n.minX-16,y:n.minY-2,width:n.width+32,height:n.height+42); ctx.stroke(rounded(arch,radius:18),with:.color(c(palette,0).opacity(0.18+intensity*0.28)),lineWidth:2); let t=(phase*0.035).truncatingRemainder(dividingBy:1); if t>0.62 { let local=(t-0.62)/0.38; let x=n.minX-100+CGFloat(local)*(n.width/2+90); let train=CGRect(x:x,y:n.maxY+18,width:34,height:12); ctx.fill(rounded(train,radius:2),with:.color(c(palette,0).opacity(0.35+intensity*0.35))); ellipse(&ctx,rect:CGRect(x:train.maxX-5,y:train.midY-2,width:4,height:4),color:c(palette,2).opacity(0.75),fill:true) }
         case .bridge:
@@ -1362,7 +1452,7 @@ private enum NotchAmbientPainter {
         case .dataRain:
             let cols=max(3,min(lowPower ? 9:16,s.count)); for i in 0..<cols { let t=CGFloat(i)/CGFloat(max(1,cols-1)); let x=n.minX-50+t*(n.width+100); let y=n.maxY+CGFloat((rand(i,seed:s.seed,salt:92)*100+phase*15).truncatingRemainder(dividingBy:110)); for j in 0..<4 { let bit=((i+j+Int(abs(phase)))%2); ctx.draw(Text("\(bit)").font(.system(size:7,weight:.medium,design:.monospaced)).foregroundColor(c(palette,0).opacity(0.10+intensity*0.28)),at:CGPoint(x:x,y:y+CGFloat(j*9))) } }
         case .terminalCursor:
-            let y=n.maxY+12; let visible=s.activity == .staticMode || sin(phase*1.6)>-0.15; if visible { ctx.fill(rounded(CGRect(x:n.midX-10,y:y,width:20,height:2.2),radius:1),with:.color(c(palette,0).opacity(0.35+intensity*0.48))) }
+            let y=n.maxY+12; let visible=s.activity == .staticMode || sin(phase * 1.6) > -0.15; if visible { ctx.fill(rounded(CGRect(x:n.midX-10,y:y,width:20,height:2.2),radius:1),with:.color(c(palette,0).opacity(0.35+intensity*0.48))) }
         default: break
         }
     }
