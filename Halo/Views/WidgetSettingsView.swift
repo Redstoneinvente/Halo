@@ -735,6 +735,65 @@ private extension OpenNotchRegionPlacement {
     }
 }
 
+private struct VisualWorkspaceGridDropTarget: Equatable {
+    let column: Int
+    let row: Int
+}
+
+private struct VisualWorkspaceGridDropDelegate: DropDelegate {
+    let columns: Int
+    let rows: Int
+    let leading: CGFloat
+    let top: CGFloat
+    let gap: CGFloat
+    let cellWidth: CGFloat
+    let cellHeight: CGFloat
+    let target: Binding<VisualWorkspaceGridDropTarget?>
+    let accept: ([NSItemProvider], Int, Int) -> Bool
+
+    func validateDrop(info: DropInfo) -> Bool {
+        !info.itemProviders(for: [UTType.text]).isEmpty
+    }
+
+    func dropEntered(info: DropInfo) {
+        target.wrappedValue = cell(at: info.location)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        target.wrappedValue = cell(at: info.location)
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        target.wrappedValue = nil
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let cell = cell(at: info.location) else {
+            target.wrappedValue = nil
+            return false
+        }
+        target.wrappedValue = nil
+        return accept(info.itemProviders(for: [UTType.text]), cell.column, cell.row)
+    }
+
+    private func cell(at point: CGPoint) -> VisualWorkspaceGridDropTarget? {
+        let safeColumns = max(1, columns)
+        let safeRows = max(1, rows)
+        let x = point.x - leading
+        let y = point.y - top
+        let gridWidth = CGFloat(safeColumns) * cellWidth + CGFloat(max(0, safeColumns - 1)) * gap
+        let gridHeight = CGFloat(safeRows) * cellHeight + CGFloat(max(0, safeRows - 1)) * gap
+        guard x >= 0, y >= 0, x <= gridWidth, y <= gridHeight else { return nil }
+
+        let strideX = max(1, cellWidth + gap)
+        let strideY = max(1, cellHeight + gap)
+        let column = min(safeColumns - 1, max(0, Int((x + gap * 0.5) / strideX)))
+        let row = min(safeRows - 1, max(0, Int((y + gap * 0.5) / strideY)))
+        return VisualWorkspaceGridDropTarget(column: column, row: row)
+    }
+}
+
 struct OpenedNotchWorkspaceEditor: View {
     @Binding var layout: WorkspaceLayout
     @Environment(\.dismiss) private var dismiss
@@ -743,6 +802,7 @@ struct OpenedNotchWorkspaceEditor: View {
     @State private var selectedGroup: UUID?
     @State private var selectedRegion: UUID?
     @State private var backgroundMode = false
+    @State private var gridDropTarget: VisualWorkspaceGridDropTarget?
 
     private var opened: OpenNotchLayout { layout.resolvedOpenNotchLayout }
 
@@ -857,72 +917,93 @@ struct OpenedNotchWorkspaceEditor: View {
     }
 
     private func directGridPreview(canvasSize: CGSize) -> some View {
-        let padding: CGFloat = 14
-        let columns = opened.resolvedGridColumns
-        let rows = max(opened.resolvedGridRows, opened.requiredGridRows)
-        let gap = max(2, CGFloat(opened.resolvedGridGap) * 0.65)
-        let innerWidth = max(1, canvasSize.width - padding * 2)
-        let innerHeight = max(1, canvasSize.height - padding * 2)
-        let cellWidth = max(1, (innerWidth - gap * CGFloat(max(0, columns - 1))) / CGFloat(columns))
-        let cellHeight = max(1, (innerHeight - gap * CGFloat(max(0, rows - 1))) / CGFloat(max(1, rows)))
-        let items = opened.resolvedGridItems
-        return ZStack(alignment: .topLeading) {
-            Canvas { context, _ in
-                for column in 0...columns {
-                    let x = padding + CGFloat(column) * (cellWidth + gap) - (column == columns ? gap : 0)
-                    var path = Path(); path.move(to: CGPoint(x: x, y: padding)); path.addLine(to: CGPoint(x: x, y: canvasSize.height - padding))
-                    context.stroke(path, with: .color(.white.opacity(0.045)), lineWidth: 0.5)
-                }
-                for row in 0...rows {
-                    let y = padding + CGFloat(row) * (cellHeight + gap) - (row == rows ? gap : 0)
-                    var path = Path(); path.move(to: CGPoint(x: padding, y: y)); path.addLine(to: CGPoint(x: canvasSize.width - padding, y: y))
-                    context.stroke(path, with: .color(.white.opacity(0.045)), lineWidth: 0.5)
-                }
+    let margins = visualWorkspaceMargins
+    let leading = CGFloat(margins.leading)
+    let trailing = CGFloat(margins.trailing)
+    let top = CGFloat(margins.top)
+    let bottom = CGFloat(margins.bottom)
+    let columns = opened.resolvedGridColumns
+    let rows = max(opened.resolvedGridRows, opened.requiredGridRows)
+    let gap = max(2, CGFloat(opened.resolvedGridGap) * 0.65)
+    let innerWidth = max(1, canvasSize.width - leading - trailing)
+    let innerHeight = max(1, canvasSize.height - top - bottom)
+    let cellWidth = max(1, (innerWidth - gap * CGFloat(max(0, columns - 1))) / CGFloat(columns))
+    let cellHeight = max(1, (innerHeight - gap * CGFloat(max(0, rows - 1))) / CGFloat(max(1, rows)))
+    let items = opened.resolvedGridItems
+    return ZStack(alignment: .topLeading) {
+        Canvas { context, _ in
+            for column in 0...columns {
+                let x = leading + CGFloat(column) * (cellWidth + gap) - (column == columns ? gap : 0)
+                var path = Path(); path.move(to: CGPoint(x: x, y: top)); path.addLine(to: CGPoint(x: x, y: canvasSize.height - bottom))
+                context.stroke(path, with: .color(.white.opacity(0.045)), lineWidth: 0.5)
             }
-            .allowsHitTesting(false)
-
-            ForEach(0..<(columns * rows), id: \.self) { index in
-                let column = index % columns
-                let row = index / columns
-                Color.clear
-                    .contentShape(Rectangle())
-                    .frame(width: cellWidth, height: cellHeight)
-                    .position(x: padding + CGFloat(column) * (cellWidth + gap) + cellWidth / 2,
-                              y: padding + CGFloat(row) * (cellHeight + gap) + cellHeight / 2)
-                    .onDrop(of: [UTType.text], isTargeted: nil) { providers in
-                        acceptGridDrop(providers, column: column, row: row)
-                    }
-            }
-
-            ForEach(items) { item in
-                if let raw = item.gridPlacement {
-                    let placement = raw.clamped(columns: columns)
-                    let width = cellWidth * CGFloat(placement.columnSpan) + gap * CGFloat(max(0, placement.columnSpan - 1))
-                    let height = cellHeight * CGFloat(placement.rowSpan) + gap * CGFloat(max(0, placement.rowSpan - 1))
-                    let x = padding + CGFloat(placement.column) * (cellWidth + gap)
-                    let y = padding + CGFloat(placement.row) * (cellHeight + gap)
-                    gridItemPreview(item, size: CGSize(width: width, height: height))
-                        .frame(width: width, height: height)
-                        .position(x: x + width / 2, y: y + height / 2)
-                }
-            }
-
-            if items.isEmpty {
-                VStack(spacing: 9) {
-                    Image(systemName: "square.grid.3x3").font(.system(size: 28, weight: .light)).foregroundStyle(.secondary)
-                    Text("Empty workspace").font(.headline)
-                    Text("Add widgets directly to the grid.").font(.caption).foregroundStyle(.secondary)
-                    Menu("Add Widget") { ForEach(ModuleID.allCases) { module in Button(module.title) { addModule(module) } } }
-                        .buttonStyle(.borderedProminent)
-                }
-                .frame(width: canvasSize.width, height: canvasSize.height)
+            for row in 0...rows {
+                let y = top + CGFloat(row) * (cellHeight + gap) - (row == rows ? gap : 0)
+                var path = Path(); path.move(to: CGPoint(x: leading, y: y)); path.addLine(to: CGPoint(x: canvasSize.width - trailing, y: y))
+                context.stroke(path, with: .color(.white.opacity(0.045)), lineWidth: 0.5)
             }
         }
-        .frame(width: canvasSize.width, height: canvasSize.height)
-        .clipped()
-    }
+        .allowsHitTesting(false)
 
-    private func gridItemPreview(_ item: OpenNotchItem, size: CGSize) -> some View {
+        ForEach(0..<(columns * rows), id: \.self) { index in
+            let column = index % columns
+            let row = index / columns
+            let targetCell = VisualWorkspaceGridDropTarget(column: column, row: row)
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(gridDropTarget == targetCell ? Color.accentColor.opacity(0.16) : Color.clear)
+                .overlay {
+                    if gridDropTarget == targetCell {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(Color.accentColor.opacity(0.8), lineWidth: 1.5)
+                    }
+                }
+                .frame(width: cellWidth, height: cellHeight)
+                .position(x: leading + CGFloat(column) * (cellWidth + gap) + cellWidth / 2,
+                          y: top + CGFloat(row) * (cellHeight + gap) + cellHeight / 2)
+                .allowsHitTesting(false)
+        }
+
+        ForEach(items) { item in
+            if let raw = item.gridPlacement {
+                let placement = raw.clamped(columns: columns)
+                let width = cellWidth * CGFloat(placement.columnSpan) + gap * CGFloat(max(0, placement.columnSpan - 1))
+                let height = cellHeight * CGFloat(placement.rowSpan) + gap * CGFloat(max(0, placement.rowSpan - 1))
+                let x = leading + CGFloat(placement.column) * (cellWidth + gap)
+                let y = top + CGFloat(placement.row) * (cellHeight + gap)
+                gridItemPreview(item, size: CGSize(width: width, height: height))
+                    .frame(width: width, height: height)
+                    .position(x: x + width / 2, y: y + height / 2)
+            }
+        }
+
+        if items.isEmpty {
+            VStack(spacing: 9) {
+                Image(systemName: "square.grid.3x3").font(.system(size: 28, weight: .light)).foregroundStyle(.secondary)
+                Text("Empty workspace").font(.headline)
+                Text("Add widgets directly to the grid.").font(.caption).foregroundStyle(.secondary)
+                Menu("Add Widget") { ForEach(ModuleID.allCases) { module in Button(module.title) { addModule(module) } } }
+                    .buttonStyle(.borderedProminent)
+            }
+            .frame(width: canvasSize.width, height: canvasSize.height)
+        }
+    }
+    .frame(width: canvasSize.width, height: canvasSize.height)
+    .contentShape(Rectangle())
+    .onDrop(of: [UTType.text], delegate: VisualWorkspaceGridDropDelegate(
+        columns: columns,
+        rows: rows,
+        leading: leading,
+        top: top,
+        gap: gap,
+        cellWidth: cellWidth,
+        cellHeight: cellHeight,
+        target: $gridDropTarget,
+        accept: acceptGridDrop
+    ))
+    .clipped()
+}
+
+private func gridItemPreview(_ item: OpenNotchItem, size: CGSize) -> some View {
         let label = item.module?.title ?? item.element?.title ?? item.kind.rawValue.capitalized
         let selected = selectedItem == item.id
         let placement = item.gridPlacement ?? OpenNotchGridPlacement()
@@ -1123,6 +1204,7 @@ struct OpenedNotchWorkspaceEditor: View {
 
     @ViewBuilder private var inspector: some View {
         Form {
+            workspaceMarginsInspector
             if backgroundMode { backgroundInspector }
             else if let item = selectedItem.flatMap(findItem) { itemInspector(item) }
             else if let group = selectedGroup.flatMap(findGroup) { groupInspector(group) }
@@ -1143,6 +1225,57 @@ struct OpenedNotchWorkspaceEditor: View {
             }
         }.formStyle(.grouped).scrollContentBackground(.hidden)
     }
+
+    private var safeWorkspaceSideInset: Double {
+    min(24.0, max(12.0, 8.0 + layout.appearance.surface.shoulder * 0.5))
+}
+
+private var visualWorkspaceMargins: OpenNotchInsets {
+    let configured = opened.resolvedGridPadding
+    return OpenNotchInsets(
+        top: max(configured.top, 10),
+        leading: max(configured.leading, safeWorkspaceSideInset),
+        bottom: max(configured.bottom, 12),
+        trailing: max(configured.trailing, safeWorkspaceSideInset)
+    )
+}
+
+private func gridMarginBinding(_ keyPath: WritableKeyPath<OpenNotchInsets, Double>) -> Binding<Double> {
+    Binding(
+        get: { visualWorkspaceMargins[keyPath: keyPath] },
+        set: { value in
+            mutateOpen { open in
+                var margins = open.resolvedGridPadding
+                margins[keyPath: keyPath] = value
+                open.gridPadding = margins
+            }
+        }
+    )
+}
+
+private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
+    mutateOpen { $0.gridPadding = margins }
+}
+
+@ViewBuilder private var workspaceMarginsInspector: some View {
+    Section("Workspace Margins") {
+        PreciseSlider(title: "Top", value: gridMarginBinding(\.top), range: 10...96, step: 1, suffix: "pt")
+        PreciseSlider(title: "Leading", value: gridMarginBinding(\.leading), range: safeWorkspaceSideInset...96, step: 1, suffix: "pt")
+        PreciseSlider(title: "Bottom", value: gridMarginBinding(\.bottom), range: 12...96, step: 1, suffix: "pt")
+        PreciseSlider(title: "Trailing", value: gridMarginBinding(\.trailing), range: safeWorkspaceSideInset...96, step: 1, suffix: "pt")
+        HStack {
+            Button("Safe minimum") {
+                setWorkspaceMargins(OpenNotchInsets(top: 10, leading: safeWorkspaceSideInset, bottom: 12, trailing: safeWorkspaceSideInset))
+            }
+            Button("Comfortable") {
+                let side = max(18, safeWorkspaceSideInset)
+                setWorkspaceMargins(OpenNotchInsets(top: 16, leading: side, bottom: 16, trailing: side))
+            }
+        }
+        Text("These margins apply only to Visual Workspace. Halo keeps the minimum contour-safe inset, so widgets stay clear of rounded and scooped notch edges even at the tightest setting.")
+            .font(.caption).foregroundStyle(.secondary)
+    }
+}
 
     @ViewBuilder private func itemInspector(_ item: OpenNotchItem) -> some View {
         let binding = itemBinding(item.id)
