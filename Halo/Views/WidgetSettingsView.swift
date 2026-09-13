@@ -1529,23 +1529,8 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
             clockSizeOverrideInspector(itemID: itemID, style: style)
         }
         if module == .calendar {
-            let content = style.content.withDefault(WidgetContentOptions())
-            Section("Calendar Presentation") {
-                Picker("View", selection: content.calendarViewStyle.withDefault(.split)) {
-                    ForEach(CalendarWidgetViewStyle.allCases) { Text($0.rawValue).tag($0) }
-                }
-                Text("Agenda emphasizes upcoming events, Month Grid is a real navigable calendar, Week Strip is compact, and Split pairs the month with the selected day's agenda.")
-                    .font(.caption).foregroundStyle(.secondary)
-                PreciseSlider(title: "Visible events", value: Binding(get: { Double(content.wrappedValue.maxItems) }, set: { content.wrappedValue.maxItems = Int($0) }), range: 1...20, step: 1)
-                Toggle("Weekday labels", isOn: content.calendarShowWeekdayHeader.withDefault(true))
-                Toggle("Adjacent-month days", isOn: content.calendarShowAdjacentDays.withDefault(true))
-                Toggle("Event dots", isOn: content.calendarShowEventDots.withDefault(true))
-                if content.wrappedValue.resolvedCalendarViewStyle == .monthGrid {
-                    Toggle("Agenda below month", isOn: content.calendarShowAgendaBelowGrid.withDefault(true))
-                }
-                Toggle("Event times", isOn: content.calendarShowTimes)
-                Toggle("Join buttons", isOn: content.calendarShowJoin)
-            }
+            visualCalendarSettings(style: style)
+            visualCalendarSizeOverrideInspector(itemID: itemID, style: style)
         }
         Section("Block Styling") {
             Picker("Background", selection: Binding(get: { style.wrappedValue.resolvedCardBackgroundStyle }, set: { style.wrappedValue.cardBackgroundStyle = $0 })) {
@@ -1648,6 +1633,139 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
                 Button("Reset \(columns)×\(rows) to Automatic") { override.wrappedValue = nil }
             } else {
                 Text("Automatic uses footprint, aspect ratio, point size, style and information priority. Override only when this exact grid size needs a deliberately different treatment.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+
+    @ViewBuilder private func visualCalendarSettings(style: Binding<WidgetStyle>) -> some View {
+        let calendar = style.visualCalendar.withDefault(VisualCalendarOptions())
+        Section("Calendar View") {
+            Picker("Preferred view", selection: calendar.preferredView) {
+                ForEach(VisualCalendarViewStyle.allCases) { Text($0.rawValue).tag($0) }
+            }
+            Text("Automatic chooses a deliberately different Calendar composition for the current footprint. Narrow rows become agenda strips, tall columns become day agendas, and larger blocks become month, timeline, week or split views.")
+                .font(.caption).foregroundStyle(.secondary)
+            PreciseSlider(title: "Maximum events", value: Binding(get: { Double(calendar.wrappedValue.maxEvents) }, set: { calendar.wrappedValue.maxEvents = Int($0) }), range: 1...30, step: 1)
+            Picker("Density", selection: calendar.density) { ForEach(VisualCalendarDensity.allCases) { Text($0.rawValue).tag($0) } }
+        }
+        Section("Month View") {
+            Picker("Week starts", selection: calendar.weekStart) { ForEach(VisualCalendarWeekStart.allCases) { Text($0.rawValue).tag($0) } }
+            Toggle("Week numbers", isOn: calendar.showWeekNumbers)
+            Toggle("Adjacent-month days", isOn: calendar.showAdjacentMonthDays)
+            Toggle("Highlight today", isOn: calendar.highlightToday)
+            Toggle("Highlight selected day", isOn: calendar.highlightSelectedDay)
+            Picker("Event indicators", selection: calendar.eventIndicatorStyle) { ForEach(VisualCalendarEventIndicatorStyle.allCases) { Text($0.rawValue).tag($0) } }
+            Stepper("Visible indicators: \(calendar.wrappedValue.visibleEventIndicators)", value: calendar.visibleEventIndicators, in: 1...6)
+            Picker("Today treatment", selection: calendar.todayStyle) { ForEach(VisualCalendarTodayStyle.allCases) { Text($0.rawValue).tag($0) } }
+            Picker("Weekend treatment", selection: calendar.weekendStyle) { ForEach(VisualCalendarWeekendStyle.allCases) { Text($0.rawValue).tag($0) } }
+            Toggle("Grid lines", isOn: calendar.showGridLines)
+            if calendar.wrappedValue.showGridLines { PreciseSlider(title: "Grid line opacity", value: calendar.gridLineOpacity, range: 0...0.5, step: 0.01, decimals: 2) }
+        }
+        Section("Agenda Information Priority") {
+            Text("Date and event title are always preserved. Lower-priority metadata disappears first as the widget becomes constrained.")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(calendar.wrappedValue.resolvedInformationPriority) { information in
+                HStack(spacing: 8) {
+                    Toggle(information.title, isOn: calendarInformationEnabled(calendar, information))
+                    Spacer(minLength: 4)
+                    Button { moveCalendarInformation(calendar, information, -1) } label: { Image(systemName: "chevron.up") }
+                        .buttonStyle(.borderless).disabled(calendar.wrappedValue.resolvedInformationPriority.first == information)
+                    Button { moveCalendarInformation(calendar, information, 1) } label: { Image(systemName: "chevron.down") }
+                        .buttonStyle(.borderless).disabled(calendar.wrappedValue.resolvedInformationPriority.last == information)
+                }
+            }
+        }
+        Section("Calendar Filtering") {
+            Picker("Show", selection: calendar.filterMode) { ForEach(VisualCalendarFilterMode.allCases) { Text($0.rawValue).tag($0) } }
+            if calendar.wrappedValue.filterMode == .custom {
+                TextField("Calendar names (comma separated)", text: visualCalendarNamesBinding(calendar))
+                Text("Names are matched against the macOS Calendar names attached to EventKit events.").font(.caption2).foregroundStyle(.secondary)
+            } else if calendar.wrappedValue.filterMode == .work || calendar.wrappedValue.filterMode == .personal {
+                Text("Work and Personal intelligently match common calendar names. Use Custom Selection when your calendars use different names.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Toggle("Use native calendar colors", isOn: calendar.useNativeCalendarColors)
+            if !calendar.wrappedValue.useNativeCalendarColors {
+                ColorPicker("Event color", selection: Binding(get: { (calendar.wrappedValue.eventColorOverride ?? style.wrappedValue.accentColor).color }, set: { calendar.wrappedValue.eventColorOverride = WidgetColor($0) }), supportsOpacity: false)
+            }
+        }
+        Section("Calendar Appearance") {
+            ColorPicker("Today", selection: Binding(get: { (calendar.wrappedValue.todayColor ?? style.wrappedValue.accentColor).color }, set: { calendar.wrappedValue.todayColor = WidgetColor($0) }), supportsOpacity: false)
+            ColorPicker("Selected day", selection: Binding(get: { (calendar.wrappedValue.selectedDayColor ?? style.wrappedValue.accentColor).color }, set: { calendar.wrappedValue.selectedDayColor = WidgetColor($0) }), supportsOpacity: false)
+            PreciseSlider(title: "Event corner radius", value: calendar.eventCornerRadius, range: 0...24, step: 1, suffix: "pt")
+            PreciseSlider(title: "Event fill opacity", value: calendar.eventOpacity, range: 0...0.45, step: 0.01, decimals: 2)
+            PreciseSlider(title: "Calendar background", value: calendar.backgroundOpacity, range: 0...0.6, step: 0.01, decimals: 2)
+        }
+        Section("Calendar Typography") {
+            visualCalendarTypographyEditor("Date", calendar.dateTypography)
+            visualCalendarTypographyEditor("Events", calendar.eventTypography)
+            visualCalendarTypographyEditor("Month title", calendar.monthTypography)
+        }
+    }
+
+    @ViewBuilder private func visualCalendarTypographyEditor(_ title: String, _ typography: Binding<VisualCalendarTypography>) -> some View {
+        DisclosureGroup(title) {
+            Picker("Font", selection: typography.fontFamily) { ForEach(WidgetFontFamily.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+            if typography.wrappedValue.fontFamily == .custom { TextField("Installed font", text: typography.customFont) }
+            Picker("Weight", selection: typography.weight) { ForEach(WidgetFontWeight.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+            PreciseSlider(title: "Size", value: typography.size, range: 8...48, step: 1, suffix: "pt")
+        }
+    }
+
+    private func calendarInformationEnabled(_ calendar: Binding<VisualCalendarOptions>, _ information: VisualCalendarInformation) -> Binding<Bool> {
+        Binding(get: { calendar.wrappedValue.enabledInformation.contains(information) }, set: { enabled in
+            var values = calendar.wrappedValue.enabledInformation
+            if enabled { if !values.contains(information) { values.append(information) } }
+            else { values.removeAll { $0 == information } }
+            calendar.wrappedValue.enabledInformation = values
+        })
+    }
+
+    private func moveCalendarInformation(_ calendar: Binding<VisualCalendarOptions>, _ information: VisualCalendarInformation, _ direction: Int) {
+        var values = calendar.wrappedValue.resolvedInformationPriority
+        guard let index = values.firstIndex(of: information) else { return }
+        let target = index + direction
+        guard values.indices.contains(target) else { return }
+        values.swapAt(index, target)
+        calendar.wrappedValue.informationPriority = values
+    }
+
+    private func visualCalendarNamesBinding(_ calendar: Binding<VisualCalendarOptions>) -> Binding<String> {
+        Binding(get: { calendar.wrappedValue.customCalendarNames.joined(separator: ", ") }, set: { text in
+            calendar.wrappedValue.customCalendarNames = text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        })
+    }
+
+    @ViewBuilder private func visualCalendarSizeOverrideInspector(itemID: UUID, style: Binding<WidgetStyle>) -> some View {
+        let placement = findItem(itemID)?.gridPlacement ?? OpenNotchGridPlacement()
+        let columns = min(8, max(1, placement.columnSpan))
+        let rows = min(4, max(1, placement.rowSpan))
+        let key = VisualCalendarOptions.sizeKey(columns: columns, rows: rows)
+        let override = Binding<VisualCalendarSizeOverride?>(get: {
+            style.wrappedValue.visualCalendar?.sizeOverrides[key]
+        }, set: { replacement in
+            var options = style.wrappedValue.resolvedVisualCalendar
+            if let replacement { options.sizeOverrides[key] = replacement } else { options.sizeOverrides.removeValue(forKey: key) }
+            style.wrappedValue.visualCalendar = options
+        })
+        Section("\(columns)×\(rows) Calendar Override") {
+            Toggle("Override Automatic", isOn: Binding(get: { override.wrappedValue != nil }, set: { enabled in
+                if enabled {
+                    override.wrappedValue = VisualCalendarSizeOverride(view: style.wrappedValue.resolvedVisualCalendar.preferredView,
+                                                                      maxEvents: style.wrappedValue.resolvedVisualCalendar.maxEvents,
+                                                                      indicatorStyle: style.wrappedValue.resolvedVisualCalendar.eventIndicatorStyle)
+                } else { override.wrappedValue = nil }
+            }))
+            if override.wrappedValue != nil {
+                let value = override.withDefault(VisualCalendarSizeOverride())
+                Picker("View", selection: value.view.withDefault(.automatic)) { ForEach(VisualCalendarViewStyle.allCases) { Text($0.rawValue).tag($0) } }
+                PreciseSlider(title: "Events shown", value: Binding(get: { Double(value.wrappedValue.maxEvents ?? style.wrappedValue.resolvedVisualCalendar.maxEvents) }, set: { value.wrappedValue.maxEvents = Int($0) }), range: 1...30, step: 1)
+                Picker("Month indicators", selection: value.indicatorStyle.withDefault(style.wrappedValue.resolvedVisualCalendar.eventIndicatorStyle)) { ForEach(VisualCalendarEventIndicatorStyle.allCases) { Text($0.rawValue).tag($0) } }
+                Button("Reset \(columns)×\(rows) to Automatic") { override.wrappedValue = nil }
+            } else {
+                Text("Automatic uses the exact grid footprint, actual point dimensions, event density and Calendar preferences. Override only when this exact size needs a different emphasis.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

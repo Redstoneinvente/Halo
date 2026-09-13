@@ -631,6 +631,194 @@ enum CalendarWidgetViewStyle: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+
+enum VisualCalendarViewStyle: String, Codable, CaseIterable, Identifiable {
+    case automatic = "Automatic"
+    case today = "Today"
+    case agenda = "Agenda"
+    case dayTimeline = "Day Timeline"
+    case week = "Week"
+    case month = "Month"
+    case monthAgenda = "Month + Agenda"
+    case split = "Split"
+    case upcoming = "Upcoming"
+    case minimal = "Minimal"
+    var id: String { rawValue }
+}
+
+enum VisualCalendarWeekStart: String, Codable, CaseIterable, Identifiable {
+    case system = "System Default"
+    case monday = "Monday"
+    case sunday = "Sunday"
+    var id: String { rawValue }
+}
+
+enum VisualCalendarEventIndicatorStyle: String, Codable, CaseIterable, Identifiable {
+    case automatic = "Automatic"
+    case dots = "Dots"
+    case bars = "Bars"
+    case underline = "Underline"
+    case filledDate = "Filled Date"
+    case minimalMarker = "Minimal Marker"
+    var id: String { rawValue }
+}
+
+enum VisualCalendarTodayStyle: String, Codable, CaseIterable, Identifiable {
+    case circle = "Circle"
+    case pill = "Pill"
+    case filledNumber = "Filled Number"
+    case outline = "Outline"
+    case accentText = "Accent Text"
+    case subtleGlow = "Subtle Glow"
+    case minimalDot = "Minimal Dot"
+    var id: String { rawValue }
+}
+
+enum VisualCalendarDensity: String, Codable, CaseIterable, Identifiable {
+    case automatic = "Automatic"
+    case compact = "Compact"
+    case comfortable = "Comfortable"
+    case spacious = "Spacious"
+    var id: String { rawValue }
+}
+
+enum VisualCalendarWeekendStyle: String, Codable, CaseIterable, Identifiable {
+    case normal = "Normal"
+    case subtle = "Subtle"
+    case muted = "Muted"
+    case accent = "Accent"
+    var id: String { rawValue }
+}
+
+enum VisualCalendarFilterMode: String, Codable, CaseIterable, Identifiable {
+    case all = "All Calendars"
+    case work = "Work"
+    case personal = "Personal"
+    case birthdays = "Birthdays"
+    case custom = "Custom Selection"
+    var id: String { rawValue }
+}
+
+enum VisualCalendarInformation: String, Codable, CaseIterable, Identifiable, Hashable {
+    case startTime, calendarColor, endTime, location, meetingLink, duration, notes, attendees
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .startTime: return "Start time"
+        case .calendarColor: return "Calendar color"
+        case .endTime: return "End time"
+        case .location: return "Location"
+        case .meetingLink: return "Meeting link"
+        case .duration: return "Duration"
+        case .notes: return "Notes preview"
+        case .attendees: return "Attendee indicator"
+        }
+    }
+}
+
+struct VisualCalendarTypography: Codable, Equatable {
+    var fontFamily: WidgetFontFamily = .system
+    var customFont = "Helvetica Neue"
+    var weight: WidgetFontWeight = .medium
+    var size = 13.0
+
+    func validated() throws -> VisualCalendarTypography {
+        guard size.isFinite else { throw CocoaError(.fileReadCorruptFile) }
+        var value = self
+        value.customFont = String(customFont.prefix(120))
+        value.size = min(48, max(8, size))
+        return value
+    }
+}
+
+struct VisualCalendarSizeOverride: Codable, Equatable {
+    var view: VisualCalendarViewStyle?
+    var maxEvents: Int?
+    var indicatorStyle: VisualCalendarEventIndicatorStyle?
+}
+
+struct VisualCalendarOptions: Codable, Equatable {
+    var preferredView: VisualCalendarViewStyle = .automatic
+    var weekStart: VisualCalendarWeekStart = .system
+    var showWeekNumbers = false
+    var showAdjacentMonthDays = true
+    var highlightToday = true
+    var highlightSelectedDay = true
+    var eventIndicatorStyle: VisualCalendarEventIndicatorStyle = .automatic
+    var visibleEventIndicators = 3
+    var weekendStyle: VisualCalendarWeekendStyle = .subtle
+    var density: VisualCalendarDensity = .automatic
+    var maxEvents = 8
+
+    var showEventEndTime = true
+    var showEventDuration = true
+    var showEventLocation = true
+    var showMeetingLink = true
+    var showNotesPreview = true
+    var showAttendees = true
+    var enabledInformation: [VisualCalendarInformation] = VisualCalendarInformation.allCases
+    var informationPriority: [VisualCalendarInformation] = [.startTime, .calendarColor, .endTime, .location, .meetingLink, .duration, .notes, .attendees]
+
+    var filterMode: VisualCalendarFilterMode = .all
+    var customCalendarNames: [String] = []
+    var useNativeCalendarColors = true
+    var eventColorOverride: WidgetColor?
+
+    var todayStyle: VisualCalendarTodayStyle = .filledNumber
+    var todayColor: WidgetColor?
+    var selectedDayColor: WidgetColor?
+    var eventCornerRadius = 8.0
+    var eventOpacity = 0.08
+    var showGridLines = false
+    var gridLineOpacity = 0.08
+    var backgroundOpacity = 0.0
+
+    var dateTypography = VisualCalendarTypography(fontFamily: .rounded, customFont: "Helvetica Neue", weight: .bold, size: 14)
+    var eventTypography = VisualCalendarTypography(fontFamily: .system, customFont: "Helvetica Neue", weight: .medium, size: 12)
+    var monthTypography = VisualCalendarTypography(fontFamily: .rounded, customFont: "Helvetica Neue", weight: .semibold, size: 13)
+
+    var sizeOverrides: [String: VisualCalendarSizeOverride] = [:]
+
+    static func sizeKey(columns: Int, rows: Int) -> String { "\(min(8, max(1, columns)))x\(min(4, max(1, rows)))" }
+    func sizeOverride(columns: Int, rows: Int) -> VisualCalendarSizeOverride? { sizeOverrides[Self.sizeKey(columns: columns, rows: rows)] }
+
+    var resolvedInformationPriority: [VisualCalendarInformation] {
+        var result: [VisualCalendarInformation] = []
+        for value in informationPriority where !result.contains(value) { result.append(value) }
+        for value in VisualCalendarInformation.allCases where !result.contains(value) { result.append(value) }
+        return result
+    }
+
+    func validated() throws -> VisualCalendarOptions {
+        guard eventCornerRadius.isFinite, eventOpacity.isFinite, gridLineOpacity.isFinite, backgroundOpacity.isFinite else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        var value = self
+        value.visibleEventIndicators = min(6, max(1, visibleEventIndicators))
+        value.maxEvents = min(30, max(1, maxEvents))
+        value.eventCornerRadius = min(24, max(0, eventCornerRadius))
+        value.eventOpacity = min(0.45, max(0, eventOpacity))
+        value.gridLineOpacity = min(0.5, max(0, gridLineOpacity))
+        value.backgroundOpacity = min(0.6, max(0, backgroundOpacity))
+        value.customCalendarNames = customCalendarNames.map { String($0.prefix(120)) }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        value.eventColorOverride = try eventColorOverride?.validated()
+        value.todayColor = try todayColor?.validated()
+        value.selectedDayColor = try selectedDayColor?.validated()
+        value.dateTypography = try dateTypography.validated()
+        value.eventTypography = try eventTypography.validated()
+        value.monthTypography = try monthTypography.validated()
+        value.enabledInformation = VisualCalendarInformation.allCases.filter { enabledInformation.contains($0) }
+        value.informationPriority = resolvedInformationPriority
+        value.sizeOverrides = sizeOverrides.filter { key, override in
+            let parts = key.split(separator: "x")
+            guard parts.count == 2, let columns = Int(parts[0]), let rows = Int(parts[1]), (1...8).contains(columns), (1...4).contains(rows) else { return false }
+            if let maxEvents = override.maxEvents, !(1...30).contains(maxEvents) { return false }
+            return true
+        }
+        return value
+    }
+}
+
 /// Content controls for the opened-notch widget dashboard. One instance belongs to one ModuleID,
 /// so the editor can expose only the controls relevant to that widget while profiles keep them all.
 struct WidgetContentOptions: Codable, Equatable {
@@ -750,6 +938,8 @@ struct WidgetStyle: Codable, Equatable {
     var minimumHeight = 0.0
     var showTitle = true
     var clock = ClockOptions()
+    // Visual Workspace Calendar options live separately so the regular opened-notch Calendar keeps its legacy presentation untouched.
+    var visualCalendar: VisualCalendarOptions?
     var content: WidgetContentOptions?
     var chrome: WidgetChromeOptions?
 
@@ -764,6 +954,7 @@ struct WidgetStyle: Codable, Equatable {
     var elementStyles: [String: WidgetElementStyle]?
 
     var resolvedContent: WidgetContentOptions { content ?? WidgetContentOptions() }
+    var resolvedVisualCalendar: VisualCalendarOptions { visualCalendar ?? VisualCalendarOptions() }
     var resolvedChrome: WidgetChromeOptions { chrome ?? WidgetChromeOptions() }
     var resolvedLayoutMode: WidgetLayoutMode { layoutMode ?? .standard }
     var resolvedCardBackgroundStyle: WidgetCardBackgroundStyle { cardBackgroundStyle ?? .solid }
@@ -788,6 +979,7 @@ struct WidgetStyle: Codable, Equatable {
         guard [fontSize, backgroundOpacity, padding, cornerRadius, width, minimumHeight].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
         v.clock = try clock.validated()
+        if visualCalendar != nil { v.visualCalendar = try resolvedVisualCalendar.validated() }
         v.fontSize = min(48, max(10, fontSize)); v.padding = min(32, max(0, padding))
         v.cornerRadius = min(40, max(0, cornerRadius)); v.backgroundOpacity = min(1, max(0, backgroundOpacity))
         v.width = width <= 0 ? 0 : min(640, max(120, width))
