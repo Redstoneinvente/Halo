@@ -64,22 +64,7 @@
 		A11C0F1A0000000000000331 /* Services/UpdateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000332 /* Services/UpdateManager.swift */; };
 		A11C0F1A0000000000000333 /* Views/WhatsNewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000334 /* Views/WhatsNewView.swift */; };
 		A11C0F1A0000000000000341 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000342 /* Sparkle */; };
-		A11C0F1A0000000000000344 /* Sparkle in Embed Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000342 /* Sparkle */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		A11C0F1A0000000000000345 /* Embed Frameworks */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 10;
-			files = (
-				A11C0F1A0000000000000344 /* Sparkle in Embed Frameworks */,
-			);
-			name = "Embed Frameworks";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		000000000000000000000006 /* Halo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Halo.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -349,7 +334,6 @@
 				000000000000000000000007 /* Sources */,
 				000000000000000000000008 /* Frameworks */,
 				000000000000000000000009 /* Resources */,
-				A11C0F1A0000000000000345 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -541,7 +525,6 @@
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Halo reads today's calendar events when you enable Calendar.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo uses ScreenCaptureKit to analyze system audio for optional music-reactive visual effects. Halo does not save or transmit screen content.";
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MARKETING_VERSION = 0.2.0;
 				CURRENT_PROJECT_VERSION = 200;
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
@@ -576,7 +559,6 @@
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Halo reads today's calendar events when you enable Calendar.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo uses ScreenCaptureKit to analyze system audio for optional music-reactive visual effects. Halo does not save or transmit screen content.";
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MARKETING_VERSION = 0.2.0;
 				CURRENT_PROJECT_VERSION = 200;
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
@@ -640,22 +622,22 @@
 			defaultConfigurationName = Release;
 		};
 		00000000000000000000000B /* Build configuration list for PBXNativeTarget "Halo" */ = {
-			isa = XCConfigurationList;
 			buildConfigurations = (
 				00000000000000000000000E /* Debug */,
 				00000000000000000000000F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
+			isa = XCConfigurationList;
 		};
 		000000000000000000000016 /* Build configuration list for PBXNativeTarget "HaloCoreTests" */ = {
-			isa = XCConfigurationList;
 			buildConfigurations = (
 				000000000000000000000019 /* Debug */,
 				00000000000000000000001A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
+			isa = XCConfigurationList;
 		};
 /* End XCConfigurationList section */
 	};
