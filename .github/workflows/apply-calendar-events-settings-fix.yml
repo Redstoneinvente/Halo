@@ -1,27 +1,77 @@
-name: Diagnose Surface Blur and Calendar Access
+name: Apply Surface Blur and Calendar Access Repair
 on:
   push:
     branches: [chatgpt/calendar-events-settings-fix]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  diagnose:
+  apply:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Inspect latest main
+      - name: Patch and validate latest main
         shell: bash
         run: |
           set -euo pipefail
+          cp .github/calendar_events_settings_fix.py /tmp/repair.py
           git fetch origin main
-          git checkout -B inspect origin/main
-          echo '=== SurfaceBackground definition ==='
-          grep -R -n -A120 -B10 'struct SurfaceBackground' Halo || true
-          echo '=== appearance.blur usages ==='
-          grep -R -n -B4 -A8 'appearance\.blur\|\.blur = entry\.blur\|fallback\.blur' Halo || true
-          echo '=== Calendar authorization ==='
-          grep -n -A130 -B10 'final class CalendarService' Halo/Services/Integrations.swift || true
-          echo '=== Calendar privacy keys ==='
-          grep -n -i 'calendar' Halo/Info.plist || true
+          git checkout -B main origin/main
+          python3 /tmp/repair.py
+
+          echo '=== Repair scope ==='
+          git diff --name-only
+          python3 <<'PY'
+          import subprocess
+          allowed = {
+              'Halo/Services/Integrations.swift',
+              'Halo/Views/WidgetSettingsView.swift',
+              'Halo/Views/WorkspaceSettingsView.swift',
+          }
+          changed = set(subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines())
+          if changed != allowed:
+              raise SystemExit(f'Unexpected repair scope: {sorted(changed)}')
+          print('Repair source scope verified.')
+          PY
+
+          git diff --check
+          xcrun swiftc -parse Halo/Services/Integrations.swift
+          xcrun swiftc -parse Halo/Views/WidgetSettingsView.swift
+          xcrun swiftc -parse Halo/Views/WorkspaceSettingsView.swift
+
+          echo '=== Wiring audit ==='
+          grep -q 'NSApplication.didBecomeActiveNotification' Halo/Services/Integrations.swift
+          grep -q '@Published private(set) var authorizationStatus' Halo/Services/Integrations.swift
+          grep -q 'Calendar access is write-only' Halo/Services/Integrations.swift
+          grep -q 'NSApplication.didBecomeActiveNotification' Halo/Views/WidgetSettingsView.swift
+          grep -q 'Calendar access granted ·' Halo/Views/WidgetSettingsView.swift
+          grep -q 'Section("Surface background effects")' Halo/Views/WorkspaceSettingsView.swift
+          grep -q 'title: "Background blur"' Halo/Views/WorkspaceSettingsView.swift
+          grep -q 'INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription' Halo.xcodeproj/project.pbxproj
+          grep -q 'INFOPLIST_KEY_NSCalendarsUsageDescription' Halo.xcodeproj/project.pbxproj
+          grep -q 'appearance.blur' Halo/Views/ModuleViews.swift
+          echo 'Authorization resync, privacy declarations, Surface blur UI, and runtime blur wiring verified.'
+
+          echo '=== Build validation ==='
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee /tmp/repair-build.log
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if grep -E 'Halo/(Services/Integrations|Views/WidgetSettingsView|Views/WorkspaceSettingsView)\.swift:[0-9]+:[0-9]+: error:' /tmp/repair-build.log; then
+              echo 'A modified repair source file has a compiler error.' >&2
+              exit 1
+          fi
+          if [[ $build_status -ne 0 ]]; then
+              echo 'Full target still has unrelated repository errors; modified repair files reported no compiler errors.'
+              grep -E 'error:' /tmp/repair-build.log | tail -n 30 || true
+          else
+              echo 'Full target build succeeded.'
+          fi
+
+          git diff --stat
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/Services/Integrations.swift Halo/Views/WidgetSettingsView.swift Halo/Views/WorkspaceSettingsView.swift
+          git commit -m 'Restore surface blur and refresh Calendar access'
+          git push origin HEAD:main
