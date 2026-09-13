@@ -11,7 +11,7 @@ replacement = """
     project = project.replace(group_anchor, group_anchor + f'\\t\\t\\t\\t{file_id} /* Views/VisualWorkspaceAdaptiveWidgets.swift */,\\n', 1)
 
     # Add only to the Halo app source phase."""
-source, count = pattern.subn(replacement, source, count=1)
+source, count = pattern.subn(lambda _: replacement, source, count=1)
 if count != 1:
     raise SystemExit('Could not adapt the Xcode project patch block')
 namespace = {'__name__': '__main__', '__file__': str(source_path)}
