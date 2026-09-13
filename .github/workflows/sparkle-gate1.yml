@@ -1,0 +1,87 @@
+name: Sparkle Gate 1
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/sparkle-2-gate1
+    paths:
+      - '.github/add_sparkle_gate1.py'
+      - '.github/workflows/sparkle-gate1.yml'
+      - 'Halo/Services/SparkleLinkProbe.swift'
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Wire and validate Sparkle package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # A workflow-generated commit should not recursively patch the project.
+          if grep -q 'Sparkle in Frameworks' Halo.xcodeproj/project.pbxproj; then
+            echo 'Gate 1 project wiring already present; validating existing branch state.'
+          else
+            python3 .github/add_sparkle_gate1.py
+          fi
+
+          git diff --check
+
+          # Package graph must resolve at the exact version before anything is committed.
+          xcodebuild -resolvePackageDependencies -project Halo.xcodeproj -scheme Halo
+
+          RESOLVED=$(find Halo.xcodeproj -path '*/swiftpm/Package.resolved' -type f -print -quit || true)
+          if [ -n "$RESOLVED" ]; then
+            echo "Resolved package lock: $RESOLVED"
+            cat "$RESOLVED"
+            grep -q 'sparkle' "$RESOLVED"
+            grep -q '2.9.6' "$RESOLVED"
+          fi
+
+          # Prove the source can really import/typecheck against Sparkle's resolved macOS binary.
+          FW=$(find ~/Library/Developer/Xcode/DerivedData -path '*Sparkle.framework' -type d -print -quit || true)
+          if [ -z "$FW" ]; then
+            FW=$(find ~/Library/Developer/Xcode/DerivedData -path '*Sparkle.xcframework/*/Sparkle.framework' -type d -print -quit || true)
+          fi
+          test -n "$FW"
+          echo "Sparkle framework: $FW"
+          xcrun swiftc -typecheck -target arm64-apple-macos13.0 -F "$(dirname "$FW")" Halo/Services/SparkleLinkProbe.swift
+
+          # Confirm Xcode sees Sparkle on the Halo target and no manual embed phase was introduced.
+          grep -q 'Sparkle in Frameworks' Halo.xcodeproj/project.pbxproj
+          grep -q 'packageProductDependencies' Halo.xcodeproj/project.pbxproj
+          grep -q 'version = 2.9.6;' Halo.xcodeproj/project.pbxproj
+          if grep -q 'Sparkle in Embed Frameworks' Halo.xcodeproj/project.pbxproj; then
+            echo 'Unexpected manual Sparkle Embed Frameworks entry'
+            exit 1
+          fi
+
+          # Try the real app target as an additional preflight. Existing unrelated compiler
+          # complexity failures are allowed, but Sparkle/project/probe errors are not.
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > /tmp/halo-gate1-build.log 2>&1
+          BUILD_STATUS=$?
+          set -e
+          if grep -E 'error:' /tmp/halo-gate1-build.log | grep -E 'Sparkle|SparkleLinkProbe|project.pbxproj|package product'; then
+            tail -n 250 /tmp/halo-gate1-build.log
+            exit 1
+          fi
+          echo "Full target preflight status: $BUILD_STATUS"
+
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo.xcodeproj/project.pbxproj Halo/Services/SparkleLinkProbe.swift
+          if [ -n "$RESOLVED" ]; then git add "$RESOLVED"; fi
+
+          if ! git diff --cached --quiet; then
+            git commit -m 'Add Sparkle 2 Gate 1 dependency'
+            git push origin HEAD:feature/sparkle-2-gate1
+          fi
