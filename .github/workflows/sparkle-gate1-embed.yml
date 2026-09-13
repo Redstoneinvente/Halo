@@ -1,0 +1,67 @@
+name: Sparkle Gate 1 Embed
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/sparkle-2-gate1
+    paths:
+      - '.github/patch_sparkle_gate1_embedding.py'
+      - '.github/workflows/sparkle-gate1-embed.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply and validate embedding
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! grep -q 'Sparkle in Embed Frameworks' Halo.xcodeproj/project.pbxproj; then
+            python3 .github/patch_sparkle_gate1_embedding.py
+          fi
+
+          git diff --check
+
+          # Xcode must accept the project and resolve the exact package.
+          xcodebuild -resolvePackageDependencies -project Halo.xcodeproj -scheme Halo
+          xcodebuild -list -project Halo.xcodeproj >/tmp/halo-project-list.txt
+
+          # Verify the structural wiring requested by the runtime loader.
+          grep -q 'Sparkle in Embed Frameworks' Halo.xcodeproj/project.pbxproj
+          grep -q 'CodeSignOnCopy' Halo.xcodeproj/project.pbxproj
+          grep -q 'dstSubfolderSpec = 10;' Halo.xcodeproj/project.pbxproj
+          grep -q '@executable_path/../Frameworks' Halo.xcodeproj/project.pbxproj
+
+          # Ask Xcode for the effective Debug build settings and confirm the app runpath.
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug -showBuildSettings > /tmp/halo-build-settings.txt
+          grep 'LD_RUNPATH_SEARCH_PATHS' /tmp/halo-build-settings.txt | grep -q '@executable_path/../Frameworks'
+
+          # Real target preflight. Halo has unrelated baseline compiler-complexity failures,
+          # but project/package/embed errors or duplicate-copy errors are not acceptable.
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > /tmp/halo-sparkle-embed-build.log 2>&1
+          STATUS=$?
+          set -e
+
+          if grep -E 'error:|Multiple commands produce' /tmp/halo-sparkle-embed-build.log | grep -E 'Sparkle|Embed Frameworks|multiple commands|Multiple commands|framework'; then
+            tail -n 300 /tmp/halo-sparkle-embed-build.log
+            exit 1
+          fi
+          echo "Halo baseline build status: $STATUS"
+
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo.xcodeproj/project.pbxproj
+          if ! git diff --cached --quiet; then
+            git commit -m 'Embed and sign Sparkle for Gate 1'
+            git push origin HEAD:feature/sparkle-2-gate1
+          fi
