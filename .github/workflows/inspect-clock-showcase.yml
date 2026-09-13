@@ -1,0 +1,27 @@
+name: Inspect Clock Showcase
+
+on:
+  push:
+    branches:
+      - chatgpt/clock-showcase
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect Clock call sites and services
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== WidgetClock call sites ==='
+          grep -R -n --include='*.swift' 'WidgetClock' Halo || true
+          echo '=== clock cases ==='
+          grep -R -n --include='*.swift' 'case \.clock' Halo/Views Halo/Core || true
+          echo '=== calendar service API ==='
+          grep -R -n --include='*.swift' -E 'class .*Calendar|struct .*Calendar|final class .*Calendar|@Published.*event|upcoming|events' Halo/Core Halo/Services | head -n 160 || true
+          echo '=== system service battery API ==='
+          grep -R -n --include='*.swift' -E 'battery|Battery|SystemService|SystemMetrics' Halo/Core Halo/Services | head -n 200 || true
