@@ -8,9 +8,6 @@ enum VinylStylePreset: String, Codable, CaseIterable, Identifiable {
     case retro = "Retro"
     case neon = "Neon"
     case smoked = "Smoked"
-    case chrome = "Chrome"
-    case aurora = "Aurora"
-    case translucent = "Translucent"
     case custom = "Custom"
     var id: String { rawValue }
 }
@@ -81,147 +78,68 @@ struct VinylStyleOptions: Codable, Equatable {
         value.preset = preset
         switch preset {
         case .classic:
-            value.grooveCount = 10
-            value.grooveOpacity = 0.13
-            value.edgeRingOpacity = 0.18
-            value.highlightIntensity = 0.18
-            value.gloss = 0.16
-            value.depth = 0.78
-            value.rpm = 8
-
+            break
         case .studio:
-            value.grooveCount = 16
-            value.grooveOpacity = 0.16
-            value.grooveWidth = 0.004
-            value.edgeRingOpacity = 0.34
-            value.edgeRingWidth = 0.011
-            value.highlightIntensity = 0.52
-            value.highlightArc = 0.34
-            value.highlightWidth = 0.013
-            value.gloss = 0.48
-            value.shadowOpacity = 0.55
-            value.shadowRadius = 0.085
-            value.labelBorderOpacity = 0.52
-            value.depth = 0.92
-            value.rpm = 9
-
+            value.grooveCount = 12
+            value.grooveOpacity = 0.13
+            value.grooveWidth = 0.0045
+            value.edgeRingOpacity = 0.24
+            value.highlightIntensity = 0.30
+            value.highlightArc = 0.30
+            value.gloss = 0.30
+            value.shadowOpacity = 0.48
+            value.shadowRadius = 0.075
+            value.labelBorderOpacity = 0.42
+            value.depth = 0.82
         case .minimal:
-            value.grooveCount = 1
-            value.grooveOpacity = 0.028
-            value.edgeRingOpacity = 0.035
-            value.highlightIntensity = 0.035
-            value.gloss = 0.025
-            value.shadowOpacity = 0.14
-            value.labelBorderOpacity = 0.06
-            value.labelScale = 0.36
-            value.centerCapScale = 0.07
-            value.depth = 0.34
-            value.rpm = 5
-
+            value.grooveCount = 3
+            value.grooveOpacity = 0.045
+            value.edgeRingOpacity = 0.06
+            value.highlightIntensity = 0.06
+            value.gloss = 0.04
+            value.shadowOpacity = 0.20
+            value.labelBorderOpacity = 0.12
+            value.labelScale = 0.42
+            value.centerCapScale = 0.085
         case .retro:
             value.discColorSource = .custom
             value.accentSource = .custom
-            value.labelStyle = .custom
-            value.customDiscColor = WidgetColor(red: 0.105, green: 0.058, blue: 0.028)
-            value.customAccentColor = WidgetColor(red: 0.96, green: 0.73, blue: 0.34)
-            value.customLabelColor = WidgetColor(red: 0.64, green: 0.10, blue: 0.07)
+            value.customDiscColor = WidgetColor(red: 0.075, green: 0.047, blue: 0.035)
+            value.customAccentColor = WidgetColor(red: 0.92, green: 0.77, blue: 0.48)
             value.grooveCount = 7
-            value.grooveOpacity = 0.24
-            value.grooveWidth = 0.0075
-            value.labelScale = 0.56
-            value.highlightIntensity = 0.09
-            value.gloss = 0.06
-            value.edgeRingOpacity = 0.28
-            value.rpm = 5.5
-
+            value.grooveOpacity = 0.16
+            value.grooveWidth = 0.0065
+            value.labelScale = 0.52
+            value.labelSaturation = 0.82
+            value.labelBrightness = -0.035
+            value.highlightIntensity = 0.11
+            value.gloss = 0.08
+            value.rpm = 6
         case .neon:
             value.discColorSource = .album
             value.accentSource = .album
-            value.labelStyle = .albumColor
-            value.discOpacity = 0.96
-            value.grooveCount = 13
-            value.grooveOpacity = 0.34
-            value.grooveWidth = 0.007
-            value.edgeRingOpacity = 0.62
-            value.edgeRingWidth = 0.014
-            value.highlightIntensity = 0.44
-            value.gloss = 0.30
-            value.glowOpacity = 0.88
-            value.glowRadius = 0.20
-            value.depth = 0.50
-            value.rpm = 12
-
+            value.grooveCount = 10
+            value.grooveOpacity = 0.23
+            value.grooveWidth = 0.0065
+            value.edgeRingOpacity = 0.34
+            value.highlightIntensity = 0.35
+            value.gloss = 0.24
+            value.glowOpacity = 0.55
+            value.glowRadius = 0.16
+            value.depth = 0.55
+            value.rpm = 10
         case .smoked:
             value.discColorSource = .custom
-            value.accentSource = .custom
-            value.customDiscColor = WidgetColor(red: 0.065, green: 0.085, blue: 0.11)
-            value.customAccentColor = WidgetColor(red: 0.58, green: 0.72, blue: 0.82)
-            value.discOpacity = 0.78
-            value.grooveCount = 18
-            value.grooveOpacity = 0.10
-            value.grooveWidth = 0.0036
-            value.edgeRingOpacity = 0.16
-            value.highlightIntensity = 0.28
-            value.highlightArc = 0.42
-            value.gloss = 0.26
-            value.depth = 0.22
-            value.labelScale = 0.40
-            value.shadowOpacity = 0.50
-
-        case .chrome:
-            value.discColorSource = .custom
-            value.accentSource = .custom
-            value.customDiscColor = WidgetColor(red: 0.20, green: 0.22, blue: 0.25)
-            value.customAccentColor = WidgetColor(red: 0.92, green: 0.95, blue: 1.0)
-            value.grooveCount = 20
-            value.grooveOpacity = 0.22
-            value.grooveWidth = 0.0035
-            value.edgeRingOpacity = 0.74
-            value.edgeRingWidth = 0.015
-            value.highlightIntensity = 0.78
-            value.highlightArc = 0.18
-            value.highlightWidth = 0.019
-            value.gloss = 0.68
-            value.depth = 0.86
-            value.shadowOpacity = 0.38
-            value.labelBorderOpacity = 0.68
-            value.rpm = 7
-
-        case .aurora:
-            value.discColorSource = .album
-            value.accentSource = .album
-            value.labelStyle = .artwork
-            value.discOpacity = 0.92
-            value.grooveCount = 9
-            value.grooveOpacity = 0.18
-            value.edgeRingOpacity = 0.48
-            value.highlightIntensity = 0.34
-            value.highlightArc = 0.48
-            value.gloss = 0.22
-            value.glowOpacity = 0.72
-            value.glowRadius = 0.28
-            value.depth = 0.46
-            value.rpm = 8.5
-
-        case .translucent:
-            value.discColorSource = .custom
-            value.accentSource = .custom
-            value.customDiscColor = WidgetColor(red: 0.16, green: 0.24, blue: 0.30)
-            value.customAccentColor = WidgetColor(red: 0.62, green: 0.93, blue: 0.96)
-            value.discOpacity = 0.58
+            value.customDiscColor = WidgetColor(red: 0.075, green: 0.09, blue: 0.11)
+            value.discOpacity = 0.90
             value.grooveCount = 14
-            value.grooveOpacity = 0.12
+            value.grooveOpacity = 0.08
             value.grooveWidth = 0.004
-            value.edgeRingOpacity = 0.38
-            value.highlightIntensity = 0.32
+            value.highlightIntensity = 0.20
+            value.highlightArc = 0.38
             value.gloss = 0.22
-            value.depth = 0.10
-            value.labelScale = 0.38
-            value.shadowOpacity = 0.26
-            value.glowOpacity = 0.18
-            value.glowRadius = 0.12
-            value.rpm = 6.5
-
+            value.depth = 0.42
+            value.labelScale = 0.43
         case .custom:
             break
         }
@@ -324,21 +242,13 @@ final class VinylStyleWindowController {
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.title = "Halo · Vinyl Studio"
-        window.titleVisibility = .visible
-        window.titlebarAppearsTransparent = false
         window.contentViewController = controller
         window.isReleasedWhenClosed = false
         window.minSize = CGSize(width: 520, height: 620)
-        window.standardWindowButton(.closeButton)?.isHidden = false
-        window.standardWindowButton(.closeButton)?.isEnabled = true
         window.center()
         self.window = window
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-    }
-
-    func close() {
-        window?.performClose(nil)
     }
 }
 
@@ -519,38 +429,15 @@ struct VinylStyleSettingsView: View {
     private var options: VinylStyleOptions { store.options.normalized() }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Label("Vinyl Studio", systemImage: "opticaldisc")
-                    .font(.headline)
-                Text(options.preset.rawValue)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.quaternary, in: Capsule())
-                Spacer()
-                Button("Reset") { store.reset() }
-                    .buttonStyle(.borderless)
-                Button { VinylStyleWindowController.shared.close() } label: {
-                    Label("Close", systemImage: "xmark")
-                }
-                .keyboardShortcut(.cancelAction)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 11)
-            .background(Color(nsColor: .windowBackgroundColor))
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .center, spacing: 24) {
                     VinylRecordView(artwork: NSApp.applicationIconImage,
                                     size: 154,
                                     palette: [WidgetColor(red: 0.42, green: 0.68, blue: 1.0), WidgetColor(red: 0.82, green: 0.28, blue: 0.72)],
                                     playing: true, lowPower: false, interactive: false)
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Live Record Preview").font(.title2.bold())
+                        Text("Vinyl Studio").font(.title.bold())
                         Text("One vinyl design, shared everywhere Halo shows a record — Closed Notch and Music CI update together.")
                             .font(.callout).foregroundStyle(.secondary)
                         Picker("Preset", selection: Binding(get: { options.preset }, set: { store.applyPreset($0) })) {
@@ -635,8 +522,7 @@ struct VinylStyleSettingsView: View {
                 Text("Vinyl Studio is global by design: changing the record here immediately updates every vinyl instance in Halo, including the closed notch and Music CI.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-                .padding(20)
-            }
+            .padding(20)
         }
         .frame(minWidth: 500, minHeight: 600)
     }
