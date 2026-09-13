@@ -1049,7 +1049,33 @@ private struct OpenNotchWorkspaceView: View {
         .clipped()
     }
 
-    private var fixedCanvas: some View {
+    @ViewBuilder private var fixedCanvas: some View {
+        if opened.usesFreeformRegions {
+            freeformCanvas
+        } else {
+            legacyFixedCanvas
+        }
+    }
+
+    private var freeformCanvas: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                ForEach(regions) { region in
+                    let frame = region.frame ?? fallbackFrame(for: region.placement)
+                    OpenNotchRegionView(region: region, layout: layout, store: store)
+                        .frame(width: max(1, proxy.size.width * CGFloat(frame.width)),
+                               height: max(1, proxy.size.height * CGFloat(frame.height)))
+                        .offset(x: proxy.size.width * CGFloat(frame.x),
+                                y: proxy.size.height * CGFloat(frame.y))
+                        .clipped()
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            .clipped()
+        }
+    }
+
+    private var legacyFixedCanvas: some View {
         GeometryReader { proxy in
             let heights = trackSizes(total: proxy.size.height, weights: effectiveRowWeights, gaps: 2)
             VStack(spacing: gap) {
@@ -1059,6 +1085,22 @@ private struct OpenNotchWorkspaceView: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
         }
+    }
+
+    private func fallbackFrame(for placement: OpenNotchRegionPlacement) -> OpenNotchRegionFrame {
+        let column: Double
+        let row: Double
+        switch placement {
+        case .topLeft, .middleLeft, .bottomLeft: column = 0
+        case .topCenter, .middleCenter, .bottomCenter: column = 1
+        case .topRight, .middleRight, .bottomRight: column = 2
+        }
+        switch placement {
+        case .topLeft, .topCenter, .topRight: row = 0
+        case .middleLeft, .middleCenter, .middleRight: row = 1
+        case .bottomLeft, .bottomCenter, .bottomRight: row = 2
+        }
+        return OpenNotchRegionFrame(x: column / 3, y: row / 3, width: 1.0 / 3, height: 1.0 / 3)
     }
 
     private func regionRow(_ placements: [OpenNotchRegionPlacement], height: CGFloat) -> some View {

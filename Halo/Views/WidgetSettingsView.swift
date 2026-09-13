@@ -761,6 +761,9 @@ struct OpenedNotchWorkspaceEditor: View {
                 ForEach(OpenNotchPreset.allCases) { Text($0.rawValue).tag($0) }
             }.frame(width: 190)
             Menu { addMenu } label: { Label("Add", systemImage: "plus") }
+            if opened.resolvedContentMode == .fixed {
+                Menu { regionArrangementMenu } label: { Label("Regions", systemImage: "rectangle.3.group") }
+            }
             Button { duplicateSelected() } label: { Image(systemName: "plus.square.on.square") }.disabled(selectedItem == nil).help("Duplicate selected item")
             Button { backgroundMode = true; selectedItem = nil; selectedGroup = nil; selectedRegion = nil } label: { Image(systemName: "paintbrush") }.help("Opened surface appearance")
             Spacer()
@@ -774,7 +777,47 @@ struct OpenedNotchWorkspaceEditor: View {
         Menu("Lightweight element") { ForEach(OpenNotchElementKind.allCases) { element in Button(element.title) { addElement(element) } } }
         Divider()
         Button("Group") { addGroup() }
-        Menu("Region") { ForEach(OpenNotchRegionPlacement.allCases) { placement in Button(placement.title) { ensureRegion(placement, select: true) } } }
+        Button("Region") { addRegion() }.disabled(opened.regions.count >= 9)
+    }
+
+    @ViewBuilder private var regionArrangementMenu: some View {
+        Button("Add Region") { addRegion() }.disabled(opened.regions.count >= 9)
+        if !opened.regions.isEmpty {
+            Divider()
+            let count = opened.regions.count
+            if count == 1 {
+                Button("Full Canvas") { arrangeSingle(.full) }
+                Button("Centered Large") { arrangeSingle(OpenNotchRegionFrame(x: 0.10, y: 0.10, width: 0.80, height: 0.80)) }
+                Button("Compact Center") { arrangeSingle(OpenNotchRegionFrame(x: 0.25, y: 0.25, width: 0.50, height: 0.50)) }
+                Divider()
+                Button("Left Half") { arrangeSingle(OpenNotchRegionFrame(x: 0, y: 0, width: 0.50, height: 1)) }
+                Button("Right Half") { arrangeSingle(OpenNotchRegionFrame(x: 0.50, y: 0, width: 0.50, height: 1)) }
+                Button("Top Half") { arrangeSingle(OpenNotchRegionFrame(x: 0, y: 0, width: 1, height: 0.50)) }
+                Button("Bottom Half") { arrangeSingle(OpenNotchRegionFrame(x: 0, y: 0.50, width: 1, height: 0.50)) }
+            } else if count == 2 {
+                Button("Side by Side") { arrangeSideBySide() }
+                Button("Stacked") { arrangeStacked() }
+                Divider()
+                Button("Wide Left + Narrow Right") { applyRegionFrames([OpenNotchRegionFrame(x: 0, y: 0, width: 0.64, height: 1), OpenNotchRegionFrame(x: 0.66, y: 0, width: 0.34, height: 1)]) }
+                Button("Narrow Left + Wide Right") { applyRegionFrames([OpenNotchRegionFrame(x: 0, y: 0, width: 0.34, height: 1), OpenNotchRegionFrame(x: 0.36, y: 0, width: 0.64, height: 1)]) }
+                Button("Hero Top + Bottom Strip") { applyRegionFrames([OpenNotchRegionFrame(x: 0, y: 0, width: 1, height: 0.66), OpenNotchRegionFrame(x: 0, y: 0.68, width: 1, height: 0.32)]) }
+                Button("Top Strip + Hero Bottom") { applyRegionFrames([OpenNotchRegionFrame(x: 0, y: 0, width: 1, height: 0.32), OpenNotchRegionFrame(x: 0, y: 0.34, width: 1, height: 0.66)]) }
+            } else if count == 3 {
+                Button("3 Columns") { arrangeColumns() }
+                Button("3 Rows") { arrangeRows() }
+                Divider()
+                Button("Hero Left + Right Stack") { applyRegionFrames([OpenNotchRegionFrame(x: 0, y: 0, width: 0.58, height: 1), OpenNotchRegionFrame(x: 0.60, y: 0, width: 0.40, height: 0.49), OpenNotchRegionFrame(x: 0.60, y: 0.51, width: 0.40, height: 0.49)]) }
+                Button("Hero Top + Bottom Split") { applyRegionFrames([OpenNotchRegionFrame(x: 0, y: 0, width: 1, height: 0.58), OpenNotchRegionFrame(x: 0, y: 0.60, width: 0.49, height: 0.40), OpenNotchRegionFrame(x: 0.51, y: 0.60, width: 0.49, height: 0.40)]) }
+            } else if count == 4 {
+                Button("2 × 2 Grid") { arrangeGrid() }
+                Button("4 Columns") { arrangeColumns() }
+                Button("4 Rows") { arrangeRows() }
+            } else {
+                Button("Automatic Grid") { arrangeGrid() }
+                Button("Columns") { arrangeColumns() }
+                Button("Rows") { arrangeRows() }
+            }
+        }
     }
 
     private var preview: some View {
@@ -788,15 +831,19 @@ struct OpenedNotchWorkspaceEditor: View {
                 .overlay {
                     GeometryReader { proxy in
                         let inset: CGFloat = 14
-                        let canvasWidth = max(1, proxy.size.width - inset * 2)
-                        let canvasHeight = max(1, proxy.size.height - inset * 2)
-                        let heights = editorTrackSizes(total: canvasHeight, weights: editorRowWeights, gap: 8)
-                        VStack(spacing: 8) {
-                            editorRow([.topLeft, .topCenter, .topRight], height: heights[0], totalWidth: canvasWidth)
-                            editorRow([.middleLeft, .middleCenter, .middleRight], height: heights[1], totalWidth: canvasWidth)
-                            editorRow([.bottomLeft, .bottomCenter, .bottomRight], height: heights[2], totalWidth: canvasWidth)
+                        let canvasSize = CGSize(width: max(1, proxy.size.width - inset * 2), height: max(1, proxy.size.height - inset * 2))
+                        if opened.resolvedContentMode == .fixed && opened.usesFreeformRegions {
+                            freeformPreview(canvasSize: canvasSize)
+                                .padding(inset)
+                        } else {
+                            let heights = editorTrackSizes(total: canvasSize.height, weights: editorRowWeights, gap: 8)
+                            VStack(spacing: 8) {
+                                editorRow([.topLeft, .topCenter, .topRight], height: heights[0], totalWidth: canvasSize.width)
+                                editorRow([.middleLeft, .middleCenter, .middleRight], height: heights[1], totalWidth: canvasSize.width)
+                                editorRow([.bottomLeft, .bottomCenter, .bottomRight], height: heights[2], totalWidth: canvasSize.width)
+                            }
+                            .padding(inset)
                         }
-                        .padding(inset)
                     }
                 }
                 .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.12)))
@@ -859,6 +906,42 @@ struct OpenedNotchWorkspaceEditor: View {
         }
         .frame(width: cellSize.width, height: cellSize.height, alignment: placement.editorAlignment)
         .clipped()
+    }
+
+
+    private func freeformPreview(canvasSize: CGSize) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(opened.regions) { region in
+                let frame = effectiveRegionFrame(region.id)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(regionTitle(region)).font(.system(size: 9, weight: .semibold))
+                        Spacer()
+                        Text("\(Int((frame.width * 100).rounded()))×\(Int((frame.height * 100).rounded()))%")
+                            .font(.system(size: 8, design: .monospaced)).foregroundStyle(.secondary)
+                    }
+                    ForEach(region.groups) { group in groupPreview(group, region: region) }
+                    Spacer(minLength: 0)
+                }
+                .padding(7)
+                .frame(width: max(44, canvasSize.width * CGFloat(frame.width)),
+                       height: max(44, canvasSize.height * CGFloat(frame.height)), alignment: .topLeading)
+                .background((selectedRegion == region.id ? Color.accentColor.opacity(0.16) : Color.white.opacity(0.045)), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(selectedRegion == region.id ? Color.accentColor.opacity(0.75) : .white.opacity(0.08), lineWidth: selectedRegion == region.id ? 1.5 : 1))
+                .contentShape(Rectangle())
+                .clipped()
+                .offset(x: canvasSize.width * CGFloat(frame.x), y: canvasSize.height * CGFloat(frame.y))
+                .onTapGesture { selectedRegion = region.id; selectedGroup = nil; selectedItem = nil; backgroundMode = false }
+                .onDrop(of: [UTType.text], isTargeted: nil) { providers in acceptDrop(providers, regionID: region.id) }
+            }
+        }
+        .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
+        .clipped()
+    }
+
+    private func regionTitle(_ region: OpenNotchRegion) -> String {
+        let index = (opened.regions.firstIndex(where: { $0.id == region.id }) ?? 0) + 1
+        return "Region \(index)"
     }
 
     private func groupPreview(_ group: OpenNotchGroup, region: OpenNotchRegion) -> some View {
@@ -987,23 +1070,51 @@ struct OpenedNotchWorkspaceEditor: View {
 
     @ViewBuilder private func regionInspector(_ region: OpenNotchRegion) -> some View {
         let b = regionBinding(region.id)
-        Section("Region") { Picker("Placement", selection: b.placement) { ForEach(OpenNotchRegionPlacement.allCases) { Text($0.title).tag($0) } } }
-        Section("Region size") {
-            PreciseSlider(title: "Width in column", value: Binding(
-                get: { b.wrappedValue.resolvedWidthFraction * 100 },
-                set: { b.wrappedValue.widthFraction = $0 / 100 }
-            ), range: 15...100, step: 1, suffix: "%")
-            PreciseSlider(title: "Height in row", value: Binding(
-                get: { b.wrappedValue.resolvedHeightFraction * 100 },
-                set: { b.wrappedValue.heightFraction = $0 / 100 }
-            ), range: 15...100, step: 1, suffix: "%")
-            PreciseSlider(title: "Column width share", value: columnWeightBinding(for: b.wrappedValue.placement), range: 0.1...6, step: 0.1, suffix: "×", decimals: 1)
-            PreciseSlider(title: "Row height share", value: rowWeightBinding(for: b.wrappedValue.placement), range: 0.1...6, step: 0.1, suffix: "×", decimals: 1)
-            Button("Reset Region Size") { b.wrappedValue.widthFraction = nil; b.wrappedValue.heightFraction = nil; resetTrackWeights(for: b.wrappedValue.placement) }
-            Text("Track shares control the relative size of this row/column. Width and height percentages control how much of that designed slot this region occupies.").font(.caption).foregroundStyle(.secondary)
+        Section("Region") {
+            Text(regionTitle(region)).font(.headline)
+            Text("\(region.groups.count) group\(region.groups.count == 1 ? "" : "s")")
+                .font(.caption).foregroundStyle(.secondary)
+            if opened.resolvedContentMode != .fixed {
+                Picker("Order position", selection: b.placement) { ForEach(OpenNotchRegionPlacement.allCases) { Text($0.title).tag($0) } }
+            }
+        }
+        if opened.resolvedContentMode == .fixed {
+            Section("Frame") {
+                Menu("Quick Size & Position") {
+                    Button("Full Canvas") { setRegionFrame(region.id, .full) }
+                    Button("Centered Large") { setRegionFrame(region.id, OpenNotchRegionFrame(x: 0.10, y: 0.10, width: 0.80, height: 0.80)) }
+                    Button("Compact Center") { setRegionFrame(region.id, OpenNotchRegionFrame(x: 0.25, y: 0.25, width: 0.50, height: 0.50)) }
+                    Divider()
+                    Button("Left Half") { setRegionFrame(region.id, OpenNotchRegionFrame(x: 0, y: 0, width: 0.50, height: 1)) }
+                    Button("Right Half") { setRegionFrame(region.id, OpenNotchRegionFrame(x: 0.50, y: 0, width: 0.50, height: 1)) }
+                    Button("Top Half") { setRegionFrame(region.id, OpenNotchRegionFrame(x: 0, y: 0, width: 1, height: 0.50)) }
+                    Button("Bottom Half") { setRegionFrame(region.id, OpenNotchRegionFrame(x: 0, y: 0.50, width: 1, height: 0.50)) }
+                    Divider()
+                    Button("Top Left Quarter") { setRegionFrame(region.id, OpenNotchRegionFrame(x: 0, y: 0, width: 0.50, height: 0.50)) }
+                    Button("Top Right Quarter") { setRegionFrame(region.id, OpenNotchRegionFrame(x: 0.50, y: 0, width: 0.50, height: 0.50)) }
+                    Button("Bottom Left Quarter") { setRegionFrame(region.id, OpenNotchRegionFrame(x: 0, y: 0.50, width: 0.50, height: 0.50)) }
+                    Button("Bottom Right Quarter") { setRegionFrame(region.id, OpenNotchRegionFrame(x: 0.50, y: 0.50, width: 0.50, height: 0.50)) }
+                }
+                PreciseSlider(title: "X", value: regionFramePercentBinding(region.id, \.x), range: 0...100, step: 1, suffix: "%")
+                PreciseSlider(title: "Y", value: regionFramePercentBinding(region.id, \.y), range: 0...100, step: 1, suffix: "%")
+                PreciseSlider(title: "Width", value: regionFramePercentBinding(region.id, \.width), range: 10...100, step: 1, suffix: "%")
+                PreciseSlider(title: "Height", value: regionFramePercentBinding(region.id, \.height), range: 10...100, step: 1, suffix: "%")
+                Text("Regions use normalized canvas coordinates, so the same layout scales with the opened notch size. Regions may also overlap intentionally.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         Section("Region padding") { insetsEditor(b.padding) }
-        Section { Button("Add Group") { addGroup(regionID: region.id) } }
+        Section("Region actions") {
+            Button("Add Group") { addGroup(regionID: region.id) }
+            if opened.regions.count > 1 {
+                Menu("Merge Into…") {
+                    ForEach(opened.regions.filter { $0.id != region.id }) { target in
+                        Button(regionTitle(target)) { mergeRegion(region.id, into: target.id) }
+                    }
+                }
+            }
+            Button("Remove Region", role: .destructive) { removeRegion(region.id) }
+        }
     }
 
     @ViewBuilder private var backgroundInspector: some View {
@@ -1133,6 +1244,141 @@ struct OpenedNotchWorkspaceEditor: View {
         }
         if select, let r = opened.regions.first(where: { $0.placement == placement }) { selectedRegion = r.id }
     }
+
+    private func addRegion() {
+        guard opened.regions.count < 9 else { return }
+        let id = UUID()
+        mutateOpen { open in
+            open.materializeRegionFrames()
+            let used = Set(open.regions.map(\.placement))
+            let placement = OpenNotchRegionPlacement.allCases.first(where: { !used.contains($0) }) ?? .middleCenter
+            var region = OpenNotchRegion()
+            region.id = id
+            region.placement = placement
+            region.padding = OpenNotchInsets()
+            region.frame = .full
+            region.groups = [OpenNotchGroup(name: "Region \(open.regions.count + 1)")]
+            open.regions.append(region)
+            applyDefaultArrangement(to: &open)
+        }
+        selectedRegion = id; selectedGroup = nil; selectedItem = nil; backgroundMode = false
+    }
+
+    private func effectiveRegionFrame(_ id: UUID) -> OpenNotchRegionFrame {
+        var value = opened
+        value.materializeRegionFrames()
+        return value.regions.first(where: { $0.id == id })?.frame ?? .full
+    }
+
+    private func regionFramePercentBinding(_ id: UUID, _ keyPath: WritableKeyPath<OpenNotchRegionFrame, Double>) -> Binding<Double> {
+        Binding(
+            get: { effectiveRegionFrame(id)[keyPath: keyPath] * 100 },
+            set: { percent in
+                mutateOpen { open in
+                    open.materializeRegionFrames()
+                    guard let index = open.regions.firstIndex(where: { $0.id == id }) else { return }
+                    var frame = open.regions[index].frame ?? .full
+                    frame[keyPath: keyPath] = percent / 100
+                    open.regions[index].frame = frame.clamped()
+                }
+            }
+        )
+    }
+
+    private func setRegionFrame(_ id: UUID, _ frame: OpenNotchRegionFrame) {
+        mutateOpen { open in
+            open.materializeRegionFrames()
+            if let index = open.regions.firstIndex(where: { $0.id == id }) { open.regions[index].frame = frame.clamped() }
+        }
+    }
+
+    private func applyRegionFrames(_ frames: [OpenNotchRegionFrame]) {
+        mutateOpen { open in
+            open.materializeRegionFrames()
+            for index in open.regions.indices where index < frames.count { open.regions[index].frame = frames[index].clamped() }
+        }
+    }
+
+    private func arrangeSingle(_ frame: OpenNotchRegionFrame) { guard opened.regions.count == 1 else { return }; applyRegionFrames([frame]) }
+    private func arrangeSideBySide() { arrangeColumns() }
+    private func arrangeStacked() { arrangeRows() }
+
+    private func arrangeColumns() {
+        let count = opened.regions.count
+        guard count > 0 else { return }
+        let gap = count > 1 ? 0.02 : 0
+        let width = (1 - gap * Double(count - 1)) / Double(count)
+        applyRegionFrames((0..<count).map { OpenNotchRegionFrame(x: Double($0) * (width + gap), y: 0, width: width, height: 1) })
+    }
+
+    private func arrangeRows() {
+        let count = opened.regions.count
+        guard count > 0 else { return }
+        let gap = count > 1 ? 0.02 : 0
+        let height = (1 - gap * Double(count - 1)) / Double(count)
+        applyRegionFrames((0..<count).map { OpenNotchRegionFrame(x: 0, y: Double($0) * (height + gap), width: 1, height: height) })
+    }
+
+    private func arrangeGrid() {
+        let count = opened.regions.count
+        guard count > 0 else { return }
+        let columns = max(1, Int(ceil(sqrt(Double(count)))))
+        let rows = max(1, Int(ceil(Double(count) / Double(columns))))
+        let gap = 0.02
+        let width = (1 - gap * Double(columns - 1)) / Double(columns)
+        let height = (1 - gap * Double(rows - 1)) / Double(rows)
+        applyRegionFrames((0..<count).map { index in
+            let column = index % columns
+            let row = index / columns
+            return OpenNotchRegionFrame(x: Double(column) * (width + gap), y: Double(row) * (height + gap), width: width, height: height)
+        })
+    }
+
+    private func applyDefaultArrangement(to open: inout OpenNotchLayout) {
+        let count = open.regions.count
+        guard count > 0 else { return }
+        let frames: [OpenNotchRegionFrame]
+        if count == 1 {
+            frames = [.full]
+        } else if count == 2 {
+            frames = [OpenNotchRegionFrame(x: 0, y: 0, width: 0.49, height: 1), OpenNotchRegionFrame(x: 0.51, y: 0, width: 0.49, height: 1)]
+        } else if count == 3 {
+            frames = [OpenNotchRegionFrame(x: 0, y: 0, width: 0.32, height: 1), OpenNotchRegionFrame(x: 0.34, y: 0, width: 0.32, height: 1), OpenNotchRegionFrame(x: 0.68, y: 0, width: 0.32, height: 1)]
+        } else {
+            let columns = max(1, Int(ceil(sqrt(Double(count)))))
+            let rows = max(1, Int(ceil(Double(count) / Double(columns))))
+            let gap = 0.02
+            let width = (1 - gap * Double(columns - 1)) / Double(columns)
+            let height = (1 - gap * Double(rows - 1)) / Double(rows)
+            frames = (0..<count).map { index in
+                let column = index % columns; let row = index / columns
+                return OpenNotchRegionFrame(x: Double(column) * (width + gap), y: Double(row) * (height + gap), width: width, height: height)
+            }
+        }
+        for index in open.regions.indices where index < frames.count { open.regions[index].frame = frames[index] }
+    }
+
+    private func mergeRegion(_ sourceID: UUID, into targetID: UUID) {
+        guard sourceID != targetID else { return }
+        mutateOpen { open in
+            open.materializeRegionFrames()
+            guard let sourceIndex = open.regions.firstIndex(where: { $0.id == sourceID }),
+                  let targetIndex = open.regions.firstIndex(where: { $0.id == targetID }) else { return }
+            let source = open.regions[sourceIndex]
+            let sourceFrame = source.frame ?? .full
+            let targetFrame = open.regions[targetIndex].frame ?? .full
+            open.regions[targetIndex].groups.append(contentsOf: source.groups)
+            open.regions[targetIndex].frame = targetFrame.union(sourceFrame)
+            open.regions.remove(at: sourceIndex)
+        }
+        selectedRegion = targetID; selectedGroup = nil; selectedItem = nil
+    }
+
+    private func removeRegion(_ id: UUID) {
+        mutateOpen { open in open.regions.removeAll { $0.id == id } }
+        if selectedRegion == id { selectedRegion = nil; selectedGroup = nil; selectedItem = nil }
+    }
+
     private func defaultGroupID() -> UUID {
         if let selectedGroup, findGroup(selectedGroup) != nil { return selectedGroup }
         ensureRegion(.middleCenter)
@@ -1153,6 +1399,18 @@ struct OpenedNotchWorkspaceEditor: View {
     private func acceptDrop(_ providers: [NSItemProvider], placement: OpenNotchRegionPlacement) -> Bool {
         guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }
         provider.loadObject(ofClass: NSString.self) { object, _ in guard let text = object as? String, let id = UUID(uuidString: text) else { return }; DispatchQueue.main.async { ensureRegion(placement); guard let gid = opened.regions.first(where: { $0.placement == placement })?.groups.first?.id else { return }; move(id, to: gid, before: nil) } }; return true
+    }
+    private func acceptDrop(_ providers: [NSItemProvider], regionID: UUID) -> Bool {
+        guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }
+        provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard let text = object as? String, let id = UUID(uuidString: text) else { return }
+            DispatchQueue.main.async {
+                guard let region = opened.regions.first(where: { $0.id == regionID }) else { return }
+                if let gid = region.groups.first?.id { move(id, to: gid, before: nil) }
+                else { addGroup(regionID: regionID); if let gid = findRegion(regionID)?.groups.first?.id { move(id, to: gid, before: nil) } }
+            }
+        }
+        return true
     }
     private func acceptDrop(_ providers: [NSItemProvider], groupID: UUID, before target: UUID? = nil) -> Bool {
         guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }

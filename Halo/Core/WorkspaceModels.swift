@@ -469,14 +469,48 @@ struct OpenNotchGroup: Codable, Equatable, Identifiable {
     }
 }
 
+struct OpenNotchRegionFrame: Codable, Equatable {
+    // Normalized coordinates inside the opened Visual Workspace canvas.
+    // Optional use on OpenNotchRegion keeps every pre-freeform layout decodable.
+    var x = 0.0
+    var y = 0.0
+    var width = 1.0
+    var height = 1.0
+
+    static let full = OpenNotchRegionFrame()
+
+    func clamped(minimumSize: Double = 0.10) -> OpenNotchRegionFrame {
+        var value = self
+        value.width = min(1, max(minimumSize, width))
+        value.height = min(1, max(minimumSize, height))
+        value.x = min(1 - value.width, max(0, x))
+        value.y = min(1 - value.height, max(0, y))
+        return value
+    }
+
+    func union(_ other: OpenNotchRegionFrame) -> OpenNotchRegionFrame {
+        let left = min(x, other.x)
+        let top = min(y, other.y)
+        let right = max(x + width, other.x + other.width)
+        let bottom = max(y + height, other.y + other.height)
+        return OpenNotchRegionFrame(x: left, y: top, width: right - left, height: bottom - top).clamped()
+    }
+
+    func validated() throws -> OpenNotchRegionFrame {
+        guard [x, y, width, height].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        return clamped()
+    }
+}
+
 struct OpenNotchRegion: Codable, Equatable, Identifiable {
     var id = UUID()
     var placement: OpenNotchRegionPlacement = .middleCenter
     var padding = OpenNotchInsets()
-    // Fractions are relative to the region's grid track. Optional keeps layouts
-    // created by the first workspace version fully decodable.
+    // Fractions are relative to the legacy grid track. They remain for old layouts.
     var widthFraction: Double?
     var heightFraction: Double?
+    // Once set, frame replaces the legacy 3x3 track geometry for Fixed Canvas.
+    var frame: OpenNotchRegionFrame?
     var groups: [OpenNotchGroup] = []
     var resolvedWidthFraction: Double { min(1, max(0.15, widthFraction ?? 1)) }
     var resolvedHeightFraction: Double { min(1, max(0.15, heightFraction ?? 1)) }
@@ -484,6 +518,7 @@ struct OpenNotchRegion: Codable, Equatable, Identifiable {
         var value = self
         if let widthFraction { guard widthFraction.isFinite else { throw CocoaError(.fileReadCorruptFile) }; value.widthFraction = min(1, max(0.15, widthFraction)) }
         if let heightFraction { guard heightFraction.isFinite else { throw CocoaError(.fileReadCorruptFile) }; value.heightFraction = min(1, max(0.15, heightFraction)) }
+        value.frame = try frame?.validated()
         value.padding = try padding.validated(); value.groups = try groups.prefix(16).map { try $0.validated() }
         return value
     }
@@ -579,6 +614,7 @@ struct OpenNotchLayout: Codable, Equatable {
     var resolvedContentMode: OpenNotchContentMode { contentMode ?? .fixed }
     var resolvedColumnWeights: [Double] { Self.resolvedTrackWeights(columnWeights) }
     var resolvedRowWeights: [Double] { Self.resolvedTrackWeights(rowWeights) }
+    var usesFreeformRegions: Bool { regions.contains { $0.frame != nil } }
     var allItems: [OpenNotchItem] { regions.flatMap(\.groups).flatMap(\.items) }
 
     private static func resolvedTrackWeights(_ saved: [Double]?) -> [Double] {
@@ -593,6 +629,53 @@ struct OpenNotchLayout: Codable, Equatable {
     mutating func setRowWeight(_ value: Double, at index: Int) {
         guard (0..<3).contains(index) else { return }
         var values = resolvedRowWeights; values[index] = min(6, max(0.1, value)); rowWeights = values
+    }
+
+    // Converts the legacy collapsed 3x3 tracks into normalized freeform frames.
+    // This only happens when a user starts editing region geometry, so old profiles
+    // keep their exact legacy behavior until then.
+    mutating func materializeRegionFrames() {
+        guard !regions.isEmpty else { return }
+        let occupiedColumns = (0..<3).map { column in regions.contains { Self.columnIndex($0.placement) == column } }
+        let occupiedRows = (0..<3).map { row in regions.contains { Self.rowIndex($0.placement) == row } }
+        let columnTracks = Self.normalizedTracks(weights: resolvedColumnWeights, occupied: occupiedColumns)
+        let rowTracks = Self.normalizedTracks(weights: resolvedRowWeights, occupied: occupiedRows)
+
+        for index in regions.indices where regions[index].frame == nil {
+            let region = regions[index]
+            let column = columnTracks[Self.columnIndex(region.placement)]
+            let row = rowTracks[Self.rowIndex(region.placement)]
+            let width = column.length * region.resolvedWidthFraction
+            let height = row.length * region.resolvedHeightFraction
+            let x = column.start + (column.length - width) * Self.horizontalAnchor(region.placement)
+            let y = row.start + (row.length - height) * Self.verticalAnchor(region.placement)
+            regions[index].frame = OpenNotchRegionFrame(x: x, y: y, width: width, height: height).clamped()
+        }
+    }
+
+    private static func normalizedTracks(weights: [Double], occupied: [Bool]) -> [(start: Double, length: Double)] {
+        let active = zip(weights, occupied).map { max(0, $1 ? $0 : 0) }
+        let total = active.reduce(0, +)
+        guard total > 0 else { return [(0, 1.0 / 3), (1.0 / 3, 1.0 / 3), (2.0 / 3, 1.0 / 3)] }
+        var cursor = 0.0
+        return active.map { weight in
+            let length = weight > 0 ? weight / total : 0
+            defer { cursor += length }
+            return (cursor, length)
+        }
+    }
+
+    private static func rowIndex(_ placement: OpenNotchRegionPlacement) -> Int {
+        switch placement { case .topLeft, .topCenter, .topRight: return 0; case .middleLeft, .middleCenter, .middleRight: return 1; case .bottomLeft, .bottomCenter, .bottomRight: return 2 }
+    }
+    private static func columnIndex(_ placement: OpenNotchRegionPlacement) -> Int {
+        switch placement { case .topLeft, .middleLeft, .bottomLeft: return 0; case .topCenter, .middleCenter, .bottomCenter: return 1; case .topRight, .middleRight, .bottomRight: return 2 }
+    }
+    private static func horizontalAnchor(_ placement: OpenNotchRegionPlacement) -> Double {
+        switch placement { case .topLeft, .middleLeft, .bottomLeft: return 0; case .topCenter, .middleCenter, .bottomCenter: return 0.5; case .topRight, .middleRight, .bottomRight: return 1 }
+    }
+    private static func verticalAnchor(_ placement: OpenNotchRegionPlacement) -> Double {
+        switch placement { case .topLeft, .topCenter, .topRight: return 0; case .middleLeft, .middleCenter, .middleRight: return 0.5; case .bottomLeft, .bottomCenter, .bottomRight: return 1 }
     }
 
     static func migrated(modules: [ModuleID], horizontal: Bool) -> OpenNotchLayout {
