@@ -722,17 +722,6 @@ private struct HaloDropZoneBoardView: View {
             let dense = configuration.zones.count >= 6 || proxy.size.height < 260
 
             ZStack(alignment: .topLeading) {
-                // Render the exact background configured in Drop Zone Studio in the live Drop CI.
-                // Keep the background itself clipped so it never paints outside the CI surface.
-                HaloDropCIBackgroundView(configuration: configuration)
-                    .clipShape(
-                        RoundedRectangle(
-                            cornerRadius: max(18, min(32, CGFloat(configuration.cornerRadius) + 4)),
-                            style: .continuous
-                        )
-                    )
-                    .allowsHitTesting(false)
-
                 Color.clear
                     .contentShape(Rectangle())
 
