@@ -18,7 +18,7 @@ private final class VisualCalendarSourceBrowser: ObservableObject {
     @Published var status = "Calendar access has not been checked."
     @Published private(set) var authorizationStatus: EKAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
 
-    private let store = EKEventStore()
+    private var store = EKEventStore()
     private var activationObserver: AnyCancellable?
     private var eventObserver: AnyCancellable?
 
@@ -27,7 +27,7 @@ private final class VisualCalendarSourceBrowser: ObservableObject {
     init() {
         activationObserver = NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.refresh() }
+            .sink { [weak self] _ in self?.applicationDidBecomeActive() }
         eventObserver = NotificationCenter.default.publisher(for: .EKEventStoreChanged)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.refresh() }
@@ -35,17 +35,48 @@ private final class VisualCalendarSourceBrowser: ObservableObject {
 
     func requestAccess() {
         syncAuthorizationStatus()
-        if hasAccess { refresh(); return }
+
+        if hasAccess {
+            rebuildEventStore()
+            refresh()
+            return
+        }
+
+        if #available(macOS 14.0, *), authorizationStatus == .writeOnly {
+            status = "Calendar is write-only. Halo needs Full Access to discover calendars and read events."
+            openCalendarPrivacySettings()
+            return
+        }
+
+        switch authorizationStatus {
+        case .denied, .restricted:
+            status = authorizationMessage
+            openCalendarPrivacySettings()
+            return
+        case .notDetermined:
+            break
+        case .authorized:
+            rebuildEventStore()
+            refresh()
+            return
+        @unknown default:
+            break
+        }
+
         let completion: (Bool, Error?) -> Void = { [weak self] allowed, error in
             Task { @MainActor in
                 guard let self else { return }
+                self.rebuildEventStore()
                 self.syncAuthorizationStatus()
                 if let error, !allowed { self.status = error.localizedDescription }
                 self.refresh()
             }
         }
-        if #available(macOS 14.0, *) { store.requestFullAccessToEvents(completion: completion) }
-        else { store.requestAccess(to: .event, completion: completion) }
+        if #available(macOS 14.0, *) {
+            store.requestFullAccessToEvents(completion: completion)
+        } else {
+            store.requestAccess(to: .event, completion: completion)
+        }
     }
 
     func refresh() {
@@ -67,6 +98,28 @@ private final class VisualCalendarSourceBrowser: ObservableObject {
             )
         }.sorted { lhs, rhs in lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending }
         status = "Calendar access granted · \(sources.count) source\(sources.count == 1 ? "" : "s") available to Halo."
+    }
+
+    private func applicationDidBecomeActive() {
+        syncAuthorizationStatus()
+        if hasAccess { rebuildEventStore() }
+        refresh()
+    }
+
+    private func rebuildEventStore() {
+        store.reset()
+        store = EKEventStore()
+    }
+
+    private func openCalendarPrivacySettings() {
+        let candidates = [
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Calendars"
+        ]
+        for raw in candidates {
+            guard let url = URL(string: raw) else { continue }
+            if NSWorkspace.shared.open(url) { return }
+        }
     }
 
     private func syncAuthorizationStatus() {

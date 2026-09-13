@@ -1367,7 +1367,7 @@ struct AlbumNotchBackground: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion; @State private var artwork: NSImage?
     private var colors: [Color] { media.artworkColors.map(\.color) }; private var artworkOptions: ClosedArtworkOptions { options.resolvedArtwork }
     private var reactive: ReactiveBackgroundOptions { if let saved = options.reactiveBackground { return saved }; var legacy = ReactiveBackgroundOptions(); legacy.enabled = options.albumBackgroundFrequencyEffect ?? false; return legacy }
-    private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }; private var wantsArtworkBackground: Bool { artworkOptions.enabled && artworkOptions.mode == .background }
+    private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }; private var wantsArtworkBackground: Bool { artworkOptions.usesBackgroundArtwork }
     private var active: Bool { media.isPlaying && (reactive.enabled || (options.albumBackgroundColor == true && !colors.isEmpty) || (wantsArtworkBackground && artwork != nil)) }
     var body: some View {
         Group {

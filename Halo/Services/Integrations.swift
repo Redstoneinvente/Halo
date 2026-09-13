@@ -18,7 +18,7 @@ final class CalendarService: ObservableObject {
     @Published var status = "Calendar access is off. Enable it to show today's schedule."
     @Published private(set) var authorizationStatus: EKAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
 
-    private let store = EKEventStore()
+    private var store = EKEventStore()
     private var eventObserver: AnyCancellable?
     private var activationObserver: AnyCancellable?
 
@@ -30,25 +30,55 @@ final class CalendarService: ObservableObject {
             .sink { [weak self] _ in self?.refresh() }
         activationObserver = NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.refresh() }
+            .sink { [weak self] _ in self?.applicationDidBecomeActive() }
     }
 
     func requestAccess() {
         syncAuthorizationStatus()
+
         if hasAccess {
+            rebuildEventStore()
             refresh()
             return
         }
+
+        if #available(macOS 14.0, *), authorizationStatus == .writeOnly {
+            status = "Calendar is write-only. Halo needs Full Access to read your calendars."
+            openCalendarPrivacySettings()
+            return
+        }
+
+        switch authorizationStatus {
+        case .denied, .restricted:
+            status = authorizationMessage
+            openCalendarPrivacySettings()
+            return
+        case .notDetermined:
+            break
+        case .authorized:
+            rebuildEventStore()
+            refresh()
+            return
+        @unknown default:
+            break
+        }
+
         let completion: (Bool, Error?) -> Void = { [weak self] allowed, error in
             Task { @MainActor in
                 guard let self else { return }
+                // Apple documents that an EKEventStore used before permission can need
+                // reset/recreation before newly granted event data becomes visible.
+                self.rebuildEventStore()
                 self.syncAuthorizationStatus()
                 if let error, !allowed { self.status = error.localizedDescription }
                 self.refresh()
             }
         }
-        if #available(macOS 14.0, *) { store.requestFullAccessToEvents(completion: completion) }
-        else { store.requestAccess(to: .event, completion: completion) }
+        if #available(macOS 14.0, *) {
+            store.requestFullAccessToEvents(completion: completion)
+        } else {
+            store.requestAccess(to: .event, completion: completion)
+        }
     }
 
     func refresh() {
@@ -107,6 +137,30 @@ final class CalendarService: ObservableObject {
                 if lhs.startDate == rhs.startDate { return (lhs.title ?? "") < (rhs.title ?? "") }
                 return lhs.startDate < rhs.startDate
             }
+    }
+
+    private func applicationDidBecomeActive() {
+        let previous = authorizationStatus
+        syncAuthorizationStatus()
+        let gainedReadableAccess = !Self.canReadEvents(previous) && hasAccess
+        if gainedReadableAccess || hasAccess { rebuildEventStore() }
+        refresh()
+    }
+
+    private func rebuildEventStore() {
+        store.reset()
+        store = EKEventStore()
+    }
+
+    private func openCalendarPrivacySettings() {
+        let candidates = [
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Calendars"
+        ]
+        for raw in candidates {
+            guard let url = URL(string: raw) else { continue }
+            if NSWorkspace.shared.open(url) { return }
+        }
     }
 
     private func syncAuthorizationStatus() {

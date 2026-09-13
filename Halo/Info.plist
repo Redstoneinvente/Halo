@@ -4,6 +4,10 @@
 <dict>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Halo reads your calendars to show schedules, holidays, and meeting links. Halo does not modify events.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Halo reads your calendar events when you enable Calendar.</string>
 	<key>HaloFirebaseAPIKey</key>
 	<string>$(HALO_FIREBASE_API_KEY)</string>
 	<key>HaloLicenseSeatProductSlug</key>
