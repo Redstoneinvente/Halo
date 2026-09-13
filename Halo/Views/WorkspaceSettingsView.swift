@@ -18,7 +18,7 @@ struct SettingsView: View {
     @State private var renamingProfile: UUID?
     @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
-    private let sections = ["General", "Account & License", "Appearance", "Modules", "Widgets", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
+    private let sections = ["General", "Account & License", "Appearance", "Activation Sequence", "Modules", "Widgets", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "About"]
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -69,6 +69,7 @@ struct SettingsView: View {
         case "General": return "gearshape"
         case "Account & License": return "person.crop.circle.badge.checkmark"
         case "Appearance": return "paintpalette"
+        case "Activation Sequence": return "power.circle"
         case "Modules": return "square.grid.2x2"
         case "Widgets": return "slider.horizontal.3"
         case "Context Notch Interface": return "rectangle.stack"
@@ -114,6 +115,7 @@ struct SettingsView: View {
         case "Account & License": HaloAccountLicenseSettingsView()
         case "Schedules": ScheduleSettingsView(workspace: workspace)
         case "Appearance": AppearanceSettingsPane(store: store, workspace: workspace)
+        case "Activation Sequence": ActivationSequenceSettingsPane()
         case "Widgets": WidgetSettingsView(layout: $workspace.settings.layout)
         case "Closed notch": ClosedNotchSettingsView(layout: $workspace.settings.layout, media: workspace.media, app: workspace.settings.mediaApp)
         case "Notch Ambient": NotchAmbientSettingsView(store: store, workspace: workspace)

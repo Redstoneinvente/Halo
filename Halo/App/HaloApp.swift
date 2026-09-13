@@ -80,7 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func configureCommercialAccessGate() {
         // The panel/geometry engine is always alive. When access is unavailable the router renders
         // only the black locked notch and the sign-in/license flow; normal Halo content never runs.
-        let manager = WindowManager(store: store)
+        let activationContext = ActivationSequenceCoordinator.shared.classifyStartup()
+        let manager = WindowManager(store: store, startupActivationContext: activationContext)
         engine = manager
         manager.start()
 
@@ -199,6 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        ActivationSequenceCoordinator.shared.markQuit()
         stopLicensedServices()
         engine?.stop()
         engine = nil

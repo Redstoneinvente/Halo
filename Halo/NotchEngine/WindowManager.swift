@@ -23,6 +23,7 @@ final class SurfaceState: ObservableObject {
     @Published var physicalNotchHeight: CGFloat = 32
     @Published var screenFrame: CGRect = .zero
     @Published var theme = Theme()
+    @Published var activationSurfaceOptions = SurfaceOptions()
     @Published var layoutOverride: WorkspaceLayout?
     @Published var contextPreferredSize: CGSize?
     /// Per-surface drag state keeps Drop CI scoped to the display beneath the dragged item.
@@ -333,6 +334,8 @@ final class WindowManager {
     private var hudMonitor: Any?
     private var lastHUDCapsLock = false
     private let store: AppStore
+    private let startupActivationContext: ActivationLaunchContext
+    private var initialActivationPending = false
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
     private var lastContextOffset = CGSize(
@@ -352,11 +355,21 @@ final class WindowManager {
         return SurfaceGeometry(screen: screen.frame, visible: screen.visibleFrame, safeAreaTop: screen.safeAreaInsets.top,
                                physicalNotchWidth: width, style: theme.style, appearance: appearance, expandedWidth: theme.width)
     }
-    init(store: AppStore) { self.store = store }
+    init(store: AppStore,
+         startupActivationContext: ActivationLaunchContext = ActivationLaunchContext(event: .manualLaunch, macJustStarted: false)) {
+        self.store = store
+        self.startupActivationContext = startupActivationContext
+    }
 
     func start() {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: .init("HaloPreviewActivationSequence"))
+            .receive(on: RunLoop.main).sink { [weak self] _ in self?.previewActivation() }.store(in: &subscriptions)
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+            .receive(on: RunLoop.main).sink { [weak self] _ in
+                self?.playActivation(context: ActivationLaunchContext(event: .wake, macJustStarted: false))
+            }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .debounce(for: .milliseconds(80), scheduler: RunLoop.main)
             .sink { [weak self] _ in
@@ -476,7 +489,23 @@ final class WindowManager {
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.$activities.receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+
+        let shouldHideInitialFrame = ActivationSequenceCoordinator.shared.shouldPlay(startupActivationContext)
+        initialActivationPending = shouldHideInitialFrame
         reconcile()
+        guard shouldHideInitialFrame else { return }
+        // Let SwiftUI mount at the already-final closed geometry while the panel is transparent.
+        // The presentation is then published before the panel becomes visible, avoiding a one-frame
+        // normal-notch flash on cold launch.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.playActivation(context: self.startupActivationContext)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.initialActivationPending = false
+                self.hosts.values.forEach { $0.panel.alphaValue = 1 }
+            }
+        }
     }
 
     private var activeClosedActivity: LiveActivity? {
@@ -1256,6 +1285,39 @@ final class WindowManager {
         if host.ambientPanel.frame != frame { host.ambientPanel.setFrame(frame, display: false) }
     }
 
+    private func activationDisplays() -> [ActivationDisplayDescriptor] {
+        let mainID = NSScreen.main.map(Self.displayID)
+        return hosts.compactMap { id, host in
+            guard let geometry = host.geometry else { return nil }
+            let screen = NSScreen.screens.first(where: { Self.displayID($0) == id })
+            return ActivationDisplayDescriptor(
+                id: id,
+                screenFrame: geometry.screen,
+                hasNotch: geometry.safeAreaTop > 0 && geometry.physicalNotchWidth > 0,
+                isMain: id == mainID,
+                themeTint: host.state.theme.tint,
+                wallpaperURL: screen.flatMap { NSWorkspace.shared.desktopImageURL(for: $0) }
+            )
+        }
+    }
+
+    private func currentActivationSystemVolume() -> Float32? {
+        store.workspace.audio.refresh()
+        return store.workspace.audio.canSetVolume ? store.workspace.audio.volume : nil
+    }
+
+    private func playActivation(context: ActivationLaunchContext) {
+        let displays = activationDisplays()
+        guard !displays.isEmpty else { return }
+        ActivationSequenceCoordinator.shared.play(context: context, displays: displays, systemVolume: currentActivationSystemVolume())
+    }
+
+    private func previewActivation() {
+        let displays = activationDisplays()
+        guard !displays.isEmpty else { return }
+        ActivationSequenceCoordinator.shared.preview(displays: displays, systemVolume: currentActivationSystemVolume())
+    }
+
     private func reconcile() {
         let screens = store.configuration.allDisplays ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
         var active = Set<String>()
@@ -1282,6 +1344,9 @@ final class WindowManager {
                 appearance.expandedHeight = requested.isFinite ? min(1100, max(200, requested)) : 260
             }
             appearance.surface = (try? appearance.surface.validated()) ?? SurfaceOptions()
+            if host.state.activationSurfaceOptions != appearance.surface {
+                host.state.activationSurfaceOptions = appearance.surface
+            }
             let previousOffset = host.geometry?.offset(expanded: host.state.expanded) ?? .zero
             host.geometry = Self.geometry(screen: screen, theme: theme, appearance: appearance)
             if host.state.screenFrame != screen.frame { host.state.screenFrame = screen.frame }
@@ -1320,11 +1385,14 @@ final class WindowManager {
                 host.ambientPanel.contentView = ambientView
                 updateAmbientPanelFrame(host: host, geometry: host.geometry!)
 
-                let root = HaloSurfaceRouter(viewport: host.state.viewport,
-                                             store: store,
-                                             state: host.state,
-                                             workspace: store.workspace)
-                    .environment(\.haloScreenFrame, screen.frame)
+                let root = ZStack {
+                    HaloSurfaceRouter(viewport: host.state.viewport,
+                                      store: store,
+                                      state: host.state,
+                                      workspace: store.workspace)
+                    ActivationSequenceOverlay(displayID: id, surfaceState: host.state)
+                }
+                .environment(\.haloScreenFrame, screen.frame)
                 let view = HaloDropHostingView(rootView: root)
                 view.sizingOptions = []
                 view.dragStateHandler = { [weak host] active, count in
@@ -1333,6 +1401,7 @@ final class WindowManager {
                     let ciEnabled = defaults.object(forKey: "HaloContextDropEnabled") == nil
                         ? true : defaults.bool(forKey: "HaloContextDropEnabled")
                     if active && ciEnabled {
+                        ActivationSequenceCoordinator.shared.cancelForInteraction()
                         host.state.beginFileDrop(count: count)
                     } else if host.state.dropTargeted {
                         host.state.endFileDrop(collapseAfterDelay: true)
@@ -1344,8 +1413,10 @@ final class WindowManager {
                     self.store.addFiles(urls)
                 }
                 host.panel.contentView = view
+                if initialActivationPending { host.panel.alphaValue = 0 }
                 host.subscription = host.state.$expanded.dropFirst().removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self, weak host] expanded in
                     guard let self, let host, let geometry = host.geometry else { return }
+                    if expanded { ActivationSequenceCoordinator.shared.cancelForInteraction() }
                     if !expanded { host.state.contextPreferredSize = nil }
                     var target = self.targetFrame(host: host, expanded: expanded)
                     if geometry.style == .detached {

@@ -60,6 +60,7 @@
 		F8614B813053291B00D4943C /* icon_16x16.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6D3053291B00D4943C /* icon_16x16.png */; };
 		F8614B823053291B00D4943C /* Halo.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6C3053291B00D4943C /* Halo.png */; };
 		A11C0F1A0000000000000311 /* Views/VisualWorkspaceAdaptiveWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */; };
+		A11C0F1A0000000000000321 /* Views/ActivationSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -137,6 +138,7 @@
 		F8614B763053291B00D4943C /* icon_512x512@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_512x512@2x.png"; sourceTree = "<group>"; };
 		A11C0F1A0000000000000001 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Halo/Config/Base.xcconfig; sourceTree = SOURCE_ROOT; };
 		A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/VisualWorkspaceAdaptiveWidgets.swift; sourceTree = "<group>"; };
+		A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ActivationSequence.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -210,6 +212,7 @@
 				00000000000000000000006B /* Core/WorkspaceStore.swift */,
 				00000000000000000000006C /* Views/ModuleViews.swift */,
 				A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */,
+				A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */,
 				00000000000000000000006D /* Services/Integrations.swift */,
 				00000000000000000000006E /* Services/CaptureService.swift */,
 				00000000000000000000006F /* Core/ExtensionContracts.swift */,
@@ -433,6 +436,7 @@
 				0000000000000000000000CF /* Core/WorkspaceStore.swift in Sources */,
 				0000000000000000000000D0 /* Views/ModuleViews.swift in Sources */,
 				A11C0F1A0000000000000311 /* Views/VisualWorkspaceAdaptiveWidgets.swift in Sources */,
+				A11C0F1A0000000000000321 /* Views/ActivationSequence.swift in Sources */,
 				0000000000000000000000D1 /* Services/Integrations.swift in Sources */,
 				0000000000000000000000D2 /* Services/CaptureService.swift in Sources */,
 				0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */,
