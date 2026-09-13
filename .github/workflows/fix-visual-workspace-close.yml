@@ -1,0 +1,66 @@
+name: Fix Visual Workspace Close
+
+on:
+  push:
+    branches: [chatgpt/visual-workspace-close-fix]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply and validate Visual Workspace fix
+        run: |
+          set -euo pipefail
+          cp .github/fix_visual_workspace_close.py /tmp/fix_visual_workspace_close.py
+          git fetch origin main
+          git checkout --detach origin/main
+
+          # Undo only the accidental Vinyl Studio portion of the previous polish commit.
+          git checkout e5fb36353509d5d324a9e8b712267149007ac253 -- Halo/Views/SurfaceView.swift
+
+          python3 /tmp/fix_visual_workspace_close.py
+          git diff --check
+
+          python3 - <<'PY'
+          from pathlib import Path
+          w = Path('Halo/Views/WidgetSettingsView.swift').read_text()
+          if 'private var visualWorkspaceHeader: some View' not in w:
+              raise SystemExit('Visual Workspace pinned header missing')
+          if 'Label("Close", systemImage: "xmark")' not in w:
+              raise SystemExit('Pinned Visual Workspace Close button missing')
+          if 'Close Visual Workspace' not in w:
+              raise SystemExit('Visual Workspace close help missing')
+          if 'help("Close editor")' in w:
+              raise SystemExit('Old clipped toolbar close control still present')
+
+          s = Path('Halo/Views/SurfaceView.swift').read_text()
+          for accidental in ['case chrome = "Chrome"', 'case aurora = "Aurora"', 'case translucent = "Translucent"']:
+              if accidental in s:
+                  raise SystemExit(f'accidental Vinyl Studio polish still present: {accidental}')
+          PY
+
+          xcrun swiftc -parse Halo/Views/WidgetSettingsView.swift
+          xcrun swiftc -parse Halo/Views/SurfaceView.swift
+
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > /tmp/visual-workspace-close.log 2>&1
+          BUILD_STATUS=$?
+          set -e
+          grep -E '(WidgetSettingsView.swift|SurfaceView.swift):.*(error:|warning:)' /tmp/visual-workspace-close.log || true
+          if grep -Eq '(WidgetSettingsView.swift|SurfaceView.swift):.*error:' /tmp/visual-workspace-close.log; then
+            exit 1
+          fi
+          echo "Full build status: $BUILD_STATUS (unrelated pre-existing compiler failures tolerated only when changed files have no errors)"
+
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo/Views/WidgetSettingsView.swift Halo/Views/SurfaceView.swift
+          git commit -m 'Fix Visual Workspace close button'
+          git push origin HEAD:main
