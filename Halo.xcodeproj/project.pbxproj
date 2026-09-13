@@ -622,22 +622,22 @@
 			defaultConfigurationName = Release;
 		};
 		00000000000000000000000B /* Build configuration list for PBXNativeTarget "Halo" */ = {
+			isa = XCConfigurationList;
 			buildConfigurations = (
 				00000000000000000000000E /* Debug */,
 				00000000000000000000000F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
-			isa = XCConfigurationList;
 		};
 		000000000000000000000016 /* Build configuration list for PBXNativeTarget "HaloCoreTests" */ = {
+			isa = XCConfigurationList;
 			buildConfigurations = (
 				000000000000000000000019 /* Debug */,
 				00000000000000000000001A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
-			isa = XCConfigurationList;
 		};
 /* End XCConfigurationList section */
 	};
