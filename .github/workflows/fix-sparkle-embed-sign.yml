@@ -1,0 +1,61 @@
+name: Fix Sparkle Embed Sign
+
+on:
+  push:
+    branches: [chatgpt/sparkle-embed-sign-fix]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch and validate Sparkle embedding
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/fix_sparkle_embed_sign.py /tmp/fix_sparkle_embed_sign.py
+          git fetch origin main
+          git checkout --detach origin/main
+          python3 /tmp/fix_sparkle_embed_sign.py
+          git diff --check
+
+          grep -q 'Sparkle in Embed Frameworks' Halo.xcodeproj/project.pbxproj
+          grep -q 'CodeSignOnCopy' Halo.xcodeproj/project.pbxproj
+          grep -q 'dstSubfolderSpec = 10;' Halo.xcodeproj/project.pbxproj
+          test "$(grep -c 'LD_RUNPATH_SEARCH_PATHS = \"$(inherited) @executable_path/../Frameworks\";' Halo.xcodeproj/project.pbxproj)" -ge 2
+
+          xcodebuild -resolvePackageDependencies -project Halo.xcodeproj -scheme Halo
+
+          set +e
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > /tmp/sparkle-embed-build.log 2>&1
+          BUILD_STATUS=$?
+          set -e
+
+          if grep -E 'Multiple commands produce|error:' /tmp/sparkle-embed-build.log | grep -E 'Sparkle|project.pbxproj|Embed Frameworks'; then
+            tail -n 220 /tmp/sparkle-embed-build.log
+            exit 1
+          fi
+
+          SPARKLE_BIN='build/Debug/Halo.app/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle'
+          test -f "$SPARKLE_BIN"
+
+          echo '--- Halo runpaths ---'
+          if [ -f build/Debug/Halo.app/Contents/MacOS/Halo.debug.dylib ]; then
+            otool -l build/Debug/Halo.app/Contents/MacOS/Halo.debug.dylib | grep -A2 LC_RPATH || true
+          fi
+          otool -l build/Debug/Halo.app/Contents/MacOS/Halo | grep -A2 LC_RPATH || true
+
+          # Verify the final build settings contain the app Frameworks runpath.
+          xcodebuild -project Halo.xcodeproj -target Halo -configuration Debug -showBuildSettings | grep 'LD_RUNPATH_SEARCH_PATHS' | grep -q '@executable_path/../Frameworks'
+
+          echo "Build status: $BUILD_STATUS"
+          git config user.name 'Doshagyasing Gowardun'
+          git config user.email '45894815+Redstoneinvente@users.noreply.github.com'
+          git add Halo.xcodeproj/project.pbxproj
+          git commit -m 'Fix Sparkle framework embedding and runpath'
+          git push origin HEAD:main
