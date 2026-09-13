@@ -1,0 +1,24 @@
+name: Inspect Capture Platform
+
+on:
+  push:
+    branches:
+      - chatgpt/capture-suite
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect native capture capabilities
+        shell: bash
+        run: |
+          echo '=== screencapture help ==='
+          /usr/sbin/screencapture -h 2>&1 || true
+          echo '=== sdk ==='
+          xcrun --sdk macosx --show-sdk-version
+          echo '=== ScreenCaptureKit headers ==='
+          grep -R "capturesAudio\|captureMicrophone\|SCRecordingOutput" "$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks/ScreenCaptureKit.framework/Headers" | head -120 || true
