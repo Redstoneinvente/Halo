@@ -770,39 +770,8 @@ private struct TransferContextView: View {
         }
         .padding(compact ? 14 : 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background { transferBackground }
         .onAppear { surfaceState.contextPreferredSize = CGSize(width: compact ? 430 : 620, height: compact ? 120 : 230) }
         .onChange(of: compact) { value in surfaceState.contextPreferredSize = CGSize(width: value ? 430 : 620, height: value ? 120 : 230) }
-    }
-
-    @ViewBuilder private var transferBackground: some View {
-        let primary = Color(hue: backgroundPrimaryHue, saturation: backgroundSaturation, brightness: backgroundBrightness)
-        let secondary = Color(hue: backgroundSecondaryHue, saturation: backgroundSaturation, brightness: min(1, backgroundBrightness + 0.12))
-        switch backgroundStyle {
-        case "Black":
-            Color.black.opacity(backgroundOpacity)
-        case "Accent":
-            Color.accentColor.opacity(backgroundOpacity)
-        case "Dynamic":
-            LinearGradient(
-                colors: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading")
-                    ? [Color.orange.opacity(backgroundOpacity), primary.opacity(backgroundOpacity)]
-                    : [Color.accentColor.opacity(backgroundOpacity), secondary.opacity(backgroundOpacity)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        case "Glass":
-            ZStack {
-                Rectangle().fill(.ultraThinMaterial)
-                primary.opacity(max(0, min(1, backgroundOpacity * 0.36)))
-            }
-        default:
-            LinearGradient(
-                colors: [primary.opacity(backgroundOpacity), secondary.opacity(backgroundOpacity)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
     }
 
     private func stat(_ title: String, value: String, symbol: String) -> some View {
@@ -827,6 +796,99 @@ private struct TransferContextView: View {
         if value >= 1_000_000 { return String(format: "%.1f MB", value / 1_000_000) }
         if value >= 1_000 { return String(format: "%.0f KB", value / 1_000) }
         return String(format: "%.0f B", value)
+    }
+}
+
+
+private struct TransferClosedContextView: View {
+    @ObservedObject var monitor: TransferActivityMonitor
+    @AppStorage("HaloContextTransferShowDirection") private var showDirection = true
+    @AppStorage("HaloContextTransferShowDownload") private var showDownload = true
+    @AppStorage("HaloContextTransferShowUpload") private var showUpload = true
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading") ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+
+            if showDirection {
+                Text(shortDirection)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+
+            if showDownload {
+                Label(speed(monitor.downloadBytesPerSecond), systemImage: "arrow.down")
+                    .labelStyle(.titleAndIcon)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .lineLimit(1)
+            }
+            if showUpload {
+                Label(speed(monitor.uploadBytesPerSecond), systemImage: "arrow.up")
+                    .labelStyle(.titleAndIcon)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var shortDirection: String {
+        if monitor.direction.contains("Uploading + Downloading") { return "Transfer" }
+        if monitor.direction.contains("Uploading") { return "Uploading" }
+        if monitor.direction.contains("Downloading") { return "Downloading" }
+        return "Transfer"
+    }
+
+    private func speed(_ value: Double) -> String {
+        if value >= 1_000_000_000 { return String(format: "%.1fG/s", value / 1_000_000_000) }
+        if value >= 1_000_000 { return String(format: "%.1fM/s", value / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.0fK/s", value / 1_000) }
+        return String(format: "%.0fB/s", value)
+    }
+}
+
+private struct TransferSurfaceBackground: View {
+    @ObservedObject var monitor: TransferActivityMonitor
+    @AppStorage("HaloContextTransferBackgroundStyle") private var style = "Gradient"
+    @AppStorage("HaloContextTransferBackgroundPrimaryHue") private var primaryHue = 0.58
+    @AppStorage("HaloContextTransferBackgroundSecondaryHue") private var secondaryHue = 0.72
+    @AppStorage("HaloContextTransferBackgroundSaturation") private var saturation = 0.72
+    @AppStorage("HaloContextTransferBackgroundBrightness") private var brightness = 0.30
+    @AppStorage("HaloContextTransferBackgroundOpacity") private var opacity = 1.0
+
+    var body: some View {
+        let primary = Color(hue: primaryHue, saturation: saturation, brightness: brightness)
+        let secondary = Color(hue: secondaryHue, saturation: saturation, brightness: min(1, brightness + 0.12))
+        switch style {
+        case "Black":
+            Color.black.opacity(opacity)
+        case "Accent":
+            Color.accentColor.opacity(opacity)
+        case "Dynamic":
+            LinearGradient(
+                colors: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading")
+                    ? [Color.orange.opacity(opacity), primary.opacity(opacity)]
+                    : [Color.accentColor.opacity(opacity), secondary.opacity(opacity)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case "Glass":
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                primary.opacity(max(0, min(1, opacity * 0.36)))
+            }
+        default:
+            LinearGradient(
+                colors: [primary.opacity(opacity), secondary.opacity(opacity)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
     }
 }
 
@@ -914,9 +976,6 @@ struct SurfaceView: View {
     private var teleprompterContextActive: Bool { activeContext == .teleprompter }
     private var transferContextActive: Bool { activeContext == .transfer }
     private var contextOwnsFullSurface: Bool {
-        // Transfer CI takes ownership immediately so Halo never flashes the normal notch
-        // while the transfer surface is expanding. Other CIs keep their existing behavior.
-        if activeContext == .transfer { return true }
         guard state.expanded else { return false }
         switch activeContext {
         case .drop: return dropUsesFullNotchArea
@@ -924,7 +983,7 @@ struct SurfaceView: View {
         case .bluetooth: return bluetoothUsesFullNotchArea
         case .retro: return retroUsesFullNotchArea
         case .teleprompter: return true
-        case .transfer: return true
+        case .transfer: return false
         case .none: return false
         }
     }
@@ -983,7 +1042,11 @@ struct SurfaceView: View {
                         Circle().fill(store.deadline == nil ? accent : .green).frame(width: 6, height: 6)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                       } else if !state.expanded {
-                        ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
+                        if transferContextActive {
+                            TransferClosedContextView(monitor: transfer)
+                        } else {
+                            ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
+                        }
                       } else if keepsClosedContentsWhileExpanded {
                         ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
                       } else { HStack {
@@ -996,7 +1059,7 @@ struct SurfaceView: View {
                     .frame(height: state.expanded ? max(40, state.compactHeight) : state.compactHeight)
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        guard !teleprompterActive && !transferContextActive else { return }
+                        guard !teleprompterActive else { return }
                         if state.expanded && state.pinned { return }
                         state.expanded.toggle()
                     }
@@ -1004,7 +1067,11 @@ struct SurfaceView: View {
                     .accessibilityAddTraits(.isButton)
                 }
                 if state.expanded {
-                    if dropContextActive {
+                    if transferContextActive {
+                        TransferContextView(monitor: transfer, surfaceState: state)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                    } else if dropContextActive {
                         if !dropUsesFullNotchArea {
                             DropContextView(itemCount: state.dropItemCount, surfaceState: state)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -1101,8 +1168,6 @@ struct SurfaceView: View {
                 Group {
                     if dropContextActive {
                         DropContextView(itemCount: state.dropItemCount, surfaceState: state)
-                    } else if transferContextActive {
-                        TransferContextView(monitor: transfer, surfaceState: state)
                     } else if contextMusicActive {
                         ContextMusicView(media: workspace.media, options: contextOptions,
                                          visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
@@ -1148,11 +1213,7 @@ struct SurfaceView: View {
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }
         .onReceive(transfer.$isActive.removeDuplicates()) { active in
-            if active && transferCIEnabled && activeContext == .transfer {
-                state.collapseTask?.cancel()
-                state.expanded = true
-            } else if !active && !state.pinned && activeContext == nil {
-                state.expanded = false
+            if !active {
                 state.contextPreferredSize = nil
             }
         }
@@ -1172,10 +1233,6 @@ struct SurfaceView: View {
             if teleprompterContextActive {
                 state.collapseTask?.cancel()
                 if !state.pinned { state.expanded = false }
-            } else if transferContextActive {
-                // Transfer CI owns the surface. Ignore normal notch hover expansion/collapse
-                // until the transfer releases ownership.
-                state.collapseTask?.cancel()
             } else {
                 state.hover(hovering, enabled: store.configuration.hoverToExpand)
             }
@@ -1186,7 +1243,7 @@ struct SurfaceView: View {
                 state.expanded = true
             }
         }
-        .onAppear { workspace.setOpenedNotchVisible(state.expanded && activeContext == nil, token: openVisibilityToken) }
+        .onAppear { workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive), token: openVisibilityToken) }
         .onDisappear { workspace.setOpenedNotchVisible(false, token: openVisibilityToken) }
         .onChange(of: state.expanded) { expanded in
             if teleprompterContextActive && expanded {
@@ -1207,15 +1264,14 @@ struct SurfaceView: View {
                 state.collapseTask?.cancel()
                 if !state.pinned { state.expanded = false }
             }
-            workspace.setOpenedNotchVisible(state.expanded && activeContext == nil, token: openVisibilityToken)
+            workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive), token: openVisibilityToken)
         }
     }
 
     @ViewBuilder private var surfaceBackgroundLayer: some View {
         ZStack {
             if transferContextActive {
-                // TransferContextView draws its own fully customizable background.
-                Color.clear
+                TransferSurfaceBackground(monitor: transfer)
             } else if state.expanded && activeContext == nil && usesVisualWorkspace {
                 OpenNotchBackgroundView(options: layout.resolvedOpenNotchLayout.appearance, fallback: layout.appearance, theme: theme, system: workspace.system)
             } else {
