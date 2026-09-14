@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare CoreGraphics import
+      - name: Prepare patch anchors
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -22,7 +22,14 @@ jobs:
           s = p.read_text()
           if 'import CoreGraphics' not in s:
               s = s.replace('import AppKit\n', 'import AppKit\nimport CoreGraphics\n', 1)
-              p.write_text(s)
+          current_hover = '''        .onHover { hovering in
+              clipboardCI.setInteractionActive(clipboardContextActive && hovering)
+              if teleprompterContextActive {'''.replace('              ', '            ')
+          old_hover = '''        .onHover { hovering in
+              if teleprompterContextActive {'''.replace('              ', '            ')
+          if current_hover in s:
+              s = s.replace(current_hover, old_hover, 1)
+          p.write_text(s)
           PY
       - name: Apply Clipboard CI manual/paste/translation enhancement
         run: python3 scripts/enhance_clipboard_ci_manual_paste_translate.py
