@@ -1,0 +1,37 @@
+name: Enhance Clipboard CI Manual Paste Translate
+
+on:
+  push:
+    paths:
+      - '.github/clipboard-ci-manual-paste-translate-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply Clipboard CI manual/paste/translation enhancement
+        run: python3 scripts/enhance_clipboard_ci_manual_paste_translate.py
+      - name: Verify patch markers
+        run: |
+          grep -q 'HaloClipboardCIToggle' Halo/Views/SurfaceView.swift
+          grep -q 'pasteCurrentPayload' Halo/Views/SurfaceView.swift
+          grep -q 'openTranslation' Halo/Views/SurfaceView.swift
+          grep -q 'updateClipboardCIHotkey' Halo/Core/WorkspaceStore.swift
+          grep -q 'Enable global Clipboard CI shortcut' Halo/Views/WorkspaceSettingsView.swift
+          grep -q 'Offer Translate action' Halo/Views/WorkspaceSettingsView.swift
+      - name: Commit enhancement
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Views/SurfaceView.swift Halo/Core/WorkspaceStore.swift Halo/Views/WorkspaceSettingsView.swift
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+          else
+            git commit -m 'Add Clipboard CI manual access paste and translation'
+            git push
+          fi
