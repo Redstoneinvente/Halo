@@ -201,7 +201,7 @@ final class HaloUpdateAnimationPreviewController {
 
     private func show(version: String) {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
-        let width: CGFloat = min(480, max(360, screen.frame.width * 0.30)), height: CGFloat = 118
+        let width: CGFloat = min(480, max(360, screen.frame.width * 0.30)), height: CGFloat = 166
         let frame = NSRect(x: screen.frame.midX - width / 2, y: screen.frame.maxY - height, width: width, height: height)
         let root = HaloPhysicalUpdatePreview(model: model, version: version)
         if let panel { panel.setFrame(frame, display: true); panel.contentView = NSHostingView(rootView: root); panel.orderFrontRegardless(); return }
@@ -247,30 +247,39 @@ private struct HaloPhysicalUpdatePreview: View {
 
     var body: some View {
         GeometryReader { proxy in
-            ZStack(alignment: .top) {
-                Color.clear
-                let width = min(proxy.size.width - 12, 430.0)
-                ZStack(alignment: .bottom) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 24, style: .continuous).fill(.black)
-                        Rectangle().fill(.black).frame(height: 28).frame(maxHeight: .infinity, alignment: .top)
-                        styleOverlay
-                        information
-                        verificationSweep(width: width)
-                        if perimeterBar { perimeterProgress(width: width) }
-                    }
-                    progress(width: width - 34).padding(.bottom, 7)
-                }
-                .frame(width: width, height: 96)
-                .shadow(color: Color.accentColor.opacity(glow * multiplier), radius: 14 + 10 * glow)
-                .scaleEffect(model.completionPulse ? 1.018 : 1)
-                .opacity(model.poweredDown ? 0 : 1)
-                .scaleEffect(x: model.installing ? 0.90 : 1, y: model.installing ? 0.82 : 1, anchor: .top)
-                .animation(.spring(response: 0.3, dampingFraction: 0.72), value: model.installing)
-                .animation(.spring(response: 0.2, dampingFraction: 0.62), value: model.completionPulse)
-                .animation(.easeIn(duration: 0.22), value: model.poweredDown)
-            }.frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-        }.preferredColorScheme(.dark)
+            let width = min(proxy.size.width - 12, 430.0)
+            VStack(spacing: 7) {
+                notchBody(width: width)
+                    .frame(width: width, height: 96)
+                    .shadow(color: Color.accentColor.opacity(glow * multiplier), radius: 14 + 10 * glow)
+                    .scaleEffect(model.completionPulse ? 1.018 : 1)
+                    .opacity(model.poweredDown ? 0 : 1)
+                    .scaleEffect(x: model.installing ? 0.90 : 1, y: model.installing ? 0.82 : 1, anchor: .top)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.72), value: model.installing)
+                    .animation(.spring(response: 0.2, dampingFraction: 0.62), value: model.completionPulse)
+                    .animation(.easeIn(duration: 0.22), value: model.poweredDown)
+
+                information
+                    .frame(width: width)
+                    .opacity(model.poweredDown ? 0 : 1)
+                    .animation(.easeIn(duration: 0.18), value: model.poweredDown)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func notchBody(width: CGFloat) -> some View {
+        ZStack(alignment: .bottom) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 24, style: .continuous).fill(.black)
+                Rectangle().fill(.black).frame(height: 28).frame(maxHeight: .infinity, alignment: .top)
+                styleOverlay
+                verificationSweep(width: width)
+                if perimeterBar { perimeterProgress(width: width) }
+            }
+            progress(width: width - 34).padding(.bottom, 7)
+        }
     }
 
     @ViewBuilder private var styleOverlay: some View {
@@ -297,10 +306,12 @@ private struct HaloPhysicalUpdatePreview: View {
     }
 
     private var information: some View {
-        VStack(spacing: 3) {
-            if showPercentage { Text("\(Int(model.progress * 100))%").font(.system(size: 17, weight: .bold, design: .rounded)).monospacedDigit() }
-            if showStatus { Text(model.phase).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary) }
-            if showVersion { Text("Halo \(version)").font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary) }
+        VStack(spacing: 2) {
+            if showPercentage { Text("\(Int(model.progress * 100))%").font(.system(size: 16, weight: .bold, design: .rounded)).monospacedDigit() }
+            HStack(spacing: 8) {
+                if showStatus { Text(model.phase).font(.system(size: 10, weight: .semibold, design: .rounded)) }
+                if showVersion { Text("Halo \(version)").font(.system(size: 9, weight: .medium, design: .rounded)).foregroundStyle(.secondary) }
+            }
             if showSize || showSpeed || showETA {
                 HStack(spacing: 7) {
                     if showSize { Text("\(Int(model.progress * 120)) / 120 MB") }
@@ -308,7 +319,8 @@ private struct HaloPhysicalUpdatePreview: View {
                     if showETA { Text(model.progress >= 0.99 ? "0s" : "~\(max(1, Int((1 - model.progress) * 7)))s") }
                 }.font(.system(size: 8, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary)
             }
-        }.padding(.top, 12)
+        }
+        .foregroundStyle(.white)
     }
 
     @ViewBuilder private func verificationSweep(width: CGFloat) -> some View {
@@ -323,20 +335,34 @@ private struct HaloPhysicalUpdatePreview: View {
     }
 
     private func perimeterProgress(width: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .trim(from: 0, to: min(1, model.progress))
-            .stroke(barColor.opacity(perimeterOpacity), style: StrokeStyle(lineWidth: perimeterThickness, lineCap: .round))
-            .frame(width: width - 2, height: 94)
-            .scaleEffect(x: perimeterClockwise ? 1 : -1, y: 1)
-            .rotationEffect(.degrees(-90))
-            .shadow(color: barColor.opacity(perimeterGlow), radius: 2 + 6 * perimeterGlow)
-            .allowsHitTesting(false)
+        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+        return ZStack {
+            shape
+                .stroke(barColor.opacity(perimeterOpacity * 0.12), lineWidth: max(0.5, perimeterThickness * 0.7))
+            if perimeterClockwise {
+                shape
+                    .trim(from: 0, to: min(1, model.progress))
+                    .stroke(barColor.opacity(perimeterOpacity), style: StrokeStyle(lineWidth: perimeterThickness, lineCap: .round, lineJoin: .round))
+            } else {
+                shape
+                    .trim(from: max(0, 1 - model.progress), to: 1)
+                    .stroke(barColor.opacity(perimeterOpacity), style: StrokeStyle(lineWidth: perimeterThickness, lineCap: .round, lineJoin: .round))
+            }
+        }
+        .padding(max(1, perimeterThickness / 2 + 1))
+        .shadow(color: barColor.opacity(perimeterGlow), radius: 2 + 6 * perimeterGlow)
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder private func progress(width: CGFloat) -> some View {
         switch presentation {
         case "Hidden", "Percentage Only": EmptyView()
-        case "Full Perimeter": RoundedRectangle(cornerRadius: 21).trim(from: 0, to: min(1, model.progress)).stroke(Color.accentColor, style: StrokeStyle(lineWidth: thickness, lineCap: .round)).frame(width: width + 20, height: 76).rotationEffect(.degrees(-90)).shadow(color: Color.accentColor.opacity(glow), radius: 6)
+        case "Full Perimeter":
+            RoundedRectangle(cornerRadius: 21)
+                .trim(from: 0, to: min(1, model.progress))
+                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: thickness, lineCap: .round))
+                .frame(width: width + 20, height: 76)
+                .shadow(color: Color.accentColor.opacity(glow), radius: 6)
         case "Inside Fill": GeometryReader { proxy in Rectangle().fill(Color.accentColor.opacity(0.12 + 0.16 * multiplier)).frame(width: proxy.size.width * model.progress).frame(maxWidth: .infinity, alignment: .leading) }.frame(width: width, height: 42).clipShape(RoundedRectangle(cornerRadius: 10))
         case "Ring": Circle().trim(from: 0, to: min(1, model.progress)).stroke(Color.accentColor, style: StrokeStyle(lineWidth: max(2, thickness), lineCap: .round)).rotationEffect(.degrees(-90)).frame(width: 30, height: 30)
         case "Segments": HStack(spacing: 3) { ForEach(0..<12, id: \.self) { i in Capsule().fill(Double(i) / 12 <= model.progress ? Color.accentColor : Color.white.opacity(0.12)).frame(width: max(3, (width - 33) / 12), height: max(1, thickness)) } }
@@ -415,12 +441,34 @@ struct UpdateAnimationSettingsView: View {
                 Spacer(); Text(autoPreview ? "Physical notch auto-preview enabled" : "Manual physical preview").font(.caption).foregroundStyle(.secondary)
             }
             Text("The preview appears at the physical notch on your active display. It is synthetic and never starts a Sparkle check, download, or installation.").font(.caption).foregroundStyle(.secondary)
-            ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: 16).fill(.black).frame(width: 360, height: 92).shadow(color: Color.accentColor.opacity(glow), radius: 18)
-                VStack(spacing: 4) { if showPercentage { Text("\(Int(localProgress * 100))%").font(.title3.bold()).monospacedDigit() }; if showStatus { Text(localPhase).font(.caption).foregroundStyle(.secondary) }; if showVersion { Text("Halo \(updates.currentVersion)").font(.caption2).foregroundStyle(.tertiary) } }.padding(.bottom, 14)
-                GeometryReader { proxy in Capsule().fill(Color.white.opacity(0.12)).overlay(alignment: .leading) { Capsule().fill(Color.accentColor).frame(width: proxy.size.width * localProgress) } }.frame(width: 330, height: max(1, thickness)).padding(.bottom, 5)
-                if perimeterBar { RoundedRectangle(cornerRadius: 16).trim(from: 0, to: min(1, localProgress)).stroke(previewBarColor.opacity(perimeterOpacity), style: StrokeStyle(lineWidth: perimeterThickness, lineCap: .round)).frame(width: 358, height: 90).rotationEffect(.degrees(-90)).shadow(color: previewBarColor.opacity(perimeterGlow), radius: 2 + 5 * perimeterGlow) }
-            }.frame(maxWidth: .infinity).padding(.vertical, 8)
+            VStack(spacing: 6) {
+                ZStack(alignment: .bottom) {
+                    RoundedRectangle(cornerRadius: 16).fill(.black).frame(width: 360, height: 92).shadow(color: Color.accentColor.opacity(glow), radius: 18)
+                    GeometryReader { proxy in Capsule().fill(Color.white.opacity(0.12)).overlay(alignment: .leading) { Capsule().fill(Color.accentColor).frame(width: proxy.size.width * localProgress) } }.frame(width: 330, height: max(1, thickness)).padding(.bottom, 5)
+                    if perimeterBar {
+                        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        ZStack {
+                            shape.stroke(previewBarColor.opacity(perimeterOpacity * 0.12), lineWidth: max(0.5, perimeterThickness * 0.7))
+                            if perimeterClockwise {
+                                shape.trim(from: 0, to: min(1, localProgress)).stroke(previewBarColor.opacity(perimeterOpacity), style: StrokeStyle(lineWidth: perimeterThickness, lineCap: .round, lineJoin: .round))
+                            } else {
+                                shape.trim(from: max(0, 1 - localProgress), to: 1).stroke(previewBarColor.opacity(perimeterOpacity), style: StrokeStyle(lineWidth: perimeterThickness, lineCap: .round, lineJoin: .round))
+                            }
+                        }
+                        .frame(width: 356, height: 88)
+                        .shadow(color: previewBarColor.opacity(perimeterGlow), radius: 2 + 5 * perimeterGlow)
+                    }
+                }
+                VStack(spacing: 2) {
+                    if showPercentage { Text("\(Int(localProgress * 100))%").font(.title3.bold()).monospacedDigit() }
+                    HStack(spacing: 8) {
+                        if showStatus { Text(localPhase).font(.caption).foregroundStyle(.secondary) }
+                        if showVersion { Text("Halo \(updates.currentVersion)").font(.caption2).foregroundStyle(.tertiary) }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
         }
         .onChange(of: signature) { _ in if autoPreview { schedulePreview() } }
         .onDisappear { debounceTask?.cancel(); HaloUpdateAnimationPreviewController.shared.dismiss() }
