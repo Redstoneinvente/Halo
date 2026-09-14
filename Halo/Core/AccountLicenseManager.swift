@@ -48,9 +48,12 @@ final class HaloAccountLicenseManager: ObservableObject {
     @Published var notice: String?
     @Published var errorMessage: String?
 
+    private static let pressLicenseDefaultsKey = "HaloPressLicenseKey"
+
     private var started = false
     private var authListener: AuthStateDidChangeListenerHandle?
     private var subscriptions = Set<AnyCancellable>()
+    private var activePressLicenseKey: String?
 
     private init() {}
 
@@ -59,6 +62,7 @@ final class HaloAccountLicenseManager: ObservableObject {
         started = true
         configureFirebaseIfAvailable()
         configureLicenseSeatIfAvailable()
+        restorePressLicenseIfPresent()
     }
 
     // MARK: - Firebase
@@ -218,7 +222,10 @@ final class HaloAccountLicenseManager: ObservableObject {
 
         LicenseSeatStore.shared.$nextAutoValidationAt
             .receive(on: RunLoop.main)
-            .sink { [weak self] date in self?.nextLicenseValidation = date }
+            .sink { [weak self] date in
+                guard self?.activePressLicenseKey == nil else { return }
+                self?.nextLicenseValidation = date
+            }
             .store(in: &subscriptions)
     }
 
@@ -235,6 +242,12 @@ final class HaloAccountLicenseManager: ObservableObject {
     }
 
     private func applyLicenseStatus(_ status: LicenseStatus) {
+        if let pressKey = activePressLicenseKey {
+            licenseState = .active(maskedKey: Self.mask(pressKey), offline: false)
+            nextLicenseValidation = nil
+            return
+        }
+
         switch status {
         case .inactive(let message):
             licenseState = .inactive(message)
@@ -254,14 +267,44 @@ final class HaloAccountLicenseManager: ObservableObject {
         return Self.mask(license.licenseKey)
     }
 
-    func activateLicense(_ key: String) async {
-        guard licenseConfigured else {
-            errorMessage = "LicenseSeat is not configured yet."
-            return
+    // MARK: - Press license test path
+
+    private func restorePressLicenseIfPresent() {
+        guard let saved = UserDefaults.standard.string(forKey: Self.pressLicenseDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              saved.hasPrefix("PK_") else { return }
+
+        activePressLicenseKey = saved
+        nextLicenseValidation = nil
+        licenseState = .active(maskedKey: Self.mask(saved), offline: false)
+    }
+
+    private func activatePressLicenseForTesting(_ key: String) async {
+        await perform("Press license activated on this Mac (test mode)") {
+            self.activePressLicenseKey = key
+            UserDefaults.standard.set(key, forKey: Self.pressLicenseDefaultsKey)
+            self.nextLicenseValidation = nil
+            self.licenseState = .active(maskedKey: Self.mask(key), offline: false)
         }
+    }
+
+    func activateLicense(_ key: String) async {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             errorMessage = "Enter a license key."
+            return
+        }
+
+        // Press keys are intentionally routed before LicenseSeat. During this
+        // test phase any PK_ key is accepted locally; Firestore validation and
+        // one-way account/device binding will replace this temporary grant.
+        if trimmed.hasPrefix("PK_") {
+            await activatePressLicenseForTesting(trimmed)
+            return
+        }
+
+        guard licenseConfigured else {
+            errorMessage = "LicenseSeat is not configured yet."
             return
         }
 
@@ -272,6 +315,14 @@ final class HaloAccountLicenseManager: ObservableObject {
     }
 
     func validateLicenseNow() async {
+        if let pressKey = activePressLicenseKey {
+            errorMessage = nil
+            notice = "Press license active (test mode)"
+            licenseState = .active(maskedKey: Self.mask(pressKey), offline: false)
+            nextLicenseValidation = nil
+            return
+        }
+
         guard licenseConfigured,
               let current = LicenseSeatStore.shared.seat?.currentLicense() else { return }
         await perform("License checked") {
@@ -281,6 +332,20 @@ final class HaloAccountLicenseManager: ObservableObject {
     }
 
     func deactivateLicense() async {
+        if activePressLicenseKey != nil {
+            await perform("Press license removed from this Mac") {
+                self.activePressLicenseKey = nil
+                UserDefaults.standard.removeObject(forKey: Self.pressLicenseDefaultsKey)
+                self.nextLicenseValidation = nil
+                if self.licenseConfigured {
+                    self.applyLicenseStatus(LicenseSeatStore.shared.status)
+                } else {
+                    self.licenseState = .notConfigured("Set HALO_LICENSESEAT_API_KEY and HALO_LICENSESEAT_PRODUCT_SLUG in the build configuration.")
+                }
+            }
+            return
+        }
+
         guard licenseConfigured else { return }
         await perform("License deactivated on this Mac") {
             try await LicenseSeatStore.shared.deactivate()
@@ -289,6 +354,7 @@ final class HaloAccountLicenseManager: ObservableObject {
     }
 
     var isLicensed: Bool { licenseState.isLicensed }
+    var isPressLicense: Bool { activePressLicenseKey != nil }
 
     private static func mask(_ key: String) -> String {
         let suffix = String(key.suffix(4))
