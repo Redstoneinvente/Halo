@@ -998,8 +998,6 @@ private struct TransferContextInterfaceCard: View {
 private struct TransferContextSettings: View {
     @AppStorage("HaloContextTransferEnabled") private var enabled = true
     @AppStorage("HaloContextTransferPriority") private var priority = 65.0
-    @AppStorage("HaloContextTransferUseFullNotchArea") private var useFullNotchArea = true
-    @AppStorage("HaloContextTransferKeepClosedNotchContents") private var keepClosedContents = false
     @AppStorage("HaloContextTransferThresholdMBps") private var threshold = 0.35
     @AppStorage("HaloContextTransferLingerSeconds") private var linger = 2.5
     @AppStorage("HaloContextTransferReactDownloads") private var reactDownloads = true
@@ -1012,6 +1010,12 @@ private struct TransferContextSettings: View {
     @AppStorage("HaloContextTransferShowSession") private var showSession = true
     @AppStorage("HaloContextTransferShowElapsed") private var showElapsed = true
     @AppStorage("HaloContextTransferShowGraph") private var showGraph = true
+    @AppStorage("HaloContextTransferBackgroundStyle") private var backgroundStyle = "Gradient"
+    @AppStorage("HaloContextTransferBackgroundPrimaryHue") private var backgroundPrimaryHue = 0.58
+    @AppStorage("HaloContextTransferBackgroundSecondaryHue") private var backgroundSecondaryHue = 0.72
+    @AppStorage("HaloContextTransferBackgroundSaturation") private var backgroundSaturation = 0.72
+    @AppStorage("HaloContextTransferBackgroundBrightness") private var backgroundBrightness = 0.30
+    @AppStorage("HaloContextTransferBackgroundOpacity") private var backgroundOpacity = 1.0
     var body: some View {
         Section("Transfer Context Interface") {
             Toggle("Enable Transfer CI", isOn: $enabled)
@@ -1039,7 +1043,36 @@ private struct TransferContextSettings: View {
             Slider(value: $priority, in: 0...100, step: 1) { Text("Transfer CI priority") }
             Text("Transfer defaults to priority 65: above Music and Bluetooth, below Teleprompter, Retro and Drop. Change it to decide which CI owns Halo when contexts overlap.").font(.caption).foregroundStyle(.secondary)
         }
-        Section("CI surface") { Toggle("Use full notch area", isOn: $useFullNotchArea); Toggle("Keep closed-notch contents visible", isOn: $keepClosedContents) }
+        Section("Surface ownership") {
+            Label("Transfer CI replaces the normal Halo notch while it is active.", systemImage: "rectangle.inset.filled")
+            Text("When Transfer CI wins priority, the closed notch, opened dashboard and normal notch hover/tap behavior are suspended until the transfer ends. This applies only to Transfer CI.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Background") {
+            Picker("Style", selection: $backgroundStyle) {
+                Text("Gradient").tag("Gradient")
+                Text("Dynamic").tag("Dynamic")
+                Text("Accent").tag("Accent")
+                Text("Glass").tag("Glass")
+                Text("Black").tag("Black")
+            }
+            if backgroundStyle == "Gradient" || backgroundStyle == "Dynamic" || backgroundStyle == "Glass" {
+                LabeledContent("Primary hue") { Slider(value: $backgroundPrimaryHue, in: 0...1) }
+            }
+            if backgroundStyle == "Gradient" {
+                LabeledContent("Secondary hue") { Slider(value: $backgroundSecondaryHue, in: 0...1) }
+            }
+            if backgroundStyle == "Gradient" || backgroundStyle == "Dynamic" || backgroundStyle == "Glass" {
+                LabeledContent("Saturation") { Slider(value: $backgroundSaturation, in: 0...1) }
+                LabeledContent("Brightness") { Slider(value: $backgroundBrightness, in: 0.05...1) }
+            }
+            LabeledContent("Background opacity") {
+                Slider(value: $backgroundOpacity, in: 0.15...1)
+                Text("\(Int((backgroundOpacity * 100).rounded()))%").font(.caption.monospacedDigit()).frame(width: 42)
+            }
+            Text(backgroundStyle == "Dynamic" ? "Dynamic background shifts toward download/accent colors or upload/orange colors based on the active transfer direction." : "This background belongs only to Transfer CI and does not change your normal Halo notch appearance.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
         Section("What Halo can detect") { Text("This version detects real system network throughput, so it works across browsers and apps without plugins. macOS does not expose a universal public API that identifies every app's file name or exact download progress, so Transfer CI reports network-level transfer statistics rather than inventing per-file progress.").font(.caption).foregroundStyle(.secondary) }
     }
 }

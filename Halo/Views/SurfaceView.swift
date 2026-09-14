@@ -715,6 +715,12 @@ private struct TransferContextView: View {
     @AppStorage("HaloContextTransferShowSession") private var showSession = true
     @AppStorage("HaloContextTransferShowElapsed") private var showElapsed = true
     @AppStorage("HaloContextTransferShowGraph") private var showGraph = true
+    @AppStorage("HaloContextTransferBackgroundStyle") private var backgroundStyle = "Gradient"
+    @AppStorage("HaloContextTransferBackgroundPrimaryHue") private var backgroundPrimaryHue = 0.58
+    @AppStorage("HaloContextTransferBackgroundSecondaryHue") private var backgroundSecondaryHue = 0.72
+    @AppStorage("HaloContextTransferBackgroundSaturation") private var backgroundSaturation = 0.72
+    @AppStorage("HaloContextTransferBackgroundBrightness") private var backgroundBrightness = 0.30
+    @AppStorage("HaloContextTransferBackgroundOpacity") private var backgroundOpacity = 1.0
 
     private var elapsed: String {
         guard let start = monitor.sessionStartedAt else { return "0:00" }
@@ -764,8 +770,39 @@ private struct TransferContextView: View {
         }
         .padding(compact ? 14 : 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background { transferBackground }
         .onAppear { surfaceState.contextPreferredSize = CGSize(width: compact ? 430 : 620, height: compact ? 120 : 230) }
         .onChange(of: compact) { value in surfaceState.contextPreferredSize = CGSize(width: value ? 430 : 620, height: value ? 120 : 230) }
+    }
+
+    @ViewBuilder private var transferBackground: some View {
+        let primary = Color(hue: backgroundPrimaryHue, saturation: backgroundSaturation, brightness: backgroundBrightness)
+        let secondary = Color(hue: backgroundSecondaryHue, saturation: backgroundSaturation, brightness: min(1, backgroundBrightness + 0.12))
+        switch backgroundStyle {
+        case "Black":
+            Color.black.opacity(backgroundOpacity)
+        case "Accent":
+            Color.accentColor.opacity(backgroundOpacity)
+        case "Dynamic":
+            LinearGradient(
+                colors: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading")
+                    ? [Color.orange.opacity(backgroundOpacity), primary.opacity(backgroundOpacity)]
+                    : [Color.accentColor.opacity(backgroundOpacity), secondary.opacity(backgroundOpacity)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case "Glass":
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                primary.opacity(max(0, min(1, backgroundOpacity * 0.36)))
+            }
+        default:
+            LinearGradient(
+                colors: [primary.opacity(backgroundOpacity), secondary.opacity(backgroundOpacity)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
     }
 
     private func stat(_ title: String, value: String, symbol: String) -> some View {
@@ -877,6 +914,9 @@ struct SurfaceView: View {
     private var teleprompterContextActive: Bool { activeContext == .teleprompter }
     private var transferContextActive: Bool { activeContext == .transfer }
     private var contextOwnsFullSurface: Bool {
+        // Transfer CI takes ownership immediately so Halo never flashes the normal notch
+        // while the transfer surface is expanding. Other CIs keep their existing behavior.
+        if activeContext == .transfer { return true }
         guard state.expanded else { return false }
         switch activeContext {
         case .drop: return dropUsesFullNotchArea
@@ -884,7 +924,7 @@ struct SurfaceView: View {
         case .bluetooth: return bluetoothUsesFullNotchArea
         case .retro: return retroUsesFullNotchArea
         case .teleprompter: return true
-        case .transfer: return transferUsesFullNotchArea
+        case .transfer: return true
         case .none: return false
         }
     }
@@ -895,7 +935,7 @@ struct SurfaceView: View {
         case .bluetooth: return bluetoothKeepsClosedContents
         case .retro: return retroKeepsClosedContents
         case .teleprompter: return false
-        case .transfer: return transferKeepsClosedContents
+        case .transfer: return false
         case .none:
             // The two opened-layout systems are mutually exclusive. The Default
             // layout is the only system allowed to keep its closed-notch strip.
@@ -956,7 +996,7 @@ struct SurfaceView: View {
                     .frame(height: state.expanded ? max(40, state.compactHeight) : state.compactHeight)
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        guard !teleprompterActive else { return }
+                        guard !teleprompterActive && !transferContextActive else { return }
                         if state.expanded && state.pinned { return }
                         state.expanded.toggle()
                     }
@@ -1132,6 +1172,10 @@ struct SurfaceView: View {
             if teleprompterContextActive {
                 state.collapseTask?.cancel()
                 if !state.pinned { state.expanded = false }
+            } else if transferContextActive {
+                // Transfer CI owns the surface. Ignore normal notch hover expansion/collapse
+                // until the transfer releases ownership.
+                state.collapseTask?.cancel()
             } else {
                 state.hover(hovering, enabled: store.configuration.hoverToExpand)
             }
@@ -1169,12 +1213,15 @@ struct SurfaceView: View {
 
     @ViewBuilder private var surfaceBackgroundLayer: some View {
         ZStack {
-            if state.expanded && activeContext == nil && usesVisualWorkspace {
+            if transferContextActive {
+                // TransferContextView draws its own fully customizable background.
+                Color.clear
+            } else if state.expanded && activeContext == nil && usesVisualWorkspace {
                 OpenNotchBackgroundView(options: layout.resolvedOpenNotchLayout.appearance, fallback: layout.appearance, theme: theme, system: workspace.system)
             } else {
                 SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
             }
-            if !state.expanded || layout.closedNotch?.applyBackgroundWhenOpened == true {
+            if !transferContextActive && (!state.expanded || layout.closedNotch?.applyBackgroundWhenOpened == true) {
                 AlbumNotchBackground(options: closedBackgroundOptions, media: workspace.media, system: workspace.system)
             }
         }
