@@ -5,561 +5,309 @@ import SwiftUI
 @MainActor
 final class HaloUpdateController: NSObject {
     static let shared = HaloUpdateController()
-
-    private let controller: SPUStandardUpdaterController
+    private let controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil)
     private var updaterStarted = false
+    private override init() { super.init() }
 
-    private override init() {
-        controller = SPUStandardUpdaterController(
-            startingUpdater: false,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
-        )
-        super.init()
-    }
-
-    var currentVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
-    }
-
-    var currentBuild: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
-    }
-
+    var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0" }
+    var currentBuild: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0" }
     var isConfigured: Bool {
-        guard
-            let feedValue = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
-            !feedValue.isEmpty,
-            !feedValue.contains("$("),
-            let feedURL = URL(string: feedValue),
-            feedURL.scheme?.lowercased() == "https",
-            let publicKey = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
-            !publicKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-            !publicKey.contains("$(")
-        else {
-            return false
-        }
+        guard let feed = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
+              !feed.isEmpty, !feed.contains("$("),
+              let url = URL(string: feed), url.scheme?.lowercased() == "https",
+              let key = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
+              !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !key.contains("$(") else { return false }
         return true
     }
+    var canCheckForUpdates: Bool { ensureUpdaterStarted() && controller.updater.canCheckForUpdates }
+    var automaticallyChecksForUpdates: Bool { ensureUpdaterStarted() && controller.updater.automaticallyChecksForUpdates }
+    var automaticallyDownloadsUpdates: Bool { ensureUpdaterStarted() && controller.updater.automaticallyDownloadsUpdates }
+    var lastUpdateCheckDate: Date? { ensureUpdaterStarted() ? controller.updater.lastUpdateCheckDate : nil }
 
-    var canCheckForUpdates: Bool {
-        guard ensureUpdaterStarted() else { return false }
-        return controller.updater.canCheckForUpdates
-    }
-
-    var automaticallyChecksForUpdates: Bool {
-        guard ensureUpdaterStarted() else { return false }
-        return controller.updater.automaticallyChecksForUpdates
-    }
-
-    var automaticallyDownloadsUpdates: Bool {
-        guard ensureUpdaterStarted() else { return false }
-        return controller.updater.automaticallyDownloadsUpdates
-    }
-
-    var lastUpdateCheckDate: Date? {
-        guard ensureUpdaterStarted() else { return nil }
-        return controller.updater.lastUpdateCheckDate
-    }
-
-    func setAutomaticallyChecksForUpdates(_ enabled: Bool) {
-        guard ensureUpdaterStarted() else { return }
-        controller.updater.automaticallyChecksForUpdates = enabled
-    }
-
-    func setAutomaticallyDownloadsUpdates(_ enabled: Bool) {
-        guard ensureUpdaterStarted() else { return }
-        controller.updater.automaticallyDownloadsUpdates = enabled
-    }
-
+    func setAutomaticallyChecksForUpdates(_ value: Bool) { if ensureUpdaterStarted() { controller.updater.automaticallyChecksForUpdates = value } }
+    func setAutomaticallyDownloadsUpdates(_ value: Bool) { if ensureUpdaterStarted() { controller.updater.automaticallyDownloadsUpdates = value } }
     func checkForUpdates() {
         guard isConfigured else {
             let alert = NSAlert()
             alert.alertStyle = .informational
             alert.messageText = "Updates are not configured yet"
-            alert.informativeText = "Sparkle is linked correctly, but Halo still needs an HTTPS appcast URL and its Ed25519 public signing key. Configure those locally before starting the updater."
+            alert.informativeText = "Halo still needs a valid HTTPS appcast URL and Ed25519 public signing key before Sparkle can start."
             alert.addButton(withTitle: "OK")
             alert.runModal()
             return
         }
-
         guard ensureUpdaterStarted() else { return }
         controller.checkForUpdates(nil)
     }
-
-    @discardableResult
-    private func ensureUpdaterStarted() -> Bool {
+    @discardableResult private func ensureUpdaterStarted() -> Bool {
         guard isConfigured else { return false }
-        if !updaterStarted {
-            controller.startUpdater()
-            updaterStarted = true
-        }
+        if !updaterStarted { controller.startUpdater(); updaterStarted = true }
         return true
     }
 }
 
 private struct HaloReleaseHighlight: Identifiable {
-    let id = UUID()
-    let symbol: String
-    let title: String
-    let detail: String
-    let accent: Color
+    let id = UUID(); let symbol: String; let title: String; let detail: String; let accent: Color
 }
-
 private struct HaloReleaseStory {
-    let version: String
-    let eyebrow: String
-    let title: String
-    let subtitle: String
-    let highlights: [HaloReleaseHighlight]
-
-    static func forCurrentBuild() -> HaloReleaseStory {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
-
-        switch version {
-        case "0.2.1", "0.2.2":
-            return HaloReleaseStory(
-                version: version,
-                eyebrow: "HALO \(version)",
-                title: "Halo keeps getting sharper.",
-                subtitle: "A cleaner update experience, a proper What's New surface, and another round of polish across the notch.",
-                highlights: [
-                    .init(
-                        symbol: "arrow.triangle.2.circlepath.circle.fill",
-                        title: "Sparkle 2 updates",
-                        detail: "Halo can securely check, download, verify, and install signed updates without sending you off to a browser.",
-                        accent: .green
-                    ),
-                    .init(
-                        symbol: "gearshape.2.fill",
-                        title: "Update controls in Settings",
-                        detail: "Check manually, choose whether Halo checks automatically, and control automatic downloads from inside Halo.",
-                        accent: .cyan
-                    ),
-                    .init(
-                        symbol: "sparkles.rectangle.stack.fill",
-                        title: "What's New",
-                        detail: "Each release now has a native Halo release story so the important changes are easy to discover after updating.",
-                        accent: .purple
-                    ),
-                    .init(
-                        symbol: "checkmark.seal.fill",
-                        title: "Release pipeline polish",
-                        detail: "Signed appcasts, delta-ready builds, and safer Gate 3 packaging make future Halo releases considerably less painful.",
-                        accent: .orange
-                    )
-                ]
-            )
-        default:
-            return HaloReleaseStory(
-                version: version,
-                eyebrow: "HALO \(version)",
-                title: "Halo just got better.",
-                subtitle: "This release brings another round of polish, fixes, and improvements across your notch experience.",
-                highlights: [
-                    .init(symbol: "wand.and.stars", title: "Refined experience", detail: "Everyday interactions have been tuned for clarity, responsiveness, and visual consistency.", accent: .purple),
-                    .init(symbol: "gauge.with.dots.needle.67percent", title: "Performance work", detail: "Background work stays restrained so Halo can remain present without becoming demanding.", accent: .cyan),
-                    .init(symbol: "checkmark.seal.fill", title: "Quality fixes", detail: "This build includes reliability and compatibility improvements throughout Halo.", accent: .green)
-                ]
-            )
+    let version: String; let title: String; let subtitle: String; let highlights: [HaloReleaseHighlight]
+    static func current() -> HaloReleaseStory {
+        let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        if ["0.2.1", "0.2.2"].contains(v) {
+            return .init(version: v, title: "Halo keeps getting sharper.", subtitle: "A cleaner update experience, a proper What's New surface, and another round of polish across the notch.", highlights: [
+                .init(symbol: "arrow.triangle.2.circlepath.circle.fill", title: "Sparkle 2 updates", detail: "Secure signed updates without leaving Halo.", accent: .green),
+                .init(symbol: "gearshape.2.fill", title: "Update controls", detail: "Check manually and manage automatic checks and downloads.", accent: .cyan),
+                .init(symbol: "sparkles.rectangle.stack.fill", title: "What's New", detail: "See the important changes after each Halo update.", accent: .purple),
+                .init(symbol: "checkmark.seal.fill", title: "Release polish", detail: "A cleaner signed appcast and release pipeline.", accent: .orange)
+            ])
         }
+        return .init(version: v, title: "Halo just got better.", subtitle: "This release brings another round of polish, fixes, and improvements.", highlights: [
+            .init(symbol: "wand.and.stars", title: "Refined experience", detail: "Cleaner everyday interactions.", accent: .purple),
+            .init(symbol: "gauge.with.dots.needle.67percent", title: "Performance", detail: "Background work remains restrained.", accent: .cyan),
+            .init(symbol: "checkmark.seal.fill", title: "Quality fixes", detail: "Reliability improvements throughout Halo.", accent: .green)
+        ])
     }
 }
 
 @MainActor
 final class HaloWhatsNewCoordinator {
     static let shared = HaloWhatsNewCoordinator()
-
     private let defaults = UserDefaults.standard
-    private let lastSeenKey = "HaloWhatsNewLastSeenVersion"
+    private let key = "HaloWhatsNewLastSeenVersion"
     private var window: NSWindow?
     private var checkedThisLaunch = false
-
     private init() {}
-
-    var currentVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
-    }
-
+    var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0" }
     func presentIfNeeded() {
-        guard !checkedThisLaunch else { return }
-        checkedThisLaunch = true
-
-        let current = currentVersion
-        let previous = defaults.string(forKey: lastSeenKey)
+        guard !checkedThisLaunch else { return }; checkedThisLaunch = true
+        let current = currentVersion, previous = defaults.string(forKey: key)
         guard previous != current else { return }
-
         if previous == nil {
-            let looksLikeExistingInstall = defaults.object(forKey: "HaloSetupCompletedV1") != nil ||
-                defaults.object(forKey: "onboarded") != nil
-            if !looksLikeExistingInstall {
-                defaults.set(current, forKey: lastSeenKey)
-                return
-            }
+            let existing = defaults.object(forKey: "HaloSetupCompletedV1") != nil || defaults.object(forKey: "onboarded") != nil
+            if !existing { defaults.set(current, forKey: key); return }
         }
-
         present()
     }
-
     func present() {
-        defaults.set(currentVersion, forKey: lastSeenKey)
-
-        if let window {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-            return
-        }
-
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 720),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "What's New in Halo"
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
-        window.backgroundColor = .clear
-        window.contentMinSize = NSSize(width: 660, height: 600)
-        window.isReleasedWhenClosed = false
-        window.center()
-        window.contentView = NSHostingView(rootView: HaloWhatsNewView { [weak self, weak window] in
-            window?.close()
-            self?.window = nil
-        })
-        self.window = window
-
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+        defaults.set(currentVersion, forKey: key)
+        if let window { NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil); return }
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 690), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        w.title = "What's New in Halo"; w.titleVisibility = .hidden; w.titlebarAppearsTransparent = true; w.isMovableByWindowBackground = true
+        w.backgroundColor = .clear; w.contentMinSize = NSSize(width: 640, height: 560); w.isReleasedWhenClosed = false; w.center()
+        w.contentView = NSHostingView(rootView: HaloWhatsNewView { [weak self, weak w] in w?.close(); self?.window = nil })
+        window = w; NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil)
     }
 }
 
 private struct HaloWhatsNewView: View {
     let onDone: () -> Void
-    private let story = HaloReleaseStory.forCurrentBuild()
-
+    private let story = HaloReleaseStory.current()
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.025, green: 0.03, blue: 0.075),
-                    Color(red: 0.105, green: 0.045, blue: 0.18),
-                    Color(red: 0.02, green: 0.095, blue: 0.14)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            Circle()
-                .fill(Color.purple.opacity(0.20))
-                .frame(width: 420, height: 420)
-                .blur(radius: 90)
-                .offset(x: 260, y: -260)
-
-            Circle()
-                .fill(Color.cyan.opacity(0.14))
-                .frame(width: 360, height: 360)
-                .blur(radius: 100)
-                .offset(x: -300, y: 260)
-
+            LinearGradient(colors: [Color(red: 0.025, green: 0.03, blue: 0.075), Color(red: 0.105, green: 0.045, blue: 0.18), Color(red: 0.02, green: 0.095, blue: 0.14)], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea()
             ScrollView {
-                VStack(spacing: 26) {
-                    hero
-                    highlights
-                    footer
-                }
-                .padding(.horizontal, 38)
-                .padding(.top, 42)
-                .padding(.bottom, 30)
-            }
-        }
-        .preferredColorScheme(.dark)
-    }
-
-    private var hero: some View {
-        VStack(spacing: 14) {
-            ZStack {
-                Circle().fill(Color.white.opacity(0.08)).frame(width: 112, height: 112)
-                Circle().stroke(Color.white.opacity(0.12), lineWidth: 1).frame(width: 112, height: 112)
-                Image(nsImage: NSApp.applicationIconImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 82, height: 82)
-                    .shadow(color: .purple.opacity(0.5), radius: 28)
-            }
-
-            Text(story.eyebrow)
-                .font(.caption.weight(.bold))
-                .tracking(2.2)
-                .foregroundStyle(Color.white.opacity(0.62))
-
-            Text(story.title)
-                .font(.system(size: 35, weight: .bold, design: .rounded))
-                .multilineTextAlignment(.center)
-
-            Text(story.subtitle)
-                .font(.title3)
-                .foregroundStyle(Color.white.opacity(0.68))
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 610)
-        }
-    }
-
-    private var highlights: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-            ForEach(story.highlights) { item in
-                HStack(alignment: .top, spacing: 14) {
-                    Image(systemName: item.symbol)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(item.accent)
-                        .frame(width: 38, height: 38)
-                        .background(item.accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(item.title).font(.headline)
-                        Text(item.detail)
-                            .font(.callout)
-                            .foregroundStyle(Color.white.opacity(0.62))
-                            .fixedSize(horizontal: false, vertical: true)
+                VStack(spacing: 24) {
+                    Image(nsImage: NSApp.applicationIconImage).resizable().scaledToFit().frame(width: 82, height: 82).shadow(color: .purple.opacity(0.5), radius: 24)
+                    Text("HALO \(story.version)").font(.caption.bold()).tracking(2).foregroundStyle(.secondary)
+                    Text(story.title).font(.system(size: 34, weight: .bold, design: .rounded)).multilineTextAlignment(.center)
+                    Text(story.subtitle).font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                        ForEach(story.highlights) { item in
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: item.symbol).foregroundStyle(item.accent).frame(width: 34, height: 34).background(item.accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 10))
+                                VStack(alignment: .leading, spacing: 5) { Text(item.title).font(.headline); Text(item.detail).font(.callout).foregroundStyle(.secondary) }
+                                Spacer()
+                            }.padding(15).frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        }
                     }
-                    Spacer(minLength: 0)
-                }
-                .padding(17)
-                .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.08)))
+                    HStack {
+                        Button("Check for Updates") { HaloUpdateController.shared.checkForUpdates() }
+                        Spacer(); Button("Continue") { onDone() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                    }
+                }.padding(36)
             }
+        }.preferredColorScheme(.dark)
+    }
+}
+
+@MainActor
+private final class HaloUpdatePreviewModel: ObservableObject {
+    @Published var progress = 0.0
+    @Published var phase = "Ready"
+    @Published var installing = false
+    @Published var poweredDown = false
+}
+
+@MainActor
+final class HaloUpdateAnimationPreviewController {
+    static let shared = HaloUpdateAnimationPreviewController()
+    private let model = HaloUpdatePreviewModel()
+    private var panel: NSPanel?
+    private var task: Task<Void, Never>?
+    private init() {}
+
+    func play(version: String) {
+        let d = UserDefaults.standard
+        guard (d.string(forKey: "HaloUpdateAnimationStyle") ?? "Edge Fill") != "None" else { dismiss(); return }
+        task?.cancel(); show(version: version)
+        let stored = d.double(forKey: "HaloUpdateAnimationSpeed"), speed = max(0.5, stored == 0 ? 1 : stored)
+        model.progress = 0; model.phase = "Downloading"; model.installing = false; model.poweredDown = false
+        task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            withAnimation(.linear(duration: 1.8 / speed)) { model.progress = 1 }
+            try? await Task.sleep(nanoseconds: UInt64(1.9 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
+            model.phase = "Verifying"
+            try? await Task.sleep(nanoseconds: UInt64(0.55 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.28 / speed, dampingFraction: 0.72)) { model.phase = "Installing"; model.installing = true }
+            try? await Task.sleep(nanoseconds: UInt64(0.65 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.25 / speed)) { model.phase = "Updated ✓"; model.installing = false }
+            try? await Task.sleep(nanoseconds: UInt64(0.62 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.24 / speed)) { model.phase = "Relaunching"; model.poweredDown = true }
+            try? await Task.sleep(nanoseconds: UInt64(0.36 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
+            dismiss()
         }
     }
+    func dismiss() { task?.cancel(); task = nil; panel?.orderOut(nil); panel = nil; model.progress = 0; model.phase = "Ready"; model.installing = false; model.poweredDown = false }
+    private func show(version: String) {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        let width: CGFloat = min(480, max(360, screen.frame.width * 0.30)), height: CGFloat = 118
+        let frame = NSRect(x: screen.frame.midX - width / 2, y: screen.frame.maxY - height, width: width, height: height)
+        let root = HaloPhysicalUpdatePreview(model: model, version: version)
+        if let panel { panel.setFrame(frame, display: true); panel.contentView = NSHostingView(rootView: root); panel.orderFrontRegardless(); return }
+        let p = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = false; p.ignoresMouseEvents = true; p.hidesOnDeactivate = false; p.isReleasedWhenClosed = false
+        p.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        p.contentView = NSHostingView(rootView: root); panel = p; p.orderFrontRegardless()
+    }
+}
 
-    private var footer: some View {
-        HStack(spacing: 12) {
-            Button {
-                HaloUpdateController.shared.checkForUpdates()
-            } label: {
-                Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath")
-            }
-            .buttonStyle(.bordered)
-
-            Spacer()
-
-            Text("Thanks for using Halo.")
-                .font(.caption)
-                .foregroundStyle(Color.white.opacity(0.48))
-
-            Spacer()
-
-            Button("Continue") { onDone() }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
+private struct HaloPhysicalUpdatePreview: View {
+    @ObservedObject var model: HaloUpdatePreviewModel
+    let version: String
+    @AppStorage("HaloUpdateAnimationStyle") private var style = "Edge Fill"
+    @AppStorage("HaloUpdateAnimationIntensity") private var intensity = "Balanced"
+    @AppStorage("HaloUpdateProgressPresentation") private var presentation = "Bottom Edge"
+    @AppStorage("HaloUpdateGlowStrength") private var glow = 0.45
+    @AppStorage("HaloUpdateProgressThickness") private var thickness = 2.0
+    @AppStorage("HaloUpdateShowPercentage") private var showPercentage = true
+    @AppStorage("HaloUpdateShowVersion") private var showVersion = true
+    @AppStorage("HaloUpdateShowStatus") private var showStatus = true
+    private var multiplier: Double { intensity == "Subtle" ? 0.55 : intensity == "Expressive" ? 1.4 : 1 }
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .top) {
+                Color.clear
+                let width = min(proxy.size.width - 12, 430.0)
+                ZStack(alignment: .bottom) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 24, style: .continuous).fill(.black)
+                        Rectangle().fill(.black).frame(height: 28).frame(maxHeight: .infinity, alignment: .top)
+                        if ["Energy", "Portal", "Circuit"].contains(style) {
+                            RoundedRectangle(cornerRadius: 24).stroke(Color.accentColor.opacity(0.24 * multiplier), lineWidth: max(1, thickness)).blur(radius: 3 + 4 * glow)
+                        }
+                        VStack(spacing: 3) {
+                            if showPercentage { Text("\(Int(model.progress * 100))%").font(.system(size: 17, weight: .bold, design: .rounded)).monospacedDigit() }
+                            if showStatus { Text(model.phase).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary) }
+                            if showVersion { Text("Halo \(version)").font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary) }
+                        }.padding(.top, 14)
+                    }
+                    progress(width: width - 34).padding(.bottom, 7)
+                }
+                .frame(width: width, height: 96)
+                .shadow(color: Color.accentColor.opacity(glow * multiplier), radius: 14 + 10 * glow)
+                .opacity(model.poweredDown ? 0 : 1)
+                .scaleEffect(x: model.installing ? 0.965 : 1, y: model.installing ? 0.93 : 1, anchor: .top)
+                .animation(.easeInOut(duration: 0.24), value: model.installing)
+                .animation(.easeIn(duration: 0.22), value: model.poweredDown)
+            }.frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+        }.preferredColorScheme(.dark)
+    }
+    @ViewBuilder private func progress(width: CGFloat) -> some View {
+        switch presentation {
+        case "Hidden", "Percentage Only": EmptyView()
+        case "Full Perimeter": RoundedRectangle(cornerRadius: 21).trim(from: 0, to: min(1, model.progress)).stroke(Color.accentColor, style: StrokeStyle(lineWidth: thickness, lineCap: .round)).frame(width: width + 20, height: 76).rotationEffect(.degrees(-90)).shadow(color: Color.accentColor.opacity(glow), radius: 6)
+        case "Ring": Circle().trim(from: 0, to: min(1, model.progress)).stroke(Color.accentColor, style: StrokeStyle(lineWidth: max(2, thickness), lineCap: .round)).rotationEffect(.degrees(-90)).frame(width: 30, height: 30)
+        case "Segments": HStack(spacing: 3) { ForEach(0..<12, id: \.self) { i in Capsule().fill(Double(i) / 12 <= model.progress ? Color.accentColor : Color.white.opacity(0.12)).frame(width: max(3, (width - 33) / 12), height: max(1, thickness)) } }
+        default: ZStack(alignment: .leading) { Capsule().fill(Color.white.opacity(0.1)).frame(width: width, height: max(1, thickness)); Capsule().fill(Color.accentColor).frame(width: max(0, width * model.progress), height: max(1, thickness)).shadow(color: Color.accentColor.opacity(glow * multiplier), radius: 6) }
         }
-        .padding(.top, 2)
     }
 }
 
 @MainActor
 struct UpdateAnimationSettingsView: View {
     private let updates = HaloUpdateController.shared
-
-    @AppStorage("HaloUpdateAnimationStyle") private var updateAnimationStyle = "Edge Fill"
-    @AppStorage("HaloUpdateAnimationIntensity") private var updateAnimationIntensity = "Balanced"
-    @AppStorage("HaloUpdateProgressPresentation") private var updateProgressPresentation = "Bottom Edge"
-    @AppStorage("HaloUpdateAnimationSpeed") private var updateAnimationSpeed = 1.0
-    @AppStorage("HaloUpdateGlowStrength") private var updateGlowStrength = 0.45
-    @AppStorage("HaloUpdateProgressThickness") private var updateProgressThickness = 2.0
-    @AppStorage("HaloUpdateShowPercentage") private var updateShowPercentage = true
-    @AppStorage("HaloUpdateShowVersion") private var updateShowVersion = true
-    @AppStorage("HaloUpdateShowStatus") private var updateShowStatus = true
-    @AppStorage("HaloUpdateShowDownloadedSize") private var updateShowDownloadedSize = false
-    @AppStorage("HaloUpdateShowDownloadSpeed") private var updateShowDownloadSpeed = false
-    @AppStorage("HaloUpdateShowETA") private var updateShowETA = false
-    @AppStorage("HaloUpdateSoundsEnabled") private var updateSoundsEnabled = true
-    @AppStorage("HaloUpdateSoundVolume") private var updateSoundVolume = 0.55
+    @AppStorage("HaloUpdateAnimationStyle") private var style = "Edge Fill"
+    @AppStorage("HaloUpdateAnimationIntensity") private var intensity = "Balanced"
+    @AppStorage("HaloUpdateProgressPresentation") private var presentation = "Bottom Edge"
+    @AppStorage("HaloUpdateAnimationSpeed") private var speed = 1.0
+    @AppStorage("HaloUpdateGlowStrength") private var glow = 0.45
+    @AppStorage("HaloUpdateProgressThickness") private var thickness = 2.0
+    @AppStorage("HaloUpdateShowPercentage") private var showPercentage = true
+    @AppStorage("HaloUpdateShowVersion") private var showVersion = true
+    @AppStorage("HaloUpdateShowStatus") private var showStatus = true
+    @AppStorage("HaloUpdateShowDownloadedSize") private var showSize = false
+    @AppStorage("HaloUpdateShowDownloadSpeed") private var showSpeed = false
+    @AppStorage("HaloUpdateShowETA") private var showETA = false
+    @AppStorage("HaloUpdateSoundsEnabled") private var sounds = true
+    @AppStorage("HaloUpdateSoundVolume") private var volume = 0.55
     @AppStorage("HaloUpdateAutoPreview") private var autoPreview = true
-
-    @State private var previewProgress = 0.0
-    @State private var previewPhase = "Ready"
-    @State private var previewRunID = UUID()
-
-    private var previewSettingsSignature: String {
-        [
-            updateAnimationStyle,
-            updateAnimationIntensity,
-            updateProgressPresentation,
-            String(updateAnimationSpeed),
-            String(updateGlowStrength),
-            String(updateProgressThickness),
-            String(updateShowPercentage),
-            String(updateShowVersion),
-            String(updateShowStatus),
-            String(updateShowDownloadedSize),
-            String(updateShowDownloadSpeed),
-            String(updateShowETA)
-        ].joined(separator: "|")
-    }
+    @State private var localProgress = 0.0
+    @State private var localPhase = "Ready"
+    @State private var runID = UUID()
+    @State private var debounceTask: Task<Void, Never>?
+    private var signature: String { [style, intensity, presentation, String(speed), String(glow), String(thickness), String(showPercentage), String(showVersion), String(showStatus), String(showSize), String(showSpeed), String(showETA)].joined(separator: "|") }
 
     var body: some View {
         Section("Presentation") {
-            Text("Customize how update progress is presented through Halo's notch. Sparkle still owns the real download, verification, installation, and relaunch process.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Picker("Style", selection: $updateAnimationStyle) {
-                ForEach(["Minimal", "Edge Fill", "Energy", "Particles", "Liquid", "Portal", "Digital", "Circuit", "None"], id: \.self) { Text($0).tag($0) }
-            }
-            Picker("Intensity", selection: $updateAnimationIntensity) {
-                ForEach(["Subtle", "Balanced", "Expressive"], id: \.self) { Text($0).tag($0) }
-            }
-            Picker("Progress presentation", selection: $updateProgressPresentation) {
-                ForEach(["Bottom Edge", "Full Perimeter", "Inside Fill", "Ring", "Segments", "Particles", "Percentage Only", "Hidden"], id: \.self) { Text($0).tag($0) }
-            }
+            Text("Customize how Halo presents update progress at the physical notch. Sparkle still owns the real download, verification, installation, and relaunch process.").font(.caption).foregroundStyle(.secondary)
+            Picker("Style", selection: $style) { ForEach(["Minimal", "Edge Fill", "Energy", "Particles", "Liquid", "Portal", "Digital", "Circuit", "None"], id: \.self) { Text($0).tag($0) } }
+            Picker("Intensity", selection: $intensity) { ForEach(["Subtle", "Balanced", "Expressive"], id: \.self) { Text($0).tag($0) } }
+            Picker("Progress presentation", selection: $presentation) { ForEach(["Bottom Edge", "Full Perimeter", "Inside Fill", "Ring", "Segments", "Particles", "Percentage Only", "Hidden"], id: \.self) { Text($0).tag($0) } }
         }
-
         Section("Motion & Glow") {
-            LabeledContent("Animation speed") {
-                Slider(value: $updateAnimationSpeed, in: 0.5...2.0, step: 0.05).frame(width: 220)
-                Text("\(updateAnimationSpeed, specifier: "%.2f")×").monospacedDigit().frame(width: 52, alignment: .trailing)
-            }
-            LabeledContent("Glow strength") {
-                Slider(value: $updateGlowStrength, in: 0...1, step: 0.05).frame(width: 220)
-                Text("\(Int(updateGlowStrength * 100))%").monospacedDigit().frame(width: 52, alignment: .trailing)
-            }
-            LabeledContent("Progress thickness") {
-                Slider(value: $updateProgressThickness, in: 1...8, step: 0.5).frame(width: 220)
-                Text("\(updateProgressThickness, specifier: "%.1f") pt").monospacedDigit().frame(width: 62, alignment: .trailing)
-            }
+            LabeledContent("Animation speed") { Slider(value: $speed, in: 0.5...2, step: 0.05).frame(width: 220); Text("\(speed, specifier: "%.2f")×").monospacedDigit().frame(width: 52) }
+            LabeledContent("Glow strength") { Slider(value: $glow, in: 0...1, step: 0.05).frame(width: 220); Text("\(Int(glow * 100))%").monospacedDigit().frame(width: 52) }
+            LabeledContent("Progress thickness") { Slider(value: $thickness, in: 1...8, step: 0.5).frame(width: 220); Text("\(thickness, specifier: "%.1f") pt").monospacedDigit().frame(width: 62) }
         }
-
         Section("Progress Information") {
-            Toggle("Show percentage", isOn: $updateShowPercentage)
-            Toggle("Show version", isOn: $updateShowVersion)
-            Toggle("Show current phase", isOn: $updateShowStatus)
-            Toggle("Show downloaded / total size", isOn: $updateShowDownloadedSize)
-            Toggle("Show download speed", isOn: $updateShowDownloadSpeed)
-            Toggle("Show estimated time", isOn: $updateShowETA)
+            Toggle("Show percentage", isOn: $showPercentage); Toggle("Show version", isOn: $showVersion); Toggle("Show current phase", isOn: $showStatus)
+            Toggle("Show downloaded / total size", isOn: $showSize); Toggle("Show download speed", isOn: $showSpeed); Toggle("Show estimated time", isOn: $showETA)
         }
-
         Section("Sounds") {
-            Toggle("Enable update sounds", isOn: $updateSoundsEnabled)
-            LabeledContent("Volume") {
-                Slider(value: $updateSoundVolume, in: 0...1, step: 0.05)
-                    .frame(width: 220)
-                    .disabled(!updateSoundsEnabled)
-                Text("\(Int(updateSoundVolume * 100))%")
-                    .monospacedDigit()
-                    .frame(width: 52, alignment: .trailing)
-            }
+            Toggle("Enable update sounds", isOn: $sounds)
+            LabeledContent("Volume") { Slider(value: $volume, in: 0...1, step: 0.05).frame(width: 220).disabled(!sounds); Text("\(Int(volume * 100))%").monospacedDigit().frame(width: 52) }
         }
-
         Section("Preview") {
             Toggle("Automatically preview animation changes", isOn: $autoPreview)
-
             HStack {
-                Button {
-                    playPreview()
-                } label: {
-                    Label("Preview Animation", systemImage: "play.fill")
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button("Reset Preview") {
-                    previewRunID = UUID()
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        previewProgress = 0
-                        previewPhase = "Ready"
-                    }
-                }
-
-                Spacer()
-
-                Text(autoPreview ? "Live preview enabled" : "Manual preview")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Button { playPreview() } label: { Label("Preview on Notch", systemImage: "play.fill") }.buttonStyle(.borderedProminent)
+                Button("Stop Preview") { stopPreview() }
+                Spacer(); Text(autoPreview ? "Physical notch auto-preview enabled" : "Manual physical preview").font(.caption).foregroundStyle(.secondary)
             }
-
-            VStack(spacing: 10) {
-                ZStack(alignment: .bottom) {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(.black)
-                        .frame(width: 360, height: 92)
-                        .shadow(color: Color.accentColor.opacity(updateGlowStrength), radius: 18)
-                        .scaleEffect(previewPhase == "Installing" ? 0.985 : 1)
-                        .animation(.easeInOut(duration: 0.22 / max(updateAnimationSpeed, 0.5)), value: previewPhase)
-
-                    VStack(spacing: 4) {
-                        if updateShowPercentage { Text("\(Int(previewProgress * 100))%").font(.title3.bold()).monospacedDigit() }
-                        if updateShowStatus { Text(previewPhase).font(.caption).foregroundStyle(.secondary) }
-                        if updateShowVersion { Text("Halo \(updates.currentVersion)").font(.caption2).foregroundStyle(.tertiary) }
-                    }
-                    .padding(.bottom, 14)
-
-                    GeometryReader { proxy in
-                        Capsule()
-                            .fill(Color.accentColor.opacity(0.18))
-                            .frame(height: updateProgressThickness)
-                            .overlay(alignment: .leading) {
-                                Capsule()
-                                    .fill(Color.accentColor)
-                                    .frame(width: proxy.size.width * previewProgress, height: updateProgressThickness)
-                                    .shadow(color: Color.accentColor.opacity(updateGlowStrength), radius: 6)
-                            }
-                    }
-                    .frame(width: 330, height: updateProgressThickness)
-                    .padding(.bottom, 5)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
+            Text("The preview appears at the physical notch on your active display. It is synthetic and never starts a Sparkle check, download, or installation.").font(.caption).foregroundStyle(.secondary)
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 16).fill(.black).frame(width: 360, height: 92).shadow(color: Color.accentColor.opacity(glow), radius: 18)
+                VStack(spacing: 4) { if showPercentage { Text("\(Int(localProgress * 100))%").font(.title3.bold()).monospacedDigit() }; if showStatus { Text(localPhase).font(.caption).foregroundStyle(.secondary) }; if showVersion { Text("Halo \(updates.currentVersion)").font(.caption2).foregroundStyle(.tertiary) } }.padding(.bottom, 14)
+                GeometryReader { proxy in Capsule().fill(Color.white.opacity(0.12)).overlay(alignment: .leading) { Capsule().fill(Color.accentColor).frame(width: proxy.size.width * localProgress) } }.frame(width: 330, height: max(1, thickness)).padding(.bottom, 5)
+            }.frame(maxWidth: .infinity).padding(.vertical, 8)
         }
-        .onChange(of: previewSettingsSignature) { _ in
-            guard autoPreview else { return }
-            playPreview()
-        }
+        .onChange(of: signature) { _ in if autoPreview { schedulePreview() } }
+        .onDisappear { debounceTask?.cancel(); HaloUpdateAnimationPreviewController.shared.dismiss() }
     }
-
+    private func schedulePreview() { debounceTask?.cancel(); debounceTask = Task { @MainActor in try? await Task.sleep(nanoseconds: 220_000_000); guard !Task.isCancelled else { return }; playPreview() } }
+    private func stopPreview() { runID = UUID(); debounceTask?.cancel(); HaloUpdateAnimationPreviewController.shared.dismiss(); localProgress = 0; localPhase = "Ready" }
     private func playPreview() {
-        guard updateAnimationStyle != "None" else {
-            previewRunID = UUID()
-            withAnimation(.easeOut(duration: 0.2)) {
-                previewProgress = 0
-                previewPhase = "Standard Sparkle UI"
-            }
-            return
-        }
-
-        let runID = UUID()
-        previewRunID = runID
-        let speed = max(updateAnimationSpeed, 0.5)
-
-        previewProgress = 0
-        previewPhase = "Downloading"
-
+        guard style != "None" else { HaloUpdateAnimationPreviewController.shared.dismiss(); localProgress = 0; localPhase = "Standard Sparkle UI"; return }
+        HaloUpdateAnimationPreviewController.shared.play(version: updates.currentVersion)
+        let id = UUID(); runID = id; let s = max(speed, 0.5); localProgress = 0; localPhase = "Downloading"
         Task { @MainActor in
-            withAnimation(.linear(duration: 1.8 / speed)) {
-                previewProgress = 1
-            }
-
-            try? await Task.sleep(nanoseconds: UInt64((1.9 / speed) * 1_000_000_000))
-            guard previewRunID == runID else { return }
-
-            previewPhase = "Verifying"
-            try? await Task.sleep(nanoseconds: UInt64((0.55 / speed) * 1_000_000_000))
-            guard previewRunID == runID else { return }
-
-            previewPhase = "Installing"
-            try? await Task.sleep(nanoseconds: UInt64((0.65 / speed) * 1_000_000_000))
-            guard previewRunID == runID else { return }
-
-            previewPhase = "Updated ✓"
-            try? await Task.sleep(nanoseconds: UInt64((0.8 / speed) * 1_000_000_000))
-            guard previewRunID == runID else { return }
-
-            withAnimation(.easeOut(duration: 0.25 / speed)) {
-                previewProgress = 0
-                previewPhase = "Ready"
-            }
+            withAnimation(.linear(duration: 1.8 / s)) { localProgress = 1 }
+            try? await Task.sleep(nanoseconds: UInt64(1.9 / s * 1_000_000_000)); guard runID == id else { return }; localPhase = "Verifying"
+            try? await Task.sleep(nanoseconds: UInt64(0.55 / s * 1_000_000_000)); guard runID == id else { return }; localPhase = "Installing"
+            try? await Task.sleep(nanoseconds: UInt64(0.65 / s * 1_000_000_000)); guard runID == id else { return }; localPhase = "Updated ✓"
+            try? await Task.sleep(nanoseconds: UInt64(0.62 / s * 1_000_000_000)); guard runID == id else { return }; localPhase = "Relaunching"
+            try? await Task.sleep(nanoseconds: UInt64(0.36 / s * 1_000_000_000)); guard runID == id else { return }; localProgress = 0; localPhase = "Ready"
         }
     }
 }
