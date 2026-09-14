@@ -1002,6 +1002,8 @@ private struct TransferContextSettings: View {
     @AppStorage("HaloContextTransferLingerSeconds") private var linger = 2.5
     @AppStorage("HaloContextTransferReactDownloads") private var reactDownloads = true
     @AppStorage("HaloContextTransferReactUploads") private var reactUploads = true
+    @AppStorage("HaloContextTransferClosedStyle") private var closedStyle = "Stats"
+    @AppStorage("HaloContextTransferOpenStyle") private var openStyle = "Dashboard"
     @AppStorage("HaloContextTransferCompact") private var compact = false
     @AppStorage("HaloContextTransferShowDirection") private var showDirection = true
     @AppStorage("HaloContextTransferShowDownload") private var showDownload = true
@@ -1010,44 +1012,95 @@ private struct TransferContextSettings: View {
     @AppStorage("HaloContextTransferShowSession") private var showSession = true
     @AppStorage("HaloContextTransferShowElapsed") private var showElapsed = true
     @AppStorage("HaloContextTransferShowGraph") private var showGraph = true
+    @AppStorage("HaloContextTransferIndicatorStyle") private var indicatorStyle = "Edge Bar"
+    @AppStorage("HaloContextTransferIndicatorShowSpeed") private var indicatorShowSpeed = true
+    @AppStorage("HaloContextTransferIndicatorThickness") private var indicatorThickness = 3.0
+    @AppStorage("HaloContextTransferIndicatorIntensity") private var indicatorIntensity = 1.0
     @AppStorage("HaloContextTransferBackgroundStyle") private var backgroundStyle = "Gradient"
     @AppStorage("HaloContextTransferBackgroundPrimaryHue") private var backgroundPrimaryHue = 0.58
     @AppStorage("HaloContextTransferBackgroundSecondaryHue") private var backgroundSecondaryHue = 0.72
     @AppStorage("HaloContextTransferBackgroundSaturation") private var backgroundSaturation = 0.72
     @AppStorage("HaloContextTransferBackgroundBrightness") private var backgroundBrightness = 0.30
     @AppStorage("HaloContextTransferBackgroundOpacity") private var backgroundOpacity = 1.0
+
     var body: some View {
         Section("Transfer Context Interface") {
             Toggle("Enable Transfer CI", isOn: $enabled)
-            Text("Transfer CI only becomes eligible when Halo detects sustained network transfer activity above your threshold, then closes after the transfer goes quiet.").font(.caption).foregroundStyle(.secondary)
+            Text("Transfer CI replaces the contents and styling of the existing Halo notch while transfer activity is present. It still opens, closes, hovers, pins and animates exactly like your normal notch.")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("React to downloads", isOn: $reactDownloads)
             Toggle("React to uploads", isOn: $reactUploads)
         }
+
         Section("Detection") {
-            LabeledContent("Activation threshold") { Slider(value: $threshold, in: 0.05...10, step: 0.05); Text(String(format: "%.2f MB/s", threshold)).font(.caption.monospacedDigit()).frame(width: 78) }
-            LabeledContent("Stay visible after activity") { Slider(value: $linger, in: 0...10, step: 0.5); Text(String(format: "%.1f s", linger)).font(.caption.monospacedDigit()).frame(width: 54) }
-            Text("A short two-sample confirmation prevents tiny background requests from constantly opening the notch. The linger period prevents chunked transfers from flickering the CI.").font(.caption).foregroundStyle(.secondary)
-        }
-        Section("Layout") {
-            Toggle("Compact presentation", isOn: $compact)
-            Toggle("Show transfer direction", isOn: $showDirection)
-            Toggle("Show download speed", isOn: $showDownload)
-            Toggle("Show upload speed", isOn: $showUpload)
-            Toggle("Show peak speeds", isOn: $showPeak).disabled(compact)
-            Toggle("Show transferred this session", isOn: $showSession).disabled(compact)
-            Toggle("Show elapsed time", isOn: $showElapsed)
-            Toggle("Show live throughput graph", isOn: $showGraph).disabled(compact)
-            Text(compact ? "Compact mode requests a small 430 × 120 pt CI." : "Detailed mode requests a 620 × 230 pt CI with room for live history and session statistics.").font(.caption).foregroundStyle(.secondary)
-        }
-        Section("CI priority") {
-            Slider(value: $priority, in: 0...100, step: 1) { Text("Transfer CI priority") }
-            Text("Transfer defaults to priority 65: above Music and Bluetooth, below Teleprompter, Retro and Drop. Change it to decide which CI owns Halo when contexts overlap.").font(.caption).foregroundStyle(.secondary)
-        }
-        Section("Surface ownership") {
-            Label("Transfer CI replaces the normal Halo notch while it is active.", systemImage: "rectangle.inset.filled")
-            Text("When Transfer CI wins priority, the closed notch, opened dashboard and normal notch hover/tap behavior are suspended until the transfer ends. This applies only to Transfer CI.")
+            LabeledContent("Activation threshold") {
+                Slider(value: $threshold, in: 0.05...10, step: 0.05)
+                Text(String(format: "%.2f MB/s", threshold)).font(.caption.monospacedDigit()).frame(width: 78)
+            }
+            LabeledContent("Stay visible after activity") {
+                Slider(value: $linger, in: 0...10, step: 0.5)
+                Text(String(format: "%.1f s", linger)).font(.caption.monospacedDigit()).frame(width: 54)
+            }
+            Text("Two sustained samples prevent tiny background requests from constantly taking over the notch. Linger smooths chunked transfers.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+
+        Section("Closed notch") {
+            Picker("Presentation", selection: $closedStyle) {
+                Text("Stats").tag("Stats")
+                Text("Download indicator").tag("Indicator")
+                Text("Minimal").tag("Minimal")
+            }.pickerStyle(.segmented)
+            Text(closedStyle == "Indicator" ? "Indicator mode turns the notch itself into a live transfer indicator, similar to Halo's update/download presentation. Because system-wide traffic does not expose universal file progress, the fill represents live transfer activity rather than a fake percentage." : "Choose how much transfer information should replace the normal closed-notch contents.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        if closedStyle == "Indicator" || openStyle == "Indicator" {
+            Section("Indicator") {
+                Picker("Style", selection: $indicatorStyle) {
+                    Text("Edge Bar").tag("Edge Bar")
+                    Text("Center Pulse").tag("Center Pulse")
+                    Text("Dual Rails").tag("Dual Rails")
+                    Text("Minimal").tag("Minimal")
+                }
+                Toggle("Show live speed", isOn: $indicatorShowSpeed)
+                LabeledContent("Thickness") {
+                    Slider(value: $indicatorThickness, in: 1.5...10, step: 0.5)
+                    Text(String(format: "%.1f pt", indicatorThickness)).font(.caption.monospacedDigit()).frame(width: 48)
+                }
+                LabeledContent("Intensity") {
+                    Slider(value: $indicatorIntensity, in: 0.2...1, step: 0.05)
+                    Text("\(Int((indicatorIntensity * 100).rounded()))%").font(.caption.monospacedDigit()).frame(width: 42)
+                }
+            }
+        }
+
+        Section("Opened notch") {
+            Picker("Presentation", selection: $openStyle) {
+                Text("Dashboard").tag("Dashboard")
+                Text("Indicator").tag("Indicator")
+                Text("Minimal").tag("Minimal")
+            }.pickerStyle(.segmented)
+            if openStyle == "Dashboard" {
+                Toggle("Compact presentation", isOn: $compact)
+            }
+            Toggle("Show transfer direction", isOn: $showDirection)
+            Toggle("Show download speed", isOn: $showDownload).disabled(openStyle == "Indicator")
+            Toggle("Show upload speed", isOn: $showUpload).disabled(openStyle == "Indicator")
+            Toggle("Show peak speeds", isOn: $showPeak).disabled(compact || openStyle != "Dashboard")
+            Toggle("Show transferred this session", isOn: $showSession).disabled(compact || openStyle != "Dashboard")
+            Toggle("Show elapsed time", isOn: $showElapsed)
+            Toggle("Show live throughput graph", isOn: $showGraph).disabled(compact || openStyle != "Dashboard")
+            Text("Transfer CI now sizes itself from the content you enable. Removing graph, session totals, peaks or stat blocks shrinks the opened notch; enabling them grows it again.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("CI priority") {
+            Slider(value: $priority, in: 0...100, step: 1) { Text("Transfer CI priority") }
+            Text("Transfer defaults to priority 65: above Music and Bluetooth, below Teleprompter, Retro and Drop.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
         Section("Background") {
             Picker("Style", selection: $backgroundStyle) {
                 Text("Gradient").tag("Gradient")
@@ -1070,10 +1123,14 @@ private struct TransferContextSettings: View {
                 Slider(value: $backgroundOpacity, in: 0.15...1)
                 Text("\(Int((backgroundOpacity * 100).rounded()))%").font(.caption.monospacedDigit()).frame(width: 42)
             }
-            Text(backgroundStyle == "Dynamic" ? "Dynamic background shifts toward download/accent colors or upload/orange colors based on the active transfer direction." : "This background belongs only to Transfer CI and does not change your normal Halo notch appearance.")
+            Text(backgroundStyle == "Dynamic" ? "Dynamic shifts toward download/accent or upload/orange colors based on the active direction." : "Transfer styling is isolated from your normal notch appearance.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        Section("What Halo can detect") { Text("This version detects real system network throughput, so it works across browsers and apps without plugins. macOS does not expose a universal public API that identifies every app's file name or exact download progress, so Transfer CI reports network-level transfer statistics rather than inventing per-file progress.").font(.caption).foregroundStyle(.secondary) }
+
+        Section("What Halo can detect") {
+            Text("System-wide transfer detection can report real throughput, direction, totals and peaks, but macOS does not expose a universal file progress percentage for every browser and app. Indicator mode therefore represents live transfer activity unless a future app-specific provider can supply real progress.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
     }
 }
 

@@ -704,9 +704,122 @@ private struct TransferHistoryGraph: View {
     }
 }
 
+private struct TransferActivityIndicator: View {
+    @ObservedObject var monitor: TransferActivityMonitor
+    let compact: Bool
+    @AppStorage("HaloContextTransferIndicatorStyle") private var style = "Edge Bar"
+    @AppStorage("HaloContextTransferIndicatorShowSpeed") private var showSpeed = true
+    @AppStorage("HaloContextTransferIndicatorThickness") private var thickness = 3.0
+    @AppStorage("HaloContextTransferIndicatorIntensity") private var intensity = 1.0
+    @AppStorage("HaloContextTransferThresholdMBps") private var thresholdMBps = 0.35
+
+    private var uploadOnly: Bool {
+        monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading")
+    }
+    private var accent: Color { uploadOnly ? .orange : .accentColor }
+    private var currentSpeed: Double { max(monitor.downloadBytesPerSecond, monitor.uploadBytesPerSecond) }
+    private var activity: Double {
+        let threshold = max(50_000, thresholdMBps * 1_000_000)
+        return min(1, max(0.10, currentSpeed / (threshold * 5)))
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                switch style {
+                case "Center Pulse":
+                    HStack(spacing: 8) {
+                        Image(systemName: uploadOnly ? "arrow.up" : "arrow.down")
+                            .font(.system(size: compact ? 10 : 14, weight: .bold))
+                        Capsule()
+                            .fill(accent.opacity(0.18))
+                            .frame(width: compact ? 56 : 110, height: max(2, thickness))
+                            .overlay(alignment: .leading) {
+                                Capsule()
+                                    .fill(accent.opacity(0.95 * intensity))
+                                    .frame(width: (compact ? 56 : 110) * activity)
+                                    .animation(.easeOut(duration: 0.25), value: activity)
+                            }
+                        if showSpeed { Text(speed(currentSpeed)).monospacedDigit() }
+                    }
+                    .font(.system(size: compact ? 9 : 11, weight: .semibold, design: .rounded))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                case "Dual Rails":
+                    VStack(spacing: max(2, thickness)) {
+                        rail(value: monitor.downloadBytesPerSecond, threshold: thresholdMBps, color: .accentColor, width: proxy.size.width)
+                        rail(value: monitor.uploadBytesPerSecond, threshold: thresholdMBps, color: .orange, width: proxy.size.width)
+                    }
+                    .padding(.horizontal, compact ? 8 : 14)
+                    .frame(maxHeight: .infinity, alignment: .center)
+                    .overlay(alignment: .center) {
+                        if showSpeed {
+                            Text(speed(currentSpeed))
+                                .font(.system(size: compact ? 8 : 10, weight: .semibold, design: .monospaced))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(.black.opacity(0.52), in: Capsule())
+                        }
+                    }
+
+                case "Minimal":
+                    HStack(spacing: 6) {
+                        Image(systemName: uploadOnly ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                            .foregroundStyle(accent)
+                        if showSpeed { Text(speed(currentSpeed)).monospacedDigit() }
+                    }
+                    .font(.system(size: compact ? 9 : 11, weight: .semibold, design: .rounded))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                default:
+                    VStack(spacing: 0) {
+                        Spacer()
+                        Capsule()
+                            .fill(.white.opacity(0.10))
+                            .frame(height: max(2, thickness))
+                            .overlay(alignment: .leading) {
+                                Capsule()
+                                    .fill(accent.opacity(0.95 * intensity))
+                                    .frame(width: max(8, proxy.size.width * activity), height: max(2, thickness))
+                                    .animation(.easeOut(duration: 0.25), value: activity)
+                            }
+                    }
+                    .overlay(alignment: .center) {
+                        HStack(spacing: 6) {
+                            Image(systemName: uploadOnly ? "arrow.up" : "arrow.down")
+                            if showSpeed { Text(speed(currentSpeed)).monospacedDigit() }
+                        }
+                        .font(.system(size: compact ? 9 : 11, weight: .semibold, design: .rounded))
+                    }
+                }
+            }
+        }
+    }
+
+    private func rail(value: Double, threshold: Double, color: Color, width: CGFloat) -> some View {
+        let floor = max(50_000, threshold * 1_000_000)
+        let fraction = min(1, max(0.05, value / (floor * 5)))
+        return Capsule()
+            .fill(color.opacity(0.12))
+            .frame(height: max(2, thickness))
+            .overlay(alignment: .leading) {
+                Capsule().fill(color.opacity(0.92 * intensity))
+                    .frame(width: max(5, width * fraction), height: max(2, thickness))
+                    .animation(.easeOut(duration: 0.25), value: fraction)
+            }
+    }
+
+    private func speed(_ value: Double) -> String {
+        if value >= 1_000_000_000 { return String(format: "%.1f GB/s", value / 1_000_000_000) }
+        if value >= 1_000_000 { return String(format: "%.1f MB/s", value / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.0f KB/s", value / 1_000) }
+        return String(format: "%.0f B/s", value)
+    }
+}
+
 private struct TransferContextView: View {
     @ObservedObject var monitor: TransferActivityMonitor
     @ObservedObject var surfaceState: SurfaceState
+    @AppStorage("HaloContextTransferOpenStyle") private var openStyle = "Dashboard"
     @AppStorage("HaloContextTransferCompact") private var compact = false
     @AppStorage("HaloContextTransferShowDirection") private var showDirection = true
     @AppStorage("HaloContextTransferShowDownload") private var showDownload = true
@@ -715,12 +828,6 @@ private struct TransferContextView: View {
     @AppStorage("HaloContextTransferShowSession") private var showSession = true
     @AppStorage("HaloContextTransferShowElapsed") private var showElapsed = true
     @AppStorage("HaloContextTransferShowGraph") private var showGraph = true
-    @AppStorage("HaloContextTransferBackgroundStyle") private var backgroundStyle = "Gradient"
-    @AppStorage("HaloContextTransferBackgroundPrimaryHue") private var backgroundPrimaryHue = 0.58
-    @AppStorage("HaloContextTransferBackgroundSecondaryHue") private var backgroundSecondaryHue = 0.72
-    @AppStorage("HaloContextTransferBackgroundSaturation") private var backgroundSaturation = 0.72
-    @AppStorage("HaloContextTransferBackgroundBrightness") private var backgroundBrightness = 0.30
-    @AppStorage("HaloContextTransferBackgroundOpacity") private var backgroundOpacity = 1.0
 
     private var elapsed: String {
         guard let start = monitor.sessionStartedAt else { return "0:00" }
@@ -728,50 +835,117 @@ private struct TransferContextView: View {
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
+    private var visibleStatCount: Int {
+        (showDownload ? 1 : 0) + (showUpload ? 1 : 0) + ((!compact && showPeak) ? 2 : 0)
+    }
+    private var preferredSize: CGSize {
+        switch openStyle {
+        case "Indicator":
+            return CGSize(width: 360, height: showElapsed ? 96 : 82)
+        case "Minimal":
+            let width = 300 + Double(max(0, min(2, visibleStatCount))) * 75
+            return CGSize(width: width, height: showDirection || showElapsed ? 112 : 92)
+        default:
+            let statColumns = max(1, min(4, visibleStatCount))
+            let width = compact ? (300 + Double(statColumns) * 72) : (360 + Double(statColumns) * 72)
+            var height = compact ? 112.0 : 128.0
+            if showGraph && !compact { height += 70 }
+            if showSession && !compact { height += 34 }
+            return CGSize(width: min(680, max(340, width)), height: min(280, height))
+        }
+    }
+    private var sizingSignature: String {
+        [openStyle, compact.description, showDirection.description, showDownload.description,
+         showUpload.description, showPeak.description, showSession.description,
+         showElapsed.description, showGraph.description].joined(separator: "|")
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 9 : 14) {
-            HStack(spacing: 10) {
-                Image(systemName: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading") ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                    .font(.system(size: compact ? 18 : 23, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-                VStack(alignment: .leading, spacing: 2) {
-                    if showDirection { Text(monitor.direction).font(compact ? .headline : .title3.bold()) }
-                    Text("LIVE TRANSFER").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+        Group {
+            if openStyle == "Indicator" {
+                VStack(spacing: 8) {
+                    TransferActivityIndicator(monitor: monitor, compact: false)
+                        .frame(height: 34)
+                    if showDirection || showElapsed {
+                        HStack {
+                            if showDirection { Text(monitor.direction).font(.caption.weight(.semibold)) }
+                            Spacer()
+                            if showElapsed { Label(elapsed, systemImage: "clock").font(.caption.monospacedDigit()) }
+                        }
+                        .foregroundStyle(.secondary)
+                    }
                 }
-                Spacer()
-                if showElapsed { Label(elapsed, systemImage: "clock").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
-            }
-
-            HStack(spacing: compact ? 10 : 14) {
-                if showDownload { stat("Download", value: speed(monitor.downloadBytesPerSecond), symbol: "arrow.down") }
-                if showUpload { stat("Upload", value: speed(monitor.uploadBytesPerSecond), symbol: "arrow.up") }
-                if showPeak && !compact {
-                    stat("Peak ↓", value: speed(monitor.peakDownloadBytesPerSecond), symbol: "gauge.with.dots.needle.50percent")
-                    stat("Peak ↑", value: speed(monitor.peakUploadBytesPerSecond), symbol: "gauge.with.dots.needle.67percent")
+                .padding(.horizontal, 16).padding(.vertical, 12)
+            } else if openStyle == "Minimal" {
+                HStack(spacing: 12) {
+                    Image(systemName: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading") ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                        .font(.system(size: 22, weight: .semibold)).foregroundStyle(Color.accentColor)
+                    if showDirection {
+                        Text(monitor.direction).font(.headline)
+                    }
+                    if showDownload { compactStat("↓", speed(monitor.downloadBytesPerSecond)) }
+                    if showUpload { compactStat("↑", speed(monitor.uploadBytesPerSecond)) }
+                    Spacer(minLength: 4)
+                    if showElapsed { Text(elapsed).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
                 }
-            }
+                .padding(.horizontal, 16).padding(.vertical, 13)
+            } else {
+                VStack(alignment: .leading, spacing: compact ? 9 : 14) {
+                    HStack(spacing: 10) {
+                        Image(systemName: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading") ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                            .font(.system(size: compact ? 18 : 23, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                        VStack(alignment: .leading, spacing: 2) {
+                            if showDirection { Text(monitor.direction).font(compact ? .headline : .title3.bold()) }
+                            Text("LIVE TRANSFER").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if showElapsed { Label(elapsed, systemImage: "clock").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+                    }
 
-            if showGraph && !compact {
-                TransferHistoryGraph(download: monitor.downloadHistory, upload: monitor.uploadHistory)
-                    .frame(height: 56)
-                    .padding(.vertical, 2)
-            }
+                    if visibleStatCount > 0 {
+                        HStack(spacing: compact ? 10 : 14) {
+                            if showDownload { stat("Download", value: speed(monitor.downloadBytesPerSecond), symbol: "arrow.down") }
+                            if showUpload { stat("Upload", value: speed(monitor.uploadBytesPerSecond), symbol: "arrow.up") }
+                            if showPeak && !compact {
+                                stat("Peak ↓", value: speed(monitor.peakDownloadBytesPerSecond), symbol: "gauge")
+                                stat("Peak ↑", value: speed(monitor.peakUploadBytesPerSecond), symbol: "gauge")
+                            }
+                        }
+                    }
 
-            if showSession && !compact {
-                HStack {
-                    Label("↓ \(bytes(monitor.sessionDownloadedBytes))", systemImage: "tray.and.arrow.down")
-                    Label("↑ \(bytes(monitor.sessionUploadedBytes))", systemImage: "tray.and.arrow.up")
-                    Spacer()
-                    Text("Session \(bytes(monitor.sessionDownloadedBytes + monitor.sessionUploadedBytes))")
+                    if showGraph && !compact {
+                        TransferHistoryGraph(download: monitor.downloadHistory, upload: monitor.uploadHistory)
+                            .frame(height: 56).padding(.vertical, 2)
+                    }
+
+                    if showSession && !compact {
+                        HStack {
+                            Label("↓ \(bytes(monitor.sessionDownloadedBytes))", systemImage: "tray.and.arrow.down")
+                            Label("↑ \(bytes(monitor.sessionUploadedBytes))", systemImage: "tray.and.arrow.up")
+                            Spacer()
+                            Text("Session \(bytes(monitor.sessionDownloadedBytes + monitor.sessionUploadedBytes))")
+                        }
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
                 }
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .padding(compact ? 14 : 18)
             }
         }
-        .padding(compact ? 14 : 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear { surfaceState.contextPreferredSize = CGSize(width: compact ? 430 : 620, height: compact ? 120 : 230) }
-        .onChange(of: compact) { value in surfaceState.contextPreferredSize = CGSize(width: value ? 430 : 620, height: value ? 120 : 230) }
+        .onAppear { updatePreferredSize() }
+        .onChange(of: sizingSignature) { _ in updatePreferredSize() }
+    }
+
+    private func updatePreferredSize() {
+        surfaceState.contextPreferredSize = preferredSize
+    }
+
+    private func compactStat(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 12, weight: .semibold, design: .rounded)).monospacedDigit()
+        }
     }
 
     private func stat(_ title: String, value: String, symbol: String) -> some View {
@@ -799,42 +973,47 @@ private struct TransferContextView: View {
     }
 }
 
-
 private struct TransferClosedContextView: View {
     @ObservedObject var monitor: TransferActivityMonitor
+    @AppStorage("HaloContextTransferClosedStyle") private var closedStyle = "Stats"
     @AppStorage("HaloContextTransferShowDirection") private var showDirection = true
     @AppStorage("HaloContextTransferShowDownload") private var showDownload = true
     @AppStorage("HaloContextTransferShowUpload") private var showUpload = true
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading") ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-
-            if showDirection {
-                Text(shortDirection)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 4)
-
-            if showDownload {
-                Label(speed(monitor.downloadBytesPerSecond), systemImage: "arrow.down")
-                    .labelStyle(.titleAndIcon)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .lineLimit(1)
-            }
-            if showUpload {
-                Label(speed(monitor.uploadBytesPerSecond), systemImage: "arrow.up")
-                    .labelStyle(.titleAndIcon)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .lineLimit(1)
+        Group {
+            if closedStyle == "Indicator" {
+                TransferActivityIndicator(monitor: monitor, compact: true)
+                    .padding(.horizontal, 5)
+            } else if closedStyle == "Minimal" {
+                HStack(spacing: 6) {
+                    Image(systemName: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading") ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.accentColor)
+                    Text(speed(max(monitor.downloadBytesPerSecond, monitor.uploadBytesPerSecond)))
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced)).lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading") ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.accentColor)
+                    if showDirection {
+                        Text(shortDirection).font(.system(size: 10, weight: .semibold, design: .rounded)).lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                    if showDownload {
+                        Label(speed(monitor.downloadBytesPerSecond), systemImage: "arrow.down")
+                            .font(.system(size: 9, weight: .medium, design: .monospaced)).lineLimit(1)
+                    }
+                    if showUpload {
+                        Label(speed(monitor.uploadBytesPerSecond), systemImage: "arrow.up")
+                            .font(.system(size: 9, weight: .medium, design: .monospaced)).lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var shortDirection: String {
