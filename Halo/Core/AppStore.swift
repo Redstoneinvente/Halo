@@ -1110,6 +1110,8 @@ final class HaloLicenseManager: ObservableObject {
 
     private let licenseKeyKey = "licenseseat.licenseKey"
     private let fingerprintKey = "licenseseat.fingerprint"
+    private let pressLicenseKey = "press.licenseKey"
+    private let pressLicenseOwnerKey = "press.owner"
     private let localTrialUsedKey = "trial.local.used"
     private let localTrialOwnerKey = "trial.local.owner"
     private let localTrialStartedKey = "trial.local.startedAt"
@@ -1122,6 +1124,9 @@ final class HaloLicenseManager: ObservableObject {
     var trialConfigured: Bool { true }
 
     func restoreAndValidate() async {
+        // Press licenses are a separate Halo entitlement and must never be sent to LicenseSeat.
+        if restorePressLicense() { return }
+
         // Prefer a paid LicenseSeat entitlement whenever one is stored and valid.
         if isConfigured, let key = HaloKeychain.string(for: licenseKeyKey), !key.isEmpty {
             licenseHint = Self.hint(key)
@@ -1203,9 +1208,30 @@ final class HaloLicenseManager: ObservableObject {
     }
 
     func activate(_ key: String) async {
-        guard isConfigured else { state = .unconfigured; errorMessage = "LicenseSeat is not configured yet."; return }
         let cleaned = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard cleaned.count >= 6 else { errorMessage = "Enter your LicenseSeat key."; return }
+        guard cleaned.count >= 6 else { errorMessage = "Enter your Halo license key."; return }
+
+        // PK_ keys are Halo press licenses. Keep this branch before every LicenseSeat guard/request.
+        if Self.isPressLicenseKey(cleaned) {
+            guard HaloAccountManager.shared.isSignedIn,
+                  !HaloAccountManager.shared.userID.isEmpty else {
+                errorMessage = "Sign in to your Halo account before activating a press license."
+                return
+            }
+            isBusy = true; state = .checking; errorMessage = nil; notice = nil
+            defer { isBusy = false }
+            guard HaloKeychain.set(cleaned, for: pressLicenseKey),
+                  HaloKeychain.set(HaloAccountManager.shared.userID, for: pressLicenseOwnerKey) else {
+                state = .invalid("Halo could not save the press license securely on this Mac.")
+                errorMessage = "Halo could not save the press license securely on this Mac."
+                return
+            }
+            applyPressLicense(cleaned)
+            notice = "Press license activated on this Mac (test mode)."
+            return
+        }
+
+        guard isConfigured else { state = .unconfigured; errorMessage = "LicenseSeat is not configured yet."; return }
         isBusy = true; state = .checking; errorMessage = nil; notice = nil
         defer { isBusy = false }
         do {
@@ -1230,6 +1256,7 @@ final class HaloLicenseManager: ObservableObject {
     }
 
     func validate() async {
+        if restorePressLicense() { return }
         guard isConfigured else { state = .unconfigured; return }
         guard let key = HaloKeychain.string(for: licenseKeyKey), !key.isEmpty else { state = .inactive; return }
         isBusy = true; state = .checking; errorMessage = nil
@@ -1258,6 +1285,24 @@ final class HaloLicenseManager: ObservableObject {
     }
 
     func deactivate() async {
+        if let key = HaloKeychain.string(for: pressLicenseKey), Self.isPressLicenseKey(key) {
+            HaloKeychain.remove(pressLicenseKey)
+            HaloKeychain.remove(pressLicenseOwnerKey)
+            licenseHint = ""
+            details = .empty
+            errorMessage = nil
+            if restoreLocalTrial() {
+                notice = "Press license removed. Your local trial is still active."
+            } else if isConfigured,
+                      !(HaloKeychain.string(for: licenseKeyKey) ?? "").isEmpty {
+                await validate()
+                notice = "Press license removed. Your paid license is active."
+            } else {
+                state = isConfigured ? .inactive : .unconfigured
+                notice = "Press license removed from this Mac."
+            }
+            return
+        }
         guard isConfigured else { return }
         guard let key = HaloKeychain.string(for: licenseKeyKey), !key.isEmpty else { state = .inactive; return }
         isBusy = true; errorMessage = nil; notice = nil
@@ -1285,10 +1330,43 @@ final class HaloLicenseManager: ObservableObject {
 
     func accessValid(for accountID: String) -> Bool {
         guard state.isValid else { return false }
+        if details.plan == "Press" {
+            return HaloKeychain.string(for: pressLicenseOwnerKey) == accountID
+        }
         guard details.isTrial && details.plan == "Local Trial" else { return true }
         guard let owner = HaloKeychain.string(for: localTrialOwnerKey), owner == accountID,
               let expiresAt = localTrialDate(for: localTrialExpiresKey) else { return false }
         return Date() < expiresAt
+    }
+
+    private static func isPressLicenseKey(_ key: String) -> Bool {
+        key.trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .hasPrefix("PK_")
+    }
+
+    @discardableResult
+    private func restorePressLicense() -> Bool {
+        guard let key = HaloKeychain.string(for: pressLicenseKey),
+              Self.isPressLicenseKey(key) else { return false }
+        let account = HaloAccountManager.shared
+        guard account.isSignedIn, !account.userID.isEmpty else { return false }
+        guard let owner = HaloKeychain.string(for: pressLicenseOwnerKey),
+              owner == account.userID else {
+            licenseHint = Self.hint(key)
+            details = HaloLicenseDetails(status: "account_mismatch", plan: "Press", expiresAt: nil, activeSeats: 1, seatLimit: 1)
+            state = .invalid("This press license belongs to another Halo account.")
+            return true
+        }
+        applyPressLicense(key)
+        return true
+    }
+
+    private func applyPressLicense(_ key: String) {
+        trialExpiryTask?.cancel()
+        licenseHint = Self.hint(key)
+        details = HaloLicenseDetails(status: "active", plan: "Press", expiresAt: nil, activeSeats: 1, seatLimit: 1)
+        state = .valid(plan: "Press")
     }
 
     @discardableResult
