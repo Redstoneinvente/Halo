@@ -1539,6 +1539,7 @@ private enum ClipboardCISizing {
         max(360, physicalNotchWidth > 0 ? physicalNotchWidth + 120 : 360)
     }
 
+    @MainActor
     static func closedPreferredWidth(monitor: ClipboardContextMonitor, physicalNotchWidth: CGFloat) -> CGFloat {
         let defaults = UserDefaults.standard
         let showPreview = defaults.object(forKey: "HaloContextClipboardShowClosedPreview") == nil
