@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SPARKLE_BIN="${SPARKLE_BIN:-}"
 DOWNLOAD_PREFIX="${HALO_SPARKLE_DOWNLOAD_URL_PREFIX:-}"
-WORK_ROOT="${HALO_SPARKLE_GATE3_DIR:-$HOME/Desktop/Halo-Sparkle-Gate3}"
+WORK_ROOT="${HALO_SPARKLE_GATE3_DIR:-$HOME/Library/Caches/Halo-Sparkle-Gate3}"
 
 if ! command -v xcodebuild >/dev/null 2>&1; then
   echo "xcodebuild is unavailable. Install/open the full Xcode app first." >&2
@@ -57,6 +57,15 @@ if ! grep -Eq '^HALO_SPARKLE_FEED_URL[[:space:]]*=' "$SECRETS"; then
   exit 1
 fi
 
+# Gate 3 must build outside Desktop/Documents/iCloud/File Provider locations.
+# File Provider can reattach FinderInfo/file-provider xattrs to Sparkle resources
+# while Xcode is assembling Halo.app, which causes codesign to reject the bundle.
+if [[ "$WORK_ROOT" == "$HOME/Desktop"* || "$WORK_ROOT" == "$HOME/Documents"* || "$WORK_ROOT" == *"Mobile Documents"* ]]; then
+  echo "HALO_SPARKLE_GATE3_DIR must not be inside Desktop, Documents, or iCloud/File Provider storage." >&2
+  echo "Use the default cache location or a local path such as /tmp/Halo-Sparkle-Gate3." >&2
+  exit 1
+fi
+
 # Code signing rejects resource forks/Finder metadata. Strip extended attributes
 # from Halo's own source resources before Xcode copies them into Halo.app.
 echo "Sanitizing source extended attributes for code signing…" >&2
@@ -64,6 +73,8 @@ xattr -cr "$ROOT/Halo" "$ROOT/Assets.xcassets" 2>/dev/null || true
 
 rm -rf "$WORK_ROOT"
 mkdir -p "$WORK_ROOT/base-derived" "$WORK_ROOT/candidate-derived" "$WORK_ROOT/updates" "$WORK_ROOT/install"
+
+echo "Gate 3 working directory: $WORK_ROOT" >&2
 
 prepare_packages() {
   local derived="$1"
@@ -87,9 +98,6 @@ prepare_packages() {
     exit 1
   fi
 
-  # Sparkle's downloaded binary artifact may arrive with FinderInfo/file-provider
-  # extended attributes on bundled resources. Those are rejected when Xcode later
-  # signs Halo.app, so remove them only from this isolated DerivedData copy.
   echo "Sanitizing resolved Sparkle artifact extended attributes…" >&2
   xattr -cr "$sparkle_artifact" 2>/dev/null || true
 
@@ -172,10 +180,13 @@ CANDIDATE_APP="$(build_halo 0.2.1 201 "$WORK_ROOT/candidate-derived")"
 
 # Keep a copy of the baseline app that you can launch for the end-to-end update test.
 COPYFILE_DISABLE=1 ditto "$BASE_APP" "$WORK_ROOT/install/Halo.app"
+xattr -cr "$WORK_ROOT/install/Halo.app" 2>/dev/null || true
+codesign --verify --deep --strict --verbose=2 "$WORK_ROOT/install/Halo.app" >&2
 
-# Keep both full archives so generate_appcast can produce a proper version history and delta when compatible.
-COPYFILE_DISABLE=1 ditto -c -k --sequesterRsrc --keepParent "$BASE_APP" "$WORK_ROOT/updates/Halo-0.2.0.zip"
-COPYFILE_DISABLE=1 ditto -c -k --sequesterRsrc --keepParent "$CANDIDATE_APP" "$WORK_ROOT/updates/Halo-0.2.1.zip"
+# Keep both full archives. COPYFILE_DISABLE plus no --sequesterRsrc prevents
+# resource-fork metadata from being carried into the update archives.
+COPYFILE_DISABLE=1 ditto -c -k --keepParent "$BASE_APP" "$WORK_ROOT/updates/Halo-0.2.0.zip"
+COPYFILE_DISABLE=1 ditto -c -k --keepParent "$CANDIDATE_APP" "$WORK_ROOT/updates/Halo-0.2.1.zip"
 
 cat > "$WORK_ROOT/updates/Halo-0.2.1.md" <<'EOF'
 # Halo 0.2.1
