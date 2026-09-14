@@ -332,7 +332,6 @@ private struct HaloHardwareNotchShape: InsettableShape {
             control: CGPoint(x: box.maxX, y: extendedBottom)
         )
         path.addLine(to: CGPoint(x: box.maxX, y: box.minY))
-        path.closeSubpath()
         return path
     }
 
