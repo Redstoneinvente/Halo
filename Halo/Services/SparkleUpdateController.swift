@@ -11,6 +11,7 @@ final class HaloUpdateController: NSObject, SPUUpdaterDelegate {
 
     var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0" }
     var currentBuild: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0" }
+
     var isConfigured: Bool {
         guard let feed = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
               !feed.isEmpty, !feed.contains("$("),
@@ -19,13 +20,20 @@ final class HaloUpdateController: NSObject, SPUUpdaterDelegate {
               !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !key.contains("$(") else { return false }
         return true
     }
+
     var canCheckForUpdates: Bool { ensureUpdaterStarted() && controller.updater.canCheckForUpdates }
     var automaticallyChecksForUpdates: Bool { ensureUpdaterStarted() && controller.updater.automaticallyChecksForUpdates }
     var automaticallyDownloadsUpdates: Bool { ensureUpdaterStarted() && controller.updater.automaticallyDownloadsUpdates }
     var lastUpdateCheckDate: Date? { ensureUpdaterStarted() ? controller.updater.lastUpdateCheckDate : nil }
 
-    func setAutomaticallyChecksForUpdates(_ value: Bool) { if ensureUpdaterStarted() { controller.updater.automaticallyChecksForUpdates = value } }
-    func setAutomaticallyDownloadsUpdates(_ value: Bool) { if ensureUpdaterStarted() { controller.updater.automaticallyDownloadsUpdates = value } }
+    func setAutomaticallyChecksForUpdates(_ value: Bool) {
+        if ensureUpdaterStarted() { controller.updater.automaticallyChecksForUpdates = value }
+    }
+
+    func setAutomaticallyDownloadsUpdates(_ value: Bool) {
+        if ensureUpdaterStarted() { controller.updater.automaticallyDownloadsUpdates = value }
+    }
+
     func checkForUpdates() {
         guard isConfigured else {
             let alert = NSAlert()
@@ -39,14 +47,22 @@ final class HaloUpdateController: NSObject, SPUUpdaterDelegate {
         guard ensureUpdaterStarted() else { return }
         controller.checkForUpdates(nil)
     }
-    @discardableResult private func ensureUpdaterStarted() -> Bool {
+
+    @discardableResult
+    private func ensureUpdaterStarted() -> Bool {
         guard isConfigured else { return false }
-        if !updaterStarted { controller.startUpdater(); updaterStarted = true }
+        if !updaterStarted {
+            controller.startUpdater()
+            updaterStarted = true
+        }
         return true
     }
 
     func updater(_ updater: SPUUpdater, willDownloadUpdate item: SUAppcastItem, with request: NSMutableURLRequest) {
-        HaloUpdateAnimationPreviewController.shared.beginRealUpdate(version: item.displayVersionString)
+        HaloUpdateAnimationPreviewController.shared.beginRealUpdate(
+            version: item.displayVersionString,
+            expectedBytes: item.contentLength
+        )
     }
 
     func updater(_ updater: SPUUpdater, didDownloadUpdate item: SUAppcastItem) {
@@ -104,7 +120,7 @@ private struct HaloReleaseStory {
             subtitle: "A cleaner update experience and another round of polish across the notch.",
             highlights: [
                 .init(symbol: "arrow.triangle.2.circlepath.circle.fill", title: "Sparkle 2 updates", detail: "Secure signed updates without leaving Halo.", accent: .green),
-                .init(symbol: "sparkles", title: "Native update progress", detail: "A lightweight progress trace can follow the notch while updates install.", accent: .cyan),
+                .init(symbol: "sparkles", title: "Native update progress", detail: "A lightweight progress trace follows the notch while updates install.", accent: .cyan),
                 .init(symbol: "sparkles.rectangle.stack.fill", title: "What's New", detail: "See the important changes after each Halo update.", accent: .purple),
                 .init(symbol: "checkmark.seal.fill", title: "Release polish", detail: "A cleaner signed appcast and release pipeline.", accent: .orange)
             ]
@@ -131,7 +147,10 @@ final class HaloWhatsNewCoordinator {
         guard previous != current else { return }
         if previous == nil {
             let existing = defaults.object(forKey: "HaloSetupCompletedV1") != nil || defaults.object(forKey: "onboarded") != nil
-            if !existing { defaults.set(current, forKey: key); return }
+            if !existing {
+                defaults.set(current, forKey: key)
+                return
+            }
         }
         present()
     }
@@ -143,6 +162,7 @@ final class HaloWhatsNewCoordinator {
             window.makeKeyAndOrderFront(nil)
             return
         }
+
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 760, height: 690),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -174,18 +194,38 @@ private struct HaloWhatsNewView: View {
     var body: some View {
         ZStack {
             LinearGradient(
-                colors: [Color(red: 0.025, green: 0.03, blue: 0.075), Color(red: 0.105, green: 0.045, blue: 0.18), Color(red: 0.02, green: 0.095, blue: 0.14)],
+                colors: [
+                    Color(red: 0.025, green: 0.03, blue: 0.075),
+                    Color(red: 0.105, green: 0.045, blue: 0.18),
+                    Color(red: 0.02, green: 0.095, blue: 0.14)
+                ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
-            ).ignoresSafeArea()
+            )
+            .ignoresSafeArea()
+
             ScrollView {
                 VStack(spacing: 24) {
                     Image(nsImage: NSApp.applicationIconImage)
-                        .resizable().scaledToFit().frame(width: 82, height: 82)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 82, height: 82)
                         .shadow(color: .purple.opacity(0.5), radius: 24)
-                    Text("HALO \(story.version)").font(.caption.bold()).tracking(2).foregroundStyle(.secondary)
-                    Text(story.title).font(.system(size: 34, weight: .bold, design: .rounded)).multilineTextAlignment(.center)
-                    Text(story.subtitle).font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
+
+                    Text("HALO \(story.version)")
+                        .font(.caption.bold())
+                        .tracking(2)
+                        .foregroundStyle(.secondary)
+
+                    Text(story.title)
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .multilineTextAlignment(.center)
+
+                    Text(story.subtitle)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                         ForEach(story.highlights) { item in
                             HStack(alignment: .top, spacing: 12) {
@@ -193,6 +233,7 @@ private struct HaloWhatsNewView: View {
                                     .foregroundStyle(item.accent)
                                     .frame(width: 34, height: 34)
                                     .background(item.accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 10))
+
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(item.title).font(.headline)
                                     Text(item.detail).font(.callout).foregroundStyle(.secondary)
@@ -204,10 +245,13 @@ private struct HaloWhatsNewView: View {
                             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
                         }
                     }
+
                     HStack {
                         Button("Check for Updates") { HaloUpdateController.shared.checkForUpdates() }
                         Spacer()
-                        Button("Continue") { onDone() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                        Button("Continue") { onDone() }
+                            .buttonStyle(.borderedProminent)
+                            .keyboardShortcut(.defaultAction)
                     }
                 }
                 .padding(36)
@@ -220,9 +264,9 @@ private struct HaloWhatsNewView: View {
 private enum HaloUpdatePhase: String {
     case ready = "Ready"
     case downloading = "Downloading"
-    case installing = "Installing"
     case verifying = "Verifying"
     case finishing = "Finishing"
+    case installing = "Installing"
     case updated = "Updated ✓"
 }
 
@@ -242,40 +286,56 @@ private struct HaloPhysicalNotchGeometry {
     static func measure(on screen: NSScreen) -> HaloPhysicalNotchGeometry {
         let frame = screen.frame
         let topInset = screen.safeAreaInsets.top
+
         if topInset > 0,
            let left = screen.auxiliaryTopLeftArea,
            let right = screen.auxiliaryTopRightArea {
             let width = max(1, right.minX - left.maxX)
             let height = max(1, topInset)
-            return .init(screen: screen,
-                         size: CGSize(width: width, height: height),
-                         centerX: (left.maxX + right.minX) / 2,
-                         detected: true)
+            return .init(
+                screen: screen,
+                size: CGSize(width: width, height: height),
+                centerX: (left.maxX + right.minX) / 2,
+                detected: true
+            )
         }
 
-        let fallbackHeight = max(28, topInset)
-        return .init(screen: screen,
-                     size: CGSize(width: 180, height: fallbackHeight),
-                     centerX: frame.midX,
-                     detected: false)
+        return .init(
+            screen: screen,
+            size: CGSize(width: 180, height: max(28, topInset)),
+            centerX: frame.midX,
+            detected: false
+        )
     }
 }
 
 private struct HaloHardwareNotchShape: InsettableShape {
     var cornerRadius: CGFloat
+    var bottomExtension: CGFloat
     var insetAmount: CGFloat = 0
 
     func path(in rect: CGRect) -> Path {
-        let r = min(max(2, cornerRadius - insetAmount), max(2, rect.height / 2))
         let box = rect.insetBy(dx: insetAmount, dy: insetAmount)
+        let physicalBottom = max(box.minY, box.maxY - bottomExtension)
+        let extendedBottom = box.maxY
+        let radius = min(max(2, cornerRadius - insetAmount), max(2, (extendedBottom - box.minY) / 2))
+
         var path = Path()
         path.move(to: CGPoint(x: box.minX, y: box.minY))
-        path.addLine(to: CGPoint(x: box.minX, y: box.maxY - r))
-        path.addQuadCurve(to: CGPoint(x: box.minX + r, y: box.maxY), control: CGPoint(x: box.minX, y: box.maxY))
-        path.addLine(to: CGPoint(x: box.maxX - r, y: box.maxY))
-        path.addQuadCurve(to: CGPoint(x: box.maxX, y: box.maxY - r), control: CGPoint(x: box.maxX, y: box.maxY))
+        path.addLine(to: CGPoint(x: box.minX, y: extendedBottom - radius))
+        path.addQuadCurve(
+            to: CGPoint(x: box.minX + radius, y: extendedBottom),
+            control: CGPoint(x: box.minX, y: extendedBottom)
+        )
+        path.addLine(to: CGPoint(x: box.maxX - radius, y: extendedBottom))
+        path.addQuadCurve(
+            to: CGPoint(x: box.maxX, y: extendedBottom - radius),
+            control: CGPoint(x: box.maxX, y: extendedBottom)
+        )
         path.addLine(to: CGPoint(x: box.maxX, y: box.minY))
         path.closeSubpath()
+
+        _ = physicalBottom
         return path
     }
 
@@ -293,58 +353,119 @@ private final class HaloUpdatePreviewModel: ObservableObject {
     @Published var detailsVisible = false
     @Published var pulse = false
     @Published var poweredDown = false
+    @Published var downloadedBytes: UInt64 = 0
+    @Published var totalBytes: UInt64 = 0
+    @Published var bytesPerSecond: Double = 0
+    @Published var etaSeconds: Double = 0
 }
 
 @MainActor
 final class HaloUpdateAnimationPreviewController {
     static let shared = HaloUpdateAnimationPreviewController()
+
     private let model = HaloUpdatePreviewModel()
     private var panel: NSPanel?
-    private var task: Task<Void, Never>?
+    private var previewTask: Task<Void, Never>?
+    private var liveProgressTask: Task<Void, Never>?
+    private var realDownloadComplete = false
     private init() {}
 
-    func beginRealUpdate(version: String) {
-        task?.cancel()
-        task = nil
+    func beginRealUpdate(version: String, expectedBytes: UInt64) {
+        previewTask?.cancel()
+        liveProgressTask?.cancel()
+        realDownloadComplete = false
+
         guard let screen = HaloPhysicalNotchGeometry.targetScreen() else { return }
         let geometry = HaloPhysicalNotchGeometry.measure(on: screen)
         show(version: version, geometry: geometry)
 
         let defaults = UserDefaults.standard
         let showDetails = defaults.object(forKey: "HaloUpdateShowExpandedDetails") as? Bool ?? true
-        model.progress = 0.02
+
+        model.progress = 0
         model.phase = .downloading
         model.detailsVisible = false
         model.pulse = false
         model.poweredDown = false
+        model.totalBytes = expectedBytes
+        model.downloadedBytes = 0
+        model.bytesPerSecond = 0
+        model.etaSeconds = 0
 
         if showDetails {
-            withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) { model.detailsVisible = true }
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
+                model.detailsVisible = true
+            }
         }
-        withAnimation(.easeOut(duration: 12)) { model.progress = 0.72 }
+
+        let fallbackTotal: UInt64 = expectedBytes > 0 ? expectedBytes : 120 * 1024 * 1024
+        let startedAt = Date()
+        var previousBytes: UInt64 = 0
+        var previousDate = startedAt
+
+        liveProgressTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            while !Task.isCancelled && !realDownloadComplete {
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled, !realDownloadComplete else { break }
+
+                let elapsed = Date().timeIntervalSince(startedAt)
+                let eased = min(0.92, 1 - exp(-elapsed / 6.5))
+                let nextProgress = min(0.92, max(model.progress, eased))
+                model.progress = nextProgress
+
+                let nextBytes = UInt64(Double(fallbackTotal) * nextProgress)
+                model.downloadedBytes = nextBytes
+                if model.totalBytes == 0 { model.totalBytes = fallbackTotal }
+
+                let now = Date()
+                let dt = max(0.001, now.timeIntervalSince(previousDate))
+                let delta = nextBytes >= previousBytes ? nextBytes - previousBytes : 0
+                let instantSpeed = Double(delta) / dt
+                if instantSpeed > 0 {
+                    model.bytesPerSecond = model.bytesPerSecond == 0
+                        ? instantSpeed
+                        : model.bytesPerSecond * 0.72 + instantSpeed * 0.28
+                }
+
+                if model.bytesPerSecond > 1, model.totalBytes > model.downloadedBytes {
+                    model.etaSeconds = Double(model.totalBytes - model.downloadedBytes) / model.bytesPerSecond
+                } else {
+                    model.etaSeconds = 0
+                }
+
+                previousBytes = nextBytes
+                previousDate = now
+            }
+        }
     }
 
     func realDownloadFinished() {
+        realDownloadComplete = true
+        liveProgressTask?.cancel()
+        liveProgressTask = nil
         model.phase = .verifying
-        withAnimation(.easeOut(duration: 0.25)) { model.progress = max(model.progress, 0.78) }
+        model.progress = max(model.progress, 0.94)
+        if model.totalBytes > 0 { model.downloadedBytes = model.totalBytes }
+        model.etaSeconds = 0
     }
 
     func realExtracting() {
         model.phase = .verifying
-        withAnimation(.easeInOut(duration: 0.35)) { model.progress = max(model.progress, 0.88) }
+        model.progress = max(model.progress, 0.96)
     }
 
     func realExtracted() {
         model.phase = .finishing
-        withAnimation(.easeOut(duration: 0.25)) { model.progress = max(model.progress, 0.94) }
+        model.progress = max(model.progress, 0.98)
     }
 
     func realInstalling() {
         model.phase = .installing
-        withAnimation(.easeOut(duration: 0.35)) {
-            model.progress = 1
-            model.pulse = true
-        }
+        model.progress = 1
+        model.pulse = true
+        model.etaSeconds = 0
     }
 
     func realWillRelaunch() {
@@ -354,61 +475,79 @@ final class HaloUpdateAnimationPreviewController {
     }
 
     func play(version: String) {
-        task?.cancel()
+        previewTask?.cancel()
+        liveProgressTask?.cancel()
+
         guard let screen = HaloPhysicalNotchGeometry.targetScreen() else { return }
         let geometry = HaloPhysicalNotchGeometry.measure(on: screen)
         show(version: version, geometry: geometry)
 
         let defaults = UserDefaults.standard
-        let storedSpeed = defaults.double(forKey: "HaloUpdateAnimationSpeed")
-        let speed = max(0.5, storedSpeed == 0 ? 1 : storedSpeed)
+        let speed = max(0.5, defaults.double(forKey: "HaloUpdateAnimationSpeed") == 0 ? 1 : defaults.double(forKey: "HaloUpdateAnimationSpeed"))
         let showDetails = defaults.object(forKey: "HaloUpdateShowExpandedDetails") as? Bool ?? true
+        let total: UInt64 = 120 * 1024 * 1024
 
         model.progress = 0
-        model.phase = .installing
-        model.detailsVisible = false
+        model.phase = .downloading
+        model.detailsVisible = showDetails
         model.pulse = false
         model.poweredDown = false
+        model.totalBytes = total
+        model.downloadedBytes = 0
+        model.bytesPerSecond = 0
+        model.etaSeconds = 0
 
-        task = Task { @MainActor [weak self] in
+        previewTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            if showDetails {
-                withAnimation(.spring(response: 0.30 / speed, dampingFraction: 0.86)) { model.detailsVisible = true }
+            let steps = 40
+            let interval = 1.8 / speed / Double(steps)
+            let bytesPerStep = Double(total) * 0.86 / Double(steps)
+
+            for i in 1...steps {
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                model.progress = 0.86 * Double(i) / Double(steps)
+                model.downloadedBytes = UInt64(Double(total) * model.progress)
+                model.bytesPerSecond = bytesPerStep / interval
+                model.etaSeconds = max(0, Double(total - model.downloadedBytes) / max(1, model.bytesPerSecond))
             }
 
-            withAnimation(.linear(duration: 2.0 / speed)) { model.progress = 0.86 }
-            try? await Task.sleep(nanoseconds: UInt64(2.05 / speed * 1_000_000_000))
-            guard !Task.isCancelled else { return }
-
             model.phase = .verifying
-            withAnimation(.easeInOut(duration: 0.42 / speed)) { model.progress = 0.94 }
-            try? await Task.sleep(nanoseconds: UInt64(0.46 / speed * 1_000_000_000))
+            model.progress = 0.94
+            model.downloadedBytes = total
+            model.etaSeconds = 0
+            try? await Task.sleep(nanoseconds: UInt64(0.48 / speed * 1_000_000_000))
             guard !Task.isCancelled else { return }
 
             model.phase = .finishing
-            withAnimation(.easeOut(duration: 0.32 / speed)) { model.progress = 1; model.pulse = true }
+            model.progress = 0.98
             try? await Task.sleep(nanoseconds: UInt64(0.36 / speed * 1_000_000_000))
             guard !Task.isCancelled else { return }
 
+            model.phase = .installing
+            model.progress = 1
+            model.pulse = true
+            try? await Task.sleep(nanoseconds: UInt64(0.38 / speed * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+
             model.phase = .updated
-            withAnimation(.easeOut(duration: 0.18 / speed)) { model.pulse = false }
-            try? await Task.sleep(nanoseconds: UInt64(0.55 / speed * 1_000_000_000))
+            model.pulse = false
+            try? await Task.sleep(nanoseconds: UInt64(0.50 / speed * 1_000_000_000))
             guard !Task.isCancelled else { return }
 
             withAnimation(.easeInOut(duration: 0.22 / speed)) { model.detailsVisible = false }
-            try? await Task.sleep(nanoseconds: UInt64(0.18 / speed * 1_000_000_000))
-            guard !Task.isCancelled else { return }
-
-            withAnimation(.easeIn(duration: 0.20 / speed)) { model.poweredDown = true }
-            try? await Task.sleep(nanoseconds: UInt64(0.24 / speed * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: UInt64(0.20 / speed * 1_000_000_000))
             guard !Task.isCancelled else { return }
             dismiss()
         }
     }
 
     func dismiss() {
-        task?.cancel()
-        task = nil
+        previewTask?.cancel()
+        liveProgressTask?.cancel()
+        previewTask = nil
+        liveProgressTask = nil
+        realDownloadComplete = false
         panel?.orderOut(nil)
         panel = nil
         model.progress = 0
@@ -416,20 +555,33 @@ final class HaloUpdateAnimationPreviewController {
         model.detailsVisible = false
         model.pulse = false
         model.poweredDown = false
+        model.downloadedBytes = 0
+        model.totalBytes = 0
+        model.bytesPerSecond = 0
+        model.etaSeconds = 0
     }
 
     private func show(version: String, geometry: HaloPhysicalNotchGeometry) {
+        let defaults = UserDefaults.standard
+        let bottomOffset = CGFloat(max(0, defaults.double(forKey: "HaloUpdateTraceBottomOffset")))
         let screen = geometry.screen
         let expandedWidth = max(340, geometry.size.width + 120)
         let panelWidth = min(screen.frame.width, max(expandedWidth + 40, geometry.size.width + 48))
-        let panelHeight = max(170, geometry.size.height + 122)
+        let panelHeight = max(180, geometry.size.height + bottomOffset + 132)
         let frame = NSRect(
             x: geometry.centerX - panelWidth / 2,
             y: screen.frame.maxY - panelHeight,
             width: panelWidth,
             height: panelHeight
         )
-        let root = HaloPhysicalUpdatePreview(model: model, version: version, notchSize: geometry.size, expandedWidth: expandedWidth, notchDetected: geometry.detected)
+
+        let root = HaloPhysicalUpdatePreview(
+            model: model,
+            version: version,
+            notchSize: geometry.size,
+            expandedWidth: expandedWidth,
+            notchDetected: geometry.detected
+        )
 
         if let panel {
             panel.setFrame(frame, display: true)
@@ -438,7 +590,12 @@ final class HaloUpdateAnimationPreviewController {
             return
         }
 
-        let panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        let panel = NSPanel(
+            contentRect: frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
@@ -466,6 +623,8 @@ private struct HaloPhysicalUpdatePreview: View {
     @AppStorage("HaloUpdateTraceOpacity") private var traceOpacity = 1.0
     @AppStorage("HaloUpdateTraceColor") private var traceColorName = "Accent"
     @AppStorage("HaloUpdateTraceClockwise") private var clockwise = true
+    @AppStorage("HaloUpdateTraceBottomOffset") private var bottomOffset = 0.0
+
     @AppStorage("HaloUpdateShowExpandedDetails") private var showExpandedDetails = true
     @AppStorage("HaloUpdateShowPercentage") private var showPercentage = true
     @AppStorage("HaloUpdateShowVersion") private var showVersion = true
@@ -476,7 +635,8 @@ private struct HaloPhysicalUpdatePreview: View {
 
     private var hardwareWidth: CGFloat { max(1, notchSize.width) }
     private var hardwareHeight: CGFloat { max(1, notchSize.height) }
-    private var expandedHeight: CGFloat { hardwareHeight + 80 }
+    private var traceHeight: CGFloat { hardwareHeight + CGFloat(max(0, bottomOffset)) }
+    private var expandedHeight: CGFloat { traceHeight + 80 }
     private var cornerRadius: CGFloat { min(12, max(5, hardwareHeight * 0.34)) }
 
     private var traceColor: Color {
@@ -496,14 +656,19 @@ private struct HaloPhysicalUpdatePreview: View {
 
                 if showExpandedDetails {
                     expandedSurface
-                        .frame(width: model.detailsVisible ? expandedWidth : hardwareWidth,
-                               height: model.detailsVisible ? expandedHeight : hardwareHeight,
-                               alignment: .top)
-                        .animation(.spring(response: 0.30 / max(speed, 0.5), dampingFraction: 0.86), value: model.detailsVisible)
+                        .frame(
+                            width: model.detailsVisible ? expandedWidth : hardwareWidth,
+                            height: model.detailsVisible ? expandedHeight : traceHeight,
+                            alignment: .top
+                        )
+                        .animation(
+                            .spring(response: 0.30 / max(speed, 0.5), dampingFraction: 0.86),
+                            value: model.detailsVisible
+                        )
                 }
 
                 hardwareNotch
-                    .frame(width: hardwareWidth, height: hardwareHeight)
+                    .frame(width: hardwareWidth, height: traceHeight)
                     .zIndex(4)
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
@@ -513,38 +678,45 @@ private struct HaloPhysicalUpdatePreview: View {
     }
 
     private var hardwareShape: HaloHardwareNotchShape {
-        HaloHardwareNotchShape(cornerRadius: cornerRadius)
+        HaloHardwareNotchShape(
+            cornerRadius: cornerRadius,
+            bottomExtension: CGFloat(max(0, bottomOffset))
+        )
     }
 
     private var hardwareNotch: some View {
-        ZStack {
-            hardwareShape.fill(.black)
+        ZStack(alignment: .top) {
+            Rectangle()
+                .fill(.black)
+                .frame(width: hardwareWidth, height: hardwareHeight)
+                .frame(maxHeight: .infinity, alignment: .top)
 
             hardwareShape
                 .inset(by: max(0.5, traceThickness * 0.5))
-                .stroke(traceColor.opacity(max(0.18, traceOpacity * 0.20)), lineWidth: max(0.75, traceThickness * 0.7))
+                .stroke(
+                    traceColor.opacity(max(0.18, traceOpacity * 0.20)),
+                    lineWidth: max(0.75, traceThickness * 0.7)
+                )
 
             if clockwise {
                 hardwareShape
                     .inset(by: max(0.5, traceThickness * 0.5))
                     .trim(from: 0, to: min(1, model.progress))
-                    .stroke(traceColor.opacity(traceOpacity), style: StrokeStyle(lineWidth: traceThickness, lineCap: .round, lineJoin: .round))
+                    .stroke(
+                        traceColor.opacity(traceOpacity),
+                        style: StrokeStyle(lineWidth: traceThickness, lineCap: .round, lineJoin: .round)
+                    )
             } else {
                 hardwareShape
                     .inset(by: max(0.5, traceThickness * 0.5))
                     .trim(from: max(0, 1 - model.progress), to: 1)
-                    .stroke(traceColor.opacity(traceOpacity), style: StrokeStyle(lineWidth: traceThickness, lineCap: .round, lineJoin: .round))
+                    .stroke(
+                        traceColor.opacity(traceOpacity),
+                        style: StrokeStyle(lineWidth: traceThickness, lineCap: .round, lineJoin: .round)
+                    )
             }
         }
         .shadow(color: traceColor.opacity(traceGlow), radius: 1 + 7 * traceGlow)
-        .overlay {
-            if model.progress > 0.02 {
-                hardwareShape
-                    .inset(by: max(1, traceThickness))
-                    .stroke(traceColor.opacity(0.15 * traceGlow), lineWidth: traceThickness + 2)
-                    .blur(radius: 2.5)
-            }
-        }
         .scaleEffect(model.pulse ? 1.025 : 1)
         .animation(.spring(response: 0.22 / max(speed, 0.5), dampingFraction: 0.64), value: model.pulse)
     }
@@ -554,12 +726,13 @@ private struct HaloPhysicalUpdatePreview: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(Color.black.opacity(0.985))
                 .shadow(color: .black.opacity(0.42), radius: 14, y: 5)
+
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(Color.white.opacity(0.07), lineWidth: 1)
 
             if model.detailsVisible {
                 detailContent
-                    .padding(.top, hardwareHeight + 10)
+                    .padding(.top, traceHeight + 10)
                     .padding(.horizontal, 18)
                     .padding(.bottom, 10)
                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -571,9 +744,10 @@ private struct HaloPhysicalUpdatePreview: View {
     private var detailContent: some View {
         VStack(spacing: 5) {
             if showPercentage {
-                Text("\(Int(model.progress * 100))%")
+                Text("\(Int((model.progress * 100).rounded()))%")
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                     .monospacedDigit()
+                    .contentTransition(.numericText(value: model.progress))
             }
 
             HStack(spacing: 8) {
@@ -590,15 +764,39 @@ private struct HaloPhysicalUpdatePreview: View {
 
             if showSize || showSpeed || showETA {
                 HStack(spacing: 9) {
-                    if showSize { Text("\(Int(model.progress * 120)) / 120 MB") }
-                    if showSpeed { Text("18.4 MB/s") }
-                    if showETA { Text(model.progress >= 0.99 ? "0s" : "~\(max(1, Int((1 - model.progress) * 7)))s") }
+                    if showSize {
+                        Text("\(formattedBytes(model.downloadedBytes)) / \(formattedBytes(model.totalBytes))")
+                    }
+                    if showSpeed {
+                        Text(model.bytesPerSecond > 0 ? "\(formattedRate(model.bytesPerSecond))" : "—")
+                    }
+                    if showETA {
+                        Text(model.etaSeconds > 0 ? formattedETA(model.etaSeconds) : "—")
+                    }
                 }
                 .font(.system(size: 8, weight: .medium, design: .monospaced))
                 .foregroundStyle(.tertiary)
             }
         }
         .foregroundStyle(.white)
+    }
+
+    private func formattedBytes(_ bytes: UInt64) -> String {
+        guard bytes > 0 else { return "0 MB" }
+        let mb = Double(bytes) / 1_048_576
+        if mb >= 1000 { return String(format: "%.2f GB", mb / 1024) }
+        return String(format: mb >= 100 ? "%.0f MB" : "%.1f MB", mb)
+    }
+
+    private func formattedRate(_ bytesPerSecond: Double) -> String {
+        let mb = bytesPerSecond / 1_048_576
+        return String(format: "%.1f MB/s", mb)
+    }
+
+    private func formattedETA(_ seconds: Double) -> String {
+        let value = max(0, Int(seconds.rounded()))
+        if value >= 60 { return "~\(value / 60)m \(value % 60)s" }
+        return "~\(value)s"
     }
 }
 
@@ -611,6 +809,7 @@ struct UpdateAnimationSettingsView: View {
     @AppStorage("HaloUpdateTraceOpacity") private var traceOpacity = 1.0
     @AppStorage("HaloUpdateTraceColor") private var traceColor = "Accent"
     @AppStorage("HaloUpdateTraceClockwise") private var clockwise = true
+    @AppStorage("HaloUpdateTraceBottomOffset") private var bottomOffset = 0.0
     @AppStorage("HaloUpdateAnimationSpeed") private var speed = 1.0
 
     @AppStorage("HaloUpdateShowExpandedDetails") private var showExpandedDetails = true
@@ -628,7 +827,22 @@ struct UpdateAnimationSettingsView: View {
     @State private var debounceTask: Task<Void, Never>?
 
     private var signature: String {
-        [traceColor, String(traceThickness), String(traceGlow), String(traceOpacity), String(clockwise), String(speed), String(showExpandedDetails), String(showPercentage), String(showVersion), String(showStatus), String(showSize), String(showSpeed), String(showETA)].joined(separator: "|")
+        [
+            traceColor,
+            String(traceThickness),
+            String(traceGlow),
+            String(traceOpacity),
+            String(clockwise),
+            String(bottomOffset),
+            String(speed),
+            String(showExpandedDetails),
+            String(showPercentage),
+            String(showVersion),
+            String(showStatus),
+            String(showSize),
+            String(showSpeed),
+            String(showETA)
+        ].joined(separator: "|")
     }
 
     var body: some View {
@@ -638,22 +852,37 @@ struct UpdateAnimationSettingsView: View {
                 .foregroundStyle(.secondary)
 
             Picker("Color", selection: $traceColor) {
-                ForEach(["Accent", "White", "Cyan", "Purple", "Green"], id: \.self) { Text($0).tag($0) }
+                ForEach(["Accent", "White", "Cyan", "Purple", "Green"], id: \.self) {
+                    Text($0).tag($0)
+                }
             }
+
             Toggle("Clockwise", isOn: $clockwise)
 
             LabeledContent("Thickness") {
                 Slider(value: $traceThickness, in: 0.75...5, step: 0.25).frame(width: 220)
                 Text("\(traceThickness, specifier: "%.2f") pt").monospacedDigit().frame(width: 66)
             }
+
+            LabeledContent("Bottom edge offset") {
+                Slider(value: $bottomOffset, in: 0...12, step: 0.5).frame(width: 220)
+                Text("\(bottomOffset, specifier: "%.1f") pt").monospacedDigit().frame(width: 62)
+            }
+
+            Text("Adds a small gap below the physical notch so the lower part of the trace can sit slightly lower.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             LabeledContent("Glow") {
                 Slider(value: $traceGlow, in: 0...1, step: 0.05).frame(width: 220)
                 Text("\(Int(traceGlow * 100))%").monospacedDigit().frame(width: 52)
             }
+
             LabeledContent("Opacity") {
                 Slider(value: $traceOpacity, in: 0.2...1, step: 0.05).frame(width: 220)
                 Text("\(Int(traceOpacity * 100))%").monospacedDigit().frame(width: 52)
             }
+
             LabeledContent("Animation speed") {
                 Slider(value: $speed, in: 0.5...2, step: 0.05).frame(width: 220)
                 Text("\(speed, specifier: "%.2f")×").monospacedDigit().frame(width: 52)
@@ -690,6 +919,7 @@ struct UpdateAnimationSettingsView: View {
 
         Section("Preview") {
             Toggle("Automatically preview changes", isOn: $autoPreview)
+
             HStack {
                 Button { playPreview() } label: {
                     Label("Preview Animation", systemImage: "play.fill")
@@ -705,6 +935,7 @@ struct UpdateAnimationSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
             Text("Preview is synthetic and does not start a real Sparkle update.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
