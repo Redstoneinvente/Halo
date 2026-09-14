@@ -136,6 +136,8 @@ private final class HaloUpdatePreviewModel: ObservableObject {
     @Published var phase = "Ready"
     @Published var installing = false
     @Published var poweredDown = false
+    @Published var verifySweep = -1.0
+    @Published var completionPulse = false
 }
 
 @MainActor
@@ -151,23 +153,52 @@ final class HaloUpdateAnimationPreviewController {
         guard (d.string(forKey: "HaloUpdateAnimationStyle") ?? "Edge Fill") != "None" else { dismiss(); return }
         task?.cancel(); show(version: version)
         let stored = d.double(forKey: "HaloUpdateAnimationSpeed"), speed = max(0.5, stored == 0 ? 1 : stored)
-        model.progress = 0; model.phase = "Downloading"; model.installing = false; model.poweredDown = false
+        model.progress = 0; model.phase = "Downloading"; model.installing = false; model.poweredDown = false; model.verifySweep = -1; model.completionPulse = false
+        playCue("Tink")
         task = Task { @MainActor [weak self] in
             guard let self else { return }
             withAnimation(.linear(duration: 1.8 / speed)) { model.progress = 1 }
             try? await Task.sleep(nanoseconds: UInt64(1.9 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
-            model.phase = "Verifying"
-            try? await Task.sleep(nanoseconds: UInt64(0.55 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
-            withAnimation(.spring(response: 0.28 / speed, dampingFraction: 0.72)) { model.phase = "Installing"; model.installing = true }
-            try? await Task.sleep(nanoseconds: UInt64(0.65 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.25 / speed)) { model.phase = "Updated ✓"; model.installing = false }
-            try? await Task.sleep(nanoseconds: UInt64(0.62 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
-            withAnimation(.easeIn(duration: 0.24 / speed)) { model.phase = "Relaunching"; model.poweredDown = true }
-            try? await Task.sleep(nanoseconds: UInt64(0.36 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
+
+            withAnimation(.spring(response: 0.24 / speed, dampingFraction: 0.62)) { model.completionPulse = true }
+            playCue("Glass")
+            try? await Task.sleep(nanoseconds: UInt64(0.18 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.18 / speed)) { model.completionPulse = false }
+
+            model.phase = "Verifying"; model.verifySweep = -1
+            withAnimation(.easeInOut(duration: 0.48 / speed)) { model.verifySweep = 1 }
+            playCue("Pop")
+            try? await Task.sleep(nanoseconds: UInt64(0.58 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
+
+            withAnimation(.spring(response: 0.34 / speed, dampingFraction: 0.76)) { model.phase = "Installing"; model.installing = true }
+            playCue("Funk")
+            try? await Task.sleep(nanoseconds: UInt64(0.72 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
+
+            withAnimation(.easeInOut(duration: 0.25 / speed)) { model.phase = "Updated ✓"; model.installing = false; model.completionPulse = true }
+            playCue("Glass")
+            try? await Task.sleep(nanoseconds: UInt64(0.46 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.16 / speed)) { model.completionPulse = false }
+            try? await Task.sleep(nanoseconds: UInt64(0.26 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
+
+            withAnimation(.easeIn(duration: 0.28 / speed)) { model.phase = "Relaunching"; model.poweredDown = true }
+            try? await Task.sleep(nanoseconds: UInt64(0.38 / speed * 1_000_000_000)); guard !Task.isCancelled else { return }
             dismiss()
         }
     }
-    func dismiss() { task?.cancel(); task = nil; panel?.orderOut(nil); panel = nil; model.progress = 0; model.phase = "Ready"; model.installing = false; model.poweredDown = false }
+
+    func dismiss() {
+        task?.cancel(); task = nil; panel?.orderOut(nil); panel = nil
+        model.progress = 0; model.phase = "Ready"; model.installing = false; model.poweredDown = false; model.verifySweep = -1; model.completionPulse = false
+    }
+
+    private func playCue(_ name: String) {
+        let d = UserDefaults.standard
+        guard d.object(forKey: "HaloUpdateSoundsEnabled") as? Bool ?? true else { return }
+        let stored = d.double(forKey: "HaloUpdateSoundVolume")
+        let volume = Float(stored == 0 ? 0.55 : min(1, max(0, stored)))
+        if let sound = NSSound(named: NSSound.Name(name)) { sound.volume = volume; sound.play() }
+    }
+
     private func show(version: String) {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let width: CGFloat = min(480, max(360, screen.frame.width * 0.30)), height: CGFloat = 118
@@ -193,7 +224,27 @@ private struct HaloPhysicalUpdatePreview: View {
     @AppStorage("HaloUpdateShowPercentage") private var showPercentage = true
     @AppStorage("HaloUpdateShowVersion") private var showVersion = true
     @AppStorage("HaloUpdateShowStatus") private var showStatus = true
+    @AppStorage("HaloUpdateShowDownloadedSize") private var showSize = false
+    @AppStorage("HaloUpdateShowDownloadSpeed") private var showSpeed = false
+    @AppStorage("HaloUpdateShowETA") private var showETA = false
+    @AppStorage("HaloUpdatePerimeterBarEnabled") private var perimeterBar = false
+    @AppStorage("HaloUpdatePerimeterBarThickness") private var perimeterThickness = 1.5
+    @AppStorage("HaloUpdatePerimeterBarOpacity") private var perimeterOpacity = 0.85
+    @AppStorage("HaloUpdatePerimeterBarGlow") private var perimeterGlow = 0.35
+    @AppStorage("HaloUpdatePerimeterBarColor") private var perimeterColor = "Accent"
+    @AppStorage("HaloUpdatePerimeterBarClockwise") private var perimeterClockwise = true
+
     private var multiplier: Double { intensity == "Subtle" ? 0.55 : intensity == "Expressive" ? 1.4 : 1 }
+    private var barColor: Color {
+        switch perimeterColor {
+        case "White": return .white
+        case "Cyan": return .cyan
+        case "Purple": return .purple
+        case "Green": return .green
+        default: return .accentColor
+        }
+    }
+
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .top) {
@@ -203,32 +254,93 @@ private struct HaloPhysicalUpdatePreview: View {
                     ZStack {
                         RoundedRectangle(cornerRadius: 24, style: .continuous).fill(.black)
                         Rectangle().fill(.black).frame(height: 28).frame(maxHeight: .infinity, alignment: .top)
-                        if ["Energy", "Portal", "Circuit"].contains(style) {
-                            RoundedRectangle(cornerRadius: 24).stroke(Color.accentColor.opacity(0.24 * multiplier), lineWidth: max(1, thickness)).blur(radius: 3 + 4 * glow)
-                        }
-                        VStack(spacing: 3) {
-                            if showPercentage { Text("\(Int(model.progress * 100))%").font(.system(size: 17, weight: .bold, design: .rounded)).monospacedDigit() }
-                            if showStatus { Text(model.phase).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary) }
-                            if showVersion { Text("Halo \(version)").font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary) }
-                        }.padding(.top, 14)
+                        styleOverlay
+                        information
+                        verificationSweep(width: width)
+                        if perimeterBar { perimeterProgress(width: width) }
                     }
                     progress(width: width - 34).padding(.bottom, 7)
                 }
                 .frame(width: width, height: 96)
                 .shadow(color: Color.accentColor.opacity(glow * multiplier), radius: 14 + 10 * glow)
+                .scaleEffect(model.completionPulse ? 1.018 : 1)
                 .opacity(model.poweredDown ? 0 : 1)
-                .scaleEffect(x: model.installing ? 0.965 : 1, y: model.installing ? 0.93 : 1, anchor: .top)
-                .animation(.easeInOut(duration: 0.24), value: model.installing)
+                .scaleEffect(x: model.installing ? 0.90 : 1, y: model.installing ? 0.82 : 1, anchor: .top)
+                .animation(.spring(response: 0.3, dampingFraction: 0.72), value: model.installing)
+                .animation(.spring(response: 0.2, dampingFraction: 0.62), value: model.completionPulse)
                 .animation(.easeIn(duration: 0.22), value: model.poweredDown)
             }.frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
         }.preferredColorScheme(.dark)
     }
+
+    @ViewBuilder private var styleOverlay: some View {
+        switch style {
+        case "Energy":
+            RoundedRectangle(cornerRadius: 24).stroke(AngularGradient(colors: [.clear, .accentColor, .clear, .accentColor, .clear], center: .center), lineWidth: max(1, thickness)).blur(radius: 2 + 4 * glow).opacity(0.75 * multiplier)
+        case "Portal":
+            ZStack {
+                RoundedRectangle(cornerRadius: 24).stroke(Color.accentColor.opacity(0.42 * multiplier), lineWidth: max(1, thickness))
+                RoundedRectangle(cornerRadius: 20).stroke(Color.accentColor.opacity(0.18 * multiplier), lineWidth: 1).padding(4).blur(radius: 3)
+            }
+        case "Circuit":
+            RoundedRectangle(cornerRadius: 24).stroke(Color.accentColor.opacity(0.65 * multiplier), style: StrokeStyle(lineWidth: max(1, thickness), dash: [6, 4], dashPhase: model.progress * -24)).shadow(color: Color.accentColor.opacity(glow), radius: 4)
+        case "Liquid":
+            LinearGradient(colors: [Color.accentColor.opacity(0.03), Color.accentColor.opacity(0.14 * model.progress * multiplier)], startPoint: .top, endPoint: .bottom).clipShape(RoundedRectangle(cornerRadius: 24))
+        case "Digital":
+            RoundedRectangle(cornerRadius: 24).stroke(Color.accentColor.opacity(0.28 * multiplier), style: StrokeStyle(lineWidth: 1, dash: [2, 3]))
+        case "Particles":
+            HStack(spacing: 13) {
+                ForEach(0..<12, id: \.self) { i in Circle().fill(Color.accentColor.opacity(0.18 + Double(i % 4) * 0.12)).frame(width: 2.5, height: 2.5).offset(y: CGFloat((i % 3) - 1) * 7) }
+            }.opacity(0.35 + 0.45 * model.progress)
+        default: EmptyView()
+        }
+    }
+
+    private var information: some View {
+        VStack(spacing: 3) {
+            if showPercentage { Text("\(Int(model.progress * 100))%").font(.system(size: 17, weight: .bold, design: .rounded)).monospacedDigit() }
+            if showStatus { Text(model.phase).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary) }
+            if showVersion { Text("Halo \(version)").font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary) }
+            if showSize || showSpeed || showETA {
+                HStack(spacing: 7) {
+                    if showSize { Text("\(Int(model.progress * 120)) / 120 MB") }
+                    if showSpeed { Text("18.4 MB/s") }
+                    if showETA { Text(model.progress >= 0.99 ? "0s" : "~\(max(1, Int((1 - model.progress) * 7)))s") }
+                }.font(.system(size: 8, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary)
+            }
+        }.padding(.top, 12)
+    }
+
+    @ViewBuilder private func verificationSweep(width: CGFloat) -> some View {
+        if model.phase == "Verifying" {
+            LinearGradient(colors: [.clear, .white.opacity(0.08), .white.opacity(0.85), .white.opacity(0.08), .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: 72, height: 80)
+                .blur(radius: 1.5)
+                .offset(x: CGFloat(model.verifySweep) * width * 0.55)
+                .blendMode(.plusLighter)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func perimeterProgress(width: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .trim(from: 0, to: min(1, model.progress))
+            .stroke(barColor.opacity(perimeterOpacity), style: StrokeStyle(lineWidth: perimeterThickness, lineCap: .round))
+            .frame(width: width - 2, height: 94)
+            .scaleEffect(x: perimeterClockwise ? 1 : -1, y: 1)
+            .rotationEffect(.degrees(-90))
+            .shadow(color: barColor.opacity(perimeterGlow), radius: 2 + 6 * perimeterGlow)
+            .allowsHitTesting(false)
+    }
+
     @ViewBuilder private func progress(width: CGFloat) -> some View {
         switch presentation {
         case "Hidden", "Percentage Only": EmptyView()
         case "Full Perimeter": RoundedRectangle(cornerRadius: 21).trim(from: 0, to: min(1, model.progress)).stroke(Color.accentColor, style: StrokeStyle(lineWidth: thickness, lineCap: .round)).frame(width: width + 20, height: 76).rotationEffect(.degrees(-90)).shadow(color: Color.accentColor.opacity(glow), radius: 6)
+        case "Inside Fill": GeometryReader { proxy in Rectangle().fill(Color.accentColor.opacity(0.12 + 0.16 * multiplier)).frame(width: proxy.size.width * model.progress).frame(maxWidth: .infinity, alignment: .leading) }.frame(width: width, height: 42).clipShape(RoundedRectangle(cornerRadius: 10))
         case "Ring": Circle().trim(from: 0, to: min(1, model.progress)).stroke(Color.accentColor, style: StrokeStyle(lineWidth: max(2, thickness), lineCap: .round)).rotationEffect(.degrees(-90)).frame(width: 30, height: 30)
         case "Segments": HStack(spacing: 3) { ForEach(0..<12, id: \.self) { i in Capsule().fill(Double(i) / 12 <= model.progress ? Color.accentColor : Color.white.opacity(0.12)).frame(width: max(3, (width - 33) / 12), height: max(1, thickness)) } }
+        case "Particles": ZStack(alignment: .leading) { Capsule().fill(Color.white.opacity(0.06)).frame(width: width, height: max(1, thickness)); HStack(spacing: 7) { ForEach(0..<14, id: \.self) { i in Circle().fill(Color.accentColor.opacity(0.25 + Double(i % 5) * 0.12)).frame(width: max(2, thickness), height: max(2, thickness)) } }.frame(width: max(0, width * model.progress), alignment: .trailing).clipped() }
         default: ZStack(alignment: .leading) { Capsule().fill(Color.white.opacity(0.1)).frame(width: width, height: max(1, thickness)); Capsule().fill(Color.accentColor).frame(width: max(0, width * model.progress), height: max(1, thickness)).shadow(color: Color.accentColor.opacity(glow * multiplier), radius: 6) }
         }
     }
@@ -252,11 +364,17 @@ struct UpdateAnimationSettingsView: View {
     @AppStorage("HaloUpdateSoundsEnabled") private var sounds = true
     @AppStorage("HaloUpdateSoundVolume") private var volume = 0.55
     @AppStorage("HaloUpdateAutoPreview") private var autoPreview = true
+    @AppStorage("HaloUpdatePerimeterBarEnabled") private var perimeterBar = false
+    @AppStorage("HaloUpdatePerimeterBarThickness") private var perimeterThickness = 1.5
+    @AppStorage("HaloUpdatePerimeterBarOpacity") private var perimeterOpacity = 0.85
+    @AppStorage("HaloUpdatePerimeterBarGlow") private var perimeterGlow = 0.35
+    @AppStorage("HaloUpdatePerimeterBarColor") private var perimeterColor = "Accent"
+    @AppStorage("HaloUpdatePerimeterBarClockwise") private var perimeterClockwise = true
     @State private var localProgress = 0.0
     @State private var localPhase = "Ready"
     @State private var runID = UUID()
     @State private var debounceTask: Task<Void, Never>?
-    private var signature: String { [style, intensity, presentation, String(speed), String(glow), String(thickness), String(showPercentage), String(showVersion), String(showStatus), String(showSize), String(showSpeed), String(showETA)].joined(separator: "|") }
+    private var signature: String { [style, intensity, presentation, String(speed), String(glow), String(thickness), String(showPercentage), String(showVersion), String(showStatus), String(showSize), String(showSpeed), String(showETA), String(perimeterBar), String(perimeterThickness), String(perimeterOpacity), String(perimeterGlow), perimeterColor, String(perimeterClockwise)].joined(separator: "|") }
 
     var body: some View {
         Section("Presentation") {
@@ -269,6 +387,17 @@ struct UpdateAnimationSettingsView: View {
             LabeledContent("Animation speed") { Slider(value: $speed, in: 0.5...2, step: 0.05).frame(width: 220); Text("\(speed, specifier: "%.2f")×").monospacedDigit().frame(width: 52) }
             LabeledContent("Glow strength") { Slider(value: $glow, in: 0...1, step: 0.05).frame(width: 220); Text("\(Int(glow * 100))%").monospacedDigit().frame(width: 52) }
             LabeledContent("Progress thickness") { Slider(value: $thickness, in: 1...8, step: 0.5).frame(width: 220); Text("\(thickness, specifier: "%.1f") pt").monospacedDigit().frame(width: 62) }
+        }
+        Section("Perimeter Bar") {
+            Toggle("Show perimeter progress bar", isOn: $perimeterBar)
+            Text("A small independent progress line can trace the outer edge of the notch while any update style is active.").font(.caption).foregroundStyle(.secondary)
+            if perimeterBar {
+                Picker("Color", selection: $perimeterColor) { ForEach(["Accent", "White", "Cyan", "Purple", "Green"], id: \.self) { Text($0).tag($0) } }
+                Toggle("Clockwise", isOn: $perimeterClockwise)
+                LabeledContent("Thickness") { Slider(value: $perimeterThickness, in: 0.5...5, step: 0.25).frame(width: 220); Text("\(perimeterThickness, specifier: "%.2f") pt").monospacedDigit().frame(width: 66) }
+                LabeledContent("Opacity") { Slider(value: $perimeterOpacity, in: 0.1...1, step: 0.05).frame(width: 220); Text("\(Int(perimeterOpacity * 100))%").monospacedDigit().frame(width: 52) }
+                LabeledContent("Glow") { Slider(value: $perimeterGlow, in: 0...1, step: 0.05).frame(width: 220); Text("\(Int(perimeterGlow * 100))%").monospacedDigit().frame(width: 52) }
+            }
         }
         Section("Progress Information") {
             Toggle("Show percentage", isOn: $showPercentage); Toggle("Show version", isOn: $showVersion); Toggle("Show current phase", isOn: $showStatus)
@@ -290,10 +419,15 @@ struct UpdateAnimationSettingsView: View {
                 RoundedRectangle(cornerRadius: 16).fill(.black).frame(width: 360, height: 92).shadow(color: Color.accentColor.opacity(glow), radius: 18)
                 VStack(spacing: 4) { if showPercentage { Text("\(Int(localProgress * 100))%").font(.title3.bold()).monospacedDigit() }; if showStatus { Text(localPhase).font(.caption).foregroundStyle(.secondary) }; if showVersion { Text("Halo \(updates.currentVersion)").font(.caption2).foregroundStyle(.tertiary) } }.padding(.bottom, 14)
                 GeometryReader { proxy in Capsule().fill(Color.white.opacity(0.12)).overlay(alignment: .leading) { Capsule().fill(Color.accentColor).frame(width: proxy.size.width * localProgress) } }.frame(width: 330, height: max(1, thickness)).padding(.bottom, 5)
+                if perimeterBar { RoundedRectangle(cornerRadius: 16).trim(from: 0, to: min(1, localProgress)).stroke(previewBarColor.opacity(perimeterOpacity), style: StrokeStyle(lineWidth: perimeterThickness, lineCap: .round)).frame(width: 358, height: 90).rotationEffect(.degrees(-90)).shadow(color: previewBarColor.opacity(perimeterGlow), radius: 2 + 5 * perimeterGlow) }
             }.frame(maxWidth: .infinity).padding(.vertical, 8)
         }
         .onChange(of: signature) { _ in if autoPreview { schedulePreview() } }
         .onDisappear { debounceTask?.cancel(); HaloUpdateAnimationPreviewController.shared.dismiss() }
+    }
+
+    private var previewBarColor: Color {
+        switch perimeterColor { case "White": return .white; case "Cyan": return .cyan; case "Purple": return .purple; case "Green": return .green; default: return .accentColor }
     }
     private func schedulePreview() { debounceTask?.cancel(); debounceTask = Task { @MainActor in try? await Task.sleep(nanoseconds: 220_000_000); guard !Task.isCancelled else { return }; playPreview() } }
     private func stopPreview() { runID = UUID(); debounceTask?.cancel(); HaloUpdateAnimationPreviewController.shared.dismiss(); localProgress = 0; localPhase = "Ready" }
@@ -304,10 +438,10 @@ struct UpdateAnimationSettingsView: View {
         Task { @MainActor in
             withAnimation(.linear(duration: 1.8 / s)) { localProgress = 1 }
             try? await Task.sleep(nanoseconds: UInt64(1.9 / s * 1_000_000_000)); guard runID == id else { return }; localPhase = "Verifying"
-            try? await Task.sleep(nanoseconds: UInt64(0.55 / s * 1_000_000_000)); guard runID == id else { return }; localPhase = "Installing"
-            try? await Task.sleep(nanoseconds: UInt64(0.65 / s * 1_000_000_000)); guard runID == id else { return }; localPhase = "Updated ✓"
-            try? await Task.sleep(nanoseconds: UInt64(0.62 / s * 1_000_000_000)); guard runID == id else { return }; localPhase = "Relaunching"
-            try? await Task.sleep(nanoseconds: UInt64(0.36 / s * 1_000_000_000)); guard runID == id else { return }; localProgress = 0; localPhase = "Ready"
+            try? await Task.sleep(nanoseconds: UInt64(0.58 / s * 1_000_000_000)); guard runID == id else { return }; localPhase = "Installing"
+            try? await Task.sleep(nanoseconds: UInt64(0.72 / s * 1_000_000_000)); guard runID == id else { return }; localPhase = "Updated ✓"
+            try? await Task.sleep(nanoseconds: UInt64(0.72 / s * 1_000_000_000)); guard runID == id else { return }; localPhase = "Relaunching"
+            try? await Task.sleep(nanoseconds: UInt64(0.38 / s * 1_000_000_000)); guard runID == id else { return }; localProgress = 0; localPhase = "Ready"
         }
     }
 }
