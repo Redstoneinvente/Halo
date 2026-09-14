@@ -1,0 +1,165 @@
+name: Apply Halo release fixes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-halo-release-fixes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Patch Halo release UX
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          app_path = Path('Halo/App/HaloApp.swift')
+          app = app_path.read_text()
+
+          app = app.replace(
+              '    private let updater = HaloUpdateController.shared\n    private let setupCompletedKey = "HaloSetupCompletedV1"\n',
+              '    private let updater = HaloUpdateController.shared\n    private let whatsNew = HaloWhatsNewCoordinator.shared\n    private let setupCompletedKey = "HaloSetupCompletedV1"\n',
+              1,
+          )
+
+          if 'private let whatsNew = HaloWhatsNewCoordinator.shared' not in app:
+              raise SystemExit('Failed to add Whats New coordinator')
+
+          if '    private let forceSetupEveryLaunch = true\n' not in app:
+              raise SystemExit('Expected forceSetupEveryLaunch=true not found')
+          app = app.replace(
+              '    private let forceSetupEveryLaunch = true\n',
+              '    private let forceSetupEveryLaunch = false\n',
+              1,
+          )
+
+          old_refresh = '''    private func refreshCommercialAccess() {
+        if commercialAccessGranted {
+            startLicensedServices()
+            presentSetupIfNeeded()
+        } else {
+            setupWindow?.orderOut(nil)
+            setupWindow = nil
+            setupShownThisLaunch = false
+            stopLicensedServices()
+        }
+    }
+'''
+          new_refresh = '''    private func refreshCommercialAccess() {
+        if commercialAccessGranted {
+            startLicensedServices()
+
+            let defaults = UserDefaults.standard
+            let setupCompleted = defaults.bool(forKey: setupCompletedKey) || defaults.bool(forKey: "onboarded")
+            if setupCompleted {
+                whatsNew.presentIfNeeded()
+            } else {
+                presentSetupIfNeeded()
+            }
+        } else {
+            setupWindow?.orderOut(nil)
+            setupWindow = nil
+            setupShownThisLaunch = false
+            stopLicensedServices()
+        }
+    }
+'''
+          if old_refresh not in app:
+              raise SystemExit('Expected refreshCommercialAccess block not found')
+          app = app.replace(old_refresh, new_refresh, 1)
+          app_path.write_text(app)
+
+          settings_path = Path('Halo/Views/WorkspaceSettingsView.swift')
+          settings = settings_path.read_text()
+
+          old_about = '''private struct HaloAboutView: View {
+    private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0" }
+    private var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "2" }
+    var body: some View {
+        Section {
+            VStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().scaledToFit().frame(width: 100, height: 100).accessibilityLabel("Halo app icon")
+                Text("Halo").font(.largeTitle.bold())
+                Text("Version \\(version) · Build \\(build)").font(.caption).foregroundStyle(.secondary)
+                Text(HaloAboutContent.description).multilineTextAlignment(.center)
+                Text("Created by \\(HaloAboutContent.creator)").font(.callout).foregroundStyle(.secondary)
+            }.padding(.vertical, 16).frame(maxWidth: .infinity)
+        }
+        Section("Find out more") {
+            Link(destination: HaloAboutContent.website) { Label("Visit Halo’s website", systemImage: "globe") }
+            Link(destination: HaloAboutContent.support) { Label("Email support · r.support@redstoneinvente.com", systemImage: "envelope.fill") }
+        }
+    }
+}
+'''
+
+          new_about = '''private struct HaloAboutView: View {
+    private let updates = HaloUpdateController.shared
+    private var version: String { updates.currentVersion }
+    private var build: String { updates.currentBuild }
+
+    var body: some View {
+        Section {
+            VStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().scaledToFit().frame(width: 100, height: 100).accessibilityLabel("Halo app icon")
+                Text("Halo").font(.largeTitle.bold())
+                Text("Version \\(version) · Build \\(build)").font(.caption).foregroundStyle(.secondary)
+                Text(HaloAboutContent.description).multilineTextAlignment(.center)
+                Text("Created by \\(HaloAboutContent.creator)").font(.callout).foregroundStyle(.secondary)
+            }.padding(.vertical, 16).frame(maxWidth: .infinity)
+        }
+
+        Section("Software Update") {
+            LabeledContent("Installed version", value: "\\(version) (\\(build))")
+            HStack {
+                Button("Check for Updates…") {
+                    updates.checkForUpdates()
+                }
+                .disabled(!updates.isConfigured)
+
+                Button("What's New") {
+                    HaloWhatsNewCoordinator.shared.present()
+                }
+            }
+            if updates.isConfigured {
+                Text("Halo uses Sparkle 2 to securely check, verify, download, and install signed updates.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Label("Update configuration is unavailable in this build.", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        Section("Find out more") {
+            Link(destination: HaloAboutContent.website) { Label("Visit Halo’s website", systemImage: "globe") }
+            Link(destination: HaloAboutContent.support) { Label("Email support · r.support@redstoneinvente.com", systemImage: "envelope.fill") }
+        }
+    }
+}
+'''
+
+          if old_about not in settings:
+              raise SystemExit('Expected HaloAboutView block not found')
+          settings = settings.replace(old_about, new_about, 1)
+          settings_path.write_text(settings)
+          PY
+
+      - name: Remove one-shot workflow and commit
+        run: |
+          rm -f .github/workflows/apply-halo-release-fixes.yml
+          git config user.name "Halo Release Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Wire What's New and About update controls"
+          git push origin HEAD:main
