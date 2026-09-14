@@ -18,7 +18,7 @@ jobs:
           fetch-depth: 0
 
       - name: Patch HaloLicenseManager
-        shell: python
+        shell: python {0}
         run: |
           from pathlib import Path
 
