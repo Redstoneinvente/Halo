@@ -106,6 +106,24 @@ enum TeleprompterAdvanceMode: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum TeleprompterPresentationStyle: String, Codable, CaseIterable, Identifiable {
+    case floating = "Floating"
+    case notchExpansion = "Notch Expansion"
+    var id: String { rawValue }
+}
+
+enum TeleprompterPlacement: String, Codable, CaseIterable, Identifiable {
+    case topCenter = "Top Center"
+    case topLeft = "Top Left"
+    case topRight = "Top Right"
+    case center = "Center"
+    case bottomCenter = "Bottom Center"
+    case bottomLeft = "Bottom Left"
+    case bottomRight = "Bottom Right"
+    case custom = "Custom"
+    var id: String { rawValue }
+}
+
 enum TeleprompterShortcutPreset: String, Codable, CaseIterable, Identifiable {
     case optionCommandT = "⌥⌘T"
     case shiftOptionCommandT = "⇧⌥⌘T"
@@ -166,6 +184,12 @@ struct TeleprompterAppearance: Codable, Equatable {
     var showProgress = true
     var mirrorHorizontally = false
     var keepNearCamera = true
+    var presentationStyle: TeleprompterPresentationStyle = .floating
+    var placement: TeleprompterPlacement = .topCenter
+    var customOffsetX = 0.0
+    var customOffsetY = 0.0
+    var screenEdgePadding = 18.0
+    var notchExpansionAnimation = true
 }
 
 struct TeleprompterBehavior: Codable, Equatable {
@@ -359,13 +383,17 @@ final class TeleprompterCoordinator: NSObject {
         hidePrompt()
         let runtime = TeleprompterRuntime(profile: profile); self.runtime = runtime
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true; panel.level = .statusBar
+        panel.isOpaque = false; panel.backgroundColor = .clear
+        panel.hasShadow = profile.appearance.presentationStyle == .floating
+        panel.level = profile.appearance.presentationStyle == .notchExpansion ? .screenSaver : .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.hidesOnDeactivate = false; panel.isMovableByWindowBackground = true
+        panel.hidesOnDeactivate = false
+        panel.isMovableByWindowBackground = profile.appearance.presentationStyle == .floating
         panel.sharingType = profile.appearance.hideFromCapture ? .none : .readOnly
         panel.contentView = NSHostingView(rootView: TeleprompterPromptView(runtime: runtime))
-        panel.setContentSize(NSSize(width: profile.appearance.width, height: profile.appearance.height))
-        promptPanel = panel; position(panel, appearance: profile.appearance); panel.orderFrontRegardless()
+        promptPanel = panel
+        position(panel, appearance: profile.appearance)
+        panel.orderFrontRegardless()
         if profile.behavior.autoStart { runtime.begin() }
     }
 
@@ -389,8 +417,55 @@ final class TeleprompterCoordinator: NSObject {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main ?? NSScreen.screens.first
         guard let screen else { return }
-        let top = appearance.keepNearCamera ? screen.frame.maxY - max(8, screen.safeAreaInsets.top) - appearance.eyeLineOffset : screen.visibleFrame.maxY - 24
-        panel.setFrameOrigin(NSPoint(x: screen.frame.midX - appearance.width / 2, y: top - appearance.height))
+
+        let width = min(max(280, appearance.width), screen.frame.width - 20)
+        let height = min(max(90, appearance.height), screen.frame.height - 20)
+
+        if appearance.presentationStyle == .notchExpansion {
+            let safeTop = max(24, screen.safeAreaInsets.top)
+            let target = NSRect(x: screen.frame.midX - width / 2,
+                                y: screen.frame.maxY - (height + safeTop),
+                                width: width,
+                                height: height + safeTop)
+            if appearance.notchExpansionAnimation {
+                let collapsedWidth = min(width, max(160, safeTop * 5.0))
+                let collapsed = NSRect(x: screen.frame.midX - collapsedWidth / 2,
+                                       y: screen.frame.maxY - safeTop,
+                                       width: collapsedWidth,
+                                       height: safeTop)
+                panel.setFrame(collapsed, display: false)
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.24
+                    panel.animator().setFrame(target, display: true)
+                }
+            } else {
+                panel.setFrame(target, display: true)
+            }
+            return
+        }
+
+        let visible = screen.visibleFrame
+        let pad = max(0, appearance.screenEdgePadding)
+        var x = visible.midX - width / 2
+        var y = visible.maxY - height - pad
+        switch appearance.placement {
+        case .topCenter: break
+        case .topLeft: x = visible.minX + pad
+        case .topRight: x = visible.maxX - width - pad
+        case .center: y = visible.midY - height / 2
+        case .bottomCenter: y = visible.minY + pad
+        case .bottomLeft: x = visible.minX + pad; y = visible.minY + pad
+        case .bottomRight: x = visible.maxX - width - pad; y = visible.minY + pad
+        case .custom:
+            x = visible.midX - width / 2 + appearance.customOffsetX
+            y = visible.midY - height / 2 + appearance.customOffsetY
+        }
+        if appearance.keepNearCamera && appearance.placement == .topCenter {
+            y = screen.frame.maxY - max(8, screen.safeAreaInsets.top) - appearance.eyeLineOffset - height
+        }
+        x = min(max(x, visible.minX), visible.maxX - width)
+        y = min(max(y, visible.minY), visible.maxY - height)
+        panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
     }
 
     private func installInputMonitors() {
@@ -634,7 +709,7 @@ struct TeleprompterPromptView: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: appearance.cornerRadius, style: .continuous).fill(.black.opacity(appearance.backgroundOpacity))
+            RoundedRectangle(cornerRadius: appearance.presentationStyle == .notchExpansion ? max(8, appearance.cornerRadius) : appearance.cornerRadius, style: .continuous).fill(.black.opacity(appearance.presentationStyle == .notchExpansion ? 1.0 : appearance.backgroundOpacity))
                 .background { if appearance.blurBackground { TeleprompterVisualEffectBlur().clipShape(RoundedRectangle(cornerRadius: appearance.cornerRadius, style: .continuous)) } }
                 .overlay(RoundedRectangle(cornerRadius: appearance.cornerRadius, style: .continuous).stroke(.white.opacity(0.10), lineWidth: 1))
             VStack(spacing: 9) {
@@ -731,6 +806,18 @@ private struct TeleprompterProfileEditor: View {
 
     private var appearanceEditor: some View {
         Form {
+            Picker("Presentation", selection: $profile.appearance.presentationStyle) { ForEach(TeleprompterPresentationStyle.allCases) { Text($0.rawValue).tag($0) } }
+            if profile.appearance.presentationStyle == .floating {
+                Picker("Placement", selection: $profile.appearance.placement) { ForEach(TeleprompterPlacement.allCases) { Text($0.rawValue).tag($0) } }
+                if profile.appearance.placement == .custom {
+                    LabeledContent("Horizontal offset") { Slider(value: $profile.appearance.customOffsetX, in: -900...900); Text("\(Int(profile.appearance.customOffsetX)) pt").frame(width: 70) }
+                    LabeledContent("Vertical offset") { Slider(value: $profile.appearance.customOffsetY, in: -600...600); Text("\(Int(profile.appearance.customOffsetY)) pt").frame(width: 70) }
+                }
+                LabeledContent("Screen-edge padding") { Slider(value: $profile.appearance.screenEdgePadding, in: 0...80); Text("\(Int(profile.appearance.screenEdgePadding)) pt").frame(width: 70) }
+            } else {
+                Toggle("Animate from notch", isOn: $profile.appearance.notchExpansionAnimation)
+                Text("Notch Expansion anchors the Teleprompter to the physical notch and expands outward from it like Halo's other Context Interfaces.").font(.caption).foregroundStyle(.secondary)
+            }
             Picker("Mode", selection: $profile.behavior.displayMode) { ForEach(TeleprompterDisplayMode.allCases) { Text($0.rawValue).tag($0) } }
             LabeledContent("Width") { Slider(value: $profile.appearance.width, in: 360...1100); Text("\(Int(profile.appearance.width)) pt").frame(width: 62) }
             LabeledContent("Height") { Slider(value: $profile.appearance.height, in: 100...520); Text("\(Int(profile.appearance.height)) pt").frame(width: 62) }
