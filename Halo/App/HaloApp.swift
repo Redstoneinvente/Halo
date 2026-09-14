@@ -26,9 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var licensedServicesStarted = false
     private var setupShownThisLaunch = false
     private let updater = HaloUpdateController.shared
+    private let whatsNew = HaloWhatsNewCoordinator.shared
     private let setupCompletedKey = "HaloSetupCompletedV1"
     // Development switch: keep this true while we iterate on onboarding.
-    private let forceSetupEveryLaunch = true
+    private let forceSetupEveryLaunch = false
 
     private var commercialAccessGranted: Bool {
         let account = HaloAccountManager.shared
@@ -108,7 +109,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshCommercialAccess() {
         if commercialAccessGranted {
             startLicensedServices()
-            presentSetupIfNeeded()
+
+            let defaults = UserDefaults.standard
+            let setupCompleted = defaults.bool(forKey: setupCompletedKey) || defaults.bool(forKey: "onboarded")
+            if setupCompleted {
+                whatsNew.presentIfNeeded()
+            } else {
+                presentSetupIfNeeded()
+            }
         } else {
             setupWindow?.orderOut(nil)
             setupWindow = nil

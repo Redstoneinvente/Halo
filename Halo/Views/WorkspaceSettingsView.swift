@@ -1778,8 +1778,10 @@ private enum HaloAboutContent {
     static let support = URL(string: "mailto:r.support@redstoneinvente.com")!
 }
 private struct HaloAboutView: View {
-    private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0" }
-    private var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "2" }
+    private let updates = HaloUpdateController.shared
+    private var version: String { updates.currentVersion }
+    private var build: String { updates.currentBuild }
+
     var body: some View {
         Section {
             VStack(spacing: 12) {
@@ -1790,6 +1792,30 @@ private struct HaloAboutView: View {
                 Text("Created by \(HaloAboutContent.creator)").font(.callout).foregroundStyle(.secondary)
             }.padding(.vertical, 16).frame(maxWidth: .infinity)
         }
+
+        Section("Software Update") {
+            LabeledContent("Installed version", value: "\(version) (\(build))")
+            HStack {
+                Button("Check for Updates…") {
+                    updates.checkForUpdates()
+                }
+                .disabled(!updates.isConfigured)
+
+                Button("What's New") {
+                    HaloWhatsNewCoordinator.shared.present()
+                }
+            }
+            if updates.isConfigured {
+                Text("Halo uses Sparkle 2 to securely check, verify, download, and install signed updates.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Label("Update configuration is unavailable in this build.", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
         Section("Find out more") {
             Link(destination: HaloAboutContent.website) { Label("Visit Halo’s website", systemImage: "globe") }
             Link(destination: HaloAboutContent.support) { Label("Email support · r.support@redstoneinvente.com", systemImage: "envelope.fill") }
