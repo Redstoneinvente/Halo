@@ -1,4 +1,4 @@
-name: Patch Teleprompter Presentation
+name: Fix Teleprompter Studio And Notch Suppression
 
 on:
   push:
@@ -9,59 +9,77 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Prepare Teleprompter placement and notch expansion patch'
+    if: github.event.head_commit.message == 'Fix Teleprompter Studio top bar and notch suppression'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
-      - name: Patch source
+      - name: Patch Teleprompter Studio and notch behavior
         run: |
           python3 <<'PY'
           from pathlib import Path
-          p = Path('Halo/Services/CaptureService.swift')
-          s = p.read_text()
 
-          marker = 'enum TeleprompterShortcutPreset: String, Codable, CaseIterable, Identifiable {'
-          addition = '''enum TeleprompterPresentationStyle: String, Codable, CaseIterable, Identifiable {\n    case floating = "Floating"\n    case notchExpansion = "Notch Expansion"\n    var id: String { rawValue }\n}\n\nenum TeleprompterPlacement: String, Codable, CaseIterable, Identifiable {\n    case topCenter = "Top Center"\n    case topLeft = "Top Left"\n    case topRight = "Top Right"\n    case center = "Center"\n    case bottomCenter = "Bottom Center"\n    case bottomLeft = "Bottom Left"\n    case bottomRight = "Bottom Right"\n    case custom = "Custom"\n    var id: String { rawValue }\n}\n\n'''
-          if addition not in s:
-              s = s.replace(marker, addition + marker, 1)
+          capture = Path('Halo/Services/CaptureService.swift')
+          s = capture.read_text()
 
-          old = '    var mirrorHorizontally = false\n    var keepNearCamera = true\n}'
-          new = '    var mirrorHorizontally = false\n    var keepNearCamera = true\n    var presentationStyle: TeleprompterPresentationStyle = .floating\n    var placement: TeleprompterPlacement = .topCenter\n    var customOffsetX = 0.0\n    var customOffsetY = 0.0\n    var screenEdgePadding = 18.0\n    var notchExpansionAnimation = true\n}'
+          old = '''        panel.orderFrontRegardless()\n        if profile.behavior.autoStart { runtime.begin() }'''
+          new = '''        panel.orderFrontRegardless()\n        NotificationCenter.default.post(name: .init("HaloTeleprompterVisibilityChanged"), object: nil, userInfo: ["active": true])\n        if profile.behavior.autoStart { runtime.begin() }'''
           if old not in s:
-              raise SystemExit('appearance anchor missing')
+              raise SystemExit('teleprompter show anchor missing')
           s = s.replace(old, new, 1)
 
-          old = '''        panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true; panel.level = .statusBar\n        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]\n        panel.hidesOnDeactivate = false; panel.isMovableByWindowBackground = true\n        panel.sharingType = profile.appearance.hideFromCapture ? .none : .readOnly\n        panel.contentView = NSHostingView(rootView: TeleprompterPromptView(runtime: runtime))\n        panel.setContentSize(NSSize(width: profile.appearance.width, height: profile.appearance.height))\n        promptPanel = panel; position(panel, appearance: profile.appearance); panel.orderFrontRegardless()'''
-          new = '''        panel.isOpaque = false; panel.backgroundColor = .clear\n        panel.hasShadow = profile.appearance.presentationStyle == .floating\n        panel.level = profile.appearance.presentationStyle == .notchExpansion ? .screenSaver : .statusBar\n        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]\n        panel.hidesOnDeactivate = false\n        panel.isMovableByWindowBackground = profile.appearance.presentationStyle == .floating\n        panel.sharingType = profile.appearance.hideFromCapture ? .none : .readOnly\n        panel.contentView = NSHostingView(rootView: TeleprompterPromptView(runtime: runtime))\n        promptPanel = panel\n        position(panel, appearance: profile.appearance)\n        panel.orderFrontRegardless()'''
+          old = '''    func hidePrompt() { runtime?.pause(); runtime = nil; promptPanel?.orderOut(nil); promptPanel = nil }'''
+          new = '''    func hidePrompt() {\n        let wasVisible = promptPanel?.isVisible == true\n        runtime?.pause()\n        runtime = nil\n        promptPanel?.orderOut(nil)\n        promptPanel = nil\n        if wasVisible {\n            NotificationCenter.default.post(name: .init("HaloTeleprompterVisibilityChanged"), object: nil, userInfo: ["active": false])\n        }\n    }'''
           if old not in s:
-              raise SystemExit('panel anchor missing')
+              raise SystemExit('teleprompter hide anchor missing')
           s = s.replace(old, new, 1)
 
-          start = s.index('    private func position(_ panel: NSPanel, appearance: TeleprompterAppearance) {')
-          end = s.index('\n    private func installInputMonitors()', start)
-          replacement = '''    private func position(_ panel: NSPanel, appearance: TeleprompterAppearance) {\n        let mouse = NSEvent.mouseLocation\n        let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main ?? NSScreen.screens.first\n        guard let screen else { return }\n\n        let width = min(max(280, appearance.width), screen.frame.width - 20)\n        let height = min(max(90, appearance.height), screen.frame.height - 20)\n\n        if appearance.presentationStyle == .notchExpansion {\n            let safeTop = max(24, screen.safeAreaInsets.top)\n            let target = NSRect(x: screen.frame.midX - width / 2,\n                                y: screen.frame.maxY - (height + safeTop),\n                                width: width,\n                                height: height + safeTop)\n            if appearance.notchExpansionAnimation {\n                let collapsedWidth = min(width, max(160, safeTop * 5.0))\n                let collapsed = NSRect(x: screen.frame.midX - collapsedWidth / 2,\n                                       y: screen.frame.maxY - safeTop,\n                                       width: collapsedWidth,\n                                       height: safeTop)\n                panel.setFrame(collapsed, display: false)\n                NSAnimationContext.runAnimationGroup { context in\n                    context.duration = 0.24\n                    panel.animator().setFrame(target, display: true)\n                }\n            } else {\n                panel.setFrame(target, display: true)\n            }\n            return\n        }\n\n        let visible = screen.visibleFrame\n        let pad = max(0, appearance.screenEdgePadding)\n        var x = visible.midX - width / 2\n        var y = visible.maxY - height - pad\n        switch appearance.placement {\n        case .topCenter: break\n        case .topLeft: x = visible.minX + pad\n        case .topRight: x = visible.maxX - width - pad\n        case .center: y = visible.midY - height / 2\n        case .bottomCenter: y = visible.minY + pad\n        case .bottomLeft: x = visible.minX + pad; y = visible.minY + pad\n        case .bottomRight: x = visible.maxX - width - pad; y = visible.minY + pad\n        case .custom:\n            x = visible.midX - width / 2 + appearance.customOffsetX\n            y = visible.midY - height / 2 + appearance.customOffsetY\n        }\n        if appearance.keepNearCamera && appearance.placement == .topCenter {\n            y = screen.frame.maxY - max(8, screen.safeAreaInsets.top) - appearance.eyeLineOffset - height\n        }\n        x = min(max(x, visible.minX), visible.maxX - width)\n        y = min(max(y, visible.minY), visible.maxY - height)\n        panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)\n    }\n'''
-          s = s[:start] + replacement + s[end:]
-
-          old = '''            Picker("Mode", selection: $profile.behavior.displayMode) { ForEach(TeleprompterDisplayMode.allCases) { Text($0.rawValue).tag($0) } }'''
-          new = '''            Picker("Presentation", selection: $profile.appearance.presentationStyle) { ForEach(TeleprompterPresentationStyle.allCases) { Text($0.rawValue).tag($0) } }\n            if profile.appearance.presentationStyle == .floating {\n                Picker("Placement", selection: $profile.appearance.placement) { ForEach(TeleprompterPlacement.allCases) { Text($0.rawValue).tag($0) } }\n                if profile.appearance.placement == .custom {\n                    LabeledContent("Horizontal offset") { Slider(value: $profile.appearance.customOffsetX, in: -900...900); Text("\\(Int(profile.appearance.customOffsetX)) pt").frame(width: 70) }\n                    LabeledContent("Vertical offset") { Slider(value: $profile.appearance.customOffsetY, in: -600...600); Text("\\(Int(profile.appearance.customOffsetY)) pt").frame(width: 70) }\n                }\n                LabeledContent("Screen-edge padding") { Slider(value: $profile.appearance.screenEdgePadding, in: 0...80); Text("\\(Int(profile.appearance.screenEdgePadding)) pt").frame(width: 70) }\n            } else {\n                Toggle("Animate from notch", isOn: $profile.appearance.notchExpansionAnimation)\n                Text("Notch Expansion anchors the Teleprompter to the physical notch and expands outward from it like Halo's other Context Interfaces.").font(.caption).foregroundStyle(.secondary)\n            }\n            Picker("Mode", selection: $profile.behavior.displayMode) { ForEach(TeleprompterDisplayMode.allCases) { Text($0.rawValue).tag($0) } }'''
+          old = '''        NavigationSplitView {'''
+          new = '''        NavigationSplitView {'''
           if old not in s:
-              raise SystemExit('appearance ui anchor missing')
-          s = s.replace(old, new, 1)
+              raise SystemExit('studio root anchor missing')
 
-          old = '''            RoundedRectangle(cornerRadius: appearance.cornerRadius, style: .continuous).fill(.black.opacity(appearance.backgroundOpacity))'''
-          new = '''            RoundedRectangle(cornerRadius: appearance.presentationStyle == .notchExpansion ? max(8, appearance.cornerRadius) : appearance.cornerRadius, style: .continuous).fill(.black.opacity(appearance.presentationStyle == .notchExpansion ? 1.0 : appearance.backgroundOpacity))'''
+          old = '''        } detail: {\n            if let index = store.selectedIndex { TeleprompterProfileEditor(profile: $store.profiles[index]) }\n            else { VStack(spacing: 8) { Image(systemName: "text.bubble").font(.largeTitle); Text("Select a Teleprompter").font(.headline) }.foregroundStyle(.secondary) }\n        }\n    }'''
+          new = '''        } detail: {\n            if let index = store.selectedIndex { TeleprompterProfileEditor(profile: $store.profiles[index]) }\n            else { VStack(spacing: 8) { Image(systemName: "text.bubble").font(.largeTitle); Text("Select a Teleprompter").font(.headline) }.foregroundStyle(.secondary) }\n        }\n        .safeAreaPadding(.top, 12)\n    }'''
           if old not in s:
-              raise SystemExit('background anchor missing')
+              raise SystemExit('studio safe-area anchor missing')
           s = s.replace(old, new, 1)
+          capture.write_text(s)
 
-          p.write_text(s)
+          surface = Path('Halo/Views/SurfaceView.swift')
+          v = surface.read_text()
+
+          old = '''    @ObservedObject private var bluetooth = BluetoothStateService.shared\n    @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false'''
+          new = '''    @ObservedObject private var bluetooth = BluetoothStateService.shared\n    @State private var teleprompterActive = false\n    @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false'''
+          if old not in v:
+              raise SystemExit('surface state anchor missing')
+          v = v.replace(old, new, 1)
+
+          old = '''                    .onTapGesture {\n                        if state.expanded && state.pinned { return }\n                        state.expanded.toggle()\n                    }'''
+          new = '''                    .onTapGesture {\n                        guard !teleprompterActive else { return }\n                        if state.expanded && state.pinned { return }\n                        state.expanded.toggle()\n                    }'''
+          if old not in v:
+              raise SystemExit('surface tap anchor missing')
+          v = v.replace(old, new, 1)
+
+          old = '''        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }\n        .onHover { state.hover($0, enabled: store.configuration.hoverToExpand) }'''
+          new = '''        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }\n        .onReceive(NotificationCenter.default.publisher(for: .init("HaloTeleprompterVisibilityChanged"))) { note in\n            let active = (note.userInfo?["active"] as? Bool) ?? false\n            teleprompterActive = active\n            if active {\n                state.collapseTask?.cancel()\n                if !state.pinned { state.expanded = false }\n            }\n        }\n        .onHover { hovering in\n            if teleprompterActive {\n                state.collapseTask?.cancel()\n                if !state.pinned { state.expanded = false }\n            } else {\n                state.hover(hovering, enabled: store.configuration.hoverToExpand)\n            }\n        }'''
+          if old not in v:
+              raise SystemExit('surface hover anchor missing')
+          v = v.replace(old, new, 1)
+
+          old = '''        .onChange(of: state.expanded) { expanded in\n            workspace.setOpenedNotchVisible(expanded && activeContext == nil, token: openVisibilityToken)\n            if !expanded {'''
+          new = '''        .onChange(of: state.expanded) { expanded in\n            if teleprompterActive && expanded && activeContext == nil {\n                state.expanded = false\n                workspace.setOpenedNotchVisible(false, token: openVisibilityToken)\n                return\n            }\n            workspace.setOpenedNotchVisible(expanded && activeContext == nil, token: openVisibilityToken)\n            if !expanded {'''
+          if old not in v:
+              raise SystemExit('surface expanded anchor missing')
+          v = v.replace(old, new, 1)
+
+          surface.write_text(v)
           PY
-      - name: Commit feature
+      - name: Commit fixes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Halo/Services/CaptureService.swift
-          git commit -m "Add Teleprompter placement and notch expansion"
+          git add Halo/Services/CaptureService.swift Halo/Views/SurfaceView.swift
+          git commit -m "Fix Teleprompter Studio layout and suppress normal notch"
           git push origin main
