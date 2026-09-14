@@ -9,95 +9,42 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Add Teleprompter context matcher repair'
+    if: github.event.head_commit.message == 'Repair screen recording context trigger'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
-      - name: Patch Teleprompter context engine
+      - name: Repair screen recording detection
         shell: python
         run: |
           from pathlib import Path
-          import re
 
           p = Path('Halo/Services/CaptureService.swift')
           s = p.read_text()
 
-          pattern = re.compile(r'''    private func evaluateContext\(_ rule: TeleprompterContextRule\) -> Bool \{.*?\n    private func heuristicScreenRecordingActive\(\) -> Bool \{''', re.S)
-          replacement = r'''    private func evaluateContext(_ rule: TeleprompterContextRule) -> Bool {
-        let queries = contextQueries(rule.value)
-        switch rule.kind {
-        case .frontmostApp:
-            guard !queries.isEmpty, let app = NSWorkspace.shared.frontmostApplication else { return false }
-            return appMatches(app, queries: queries)
-        case .runningApp:
-            guard !queries.isEmpty else { return false }
-            return NSWorkspace.shared.runningApplications.contains { appMatches($0, queries: queries) }
-        case .windowTitle:
-            guard !queries.isEmpty else { return false }
-            let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-            let descriptions = windowDescriptions(frontmostPID: frontPID)
-            return descriptions.contains { description in queries.contains { description.localizedCaseInsensitiveContains($0) } }
-        case .recordingActive:
-            // Refresh on demand so a context check is not waiting for the 1.2 s polling tick.
-            let detected = heuristicScreenRecordingActive()
-            if detected != lastRecordingState { lastRecordingState = detected }
-            return detected == rule.boolValue
-        case .displayCount:
-            return NSScreen.screens.count == max(1, rule.numberValue)
-        case .timeRange:
-            let hour = Calendar.current.component(.hour, from: Date())
-            if rule.startHour == rule.endHour { return true }
-            return rule.startHour < rule.endHour
-                ? (hour >= rule.startHour && hour < rule.endHour)
-                : (hour >= rule.startHour || hour < rule.endHour)
-        }
-    }
+          old = '''        case .recordingActive:\n            return heuristicScreenRecordingActive() == rule.boolValue'''
+          new = '''        case .recordingActive:\n            return lastRecordingState == rule.boolValue'''
+          if old not in s:
+              raise SystemExit('recording context anchor not found')
+          s = s.replace(old, new, 1)
 
-    private func contextQueries(_ raw: String) -> [String] {
-        raw.components(separatedBy: CharacterSet(charactersIn: ",;\n"))
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
+          old = '''    private func heuristicScreenRecordingActive() -> Bool {\n        let windows = windowDescriptions().map { $0.lowercased() }\n        let recorders = ["obs", "screenflow", "camtasia", "loom"]\n        let running = NSWorkspace.shared.runningApplications.compactMap(\\.localizedName).map { $0.lowercased() }\n        let recorderRunning = running.contains { name in recorders.contains(where: name.contains) }\n        let recordingWindow = windows.contains { description in\n            recorders.contains(where: description.contains) && (description.contains("record") || description.contains("studio"))\n        }\n        return recorderRunning && recordingWindow\n    }'''
+          new = '''    private func heuristicScreenRecordingActive() -> Bool {\n        let windows = windowDescriptions().map { $0.lowercased() }\n        let apps = NSWorkspace.shared.runningApplications\n        let appNames = apps.compactMap(\\.localizedName).map { $0.lowercased() }\n        let bundleIDs = apps.compactMap(\\.bundleIdentifier).map { $0.lowercased() }\n\n        // Native macOS screen recording uses Screenshot / screencaptureui while a capture is active.\n        let nativeRecorderActive = appNames.contains { name in\n            name.contains("screenshot") || name.contains("screencaptureui")\n        } || bundleIDs.contains { id in\n            id.contains("screencaptureui") || id.contains("screenshot")\n        }\n\n        let recorders = ["obs", "screenflow", "camtasia", "loom", "quicktime"]\n        let recorderRunning = appNames.contains { name in recorders.contains(where: name.contains) }\n        let explicitRecordingWindow = windows.contains { description in\n            recorders.contains(where: description.contains) &&\n            (description.contains("recording") || description.contains("record") || description.contains("rec ") || description.contains("live"))\n        }\n\n        return nativeRecorderActive || (recorderRunning && explicitRecordingWindow)\n    }'''
+          if old not in s:
+              raise SystemExit('heuristic anchor not found')
+          s = s.replace(old, new, 1)
 
-    private func appMatches(_ app: NSRunningApplication, queries: [String]) -> Bool {
-        let values = [app.localizedName ?? "", app.bundleIdentifier ?? ""]
-        return queries.contains { query in
-            values.contains { value in value.localizedCaseInsensitiveContains(query) }
-        }
-    }
+          old = '''    private func recordingStateChanged(_ active: Bool) {\n        let changed = active != lastRecordingState\n        lastRecordingState = active\n        evaluateContextAutomation()'''
+          new = '''    private func recordingStateChanged(_ active: Bool) {\n        let changed = active != lastRecordingState\n        lastRecordingState = active\n        evaluateContextAutomation()'''
+          if old not in s:
+              raise SystemExit('recording state anchor not found')
 
-    private func windowDescriptions(frontmostPID: pid_t? = nil) -> [String] {
-        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
-        return list.compactMap { info in
-            if let frontmostPID,
-               let pid = info[kCGWindowOwnerPID as String] as? pid_t,
-               pid != frontmostPID { return nil }
-            let owner = info[kCGWindowOwnerName as String] as? String ?? ""
-            let name = info[kCGWindowName as String] as? String ?? ""
-            guard !owner.isEmpty || !name.isEmpty else { return nil }
-            return "\(owner) \(name)"
-        }
-    }
-
-    private func heuristicScreenRecordingActive() -> Bool {'''
-
-          s2, count = pattern.subn(replacement, s, count=1)
-          if count != 1:
-              raise SystemExit(f'context matcher replacement count={count}')
-
-          # App triggers should accept comma/semicolon/newline-separated app names and bundle IDs too.
-          old = '''                let queries = trigger.applicationNames.map { $0.lowercased() }\n                if queries.isEmpty || queries.contains(where: { query in values.contains(where: { $0.contains(query) }) }) { fire(trigger: trigger, profile: profile) }'''
-          new = '''                let queries = trigger.applicationNames\n                    .flatMap { contextQueries($0) }\n                if queries.isEmpty || queries.contains(where: { query in values.contains(where: { $0.localizedCaseInsensitiveContains(query) }) }) { fire(trigger: trigger, profile: profile) }'''
-          if old in s2:
-              s2 = s2.replace(old, new, 1)
-
-          p.write_text(s2)
-      - name: Commit context fix
+          p.write_text(s)
+      - name: Commit screen recording fix
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Halo/Services/CaptureService.swift
-          git commit -m "Fix Teleprompter context matching"
+          git commit -m "Fix screen recording context trigger"
           git push origin main
