@@ -554,7 +554,7 @@ struct SurfaceViewportView: View {
 }
 
 private enum ActiveContextInterface: String {
-    case drop, music, bluetooth, retro
+    case drop, teleprompter, music, bluetooth, retro
 }
 
 struct SurfaceView: View {
@@ -563,6 +563,8 @@ struct SurfaceView: View {
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject private var bluetooth = BluetoothStateService.shared
     @State private var teleprompterActive = false
+    @AppStorage("HaloContextTeleprompterEnabled") private var teleprompterCIEnabled = true
+    @AppStorage("HaloContextTeleprompterPriority") private var teleprompterPriority = 70.0
     @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
     @AppStorage("HaloContextMusicUseFullNotchArea") private var contextMusicUsesFullNotchArea = false
     @AppStorage("HaloContextMusicKeepClosedNotchContents") private var contextMusicKeepsClosedContents = false
@@ -596,7 +598,10 @@ struct SurfaceView: View {
             candidates.append((.drop, dropPriority, 4))
         }
         if retroCIEnabled && retroGameRequested {
-            candidates.append((.retro, retroPriority, 3))
+            candidates.append((.retro, retroPriority, 4))
+        }
+        if teleprompterCIEnabled && teleprompterActive {
+            candidates.append((.teleprompter, teleprompterPriority, 3))
         }
         if contextOptions.enabled && workspace.media.isPlaying {
             candidates.append((.music, contextMusicPriority, 2))
@@ -613,6 +618,7 @@ struct SurfaceView: View {
     private var contextMusicActive: Bool { activeContext == .music }
     private var bluetoothContextActive: Bool { activeContext == .bluetooth }
     private var retroContextActive: Bool { activeContext == .retro }
+    private var teleprompterContextActive: Bool { activeContext == .teleprompter }
     private var contextOwnsFullSurface: Bool {
         guard state.expanded else { return false }
         switch activeContext {
@@ -620,6 +626,7 @@ struct SurfaceView: View {
         case .music: return contextMusicUsesFullNotchArea
         case .bluetooth: return bluetoothUsesFullNotchArea
         case .retro: return retroUsesFullNotchArea
+        case .teleprompter: return true
         case .none: return false
         }
     }
@@ -629,6 +636,7 @@ struct SurfaceView: View {
         case .music: return contextMusicKeepsClosedContents
         case .bluetooth: return bluetoothKeepsClosedContents
         case .retro: return retroKeepsClosedContents
+        case .teleprompter: return false
         case .none:
             // The two opened-layout systems are mutually exclusive. The Default
             // layout is the only system allowed to keep its closed-notch strip.
@@ -841,13 +849,17 @@ struct SurfaceView: View {
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloTeleprompterVisibilityChanged"))) { note in
             let active = (note.userInfo?["active"] as? Bool) ?? false
             teleprompterActive = active
-            if active {
-                state.collapseTask?.cancel()
-                if !state.pinned { state.expanded = false }
+            DispatchQueue.main.async {
+                let owns = teleprompterCIEnabled && teleprompterActive && activeContext == .teleprompter
+                NotificationCenter.default.post(name: .init("HaloTeleprompterCIOwnershipChanged"), object: nil, userInfo: ["owns": owns])
+                if owns {
+                    state.collapseTask?.cancel()
+                    if !state.pinned { state.expanded = false }
+                }
             }
         }
         .onHover { hovering in
-            if teleprompterActive {
+            if teleprompterContextActive {
                 state.collapseTask?.cancel()
                 if !state.pinned { state.expanded = false }
             } else {
@@ -863,7 +875,7 @@ struct SurfaceView: View {
         .onAppear { workspace.setOpenedNotchVisible(state.expanded && activeContext == nil, token: openVisibilityToken) }
         .onDisappear { workspace.setOpenedNotchVisible(false, token: openVisibilityToken) }
         .onChange(of: state.expanded) { expanded in
-            if teleprompterActive && expanded && activeContext == nil {
+            if teleprompterContextActive && expanded {
                 state.expanded = false
                 workspace.setOpenedNotchVisible(false, token: openVisibilityToken)
                 return
@@ -875,6 +887,12 @@ struct SurfaceView: View {
             }
         }
         .onChange(of: activeContext) { _ in
+            let owns = teleprompterCIEnabled && teleprompterActive && activeContext == .teleprompter
+            NotificationCenter.default.post(name: .init("HaloTeleprompterCIOwnershipChanged"), object: nil, userInfo: ["owns": owns])
+            if owns {
+                state.collapseTask?.cancel()
+                if !state.pinned { state.expanded = false }
+            }
             workspace.setOpenedNotchVisible(state.expanded && activeContext == nil, token: openVisibilityToken)
         }
     }

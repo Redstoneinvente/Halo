@@ -359,6 +359,13 @@ final class TeleprompterCoordinator: NSObject {
         installInputMonitors(); installWorkspaceObservers(); installRecordingPolling(); installContextAutomation()
         NotificationCenter.default.addObserver(self, selector: #selector(openSettingsNotification), name: .init("HaloOpenTeleprompterSettings"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(toggleNotification), name: .init("HaloToggleTeleprompter"), object: nil)
+        observers.append(NotificationCenter.default.addObserver(forName: .init("HaloTeleprompterCIOwnershipChanged"), object: nil, queue: .main) { [weak self] note in
+            let owns = (note.userInfo?["owns"] as? Bool) ?? false
+            Task { @MainActor in
+                guard let self else { return }
+                if !owns, self.promptPanel?.isVisible == true { self.hidePrompt() }
+            }
+        })
         for name in ["HaloScreenRecordingStateChanged", "HaloHUDScreenRecordingStateChanged"] {
             observers.append(NotificationCenter.default.addObserver(forName: .init(name), object: nil, queue: .main) { [weak self] note in
                 let active = (note.userInfo?["active"] as? Bool) ?? (note.userInfo?["recording"] as? Bool) ?? false
@@ -378,6 +385,7 @@ final class TeleprompterCoordinator: NSObject {
     }
 
     func show(profile: TeleprompterProfile) {
+        guard UserDefaults.standard.object(forKey: "HaloContextTeleprompterEnabled") as? Bool ?? true else { return }
         guard profile.enabled else { return }
         contextOwnedProfileID = nil
         hidePrompt()

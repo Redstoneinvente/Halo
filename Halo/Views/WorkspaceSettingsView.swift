@@ -955,10 +955,12 @@ private struct ContextInterfaceLibraryView: View {
 
 private struct TeleprompterContextInterfaceCard: View {
     let action: () -> Void
+    @AppStorage("HaloContextTeleprompterEnabled") private var ciEnabled = true
+    @AppStorage("HaloContextTeleprompterPriority") private var priority = 70.0
     @ObservedObject private var teleprompter = TeleprompterStore.shared
     @State private var hovered = false
 
-    private var enabled: Bool { teleprompter.profiles.contains(where: { $0.enabled }) }
+    private var enabled: Bool { ciEnabled && teleprompter.profiles.contains(where: { $0.enabled }) }
     private var triggerCount: Int { teleprompter.profiles.reduce(0) { $0 + $1.triggers.filter(\.enabled).count } }
 
     var body: some View {
@@ -1004,6 +1006,8 @@ private struct TeleprompterContextInterfaceCard: View {
                         .font(.caption2).foregroundStyle(.secondary)
                     Text("\(triggerCount) trigger\(triggerCount == 1 ? "" : "s")")
                         .font(.caption2).foregroundStyle(.secondary)
+                    Text("Priority \(Int(priority))")
+                        .font(.caption2).foregroundStyle(.secondary)
                     Spacer()
                     Label("Edit", systemImage: "chevron.right")
                         .font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
@@ -1024,9 +1028,17 @@ private struct TeleprompterContextInterfaceCard: View {
 
 private struct TeleprompterContextSettings: View {
     @ObservedObject private var teleprompter = TeleprompterStore.shared
+    @AppStorage("HaloContextTeleprompterEnabled") private var ciEnabled = true
+    @AppStorage("HaloContextTeleprompterPriority") private var priority = 70.0
 
     var body: some View {
         Section("Teleprompter Context Interface") {
+            Toggle("Enable Teleprompter CI", isOn: $ciEnabled)
+                .onChange(of: ciEnabled) { enabled in
+                    if !enabled { TeleprompterCoordinator.shared.hidePrompt() }
+                }
+            Text("Disabling Teleprompter CI keeps your scripts, profiles, triggers and contexts saved, but prevents the CI from opening.")
+                .font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 12) {
                 Image(systemName: "text.bubble.fill")
                     .font(.system(size: 22, weight: .semibold))
@@ -1042,6 +1054,12 @@ private struct TeleprompterContextSettings: View {
                 Button("Open Teleprompter Studio…") { TeleprompterCoordinator.shared.showSettings() }
                     .buttonStyle(.borderedProminent)
             }
+        }
+
+        Section("CI priority") {
+            Slider(value: $priority, in: 0...100, step: 1) { Text("Teleprompter CI priority") }
+            Text("When multiple Context Interfaces are eligible, Halo gives notch ownership to the enabled CI with the highest priority. Teleprompter defaults to 70, between Retro and Music.")
+                .font(.caption).foregroundStyle(.secondary)
         }
 
         Section("Profiles") {
