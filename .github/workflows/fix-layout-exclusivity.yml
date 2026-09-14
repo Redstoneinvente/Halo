@@ -1,0 +1,66 @@
+name: Fix layout exclusivity
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-layout-exclusivity.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Make layout systems mutually exclusive
+        shell: python
+        run: |
+          from pathlib import Path
+
+          surface = Path("Halo/Views/SurfaceView.swift")
+          text = surface.read_text()
+          old = """        case .none: return keepClosedContentsWhenOpen
+"""
+          new = """        case .none:
+            // Visual Workspace owns the entire opened surface. Never layer the
+            // Default/closed-notch strip over it, even if the legacy preference
+            // was enabled before the user switched layout systems.
+            return layout.resolvedUsesCustomOpenNotchWorkspace ? false : keepClosedContentsWhenOpen
+"""
+          if old not in text:
+              raise SystemExit("SurfaceView exclusivity anchor not found")
+          text = text.replace(old, new, 1)
+          surface.write_text(text)
+
+          settings = Path("Halo/Views/WorkspaceSettingsView.swift")
+          text = settings.read_text()
+          old = '''                set: { workspace.settings.layout.setCustomOpenNotchWorkspaceEnabled($0 == "visual") }
+'''
+          new = '''                set: { value in
+                    let useVisualWorkspace = value == "visual"
+                    workspace.settings.layout.setCustomOpenNotchWorkspaceEnabled(useVisualWorkspace)
+                    // These are alternate opened-surface systems. Visual Workspace
+                    // must never inherit the Default layout's top-strip overlay.
+                    if useVisualWorkspace { keepClosedContentsWhenOpen = false }
+                }
+'''
+          if old not in text:
+              raise SystemExit("WorkspaceSettings exclusivity anchor not found")
+          text = text.replace(old, new, 1)
+          settings.write_text(text)
+
+      - name: Commit fix and remove temporary workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/fix-layout-exclusivity.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Views/SurfaceView.swift Halo/Views/WorkspaceSettingsView.swift .github/workflows/fix-layout-exclusivity.yml
+          git commit -m "Make Visual Workspace and default layout mutually exclusive"
+          git push origin HEAD:main
