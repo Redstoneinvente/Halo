@@ -3,9 +3,9 @@ import Sparkle
 import SwiftUI
 
 @MainActor
-final class HaloUpdateController: NSObject {
+final class HaloUpdateController: NSObject, SPUUpdaterDelegate {
     static let shared = HaloUpdateController()
-    private let controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil)
+    private lazy var controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
     private var updaterStarted = false
     private override init() { super.init() }
 
@@ -43,6 +43,42 @@ final class HaloUpdateController: NSObject {
         guard isConfigured else { return false }
         if !updaterStarted { controller.startUpdater(); updaterStarted = true }
         return true
+    }
+
+    func updater(_ updater: SPUUpdater, willDownloadUpdate item: SUAppcastItem, with request: NSMutableURLRequest) {
+        HaloUpdateAnimationPreviewController.shared.beginRealUpdate(version: item.displayVersionString)
+    }
+
+    func updater(_ updater: SPUUpdater, didDownloadUpdate item: SUAppcastItem) {
+        HaloUpdateAnimationPreviewController.shared.realDownloadFinished()
+    }
+
+    func updater(_ updater: SPUUpdater, failedToDownloadUpdate item: SUAppcastItem, error: any Error) {
+        HaloUpdateAnimationPreviewController.shared.dismiss()
+    }
+
+    func userDidCancelDownload(_ updater: SPUUpdater) {
+        HaloUpdateAnimationPreviewController.shared.dismiss()
+    }
+
+    func updater(_ updater: SPUUpdater, willExtractUpdate item: SUAppcastItem) {
+        HaloUpdateAnimationPreviewController.shared.realExtracting()
+    }
+
+    func updater(_ updater: SPUUpdater, didExtractUpdate item: SUAppcastItem) {
+        HaloUpdateAnimationPreviewController.shared.realExtracted()
+    }
+
+    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+        HaloUpdateAnimationPreviewController.shared.realInstalling()
+    }
+
+    func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        HaloUpdateAnimationPreviewController.shared.realWillRelaunch()
+    }
+
+    func updater(_ updater: SPUUpdater, didAbortWithError error: any Error) {
+        HaloUpdateAnimationPreviewController.shared.dismiss()
     }
 }
 
@@ -183,6 +219,7 @@ private struct HaloWhatsNewView: View {
 
 private enum HaloUpdatePhase: String {
     case ready = "Ready"
+    case downloading = "Downloading"
     case installing = "Installing"
     case verifying = "Verifying"
     case finishing = "Finishing"
@@ -265,6 +302,56 @@ final class HaloUpdateAnimationPreviewController {
     private var panel: NSPanel?
     private var task: Task<Void, Never>?
     private init() {}
+
+    func beginRealUpdate(version: String) {
+        task?.cancel()
+        task = nil
+        guard let screen = HaloPhysicalNotchGeometry.targetScreen() else { return }
+        let geometry = HaloPhysicalNotchGeometry.measure(on: screen)
+        show(version: version, geometry: geometry)
+
+        let defaults = UserDefaults.standard
+        let showDetails = defaults.object(forKey: "HaloUpdateShowExpandedDetails") as? Bool ?? true
+        model.progress = 0.02
+        model.phase = .downloading
+        model.detailsVisible = false
+        model.pulse = false
+        model.poweredDown = false
+
+        if showDetails {
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) { model.detailsVisible = true }
+        }
+        withAnimation(.easeOut(duration: 12)) { model.progress = 0.72 }
+    }
+
+    func realDownloadFinished() {
+        model.phase = .verifying
+        withAnimation(.easeOut(duration: 0.25)) { model.progress = max(model.progress, 0.78) }
+    }
+
+    func realExtracting() {
+        model.phase = .verifying
+        withAnimation(.easeInOut(duration: 0.35)) { model.progress = max(model.progress, 0.88) }
+    }
+
+    func realExtracted() {
+        model.phase = .finishing
+        withAnimation(.easeOut(duration: 0.25)) { model.progress = max(model.progress, 0.94) }
+    }
+
+    func realInstalling() {
+        model.phase = .installing
+        withAnimation(.easeOut(duration: 0.35)) {
+            model.progress = 1
+            model.pulse = true
+        }
+    }
+
+    func realWillRelaunch() {
+        model.phase = .updated
+        withAnimation(.easeOut(duration: 0.18)) { model.pulse = false }
+        withAnimation(.easeInOut(duration: 0.22)) { model.detailsVisible = false }
+    }
 
     func play(version: String) {
         task?.cancel()
