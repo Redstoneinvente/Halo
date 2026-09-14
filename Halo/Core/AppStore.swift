@@ -1239,12 +1239,14 @@ final class HaloLicenseManager: ObservableObject {
             let json = try await request(endpoint: "activate", body: payload)
             let parsed = parseValidation(json)
             guard parsed.valid else { throw HaloCommercialError.message(parsed.message ?? "License activation was rejected.") }
-            HaloKeychain.set(cleaned, for: licenseKeyKey)
+            guard HaloKeychain.set(cleaned, for: licenseKeyKey) else {
+                throw HaloCommercialError.message("Halo activated the license, but could not save it securely in Keychain. Please allow Keychain access and try again.")
+            }
             licenseHint = Self.hint(cleaned)
             trialExpiryTask?.cancel()
             details = parsed.details
             state = .valid(plan: parsed.details.plan.isEmpty ? nil : parsed.details.plan)
-            notice = "License activated on this Mac."
+            notice = "License activated and saved on this Mac."
         } catch {
             state = .invalid(readable(error))
             errorMessage = readable(error)
@@ -1711,8 +1713,18 @@ final class HaloLicenseManager: ObservableObject {
 
     private func fingerprint() -> String {
         if let existing = HaloKeychain.string(for: fingerprintKey), !existing.isEmpty { return existing }
+
+        // A device fingerprint is not a secret. Keep a UserDefaults mirror so a temporary
+        // Keychain write/read failure cannot make this Mac look like a new device at every launch.
+        let fallbackKey = "HaloLicenseSeatDeviceFingerprintV1"
+        if let fallback = UserDefaults.standard.string(forKey: fallbackKey), !fallback.isEmpty {
+            _ = HaloKeychain.set(fallback, for: fingerprintKey)
+            return fallback
+        }
+
         let value = "halo-\(UUID().uuidString.lowercased())"
-        HaloKeychain.set(value, for: fingerprintKey)
+        UserDefaults.standard.set(value, forKey: fallbackKey)
+        _ = HaloKeychain.set(value, for: fingerprintKey)
         return value
     }
 
