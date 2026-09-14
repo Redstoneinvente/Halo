@@ -269,10 +269,16 @@ final class HaloAccountLicenseManager: ObservableObject {
 
     // MARK: - Press license test path
 
+    private static func isPressLicenseKey(_ key: String) -> Bool {
+        key.trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .hasPrefix("PK_")
+    }
+
     private func restorePressLicenseIfPresent() {
         guard let saved = UserDefaults.standard.string(forKey: Self.pressLicenseDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
-              saved.hasPrefix("PK_") else { return }
+              Self.isPressLicenseKey(saved) else { return }
 
         activePressLicenseKey = saved
         nextLicenseValidation = nil
@@ -298,7 +304,7 @@ final class HaloAccountLicenseManager: ObservableObject {
         // Press keys are intentionally routed before LicenseSeat. During this
         // test phase any PK_ key is accepted locally; Firestore validation and
         // one-way account/device binding will replace this temporary grant.
-        if trimmed.hasPrefix("PK_") {
+        if Self.isPressLicenseKey(trimmed) {
             await activatePressLicenseForTesting(trimmed)
             return
         }
