@@ -57,6 +57,11 @@ if ! grep -Eq '^HALO_SPARKLE_FEED_URL[[:space:]]*=' "$SECRETS"; then
   exit 1
 fi
 
+# Code signing rejects resource forks/Finder metadata. Strip extended attributes
+# from source resources before Xcode copies them into Halo.app.
+echo "Sanitizing source extended attributes for code signing…" >&2
+xattr -cr "$ROOT/Halo" "$ROOT/Assets.xcassets" 2>/dev/null || true
+
 rm -rf "$WORK_ROOT"
 mkdir -p "$WORK_ROOT/base-derived" "$WORK_ROOT/candidate-derived" "$WORK_ROOT/updates" "$WORK_ROOT/install"
 
@@ -70,7 +75,7 @@ build_halo() {
   echo "Xcode: $(xcodebuild -version | tr '\n' ' ')" >&2
   echo "Developer dir: $DEVELOPER_DIR_ACTIVE" >&2
 
-  if ! xcodebuild \
+  if ! COPYFILE_DISABLE=1 xcodebuild \
     -project "$ROOT/Halo.xcodeproj" \
     -scheme Halo \
     -configuration Release \
@@ -86,7 +91,14 @@ build_halo() {
       echo "Xcode failed while building Halo $version ($build)." >&2
       echo "Full build log: $log" >&2
       echo "First signing-related diagnostics:" >&2
-      grep -E -m 20 'error:|CodeSign|codesign|provision|certificate|identity|Signing' "$log" >&2 || true
+      grep -E -m 30 'resource fork|Finder information|error:|CodeSign|codesign|provision|certificate|identity|Signing' "$log" >&2 || true
+
+      local failed_app="$derived/Build/Products/Release/Halo.app"
+      if [[ -d "$failed_app" ]]; then
+        echo >&2
+        echo "Extended attributes remaining in failed Halo.app:" >&2
+        xattr -lr "$failed_app" 2>/dev/null | grep -E '(^/|com\.apple\.(FinderInfo|ResourceFork|quarantine|provenance))' | head -n 120 >&2 || true
+      fi
       exit 1
   fi
 
@@ -122,8 +134,8 @@ CANDIDATE_APP="$(build_halo 0.2.1 201 "$WORK_ROOT/candidate-derived")"
 ditto "$BASE_APP" "$WORK_ROOT/install/Halo.app"
 
 # Keep both full archives so generate_appcast can produce a proper version history and delta when compatible.
-ditto -c -k --sequesterRsrc --keepParent "$BASE_APP" "$WORK_ROOT/updates/Halo-0.2.0.zip"
-ditto -c -k --sequesterRsrc --keepParent "$CANDIDATE_APP" "$WORK_ROOT/updates/Halo-0.2.1.zip"
+COPYFILE_DISABLE=1 ditto -c -k --sequesterRsrc --keepParent "$BASE_APP" "$WORK_ROOT/updates/Halo-0.2.0.zip"
+COPYFILE_DISABLE=1 ditto -c -k --sequesterRsrc --keepParent "$CANDIDATE_APP" "$WORK_ROOT/updates/Halo-0.2.1.zip"
 
 cat > "$WORK_ROOT/updates/Halo-0.2.1.md" <<'EOF'
 # Halo 0.2.1
