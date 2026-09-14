@@ -1053,7 +1053,7 @@ private struct ClipboardContextInterfaceCard: View {
                         .padding(.horizontal, 7).padding(.vertical, 4)
                         .background((enabled ? Color.accentColor : Color.secondary).opacity(0.12), in: Capsule())
                 }
-                Text("Turns the notch into a contextual action bar after you copy text, links, email addresses, phone numbers, files, JSON or addresses.")
+                Text("Turns the notch into a contextual action bar after you copy text, links, images, videos, files and more — with optional in-memory history.")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(3)
                 HStack(spacing: 7) {
                     Label(triggerMode, systemImage: triggerMode == "Pop Up" ? "rectangle.portrait.and.arrow.forward" : "cursorarrow.motionlines")
@@ -1094,6 +1094,9 @@ private struct ClipboardContextSettings: View {
     @AppStorage("HaloContextClipboardSearchEngine") private var searchEngine = "Google"
     @AppStorage("HaloContextClipboardBackgroundStyle") private var backgroundStyle = "Adaptive"
     @AppStorage("HaloContextClipboardExcludedApps") private var excludedApps = ""
+    @AppStorage("HaloContextClipboardHistoryEnabled") private var historyEnabled = true
+    @AppStorage("HaloContextClipboardShowHistory") private var showHistory = true
+    @AppStorage("HaloContextClipboardHistoryLimit") private var historyLimit = 8
 
     var body: some View {
         Group {
@@ -1104,12 +1107,12 @@ private struct ClipboardContextSettings: View {
                     Text("Stay closed — hover to open").tag("Hover to Open")
                 }
                 LabeledContent("Timeout") {
-                    Slider(value: $timeout, in: 1...60, step: 1)
-                    Text("\(Int(timeout)) s").font(.caption.monospacedDigit()).frame(width: 48)
+                    Slider(value: $timeout, in: 1...120, step: 1)
+                    Text("\(Int(timeout)) s").font(.caption.monospacedDigit()).frame(width: 52)
                 }
                 Text(triggerMode == "Pop Up"
-                     ? "A copy immediately opens Clipboard CI. It closes again when the timeout expires unless Halo is pinned."
-                     : "A copy replaces the closed notch with Clipboard CI, but does not open it. Hovering the notch opens it even if Halo's global hover-to-expand setting is off. The timeout pauses while you are interacting with the opened CI.")
+                     ? "A copy immediately opens Clipboard CI. The countdown pauses only while your pointer is over the CI, then resumes when you leave."
+                     : "A copy replaces the closed notch with Clipboard CI without opening it. Hovering opens it even if Halo's global hover-to-expand setting is off. The countdown pauses while your pointer is over the CI.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -1127,8 +1130,8 @@ private struct ClipboardContextSettings: View {
                 Toggle("Show copied preview while closed", isOn: $showClosedPreview)
                 Toggle("Show content type", isOn: $showType)
                 Toggle("Show source app", isOn: $showSource)
-                Toggle("Show character / word count", isOn: $showCharacterCount)
-                LabeledContent("Preview lines") {
+                Toggle("Show content details", isOn: $showCharacterCount)
+                LabeledContent("Text preview lines") {
                     Stepper("\(previewLines)", value: $previewLines, in: 1...6).labelsHidden()
                     Text("\(previewLines)").font(.caption.monospacedDigit()).frame(width: 24)
                 }
@@ -1136,7 +1139,20 @@ private struct ClipboardContextSettings: View {
                     Stepper("\(maxActions)", value: $maxActions, in: 2...8).labelsHidden()
                     Text("\(maxActions)").font(.caption.monospacedDigit()).frame(width: 24)
                 }
-                Text("Both the closed and opened notch resize from the content you choose to show. Disabling preview/details makes Clipboard CI physically smaller.")
+                Text("Clipboard CI resizes for the selected content. Images get a visual preview, videos get a media card, and text uses your chosen number of preview lines.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Clipboard history") {
+                Toggle("Keep in-memory history", isOn: $historyEnabled)
+                Toggle("Show history in Clipboard CI", isOn: $showHistory).disabled(!historyEnabled)
+                LabeledContent("History items") {
+                    Stepper("\(historyLimit)", value: $historyLimit, in: 2...20)
+                        .labelsHidden()
+                    Text("\(historyLimit)").font(.caption.monospacedDigit()).frame(width: 28)
+                }
+                .disabled(!historyEnabled)
+                Text("History can contain text, links, file references, image previews and videos. It lives only in memory and is cleared when Halo quits; sensitive/transient clipboard types are never added.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -1149,7 +1165,7 @@ private struct ClipboardContextSettings: View {
                 }.disabled(!showSearch)
                 Toggle("Offer text transforms", isOn: $showTransforms)
                 Toggle("Dismiss CI after an action", isOn: $autoCloseAfterAction)
-                Text("Halo chooses actions from the copied content: open links, compose email, FaceTime numbers, reveal files, pretty-print JSON, open addresses in Maps, search text, transform text, or copy the result.")
+                Text("Actions adapt to the payload: open links, compose email, FaceTime numbers, reveal files, open videos, preview/save/copy images, pretty-print JSON, open addresses in Maps, search text, transform text, or restore an earlier history item.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -1165,7 +1181,7 @@ private struct ClipboardContextSettings: View {
 
             Section("Privacy") {
                 TextField("Excluded app bundle IDs, comma-separated", text: $excludedApps)
-                Text("Clipboard CI only inspects a new pasteboard item while this CI is enabled. macOS concealed/transient clipboard types are ignored, excluded apps suppress the trigger, and Clipboard CI itself does not persist copied content to disk.")
+                Text("Clipboard CI only inspects a new pasteboard item while this CI is enabled. macOS concealed/transient clipboard types are ignored, excluded apps suppress the trigger, and Clipboard CI never persists clipboard contents or history to disk.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
