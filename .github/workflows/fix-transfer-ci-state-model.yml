@@ -1,0 +1,26 @@
+name: Fix Transfer CI State Model
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Run Transfer CI state-model repair'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Apply Transfer CI state-model repair
+        run: python3 scripts/fix_transfer_ci_state_model.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Views/SurfaceView.swift
+          git commit -m 'Make Transfer CI follow normal notch open close behavior'
+          git push
