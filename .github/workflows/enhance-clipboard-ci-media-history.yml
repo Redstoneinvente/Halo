@@ -1,0 +1,38 @@
+name: Enhance Clipboard CI Media History
+
+on:
+  push:
+    paths:
+      - '.github/clipboard-ci-media-history-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply Clipboard CI enhancements
+        run: python3 scripts/enhance_clipboard_ci_media_history.py
+      - name: Verify enhancements
+        run: |
+          grep -q 'remainingSeconds' Halo/Views/SurfaceView.swift
+          grep -q 'case image = "Image"' Halo/Views/SurfaceView.swift
+          grep -q 'case video = "Video"' Halo/Views/SurfaceView.swift
+          grep -q 'Clipboard history' Halo/Views/WorkspaceSettingsView.swift
+          grep -q 'clipboardCI.setInteractionActive(clipboardContextActive && hovering)' Halo/Views/SurfaceView.swift
+      - name: Commit enhancements
+        run: |
+          if git diff --quiet; then
+            echo 'No changes needed'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Views/SurfaceView.swift Halo/Views/WorkspaceSettingsView.swift
+          git commit -m 'Enhance Clipboard CI media history and timeout behavior'
+          git push
