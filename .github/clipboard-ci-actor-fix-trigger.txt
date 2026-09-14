@@ -1,0 +1,1 @@
+fix Clipboard CI main-actor isolation
