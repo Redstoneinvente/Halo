@@ -629,10 +629,9 @@ struct SurfaceView: View {
         case .bluetooth: return bluetoothKeepsClosedContents
         case .retro: return retroKeepsClosedContents
         case .none:
-            // Visual Workspace owns the entire opened surface. Never layer the
-            // Default/closed-notch strip over it, even if the legacy preference
-            // was enabled before the user switched layout systems.
-            return layout.resolvedUsesCustomOpenNotchWorkspace ? false : keepClosedContentsWhenOpen
+            // The two opened-layout systems are mutually exclusive. The Default
+            // layout is the only system allowed to keep its closed-notch strip.
+            return usesDefaultWorkspace && keepClosedContentsWhenOpen
         }
     }
     private var closedBackgroundOptions: ClosedNotchOptions {
@@ -663,12 +662,14 @@ struct SurfaceView: View {
     @State private var page = 0
     @State private var openVisibilityToken = UUID()
     private var modules: [ModuleID] { layout.normalizedOrder().filter { layout.enabled.contains($0) } }
+    private var usesVisualWorkspace: Bool { layout.resolvedUsesCustomOpenNotchWorkspace }
+    private var usesDefaultWorkspace: Bool { !usesVisualWorkspace }
     private var accent: Color { Color(hue: theme.tint, saturation: 0.65, brightness: 1) }
     var body: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
                 if !contextOwnsFullSurface &&
-                    !(state.expanded && activeContext == nil && layout.resolvedUsesCustomOpenNotchWorkspace) {
+                    !(state.expanded && activeContext == nil && usesVisualWorkspace) {
                     Group {
                       if !state.expanded && (state.compactWidth < 48 || state.compactHeight < 16) {
                         Circle().fill(store.deadline == nil ? accent : .green).frame(width: 6, height: 6)
@@ -719,7 +720,7 @@ struct SurfaceView: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
                         }
-                    } else if layout.resolvedUsesCustomOpenNotchWorkspace {
+                    } else if usesVisualWorkspace {
                         // The Visual Workspace receives one authoritative canvas: exactly the
                         // expanded surface proposed by the notch window. Region percentages are
                         // resolved only against this rectangle, never against intrinsic content.
@@ -773,7 +774,7 @@ struct SurfaceView: View {
                                 Button { state.pinned.toggle() } label: { Image(systemName: state.pinned ? "pin.fill" : "pin") }
                                     .help("Keep expanded").accessibilityLabel("Keep expanded")
                             }
-                            openDashboardContent
+                            legacyOpenDashboardContent
                             HStack {
                                 Spacer()
                                 Button("Settings") { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) }
@@ -858,7 +859,7 @@ struct SurfaceView: View {
 
     @ViewBuilder private var surfaceBackgroundLayer: some View {
         ZStack {
-            if state.expanded && activeContext == nil && layout.resolvedUsesCustomOpenNotchWorkspace {
+            if state.expanded && activeContext == nil && usesVisualWorkspace {
                 OpenNotchBackgroundView(options: layout.resolvedOpenNotchLayout.appearance, fallback: layout.appearance, theme: theme, system: workspace.system)
             } else {
                 SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
@@ -871,7 +872,7 @@ struct SurfaceView: View {
 
     @ViewBuilder private var surfaceOverlayLayer: some View {
         contour.stroke(state.dropTargeted ? accent : .white.opacity(0.12), lineWidth: state.dropTargeted ? 1.6 : 1)
-        if state.expanded && activeContext == nil && layout.resolvedUsesCustomOpenNotchWorkspace {
+        if state.expanded && activeContext == nil && usesVisualWorkspace {
             OpenNotchSurfaceChrome(contour: contour, options: layout.resolvedOpenNotchLayout.appearance)
         }
     }
@@ -884,13 +885,6 @@ struct SurfaceView: View {
         }
     }
 
-    @ViewBuilder private var openDashboardContent: some View {
-        if layout.resolvedUsesCustomOpenNotchWorkspace {
-            OpenNotchWorkspaceView(layout: layout, store: store, mode: layout.resolvedOpenNotchLayout.resolvedContentMode, page: $page)
-        } else {
-            legacyOpenDashboardContent
-        }
-    }
 
     @ViewBuilder private var legacyOpenDashboardContent: some View {
         switch layout.resolvedOpenNotchContentMode {

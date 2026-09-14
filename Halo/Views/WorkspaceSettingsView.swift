@@ -335,10 +335,18 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             }
         }
 
-        Section("Opened notch behavior") {
-            Toggle("Keep closed-notch contents visible when opened", isOn: $keepClosedContentsWhenOpen)
-            Text("Keeps the normal Closed Notch widgets and media visible in the top strip. Context Interfaces keep their own layout rules.")
-                .font(.caption).foregroundStyle(.secondary)
+        if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+            Section("Opened notch behavior") {
+                Label("Visual Workspace owns the opened notch", systemImage: "rectangle.3.group")
+                Text("Default-layout chrome and the closed-notch top strip are disabled while Visual Workspace is active. Switch back to Default to use those options.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } else {
+            Section("Opened notch behavior") {
+                Toggle("Keep closed-notch contents visible when opened", isOn: $keepClosedContentsWhenOpen)
+                Text("Keeps the normal Closed Notch widgets and media visible in the top strip. Context Interfaces keep their own layout rules.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
