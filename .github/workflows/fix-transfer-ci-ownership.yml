@@ -1,0 +1,26 @@
+name: Fix Transfer CI Ownership
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Run Transfer CI ownership patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Apply Transfer CI ownership patch
+        run: python3 scripts/fix_transfer_ci_ownership.py
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Halo/Views/SurfaceView.swift Halo/Views/WorkspaceSettingsView.swift
+          git commit -m 'Fix Transfer CI notch ownership and background customization'
+          git push
