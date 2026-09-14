@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreGraphics
 import UniformTypeIdentifiers
 import Darwin
 
@@ -1274,6 +1275,7 @@ private final class ClipboardContextMonitor: ObservableObject {
     @Published private(set) var image: NSImage?
     @Published private(set) var fileURL: URL?
     @Published private(set) var history: [ClipboardHistoryItem] = []
+    @Published private(set) var manualPresentation = false
     @Published private(set) var isActive = false
     @Published private(set) var copiedAt: Date?
     @Published private(set) var expiresAt: Date?
@@ -1285,6 +1287,7 @@ private final class ClipboardContextMonitor: ObservableObject {
     private var changeCount = NSPasteboard.general.changeCount
     private var timer: Timer?
     private var interactionActive = false
+    private var pasteTargetPID: pid_t?
     private let interval = 0.20
 
     private init() {
@@ -1361,6 +1364,9 @@ private final class ClipboardContextMonitor: ObservableObject {
             if boolDefault("HaloContextClipboardShowSearch", true) {
                 result.append(.init(id: "search", title: "Search Web", symbol: "magnifyingglass"))
             }
+            if boolDefault("HaloContextClipboardShowTranslate", true) {
+                result.append(.init(id: "translate", title: "Translate", symbol: "character.bubble.fill"))
+            }
             if boolDefault("HaloContextClipboardShowTransforms", true) {
                 result += [
                     .init(id: "trim", title: "Trim + Copy", symbol: "scissors"),
@@ -1369,6 +1375,10 @@ private final class ClipboardContextMonitor: ObservableObject {
                 ]
             }
         }
+
+        // Paste is deliberately first so it remains visible even when the user
+        // limits the number of contextual actions.
+        result.insert(.init(id: "paste", title: "Paste", symbol: "doc.on.clipboard.fill"), at: 0)
 
         let copyTitle: String
         switch kind {
@@ -1386,6 +1396,30 @@ private final class ClipboardContextMonitor: ObservableObject {
 
     func setInteractionActive(_ active: Bool) {
         interactionActive = active
+    }
+
+    /// Opens Clipboard CI intentionally, independent of whether a fresh copy event occurred.
+    /// The most recent in-memory history item is preferred, then the current pasteboard.
+    @discardableResult
+    func presentHistory() -> Bool {
+        rememberPasteTarget()
+        manualPresentation = true
+
+        if isActive, !text.isEmpty {
+            restartTimeout()
+            eventSerial &+= 1
+            return true
+        }
+
+        if let latest = history.first {
+            activateHistory(latest)
+            manualPresentation = true
+            return true
+        }
+
+        capture(NSPasteboard.general)
+        manualPresentation = isActive
+        return isActive
     }
 
     func dismiss() {
@@ -1436,6 +1470,10 @@ private final class ClipboardContextMonitor: ObservableObject {
             if let url = components?.url { NSWorkspace.shared.open(url) }
         case "search":
             openSearch(trimmed)
+        case "translate":
+            openTranslation(trimmed)
+        case "paste":
+            pasteCurrentPayload()
         case "pretty":
             if let data = trimmed.data(using: .utf8),
                let object = try? JSONSerialization.jsonObject(with: data),
@@ -1548,6 +1586,10 @@ private final class ClipboardContextMonitor: ObservableObject {
         image = capturedImage
         fileURL = capturedFileURL
         sourceAppName = app?.localizedName ?? "Mac"
+        if app?.bundleIdentifier != Bundle.main.bundleIdentifier {
+            pasteTargetPID = app?.processIdentifier
+        }
+        manualPresentation = false
         copiedAt = Date()
         restartTimeout()
         appendCurrentToHistory()
@@ -1662,6 +1704,7 @@ private final class ClipboardContextMonitor: ObservableObject {
     }
 
     private func deactivate() {
+        manualPresentation = false
         isActive = false
         expiresAt = nil
         remainingFraction = 0
@@ -1704,6 +1747,73 @@ private final class ClipboardContextMonitor: ObservableObject {
               let bitmap = NSBitmapImageRep(data: tiff),
               let data = bitmap.representation(using: .png, properties: [:]) else { return }
         try? data.write(to: url, options: .atomic)
+    }
+
+    private func rememberPasteTarget() {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              app.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
+        pasteTargetPID = app.processIdentifier
+    }
+
+    private func writeCurrentPayloadToPasteboard() {
+        if let fileURL, kind == .file || kind == .video || kind == .image {
+            writeFileToPasteboard(fileURL)
+        } else if kind == .image, let image {
+            writeImageToPasteboard(image)
+        } else {
+            writeToPasteboard(text)
+        }
+    }
+
+    private func pasteCurrentPayload() {
+        writeCurrentPayloadToPasteboard()
+        guard let pid = pasteTargetPID,
+              let target = NSRunningApplication(processIdentifier: pid) else { return }
+
+        // Posting Command-V is the only general way to paste into an arbitrary macOS app.
+        // Request this capability lazily: users who never use direct Paste never see a prompt.
+        guard CGPreflightPostEventAccess() || CGRequestPostEventAccess() else {
+            NSSound.beep()
+            return
+        }
+
+        target.activate(options: [.activateIgnoringOtherApps])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+            let source = CGEventSource(stateID: .combinedSessionState)
+            let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(9), keyDown: true)
+            let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(9), keyDown: false)
+            down?.flags = .maskCommand
+            up?.flags = .maskCommand
+            down?.post(tap: .cghidEventTap)
+            up?.post(tap: .cghidEventTap)
+        }
+    }
+
+    private func openTranslation(_ value: String) {
+        let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        let defaults = UserDefaults.standard
+        let provider = defaults.string(forKey: "HaloContextClipboardTranslateProvider") ?? "Google Translate"
+        let target = defaults.string(forKey: "HaloContextClipboardTranslateTarget") ?? "en"
+
+        if provider == "DeepL" {
+            var allowed = CharacterSet.alphanumerics
+            allowed.insert(charactersIn: "-._~")
+            let escaped = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+            if let url = URL(string: "https://www.deepl.com/translator#auto/\(target)/\(escaped)") {
+                NSWorkspace.shared.open(url)
+            }
+            return
+        }
+
+        var components = URLComponents(string: "https://translate.google.com/")
+        components?.queryItems = [
+            URLQueryItem(name: "sl", value: "auto"),
+            URLQueryItem(name: "tl", value: target),
+            URLQueryItem(name: "text", value: value),
+            URLQueryItem(name: "op", value: "translate")
+        ]
+        if let url = components?.url { NSWorkspace.shared.open(url) }
     }
 
     private func openSearch(_ query: String) {
@@ -2137,7 +2247,7 @@ struct SurfaceView: View {
             candidates.append((.transfer, transferPriority, 3))
         }
         if clipboardCIEnabled && clipboardCI.isActive {
-            candidates.append((.clipboard, clipboardPriority, 3))
+            candidates.append((.clipboard, clipboardCI.manualPresentation ? 1000 : clipboardPriority, 3))
         }
         if contextOptions.enabled && workspace.media.isPlaying {
             candidates.append((.music, contextMusicPriority, 2))
@@ -2391,6 +2501,22 @@ struct SurfaceView: View {
             Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
             ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloClipboardCIToggle"))) { _ in
+            guard clipboardCIEnabled else { return }
+            if clipboardContextActive && state.expanded {
+                clipboardCI.dismiss()
+                clipboardOpenedNotch = false
+                if !state.pinned { state.expanded = false }
+                return
+            }
+            guard clipboardCI.presentHistory() else { return }
+            DispatchQueue.main.async {
+                guard clipboardCIEnabled, clipboardCI.isActive else { return }
+                state.collapseTask?.cancel()
+                clipboardOpenedNotch = true
+                state.expanded = true
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloRetroGameToggle"))) { _ in
             guard retroCIEnabled else { return }
             retroGameRequested.toggle()
@@ -2422,7 +2548,11 @@ struct SurfaceView: View {
             }
         }
         .onHover { hovering in
-            clipboardCI.setInteractionActive(clipboardContextActive && hovering)
+            if clipboardContextActive {
+                clipboardCI.setInteractionActive(hovering)
+            } else {
+                clipboardCI.setInteractionActive(false)
+            }
             if teleprompterContextActive {
                 state.collapseTask?.cancel()
                 if !state.pinned { state.expanded = false }
@@ -2437,7 +2567,7 @@ struct SurfaceView: View {
                 state.expanded = true
             }
         }
-        .onAppear { workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive), token: openVisibilityToken) }
+        .onAppear { workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive), token: openVisibilityToken) }
         .onDisappear { workspace.setOpenedNotchVisible(false, token: openVisibilityToken) }
         .onChange(of: state.expanded) { expanded in
             if teleprompterContextActive && expanded {
@@ -2445,7 +2575,7 @@ struct SurfaceView: View {
                 workspace.setOpenedNotchVisible(false, token: openVisibilityToken)
                 return
             }
-            workspace.setOpenedNotchVisible(expanded && (activeContext == nil || transferContextActive), token: openVisibilityToken)
+            workspace.setOpenedNotchVisible(expanded && (activeContext == nil || transferContextActive || clipboardContextActive), token: openVisibilityToken)
             if !expanded {
                 state.contextPreferredSize = nil
                 if transferContextActive {
@@ -2514,7 +2644,7 @@ struct SurfaceView: View {
                 state.contextMinimumExpandedWidth = nil
                 if activeContext != nil { state.contextPreferredSize = nil }
             }
-            workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive), token: openVisibilityToken)
+            workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive), token: openVisibilityToken)
         }
     }
 

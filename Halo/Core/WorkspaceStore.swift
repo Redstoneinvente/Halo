@@ -100,6 +100,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     }
     private let hotkey = HotkeyService()
     private let retroGameHotkey = HotkeyService(identifierID: 2, notificationName: .init("HaloRetroGameToggle"))
+    private let clipboardCIHotkey = HotkeyService(identifierID: 3, notificationName: .init("HaloClipboardCIToggle"))
     private let defaults: UserDefaults
     private var ticker: AnyCancellable?
     private var subscriptions = Set<AnyCancellable>()
@@ -107,6 +108,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     private var tick = 0
     private var installedHotkey = ""
     private var installedRetroGameHotkey = ""
+    private var installedClipboardCIHotkey = ""
     private var pendingSave: DispatchWorkItem?
     private var hudEngine: HaloHUDEngine?
     private var systemAudioFallback: SystemAudioMediaFallback?
@@ -187,7 +189,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         disableLegacyHUDRenderer()
         updateArtworkPreference()
         if hudEngine == nil { hudEngine = HaloHUDEngine(workspace: self); hudEngine?.start() }
-        evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey(); updateRetroGameHotkey()
+        evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey(); updateRetroGameHotkey(); updateClipboardCIHotkey()
         pollMedia()
 
         bluetooth.$lastEvent
@@ -216,6 +218,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             .sink { [weak self] _ in
                 self?.disableLegacyHUDRenderer()
                 self?.updateRetroGameHotkey()
+                self?.updateClipboardCIHotkey()
             }
             .store(in: &subscriptions)
         for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didWakeNotification] {
@@ -232,7 +235,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.evaluateRules(); self?.hudEngine?.configurationDidChange() }.store(in: &subscriptions)
     }
-    func stop() { pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); bluetooth.stop(); systemAudioFallback?.stop(); systemAudioFallback = nil; hudEngine?.stop(); hudEngine = nil; hotkey.stop(); retroGameHotkey.stop(); clipboard.reset(); media.disconnect() }
+    func stop() { pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); bluetooth.stop(); systemAudioFallback?.stop(); systemAudioFallback = nil; hudEngine?.stop(); hudEngine = nil; hotkey.stop(); retroGameHotkey.stop(); clipboardCIHotkey.stop(); clipboard.reset(); media.disconnect() }
     private func schedulePersistence() {
         pendingSave?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.persist() }
@@ -264,6 +267,22 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         if !retroGameHotkey.register(code: UInt32(max(0, code)), modifiers: UInt32(max(0, modifiers))) {
             DispatchQueue.main.async { [weak self] in
                 self?.error = "The Retro Game CI shortcut is unavailable or already used. Choose another shortcut."
+            }
+        }
+    }
+    private func updateClipboardCIHotkey() {
+        let ciEnabled = defaults.object(forKey: "HaloContextClipboardEnabled") as? Bool ?? true
+        let shortcutEnabled = defaults.object(forKey: "HaloContextClipboardShortcutEnabled") as? Bool ?? true
+        let code = defaults.object(forKey: "HaloContextClipboardShortcutCode") == nil ? 9 : defaults.integer(forKey: "HaloContextClipboardShortcutCode")
+        let modifiers = defaults.object(forKey: "HaloContextClipboardShortcutModifiers") == nil ? 6144 : defaults.integer(forKey: "HaloContextClipboardShortcutModifiers")
+        let key = "\(ciEnabled)-\(shortcutEnabled)-\(code)-\(modifiers)"
+        guard key != installedClipboardCIHotkey else { return }
+        installedClipboardCIHotkey = key
+        clipboardCIHotkey.stop()
+        guard ciEnabled, shortcutEnabled else { return }
+        if !clipboardCIHotkey.register(code: UInt32(max(0, code)), modifiers: UInt32(max(0, modifiers))) {
+            DispatchQueue.main.async { [weak self] in
+                self?.error = "The Clipboard CI shortcut is unavailable or already used. Choose another shortcut."
             }
         }
     }

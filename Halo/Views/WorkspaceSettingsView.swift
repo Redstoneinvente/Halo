@@ -218,7 +218,7 @@ struct SettingsView: View {
             Section("Optional permissions") {
                 Button("Allow Calendar (today's events)") { workspace.calendar.requestAccess() }
                 Button("Allow Notifications (timer completion)") { workspace.enableNotifications() }
-                Text("Automation is requested when detecting or controlling Apple Music or Spotify. System Audio uses Screen Recording permission to analyse the Mac's output audio. Screen Recording is also requested when you capture a region. Microphone and Accessibility are not requested. Bluetooth state is read only when the Bluetooth CI/connection-state features are used. No analytics. Enabling artwork colors downloads Spotify artwork; Apple Music artwork is read from the player. Plugin URLs open only after confirmation.")
+                Text("Automation is requested when detecting or controlling Apple Music or Spotify. System Audio uses Screen Recording permission to analyse the Mac's output audio. Screen Recording is also requested when you capture a region. Microphone access is not requested. Accessibility/Post Event access is requested only if you use Clipboard CI direct Paste, so Halo can send Command–V to the app you were using. Bluetooth state is read only when the Bluetooth CI/connection-state features are used. No analytics. Enabling artwork colors downloads Spotify artwork; Apple Music artwork is read from the player. Plugin URLs open only after confirmation.")
                 Text("This direct-distribution build is not sandboxed. Files and notes are stored locally.")
             }
         case "Update Animation":
@@ -1097,6 +1097,12 @@ private struct ClipboardContextSettings: View {
     @AppStorage("HaloContextClipboardHistoryEnabled") private var historyEnabled = true
     @AppStorage("HaloContextClipboardShowHistory") private var showHistory = true
     @AppStorage("HaloContextClipboardHistoryLimit") private var historyLimit = 8
+    @AppStorage("HaloContextClipboardShortcutEnabled") private var shortcutEnabled = true
+    @AppStorage("HaloContextClipboardShortcutCode") private var shortcutCode = 9
+    @AppStorage("HaloContextClipboardShortcutModifiers") private var shortcutModifiers = 6144
+    @AppStorage("HaloContextClipboardShowTranslate") private var showTranslate = true
+    @AppStorage("HaloContextClipboardTranslateProvider") private var translateProvider = "Google Translate"
+    @AppStorage("HaloContextClipboardTranslateTarget") private var translateTarget = "en"
 
     var body: some View {
         Group {
@@ -1113,6 +1119,27 @@ private struct ClipboardContextSettings: View {
                 Text(triggerMode == "Pop Up"
                      ? "A copy immediately opens Clipboard CI. The countdown pauses only while your pointer is over the CI, then resumes when you leave."
                      : "A copy replaces the closed notch with Clipboard CI without opening it. Hovering opens it even if Halo's global hover-to-expand setting is off. The countdown pauses while your pointer is over the CI.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Manual access") {
+                Toggle("Enable global Clipboard CI shortcut", isOn: $shortcutEnabled)
+                Picker("Shortcut key", selection: $shortcutCode) {
+                    Text("V").tag(9)
+                    Text("C").tag(8)
+                    Text("B").tag(11)
+                    Text("H").tag(4)
+                    Text("Space").tag(49)
+                }.disabled(!shortcutEnabled)
+                Picker("Shortcut modifiers", selection: $shortcutModifiers) {
+                    Text("Control + Option").tag(6144)
+                    Text("Option + Command").tag(2304)
+                    Text("Control + Shift").tag(4608)
+                }.disabled(!shortcutEnabled)
+                Button("Open Clipboard CI now") {
+                    NotificationCenter.default.post(name: .init("HaloClipboardCIToggle"), object: nil)
+                }
+                Text("The default shortcut is Control–Option–V. Manual invocation opens the most recent history item even when nothing was just copied; press the shortcut again while Clipboard CI is open to dismiss it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -1163,9 +1190,31 @@ private struct ClipboardContextSettings: View {
                     Text("DuckDuckGo").tag("DuckDuckGo")
                     Text("Bing").tag("Bing")
                 }.disabled(!showSearch)
+                Toggle("Offer Translate action", isOn: $showTranslate)
+                Picker("Translation provider", selection: $translateProvider) {
+                    Text("Google Translate").tag("Google Translate")
+                    Text("DeepL").tag("DeepL")
+                }.disabled(!showTranslate)
+                Picker("Translate to", selection: $translateTarget) {
+                    Text("English").tag("en")
+                    Text("French").tag("fr")
+                    Text("Spanish").tag("es")
+                    Text("German").tag("de")
+                    Text("Italian").tag("it")
+                    Text("Portuguese").tag("pt")
+                    Text("Dutch").tag("nl")
+                    Text("Japanese").tag("ja")
+                    Text("Korean").tag("ko")
+                    Text("Chinese (Simplified)").tag("zh-CN")
+                    Text("Hindi").tag("hi")
+                    Text("Arabic").tag("ar")
+                    Text("Russian").tag("ru")
+                }.disabled(!showTranslate)
                 Toggle("Offer text transforms", isOn: $showTransforms)
                 Toggle("Dismiss CI after an action", isOn: $autoCloseAfterAction)
-                Text("Actions adapt to the payload: open links, compose email, FaceTime numbers, reveal files, open videos, preview/save/copy images, pretty-print JSON, open addresses in Maps, search text, transform text, or restore an earlier history item.")
+                Text("Paste restores the selected text, image, video or file to the macOS pasteboard and sends Command–V to the app that was frontmost when Clipboard CI opened. macOS may request Accessibility/Post Event permission the first time you use it.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Actions adapt to the payload: open links, compose email, FaceTime numbers, reveal files, open videos, preview/save/copy images, pretty-print JSON, open addresses in Maps, search or translate text, transform text, paste the selected payload into the previous app, or restore an earlier history item.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
