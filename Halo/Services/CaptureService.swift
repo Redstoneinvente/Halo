@@ -323,13 +323,16 @@ final class TeleprompterCoordinator: NSObject {
     private var monitors: [Any] = []
     private var observers: [NSObjectProtocol] = []
     private var recordingTimer: Timer?
+    private var contextTimer: Timer?
     private var lastRecordingState = false
     private var triggerLatch: [UUID: Set<UUID>] = [:]
+    private var contextMatchState: [UUID: Bool] = [:]
+    private var contextOwnedProfileID: UUID?
     private var installed = false
 
     func install() {
         guard !installed else { return }; installed = true
-        installInputMonitors(); installWorkspaceObservers(); installRecordingPolling()
+        installInputMonitors(); installWorkspaceObservers(); installRecordingPolling(); installContextAutomation()
         NotificationCenter.default.addObserver(self, selector: #selector(openSettingsNotification), name: .init("HaloOpenTeleprompterSettings"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(toggleNotification), name: .init("HaloToggleTeleprompter"), object: nil)
         for name in ["HaloScreenRecordingStateChanged", "HaloHUDScreenRecordingStateChanged"] {
@@ -344,6 +347,7 @@ final class TeleprompterCoordinator: NSObject {
     @objc private func toggleNotification() { toggleSelectedProfile() }
 
     func toggleSelectedProfile() {
+        contextOwnedProfileID = nil
         if promptPanel?.isVisible == true { hidePrompt() }
         else if let profile = store.selectedProfile { show(profile: profile) }
         else { showSettings() }
@@ -351,6 +355,7 @@ final class TeleprompterCoordinator: NSObject {
 
     func show(profile: TeleprompterProfile) {
         guard profile.enabled else { return }
+        contextOwnedProfileID = nil
         hidePrompt()
         let runtime = TeleprompterRuntime(profile: profile); self.runtime = runtime
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -362,6 +367,11 @@ final class TeleprompterCoordinator: NSObject {
         panel.setContentSize(NSSize(width: profile.appearance.width, height: profile.appearance.height))
         promptPanel = panel; position(panel, appearance: profile.appearance); panel.orderFrontRegardless()
         if profile.behavior.autoStart { runtime.begin() }
+    }
+
+    private func showFromContext(profile: TeleprompterProfile) {
+        show(profile: profile)
+        contextOwnedProfileID = profile.id
     }
 
     func hidePrompt() { runtime?.pause(); runtime = nil; promptPanel?.orderOut(nil); promptPanel = nil }
@@ -396,11 +406,54 @@ final class TeleprompterCoordinator: NSObject {
         let center = NSWorkspace.shared.notificationCenter
         observers.append(center.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in Task { @MainActor in self?.handleApplication(note, kind: .appOpened) } })
         observers.append(center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in Task { @MainActor in self?.handleApplication(note, kind: .appActivated) } })
+        observers.append(center.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.evaluateContextAutomation() } })
     }
 
     private func installRecordingPolling() {
         recordingTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { [weak self] _ in Task { @MainActor in guard let self else { return }; self.recordingStateChanged(self.heuristicScreenRecordingActive()) } }
         if let recordingTimer { RunLoop.main.add(recordingTimer, forMode: .common) }
+    }
+
+    private func installContextAutomation() {
+        contextTimer?.invalidate()
+        contextTimer = Timer.scheduledTimer(withTimeInterval: 0.75, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.evaluateContextAutomation() }
+        }
+        if let contextTimer { RunLoop.main.add(contextTimer, forMode: .common) }
+        DispatchQueue.main.async { [weak self] in self?.evaluateContextAutomation() }
+    }
+
+    private func evaluateContextAutomation() {
+        let contextProfiles = store.profiles.filter { profile in
+            profile.enabled && profile.contexts.contains(where: \.enabled)
+        }
+        let liveIDs = Set(contextProfiles.map(\.id))
+        contextMatchState = contextMatchState.filter { liveIDs.contains($0.key) }
+
+        var rising: [TeleprompterProfile] = []
+        for profile in contextProfiles {
+            let matches = contextsMatch(profile)
+            let previous = contextMatchState[profile.id] ?? false
+            contextMatchState[profile.id] = matches
+            if matches && !previous { rising.append(profile) }
+            if !matches && previous && contextOwnedProfileID == profile.id {
+                if runtime?.profile.id == profile.id { hidePrompt() }
+                contextOwnedProfileID = nil
+            }
+        }
+
+        guard !rising.isEmpty else { return }
+        let chosen: TeleprompterProfile
+        if let selected = store.selectedProfile, let selectedRising = rising.first(where: { $0.id == selected.id }) {
+            chosen = selectedRising
+        } else {
+            chosen = rising[0]
+        }
+
+        // Context is an automation trigger, not a hard lock. Never steal a Teleprompter that
+        // the user opened manually or through another explicit trigger.
+        if promptPanel?.isVisible == true, contextOwnedProfileID == nil { return }
+        showFromContext(profile: chosen)
     }
 
     private func handleInput(_ event: NSEvent) {
@@ -434,7 +487,8 @@ final class TeleprompterCoordinator: NSObject {
 
     private func handleGesture(_ event: NSEvent) {
         if promptPanel?.isVisible == true, runtime?.profile.behavior.gestureControlsEnabled == true, event.type == .scrollWheel, abs(event.scrollingDeltaY) > 1 {
-            event.scrollingDeltaY > 0 ? runtime?.previousChunk() : runtime?.nextChunk(); return
+            if event.scrollingDeltaY > 0 { runtime?.previousChunk() } else { runtime?.nextChunk() }
+            return
         }
         for profile in store.profiles where profile.enabled {
             for trigger in profile.triggers where trigger.enabled {
@@ -450,18 +504,24 @@ final class TeleprompterCoordinator: NSObject {
     }
 
     private func handleApplication(_ note: Notification, kind: TeleprompterTriggerKind) {
+        evaluateContextAutomation()
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-        let values = [(app.localizedName ?? "").lowercased(), (app.bundleIdentifier ?? "").lowercased()]
+        let values = [app.localizedName ?? "", app.bundleIdentifier ?? ""]
         for profile in store.profiles where profile.enabled {
             for trigger in profile.triggers where trigger.enabled && trigger.kind == kind {
-                let queries = trigger.applicationNames.map { $0.lowercased() }
-                if queries.isEmpty || queries.contains(where: { query in values.contains(where: { $0.contains(query) }) }) { fire(trigger: trigger, profile: profile) }
+                let queries = trigger.applicationNames.flatMap { contextQueries($0) }
+                if queries.isEmpty || queries.contains(where: { query in values.contains(where: { $0.localizedCaseInsensitiveContains(query) }) }) {
+                    fire(trigger: trigger, profile: profile)
+                }
             }
         }
     }
 
     private func recordingStateChanged(_ active: Bool) {
-        guard active != lastRecordingState else { return }; lastRecordingState = active
+        let changed = active != lastRecordingState
+        lastRecordingState = active
+        evaluateContextAutomation()
+        guard changed else { return }
         for profile in store.profiles where profile.enabled {
             for trigger in profile.triggers where trigger.enabled && trigger.kind == .screenRecording && trigger.recordingStarts == active { fire(trigger: trigger, profile: profile) }
         }
@@ -469,6 +529,7 @@ final class TeleprompterCoordinator: NSObject {
 
     private func fire(trigger: TeleprompterTrigger, profile: TeleprompterProfile) {
         guard contextsMatch(profile) else { return }
+        contextOwnedProfileID = nil
         if profile.triggerJoin == .any { show(profile: profile); return }
         var latch = triggerLatch[profile.id, default: []]; latch.insert(trigger.id); triggerLatch[profile.id] = latch
         let required = Set(profile.triggers.filter { $0.enabled && $0.kind != .manual }.map(\.id))
@@ -476,30 +537,64 @@ final class TeleprompterCoordinator: NSObject {
     }
 
     private func contextsMatch(_ profile: TeleprompterProfile) -> Bool {
-        let rules = profile.contexts.filter(\.enabled); guard !rules.isEmpty else { return true }
-        let results = rules.map(evaluateContext); return profile.contextJoin == .all ? results.allSatisfy { $0 } : results.contains(true)
+        let rules = profile.contexts.filter(\.enabled)
+        guard !rules.isEmpty else { return true }
+        let results = rules.map(evaluateContext)
+        return profile.contextJoin == .all ? results.allSatisfy { $0 } : results.contains(true)
     }
 
     private func evaluateContext(_ rule: TeleprompterContextRule) -> Bool {
-        let query = rule.value.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let queries = contextQueries(rule.value)
         switch rule.kind {
         case .frontmostApp:
-            let app = NSWorkspace.shared.frontmostApplication
-            return query.isEmpty || (app?.localizedName?.lowercased().contains(query) == true) || (app?.bundleIdentifier?.lowercased().contains(query) == true)
+            guard !queries.isEmpty, let app = NSWorkspace.shared.frontmostApplication else { return false }
+            return appMatches(app, queries: queries)
         case .runningApp:
-            return query.isEmpty || NSWorkspace.shared.runningApplications.contains { ($0.localizedName ?? "").lowercased().contains(query) || ($0.bundleIdentifier ?? "").lowercased().contains(query) }
-        case .windowTitle: return query.isEmpty || windowDescriptions().contains { $0.lowercased().contains(query) }
-        case .recordingActive: return lastRecordingState == rule.boolValue
-        case .displayCount: return NSScreen.screens.count == max(1, rule.numberValue)
+            guard !queries.isEmpty else { return false }
+            return NSWorkspace.shared.runningApplications.contains { appMatches($0, queries: queries) }
+        case .windowTitle:
+            guard !queries.isEmpty else { return false }
+            let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            return windowDescriptions(frontmostPID: frontPID).contains { description in
+                queries.contains { description.localizedCaseInsensitiveContains($0) }
+            }
+        case .recordingActive:
+            return heuristicScreenRecordingActive() == rule.boolValue
+        case .displayCount:
+            return NSScreen.screens.count == max(1, rule.numberValue)
         case .timeRange:
             let hour = Calendar.current.component(.hour, from: Date())
-            return rule.startHour <= rule.endHour ? (hour >= rule.startHour && hour <= rule.endHour) : (hour >= rule.startHour || hour <= rule.endHour)
+            if rule.startHour == rule.endHour { return true }
+            return rule.startHour < rule.endHour
+                ? (hour >= rule.startHour && hour < rule.endHour)
+                : (hour >= rule.startHour || hour < rule.endHour)
         }
     }
 
-    private func windowDescriptions() -> [String] {
+    private func contextQueries(_ raw: String) -> [String] {
+        raw.components(separatedBy: CharacterSet(charactersIn: ",;\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func appMatches(_ app: NSRunningApplication, queries: [String]) -> Bool {
+        let values = [app.localizedName ?? "", app.bundleIdentifier ?? ""]
+        return queries.contains { query in
+            values.contains { value in value.localizedCaseInsensitiveContains(query) }
+        }
+    }
+
+    private func windowDescriptions(frontmostPID: pid_t? = nil) -> [String] {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
-        return list.map { "\($0[kCGWindowOwnerName as String] as? String ?? "") \($0[kCGWindowName as String] as? String ?? "")" }
+        return list.compactMap { info in
+            if let frontmostPID,
+               let pidNumber = info[kCGWindowOwnerPID as String] as? NSNumber,
+               pidNumber.int32Value != frontmostPID { return nil }
+            let owner = info[kCGWindowOwnerName as String] as? String ?? ""
+            let name = info[kCGWindowName as String] as? String ?? ""
+            guard !owner.isEmpty || !name.isEmpty else { return nil }
+            return "\(owner) \(name)"
+        }
     }
 
     private func heuristicScreenRecordingActive() -> Bool {
@@ -507,7 +602,9 @@ final class TeleprompterCoordinator: NSObject {
         let recorders = ["obs", "screenflow", "camtasia", "loom"]
         let running = NSWorkspace.shared.runningApplications.compactMap(\.localizedName).map { $0.lowercased() }
         let recorderRunning = running.contains { name in recorders.contains(where: name.contains) }
-        let recordingWindow = windows.contains { description in recorders.contains(where: description.contains) && (description.contains("record") || description.contains("studio")) }
+        let recordingWindow = windows.contains { description in
+            recorders.contains(where: description.contains) && (description.contains("record") || description.contains("studio"))
+        }
         return recorderRunning && recordingWindow
     }
 }
@@ -655,7 +752,7 @@ private struct TeleprompterProfileEditor: View {
     private var triggerEditor: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack { Picker("Matching", selection: $profile.triggerJoin) { ForEach(TeleprompterTriggerJoin.allCases) { Text($0.rawValue).tag($0) } }.frame(width: 210); Spacer(); Button("Add Trigger") { profile.triggers.append(TeleprompterTrigger()) } }
-            Text("Profiles can have multiple launch sources. Use Any for independent triggers or All to require every enabled trigger to fire.").font(.caption).foregroundStyle(.secondary)
+            Text("Profiles can have multiple launch sources. Use Any for independent triggers or All to require every enabled trigger to fire. Contexts are also able to launch a profile on their own.").font(.caption).foregroundStyle(.secondary)
             ForEach($profile.triggers) { $trigger in
                 VStack(alignment: .leading, spacing: 9) {
                     HStack { Toggle("", isOn: $trigger.enabled).labelsHidden(); Picker("Trigger", selection: $trigger.kind) { ForEach(TeleprompterTriggerKind.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden().frame(width: 210); Spacer(); Button(role: .destructive) { profile.triggers.removeAll { $0.id == trigger.id } } label: { Image(systemName: "trash") }.buttonStyle(.borderless) }
@@ -683,20 +780,20 @@ private struct TeleprompterProfileEditor: View {
     private var contextEditor: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack { Picker("Matching", selection: $profile.contextJoin) { ForEach(TeleprompterContextJoin.allCases) { Text($0.rawValue).tag($0) } }.frame(width: 210); Spacer(); Button("Add Context") { profile.contexts.append(TeleprompterContextRule()) } }
-            Text("Contexts gate the triggers. Combine active/running apps, window title, recording state, display count and time windows.").font(.caption).foregroundStyle(.secondary)
+            Text("Contexts actively launch this Teleprompter when they change from false to true. Any/All controls how multiple contexts combine. A context-opened Teleprompter closes when that context stops matching; manually opened Teleprompters are left alone.").font(.caption).foregroundStyle(.secondary)
             ForEach($profile.contexts) { $rule in
                 VStack(alignment: .leading, spacing: 9) {
                     HStack { Toggle("", isOn: $rule.enabled).labelsHidden(); Picker("Context", selection: $rule.kind) { ForEach(TeleprompterContextKind.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden().frame(width: 220); Spacer(); Button(role: .destructive) { profile.contexts.removeAll { $0.id == rule.id } } label: { Image(systemName: "trash") }.buttonStyle(.borderless) }
                     contextFields($rule)
                 }.padding(12).background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 12))
             }
-            if profile.contexts.isEmpty { Text("No context restrictions — any matching trigger can launch this profile.").foregroundStyle(.secondary).padding(.vertical, 20) }
+            if profile.contexts.isEmpty { Text("No context automation. Add a context to let app/window/recording/display/time state launch this profile automatically.").foregroundStyle(.secondary).padding(.vertical, 20) }
         }
     }
 
     @ViewBuilder private func contextFields(_ rule: Binding<TeleprompterContextRule>) -> some View {
         switch rule.wrappedValue.kind {
-        case .frontmostApp, .runningApp, .windowTitle: TextField("Match text / bundle identifier", text: rule.value)
+        case .frontmostApp, .runningApp, .windowTitle: TextField("Match app/title/bundle ID (comma separated)", text: rule.value)
         case .recordingActive: Picker("State", selection: rule.boolValue) { Text("Recording").tag(true); Text("Not recording").tag(false) }.frame(maxWidth: 280)
         case .displayCount: Stepper("Display count = \(rule.wrappedValue.numberValue)", value: rule.numberValue, in: 1...8)
         case .timeRange: HStack { Stepper("From \(rule.wrappedValue.startHour):00", value: rule.startHour, in: 0...23); Stepper("To \(rule.wrappedValue.endHour):00", value: rule.endHour, in: 0...23) }
