@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Darwin
 
 enum VinylStylePreset: String, Codable, CaseIterable, Identifiable {
     case classic = "Classic"
@@ -545,6 +546,253 @@ struct VinylStyleSettingsView: View {
     private func percent(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
 }
 
+
+// MARK: - Transfer Context Interface
+
+@MainActor
+final class TransferActivityMonitor: ObservableObject {
+    static let shared = TransferActivityMonitor()
+
+    @Published private(set) var downloadBytesPerSecond: Double = 0
+    @Published private(set) var uploadBytesPerSecond: Double = 0
+    @Published private(set) var peakDownloadBytesPerSecond: Double = 0
+    @Published private(set) var peakUploadBytesPerSecond: Double = 0
+    @Published private(set) var sessionDownloadedBytes: Double = 0
+    @Published private(set) var sessionUploadedBytes: Double = 0
+    @Published private(set) var sessionStartedAt: Date?
+    @Published private(set) var isActive = false
+    @Published private(set) var direction = "Idle"
+    @Published private(set) var downloadHistory: [Double] = []
+    @Published private(set) var uploadHistory: [Double] = []
+
+    private var timer: Timer?
+    private var previousBytes: (received: UInt64, sent: UInt64)?
+    private var previousDate = Date()
+    private var lastBusyDate = Date.distantPast
+    private var busySamples = 0
+
+    private init() {
+        previousBytes = networkByteTotals()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.sample() }
+        }
+        if let timer { RunLoop.main.add(timer, forMode: .common) }
+    }
+
+    private func preference(_ key: String, fallback: Double) -> Double {
+        guard UserDefaults.standard.object(forKey: key) != nil else { return fallback }
+        return UserDefaults.standard.double(forKey: key)
+    }
+
+    private func preference(_ key: String, fallback: Bool) -> Bool {
+        guard UserDefaults.standard.object(forKey: key) != nil else { return fallback }
+        return UserDefaults.standard.bool(forKey: key)
+    }
+
+    private func sample() {
+        let now = Date()
+        let totals = networkByteTotals()
+        guard let previousBytes else {
+            self.previousBytes = totals
+            previousDate = now
+            return
+        }
+        self.previousBytes = totals
+        let elapsed = max(0.1, now.timeIntervalSince(previousDate))
+        previousDate = now
+
+        let receivedDelta = totals.received >= previousBytes.received ? totals.received - previousBytes.received : 0
+        let sentDelta = totals.sent >= previousBytes.sent ? totals.sent - previousBytes.sent : 0
+        downloadBytesPerSecond = Double(receivedDelta) / elapsed
+        uploadBytesPerSecond = Double(sentDelta) / elapsed
+
+        let historyLimit = 60
+        downloadHistory.append(downloadBytesPerSecond)
+        uploadHistory.append(uploadBytesPerSecond)
+        if downloadHistory.count > historyLimit { downloadHistory.removeFirst(downloadHistory.count - historyLimit) }
+        if uploadHistory.count > historyLimit { uploadHistory.removeFirst(uploadHistory.count - historyLimit) }
+
+        let threshold = max(0.01, preference("HaloContextTransferThresholdMBps", fallback: 0.35)) * 1_000_000
+        let reactDownloads = preference("HaloContextTransferReactDownloads", fallback: true)
+        let reactUploads = preference("HaloContextTransferReactUploads", fallback: true)
+        let downloadBusy = reactDownloads && downloadBytesPerSecond >= threshold
+        let uploadBusy = reactUploads && uploadBytesPerSecond >= threshold
+        let busy = downloadBusy || uploadBusy
+
+        if downloadBusy && uploadBusy { direction = "Uploading + Downloading" }
+        else if downloadBusy { direction = "Downloading" }
+        else if uploadBusy { direction = "Uploading" }
+        else if isActive { direction = downloadBytesPerSecond >= uploadBytesPerSecond ? "Downloading" : "Uploading" }
+        else { direction = "Idle" }
+
+        if busy {
+            busySamples += 1
+            lastBusyDate = now
+            if !isActive && busySamples >= 2 {
+                isActive = true
+                sessionStartedAt = now
+                sessionDownloadedBytes = 0
+                sessionUploadedBytes = 0
+                peakDownloadBytesPerSecond = 0
+                peakUploadBytesPerSecond = 0
+            }
+        } else {
+            busySamples = 0
+        }
+
+        if isActive {
+            sessionDownloadedBytes += Double(receivedDelta)
+            sessionUploadedBytes += Double(sentDelta)
+            peakDownloadBytesPerSecond = max(peakDownloadBytesPerSecond, downloadBytesPerSecond)
+            peakUploadBytesPerSecond = max(peakUploadBytesPerSecond, uploadBytesPerSecond)
+            let linger = max(0, preference("HaloContextTransferLingerSeconds", fallback: 2.5))
+            if !busy && now.timeIntervalSince(lastBusyDate) > linger {
+                isActive = false
+                direction = "Idle"
+                sessionStartedAt = nil
+            }
+        }
+    }
+
+    private func networkByteTotals() -> (received: UInt64, sent: UInt64) {
+        var pointer: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&pointer) == 0, let first = pointer else { return (0, 0) }
+        defer { freeifaddrs(pointer) }
+        var received: UInt64 = 0
+        var sent: UInt64 = 0
+        var current: UnsafeMutablePointer<ifaddrs>? = first
+        while let item = current {
+            let entry = item.pointee
+            let flags = Int32(entry.ifa_flags)
+            if (flags & IFF_UP) != 0, (flags & IFF_LOOPBACK) == 0, let raw = entry.ifa_data {
+                let data = raw.assumingMemoryBound(to: if_data.self).pointee
+                received &+= UInt64(data.ifi_ibytes)
+                sent &+= UInt64(data.ifi_obytes)
+            }
+            current = entry.ifa_next
+        }
+        return (received, sent)
+    }
+}
+
+private struct TransferHistoryGraph: View {
+    let download: [Double]
+    let upload: [Double]
+
+    var body: some View {
+        GeometryReader { proxy in
+            let maxValue = max(1, (download + upload).max() ?? 1)
+            ZStack {
+                path(values: download, size: proxy.size, maxValue: maxValue)
+                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                path(values: upload, size: proxy.size, maxValue: maxValue)
+                    .stroke(Color.orange, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+            }
+        }
+    }
+
+    private func path(values: [Double], size: CGSize, maxValue: Double) -> Path {
+        Path { path in
+            guard values.count > 1 else { return }
+            for (index, value) in values.enumerated() {
+                let x = size.width * CGFloat(index) / CGFloat(max(1, values.count - 1))
+                let y = size.height - size.height * CGFloat(min(1, max(0, value / maxValue)))
+                if index == 0 { path.move(to: CGPoint(x: x, y: y)) }
+                else { path.addLine(to: CGPoint(x: x, y: y)) }
+            }
+        }
+    }
+}
+
+private struct TransferContextView: View {
+    @ObservedObject var monitor: TransferActivityMonitor
+    @ObservedObject var surfaceState: SurfaceState
+    @AppStorage("HaloContextTransferCompact") private var compact = false
+    @AppStorage("HaloContextTransferShowDirection") private var showDirection = true
+    @AppStorage("HaloContextTransferShowDownload") private var showDownload = true
+    @AppStorage("HaloContextTransferShowUpload") private var showUpload = true
+    @AppStorage("HaloContextTransferShowPeak") private var showPeak = true
+    @AppStorage("HaloContextTransferShowSession") private var showSession = true
+    @AppStorage("HaloContextTransferShowElapsed") private var showElapsed = true
+    @AppStorage("HaloContextTransferShowGraph") private var showGraph = true
+
+    private var elapsed: String {
+        guard let start = monitor.sessionStartedAt else { return "0:00" }
+        let seconds = max(0, Int(Date().timeIntervalSince(start)))
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 9 : 14) {
+            HStack(spacing: 10) {
+                Image(systemName: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading") ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                    .font(.system(size: compact ? 18 : 23, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    if showDirection { Text(monitor.direction).font(compact ? .headline : .title3.bold()) }
+                    Text("LIVE TRANSFER").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if showElapsed { Label(elapsed, systemImage: "clock").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+            }
+
+            HStack(spacing: compact ? 10 : 14) {
+                if showDownload { stat("Download", value: speed(monitor.downloadBytesPerSecond), symbol: "arrow.down") }
+                if showUpload { stat("Upload", value: speed(monitor.uploadBytesPerSecond), symbol: "arrow.up") }
+                if showPeak && !compact {
+                    stat("Peak ↓", value: speed(monitor.peakDownloadBytesPerSecond), symbol: "gauge.with.dots.needle.50percent")
+                    stat("Peak ↑", value: speed(monitor.peakUploadBytesPerSecond), symbol: "gauge.with.dots.needle.67percent")
+                }
+            }
+
+            if showGraph && !compact {
+                TransferHistoryGraph(download: monitor.downloadHistory, upload: monitor.uploadHistory)
+                    .frame(height: 56)
+                    .padding(.vertical, 2)
+            }
+
+            if showSession && !compact {
+                HStack {
+                    Label("↓ \(bytes(monitor.sessionDownloadedBytes))", systemImage: "tray.and.arrow.down")
+                    Label("↑ \(bytes(monitor.sessionUploadedBytes))", systemImage: "tray.and.arrow.up")
+                    Spacer()
+                    Text("Session \(bytes(monitor.sessionDownloadedBytes + monitor.sessionUploadedBytes))")
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(compact ? 14 : 18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear { surfaceState.contextPreferredSize = CGSize(width: compact ? 430 : 620, height: compact ? 120 : 230) }
+        .onChange(of: compact) { value in surfaceState.contextPreferredSize = CGSize(width: value ? 430 : 620, height: value ? 120 : 230) }
+    }
+
+    private func stat(_ title: String, value: String, symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(title, systemImage: symbol).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.system(size: compact ? 15 : 18, weight: .semibold, design: .rounded)).monospacedDigit()
+        }
+        .padding(.horizontal, compact ? 10 : 12).padding(.vertical, compact ? 7 : 9)
+        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func speed(_ value: Double) -> String {
+        if value >= 1_000_000_000 { return String(format: "%.2f GB/s", value / 1_000_000_000) }
+        if value >= 1_000_000 { return String(format: "%.1f MB/s", value / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.0f KB/s", value / 1_000) }
+        return String(format: "%.0f B/s", value)
+    }
+
+    private func bytes(_ value: Double) -> String {
+        if value >= 1_000_000_000 { return String(format: "%.2f GB", value / 1_000_000_000) }
+        if value >= 1_000_000 { return String(format: "%.1f MB", value / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.0f KB", value / 1_000) }
+        return String(format: "%.0f B", value)
+    }
+}
+
 struct SurfaceViewportView: View {
     @ObservedObject var viewport: SurfaceViewport
     let content: SurfaceView
@@ -554,7 +802,7 @@ struct SurfaceViewportView: View {
 }
 
 private enum ActiveContextInterface: String {
-    case drop, teleprompter, music, bluetooth, retro
+    case drop, teleprompter, transfer, music, bluetooth, retro
 }
 
 struct SurfaceView: View {
@@ -562,9 +810,14 @@ struct SurfaceView: View {
     @ObservedObject var state: SurfaceState
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject private var bluetooth = BluetoothStateService.shared
+    @ObservedObject private var transfer = TransferActivityMonitor.shared
     @State private var teleprompterActive = false
     @AppStorage("HaloContextTeleprompterEnabled") private var teleprompterCIEnabled = true
     @AppStorage("HaloContextTeleprompterPriority") private var teleprompterPriority = 70.0
+    @AppStorage("HaloContextTransferEnabled") private var transferCIEnabled = true
+    @AppStorage("HaloContextTransferPriority") private var transferPriority = 65.0
+    @AppStorage("HaloContextTransferUseFullNotchArea") private var transferUsesFullNotchArea = true
+    @AppStorage("HaloContextTransferKeepClosedNotchContents") private var transferKeepsClosedContents = false
     @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
     @AppStorage("HaloContextMusicUseFullNotchArea") private var contextMusicUsesFullNotchArea = false
     @AppStorage("HaloContextMusicKeepClosedNotchContents") private var contextMusicKeepsClosedContents = false
@@ -603,6 +856,9 @@ struct SurfaceView: View {
         if teleprompterCIEnabled && teleprompterActive {
             candidates.append((.teleprompter, teleprompterPriority, 3))
         }
+        if transferCIEnabled && transfer.isActive {
+            candidates.append((.transfer, transferPriority, 3))
+        }
         if contextOptions.enabled && workspace.media.isPlaying {
             candidates.append((.music, contextMusicPriority, 2))
         }
@@ -619,6 +875,7 @@ struct SurfaceView: View {
     private var bluetoothContextActive: Bool { activeContext == .bluetooth }
     private var retroContextActive: Bool { activeContext == .retro }
     private var teleprompterContextActive: Bool { activeContext == .teleprompter }
+    private var transferContextActive: Bool { activeContext == .transfer }
     private var contextOwnsFullSurface: Bool {
         guard state.expanded else { return false }
         switch activeContext {
@@ -627,6 +884,7 @@ struct SurfaceView: View {
         case .bluetooth: return bluetoothUsesFullNotchArea
         case .retro: return retroUsesFullNotchArea
         case .teleprompter: return true
+        case .transfer: return transferUsesFullNotchArea
         case .none: return false
         }
     }
@@ -637,6 +895,7 @@ struct SurfaceView: View {
         case .bluetooth: return bluetoothKeepsClosedContents
         case .retro: return retroKeepsClosedContents
         case .teleprompter: return false
+        case .transfer: return transferKeepsClosedContents
         case .none:
             // The two opened-layout systems are mutually exclusive. The Default
             // layout is the only system allowed to keep its closed-notch strip.
@@ -802,6 +1061,8 @@ struct SurfaceView: View {
                 Group {
                     if dropContextActive {
                         DropContextView(itemCount: state.dropItemCount, surfaceState: state)
+                    } else if transferContextActive {
+                        TransferContextView(monitor: transfer, surfaceState: state)
                     } else if contextMusicActive {
                         ContextMusicView(media: workspace.media, options: contextOptions,
                                          visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
@@ -846,6 +1107,15 @@ struct SurfaceView: View {
             }
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }
+        .onReceive(transfer.$isActive.removeDuplicates()) { active in
+            if active && transferCIEnabled && activeContext == .transfer {
+                state.collapseTask?.cancel()
+                state.expanded = true
+            } else if !active && !state.pinned && activeContext == nil {
+                state.expanded = false
+                state.contextPreferredSize = nil
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloTeleprompterVisibilityChanged"))) { note in
             let active = (note.userInfo?["active"] as? Bool) ?? false
             teleprompterActive = active

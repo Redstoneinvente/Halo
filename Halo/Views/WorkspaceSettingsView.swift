@@ -828,7 +828,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 }
 
 private enum ContextInterfaceSelection: String, Identifiable {
-    case drop, music, teleprompter, bluetooth, retro
+    case drop, music, teleprompter, transfer, bluetooth, retro
     var id: String { rawValue }
 }
 
@@ -836,6 +836,7 @@ private struct ContextInterfaceLibraryView: View {
     @Binding var layout: WorkspaceLayout
     @State private var selection: ContextInterfaceSelection?
     @AppStorage("HaloContextDropEnabled") private var dropEnabled = true
+    @AppStorage("HaloContextTransferEnabled") private var transferEnabled = true
     @AppStorage("HaloContextBluetoothEnabled") private var bluetoothEnabled = false
     @AppStorage("HaloContextRetroEnabled") private var retroEnabled = false
 
@@ -884,6 +885,15 @@ private struct ContextInterfaceLibraryView: View {
                 }
             }
             TeleprompterContextSettings()
+        } else if selection == .transfer {
+            Section {
+                HStack(spacing: 12) {
+                    Button { withAnimation(.easeInOut(duration: 0.18)) { selection = nil } } label: { Label("All CI", systemImage: "chevron.left") }
+                    Spacer()
+                    Label("Transfer CI", systemImage: "arrow.up.arrow.down.circle.fill").font(.headline)
+                }
+            }
+            TransferContextSettings()
         } else if selection == .bluetooth {
             Section {
                 HStack(spacing: 12) {
@@ -934,6 +944,9 @@ private struct ContextInterfaceLibraryView: View {
                     TeleprompterContextInterfaceCard {
                         withAnimation(.easeInOut(duration: 0.18)) { selection = .teleprompter }
                     }
+                    TransferContextInterfaceCard(enabled: transferEnabled) {
+                        withAnimation(.easeInOut(duration: 0.18)) { selection = .transfer }
+                    }
                     BluetoothContextInterfaceCard(enabled: bluetoothEnabled) {
                         withAnimation(.easeInOut(duration: 0.18)) { selection = .bluetooth }
                     }
@@ -950,6 +963,84 @@ private struct ContextInterfaceLibraryView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+
+private struct TransferContextInterfaceCard: View {
+    let enabled: Bool
+    let action: () -> Void
+    @AppStorage("HaloContextTransferPriority") private var priority = 65.0
+    @State private var hovered = false
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous).fill(LinearGradient(colors: [Color.accentColor.opacity(0.30), Color.black.opacity(0.95)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    HStack(spacing: 18) {
+                        Image(systemName: "arrow.down.circle.fill").font(.system(size: 30, weight: .semibold))
+                        VStack(spacing: 5) { Capsule().fill(.white.opacity(0.85)).frame(width: 92, height: 6); Capsule().fill(.white.opacity(0.25)).frame(width: 68, height: 5) }
+                        Image(systemName: "arrow.up.circle.fill").font(.system(size: 30, weight: .semibold))
+                    }.foregroundStyle(.white)
+                }.frame(height: 112)
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) { Text("Transfer CI").font(.headline); Text("Downloads & Uploads").font(.caption).foregroundStyle(.secondary) }
+                    Spacer()
+                    Text(enabled ? "Enabled" : "Available").font(.caption2.weight(.semibold)).padding(.horizontal, 8).padding(.vertical, 4).background((enabled ? Color.green : Color.secondary).opacity(0.12), in: Capsule()).foregroundStyle(enabled ? Color.green : Color.secondary)
+                }
+                Text("Appears automatically during sustained network transfers with live speed, peaks, totals, elapsed time and throughput history.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.leading)
+                HStack { Label("Automatic", systemImage: "bolt.fill").font(.caption2).foregroundStyle(.secondary); Text("Priority \(Int(priority))").font(.caption2).foregroundStyle(.secondary); Spacer(); Label("Edit", systemImage: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor) }
+            }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(hovered ? 0.075 : 0.045), in: RoundedRectangle(cornerRadius: 16, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(hovered ? Color.accentColor.opacity(0.42) : Color.primary.opacity(0.08), lineWidth: 1)).contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }.buttonStyle(.plain).onHover { hovered = $0 }.animation(.easeOut(duration: 0.14), value: hovered)
+    }
+}
+
+private struct TransferContextSettings: View {
+    @AppStorage("HaloContextTransferEnabled") private var enabled = true
+    @AppStorage("HaloContextTransferPriority") private var priority = 65.0
+    @AppStorage("HaloContextTransferUseFullNotchArea") private var useFullNotchArea = true
+    @AppStorage("HaloContextTransferKeepClosedNotchContents") private var keepClosedContents = false
+    @AppStorage("HaloContextTransferThresholdMBps") private var threshold = 0.35
+    @AppStorage("HaloContextTransferLingerSeconds") private var linger = 2.5
+    @AppStorage("HaloContextTransferReactDownloads") private var reactDownloads = true
+    @AppStorage("HaloContextTransferReactUploads") private var reactUploads = true
+    @AppStorage("HaloContextTransferCompact") private var compact = false
+    @AppStorage("HaloContextTransferShowDirection") private var showDirection = true
+    @AppStorage("HaloContextTransferShowDownload") private var showDownload = true
+    @AppStorage("HaloContextTransferShowUpload") private var showUpload = true
+    @AppStorage("HaloContextTransferShowPeak") private var showPeak = true
+    @AppStorage("HaloContextTransferShowSession") private var showSession = true
+    @AppStorage("HaloContextTransferShowElapsed") private var showElapsed = true
+    @AppStorage("HaloContextTransferShowGraph") private var showGraph = true
+    var body: some View {
+        Section("Transfer Context Interface") {
+            Toggle("Enable Transfer CI", isOn: $enabled)
+            Text("Transfer CI only becomes eligible when Halo detects sustained network transfer activity above your threshold, then closes after the transfer goes quiet.").font(.caption).foregroundStyle(.secondary)
+            Toggle("React to downloads", isOn: $reactDownloads)
+            Toggle("React to uploads", isOn: $reactUploads)
+        }
+        Section("Detection") {
+            LabeledContent("Activation threshold") { Slider(value: $threshold, in: 0.05...10, step: 0.05); Text(String(format: "%.2f MB/s", threshold)).font(.caption.monospacedDigit()).frame(width: 78) }
+            LabeledContent("Stay visible after activity") { Slider(value: $linger, in: 0...10, step: 0.5); Text(String(format: "%.1f s", linger)).font(.caption.monospacedDigit()).frame(width: 54) }
+            Text("A short two-sample confirmation prevents tiny background requests from constantly opening the notch. The linger period prevents chunked transfers from flickering the CI.").font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Layout") {
+            Toggle("Compact presentation", isOn: $compact)
+            Toggle("Show transfer direction", isOn: $showDirection)
+            Toggle("Show download speed", isOn: $showDownload)
+            Toggle("Show upload speed", isOn: $showUpload)
+            Toggle("Show peak speeds", isOn: $showPeak).disabled(compact)
+            Toggle("Show transferred this session", isOn: $showSession).disabled(compact)
+            Toggle("Show elapsed time", isOn: $showElapsed)
+            Toggle("Show live throughput graph", isOn: $showGraph).disabled(compact)
+            Text(compact ? "Compact mode requests a small 430 × 120 pt CI." : "Detailed mode requests a 620 × 230 pt CI with room for live history and session statistics.").font(.caption).foregroundStyle(.secondary)
+        }
+        Section("CI priority") {
+            Slider(value: $priority, in: 0...100, step: 1) { Text("Transfer CI priority") }
+            Text("Transfer defaults to priority 65: above Music and Bluetooth, below Teleprompter, Retro and Drop. Change it to decide which CI owns Halo when contexts overlap.").font(.caption).foregroundStyle(.secondary)
+        }
+        Section("CI surface") { Toggle("Use full notch area", isOn: $useFullNotchArea); Toggle("Keep closed-notch contents visible", isOn: $keepClosedContents) }
+        Section("What Halo can detect") { Text("This version detects real system network throughput, so it works across browsers and apps without plugins. macOS does not expose a universal public API that identifies every app's file name or exact download progress, so Transfer CI reports network-level transfer statistics rather than inventing per-file progress.").font(.caption).foregroundStyle(.secondary) }
     }
 }
 
