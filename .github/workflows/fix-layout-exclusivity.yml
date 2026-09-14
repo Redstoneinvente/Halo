@@ -19,41 +19,27 @@ jobs:
           fetch-depth: 0
 
       - name: Make layout systems mutually exclusive
-        shell: python
+        shell: bash
         run: |
+          python3 - <<'PY'
           from pathlib import Path
 
           surface = Path("Halo/Views/SurfaceView.swift")
           text = surface.read_text()
-          old = """        case .none: return keepClosedContentsWhenOpen
-"""
-          new = """        case .none:
-            // Visual Workspace owns the entire opened surface. Never layer the
-            // Default/closed-notch strip over it, even if the legacy preference
-            // was enabled before the user switched layout systems.
-            return layout.resolvedUsesCustomOpenNotchWorkspace ? false : keepClosedContentsWhenOpen
-"""
+          old = "        case .none: return keepClosedContentsWhenOpen\n"
+          new = "        case .none:\n            // Visual Workspace owns the entire opened surface. Never layer the\n            // Default/closed-notch strip over it, even if the legacy preference\n            // was enabled before the user switched layout systems.\n            return layout.resolvedUsesCustomOpenNotchWorkspace ? false : keepClosedContentsWhenOpen\n"
           if old not in text:
               raise SystemExit("SurfaceView exclusivity anchor not found")
-          text = text.replace(old, new, 1)
-          surface.write_text(text)
+          surface.write_text(text.replace(old, new, 1))
 
           settings = Path("Halo/Views/WorkspaceSettingsView.swift")
           text = settings.read_text()
-          old = '''                set: { workspace.settings.layout.setCustomOpenNotchWorkspaceEnabled($0 == "visual") }
-'''
-          new = '''                set: { value in
-                    let useVisualWorkspace = value == "visual"
-                    workspace.settings.layout.setCustomOpenNotchWorkspaceEnabled(useVisualWorkspace)
-                    // These are alternate opened-surface systems. Visual Workspace
-                    // must never inherit the Default layout's top-strip overlay.
-                    if useVisualWorkspace { keepClosedContentsWhenOpen = false }
-                }
-'''
+          old = '                set: { workspace.settings.layout.setCustomOpenNotchWorkspaceEnabled($0 == "visual") }\n'
+          new = '                set: { value in\n                    let useVisualWorkspace = value == "visual"\n                    workspace.settings.layout.setCustomOpenNotchWorkspaceEnabled(useVisualWorkspace)\n                    // These are alternate opened-surface systems. Visual Workspace\n                    // must never inherit the Default layout top-strip overlay.\n                    if useVisualWorkspace { keepClosedContentsWhenOpen = false }\n                }\n'
           if old not in text:
               raise SystemExit("WorkspaceSettings exclusivity anchor not found")
-          text = text.replace(old, new, 1)
-          settings.write_text(text)
+          settings.write_text(text.replace(old, new, 1))
+          PY
 
       - name: Commit fix and remove temporary workflow
         shell: bash
