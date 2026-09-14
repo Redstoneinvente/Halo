@@ -58,18 +58,57 @@ if ! grep -Eq '^HALO_SPARKLE_FEED_URL[[:space:]]*=' "$SECRETS"; then
 fi
 
 # Code signing rejects resource forks/Finder metadata. Strip extended attributes
-# from source resources before Xcode copies them into Halo.app.
+# from Halo's own source resources before Xcode copies them into Halo.app.
 echo "Sanitizing source extended attributes for code signing…" >&2
 xattr -cr "$ROOT/Halo" "$ROOT/Assets.xcassets" 2>/dev/null || true
 
 rm -rf "$WORK_ROOT"
 mkdir -p "$WORK_ROOT/base-derived" "$WORK_ROOT/candidate-derived" "$WORK_ROOT/updates" "$WORK_ROOT/install"
 
+prepare_packages() {
+  local derived="$1"
+  local resolve_log="$derived/package-resolution.log"
+
+  echo "Resolving Sparkle into isolated Gate 3 DerivedData…" >&2
+  if ! COPYFILE_DISABLE=1 xcodebuild \
+    -resolvePackageDependencies \
+    -project "$ROOT/Halo.xcodeproj" \
+    -scheme Halo \
+    -derivedDataPath "$derived" \
+    2>&1 | tee "$resolve_log" >&2; then
+      echo "Swift package resolution failed." >&2
+      echo "Full resolution log: $resolve_log" >&2
+      exit 1
+  fi
+
+  local sparkle_artifact="$derived/SourcePackages/artifacts/sparkle"
+  if [[ ! -d "$sparkle_artifact" ]]; then
+    echo "Resolved Sparkle artifact directory was not found: $sparkle_artifact" >&2
+    exit 1
+  fi
+
+  # Sparkle's downloaded binary artifact may arrive with FinderInfo/file-provider
+  # extended attributes on bundled resources. Those are rejected when Xcode later
+  # signs Halo.app, so remove them only from this isolated DerivedData copy.
+  echo "Sanitizing resolved Sparkle artifact extended attributes…" >&2
+  xattr -cr "$sparkle_artifact" 2>/dev/null || true
+
+  local forbidden_attrs
+  forbidden_attrs="$(xattr -lr "$sparkle_artifact" 2>/dev/null | grep -E 'com\.apple\.(FinderInfo|ResourceFork)' || true)"
+  if [[ -n "$forbidden_attrs" ]]; then
+    echo "Forbidden code-signing extended attributes remain in the resolved Sparkle artifact:" >&2
+    echo "$forbidden_attrs" | head -n 80 >&2
+    exit 1
+  fi
+}
+
 build_halo() {
   local version="$1"
   local build="$2"
   local derived="$3"
   local log="$derived/xcodebuild.log"
+
+  prepare_packages "$derived"
 
   echo "Building Halo $version ($build)…" >&2
   echo "Xcode: $(xcodebuild -version | tr '\n' ' ')" >&2
@@ -81,6 +120,7 @@ build_halo() {
     -configuration Release \
     -destination 'platform=macOS,arch=arm64' \
     -derivedDataPath "$derived" \
+    -disableAutomaticPackageResolution \
     -allowProvisioningUpdates \
     ARCHS=arm64 \
     ONLY_ACTIVE_ARCH=YES \
@@ -97,7 +137,7 @@ build_halo() {
       if [[ -d "$failed_app" ]]; then
         echo >&2
         echo "Extended attributes remaining in failed Halo.app:" >&2
-        xattr -lr "$failed_app" 2>/dev/null | grep -E '(^/|com\.apple\.(FinderInfo|ResourceFork|quarantine|provenance))' | head -n 120 >&2 || true
+        xattr -lr "$failed_app" 2>/dev/null | grep -E '(^/|com\.apple\.(FinderInfo|ResourceFork|quarantine|provenance|fileprovider))' | head -n 160 >&2 || true
       fi
       exit 1
   fi
@@ -131,7 +171,7 @@ BASE_APP="$(build_halo 0.2.0 200 "$WORK_ROOT/base-derived")"
 CANDIDATE_APP="$(build_halo 0.2.1 201 "$WORK_ROOT/candidate-derived")"
 
 # Keep a copy of the baseline app that you can launch for the end-to-end update test.
-ditto "$BASE_APP" "$WORK_ROOT/install/Halo.app"
+COPYFILE_DISABLE=1 ditto "$BASE_APP" "$WORK_ROOT/install/Halo.app"
 
 # Keep both full archives so generate_appcast can produce a proper version history and delta when compatible.
 COPYFILE_DISABLE=1 ditto -c -k --sequesterRsrc --keepParent "$BASE_APP" "$WORK_ROOT/updates/Halo-0.2.0.zip"
