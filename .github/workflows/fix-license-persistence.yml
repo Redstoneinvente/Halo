@@ -1,0 +1,44 @@
+name: Fix Halo License Persistence
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Add license persistence repair'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Patch commercial license persistence
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('Halo/Core/AppStore.swift')
+          s = p.read_text()
+
+          old = '''            HaloKeychain.set(cleaned, for: licenseKeyKey)\n            licenseHint = Self.hint(cleaned)\n            trialExpiryTask?.cancel()\n            details = parsed.details\n            state = .valid(plan: parsed.details.plan.isEmpty ? nil : parsed.details.plan)\n            notice = "License activated on this Mac."'''
+          new = '''            guard HaloKeychain.set(cleaned, for: licenseKeyKey) else {\n                throw HaloCommercialError.message("Halo activated the license, but could not save it securely in Keychain. Please allow Keychain access and try again.")\n            }\n            licenseHint = Self.hint(cleaned)\n            trialExpiryTask?.cancel()\n            details = parsed.details\n            state = .valid(plan: parsed.details.plan.isEmpty ? nil : parsed.details.plan)\n            notice = "License activated and saved on this Mac."'''
+          if old not in s:
+              raise SystemExit('activation persistence anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = '''    private func fingerprint() -> String {\n        if let existing = HaloKeychain.string(for: fingerprintKey), !existing.isEmpty { return existing }\n        let value = "halo-\\(UUID().uuidString.lowercased())"\n        HaloKeychain.set(value, for: fingerprintKey)\n        return value\n    }'''
+          new = '''    private func fingerprint() -> String {\n        if let existing = HaloKeychain.string(for: fingerprintKey), !existing.isEmpty { return existing }\n\n        // A device fingerprint is not a secret. Keep a UserDefaults mirror so a temporary\n        // Keychain write/read failure cannot make this Mac look like a new device at every launch.\n        let fallbackKey = "HaloLicenseSeatDeviceFingerprintV1"\n        if let fallback = UserDefaults.standard.string(forKey: fallbackKey), !fallback.isEmpty {\n            _ = HaloKeychain.set(fallback, for: fingerprintKey)\n            return fallback\n        }\n\n        let value = "halo-\\(UUID().uuidString.lowercased())"\n        UserDefaults.standard.set(value, forKey: fallbackKey)\n        _ = HaloKeychain.set(value, for: fingerprintKey)\n        return value\n    }'''
+          if old not in s:
+              raise SystemExit('fingerprint persistence anchor not found')
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+      - name: Commit persistence fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Core/AppStore.swift
+          git commit -m "Fix license persistence across launches"
+          git push origin main
