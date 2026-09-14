@@ -1,5 +1,7 @@
 # Declarative plugins and extension contracts
 
+> For Halo Custom Interfaces (CI), `.haloCI` packages, CI permissions, triggers, actions, bindings, distribution, scripting, and the future CI marketplace, **`Docs/CISDK.md` is the canonical specification**. Do not create a parallel CI/plugin runtime that conflicts with it.
+
 Import Examples/Starter.haloPlugin from Settings → Plugins. A manifest declares version 1, a stable unique ID, name, permissions and up to 50 commands. The only supported permission is openURL. HTTPS and shortcuts URL schemes are accepted; files, JavaScript and shell schemes are rejected. A confirmation shows the full URL each time a command runs.
 
 Imported manifests are stored as JSON in preferences. Reimporting the same ID replaces that manifest after confirmation. Removing a plugin removes its commands. Imported text is never treated as executable code.
