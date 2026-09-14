@@ -7,7 +7,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>0.2.2</string>
 	<key>CFBundleVersion</key>
-	<string>202</string>
+	<string>203</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Halo reads your calendars to show schedules, holidays, and meeting links. Halo does not modify events.</string>
 	<key>NSCalendarsUsageDescription</key>
