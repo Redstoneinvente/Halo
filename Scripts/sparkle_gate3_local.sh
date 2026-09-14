@@ -6,6 +6,19 @@ SPARKLE_BIN="${SPARKLE_BIN:-}"
 DOWNLOAD_PREFIX="${HALO_SPARKLE_DOWNLOAD_URL_PREFIX:-}"
 WORK_ROOT="${HALO_SPARKLE_GATE3_DIR:-$HOME/Desktop/Halo-Sparkle-Gate3}"
 
+if ! command -v xcodebuild >/dev/null 2>&1; then
+  echo "xcodebuild is unavailable. Install/open the full Xcode app first." >&2
+  exit 1
+fi
+
+DEVELOPER_DIR_ACTIVE="$(xcode-select -p 2>/dev/null || true)"
+if [[ "$DEVELOPER_DIR_ACTIVE" == "/Library/Developer/CommandLineTools" || ! -d "$DEVELOPER_DIR_ACTIVE" ]]; then
+  echo "Gate 3 requires the full Xcode developer directory, not Command Line Tools." >&2
+  echo "Current developer directory: ${DEVELOPER_DIR_ACTIVE:-<none>}" >&2
+  echo "Fix with: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer" >&2
+  exit 1
+fi
+
 if [[ -z "$SPARKLE_BIN" || ! -x "$SPARKLE_BIN/generate_appcast" ]]; then
   echo "Set SPARKLE_BIN to the bin directory from the full Sparkle 2.9.6 distribution." >&2
   echo "Example: SPARKLE_BIN=$HOME/Downloads/Sparkle-2.9.6/bin" >&2
@@ -13,8 +26,13 @@ if [[ -z "$SPARKLE_BIN" || ! -x "$SPARKLE_BIN/generate_appcast" ]]; then
 fi
 
 if [[ -z "$DOWNLOAD_PREFIX" || "$DOWNLOAD_PREFIX" != https://* ]]; then
-  echo "Set HALO_SPARKLE_DOWNLOAD_URL_PREFIX to the HTTPS folder that will host the Gate 3 archives." >&2
+  echo "Set HALO_SPARKLE_DOWNLOAD_URL_PREFIX to the raw HTTPS folder URL that will host the Gate 3 archives." >&2
   echo "Example: https://halo.redstoneinvente.com/updates/gate3/" >&2
+  exit 1
+fi
+
+if [[ "$DOWNLOAD_PREFIX" == *'['* || "$DOWNLOAD_PREFIX" == *']'* || "$DOWNLOAD_PREFIX" == *'('* || "$DOWNLOAD_PREFIX" == *')'* ]]; then
+  echo "HALO_SPARKLE_DOWNLOAD_URL_PREFIX looks like a Markdown link. Pass only the raw https:// URL." >&2
   exit 1
 fi
 
@@ -46,24 +64,42 @@ build_halo() {
   local version="$1"
   local build="$2"
   local derived="$3"
+  local log="$derived/xcodebuild.log"
 
-  echo "Building Halo $version ($build)…"
-  xcodebuild \
+  echo "Building Halo $version ($build)…" >&2
+  echo "Xcode: $(xcodebuild -version | tr '\n' ' ')" >&2
+  echo "Developer dir: $DEVELOPER_DIR_ACTIVE" >&2
+
+  if ! xcodebuild \
     -project "$ROOT/Halo.xcodeproj" \
     -scheme Halo \
     -configuration Release \
+    -destination 'platform=macOS,arch=arm64' \
     -derivedDataPath "$derived" \
+    -allowProvisioningUpdates \
+    ARCHS=arm64 \
+    ONLY_ACTIVE_ARCH=YES \
     MARKETING_VERSION="$version" \
     CURRENT_PROJECT_VERSION="$build" \
-    build
+    build 2>&1 | tee "$log" >&2; then
+      echo >&2
+      echo "Xcode failed while building Halo $version ($build)." >&2
+      echo "Full build log: $log" >&2
+      echo "First signing-related diagnostics:" >&2
+      grep -E -m 20 'error:|CodeSign|codesign|provision|certificate|identity|Signing' "$log" >&2 || true
+      exit 1
+  fi
 
   local app="$derived/Build/Products/Release/Halo.app"
   if [[ ! -d "$app" ]]; then
-    echo "Expected app not found: $app" >&2
+    echo "Expected app not found after a successful xcodebuild: $app" >&2
     exit 1
   fi
 
-  codesign --verify --deep --strict --verbose=2 "$app"
+  if ! codesign --verify --deep --strict --verbose=2 "$app" >&2; then
+    echo "Built Halo.app exists but failed code-sign verification: $app" >&2
+    exit 1
+  fi
 
   local actual_version actual_build feed key
   actual_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
@@ -76,11 +112,11 @@ build_halo() {
   [[ "$feed" == https://* ]] || { echo "Built app has invalid SUFeedURL: $feed" >&2; exit 1; }
   [[ -n "$key" && "$key" != *'$('* ]] || { echo "Built app has invalid SUPublicEDKey" >&2; exit 1; }
 
-  echo "$app"
+  printf '%s\n' "$app"
 }
 
-BASE_APP="$(build_halo 0.2.0 200 "$WORK_ROOT/base-derived" | tail -n 1)"
-CANDIDATE_APP="$(build_halo 0.2.1 201 "$WORK_ROOT/candidate-derived" | tail -n 1)"
+BASE_APP="$(build_halo 0.2.0 200 "$WORK_ROOT/base-derived")"
+CANDIDATE_APP="$(build_halo 0.2.1 201 "$WORK_ROOT/candidate-derived")"
 
 # Keep a copy of the baseline app that you can launch for the end-to-end update test.
 ditto "$BASE_APP" "$WORK_ROOT/install/Halo.app"
