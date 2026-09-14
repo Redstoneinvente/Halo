@@ -377,9 +377,28 @@ struct UpdateAnimationSettingsView: View {
     @AppStorage("HaloUpdateShowETA") private var updateShowETA = false
     @AppStorage("HaloUpdateSoundsEnabled") private var updateSoundsEnabled = true
     @AppStorage("HaloUpdateSoundVolume") private var updateSoundVolume = 0.55
+    @AppStorage("HaloUpdateAutoPreview") private var autoPreview = true
 
-    @State private var previewProgress = 0.42
-    @State private var previewPhase = "Downloading"
+    @State private var previewProgress = 0.0
+    @State private var previewPhase = "Ready"
+    @State private var previewRunID = UUID()
+
+    private var previewSettingsSignature: String {
+        [
+            updateAnimationStyle,
+            updateAnimationIntensity,
+            updateProgressPresentation,
+            String(updateAnimationSpeed),
+            String(updateGlowStrength),
+            String(updateProgressThickness),
+            String(updateShowPercentage),
+            String(updateShowVersion),
+            String(updateShowStatus),
+            String(updateShowDownloadedSize),
+            String(updateShowDownloadSpeed),
+            String(updateShowETA)
+        ].joined(separator: "|")
+    }
 
     var body: some View {
         Section("Presentation") {
@@ -435,12 +454,39 @@ struct UpdateAnimationSettingsView: View {
         }
 
         Section("Preview") {
+            Toggle("Automatically preview animation changes", isOn: $autoPreview)
+
+            HStack {
+                Button {
+                    playPreview()
+                } label: {
+                    Label("Preview Animation", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Reset Preview") {
+                    previewRunID = UUID()
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        previewProgress = 0
+                        previewPhase = "Ready"
+                    }
+                }
+
+                Spacer()
+
+                Text(autoPreview ? "Live preview enabled" : "Manual preview")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             VStack(spacing: 10) {
                 ZStack(alignment: .bottom) {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(.black)
                         .frame(width: 360, height: 92)
                         .shadow(color: Color.accentColor.opacity(updateGlowStrength), radius: 18)
+                        .scaleEffect(previewPhase == "Installing" ? 0.985 : 1)
+                        .animation(.easeInOut(duration: 0.22 / max(updateAnimationSpeed, 0.5)), value: previewPhase)
 
                     VStack(spacing: 4) {
                         if updateShowPercentage { Text("\(Int(previewProgress * 100))%").font(.title3.bold()).monospacedDigit() }
@@ -457,24 +503,63 @@ struct UpdateAnimationSettingsView: View {
                                 Capsule()
                                     .fill(Color.accentColor)
                                     .frame(width: proxy.size.width * previewProgress, height: updateProgressThickness)
+                                    .shadow(color: Color.accentColor.opacity(updateGlowStrength), radius: 6)
                             }
                     }
                     .frame(width: 330, height: updateProgressThickness)
                     .padding(.bottom, 5)
                 }
-
-                HStack {
-                    Button("Download") {
-                        previewPhase = "Downloading"
-                        previewProgress = previewProgress >= 1 ? 0.08 : min(1, previewProgress + 0.18)
-                    }
-                    Button("Verify") { previewPhase = "Verifying"; previewProgress = 1 }
-                    Button("Install") { previewPhase = "Installing"; previewProgress = 1 }
-                    Button("Reset") { previewPhase = "Downloading"; previewProgress = 0.08 }
-                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
+        }
+        .onChange(of: previewSettingsSignature) { _ in
+            guard autoPreview else { return }
+            playPreview()
+        }
+    }
+
+    private func playPreview() {
+        guard updateAnimationStyle != "None" else {
+            previewRunID = UUID()
+            withAnimation(.easeOut(duration: 0.2)) {
+                previewProgress = 0
+                previewPhase = "Standard Sparkle UI"
+            }
+            return
+        }
+
+        let runID = UUID()
+        previewRunID = runID
+        let speed = max(updateAnimationSpeed, 0.5)
+
+        previewProgress = 0
+        previewPhase = "Downloading"
+
+        Task { @MainActor in
+            withAnimation(.linear(duration: 1.8 / speed)) {
+                previewProgress = 1
+            }
+
+            try? await Task.sleep(nanoseconds: UInt64((1.9 / speed) * 1_000_000_000))
+            guard previewRunID == runID else { return }
+
+            previewPhase = "Verifying"
+            try? await Task.sleep(nanoseconds: UInt64((0.55 / speed) * 1_000_000_000))
+            guard previewRunID == runID else { return }
+
+            previewPhase = "Installing"
+            try? await Task.sleep(nanoseconds: UInt64((0.65 / speed) * 1_000_000_000))
+            guard previewRunID == runID else { return }
+
+            previewPhase = "Updated ✓"
+            try? await Task.sleep(nanoseconds: UInt64((0.8 / speed) * 1_000_000_000))
+            guard previewRunID == runID else { return }
+
+            withAnimation(.easeOut(duration: 0.25 / speed)) {
+                previewProgress = 0
+                previewPhase = "Ready"
+            }
         }
     }
 }
