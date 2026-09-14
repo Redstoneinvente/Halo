@@ -809,7 +809,10 @@ private struct TeleprompterProfileEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack { TextField("Profile name", text: $profile.name).font(.title2.bold()).textFieldStyle(.plain); Toggle("Enabled", isOn: $profile.enabled).toggleStyle(.switch); Button("Preview") { TeleprompterCoordinator.shared.show(profile: profile) } }.padding(18)
+            HStack { TextField("Profile name", text: $profile.name).font(.title2.bold()).textFieldStyle(.plain); Toggle("Enabled", isOn: $profile.enabled).toggleStyle(.switch); Button("Preview") { TeleprompterCoordinator.shared.show(profile: profile) } }
+                .padding(.horizontal, 18)
+                .padding(.top, 52)
+                .padding(.bottom, 18)
             Divider(); Picker("Section", selection: $section) { ForEach(sections, id: \.self) { Text($0) } }.pickerStyle(.segmented).padding(14)
             ScrollView { Group { if section == "Script" { scriptEditor } else if section == "Appearance" { appearanceEditor } else if section == "Playback" { playbackEditor } else if section == "Triggers" { triggerEditor } else { contextEditor } }.padding(18) }
         }
