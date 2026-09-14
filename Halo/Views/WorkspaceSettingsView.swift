@@ -828,7 +828,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 }
 
 private enum ContextInterfaceSelection: String, Identifiable {
-    case drop, music, teleprompter, transfer, bluetooth, retro
+    case drop, music, teleprompter, transfer, clipboard, bluetooth, retro
     var id: String { rawValue }
 }
 
@@ -837,6 +837,7 @@ private struct ContextInterfaceLibraryView: View {
     @State private var selection: ContextInterfaceSelection?
     @AppStorage("HaloContextDropEnabled") private var dropEnabled = true
     @AppStorage("HaloContextTransferEnabled") private var transferEnabled = true
+    @AppStorage("HaloContextClipboardEnabled") private var clipboardEnabled = true
     @AppStorage("HaloContextBluetoothEnabled") private var bluetoothEnabled = false
     @AppStorage("HaloContextRetroEnabled") private var retroEnabled = false
 
@@ -885,6 +886,15 @@ private struct ContextInterfaceLibraryView: View {
                 }
             }
             TeleprompterContextSettings()
+        } else if selection == .clipboard {
+            Section {
+                HStack(spacing: 12) {
+                    Button { withAnimation(.easeInOut(duration: 0.18)) { selection = nil } } label: { Label("All CI", systemImage: "chevron.left") }
+                    Spacer()
+                    Label("Clipboard CI", systemImage: "doc.on.clipboard.fill").font(.headline)
+                }
+            }
+            ClipboardContextSettings()
         } else if selection == .transfer {
             Section {
                 HStack(spacing: 12) {
@@ -947,6 +957,9 @@ private struct ContextInterfaceLibraryView: View {
                     TransferContextInterfaceCard(enabled: transferEnabled) {
                         withAnimation(.easeInOut(duration: 0.18)) { selection = .transfer }
                     }
+                    ClipboardContextInterfaceCard(enabled: clipboardEnabled) {
+                        withAnimation(.easeInOut(duration: 0.18)) { selection = .clipboard }
+                    }
                     BluetoothContextInterfaceCard(enabled: bluetoothEnabled) {
                         withAnimation(.easeInOut(duration: 0.18)) { selection = .bluetooth }
                     }
@@ -966,6 +979,153 @@ private struct ContextInterfaceLibraryView: View {
     }
 }
 
+
+
+private struct ClipboardContextInterfaceCard: View {
+    let enabled: Bool
+    let action: () -> Void
+    @AppStorage("HaloContextClipboardPriority") private var priority = 68.0
+    @AppStorage("HaloContextClipboardTriggerMode") private var triggerMode = "Hover to Open"
+    @AppStorage("HaloContextClipboardTimeoutSeconds") private var timeout = 8.0
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: "doc.on.clipboard.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 38, height: 38)
+                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Clipboard CI").font(.headline)
+                        Text("Copy Actions").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(enabled ? "ON COPY" : "OFF")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .padding(.horizontal, 7).padding(.vertical, 4)
+                        .background((enabled ? Color.accentColor : Color.secondary).opacity(0.12), in: Capsule())
+                }
+                Text("Turns the notch into a contextual action bar after you copy text, links, email addresses, phone numbers, files, JSON or addresses.")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                HStack(spacing: 7) {
+                    Label(triggerMode, systemImage: triggerMode == "Pop Up" ? "rectangle.portrait.and.arrow.forward" : "cursorarrow.motionlines")
+                    Text("•")
+                    Text("\(Int(timeout))s")
+                    Text("•")
+                    Text("Priority \(Int(priority))")
+                }
+                .font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(hovered ? 0.075 : 0.045), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(hovered ? Color.accentColor.opacity(0.42) : Color.primary.opacity(0.08), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovered)
+    }
+}
+
+private struct ClipboardContextSettings: View {
+    @AppStorage("HaloContextClipboardEnabled") private var enabled = true
+    @AppStorage("HaloContextClipboardPriority") private var priority = 68.0
+    @AppStorage("HaloContextClipboardTriggerMode") private var triggerMode = "Hover to Open"
+    @AppStorage("HaloContextClipboardTimeoutSeconds") private var timeout = 8.0
+    @AppStorage("HaloContextClipboardCompact") private var compact = false
+    @AppStorage("HaloContextClipboardShowClosedPreview") private var showClosedPreview = true
+    @AppStorage("HaloContextClipboardShowType") private var showType = true
+    @AppStorage("HaloContextClipboardShowSource") private var showSource = true
+    @AppStorage("HaloContextClipboardShowCharacterCount") private var showCharacterCount = true
+    @AppStorage("HaloContextClipboardPreviewLines") private var previewLines = 3
+    @AppStorage("HaloContextClipboardMaxActions") private var maxActions = 5
+    @AppStorage("HaloContextClipboardAutoCloseAfterAction") private var autoCloseAfterAction = true
+    @AppStorage("HaloContextClipboardShowSearch") private var showSearch = true
+    @AppStorage("HaloContextClipboardShowTransforms") private var showTransforms = true
+    @AppStorage("HaloContextClipboardSearchEngine") private var searchEngine = "Google"
+    @AppStorage("HaloContextClipboardBackgroundStyle") private var backgroundStyle = "Adaptive"
+    @AppStorage("HaloContextClipboardExcludedApps") private var excludedApps = ""
+
+    var body: some View {
+        Group {
+            Section("Activation") {
+                Toggle("Enable Clipboard CI", isOn: $enabled)
+                Picker("After copying", selection: $triggerMode) {
+                    Text("Pop Up").tag("Pop Up")
+                    Text("Stay closed — hover to open").tag("Hover to Open")
+                }
+                LabeledContent("Timeout") {
+                    Slider(value: $timeout, in: 1...60, step: 1)
+                    Text("\(Int(timeout)) s").font(.caption.monospacedDigit()).frame(width: 48)
+                }
+                Text(triggerMode == "Pop Up"
+                     ? "A copy immediately opens Clipboard CI. It closes again when the timeout expires unless Halo is pinned."
+                     : "A copy replaces the closed notch with Clipboard CI, but does not open it. Hovering the notch opens it even if Halo's global hover-to-expand setting is off. The timeout pauses while you are interacting with the opened CI.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Context priority") {
+                LabeledContent("Priority") {
+                    Slider(value: $priority, in: 0...100, step: 1)
+                    Text("\(Int(priority))").font(.caption.monospacedDigit()).frame(width: 36)
+                }
+                Text("Higher-priority Context Interfaces win when several contexts are active at once. Clipboard defaults just below Teleprompter and above Transfer.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Layout") {
+                Toggle("Compact opened layout", isOn: $compact)
+                Toggle("Show copied preview while closed", isOn: $showClosedPreview)
+                Toggle("Show content type", isOn: $showType)
+                Toggle("Show source app", isOn: $showSource)
+                Toggle("Show character / word count", isOn: $showCharacterCount)
+                LabeledContent("Preview lines") {
+                    Stepper("\(previewLines)", value: $previewLines, in: 1...6).labelsHidden()
+                    Text("\(previewLines)").font(.caption.monospacedDigit()).frame(width: 24)
+                }
+                LabeledContent("Maximum actions") {
+                    Stepper("\(maxActions)", value: $maxActions, in: 2...8).labelsHidden()
+                    Text("\(maxActions)").font(.caption.monospacedDigit()).frame(width: 24)
+                }
+                Text("Both the closed and opened notch resize from the content you choose to show. Disabling preview/details makes Clipboard CI physically smaller.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Actions") {
+                Toggle("Offer web search", isOn: $showSearch)
+                Picker("Search engine", selection: $searchEngine) {
+                    Text("Google").tag("Google")
+                    Text("DuckDuckGo").tag("DuckDuckGo")
+                    Text("Bing").tag("Bing")
+                }.disabled(!showSearch)
+                Toggle("Offer text transforms", isOn: $showTransforms)
+                Toggle("Dismiss CI after an action", isOn: $autoCloseAfterAction)
+                Text("Halo chooses actions from the copied content: open links, compose email, FaceTime numbers, reveal files, pretty-print JSON, open addresses in Maps, search text, transform text, or copy the result.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Appearance") {
+                Picker("Background", selection: $backgroundStyle) {
+                    Text("Adaptive tint").tag("Adaptive")
+                    Text("Glass").tag("Glass")
+                    Text("Black").tag("Black")
+                }
+                Text("Adaptive tint changes subtly with the copied content type while keeping the notch dark and readable.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Privacy") {
+                TextField("Excluded app bundle IDs, comma-separated", text: $excludedApps)
+                Text("Clipboard CI only inspects a new pasteboard item while this CI is enabled. macOS concealed/transient clipboard types are ignored, excluded apps suppress the trigger, and Clipboard CI itself does not persist copied content to disk.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
 
 private struct TransferContextInterfaceCard: View {
     let enabled: Bool
