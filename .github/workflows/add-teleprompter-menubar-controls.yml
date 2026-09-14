@@ -1,0 +1,28 @@
+name: Add Teleprompter Menu Bar Controls
+
+on:
+  push:
+    paths:
+      - '.github/teleprompter-menubar-controls-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply Teleprompter menu bar controls patch
+        run: python3 scripts/add_teleprompter_menubar_controls.py
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Services/CaptureService.swift
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          git commit -m "Add subtle Teleprompter menu bar controls"
+          git push
