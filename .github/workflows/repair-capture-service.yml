@@ -1,0 +1,25 @@
+name: Repair CaptureService
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  repair:
+    if: github.event.head_commit.message == 'Add CaptureService repair workflow'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Repair
+        run: |
+          git checkout f5a00c984c81615401f028f6184687bf0e5e91ed -- Halo/Services/CaptureService.swift
+          sed -i 's/\.safeAreaPadding(\.top, 12)/.padding(.top, 12)/' Halo/Services/CaptureService.swift
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Halo/Services/CaptureService.swift
+          git commit -m 'Fix Teleprompter Studio compatibility with macOS 13'
+          git push
