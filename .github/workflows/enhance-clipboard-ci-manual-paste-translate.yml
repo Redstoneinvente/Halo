@@ -22,11 +22,8 @@ jobs:
           s = p.read_text()
           if 'import CoreGraphics' not in s:
               s = s.replace('import AppKit\n', 'import AppKit\nimport CoreGraphics\n', 1)
-          current_hover = '''        .onHover { hovering in
-              clipboardCI.setInteractionActive(clipboardContextActive && hovering)
-              if teleprompterContextActive {'''.replace('              ', '            ')
-          old_hover = '''        .onHover { hovering in
-              if teleprompterContextActive {'''.replace('              ', '            ')
+          current_hover = '        .onHover { hovering in\n            clipboardCI.setInteractionActive(clipboardContextActive && hovering)\n            if teleprompterContextActive {'
+          old_hover = '        .onHover { hovering in\n            if teleprompterContextActive {'
           if current_hover in s:
               s = s.replace(current_hover, old_hover, 1)
           p.write_text(s)
