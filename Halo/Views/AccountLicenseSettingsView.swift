@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 struct AccountLicenseSettingsView: View {
     @ObservedObject private var manager = HaloAccountLicenseManager.shared
+    private let updates = HaloUpdateController.shared
 
     @State private var mode: AuthMode = .signIn
     @State private var email = ""
@@ -12,6 +13,8 @@ struct AccountLicenseSettingsView: View {
     @State private var editedDisplayName = ""
     @State private var licenseKey = ""
     @State private var showingDeleteAccountConfirmation = false
+    @State private var automaticallyChecksForUpdates = false
+    @State private var automaticallyDownloadsUpdates = false
 
     private enum AuthMode: String, CaseIterable, Identifiable {
         case signIn = "Sign In"
@@ -23,9 +26,13 @@ struct AccountLicenseSettingsView: View {
         Group {
             accountSection
             licenseSection
+            softwareUpdateSection
             statusSection
         }
-        .task { manager.start() }
+        .task {
+            manager.start()
+            refreshUpdatePreferences()
+        }
         .confirmationDialog(
             "Delete your Halo account?",
             isPresented: $showingDeleteAccountConfirmation,
@@ -202,6 +209,71 @@ struct AccountLicenseSettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var softwareUpdateSection: some View {
+        Section("Software Update") {
+            HStack(spacing: 12) {
+                Image(systemName: updates.isConfigured ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                    .font(.title2)
+                    .foregroundStyle(updates.isConfigured ? .green : .orange)
+                    .frame(width: 34)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Halo \(updates.currentVersion)")
+                        .font(.headline)
+                    Text("Build \(updates.currentBuild)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button("Check for Updates") {
+                    updates.checkForUpdates()
+                    refreshUpdatePreferences()
+                }
+                .disabled(updates.isConfigured && !updates.canCheckForUpdates)
+            }
+
+            if updates.isConfigured {
+                Label("Secure updates are handled by Sparkle 2.", systemImage: "lock.shield")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Automatically check for updates", isOn: $automaticallyChecksForUpdates)
+                    .onChange(of: automaticallyChecksForUpdates) { value in
+                        updates.setAutomaticallyChecksForUpdates(value)
+                    }
+
+                Toggle("Automatically download updates", isOn: $automaticallyDownloadsUpdates)
+                    .onChange(of: automaticallyDownloadsUpdates) { value in
+                        updates.setAutomaticallyDownloadsUpdates(value)
+                    }
+
+                if let lastCheck = updates.lastUpdateCheckDate {
+                    LabeledContent("Last checked", value: lastCheck.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                }
+            } else {
+                Text("Halo's update feed or signing key is not configured in this build.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Button("What's New") {
+                    HaloWhatsNewCoordinator.shared.present()
+                }
+
+                Spacer()
+
+                Text("Release notes are also shown by Sparkle when a new version is available.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private var activationControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             SecureField("License key", text: $licenseKey)
@@ -214,6 +286,12 @@ struct AccountLicenseSettingsView: View {
             .buttonStyle(.borderedProminent)
             .disabled(manager.isBusy || licenseKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
+    }
+
+    private func refreshUpdatePreferences() {
+        guard updates.isConfigured else { return }
+        automaticallyChecksForUpdates = updates.automaticallyChecksForUpdates
+        automaticallyDownloadsUpdates = updates.automaticallyDownloadsUpdates
     }
 
     @ViewBuilder
