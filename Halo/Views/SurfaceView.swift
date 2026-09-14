@@ -816,6 +816,108 @@ private struct TransferActivityIndicator: View {
     }
 }
 
+private enum TransferCISizing {
+    private static func bool(_ key: String, fallback: Bool, defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: key) == nil ? fallback : defaults.bool(forKey: key)
+    }
+
+    private static func string(_ key: String, fallback: String, defaults: UserDefaults = .standard) -> String {
+        defaults.string(forKey: key) ?? fallback
+    }
+
+    private static func number(_ key: String, fallback: Double, defaults: UserDefaults = .standard) -> Double {
+        defaults.object(forKey: key) == nil ? fallback : defaults.double(forKey: key)
+    }
+
+    static func minimumExpandedWidth(physicalNotchWidth: CGFloat) -> CGFloat {
+        max(220, physicalNotchWidth > 0 ? physicalNotchWidth + 28 : 220)
+    }
+
+    static func openPreferredSize(defaults: UserDefaults = .standard) -> CGSize {
+        let openStyle = string("HaloContextTransferOpenStyle", fallback: "Dashboard", defaults: defaults)
+        let compact = bool("HaloContextTransferCompact", fallback: false, defaults: defaults)
+        let showDirection = bool("HaloContextTransferShowDirection", fallback: true, defaults: defaults)
+        let showDownload = bool("HaloContextTransferShowDownload", fallback: true, defaults: defaults)
+        let showUpload = bool("HaloContextTransferShowUpload", fallback: true, defaults: defaults)
+        let showPeak = bool("HaloContextTransferShowPeak", fallback: true, defaults: defaults)
+        let showSession = bool("HaloContextTransferShowSession", fallback: true, defaults: defaults)
+        let showElapsed = bool("HaloContextTransferShowElapsed", fallback: true, defaults: defaults)
+        let showGraph = bool("HaloContextTransferShowGraph", fallback: true, defaults: defaults)
+        let indicatorStyle = string("HaloContextTransferIndicatorStyle", fallback: "Edge Bar", defaults: defaults)
+        let indicatorShowSpeed = bool("HaloContextTransferIndicatorShowSpeed", fallback: true, defaults: defaults)
+        let indicatorThickness = number("HaloContextTransferIndicatorThickness", fallback: 3, defaults: defaults)
+
+        let primaryStats = (showDownload ? 1 : 0) + (showUpload ? 1 : 0)
+
+        switch openStyle {
+        case "Indicator":
+            let baseWidth: Double
+            switch indicatorStyle {
+            case "Minimal": baseWidth = indicatorShowSpeed ? 270 : 230
+            case "Center Pulse": baseWidth = indicatorShowSpeed ? 360 : 290
+            case "Dual Rails": baseWidth = indicatorShowSpeed ? 390 : 315
+            default: baseWidth = indicatorShowSpeed ? 350 : 285
+            }
+            let hasMeta = showDirection || showElapsed
+            let extraThickness = max(0, indicatorThickness - 3)
+            return CGSize(width: baseWidth, height: max(96, 70 + (hasMeta ? 26 : 8) + extraThickness))
+
+        case "Minimal":
+            var width = 205.0
+            if showDirection { width += 105 }
+            width += Double(primaryStats) * 105
+            if showElapsed { width += 62 }
+            return CGSize(width: min(600, max(260, width)), height: 96)
+
+        default:
+            let peakStats = (!compact && showPeak) ? 2 : 0
+            let stats = primaryStats + peakStats
+            var width = compact ? 300.0 : 330.0
+            if stats > 0 { width += Double(stats) * (compact ? 76 : 88) }
+            if !showDirection && !showElapsed && stats == 0 { width = 280 }
+            width = min(720, max(280, width))
+
+            var height = compact ? 78.0 : 86.0
+            if stats > 0 { height += compact ? 58 : 66 }
+            if showGraph && !compact { height += 70 }
+            if showSession && !compact { height += 34 }
+            return CGSize(width: width, height: min(300, max(96, height)))
+        }
+    }
+
+    static func closedPreferredWidth(physicalNotchWidth: CGFloat, defaults: UserDefaults = .standard) -> CGFloat {
+        let closedStyle = string("HaloContextTransferClosedStyle", fallback: "Stats", defaults: defaults)
+        let showDirection = bool("HaloContextTransferShowDirection", fallback: true, defaults: defaults)
+        let showDownload = bool("HaloContextTransferShowDownload", fallback: true, defaults: defaults)
+        let showUpload = bool("HaloContextTransferShowUpload", fallback: true, defaults: defaults)
+        let indicatorStyle = string("HaloContextTransferIndicatorStyle", fallback: "Edge Bar", defaults: defaults)
+        let indicatorShowSpeed = bool("HaloContextTransferIndicatorShowSpeed", fallback: true, defaults: defaults)
+
+        let contentWidth: CGFloat
+        switch closedStyle {
+        case "Indicator":
+            switch indicatorStyle {
+            case "Minimal": contentWidth = indicatorShowSpeed ? 165 : 110
+            case "Center Pulse": contentWidth = indicatorShowSpeed ? 245 : 180
+            case "Dual Rails": contentWidth = indicatorShowSpeed ? 255 : 195
+            default: contentWidth = indicatorShowSpeed ? 235 : 175
+            }
+        case "Minimal":
+            contentWidth = 165
+        default:
+            var width: CGFloat = 48
+            if showDirection { width += 88 }
+            if showDownload { width += 96 }
+            if showUpload { width += 96 }
+            contentWidth = width
+        }
+
+        // The physical camera/notch is a hard lower bound on real notched Macs.
+        let physicalFloor = physicalNotchWidth > 0 ? physicalNotchWidth + 16 : 110
+        return min(520, max(physicalFloor, contentWidth))
+    }
+}
+
 private struct TransferContextView: View {
     @ObservedObject var monitor: TransferActivityMonitor
     @ObservedObject var surfaceState: SurfaceState
@@ -835,29 +937,18 @@ private struct TransferContextView: View {
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
-    private var visibleStatCount: Int {
-        (showDownload ? 1 : 0) + (showUpload ? 1 : 0) + ((!compact && showPeak) ? 2 : 0)
-    }
-    private var preferredSize: CGSize {
-        switch openStyle {
-        case "Indicator":
-            return CGSize(width: 360, height: showElapsed ? 96 : 82)
-        case "Minimal":
-            let width = 300 + Double(max(0, min(2, visibleStatCount))) * 75
-            return CGSize(width: width, height: showDirection || showElapsed ? 112 : 92)
-        default:
-            let statColumns = max(1, min(4, visibleStatCount))
-            let width = compact ? (300 + Double(statColumns) * 72) : (360 + Double(statColumns) * 72)
-            var height = compact ? 112.0 : 128.0
-            if showGraph && !compact { height += 70 }
-            if showSession && !compact { height += 34 }
-            return CGSize(width: min(680, max(340, width)), height: min(280, height))
-        }
-    }
+    @AppStorage("HaloContextTransferIndicatorStyle") private var indicatorStyle = "Edge Bar"
+    @AppStorage("HaloContextTransferIndicatorShowSpeed") private var indicatorShowSpeed = true
+    @AppStorage("HaloContextTransferIndicatorThickness") private var indicatorThickness = 3.0
+
+    private var primaryStatCount: Int { (showDownload ? 1 : 0) + (showUpload ? 1 : 0) }
+    private var dashboardStatCount: Int { primaryStatCount + ((!compact && showPeak) ? 2 : 0) }
+    private var preferredSize: CGSize { TransferCISizing.openPreferredSize() }
     private var sizingSignature: String {
         [openStyle, compact.description, showDirection.description, showDownload.description,
          showUpload.description, showPeak.description, showSession.description,
-         showElapsed.description, showGraph.description].joined(separator: "|")
+         showElapsed.description, showGraph.description, indicatorStyle,
+         indicatorShowSpeed.description, String(format: "%.2f", indicatorThickness)].joined(separator: "|")
     }
 
     var body: some View {
@@ -903,7 +994,7 @@ private struct TransferContextView: View {
                         if showElapsed { Label(elapsed, systemImage: "clock").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
                     }
 
-                    if visibleStatCount > 0 {
+                    if dashboardStatCount > 0 {
                         HStack(spacing: compact ? 10 : 14) {
                             if showDownload { stat("Download", value: speed(monitor.downloadBytesPerSecond), symbol: "arrow.down") }
                             if showUpload { stat("Upload", value: speed(monitor.uploadBytesPerSecond), symbol: "arrow.up") }
@@ -933,12 +1024,15 @@ private struct TransferContextView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear { updatePreferredSize() }
-        .onChange(of: sizingSignature) { _ in updatePreferredSize() }
+        .onAppear { updateSizing() }
+        .onChange(of: sizingSignature) { _ in updateSizing() }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in updateSizing() }
     }
 
-    private func updatePreferredSize() {
+    private func updateSizing() {
+        surfaceState.contextMinimumExpandedWidth = TransferCISizing.minimumExpandedWidth(physicalNotchWidth: surfaceState.physicalNotchWidth)
         surfaceState.contextPreferredSize = preferredSize
+        surfaceState.contextPreferredCompactWidth = TransferCISizing.closedPreferredWidth(physicalNotchWidth: surfaceState.physicalNotchWidth)
     }
 
     private func compactStat(_ title: String, _ value: String) -> some View {
@@ -975,10 +1069,18 @@ private struct TransferContextView: View {
 
 private struct TransferClosedContextView: View {
     @ObservedObject var monitor: TransferActivityMonitor
+    @ObservedObject var surfaceState: SurfaceState
     @AppStorage("HaloContextTransferClosedStyle") private var closedStyle = "Stats"
     @AppStorage("HaloContextTransferShowDirection") private var showDirection = true
     @AppStorage("HaloContextTransferShowDownload") private var showDownload = true
     @AppStorage("HaloContextTransferShowUpload") private var showUpload = true
+    @AppStorage("HaloContextTransferIndicatorStyle") private var indicatorStyle = "Edge Bar"
+    @AppStorage("HaloContextTransferIndicatorShowSpeed") private var indicatorShowSpeed = true
+
+    private var sizingSignature: String {
+        [closedStyle, showDirection.description, showDownload.description, showUpload.description,
+         indicatorStyle, indicatorShowSpeed.description].joined(separator: "|")
+    }
 
     var body: some View {
         Group {
@@ -1013,6 +1115,19 @@ private struct TransferClosedContextView: View {
                 .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        .onAppear { updateSizing() }
+        .onChange(of: sizingSignature) { _ in updateSizing() }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in updateSizing() }
+    }
+
+    private func updateSizing() {
+        surfaceState.contextMinimumExpandedWidth = TransferCISizing.minimumExpandedWidth(physicalNotchWidth: surfaceState.physicalNotchWidth)
+        surfaceState.contextPreferredCompactWidth = TransferCISizing.closedPreferredWidth(physicalNotchWidth: surfaceState.physicalNotchWidth)
+        // Prime the next open target while still closed, so opening goes directly to the
+        // correct content-driven size instead of opening large and resizing a frame later.
+        if !surfaceState.expanded {
+            surfaceState.contextPreferredSize = TransferCISizing.openPreferredSize()
         }
     }
 
@@ -1222,7 +1337,7 @@ struct SurfaceView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                       } else if !state.expanded {
                         if transferContextActive {
-                            TransferClosedContextView(monitor: transfer)
+                            TransferClosedContextView(monitor: transfer, surfaceState: state)
                         } else {
                             ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
                         }
@@ -1394,6 +1509,8 @@ struct SurfaceView: View {
         .onReceive(transfer.$isActive.removeDuplicates()) { active in
             if !active {
                 state.contextPreferredSize = nil
+                state.contextPreferredCompactWidth = nil
+                state.contextMinimumExpandedWidth = nil
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloTeleprompterVisibilityChanged"))) { note in
@@ -1430,7 +1547,7 @@ struct SurfaceView: View {
                 workspace.setOpenedNotchVisible(false, token: openVisibilityToken)
                 return
             }
-            workspace.setOpenedNotchVisible(expanded && activeContext == nil, token: openVisibilityToken)
+            workspace.setOpenedNotchVisible(expanded && (activeContext == nil || transferContextActive), token: openVisibilityToken)
             if !expanded {
                 state.contextPreferredSize = nil
                 retroGameRequested = false
@@ -1442,6 +1559,11 @@ struct SurfaceView: View {
             if owns {
                 state.collapseTask?.cancel()
                 if !state.pinned { state.expanded = false }
+            }
+            if !transferContextActive {
+                state.contextPreferredCompactWidth = nil
+                state.contextMinimumExpandedWidth = nil
+                if activeContext != nil { state.contextPreferredSize = nil }
             }
             workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive), token: openVisibilityToken)
         }

@@ -26,6 +26,8 @@ final class SurfaceState: ObservableObject {
     @Published var activationSurfaceOptions = SurfaceOptions()
     @Published var layoutOverride: WorkspaceLayout?
     @Published var contextPreferredSize: CGSize?
+    @Published var contextPreferredCompactWidth: CGFloat?
+    @Published var contextMinimumExpandedWidth: CGFloat?
     /// Per-surface drag state keeps Drop CI scoped to the display beneath the dragged item.
     @Published var dropTargeted = false
     @Published var dropItemCount = 0
@@ -293,6 +295,7 @@ final class WindowManager {
         var targetFrame: CGRect?
         var subscription: AnyCancellable?
         var contextSizeSubscription: AnyCancellable?
+        var contextCompactSizeSubscription: AnyCancellable?
         init() {
             panel = HaloPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             panel.isReleasedWhenClosed = false
@@ -311,7 +314,7 @@ final class WindowManager {
         }
         func stop() {
             animator.cancel(); state.collapseTask?.cancel(); state.dropExitTask?.cancel()
-            subscription?.cancel(); contextSizeSubscription?.cancel(); panel.close(); ambientPanel.close()
+            subscription?.cancel(); contextSizeSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); panel.close(); ambientPanel.close()
         }
     }
 
@@ -1223,8 +1226,12 @@ final class WindowManager {
         // visible dead space, especially below Music/Audio CI.
         let margin: CGFloat = 12
         let minimumHeight: CGFloat = 96
-        let maxWidth = max(360, geometry.visible.width - margin * 2)
-        let width = min(maxWidth, max(360, requested.width))
+        let requestedMinimum = host.state.contextMinimumExpandedWidth ?? 360
+        let physicalMinimum = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
+            ? geometry.physicalNotchWidth + 24 : 160
+        let minimumWidth = max(160, max(requestedMinimum, physicalMinimum))
+        let maxWidth = max(minimumWidth, geometry.visible.width - margin * 2)
+        let width = min(maxWidth, max(minimumWidth, requested.width))
         var height = max(minimumHeight, requested.height)
         var frame: CGRect
 
@@ -1261,9 +1268,27 @@ final class WindowManager {
         return frame
     }
 
-    private func targetFrame(host: Host, expanded: Bool) -> CGRect {
+    private func adjustedClosedFrame(host: Host, requestedWidth: CGFloat?) -> CGRect {
         guard let geometry = host.geometry else { return .zero }
-        return expanded ? adjustedExpandedFrame(host: host, requested: host.state.contextPreferredSize) : geometry.frame(expanded: false)
+        let base = geometry.frame(expanded: false)
+        guard let requestedWidth, requestedWidth.isFinite else { return base }
+
+        let margin: CGFloat = 8
+        let physicalFloor = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
+            ? geometry.physicalNotchWidth + 16 : 64
+        let maximum = max(physicalFloor, geometry.visible.width - margin * 2)
+        let width = min(maximum, max(physicalFloor, requestedWidth))
+        var frame = CGRect(x: base.midX - width / 2, y: base.minY, width: width, height: base.height)
+        if frame.minX < geometry.visible.minX + margin { frame.origin.x = geometry.visible.minX + margin }
+        if frame.maxX > geometry.visible.maxX - margin { frame.origin.x = geometry.visible.maxX - margin - width }
+        return frame
+    }
+
+    private func targetFrame(host: Host, expanded: Bool) -> CGRect {
+        guard host.geometry != nil else { return .zero }
+        return expanded
+            ? adjustedExpandedFrame(host: host, requested: host.state.contextPreferredSize)
+            : adjustedClosedFrame(host: host, requestedWidth: host.state.contextPreferredCompactWidth)
     }
 
     private func notchAmbientFrame(for geometry: SurfaceGeometry) -> CGRect {
@@ -1453,6 +1478,28 @@ final class WindowManager {
                 // Ambient is ordered first and is mouse-pass-through; the normal Halo panel
                 // remains the interactive/top owner of the notch.
                 host.ambientPanel.orderFrontRegardless()
+                host.contextCompactSizeSubscription = host.state.$contextPreferredCompactWidth.dropFirst().removeDuplicates(by: { lhs, rhs in
+                    switch (lhs, rhs) {
+                    case (nil, nil): return true
+                    case let (a?, b?): return abs(a - b) < 1
+                    default: return false
+                    }
+                }).receive(on: DispatchQueue.main).sink { [weak self, weak host] _ in
+                    guard let self, let host, let geometry = host.geometry, !host.state.expanded else { return }
+                    let target = self.targetFrame(host: host, expanded: false)
+                    guard host.targetFrame != target else { return }
+                    host.targetFrame = target
+                    var motion = geometry.appearance.surface
+                    motion.opening = .resize
+                    motion.closing = .resize
+                    motion.duration = min(0.30, max(0.14, motion.duration))
+                    host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
+                                       preset: .smooth,
+                                       animations: host.state.theme.animations && !host.state.editingGeometry,
+                                       opening: true, style: geometry.style, liveViewportResize: true,
+                                       synchronizeClosedGeometry: true,
+                                       closedCameraFrame: self.physicalCameraFrame(for: geometry))
+                }
                 host.panel.orderFrontRegardless()
                 host.ambientPanel.order(.below, relativeTo: host.panel.windowNumber)
                 hosts[id] = host
