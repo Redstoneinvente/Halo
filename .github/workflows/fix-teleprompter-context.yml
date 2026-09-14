@@ -1,4 +1,4 @@
-name: Fix Teleprompter Context Matching
+name: Patch Teleprompter Presentation
 
 on:
   push:
@@ -9,42 +9,59 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Repair screen recording context trigger'
+    if: github.event.head_commit.message == 'Prepare Teleprompter placement and notch expansion patch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
-      - name: Repair screen recording detection
-        shell: python
+      - name: Patch source
         run: |
+          python3 <<'PY'
           from pathlib import Path
-
           p = Path('Halo/Services/CaptureService.swift')
           s = p.read_text()
 
-          old = '''        case .recordingActive:\n            return heuristicScreenRecordingActive() == rule.boolValue'''
-          new = '''        case .recordingActive:\n            return lastRecordingState == rule.boolValue'''
+          marker = 'enum TeleprompterShortcutPreset: String, Codable, CaseIterable, Identifiable {'
+          addition = '''enum TeleprompterPresentationStyle: String, Codable, CaseIterable, Identifiable {\n    case floating = "Floating"\n    case notchExpansion = "Notch Expansion"\n    var id: String { rawValue }\n}\n\nenum TeleprompterPlacement: String, Codable, CaseIterable, Identifiable {\n    case topCenter = "Top Center"\n    case topLeft = "Top Left"\n    case topRight = "Top Right"\n    case center = "Center"\n    case bottomCenter = "Bottom Center"\n    case bottomLeft = "Bottom Left"\n    case bottomRight = "Bottom Right"\n    case custom = "Custom"\n    var id: String { rawValue }\n}\n\n'''
+          if addition not in s:
+              s = s.replace(marker, addition + marker, 1)
+
+          old = '    var mirrorHorizontally = false\n    var keepNearCamera = true\n}'
+          new = '    var mirrorHorizontally = false\n    var keepNearCamera = true\n    var presentationStyle: TeleprompterPresentationStyle = .floating\n    var placement: TeleprompterPlacement = .topCenter\n    var customOffsetX = 0.0\n    var customOffsetY = 0.0\n    var screenEdgePadding = 18.0\n    var notchExpansionAnimation = true\n}'
           if old not in s:
-              raise SystemExit('recording context anchor not found')
+              raise SystemExit('appearance anchor missing')
           s = s.replace(old, new, 1)
 
-          old = '''    private func heuristicScreenRecordingActive() -> Bool {\n        let windows = windowDescriptions().map { $0.lowercased() }\n        let recorders = ["obs", "screenflow", "camtasia", "loom"]\n        let running = NSWorkspace.shared.runningApplications.compactMap(\\.localizedName).map { $0.lowercased() }\n        let recorderRunning = running.contains { name in recorders.contains(where: name.contains) }\n        let recordingWindow = windows.contains { description in\n            recorders.contains(where: description.contains) && (description.contains("record") || description.contains("studio"))\n        }\n        return recorderRunning && recordingWindow\n    }'''
-          new = '''    private func heuristicScreenRecordingActive() -> Bool {\n        let windows = windowDescriptions().map { $0.lowercased() }\n        let apps = NSWorkspace.shared.runningApplications\n        let appNames = apps.compactMap(\\.localizedName).map { $0.lowercased() }\n        let bundleIDs = apps.compactMap(\\.bundleIdentifier).map { $0.lowercased() }\n\n        // Native macOS screen recording uses Screenshot / screencaptureui while a capture is active.\n        let nativeRecorderActive = appNames.contains { name in\n            name.contains("screenshot") || name.contains("screencaptureui")\n        } || bundleIDs.contains { id in\n            id.contains("screencaptureui") || id.contains("screenshot")\n        }\n\n        let recorders = ["obs", "screenflow", "camtasia", "loom", "quicktime"]\n        let recorderRunning = appNames.contains { name in recorders.contains(where: name.contains) }\n        let explicitRecordingWindow = windows.contains { description in\n            recorders.contains(where: description.contains) &&\n            (description.contains("recording") || description.contains("record") || description.contains("rec ") || description.contains("live"))\n        }\n\n        return nativeRecorderActive || (recorderRunning && explicitRecordingWindow)\n    }'''
+          old = '''        panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true; panel.level = .statusBar\n        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]\n        panel.hidesOnDeactivate = false; panel.isMovableByWindowBackground = true\n        panel.sharingType = profile.appearance.hideFromCapture ? .none : .readOnly\n        panel.contentView = NSHostingView(rootView: TeleprompterPromptView(runtime: runtime))\n        panel.setContentSize(NSSize(width: profile.appearance.width, height: profile.appearance.height))\n        promptPanel = panel; position(panel, appearance: profile.appearance); panel.orderFrontRegardless()'''
+          new = '''        panel.isOpaque = false; panel.backgroundColor = .clear\n        panel.hasShadow = profile.appearance.presentationStyle == .floating\n        panel.level = profile.appearance.presentationStyle == .notchExpansion ? .screenSaver : .statusBar\n        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]\n        panel.hidesOnDeactivate = false\n        panel.isMovableByWindowBackground = profile.appearance.presentationStyle == .floating\n        panel.sharingType = profile.appearance.hideFromCapture ? .none : .readOnly\n        panel.contentView = NSHostingView(rootView: TeleprompterPromptView(runtime: runtime))\n        promptPanel = panel\n        position(panel, appearance: profile.appearance)\n        panel.orderFrontRegardless()'''
           if old not in s:
-              raise SystemExit('heuristic anchor not found')
+              raise SystemExit('panel anchor missing')
           s = s.replace(old, new, 1)
 
-          old = '''    private func recordingStateChanged(_ active: Bool) {\n        let changed = active != lastRecordingState\n        lastRecordingState = active\n        evaluateContextAutomation()'''
-          new = '''    private func recordingStateChanged(_ active: Bool) {\n        let changed = active != lastRecordingState\n        lastRecordingState = active\n        evaluateContextAutomation()'''
+          start = s.index('    private func position(_ panel: NSPanel, appearance: TeleprompterAppearance) {')
+          end = s.index('\n    private func installInputMonitors()', start)
+          replacement = '''    private func position(_ panel: NSPanel, appearance: TeleprompterAppearance) {\n        let mouse = NSEvent.mouseLocation\n        let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main ?? NSScreen.screens.first\n        guard let screen else { return }\n\n        let width = min(max(280, appearance.width), screen.frame.width - 20)\n        let height = min(max(90, appearance.height), screen.frame.height - 20)\n\n        if appearance.presentationStyle == .notchExpansion {\n            let safeTop = max(24, screen.safeAreaInsets.top)\n            let target = NSRect(x: screen.frame.midX - width / 2,\n                                y: screen.frame.maxY - (height + safeTop),\n                                width: width,\n                                height: height + safeTop)\n            if appearance.notchExpansionAnimation {\n                let collapsedWidth = min(width, max(160, safeTop * 5.0))\n                let collapsed = NSRect(x: screen.frame.midX - collapsedWidth / 2,\n                                       y: screen.frame.maxY - safeTop,\n                                       width: collapsedWidth,\n                                       height: safeTop)\n                panel.setFrame(collapsed, display: false)\n                NSAnimationContext.runAnimationGroup { context in\n                    context.duration = 0.24\n                    panel.animator().setFrame(target, display: true)\n                }\n            } else {\n                panel.setFrame(target, display: true)\n            }\n            return\n        }\n\n        let visible = screen.visibleFrame\n        let pad = max(0, appearance.screenEdgePadding)\n        var x = visible.midX - width / 2\n        var y = visible.maxY - height - pad\n        switch appearance.placement {\n        case .topCenter: break\n        case .topLeft: x = visible.minX + pad\n        case .topRight: x = visible.maxX - width - pad\n        case .center: y = visible.midY - height / 2\n        case .bottomCenter: y = visible.minY + pad\n        case .bottomLeft: x = visible.minX + pad; y = visible.minY + pad\n        case .bottomRight: x = visible.maxX - width - pad; y = visible.minY + pad\n        case .custom:\n            x = visible.midX - width / 2 + appearance.customOffsetX\n            y = visible.midY - height / 2 + appearance.customOffsetY\n        }\n        if appearance.keepNearCamera && appearance.placement == .topCenter {\n            y = screen.frame.maxY - max(8, screen.safeAreaInsets.top) - appearance.eyeLineOffset - height\n        }\n        x = min(max(x, visible.minX), visible.maxX - width)\n        y = min(max(y, visible.minY), visible.maxY - height)\n        panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)\n    }\n'''
+          s = s[:start] + replacement + s[end:]
+
+          old = '''            Picker("Mode", selection: $profile.behavior.displayMode) { ForEach(TeleprompterDisplayMode.allCases) { Text($0.rawValue).tag($0) } }'''
+          new = '''            Picker("Presentation", selection: $profile.appearance.presentationStyle) { ForEach(TeleprompterPresentationStyle.allCases) { Text($0.rawValue).tag($0) } }\n            if profile.appearance.presentationStyle == .floating {\n                Picker("Placement", selection: $profile.appearance.placement) { ForEach(TeleprompterPlacement.allCases) { Text($0.rawValue).tag($0) } }\n                if profile.appearance.placement == .custom {\n                    LabeledContent("Horizontal offset") { Slider(value: $profile.appearance.customOffsetX, in: -900...900); Text("\\(Int(profile.appearance.customOffsetX)) pt").frame(width: 70) }\n                    LabeledContent("Vertical offset") { Slider(value: $profile.appearance.customOffsetY, in: -600...600); Text("\\(Int(profile.appearance.customOffsetY)) pt").frame(width: 70) }\n                }\n                LabeledContent("Screen-edge padding") { Slider(value: $profile.appearance.screenEdgePadding, in: 0...80); Text("\\(Int(profile.appearance.screenEdgePadding)) pt").frame(width: 70) }\n            } else {\n                Toggle("Animate from notch", isOn: $profile.appearance.notchExpansionAnimation)\n                Text("Notch Expansion anchors the Teleprompter to the physical notch and expands outward from it like Halo's other Context Interfaces.").font(.caption).foregroundStyle(.secondary)\n            }\n            Picker("Mode", selection: $profile.behavior.displayMode) { ForEach(TeleprompterDisplayMode.allCases) { Text($0.rawValue).tag($0) } }'''
           if old not in s:
-              raise SystemExit('recording state anchor not found')
+              raise SystemExit('appearance ui anchor missing')
+          s = s.replace(old, new, 1)
+
+          old = '''            RoundedRectangle(cornerRadius: appearance.cornerRadius, style: .continuous).fill(.black.opacity(appearance.backgroundOpacity))'''
+          new = '''            RoundedRectangle(cornerRadius: appearance.presentationStyle == .notchExpansion ? max(8, appearance.cornerRadius) : appearance.cornerRadius, style: .continuous).fill(.black.opacity(appearance.presentationStyle == .notchExpansion ? 1.0 : appearance.backgroundOpacity))'''
+          if old not in s:
+              raise SystemExit('background anchor missing')
+          s = s.replace(old, new, 1)
 
           p.write_text(s)
-      - name: Commit screen recording fix
+          PY
+      - name: Commit feature
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Halo/Services/CaptureService.swift
-          git commit -m "Fix screen recording context trigger"
+          git commit -m "Add Teleprompter placement and notch expansion"
           git push origin main
