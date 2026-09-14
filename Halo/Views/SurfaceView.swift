@@ -562,6 +562,7 @@ struct SurfaceView: View {
     @ObservedObject var state: SurfaceState
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject private var bluetooth = BluetoothStateService.shared
+    @State private var teleprompterActive = false
     @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
     @AppStorage("HaloContextMusicUseFullNotchArea") private var contextMusicUsesFullNotchArea = false
     @AppStorage("HaloContextMusicKeepClosedNotchContents") private var contextMusicKeepsClosedContents = false
@@ -688,6 +689,7 @@ struct SurfaceView: View {
                     .frame(height: state.expanded ? max(40, state.compactHeight) : state.compactHeight)
                     .contentShape(Rectangle())
                     .onTapGesture {
+                        guard !teleprompterActive else { return }
                         if state.expanded && state.pinned { return }
                         state.expanded.toggle()
                     }
@@ -836,7 +838,22 @@ struct SurfaceView: View {
             }
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }
-        .onHover { state.hover($0, enabled: store.configuration.hoverToExpand) }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloTeleprompterVisibilityChanged"))) { note in
+            let active = (note.userInfo?["active"] as? Bool) ?? false
+            teleprompterActive = active
+            if active {
+                state.collapseTask?.cancel()
+                if !state.pinned { state.expanded = false }
+            }
+        }
+        .onHover { hovering in
+            if teleprompterActive {
+                state.collapseTask?.cancel()
+                if !state.pinned { state.expanded = false }
+            } else {
+                state.hover(hovering, enabled: store.configuration.hoverToExpand)
+            }
+        }
         .onChange(of: state.dropTargeted) { active in
             if active {
                 state.collapseTask?.cancel()
@@ -846,6 +863,11 @@ struct SurfaceView: View {
         .onAppear { workspace.setOpenedNotchVisible(state.expanded && activeContext == nil, token: openVisibilityToken) }
         .onDisappear { workspace.setOpenedNotchVisible(false, token: openVisibilityToken) }
         .onChange(of: state.expanded) { expanded in
+            if teleprompterActive && expanded && activeContext == nil {
+                state.expanded = false
+                workspace.setOpenedNotchVisible(false, token: openVisibilityToken)
+                return
+            }
             workspace.setOpenedNotchVisible(expanded && activeContext == nil, token: openVisibilityToken)
             if !expanded {
                 state.contextPreferredSize = nil

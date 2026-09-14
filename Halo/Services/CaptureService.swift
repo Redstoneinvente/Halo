@@ -394,6 +394,7 @@ final class TeleprompterCoordinator: NSObject {
         promptPanel = panel
         position(panel, appearance: profile.appearance)
         panel.orderFrontRegardless()
+        NotificationCenter.default.post(name: .init("HaloTeleprompterVisibilityChanged"), object: nil, userInfo: ["active": true])
         if profile.behavior.autoStart { runtime.begin() }
     }
 
@@ -402,7 +403,16 @@ final class TeleprompterCoordinator: NSObject {
         contextOwnedProfileID = profile.id
     }
 
-    func hidePrompt() { runtime?.pause(); runtime = nil; promptPanel?.orderOut(nil); promptPanel = nil }
+    func hidePrompt() {
+        let wasVisible = promptPanel?.isVisible == true
+        runtime?.pause()
+        runtime = nil
+        promptPanel?.orderOut(nil)
+        promptPanel = nil
+        if wasVisible {
+            NotificationCenter.default.post(name: .init("HaloTeleprompterVisibilityChanged"), object: nil, userInfo: ["active": false])
+        }
+    }
 
     func showSettings() {
         if settingsWindow == nil {
@@ -780,6 +790,7 @@ struct TeleprompterSettingsView: View {
             if let index = store.selectedIndex { TeleprompterProfileEditor(profile: $store.profiles[index]) }
             else { VStack(spacing: 8) { Image(systemName: "text.bubble").font(.largeTitle); Text("Select a Teleprompter").font(.headline) }.foregroundStyle(.secondary) }
         }
+        .safeAreaPadding(.top, 12)
     }
 }
 
