@@ -851,7 +851,7 @@ private enum TransferCISizing {
 
         switch openStyle {
         case "Indicator":
-            let baseWidth: Double
+            let baseWidth: CGFloat
             switch indicatorStyle {
             case "Minimal": baseWidth = indicatorShowSpeed ? 270 : 230
             case "Center Pulse": baseWidth = indicatorShowSpeed ? 360 : 290
@@ -859,25 +859,25 @@ private enum TransferCISizing {
             default: baseWidth = indicatorShowSpeed ? 350 : 285
             }
             let hasMeta = showDirection || showElapsed
-            let extraThickness = max(0, indicatorThickness - 3)
-            return CGSize(width: baseWidth, height: max(96, 70 + (hasMeta ? 26 : 8) + extraThickness))
+            let extraThickness = CGFloat(max(0, indicatorThickness - 3))
+            return CGSize(width: baseWidth, height: max(CGFloat(96), CGFloat(70 + (hasMeta ? 26 : 8)) + extraThickness))
 
         case "Minimal":
-            var width = 205.0
+            var width: CGFloat = 205
             if showDirection { width += 105 }
-            width += Double(primaryStats) * 105
+            width += CGFloat(primaryStats) * 105
             if showElapsed { width += 62 }
             return CGSize(width: min(600, max(260, width)), height: 96)
 
         default:
             let peakStats = (!compact && showPeak) ? 2 : 0
             let stats = primaryStats + peakStats
-            var width = compact ? 300.0 : 330.0
-            if stats > 0 { width += Double(stats) * (compact ? 76 : 88) }
+            var width: CGFloat = compact ? 300 : 330
+            if stats > 0 { width += CGFloat(stats) * (compact ? 76 : 88) }
             if !showDirection && !showElapsed && stats == 0 { width = 280 }
             width = min(720, max(280, width))
 
-            var height = compact ? 78.0 : 86.0
+            var height: CGFloat = compact ? 78 : 86
             if stats > 0 { height += compact ? 58 : 66 }
             if showGraph && !compact { height += 70 }
             if showSession && !compact { height += 34 }
@@ -1550,6 +1550,16 @@ struct SurfaceView: View {
             workspace.setOpenedNotchVisible(expanded && (activeContext == nil || transferContextActive), token: openVisibilityToken)
             if !expanded {
                 state.contextPreferredSize = nil
+                if transferContextActive {
+                    // Preserve the content-driven open target while Transfer remains active,
+                    // so the next hover/click opens directly to the correct size.
+                    DispatchQueue.main.async {
+                        guard transferContextActive, !state.expanded else { return }
+                        state.contextMinimumExpandedWidth = TransferCISizing.minimumExpandedWidth(physicalNotchWidth: state.physicalNotchWidth)
+                        state.contextPreferredCompactWidth = TransferCISizing.closedPreferredWidth(physicalNotchWidth: state.physicalNotchWidth)
+                        state.contextPreferredSize = TransferCISizing.openPreferredSize()
+                    }
+                }
                 retroGameRequested = false
             }
         }
