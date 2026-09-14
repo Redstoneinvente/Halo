@@ -189,6 +189,66 @@ private enum HaloUpdatePhase: String {
     case updated = "Updated ✓"
 }
 
+private struct HaloPhysicalNotchGeometry {
+    let screen: NSScreen
+    let size: CGSize
+    let centerX: CGFloat
+    let detected: Bool
+
+    static func targetScreen() -> NSScreen? {
+        let mouse = NSEvent.mouseLocation
+        if let underPointer = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) { return underPointer }
+        if let windowScreen = NSApp.keyWindow?.screen { return windowScreen }
+        return NSScreen.main ?? NSScreen.screens.first
+    }
+
+    static func measure(on screen: NSScreen) -> HaloPhysicalNotchGeometry {
+        let frame = screen.frame
+        let topInset = screen.safeAreaInsets.top
+        if topInset > 0,
+           let left = screen.auxiliaryTopLeftArea,
+           let right = screen.auxiliaryTopRightArea {
+            let width = max(1, right.minX - left.maxX)
+            let height = max(1, topInset)
+            return .init(screen: screen,
+                         size: CGSize(width: width, height: height),
+                         centerX: (left.maxX + right.minX) / 2,
+                         detected: true)
+        }
+
+        let fallbackHeight = max(28, topInset)
+        return .init(screen: screen,
+                     size: CGSize(width: 180, height: fallbackHeight),
+                     centerX: frame.midX,
+                     detected: false)
+    }
+}
+
+private struct HaloHardwareNotchShape: InsettableShape {
+    var cornerRadius: CGFloat
+    var insetAmount: CGFloat = 0
+
+    func path(in rect: CGRect) -> Path {
+        let r = min(max(2, cornerRadius - insetAmount), max(2, rect.height / 2))
+        let box = rect.insetBy(dx: insetAmount, dy: insetAmount)
+        var path = Path()
+        path.move(to: CGPoint(x: box.minX, y: box.minY))
+        path.addLine(to: CGPoint(x: box.minX, y: box.maxY - r))
+        path.addQuadCurve(to: CGPoint(x: box.minX + r, y: box.maxY), control: CGPoint(x: box.minX, y: box.maxY))
+        path.addLine(to: CGPoint(x: box.maxX - r, y: box.maxY))
+        path.addQuadCurve(to: CGPoint(x: box.maxX, y: box.maxY - r), control: CGPoint(x: box.maxX, y: box.maxY))
+        path.addLine(to: CGPoint(x: box.maxX, y: box.minY))
+        path.closeSubpath()
+        return path
+    }
+
+    func inset(by amount: CGFloat) -> HaloHardwareNotchShape {
+        var copy = self
+        copy.insetAmount += amount
+        return copy
+    }
+}
+
 @MainActor
 private final class HaloUpdatePreviewModel: ObservableObject {
     @Published var progress = 0.0
@@ -208,7 +268,10 @@ final class HaloUpdateAnimationPreviewController {
 
     func play(version: String) {
         task?.cancel()
-        show(version: version)
+        guard let screen = HaloPhysicalNotchGeometry.targetScreen() else { return }
+        let geometry = HaloPhysicalNotchGeometry.measure(on: screen)
+        show(version: version, geometry: geometry)
+
         let defaults = UserDefaults.standard
         let storedSpeed = defaults.double(forKey: "HaloUpdateAnimationSpeed")
         let speed = max(0.5, storedSpeed == 0 ? 1 : storedSpeed)
@@ -222,31 +285,21 @@ final class HaloUpdateAnimationPreviewController {
 
         task = Task { @MainActor [weak self] in
             guard let self else { return }
-
             if showDetails {
-                withAnimation(.spring(response: 0.30 / speed, dampingFraction: 0.86)) {
-                    model.detailsVisible = true
-                }
+                withAnimation(.spring(response: 0.30 / speed, dampingFraction: 0.86)) { model.detailsVisible = true }
             }
 
-            withAnimation(.linear(duration: 2.0 / speed)) {
-                model.progress = 0.86
-            }
+            withAnimation(.linear(duration: 2.0 / speed)) { model.progress = 0.86 }
             try? await Task.sleep(nanoseconds: UInt64(2.05 / speed * 1_000_000_000))
             guard !Task.isCancelled else { return }
 
             model.phase = .verifying
-            withAnimation(.easeInOut(duration: 0.42 / speed)) {
-                model.progress = 0.94
-            }
+            withAnimation(.easeInOut(duration: 0.42 / speed)) { model.progress = 0.94 }
             try? await Task.sleep(nanoseconds: UInt64(0.46 / speed * 1_000_000_000))
             guard !Task.isCancelled else { return }
 
             model.phase = .finishing
-            withAnimation(.easeOut(duration: 0.32 / speed)) {
-                model.progress = 1
-                model.pulse = true
-            }
+            withAnimation(.easeOut(duration: 0.32 / speed)) { model.progress = 1; model.pulse = true }
             try? await Task.sleep(nanoseconds: UInt64(0.36 / speed * 1_000_000_000))
             guard !Task.isCancelled else { return }
 
@@ -278,12 +331,18 @@ final class HaloUpdateAnimationPreviewController {
         model.poweredDown = false
     }
 
-    private func show(version: String) {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
-        let width: CGFloat = min(500, max(360, screen.frame.width * 0.32))
-        let height: CGFloat = 170
-        let frame = NSRect(x: screen.frame.midX - width / 2, y: screen.frame.maxY - height, width: width, height: height)
-        let root = HaloPhysicalUpdatePreview(model: model, version: version)
+    private func show(version: String, geometry: HaloPhysicalNotchGeometry) {
+        let screen = geometry.screen
+        let expandedWidth = max(340, geometry.size.width + 120)
+        let panelWidth = min(screen.frame.width, max(expandedWidth + 40, geometry.size.width + 48))
+        let panelHeight = max(170, geometry.size.height + 122)
+        let frame = NSRect(
+            x: geometry.centerX - panelWidth / 2,
+            y: screen.frame.maxY - panelHeight,
+            width: panelWidth,
+            height: panelHeight
+        )
+        let root = HaloPhysicalUpdatePreview(model: model, version: version, notchSize: geometry.size, expandedWidth: expandedWidth, notchDetected: geometry.detected)
 
         if let panel {
             panel.setFrame(frame, display: true)
@@ -310,11 +369,14 @@ final class HaloUpdateAnimationPreviewController {
 private struct HaloPhysicalUpdatePreview: View {
     @ObservedObject var model: HaloUpdatePreviewModel
     let version: String
+    let notchSize: CGSize
+    let expandedWidth: CGFloat
+    let notchDetected: Bool
 
     @AppStorage("HaloUpdateAnimationSpeed") private var speed = 1.0
-    @AppStorage("HaloUpdateTraceThickness") private var traceThickness = 1.5
-    @AppStorage("HaloUpdateTraceGlow") private var traceGlow = 0.35
-    @AppStorage("HaloUpdateTraceOpacity") private var traceOpacity = 0.95
+    @AppStorage("HaloUpdateTraceThickness") private var traceThickness = 2.25
+    @AppStorage("HaloUpdateTraceGlow") private var traceGlow = 0.45
+    @AppStorage("HaloUpdateTraceOpacity") private var traceOpacity = 1.0
     @AppStorage("HaloUpdateTraceColor") private var traceColorName = "Accent"
     @AppStorage("HaloUpdateTraceClockwise") private var clockwise = true
     @AppStorage("HaloUpdateShowExpandedDetails") private var showExpandedDetails = true
@@ -325,10 +387,10 @@ private struct HaloPhysicalUpdatePreview: View {
     @AppStorage("HaloUpdateShowDownloadSpeed") private var showSpeed = false
     @AppStorage("HaloUpdateShowETA") private var showETA = false
 
-    private let hardwareWidth: CGFloat = 182
-    private let hardwareHeight: CGFloat = 32
-    private let expandedWidth: CGFloat = 360
-    private let expandedHeight: CGFloat = 112
+    private var hardwareWidth: CGFloat { max(1, notchSize.width) }
+    private var hardwareHeight: CGFloat { max(1, notchSize.height) }
+    private var expandedHeight: CGFloat { hardwareHeight + 80 }
+    private var cornerRadius: CGFloat { min(12, max(5, hardwareHeight * 0.34)) }
 
     private var traceColor: Color {
         switch traceColorName {
@@ -363,28 +425,40 @@ private struct HaloPhysicalUpdatePreview: View {
         .preferredColorScheme(.dark)
     }
 
-    private var hardwareShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 11, style: .continuous)
+    private var hardwareShape: HaloHardwareNotchShape {
+        HaloHardwareNotchShape(cornerRadius: cornerRadius)
     }
 
     private var hardwareNotch: some View {
         ZStack {
             hardwareShape.fill(.black)
-            hardwareShape.stroke(traceColor.opacity(traceOpacity * 0.12), lineWidth: max(0.5, traceThickness * 0.65))
+
+            hardwareShape
+                .inset(by: max(0.5, traceThickness * 0.5))
+                .stroke(traceColor.opacity(max(0.18, traceOpacity * 0.20)), lineWidth: max(0.75, traceThickness * 0.7))
 
             if clockwise {
                 hardwareShape
+                    .inset(by: max(0.5, traceThickness * 0.5))
                     .trim(from: 0, to: min(1, model.progress))
                     .stroke(traceColor.opacity(traceOpacity), style: StrokeStyle(lineWidth: traceThickness, lineCap: .round, lineJoin: .round))
             } else {
                 hardwareShape
+                    .inset(by: max(0.5, traceThickness * 0.5))
                     .trim(from: max(0, 1 - model.progress), to: 1)
                     .stroke(traceColor.opacity(traceOpacity), style: StrokeStyle(lineWidth: traceThickness, lineCap: .round, lineJoin: .round))
             }
         }
-        .padding(CGFloat(max(1, traceThickness / 2 + 1)))
-        .shadow(color: traceColor.opacity(traceGlow), radius: 1 + 5 * traceGlow)
-        .scaleEffect(model.pulse ? 1.035 : 1)
+        .shadow(color: traceColor.opacity(traceGlow), radius: 1 + 7 * traceGlow)
+        .overlay {
+            if model.progress > 0.02 {
+                hardwareShape
+                    .inset(by: max(1, traceThickness))
+                    .stroke(traceColor.opacity(0.15 * traceGlow), lineWidth: traceThickness + 2)
+                    .blur(radius: 2.5)
+            }
+        }
+        .scaleEffect(model.pulse ? 1.025 : 1)
         .animation(.spring(response: 0.22 / max(speed, 0.5), dampingFraction: 0.64), value: model.pulse)
     }
 
@@ -445,9 +519,9 @@ private struct HaloPhysicalUpdatePreview: View {
 struct UpdateAnimationSettingsView: View {
     private let updates = HaloUpdateController.shared
 
-    @AppStorage("HaloUpdateTraceThickness") private var traceThickness = 1.5
-    @AppStorage("HaloUpdateTraceGlow") private var traceGlow = 0.35
-    @AppStorage("HaloUpdateTraceOpacity") private var traceOpacity = 0.95
+    @AppStorage("HaloUpdateTraceThickness") private var traceThickness = 2.25
+    @AppStorage("HaloUpdateTraceGlow") private var traceGlow = 0.45
+    @AppStorage("HaloUpdateTraceOpacity") private var traceOpacity = 1.0
     @AppStorage("HaloUpdateTraceColor") private var traceColor = "Accent"
     @AppStorage("HaloUpdateTraceClockwise") private var clockwise = true
     @AppStorage("HaloUpdateAnimationSpeed") private var speed = 1.0
@@ -472,7 +546,7 @@ struct UpdateAnimationSettingsView: View {
 
     var body: some View {
         Section("Progress Trace") {
-            Text("A thin progress line traces the notch as Halo installs an update.")
+            Text("A thin progress line automatically matches the physical notch on the active display and traces it as Halo installs an update.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -482,7 +556,7 @@ struct UpdateAnimationSettingsView: View {
             Toggle("Clockwise", isOn: $clockwise)
 
             LabeledContent("Thickness") {
-                Slider(value: $traceThickness, in: 0.5...4, step: 0.25).frame(width: 220)
+                Slider(value: $traceThickness, in: 0.75...5, step: 0.25).frame(width: 220)
                 Text("\(traceThickness, specifier: "%.2f") pt").monospacedDigit().frame(width: 66)
             }
             LabeledContent("Glow") {
@@ -490,7 +564,7 @@ struct UpdateAnimationSettingsView: View {
                 Text("\(Int(traceGlow * 100))%").monospacedDigit().frame(width: 52)
             }
             LabeledContent("Opacity") {
-                Slider(value: $traceOpacity, in: 0.1...1, step: 0.05).frame(width: 220)
+                Slider(value: $traceOpacity, in: 0.2...1, step: 0.05).frame(width: 220)
                 Text("\(Int(traceOpacity * 100))%").monospacedDigit().frame(width: 52)
             }
             LabeledContent("Animation speed") {
