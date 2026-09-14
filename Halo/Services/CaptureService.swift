@@ -559,7 +559,7 @@ final class TeleprompterCoordinator: NSObject {
                 queries.contains { description.localizedCaseInsensitiveContains($0) }
             }
         case .recordingActive:
-            return heuristicScreenRecordingActive() == rule.boolValue
+            return lastRecordingState == rule.boolValue
         case .displayCount:
             return NSScreen.screens.count == max(1, rule.numberValue)
         case .timeRange:
@@ -599,13 +599,25 @@ final class TeleprompterCoordinator: NSObject {
 
     private func heuristicScreenRecordingActive() -> Bool {
         let windows = windowDescriptions().map { $0.lowercased() }
-        let recorders = ["obs", "screenflow", "camtasia", "loom"]
-        let running = NSWorkspace.shared.runningApplications.compactMap(\.localizedName).map { $0.lowercased() }
-        let recorderRunning = running.contains { name in recorders.contains(where: name.contains) }
-        let recordingWindow = windows.contains { description in
-            recorders.contains(where: description.contains) && (description.contains("record") || description.contains("studio"))
+        let apps = NSWorkspace.shared.runningApplications
+        let appNames = apps.compactMap(\.localizedName).map { $0.lowercased() }
+        let bundleIDs = apps.compactMap(\.bundleIdentifier).map { $0.lowercased() }
+
+        // Native macOS screen recording uses Screenshot / screencaptureui while a capture is active.
+        let nativeRecorderActive = appNames.contains { name in
+            name.contains("screenshot") || name.contains("screencaptureui")
+        } || bundleIDs.contains { id in
+            id.contains("screencaptureui") || id.contains("screenshot")
         }
-        return recorderRunning && recordingWindow
+
+        let recorders = ["obs", "screenflow", "camtasia", "loom", "quicktime"]
+        let recorderRunning = appNames.contains { name in recorders.contains(where: name.contains) }
+        let explicitRecordingWindow = windows.contains { description in
+            recorders.contains(where: description.contains) &&
+            (description.contains("recording") || description.contains("record") || description.contains("rec ") || description.contains("live"))
+        }
+
+        return nativeRecorderActive || (recorderRunning && explicitRecordingWindow)
     }
 }
 
