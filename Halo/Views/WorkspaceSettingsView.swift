@@ -828,7 +828,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 }
 
 private enum ContextInterfaceSelection: String, Identifiable {
-    case drop, music, bluetooth, retro
+    case drop, music, teleprompter, bluetooth, retro
     var id: String { rawValue }
 }
 
@@ -870,6 +870,20 @@ private struct ContextInterfaceLibraryView: View {
                 }
             }
             ContextMusicSettings(layout: $layout)
+        } else if selection == .teleprompter {
+            Section {
+                HStack(spacing: 12) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) { selection = nil }
+                    } label: {
+                        Label("All CI", systemImage: "chevron.left")
+                    }
+                    Spacer()
+                    Label("Teleprompter CI", systemImage: "text.bubble.fill")
+                        .font(.headline)
+                }
+            }
+            TeleprompterContextSettings()
         } else if selection == .bluetooth {
             Section {
                 HStack(spacing: 12) {
@@ -917,6 +931,9 @@ private struct ContextInterfaceLibraryView: View {
                     ContextInterfaceCard(enabled: musicEnabled) {
                         withAnimation(.easeInOut(duration: 0.18)) { selection = .music }
                     }
+                    TeleprompterContextInterfaceCard {
+                        withAnimation(.easeInOut(duration: 0.18)) { selection = .teleprompter }
+                    }
                     BluetoothContextInterfaceCard(enabled: bluetoothEnabled) {
                         withAnimation(.easeInOut(duration: 0.18)) { selection = .bluetooth }
                     }
@@ -932,6 +949,139 @@ private struct ContextInterfaceLibraryView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+private struct TeleprompterContextInterfaceCard: View {
+    let action: () -> Void
+    @ObservedObject private var teleprompter = TeleprompterStore.shared
+    @State private var hovered = false
+
+    private var enabled: Bool { teleprompter.profiles.contains(where: { $0.enabled }) }
+    private var triggerCount: Int { teleprompter.profiles.reduce(0) { $0 + $1.triggers.filter(\.enabled).count } }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(LinearGradient(colors: [Color.indigo.opacity(0.34), Color.black.opacity(0.95)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    VStack(spacing: 8) {
+                        Image(systemName: "text.bubble.fill")
+                            .font(.system(size: 27, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text("READ · RECORD · PRESENT")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.72))
+                        HStack(spacing: 5) {
+                            Capsule().fill(.white.opacity(0.24)).frame(width: 44, height: 4)
+                            Capsule().fill(.white.opacity(0.85)).frame(width: 76, height: 5)
+                            Capsule().fill(.white.opacity(0.24)).frame(width: 44, height: 4)
+                        }
+                    }
+                }
+                .frame(height: 112)
+
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Teleprompter CI").font(.headline)
+                        Text("Creator & Presentation").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(enabled ? "Enabled" : "Available")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background((enabled ? Color.green : Color.secondary).opacity(0.12), in: Capsule())
+                        .foregroundStyle(enabled ? Color.green : Color.secondary)
+                }
+
+                Text("A camera-aligned prompting interface with scripts, profiles, auto-scroll, capture hiding, and context-aware launch triggers.")
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.leading)
+
+                HStack {
+                    Label("\(teleprompter.profiles.count) profile\(teleprompter.profiles.count == 1 ? "" : "s")", systemImage: "doc.text")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Text("\(triggerCount) trigger\(triggerCount == 1 ? "" : "s")")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Spacer()
+                    Label("Edit", systemImage: "chevron.right")
+                        .font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(hovered ? 0.075 : 0.045), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(hovered ? Color.accentColor.opacity(0.42) : Color.primary.opacity(0.08), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovered)
+    }
+}
+
+private struct TeleprompterContextSettings: View {
+    @ObservedObject private var teleprompter = TeleprompterStore.shared
+
+    var body: some View {
+        Section("Teleprompter Context Interface") {
+            HStack(spacing: 12) {
+                Image(systemName: "text.bubble.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 46, height: 46)
+                    .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Camera-aligned prompting").font(.headline)
+                    Text("Scripts can launch from keyboard, mouse, trackpad, recording state, or app context.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Open Teleprompter Studio…") { TeleprompterCoordinator.shared.showSettings() }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+
+        Section("Profiles") {
+            if teleprompter.profiles.isEmpty {
+                Text("No teleprompter profiles yet.").foregroundStyle(.secondary)
+            } else {
+                ForEach(teleprompter.profiles) { profile in
+                    HStack(spacing: 10) {
+                        Image(systemName: profile.enabled ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(profile.enabled ? Color.green : Color.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(profile.name).font(.callout.weight(.semibold))
+                            Text("\(profile.triggers.filter(\.enabled).count) triggers · \(Int(profile.behavior.wordsPerMinute)) WPM · \(profile.behavior.displayMode.rawValue)")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Preview") { TeleprompterCoordinator.shared.show(profile: profile) }
+                            .controlSize(.small)
+                    }
+                }
+            }
+            HStack {
+                Button("New Profile") { teleprompter.addProfile() }
+                Button("Configure All…") { TeleprompterCoordinator.shared.showSettings() }
+            }
+        }
+
+        Section("Trigger & context engine") {
+            Label("Keyboard and mouse shortcuts", systemImage: "keyboard")
+            Label("Trackpad swipe and pinch gestures", systemImage: "hand.draw")
+            Label("App opened / app activated", systemImage: "app.badge")
+            Label("Screen-recording start / stop", systemImage: "record.circle")
+            Label("Frontmost app, running app, window title, display count and time contexts", systemImage: "switch.2")
+            Text("Each profile can use multiple triggers and multiple context conditions with Any/All matching.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("Capture privacy") {
+            Label("Teleprompter windows can be excluded from screen capture while remaining visible to you.", systemImage: "eye.slash")
+                .font(.caption)
         }
     }
 }
