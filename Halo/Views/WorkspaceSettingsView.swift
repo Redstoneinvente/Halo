@@ -263,7 +263,13 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         Section("Opened notch space") {
             Picker("Layout system", selection: Binding(
                 get: { workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace ? "visual" : "default" },
-                set: { workspace.settings.layout.setCustomOpenNotchWorkspaceEnabled($0 == "visual") }
+                set: { value in
+                    let useVisualWorkspace = value == "visual"
+                    workspace.settings.layout.setCustomOpenNotchWorkspaceEnabled(useVisualWorkspace)
+                    // These are alternate opened-surface systems. Visual Workspace
+                    // must never inherit the Default layout top-strip overlay.
+                    if useVisualWorkspace { keepClosedContentsWhenOpen = false }
+                }
             )) {
                 Text("Default").tag("default")
                 Text("Visual Workspace").tag("visual")

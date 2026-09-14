@@ -628,7 +628,11 @@ struct SurfaceView: View {
         case .music: return contextMusicKeepsClosedContents
         case .bluetooth: return bluetoothKeepsClosedContents
         case .retro: return retroKeepsClosedContents
-        case .none: return keepClosedContentsWhenOpen
+        case .none:
+            // Visual Workspace owns the entire opened surface. Never layer the
+            // Default/closed-notch strip over it, even if the legacy preference
+            // was enabled before the user switched layout systems.
+            return layout.resolvedUsesCustomOpenNotchWorkspace ? false : keepClosedContentsWhenOpen
         }
     }
     private var closedBackgroundOptions: ClosedNotchOptions {
