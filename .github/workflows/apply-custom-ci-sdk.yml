@@ -22,42 +22,59 @@ jobs:
       - name: Reconstruct patch script
         shell: bash
         run: |
-          : > /tmp/apply_custom_ci.py
+          : > /tmp/apply_custom_ci.raw
           for part in $(find scripts/custom-ci-patch -type f -name 'part*' | sort); do
-            perl -0pe 's/\n\z//' "$part" >> /tmp/apply_custom_ci.py
+            # Each staged chunk acquired one separator newline. The chunks themselves
+            # already encode intended generator newlines as literal \n sequences.
+            perl -0pe 's/\n\z//' "$part" >> /tmp/apply_custom_ci.raw
           done
 
+          # Decode literal \n sequences ONLY while outside Python string literals.
+          # Payload strings keep their escaped newlines exactly as authored.
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
-          path = Path('/tmp/apply_custom_ci.py')
-          lines = path.read_text().splitlines()
-          repaired = []
-          changed = 0
-          start = re.compile(r"^([A-Z][A-Z0-9_]*) = '")
-          for index, line in enumerate(lines, 1):
-              match = start.match(line)
-              if not match:
-                  repaired.append(line)
+          raw = Path('/tmp/apply_custom_ci.raw').read_text()
+          out = []
+          quote = None
+          escaped = False
+          decoded = 0
+          i = 0
+          while i < len(raw):
+              ch = raw[i]
+              if quote is not None:
+                  out.append(ch)
+                  if escaped:
+                      escaped = False
+                  elif ch == '\\':
+                      escaped = True
+                  elif ch == quote:
+                      quote = None
+                  i += 1
                   continue
-              first = line.find("'", match.end() - 1)
-              last = line.rfind("'")
-              if first < 0 or last <= first:
-                  raise SystemExit(f'Could not identify staged literal boundaries on line {index}: {line[:80]!r}')
-              tail = line[last + 1:]
-              if tail.strip():
-                  raise SystemExit(f'Unexpected staged literal suffix on line {index}: {tail!r}')
-              repaired.append(line[:first] + '"' + line[first + 1:last] + '"' + tail)
-              changed += 1
-              print(f'Repaired {match.group(1)} ({len(line):,} characters)')
-          path.write_text('\n'.join(repaired) + '\n')
-          print(f'Repaired {changed} staged source literals total')
-          if changed == 0:
-              print('First physical lines:')
-              for index, line in enumerate(lines[:8], 1):
-                  print(index, repr(line[:100]), '...', repr(line[-40:]), len(line))
-              raise SystemExit('No staged source literals were repaired')
+
+              if ch in ("'", '"'):
+                  quote = ch
+                  out.append(ch)
+                  i += 1
+                  continue
+
+              if ch == '\\' and i + 1 < len(raw) and raw[i + 1] == 'n':
+                  out.append('\n')
+                  decoded += 1
+                  i += 2
+                  continue
+
+              out.append(ch)
+              i += 1
+
+          if quote is not None:
+              raise SystemExit(f'Unterminated staged Python string ({quote})')
+          repaired = ''.join(out)
+          Path('/tmp/apply_custom_ci.py').write_text(repaired)
+          print(f'Decoded {decoded} generator line breaks outside payload strings')
+          if decoded == 0:
+              raise SystemExit('No encoded generator line breaks found')
           PY
 
           python3 -m py_compile /tmp/apply_custom_ci.py
