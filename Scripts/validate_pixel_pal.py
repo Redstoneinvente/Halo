@@ -60,6 +60,31 @@ extension EnvironmentValues {
         precondition(HaloPixelPalAnimationTiming.bounce(elapsed: 1.1, intensity: 1, reduceMotion: false) == 0)
         let legacy = try JSONDecoder().decode(HaloPixelPalPreferences.self, from: Data(#"{"showCheeks":false,"faceScale":0.91}"#.utf8))
         precondition(legacy.cheekStyle == .none && legacy.faceScale == 0.91)
+        for faceStyle in HaloPixelPalFaceStyle.allCases {
+            var renderedCheeks = Set<Data>()
+            for cheekStyle in HaloPixelPalCheekStyle.allCases {
+                var prefs = HaloPixelPalPreferences()
+                prefs.faceStyle = faceStyle
+                prefs.cheekStyle = cheekStyle
+                prefs.accessoryMode = .off
+                prefs.backgroundStyle = .black
+                prefs.glowIntensity = 0
+                let normalized = prefs.normalized()
+                precondition(normalized.showCheeks == (cheekStyle != .none))
+                let roundTrip = try JSONDecoder().decode(HaloPixelPalPreferences.self, from: JSONEncoder().encode(normalized))
+                precondition(roundTrip.cheekStyle == cheekStyle)
+                let renderer = ImageRenderer(content: HaloPixelPalFace(
+                    expression: .neutral, contextualAccessory: nil, fx: .none, squareSize: 1,
+                    preferences: roundTrip, date: Date(), reduceMotion: true
+                ).frame(width: 48, height: 48))
+                renderer.scale = 2
+                guard let image = renderer.cgImage, let data = image.dataProvider?.data else {
+                    fatalError("Could not render cheek regression image")
+                }
+                renderedCheeks.insert(data as Data)
+            }
+            precondition(renderedCheeks.count == 4, "Every cheek option must visibly differ for \(faceStyle)")
+        }
         let suite = "PixelPalSmoke.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }

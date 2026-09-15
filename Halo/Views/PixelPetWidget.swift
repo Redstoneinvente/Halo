@@ -251,6 +251,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     func normalized() -> Self {
         var value = self
         value.version = 4
+        value.showCheeks = value.cheekStyle != .none
         value.animationSpeed = min(2.0, max(0.35, animationSpeed))
         value.animationIntensity = min(1.0, max(0.0, animationIntensity))
         value.faceScale = min(1.0, max(0.76, faceScale))
@@ -390,8 +391,10 @@ private enum HaloPixelPalSprites {
             return .init(rows: ["p..p", ".pp."])
         case .sparkle:
             return .init(rows: ["a...a", ".apa.", "..p.."])
-        case .classic, .glossy:
+        case .classic:
             return .init(rows: ["..p..", ".p.p.", "p...p"])
+        case .glossy:
+            return .init(rows: [".pppp.", "pp..pp", "p....p"])
         }
     }
 
@@ -459,9 +462,20 @@ private enum HaloPixelPalSprites {
         ".ppp."
     ])
 
-    static let cheekSoft = HaloPixelPalSprite(rows: ["bb"])
-    static let cheekKawaii = HaloPixelPalSprite(rows: ["bbb", ".b."])
-    static let cheekShy = HaloPixelPalSprite(rows: ["b.b", ".b."])
+    // Readable blush patches at 1×1, with distinct silhouettes for each choice.
+    static let cheekSoft = HaloPixelPalSprite(rows: [".bb.", "bbbb", ".bb."])
+    static let cheekKawaii = HaloPixelPalSprite(rows: ["b.b.b", "bbbbb", ".bbb."])
+    static let cheekShy = HaloPixelPalSprite(rows: [".b.b.", "b.b.b"])
+    static let mouthSoftSmile = HaloPixelPalSprite(rows: ["p..p", ".pp."])
+
+    static func cheeks(_ style: HaloPixelPalCheekStyle) -> HaloPixelPalSprite? {
+        switch style {
+        case .none: return nil
+        case .soft: return cheekSoft
+        case .kawaii: return cheekKawaii
+        case .shy: return cheekShy
+        }
+    }
 
     static let tear = HaloPixelPalSprite(rows: [
         "a",
@@ -1074,7 +1088,9 @@ private struct HaloPixelPalFace: View {
 
     private func automaticMouth() -> HaloPixelPalSprite? {
         switch expression {
-        case .neutral, .focused, .confused: return HaloPixelPalSprites.mouthTiny
+        case .neutral:
+            return preferences.faceStyle == .soft ? HaloPixelPalSprites.mouthSoftSmile : HaloPixelPalSprites.mouthTiny
+        case .focused, .confused: return HaloPixelPalSprites.mouthTiny
         case .blink, .sleepy, .bored: return HaloPixelPalSprites.mouthFlat
         case .happy, .music: return HaloPixelPalSprites.mouthSmile
         case .superHappy, .excited, .love: return HaloPixelPalSprites.mouthBigSmile
@@ -1105,17 +1121,13 @@ private struct HaloPixelPalFace: View {
     }
 
     private func drawCheeks(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
-        guard preferences.faceStyle != .minimal else { return }
-        let sprite: HaloPixelPalSprite
-        switch preferences.cheekStyle {
-        case .none: return
-        case .soft: sprite = HaloPixelPalSprites.cheekSoft
-        case .kawaii: sprite = HaloPixelPalSprites.cheekKawaii
-        case .shy: sprite = HaloPixelPalSprites.cheekShy
-        }
-        let opacity: Double = expression == .shy || expression == .love ? 1.0 : 0.72
-        render(.init(sprite, x: 2, y: 14), opacity, 0, 0)
-        render(.init(sprite, x: max(0, 22 - sprite.width), y: 14, mirrorX: true), opacity, 0, 0)
+        // An explicit cheek choice applies to EVERY face style, including Minimal.
+        guard let sprite = HaloPixelPalSprites.cheeks(preferences.cheekStyle) else { return }
+        let affectionate = expression == .shy || expression == .love || expression == .superHappy
+        let pulse = reduceMotion ? 0 : sin(animationTime * 2.4) * 0.035 * preferences.animationIntensity
+        let opacity = affectionate ? 0.96 + pulse : 0.88
+        render(.init(sprite, x: 1, y: 14), opacity, 0, 0)
+        render(.init(sprite, x: logicalGrid - 1 - sprite.width, y: 14, mirrorX: true), opacity, 0, 0)
     }
 
     private var resolvedAccessory: HaloPixelPalAccessory {
@@ -1320,9 +1332,8 @@ private struct HaloPixelPalSettingsView: View {
                 Picker("Mouth", selection: bind(\.mouthStyle)) {
                     ForEach(HaloPixelPalMouthStyle.allCases) { Text($0.rawValue).tag($0) }
                 }
-                Picker("Cheeks", selection: bind(\.cheekStyle)) {
-                    ForEach(HaloPixelPalCheekStyle.allCases) { Text($0.rawValue).tag($0) }
-                }
+                Text("Cheeks").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                visualCheekStyleGrid
 
                 Divider()
 
@@ -1391,6 +1402,26 @@ private struct HaloPixelPalSettingsView: View {
                         fx: .none,
                         squareSize: 2,
                         preferences: previewPreferences(eyeStyle: style),
+                        date: Date(),
+                        reduceMotion: true
+                    )
+                }
+            }
+        }
+    }
+
+    private var visualCheekStyleGrid: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+            ForEach(HaloPixelPalCheekStyle.allCases) { style in
+                previewTile(title: style.rawValue, selected: style == pal.preferences.cheekStyle) {
+                    pal.update(\.cheekStyle, style)
+                } preview: {
+                    HaloPixelPalFace(
+                        expression: .neutral,
+                        contextualAccessory: nil,
+                        fx: .none,
+                        squareSize: 2,
+                        preferences: previewPreferences(cheekStyle: style),
                         date: Date(),
                         reduceMotion: true
                     )
@@ -1540,11 +1571,13 @@ private struct HaloPixelPalSettingsView: View {
 
     private func previewPreferences(
         faceStyle: HaloPixelPalFaceStyle? = nil,
-        eyeStyle: HaloPixelPalEyeStyle? = nil
+        eyeStyle: HaloPixelPalEyeStyle? = nil,
+        cheekStyle: HaloPixelPalCheekStyle? = nil
     ) -> HaloPixelPalPreferences {
         var value = pal.preferences
         if let faceStyle { value.faceStyle = faceStyle }
         if let eyeStyle { value.eyeStyle = eyeStyle }
+        if let cheekStyle { value.cheekStyle = cheekStyle }
         value.accessoryMode = .off
         value.backgroundStyle = .black
         value.glowIntensity = 0
