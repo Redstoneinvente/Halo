@@ -105,7 +105,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     var accentColor = HaloPixelPalRGB(red: 1.0, green: 0.42, blue: 0.72)
     var backgroundStyle: HaloPixelPalBackgroundStyle = .transparent
     var backgroundColor = HaloPixelPalRGB(red: 0.03, green: 0.03, blue: 0.04)
-    var faceScale = 0.96
+    var faceScale = 1.0
     var glowIntensity = 0.0
     var showCheeks = true
 
@@ -151,7 +151,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
         accentColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .accentColor) ?? HaloPixelPalRGB(red: 1.0, green: 0.42, blue: 0.72)
         backgroundStyle = try c.decodeIfPresent(HaloPixelPalBackgroundStyle.self, forKey: .backgroundStyle) ?? .transparent
         backgroundColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .backgroundColor) ?? HaloPixelPalRGB(red: 0.03, green: 0.03, blue: 0.04)
-        faceScale = try c.decodeIfPresent(Double.self, forKey: .faceScale) ?? 0.96
+        faceScale = try c.decodeIfPresent(Double.self, forKey: .faceScale) ?? 1.0
         glowIntensity = try c.decodeIfPresent(Double.self, forKey: .glowIntensity) ?? 0
         showCheeks = try c.decodeIfPresent(Bool.self, forKey: .showCheeks) ?? true
         automaticBlinking = try c.decodeIfPresent(Bool.self, forKey: .automaticBlinking) ?? true
