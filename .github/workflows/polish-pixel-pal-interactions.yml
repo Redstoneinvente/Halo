@@ -1,4 +1,4 @@
-name: Repair Pixel Pal Expressions
+name: Fix Pixel Pet Preview and Controls
 
 on:
   push:
@@ -18,13 +18,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Repair expression rendering
+      - name: Fix Pixel Pet preview and background controls
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          p = Path('Halo/Views/PixelPetWidget.swift')
-          s = p.read_text()
+          pet = Path('Halo/Views/PixelPetWidget.swift')
+          s = pet.read_text()
 
           def replace_once(old, new, label):
               global s
@@ -33,74 +33,138 @@ jobs:
                   raise SystemExit(f'{label}: expected one match, found {count}')
               s = s.replace(old, new, 1)
 
+          # Persist richer background / inactive LED controls.
+          if 'var backgroundOpacity = 1.0' not in s:
+              replace_once(
+                  '''    var backgroundStyle: HaloPixelPalBackgroundStyle = .transparent\n    var backgroundColor = HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)\n    var faceScale = 1.0''',
+                  '''    var backgroundStyle: HaloPixelPalBackgroundStyle = .transparent\n    var backgroundColor = HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)\n    var backgroundOpacity = 1.0\n    var inactiveLEDIntensity = 0.075\n    var inactiveLEDUsesFaceColor = true\n    var inactiveLEDColor = HaloPixelPalRGB(red: 0.36, green: 0.40, blue: 0.46)\n    var faceScale = 1.0''',
+                  'background preference fields'
+              )
+              replace_once(
+                  '        case backgroundStyle, backgroundColor, faceScale, glowIntensity',
+                  '        case backgroundStyle, backgroundColor, backgroundOpacity, inactiveLEDIntensity, inactiveLEDUsesFaceColor, inactiveLEDColor, faceScale, glowIntensity',
+                  'background coding keys'
+              )
+              replace_once(
+                  '''        backgroundStyle = try c.decodeIfPresent(HaloPixelPalBackgroundStyle.self, forKey: .backgroundStyle) ?? .transparent\n        backgroundColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .backgroundColor) ?? HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)\n        faceScale = try c.decodeIfPresent(Double.self, forKey: .faceScale) ?? 1.0''',
+                  '''        backgroundStyle = try c.decodeIfPresent(HaloPixelPalBackgroundStyle.self, forKey: .backgroundStyle) ?? .transparent\n        backgroundColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .backgroundColor) ?? HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)\n        backgroundOpacity = try c.decodeIfPresent(Double.self, forKey: .backgroundOpacity) ?? 1.0\n        inactiveLEDIntensity = try c.decodeIfPresent(Double.self, forKey: .inactiveLEDIntensity) ?? 0.075\n        inactiveLEDUsesFaceColor = try c.decodeIfPresent(Bool.self, forKey: .inactiveLEDUsesFaceColor) ?? true\n        inactiveLEDColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .inactiveLEDColor) ?? HaloPixelPalRGB(red: 0.36, green: 0.40, blue: 0.46)\n        faceScale = try c.decodeIfPresent(Double.self, forKey: .faceScale) ?? 1.0''',
+                  'background decode defaults'
+              )
+              replace_once(
+                  '''        value.faceScale = min(1.0, max(0.76, faceScale))\n        value.glowIntensity = min(1.0, max(0.0, glowIntensity))\n        value.customColor = Self.clamped(customColor)''',
+                  '''        value.faceScale = min(1.0, max(0.76, faceScale))\n        value.glowIntensity = min(1.0, max(0.0, glowIntensity))\n        value.backgroundOpacity = min(1.0, max(0.0, backgroundOpacity))\n        value.inactiveLEDIntensity = min(0.35, max(0.0, inactiveLEDIntensity))\n        value.customColor = Self.clamped(customColor)''',
+                  'background normalization scalars'
+              )
+              replace_once(
+                  '''        value.blushColor = Self.clamped(blushColor)\n        value.backgroundColor = Self.clamped(backgroundColor)\n        value.allowedAccessories''',
+                  '''        value.blushColor = Self.clamped(blushColor)\n        value.backgroundColor = Self.clamped(backgroundColor)\n        value.inactiveLEDColor = Self.clamped(inactiveLEDColor)\n        value.allowedAccessories''',
+                  'inactive LED color normalization'
+              )
+              # Preferences schema revision; decoding remains backward-compatible.
+              s = s.replace('var version = 4', 'var version = 5', 1)
+              s = s.replace('        version = 4', '        version = 5', 1)
+              s = s.replace('        value.version = 4', '        value.version = 5', 1)
+
+          # Make inactive LED matrix appearance configurable.
           replace_once(
-              '    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight }',
-              '    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, smug }',
-              'eye pose enum'
+              '''            Canvas { context, size in\n                let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)\n                for y in 0..<logicalGrid {\n                    for x in 0..<logicalGrid {\n                        context.fill(Path(geometry.led(x: x, y: y)),\n                                     with: .color(faceColor.opacity(0.075)),\n                                     style: FillStyle(antialiased: false))\n                    }\n                }\n            }''',
+              '''            if preferences.inactiveLEDIntensity > 0.001 {\n                Canvas { context, size in\n                    let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)\n                    let inactiveColor = preferences.inactiveLEDUsesFaceColor ? faceColor : preferences.inactiveLEDColor.color\n                    for y in 0..<logicalGrid {\n                        for x in 0..<logicalGrid {\n                            context.fill(Path(geometry.led(x: x, y: y)),\n                                         with: .color(inactiveColor.opacity(preferences.inactiveLEDIntensity)),\n                                         style: FillStyle(antialiased: false))\n                        }\n                    }\n                }\n            }''',
+              'inactive LED matrix renderer'
           )
 
+          # Surface opacity now participates in every non-transparent background style.
           replace_once(
-              '''        case .blink, .sleepy, .bored: return .closed\n        case .happy, .superHappy, .music: return .happy\n        case .love: return .heart\n        case .excited, .shocked: return .star\n        case .wink: return .winkRight\n        case .mischievous, .smug: return .winkRight\n        default: return .open''',
-              '''        case .blink, .sleepy, .bored: return .closed\n        case .happy, .superHappy, .music, .shy: return .happy\n        case .love: return .heart\n        case .excited, .shocked: return .star\n        case .wink, .mischievous: return .winkRight\n        case .confused: return .confused\n        case .smug: return .smug\n        default: return .open''',
-              'eye pose mapping'
+              '''        case .black:\n            Color.black\n        case .custom:\n            preferences.backgroundColor.color\n        case .glow:\n            ZStack {\n                Color.black.opacity(0.74)\n                RadialGradient(\n                    colors: [faceColor.opacity(0.10 + 0.28 * preferences.glowIntensity), .clear],\n                    center: .center,\n                    startRadius: 0,\n                    endRadius: 180\n                )\n            }''',
+              '''        case .black:\n            Color.black.opacity(preferences.backgroundOpacity)\n        case .custom:\n            preferences.backgroundColor.color.opacity(preferences.backgroundOpacity)\n        case .glow:\n            ZStack {\n                Color.black.opacity(0.74 * preferences.backgroundOpacity)\n                RadialGradient(\n                    colors: [faceColor.opacity(0.10 + 0.28 * preferences.glowIntensity), .clear],\n                    center: .center,\n                    startRadius: 0,\n                    endRadius: 180\n                )\n                .opacity(preferences.backgroundOpacity)\n            }''',
+              'background surface opacity'
           )
 
+          # Expression preview should never be masked by a manually selected mouth/accessory.
           replace_once(
-              '''        case .winkRight:\n            let open = HaloPixelPalSprites.openEye(preferences.eyeStyle)\n            render(.init(open, x: leftX, y: y), 1, 0, 0)\n            render(.init(HaloPixelPalSprites.winkEye, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)\n        }''',
-              '''        case .winkRight:\n            let open = HaloPixelPalSprites.openEye(preferences.eyeStyle)\n            render(.init(open, x: leftX, y: y), 1, 0, 0)\n            render(.init(HaloPixelPalSprites.winkEye, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)\n        case .confused:\n            let open = HaloPixelPalSprites.openEye(preferences.eyeStyle)\n            let closed = HaloPixelPalSprites.closedEye(preferences.eyeStyle)\n            render(.init(open, x: leftX, y: y), 1, 0, 0)\n            render(.init(closed, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)\n        case .smug:\n            let eye = HaloPixelPalSprite(rows: [\"ppppp\", \".ppp.\"])\n            render(.init(eye, x: leftX, y: y + 2), 1, 0, 0)\n            render(.init(eye, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)\n        }''',
-              'distinct confused and smug eyes'
+              '                    preferences: pal.preferences,',
+              '                    preferences: expressionPreviewPreferences,',
+              'expression preview preferences'
+          )
+          replace_once(
+              '''                    animationTime: timeline.date.timeIntervalSince(previewEpoch)\n                )''',
+              '''                    animationTime: timeline.date.timeIntervalSince(previewEpoch)\n                )\n                .id(previewExpression)''',
+              'force expression preview refresh'
           )
 
+          # Expand background controls in settings.
           replace_once(
-              '''        case .surprised, .shocked:\n            render(.init(HaloPixelPalSprites.raisedBrow, x: leftX, y: 3), 0.95, 0, 0)\n            render(.init(HaloPixelPalSprites.raisedBrow, x: rightX, y: 3, mirrorX: true), 0.95, 0, 0)\n        case .mischievous, .smug:\n            render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.80, 0, 0)\n        default:''',
-              '''        case .surprised, .shocked:\n            render(.init(HaloPixelPalSprites.raisedBrow, x: leftX, y: 3), 0.95, 0, 0)\n            render(.init(HaloPixelPalSprites.raisedBrow, x: rightX, y: 3, mirrorX: true), 0.95, 0, 0)\n        case .confused:\n            render(.init(HaloPixelPalSprites.raisedBrow, x: leftX, y: 3), 0.95, 0, 0)\n            render(.init(HaloPixelPalSprites.worriedBrow, x: rightX, y: y, mirrorX: true), 0.88, 0, 0)\n        case .mischievous:\n            render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.82, 0, 0)\n        case .smug:\n            render(.init(HaloPixelPalSprites.raisedBrow, x: rightX, y: 3, mirrorX: true), 0.78, 0, 0)\n        default:''',
-              'distinct expression brows'
+              '''                Picker("Background", selection: bind(\\.backgroundStyle)) {\n                    ForEach(HaloPixelPalBackgroundStyle.allCases) { Text($0.rawValue).tag($0) }\n                }\n                if pal.preferences.backgroundStyle == .custom {\n                    ColorPicker("Background color", selection: rgbBinding(\\.backgroundColor))\n                }\n\n                HStack {''',
+              '''                Text("Background display").font(.caption.weight(.semibold)).foregroundStyle(.secondary)\n                Picker("Surface", selection: bind(\\.backgroundStyle)) {\n                    ForEach(HaloPixelPalBackgroundStyle.allCases) { Text($0.rawValue).tag($0) }\n                }\n                if pal.preferences.backgroundStyle == .custom {\n                    ColorPicker("Surface color", selection: rgbBinding(\\.backgroundColor))\n                }\n                if pal.preferences.backgroundStyle != .transparent {\n                    HStack {\n                        Text("Surface opacity")\n                        Slider(value: bind(\\.backgroundOpacity), in: 0...1)\n                        Text("\\(Int(pal.preferences.backgroundOpacity * 100))%")\n                            .font(.caption.monospacedDigit())\n                            .frame(width: 38, alignment: .trailing)\n                    }\n                }\n                Toggle("Match inactive LEDs to face color", isOn: bind(\\.inactiveLEDUsesFaceColor))\n                if !pal.preferences.inactiveLEDUsesFaceColor {\n                    ColorPicker("Inactive LED color", selection: rgbBinding(\\.inactiveLEDColor))\n                }\n                HStack {\n                    Text("Inactive LED brightness")\n                    Slider(value: bind(\\.inactiveLEDIntensity), in: 0...0.35)\n                    Text("\\(Int(pal.preferences.inactiveLEDIntensity * 100))%")\n                        .font(.caption.monospacedDigit())\n                        .frame(width: 38, alignment: .trailing)\n                }\n\n                HStack {''',
+              'background settings UI'
           )
 
+          # One reliable selection path: update preview, reset its animation, and show the same live reaction.
           replace_once(
-              '        case .neutral, .focused, .confused: return HaloPixelPalSprites.mouthTiny',
-              '        case .neutral, .focused: return HaloPixelPalSprites.mouthTiny\n        case .confused: return HaloPixelPalSprites.mouthO',
-              'confused mouth'
+              '''                Picker("Expression", selection: $previewExpression) {\n                    ForEach(HaloPixelPalExpression.allCases.filter { $0 != .blink }) { Text($0.title).tag($0) }\n                }\n                .pickerStyle(.menu)''',
+              '''                Picker("Expression", selection: $previewExpression) {\n                    ForEach(HaloPixelPalExpression.allCases.filter { $0 != .blink }) { Text($0.title).tag($0) }\n                }\n                .pickerStyle(.menu)\n                .onChange(of: previewExpression) { expression in\n                    previewEpoch = Date()\n                    pal.react(expression, seconds: 2.2)\n                }''',
+              'expression picker reaction'
+          )
+          replace_once(
+              '''                        Button(expression.title) {\n                            previewExpression = expression\n                            pal.react(expression, seconds: 2.2)\n                        }''',
+              '''                        Button(expression.title) {\n                            previewExpression = expression\n                        }''',
+              'expression quick button path'
           )
 
+          # Dedicated preview preferences keep expression-controlled mouth visible while retaining appearance/background choices.
           replace_once(
-              '''        let t = max(0, animationTime) * speed\n        if let reactionElapsed {\n            return (0, HaloPixelPalAnimationTiming.bounce(elapsed: reactionElapsed * speed,\n                                                         intensity: intensity, reduceMotion: reduceMotion))\n        }\n        let one = intensity > 0.28 ? 1 : 0\n        let two = intensity > 0.75 ? 2 : one''',
-              '''        let t = max(0, animationTime) * speed\n        let one = intensity > 0.28 ? 1 : 0\n        let two = intensity > 0.75 ? 2 : one\n        if let reactionElapsed {\n            if expression == .annoyed {\n                return (Int(round(sin(t * 11.0))) * one, 0)\n            }\n            return (0, HaloPixelPalAnimationTiming.bounce(elapsed: reactionElapsed * speed,\n                                                         intensity: intensity, reduceMotion: reduceMotion))\n        }''',
-              'annoyed reaction motion'
+              '''    private var previewFX: HaloPixelPalFX {''',
+              '''    private var expressionPreviewPreferences: HaloPixelPalPreferences {\n        var value = pal.preferences\n        value.mouthStyle = .automatic\n        value.accessoryMode = .contextual\n        value.selectedAccessory = .none\n        return value\n    }\n\n    private var previewFX: HaloPixelPalFX {''',
+              'expression preview preference helper'
           )
 
-          replace_once(
-              '                    ForEach(HaloPixelPalExpression.allCases) { Text($0.title).tag($0) }',
-              '                    ForEach(HaloPixelPalExpression.allCases.filter { $0 != .blink }) { Text($0.title).tag($0) }',
-              'remove blink from manual preview picker'
-          )
+          pet.write_text(s)
 
-          p.write_text(s)
+          # Add direct Pixel Pet Settings entry to the Visual Workspace inspector.
+          workspace = Path('Halo/Views/WidgetSettingsView.swift')
+          w = workspace.read_text()
+          old = '''            Picker("Presentation", selection: binding.presentation) { ForEach(OpenNotchPresentation.allCases) { Text($0.rawValue).tag($0) } }\n            Picker("Priority", selection: binding.priority) { ForEach(OpenNotchPriority.allCases) { Text($0.rawValue).tag($0) } }\n        }'''
+          new = '''            Picker("Presentation", selection: binding.presentation) { ForEach(OpenNotchPresentation.allCases) { Text($0.rawValue).tag($0) } }\n            Picker("Priority", selection: binding.priority) { ForEach(OpenNotchPriority.allCases) { Text($0.rawValue).tag($0) } }\n            if item.module == .pet {\n                Button {\n                    HaloPixelPalSettingsWindowController.shared.show()\n                } label: {\n                    Label("Pixel Pet Settings…", systemImage: "slider.horizontal.3")\n                }\n                .buttonStyle(.borderedProminent)\n                Text("Expressions, face style, accessories, animation and LED/background appearance are configured in Pixel Pet Settings.")\n                    .font(.caption2)\n                    .foregroundStyle(.secondary)\n            }\n        }'''
+          count = w.count(old)
+          if count != 1:
+              raise SystemExit(f'visual workspace Pixel Pet button: expected one match, found {count}')
+          workspace.write_text(w.replace(old, new, 1))
           PY
 
-      - name: Verify expression contract
+      - name: Verify Pixel Pet controls contract
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          s = Path('Halo/Views/PixelPetWidget.swift').read_text()
-          required = [
-              'case open, happy, closed, heart, star, winkLeft, winkRight, confused, smug',
-              'case .happy, .superHappy, .music, .shy: return .happy',
-              'case .confused: return .confused',
-              'case .smug: return .smug',
-              'case .confused:',
-              'let eye = HaloPixelPalSprite(rows: ["ppppp", ".ppp."])',
-              'case .confused: return HaloPixelPalSprites.mouthO',
-              'if expression == .annoyed',
-              'HaloPixelPalExpression.allCases.filter { $0 != .blink }',
+          pet = Path('Halo/Views/PixelPetWidget.swift').read_text()
+          workspace = Path('Halo/Views/WidgetSettingsView.swift').read_text()
+          pet_required = [
+              'var backgroundOpacity = 1.0',
+              'var inactiveLEDIntensity = 0.075',
+              'var inactiveLEDUsesFaceColor = true',
+              'inactiveColor.opacity(preferences.inactiveLEDIntensity)',
+              'Color.black.opacity(preferences.backgroundOpacity)',
+              'Text("Background display")',
+              'Toggle("Match inactive LEDs to face color"',
+              'Text("Inactive LED brightness")',
+              'preferences: expressionPreviewPreferences',
+              '.id(previewExpression)',
+              '.onChange(of: previewExpression)',
+              'pal.react(expression, seconds: 2.2)',
+              'private var expressionPreviewPreferences',
           ]
-          missing = [x for x in required if x not in s]
+          workspace_required = [
+              'if item.module == .pet',
+              'Label("Pixel Pet Settings…", systemImage: "slider.horizontal.3")',
+              'HaloPixelPalSettingsWindowController.shared.show()',
+          ]
+          missing = [x for x in pet_required if x not in pet] + [x for x in workspace_required if x not in workspace]
           if missing:
-              raise SystemExit('Missing repaired-expression contract: ' + ', '.join(missing))
+              raise SystemExit('Missing Pixel Pet controls contract: ' + ', '.join(missing))
           PY
 
-      - name: Parse Pixel Pal source
-        run: xcrun swiftc -parse Halo/Views/PixelPetWidget.swift
+      - name: Parse changed Swift sources
+        run: |
+          xcrun swiftc -parse Halo/Views/PixelPetWidget.swift
+          xcrun swiftc -parse Halo/Views/WidgetSettingsView.swift
 
       - name: Full Xcode build
         run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build
@@ -113,6 +177,6 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Halo/Views/PixelPetWidget.swift
-          git commit -m 'Repair Pixel Pal expressions'
+          git add Halo/Views/PixelPetWidget.swift Halo/Views/WidgetSettingsView.swift
+          git commit -m 'Fix Pixel Pet preview and customization'
           git push origin HEAD:main
