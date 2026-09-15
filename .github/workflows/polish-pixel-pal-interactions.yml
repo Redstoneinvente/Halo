@@ -1,4 +1,4 @@
-name: Add Configurable Pixel Pet Dizzy Threshold
+name: Add Pixel Pet Furious Escalation
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Add configurable dizzy threshold
+      - name: Add furious tap escalation and shutter
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -26,8 +26,8 @@ jobs:
           path = Path('Halo/Views/PixelPetWidget.swift')
           s = path.read_text()
 
-          if 'var dizzyRotationThresholdTurns = 0.8' in s:
-              print('Configurable dizzy threshold already present; validating existing implementation.')
+          if 'case furious' in s and 'drawFuryDoor' in s:
+              print('Furious escalation already present; validating existing implementation.')
               raise SystemExit(0)
 
           def replace_once(old, new, label):
@@ -38,114 +38,341 @@ jobs:
               s = s.replace(old, new, 1)
 
           replace_once(
-              '    var version = 6\n',
-              '    var version = 7\n',
-              'schema version property',
-          )
-          replace_once(
-              '    var animationIntensity = 0.85\n\n    // Direct interactions\n',
-              '    var animationIntensity = 0.85\n    var dizzyRotationThresholdTurns = 0.8\n\n    // Direct interactions\n',
-              'dizzy threshold preference',
-          )
-          replace_once(
-              '        case automaticBlinking, animationSpeed, animationIntensity\n',
-              '        case automaticBlinking, animationSpeed, animationIntensity, dizzyRotationThresholdTurns\n',
-              'coding key',
-          )
-          replace_once(
-              '        version = 6\n',
-              '        version = 7\n',
-              'decoded schema version',
-          )
-          replace_once(
-              '        animationIntensity = try c.decodeIfPresent(Double.self, forKey: .animationIntensity) ?? 0.85\n\n        hoverReaction',
-              '        animationIntensity = try c.decodeIfPresent(Double.self, forKey: .animationIntensity) ?? 0.85\n        dizzyRotationThresholdTurns = try c.decodeIfPresent(Double.self, forKey: .dizzyRotationThresholdTurns) ?? 0.8\n\n        hoverReaction',
-              'decode dizzy threshold',
-          )
-          replace_once(
-              '        value.version = 6\n        value.animationSpeed',
-              '        value.version = 7\n        value.animationSpeed',
-              'normalized schema version',
-          )
-          replace_once(
-              '        value.animationIntensity = min(1.0, max(0.0, animationIntensity))\n        value.faceScale',
-              '        value.animationIntensity = min(1.0, max(0.0, animationIntensity))\n        value.dizzyRotationThresholdTurns = min(2.0, max(0.35, dizzyRotationThresholdTurns))\n        value.faceScale',
-              'normalize dizzy threshold',
+              '    case annoyed\n    case wink\n',
+              '    case annoyed\n    case furious\n    case wink\n',
+              'furious expression enum',
           )
 
           replace_once(
-              '    static let minimumRotation = Double.pi * 1.55\n',
-              '',
-              'remove hardcoded rotation threshold',
-          )
-          replace_once(
-              '    mutating func register(location: CGPoint, size: CGSize, at now: TimeInterval) -> Bool {\n',
-              '    mutating func register(location: CGPoint, size: CGSize, at now: TimeInterval, minimumRotationTurns: Double) -> Bool {\n',
-              'detector configurable signature',
-          )
-          replace_once(
-              '        let radiusSpread = maxRadius - minRadius\n\n        guard abs(signedRotation) >= Self.minimumRotation,\n',
-              '        let radiusSpread = maxRadius - minRadius\n        let minimumRotation = Double.pi * 2.0 * min(2.0, max(0.35, minimumRotationTurns))\n\n        guard abs(signedRotation) >= minimumRotation,\n',
-              'detector configurable threshold',
-          )
-          replace_once(
-              '                            at: Date().timeIntervalSinceReferenceDate\n                        ) {\n',
-              '                            at: Date().timeIntervalSinceReferenceDate,\n                            minimumRotationTurns: pal.preferences.dizzyRotationThresholdTurns\n                        ) {\n',
-              'pass preference into detector',
+              '    static let winkEye = HaloPixelPalSprite(rows: [\n'
+              '        "p...p",\n'
+              '        ".ppp."\n'
+              '    ])\n\n'
+              '    static let worriedBrow = HaloPixelPalSprite(rows: ["pp..."])\n'
+              '    static let annoyedBrow = HaloPixelPalSprite(rows: ["..ppp"])\n',
+              '    static let winkEye = HaloPixelPalSprite(rows: [\n'
+              '        "p...p",\n'
+              '        ".ppp."\n'
+              '    ])\n'
+              '    static let furiousEye = HaloPixelPalSprite(rows: [\n'
+              '        "ppppp",\n'
+              '        ".ppp.",\n'
+              '        "..p.."\n'
+              '    ])\n\n'
+              '    static let worriedBrow = HaloPixelPalSprite(rows: ["pp..."])\n'
+              '    static let annoyedBrow = HaloPixelPalSprite(rows: ["..ppp"])\n'
+              '    static let furiousBrow = HaloPixelPalSprite(rows: [\n'
+              '        "pp...",\n'
+              '        ".pp..",\n'
+              '        "..pp."\n'
+              '    ])\n',
+              'furious eyes and brows',
           )
 
-          interaction_old = (
-              '                HStack {\n'
-              '                    Text("Animation intensity")\n'
-              '                    Slider(value: bind(\\.animationIntensity), in: 0...1)\n'
-              '                }\n'
-              '                Toggle("Automatic blinking + rare wink", isOn: bind(\\.automaticBlinking))\n'
+          replace_once(
+              '    static let mouthFrown = HaloPixelPalSprite(rows: [\n'
+              '        "..p..",\n'
+              '        ".p.p.",\n'
+              '        "p...p"\n'
+              '    ])\n'
+              '    static let mouthCat = HaloPixelPalSprite(rows: [\n',
+              '    static let mouthFrown = HaloPixelPalSprite(rows: [\n'
+              '        "..p..",\n'
+              '        ".p.p.",\n'
+              '        "p...p"\n'
+              '    ])\n'
+              '    static let mouthGrimace = HaloPixelPalSprite(rows: [\n'
+              '        ".ppppp.",\n'
+              '        "pwwwwwp",\n'
+              '        ".ppppp."\n'
+              '    ])\n'
+              '    static let mouthCat = HaloPixelPalSprite(rows: [\n',
+              'furious mouth',
           )
-          interaction_new = (
-              '                HStack {\n'
-              '                    Text("Animation intensity")\n'
-              '                    Slider(value: bind(\\.animationIntensity), in: 0...1)\n'
-              '                }\n'
-              '                HStack {\n'
-              '                    Text("Dizzy threshold")\n'
-              '                    Slider(value: bind(\\.dizzyRotationThresholdTurns), in: 0.35...2.0, step: 0.05)\n'
-              '                    Text("\\(pal.preferences.dizzyRotationThresholdTurns, specifier: \"%.2f\") turns")\n'
-              '                        .font(.caption.monospacedDigit())\n'
-              '                        .frame(width: 76, alignment: .trailing)\n'
-              '                }\n'
-              '                Text("How much fast circular cursor movement is required before Pixel Pet becomes dizzy. Lower values trigger sooner.")\n'
-              '                    .font(.caption2)\n'
-              '                    .foregroundStyle(.secondary)\n'
-              '                Toggle("Automatic blinking + rare wink", isOn: bind(\\.automaticBlinking))\n'
+
+          old_taps = (
+              '    func tapped() {\n'
+              '        guard preferences.tapReaction else { return }\n'
+              '        if shouldBecomeAngry(forPhysicalTapCount: 1) {\n'
+              '            react(.annoyed, seconds: 3.4)\n'
+              '            return\n'
+              '        }\n'
+              '        let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]\n'
+              '        react(sequence[tapIndex % sequence.count])\n'
+              '        tapIndex += 1\n'
+              '    }\n\n'
+              '    func doubleTapped() {\n'
+              '        guard preferences.doubleTapReaction else { return }\n'
+              '        if shouldBecomeAngry(forPhysicalTapCount: 2) {\n'
+              '            react(.annoyed, seconds: 3.4)\n'
+              '            return\n'
+              '        }\n'
+              '        react(.love, seconds: 2.2)\n'
+              '    }\n\n'
+              '    private func shouldBecomeAngry(forPhysicalTapCount count: Int) -> Bool {\n'
+              '        if reaction == .annoyed { return true }\n'
+              '        return tapBurst.register(count: count, at: Date().timeIntervalSinceReferenceDate)\n'
+              '    }\n'
           )
-          replace_once(interaction_old, interaction_new, 'dizzy threshold settings UI')
+          new_taps = (
+              '    func tapped() {\n'
+              '        guard preferences.tapReaction, reaction != .furious else { return }\n'
+              '        if let escalation = escalatedTapReaction(forPhysicalTapCount: 1) {\n'
+              '            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)\n'
+              '            return\n'
+              '        }\n'
+              '        let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]\n'
+              '        react(sequence[tapIndex % sequence.count])\n'
+              '        tapIndex += 1\n'
+              '    }\n\n'
+              '    func doubleTapped() {\n'
+              '        guard preferences.doubleTapReaction, reaction != .furious else { return }\n'
+              '        if let escalation = escalatedTapReaction(forPhysicalTapCount: 2) {\n'
+              '            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)\n'
+              '            return\n'
+              '        }\n'
+              '        react(.love, seconds: 2.2)\n'
+              '    }\n\n'
+              '    private func escalatedTapReaction(forPhysicalTapCount count: Int) -> HaloPixelPalExpression? {\n'
+              '        let triggered = tapBurst.register(count: count, at: Date().timeIntervalSinceReferenceDate)\n'
+              '        if reaction == .annoyed {\n'
+              '            return triggered ? .furious : .annoyed\n'
+              '        }\n'
+              '        return triggered ? .annoyed : nil\n'
+              '    }\n'
+          )
+          replace_once(old_taps, new_taps, 'two-stage angry tap escalation')
+
+          replace_once(
+              '                accessory: reaction == .annoyed ? .horns : nil,\n',
+              '                accessory: (reaction == .annoyed || reaction == .furious) ? .horns : nil,\n',
+              'furious horns',
+          )
+          replace_once(
+              '        case .annoyed, .shocked, .surprised: return .alert\n',
+              '        case .annoyed, .furious, .shocked, .surprised: return .alert\n',
+              'furious alert FX',
+          )
+
+          replace_once(
+              '    private var faceColor: Color { preferences.faceColor }\n'
+              '    private var accentColor: Color { preferences.accentColor.color }\n'
+              '    private var blushColor: Color { preferences.blushColor.color }\n',
+              '    private var faceColor: Color {\n'
+              '        expression == .furious ? Color(red: 1.0, green: 0.11, blue: 0.07) : preferences.faceColor\n'
+              '    }\n'
+              '    private var accentColor: Color {\n'
+              '        expression == .furious ? Color(red: 1.0, green: 0.52, blue: 0.08) : preferences.accentColor.color\n'
+              '    }\n'
+              '    private var blushColor: Color {\n'
+              '        expression == .furious ? Color(red: 0.62, green: 0.02, blue: 0.02) : preferences.blushColor.color\n'
+              '    }\n',
+              'furious red palette',
+          )
+
+          old_face_canvas = (
+              '            Canvas { context, size in\n'
+              '                draw(context: &context, size: size)\n'
+              '            }\n'
+              '            .shadow(\n'
+              '                color: faceColor.opacity(preferences.glowIntensity * 0.55),\n'
+              '                radius: 1 + 7 * preferences.glowIntensity\n'
+              '            )\n'
+          )
+          new_face_canvas = (
+              '            Canvas { context, size in\n'
+              '                draw(context: &context, size: size)\n'
+              '            }\n'
+              '            .shadow(\n'
+              '                color: faceColor.opacity(preferences.glowIntensity * 0.55),\n'
+              '                radius: 1 + 7 * preferences.glowIntensity\n'
+              '            )\n\n'
+              '            if expression == .furious, let reactionElapsed = reactionElapsed {\n'
+              '                Canvas { context, size in\n'
+              '                    drawFuryDoor(context: &context, size: size, elapsed: reactionElapsed)\n'
+              '                }\n'
+              '                .allowsHitTesting(false)\n'
+              '            }\n'
+          )
+          replace_once(old_face_canvas, new_face_canvas, 'furious shutter overlay')
+
+          background_marker = '    @ViewBuilder\n    private var background: some View {\n'
+          door_helpers = (
+              '    private func furyDoorClosure(elapsed: TimeInterval) -> Double {\n'
+              '        if reduceMotion {\n'
+              '            return elapsed >= 0.65 && elapsed < 1.55 ? 1.0 : 0.0\n'
+              '        }\n'
+              '        func smooth(_ value: Double) -> Double {\n'
+              '            let p = min(1.0, max(0.0, value))\n'
+              '            return p * p * (3.0 - 2.0 * p)\n'
+              '        }\n'
+              '        if elapsed < 0.55 { return 0 }\n'
+              '        if elapsed < 1.05 { return smooth((elapsed - 0.55) / 0.50) }\n'
+              '        if elapsed < 1.55 { return 1 }\n'
+              '        if elapsed < 2.20 { return 1 - smooth((elapsed - 1.55) / 0.65) }\n'
+              '        return 0\n'
+              '    }\n\n'
+              '    private func drawFuryDoor(context: inout GraphicsContext, size: CGSize, elapsed: TimeInterval) {\n'
+              '        let closure = furyDoorClosure(elapsed: elapsed)\n'
+              '        guard closure > 0.001 else { return }\n\n'
+              '        let panelWidth = size.width * 0.5 * closure\n'
+              '        let edgeWidth = max(1.0, min(size.width, size.height) / 48.0)\n'
+              '        let panelColor = Color(red: 0.12, green: 0.015, blue: 0.012).opacity(0.98)\n'
+              '        let edgeColor = Color(red: 0.95, green: 0.08, blue: 0.04).opacity(0.92)\n'
+              '        let seamColor = Color.black.opacity(0.42)\n\n'
+              '        func paintRect(_ rect: CGRect, _ color: Color) {\n'
+              '            var path = Path()\n'
+              '            path.addRect(rect)\n'
+              '            context.fill(path, with: .color(color))\n'
+              '        }\n\n'
+              '        paintRect(CGRect(x: 0, y: 0, width: panelWidth, height: size.height), panelColor)\n'
+              '        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: panelWidth, height: size.height), panelColor)\n'
+              '        paintRect(CGRect(x: max(0, panelWidth - edgeWidth), y: 0, width: edgeWidth, height: size.height), edgeColor)\n'
+              '        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: edgeWidth, height: size.height), edgeColor)\n\n'
+              '        for row in 1..<4 {\n'
+              '            let y = size.height * CGFloat(row) / 4.0\n'
+              '            paintRect(CGRect(x: 0, y: y, width: panelWidth, height: edgeWidth), seamColor)\n'
+              '            paintRect(CGRect(x: size.width - panelWidth, y: y, width: panelWidth, height: edgeWidth), seamColor)\n'
+              '        }\n'
+              '    }\n\n'
+          )
+          replace_once(background_marker, door_helpers + background_marker, 'furious door helpers')
+
+          replace_once(
+              '    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, smug }\n',
+              '    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, furious, smug }\n',
+              'furious eye pose enum',
+          )
+          replace_once(
+              '        case .dizzy: return .dizzy\n        case .smug: return .smug\n',
+              '        case .dizzy: return .dizzy\n        case .furious: return .furious\n        case .smug: return .smug\n',
+              'furious eye pose mapping',
+          )
+          replace_once(
+              '        case .dizzy:\n'
+              '            render(.init(HaloPixelPalSprites.xEye, x: 3, y: 6), 1, 0, 0)\n'
+              '            render(.init(HaloPixelPalSprites.xEye, x: 16, y: 6, mirrorX: true), 1, 0, 0)\n'
+              '        case .smug:\n',
+              '        case .dizzy:\n'
+              '            render(.init(HaloPixelPalSprites.xEye, x: 3, y: 6), 1, 0, 0)\n'
+              '            render(.init(HaloPixelPalSprites.xEye, x: 16, y: 6, mirrorX: true), 1, 0, 0)\n'
+              '        case .furious:\n'
+              '            render(.init(HaloPixelPalSprites.furiousEye, x: leftX, y: y + 1), 1, 0, 0)\n'
+              '            render(.init(HaloPixelPalSprites.furiousEye, x: rightX, y: y + 1, mirrorX: true), 1, 0, 0)\n'
+              '        case .smug:\n',
+              'furious eye drawing',
+          )
+
+          replace_once(
+              '        case .annoyed, .focused:\n'
+              '            render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.95, 0, 0)\n'
+              '            render(.init(HaloPixelPalSprites.annoyedBrow, x: rightX, y: y, mirrorX: true), 0.95, 0, 0)\n',
+              '        case .furious:\n'
+              '            render(.init(HaloPixelPalSprites.furiousBrow, x: leftX, y: 2), 1, 0, 0)\n'
+              '            render(.init(HaloPixelPalSprites.furiousBrow, x: rightX, y: 2, mirrorX: true), 1, 0, 0)\n'
+              '        case .annoyed, .focused:\n'
+              '            render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.95, 0, 0)\n'
+              '            render(.init(HaloPixelPalSprites.annoyedBrow, x: rightX, y: y, mirrorX: true), 0.95, 0, 0)\n',
+              'furious brows drawing',
+          )
+
+          replace_once(
+              '        case .worried, .sad, .crying, .annoyed: return HaloPixelPalSprites.mouthFrown\n'
+              '        case .shy: return HaloPixelPalSprites.mouthTiny\n',
+              '        case .worried, .sad, .crying, .annoyed: return HaloPixelPalSprites.mouthFrown\n'
+              '        case .furious: return HaloPixelPalSprites.mouthGrimace\n'
+              '        case .shy: return HaloPixelPalSprites.mouthTiny\n',
+              'furious mouth mapping',
+          )
+
+          replace_once(
+              '    private func drawCheeks(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n'
+              '        let sprite: HaloPixelPalSprite\n',
+              '    private func drawCheeks(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n'
+              '        if expression == .furious { return }\n'
+              '        let sprite: HaloPixelPalSprite\n',
+              'suppress cheeks while furious',
+          )
+
+          replace_once(
+              '            if expression == .annoyed {\n'
+              '                return (Int(round(sin(t * 11.0))) * one, 0)\n'
+              '            }\n',
+              '            if expression == .furious {\n'
+              '                return (Int(round(sin(t * 18.0))) * two, Int(round(cos(t * 13.0))) * one)\n'
+              '            }\n'
+              '            if expression == .annoyed {\n'
+              '                return (Int(round(sin(t * 11.0))) * one, 0)\n'
+              '            }\n',
+              'furious reaction shake',
+          )
+          replace_once(
+              '        case .annoyed:\n'
+              '            return (Int(round(sin(t * 11.0))) * one, 0)\n'
+              '        case .dizzy:\n',
+              '        case .annoyed:\n'
+              '            return (Int(round(sin(t * 11.0))) * one, 0)\n'
+              '        case .furious:\n'
+              '            return (Int(round(sin(t * 18.0))) * two, Int(round(cos(t * 13.0))) * one)\n'
+              '        case .dizzy:\n',
+              'furious preview shake',
+          )
+
+          replace_once(
+              '                    animationTime: timeline.date.timeIntervalSince(previewEpoch)\n'
+              '                )\n',
+              '                    animationTime: timeline.date.timeIntervalSince(previewEpoch),\n'
+              '                    reactionElapsed: previewExpression == .furious ? timeline.date.timeIntervalSince(previewEpoch) : nil\n'
+              '                )\n',
+              'furious preview shutter timing',
+          )
+          replace_once(
+              '                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .dizzy, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in\n',
+              '                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .dizzy, .furious, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in\n',
+              'furious quick preview button',
+          )
+          replace_once(
+              '        case .annoyed, .surprised, .shocked: return .alert\n',
+              '        case .annoyed, .furious, .surprised, .shocked: return .alert\n',
+              'furious preview FX',
+          )
 
           path.write_text(s)
           PY
 
-      - name: Verify configurable dizzy threshold
+      - name: Verify furious escalation contract
         run: |
           python3 - <<'PY'
           from pathlib import Path
           s = Path('Halo/Views/PixelPetWidget.swift').read_text()
           required = [
-              'var version = 7',
+              'case furious',
+              'static let furiousEye',
+              'static let furiousBrow',
+              'static let mouthGrimace',
+              'guard preferences.tapReaction, reaction != .furious else { return }',
+              'guard preferences.doubleTapReaction, reaction != .furious else { return }',
+              'private func escalatedTapReaction',
+              'return triggered ? .furious : .annoyed',
+              'escalation == .furious ? 4.6 : 3.4',
+              '(reaction == .annoyed || reaction == .furious) ? .horns : nil',
+              'expression == .furious ? Color(red: 1.0, green: 0.11, blue: 0.07)',
+              'drawFuryDoor(context: &context, size: size, elapsed: reactionElapsed)',
+              'if elapsed < 2.20 { return 1 - smooth((elapsed - 1.55) / 0.65) }',
+              'case .furious: return .furious',
+              'case .furious: return HaloPixelPalSprites.mouthGrimace',
+              'if expression == .furious { return }',
+              'sin(t * 18.0)',
+              'previewExpression == .furious ? timeline.date.timeIntervalSince(previewEpoch) : nil',
+              '.dizzy, .furious, .shy',
               'var dizzyRotationThresholdTurns = 0.8',
-              'case automaticBlinking, animationSpeed, animationIntensity, dizzyRotationThresholdTurns',
-              'decodeIfPresent(Double.self, forKey: .dizzyRotationThresholdTurns) ?? 0.8',
-              'value.dizzyRotationThresholdTurns = min(2.0, max(0.35, dizzyRotationThresholdTurns))',
-              'minimumRotationTurns: Double',
-              'let minimumRotation = Double.pi * 2.0 * min(2.0, max(0.35, minimumRotationTurns))',
-              'minimumRotationTurns: pal.preferences.dizzyRotationThresholdTurns',
-              'Text("Dizzy threshold")',
-              'Slider(value: bind(\\.dizzyRotationThresholdTurns), in: 0.35...2.0, step: 0.05)',
           ]
           missing = [m for m in required if m not in s]
           if missing:
-              raise SystemExit(f'Missing configurable dizzy threshold markers: {missing}')
-          if 'static let minimumRotation = Double.pi * 1.55' in s:
-              raise SystemExit('Hardcoded dizzy rotation threshold is still present.')
-          print('Configurable dizzy threshold verified.')
+              raise SystemExit(f'Missing furious escalation markers: {missing}')
+          if 'private func shouldBecomeAngry' in s:
+              raise SystemExit('Old one-stage angry tap logic is still present.')
+          print('Furious escalation and existing dizzy threshold verified.')
           PY
 
       - name: Parse Pixel Pet source
@@ -163,5 +390,5 @@ jobs:
             echo "No source changes to commit."
             exit 0
           fi
-          git commit -m "Add configurable Pixel Pet dizzy threshold"
+          git commit -m "Add Pixel Pet furious tap escalation"
           git push origin HEAD:main
