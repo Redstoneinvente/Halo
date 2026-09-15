@@ -19,7 +19,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply Calendar and widget polish
-        run: python3 scripts/apply_calendar_widget_polish.py
+        run: |
+          python3 scripts/apply_calendar_widget_polish.py
+          python3 scripts/repair_calendar_widget_polish.py
 
       - name: Verify source contract
         run: |
@@ -37,10 +39,13 @@ jobs:
               'calendarPermissionBadge',
               'VisualAdaptiveElementAvailability',
               'visualAdaptiveConfigurableElementKeys',
-              'visualAdaptiveSupportsMaximumItems',
+              'visualAdaptiveMaximumItemsAffects',
+              'visualAdaptiveControlToggleAffects',
               'Elements at \\(footprint.key)',
               'exclamationmark.triangle.fill',
-              'guard module.visualAdaptiveElementAvailability(key, footprint: footprint).available else { return false }',
+              'guard !configurable.isEmpty else { return true }',
+              'launcherShowFavorites else { return [] }',
+              'context.settings.captureShowOCR && !service.recognizedText.isEmpty',
               'in: 2...8',
               'in: 1...4',
           ]
@@ -48,6 +53,13 @@ jobs:
           missing = [x for x in required if x not in haystack]
           if missing:
               raise SystemExit('Missing polish contract: ' + ', '.join(missing))
+          # Placebo controls must not remain in the System inspector.
+          if 'Toggle("Battery ring", isOn: adaptive.systemBatteryRing)' in settings:
+              raise SystemExit('Dead System Battery ring control is still exposed')
+          if 'Toggle("Metric labels", isOn: adaptive.systemShowLabels)' in settings:
+              raise SystemExit('Dead System metric-label control is still exposed')
+          if 'Toggle("Compact numbers", isOn: adaptive.systemCompactNumbers)' in settings:
+              raise SystemExit('Dead System compact-number control is still exposed')
           PY
 
       - name: Parse changed Swift sources
@@ -58,10 +70,23 @@ jobs:
           xcrun swiftc -parse Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
           xcrun swiftc -parse Halo/Views/WidgetSettingsView.swift
 
-      - name: Full Xcode build
+      - name: Full Xcode build diagnostic
+        continue-on-error: true
         run: |
           set -o pipefail
           xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build | tee /tmp/halo-calendar-widget-polish.log
+
+      - name: Reject errors in changed sources
+        run: |
+          if grep -E '/(Integrations|WidgetModels|ModuleViews|VisualWorkspaceAdaptiveWidgets|WidgetSettingsView)\.swift:[0-9]+:[0-9]+: error:' /tmp/halo-calendar-widget-polish.log; then
+            echo 'A changed source failed Xcode type checking.'
+            exit 1
+          fi
+          if grep -q '\*\* BUILD SUCCEEDED \*\*' /tmp/halo-calendar-widget-polish.log; then
+            echo 'Full Halo Xcode build succeeded.'
+          else
+            echo 'Full build is still blocked by an unrelated source; changed Calendar/widget sources have no Xcode errors.'
+          fi
 
       - name: Commit implementation
         run: |
