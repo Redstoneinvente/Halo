@@ -524,6 +524,14 @@ struct OpenNotchItem: Codable, Equatable, Identifiable {
         var value = self
         value.sizing = try sizing.validated()
         value.gridPlacement = try gridPlacement?.validated()
+        if module == .pet, var placement = value.gridPlacement {
+            let side = min(4, max(1, max(placement.columnSpan, placement.rowSpan)))
+            placement.columnSpan = side
+            placement.rowSpan = side
+            placement.column = min(max(0, 8 - side), max(0, placement.column))
+            placement.row = min(max(0, 4 - side), max(0, placement.row))
+            value.gridPlacement = placement
+        }
         if let style { value.style = try style.validated() }
         if let widgetStyle { value.widgetStyle = try widgetStyle.validated() }
         value.customText = String(customText.prefix(500))
@@ -760,6 +768,13 @@ struct OpenNotchLayout: Codable, Equatable {
         for index in ordered {
             let fallback = Self.defaultGridSpan(for: items[index])
             var placement = (items[index].gridPlacement ?? OpenNotchGridPlacement(columnSpan: fallback.columns, rowSpan: fallback.rows)).clamped(columns: columns)
+            if items[index].module == .pet {
+                let side = min(min(4, columns), max(placement.columnSpan, placement.rowSpan))
+                placement.columnSpan = side
+                placement.rowSpan = side
+                placement.column = min(max(0, columns - side), max(0, placement.column))
+                placement.row = min(max(0, 4 - side), max(0, placement.row))
+            }
             if !Self.canPlace(placement, columns: columns, occupied: occupied) {
                 placement = Self.firstAvailablePlacement(columnSpan: placement.columnSpan, rowSpan: placement.rowSpan,
                                                          columns: columns, occupied: occupied)
@@ -791,7 +806,7 @@ struct OpenNotchLayout: Codable, Equatable {
         if let module = item.module {
             switch module {
             case .media, .calendar, .system: return (3, 2)
-            case .pet: return (4, 2)
+            case .pet: return (1, 1)
             case .shelf, .clipboard, .launcher, .activities, .notes: return (2, 2)
             case .clock, .timer, .audio, .capture, .stopwatch, .developer: return (2, 1)
             }
