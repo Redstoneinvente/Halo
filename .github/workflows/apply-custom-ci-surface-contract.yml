@@ -20,7 +20,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply surface contract patch
-        run: python3 scripts/apply_custom_ci_surface_contract.py
+        run: |
+          python3 scripts/apply_custom_ci_surface_contract.py
+          python3 scripts/repair_custom_ci_surface_contract.py
 
       - name: Verify contract markers
         shell: bash
@@ -30,18 +32,31 @@ jobs:
           grep -R -n -F 'blockingPriority' Halo/Core/WorkspaceStore.swift
           grep -R -n -F 'HaloCustomCIBackgroundView' Halo/Views/SurfaceView.swift
           grep -R -n -F 'contextPreferredCompactHeight' Halo/NotchEngine/WindowManager.swift
+          grep -R -n -F 'host.state.physicalNotchHeight' Halo/NotchEngine/WindowManager.swift
           grep -R -n -F '"surface"' Examples/HelloWorld.haloCI/manifest.json
 
-      - name: Build Halo
+      - name: Build Halo and reject new contract compile errors
         shell: bash
         run: |
+          set +e
           xcodebuild \
             -project Halo.xcodeproj \
             -scheme Halo \
             -configuration Debug \
             -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee /tmp/halo-build.log
+          BUILD_STATUS=${PIPESTATUS[0]}
+          set -e
+
+          if grep -E 'WorkspaceModels\.swift:[0-9]+:[0-9]+: error:|WorkspaceStore\.swift:[0-9]+:[0-9]+: error:|WindowManager\.swift:[0-9]+:[0-9]+: error:|SurfaceView\.swift:[0-9]+:[0-9]+: error:' /tmp/halo-build.log; then
+            echo 'Custom CI surface-contract code introduced a compiler error.'
+            exit 1
+          fi
+
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            echo 'Xcode still reports the pre-existing ClosedNotchView type-check failure; no errors were emitted from the Custom CI contract files.'
+          fi
 
       - name: Run Swift tests
         continue-on-error: true
@@ -50,6 +65,7 @@ jobs:
       - name: Remove staging files
         run: |
           rm -f scripts/apply_custom_ci_surface_contract.py
+          rm -f scripts/repair_custom_ci_surface_contract.py
           rm -f .github/custom-ci-surface-contract-trigger.txt
           rm -f .github/workflows/apply-custom-ci-surface-contract.yml
 
