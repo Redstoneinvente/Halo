@@ -23,6 +23,14 @@ Latest update: closed-width handling fixed, eight contours, independent opening/
 - Xcode logic-test target, Swift package tests, release scripts and checklists.
 - Weather/AI extension protocols and offline license signature verification, not connected services or enforced licensing.
 
+## Custom CI authoring
+
+Halo supports declarative third-party `.haloCI` packages through **CI SDK 0.1**. Custom CIs can provide their own closed/expanded notch layouts, static or bounded dynamic sizing, independent backgrounds, reactive Halo/macOS bindings, automatic triggers, local state, permissions and brokered actions. Surface ownership remains centrally arbitrated by Halo, so lower-priority CIs do not take over while a higher-priority CI owns the notch.
+
+Start with **[Docs/CustomCI_Authoring.md](Docs/CustomCI_Authoring.md)**. It contains a complete starter package plus the current component, binding/context, trigger, action, permission, capability, sizing and background reference. A working package is also available at `Examples/HelloWorld.haloCI`.
+
+For SDK/runtime implementation work, `Docs/CISDK.md` remains the canonical architecture specification.
+
 ## Run and test on a Mac
 
 ```sh
