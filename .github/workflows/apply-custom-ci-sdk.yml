@@ -27,10 +27,6 @@ jobs:
             perl -0pe 's/\n\z//' "$part" >> /tmp/apply_custom_ci.py
           done
 
-          # The staged generator wrapped large Swift source payloads in single-quoted
-          # Python literals. Swift prose may legitimately contain apostrophes, so repair
-          # only the OUTER quotes. Embedded Swift double-quotes were already escaped by
-          # the generator, making double-quoted Python literals safe here.
           python3 - <<'PY'
           from pathlib import Path
           import re
@@ -39,18 +35,28 @@ jobs:
           lines = path.read_text().splitlines()
           repaired = []
           changed = 0
-          pattern = re.compile(r"^([A-Z][A-Z0-9_]*) = '(.*)'$")
-          for line in lines:
-              match = pattern.match(line)
-              if match:
-                  name, body = match.groups()
-                  repaired.append(f'{name} = "{body}"')
-                  changed += 1
-              else:
+          start = re.compile(r"^([A-Z][A-Z0-9_]*) = '")
+          for index, line in enumerate(lines, 1):
+              match = start.match(line)
+              if not match:
                   repaired.append(line)
+                  continue
+              first = line.find("'", match.end() - 1)
+              last = line.rfind("'")
+              if first < 0 or last <= first:
+                  raise SystemExit(f'Could not identify staged literal boundaries on line {index}: {line[:80]!r}')
+              tail = line[last + 1:]
+              if tail.strip():
+                  raise SystemExit(f'Unexpected staged literal suffix on line {index}: {tail!r}')
+              repaired.append(line[:first] + '"' + line[first + 1:last] + '"' + tail)
+              changed += 1
+              print(f'Repaired {match.group(1)} ({len(line):,} characters)')
           path.write_text('\n'.join(repaired) + '\n')
-          print(f'Repaired {changed} staged source literals')
+          print(f'Repaired {changed} staged source literals total')
           if changed == 0:
+              print('First physical lines:')
+              for index, line in enumerate(lines[:8], 1):
+                  print(index, repr(line[:100]), '...', repr(line[-40:]), len(line))
               raise SystemExit('No staged source literals were repaired')
           PY
 
