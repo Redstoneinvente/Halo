@@ -28,7 +28,7 @@ final class HaloCoreTests: XCTestCase {
         let normalized = try pet.validated()
         XCTAssertEqual(normalized.gridPlacement?.columnSpan, 2)
         XCTAssertEqual(normalized.gridPlacement?.rowSpan, 2)
-        XCTAssertEqual(normalized.gridPlacement?.column, 6)
+        XCTAssertEqual(normalized.gridPlacement?.column, 5)
         XCTAssertEqual(normalized.gridPlacement?.row, 2)
         var layout = OpenNotchLayout()
         layout.gridColumns = 2

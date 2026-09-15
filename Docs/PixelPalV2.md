@@ -996,3 +996,23 @@ Before modifying Pixel Pal:
 10. complete a full Halo Xcode build before claiming the implementation is finished
 
 When an implementation shortcut conflicts with this document, prefer this document unless the user explicitly changes the product direction.
+
+
+## 28. September 2026 sizing and LED polish
+
+- Restore all four square footprints in validation, packing and the workspace size menu.
+  Legacy rectangles normalize to the nearest square (ties choose the smaller square);
+  narrow workspaces cap the result to the available columns. Existing 4×4 placements stay 4×4.
+- The widget bypasses card padding and title chrome. The 24×24 LED display fills the
+  largest square inside its actual cell, preserving the user's optional Face fill setting.
+  Each LED edge is snapped independently to backing pixels, so fractional scaling cannot
+  shrink the entire display to the previous integer multiple.
+- A stationary, dim palette-tinted LED matrix sits beneath the lit sprite. Lit LEDs share
+  the exact same grid, with crisp edges and a one-backing-pixel gap where space permits.
+- Direct reactions use a trigger-relative bounce that settles; hover tracks locally per
+  widget and cannot override active context alerts. Exclusive gestures distinguish clicks,
+  double-clicks and long presses. Reduce Motion freezes travel and FX while retaining blinks.
+- Composition bounds include accessories and FX before applying movement, preventing
+  clipped caps, ears and hearts. Settings use a live animation preview.
+- Validation: square persistence, rectangle/narrow-grid normalization, backing-pixel geometry,
+  and reaction timing regression tests; full macOS build/test in Validate Pixel Pal.

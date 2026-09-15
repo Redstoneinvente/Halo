@@ -221,7 +221,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
         blushColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .blushColor) ?? HaloPixelPalRGB(red: 1.0, green: 0.38, blue: 0.58)
         backgroundStyle = try c.decodeIfPresent(HaloPixelPalBackgroundStyle.self, forKey: .backgroundStyle) ?? .transparent
         backgroundColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .backgroundColor) ?? HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)
-        faceScale = try c.decodeIfPresent(Double.self, forKey: .faceScale) ?? 0.98
+        faceScale = try c.decodeIfPresent(Double.self, forKey: .faceScale) ?? 1.0
         glowIntensity = try c.decodeIfPresent(Double.self, forKey: .glowIntensity) ?? 0.10
 
         accessoryMode = try c.decodeIfPresent(HaloPixelPalAccessoryMode.self, forKey: .accessoryMode) ?? .contextual
@@ -712,6 +712,8 @@ private struct HaloPixelPalContext {
             }
         }
 
+        if hovering && p.hoverReaction { return resting }
+
         if p.idleReaction {
             let mouseIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .mouseMoved)
             let keyboardIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
@@ -792,7 +794,7 @@ struct HaloPixelPetWidget: View {
                     preferences: pal.preferences,
                     date: timeline.date,
                     reduceMotion: reduceMotion,
-                    animationTime: timeline.date.timeIntervalSince(animationEpoch),
+                    animationTime: timeline.date.timeIntervalSince(pal.reaction == nil ? animationEpoch : pal.reactionStarted),
                     reactionElapsed: pal.reaction.map { _ in timeline.date.timeIntervalSince(pal.reactionStarted) },
                     pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero
                 )
@@ -839,12 +841,12 @@ struct HaloPixelPetWidget: View {
     }
 
     private func resolvedExpression(base: HaloPixelPalExpression, date: Date) -> HaloPixelPalExpression {
-        guard base == .neutral, pal.preferences.automaticBlinking, !reduceMotion else { return base }
+        guard base == .neutral, pal.preferences.automaticBlinking else { return base }
         let speed = max(0.35, pal.preferences.animationSpeed)
         let cycle = date.timeIntervalSince(animationEpoch) * speed
         let phase = cycle.truncatingRemainder(dividingBy: 12.0)
-        if phase > 11.72 { return .blink }
-        if phase > 7.18 && phase < 7.42 { return .wink }
+        if phase > (reduceMotion ? 11.35 : 11.72) { return .blink }
+        if !reduceMotion && phase > 7.18 && phase < 7.42 { return .wink }
         return base
     }
 }
@@ -919,7 +921,27 @@ private struct HaloPixelPalFace: View {
     private func draw(context: inout GraphicsContext, size: CGSize) {
         let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)
 
-        let motion = logicalMotion()
+        var layers: [(placed: HaloPixelPalPlacedSprite, opacity: Double, x: Int, y: Int)] = []
+        func render(_ placed: HaloPixelPalPlacedSprite, opacity: Double = 1, extraX: Int = 0, extraY: Int = 0) {
+            layers.append((placed, opacity, extraX, extraY))
+        }
+        drawFaceStyle(render: render)
+        drawEyes(render: render)
+        drawBrows(render: render)
+        drawMouth(render: render)
+        drawCheeks(render: render)
+        drawAccessory(render: render)
+        drawFX(render: render)
+
+        // Constrain the whole composition, including accessories, before moving it.
+        // A cap or floating heart must never lose its top row during a bounce.
+        let requestedMotion = logicalMotion()
+        let minX = layers.map { $0.placed.x + $0.x }.min() ?? 0
+        let minY = layers.map { $0.placed.y + $0.y }.min() ?? 0
+        let maxX = layers.map { $0.placed.x + $0.x + $0.placed.sprite.width }.max() ?? logicalGrid
+        let maxY = layers.map { $0.placed.y + $0.y + $0.placed.sprite.height }.max() ?? logicalGrid
+        let motion = (x: min(logicalGrid - maxX, max(-minX, requestedMotion.x)),
+                      y: min(logicalGrid - maxY, max(-minY, requestedMotion.y)))
 
         func color(for role: HaloPixelPalColorRole) -> Color {
             switch role {
@@ -931,7 +953,7 @@ private struct HaloPixelPalFace: View {
             }
         }
 
-        func render(_ placed: HaloPixelPalPlacedSprite, opacity: Double = 1.0, extraX: Int = 0, extraY: Int = 0) {
+        func paint(_ placed: HaloPixelPalPlacedSprite, opacity: Double = 1.0, extraX: Int = 0, extraY: Int = 0) {
             let rows = placed.sprite.rows
             for (rowIndex, row) in rows.enumerated() {
                 let chars = Array(row)
@@ -948,13 +970,9 @@ private struct HaloPixelPalFace: View {
             }
         }
 
-        drawFaceStyle(render: render)
-        drawEyes(render: render)
-        drawBrows(render: render)
-        drawMouth(render: render)
-        drawCheeks(render: render)
-        drawAccessory(render: render)
-        drawFX(render: render)
+        for layer in layers {
+            paint(layer.placed, opacity: layer.opacity, extraX: layer.x, extraY: layer.y)
+        }
     }
 
     private func drawFaceStyle(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
@@ -1265,16 +1283,16 @@ private struct HaloPixelPalSettingsView: View {
     private var header: some View {
         HStack(spacing: 22) {
             TimelineView(.animation(minimumInterval: reduceMotion ? 0.45 : 1.0 / 24.0)) { timeline in
-            HaloPixelPalFace(
-                expression: previewExpression,
-                contextualAccessory: previewAccessory,
-                fx: previewFX,
-                squareSize: 2,
-                preferences: pal.preferences,
-                date: timeline.date,
-                reduceMotion: reduceMotion,
-                animationTime: timeline.date.timeIntervalSince(previewEpoch)
-            )
+                HaloPixelPalFace(
+                    expression: previewExpression,
+                    contextualAccessory: previewAccessory,
+                    fx: previewFX,
+                    squareSize: 2,
+                    preferences: pal.preferences,
+                    date: timeline.date,
+                    reduceMotion: reduceMotion,
+                    animationTime: timeline.date.timeIntervalSince(previewEpoch)
+                )
             }
             .frame(width: 150, height: 150)
             .background(Color.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
