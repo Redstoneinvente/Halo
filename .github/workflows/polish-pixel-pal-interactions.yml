@@ -26,14 +26,12 @@ jobs:
           path = Path('Halo/Views/PixelPetWidget.swift')
           s = path.read_text()
 
-          charging = '''        if p.chargingReaction && system.charging {
-            return .init(expression: .love, accessory: .halo, fx: .hearts)
-        }
-'''
-          full_charge = '''        if p.chargingReaction, let battery = system.battery, battery >= 100, !system.onBattery {
-            return .init(expression: .superHappy, accessory: .crown, fx: .sparkle)
-        }
-'''
+          charging = "        if p.chargingReaction && system.charging {\n"
+          full_charge = (
+              "        if p.chargingReaction, let battery = system.battery, battery >= 100, !system.onBattery {\n"
+              "            return .init(expression: .superHappy, accessory: .crown, fx: .sparkle)\n"
+              "        }\n"
+          )
 
           if full_charge in s:
               raise SystemExit('Full-charge reaction is already present; refusing to duplicate it.')
