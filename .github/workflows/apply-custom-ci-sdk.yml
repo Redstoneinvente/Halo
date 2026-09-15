@@ -24,57 +24,115 @@ jobs:
         run: |
           : > /tmp/apply_custom_ci.raw
           for part in $(find scripts/custom-ci-patch -type f -name 'part*' | sort); do
-            # Each staged chunk acquired one separator newline. The chunks themselves
-            # already encode intended generator newlines as literal \n sequences.
             perl -0pe 's/\n\z//' "$part" >> /tmp/apply_custom_ci.raw
           done
 
-          # Decode literal \n sequences ONLY while outside Python string literals.
-          # Payload strings keep their escaped newlines exactly as authored.
           python3 - <<'PY'
           from pathlib import Path
+          import ast
 
           raw = Path('/tmp/apply_custom_ci.raw').read_text()
-          out = []
-          quote = None
-          escaped = False
-          decoded = 0
-          i = 0
-          while i < len(raw):
-              ch = raw[i]
+          names = [
+              'SDK', 'RUNTIME', 'RENDERER', 'SETTINGS', 'TESTS', 'DOCS', 'ARCH',
+              'EXAMPLE_MANIFEST', 'EXAMPLE_INTERFACE', 'EXAMPLE_TRIGGERS', 'EXAMPLE_README'
+          ]
+
+          def decode_payload(source: str) -> str:
+              # Re-evaluate the staged body using a triple-quoted literal so ordinary
+              # apostrophes inside Swift/docs cannot terminate it. This preserves the
+              # exact escape semantics the original single-quoted generator intended.
+              if "'''" not in source:
+                  return ast.literal_eval("'''" + source + "'''")
+              safe = source.replace('"""', '\\"\\"\\"')
+              return ast.literal_eval('"""' + safe + '"""')
+
+          def decode_generator_tail(source: str) -> str:
+              # Outside ordinary Python strings, the staged file encoded line breaks as
+              # literal backslash-n. Inside strings those escapes must remain untouched.
+              out = []
+              quote = None
+              triple = False
+              escaped = False
+              comment = False
+              decoded = 0
+              i = 0
+              while i < len(source):
+                  if comment:
+                      if source.startswith('\\n', i):
+                          out.append('\n'); decoded += 1; i += 2; comment = False
+                      else:
+                          out.append(source[i]); i += 1
+                      continue
+
+                  if quote is not None:
+                      if triple:
+                          delimiter = quote * 3
+                          if source.startswith(delimiter, i) and not escaped:
+                              out.append(delimiter); i += 3; quote = None; triple = False; escaped = False
+                              continue
+                      ch = source[i]
+                      out.append(ch)
+                      if escaped:
+                          escaped = False
+                      elif ch == '\\':
+                          escaped = True
+                      elif not triple and ch == quote:
+                          quote = None
+                      i += 1
+                      continue
+
+                  if source.startswith('\\n', i):
+                      out.append('\n'); decoded += 1; i += 2; continue
+                  ch = source[i]
+                  if ch == '#':
+                      comment = True; out.append(ch); i += 1; continue
+                  if ch in ("'", '"'):
+                      if source.startswith(ch * 3, i):
+                          quote = ch; triple = True; out.append(ch * 3); i += 3
+                      else:
+                          quote = ch; triple = False; out.append(ch); i += 1
+                      continue
+                  out.append(ch); i += 1
               if quote is not None:
-                  out.append(ch)
-                  if escaped:
-                      escaped = False
-                  elif ch == '\\':
-                      escaped = True
-                  elif ch == quote:
-                      quote = None
-                  i += 1
-                  continue
+                  raise SystemExit(f'Unterminated string while decoding generator tail: {quote!r}')
+              print(f'Decoded {decoded} generator-tail line breaks')
+              return ''.join(out)
 
-              if ch in ("'", '"'):
-                  quote = ch
-                  out.append(ch)
-                  i += 1
-                  continue
+          positions = []
+          for name in names:
+              marker = f"{name} = '"
+              pos = raw.find(marker)
+              if pos < 0:
+                  raise SystemExit(f'Missing staged payload marker: {name}')
+              positions.append((name, pos, pos + len(marker)))
 
-              if ch == '\\' and i + 1 < len(raw) and raw[i + 1] == 'n':
-                  out.append('\n')
-                  decoded += 1
-                  i += 2
-                  continue
+          if positions != sorted(positions, key=lambda item: item[1]):
+              raise SystemExit('Staged payload markers are out of order')
 
-              out.append(ch)
-              i += 1
+          assignments = []
+          for index, (name, marker_pos, body_start) in enumerate(positions):
+              if index + 1 < len(positions):
+                  next_pos = positions[index + 1][1]
+                  segment = raw[body_start:next_pos]
+              else:
+                  tail_marker = 'def replace_once'
+                  next_pos = raw.find(tail_marker, body_start)
+                  if next_pos < 0:
+                      raise SystemExit('Missing generator tail marker: def replace_once')
+                  segment = raw[body_start:next_pos]
 
-          if quote is not None:
-              raise SystemExit(f'Unterminated staged Python string ({quote})')
-          repaired = ''.join(out)
-          Path('/tmp/apply_custom_ci.py').write_text(repaired)
-          print(f'Decoded {decoded} generator line breaks outside payload strings')
-          if decoded == 0:
-              raise SystemExit('No encoded generator line breaks found')
+              closing = segment.rfind("'")
+              if closing < 0:
+                  raise SystemExit(f'Missing closing staged quote for {name}')
+              payload_source = segment[:closing]
+              value = decode_payload(payload_source)
+              assignments.append(f'{name} = {value!r}\n')
+              print(f'Reconstructed {name}: {len(value):,} characters')
+
+          tail_pos = raw.find('def replace_once', positions[-1][2])
+          tail = decode_generator_tail(raw[tail_pos:])
+          rebuilt = 'from pathlib import Path\n\n' + ''.join(assignments) + '\n' + tail
+          Path('/tmp/apply_custom_ci.py').write_text(rebuilt)
           PY
 
           python3 -m py_compile /tmp/apply_custom_ci.py
