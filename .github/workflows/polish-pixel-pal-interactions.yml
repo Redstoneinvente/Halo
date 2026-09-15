@@ -1,4 +1,4 @@
-name: Add Pixel Pet Corner Radius Controls
+name: Fix Pixel Pet Display Background Radius
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Add scalable background and pixel corner radius controls
+      - name: Apply radius to the LED display surface
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -33,93 +33,35 @@ jobs:
                   raise SystemExit(f'{label}: expected one match, found {count}')
               s = s.replace(old, new, 1)
 
-          # Persist both radius controls as scale-relative fractions.
           replace_once(
-              '''    var backgroundOpacity = 1.0\n    var inactiveLEDIntensity = 0.075''',
-              '''    var backgroundOpacity = 1.0\n    var backgroundCornerRadius = 0.0\n    var pixelCornerRadius = 0.0\n    var inactiveLEDIntensity = 0.075''',
-              'radius preference fields'
-          )
-          replace_once(
-              '''        case backgroundStyle, backgroundColor, backgroundOpacity, inactiveLEDIntensity, inactiveLEDUsesFaceColor, inactiveLEDColor, faceScale, glowIntensity''',
-              '''        case backgroundStyle, backgroundColor, backgroundOpacity, backgroundCornerRadius, pixelCornerRadius, inactiveLEDIntensity, inactiveLEDUsesFaceColor, inactiveLEDColor, faceScale, glowIntensity''',
-              'radius coding keys'
-          )
-          replace_once(
-              '''        backgroundOpacity = try c.decodeIfPresent(Double.self, forKey: .backgroundOpacity) ?? 1.0\n        inactiveLEDIntensity = try c.decodeIfPresent(Double.self, forKey: .inactiveLEDIntensity) ?? 0.075''',
-              '''        backgroundOpacity = try c.decodeIfPresent(Double.self, forKey: .backgroundOpacity) ?? 1.0\n        backgroundCornerRadius = try c.decodeIfPresent(Double.self, forKey: .backgroundCornerRadius) ?? 0.0\n        pixelCornerRadius = try c.decodeIfPresent(Double.self, forKey: .pixelCornerRadius) ?? 0.0\n        inactiveLEDIntensity = try c.decodeIfPresent(Double.self, forKey: .inactiveLEDIntensity) ?? 0.075''',
-              'radius decode defaults'
-          )
-          replace_once(
-              '''        value.backgroundOpacity = min(1.0, max(0.0, backgroundOpacity))\n        value.inactiveLEDIntensity = min(0.35, max(0.0, inactiveLEDIntensity))''',
-              '''        value.backgroundOpacity = min(1.0, max(0.0, backgroundOpacity))\n        value.backgroundCornerRadius = min(0.5, max(0.0, backgroundCornerRadius))\n        value.pixelCornerRadius = min(0.5, max(0.0, pixelCornerRadius))\n        value.inactiveLEDIntensity = min(0.35, max(0.0, inactiveLEDIntensity))''',
-              'radius normalization'
-          )
-          s = s.replace('var version = 5', 'var version = 6', 1)
-          s = s.replace('        version = 5', '        version = 6', 1)
-          s = s.replace('        value.version = 5', '        value.version = 6', 1)
-
-          # A relative rounded rectangle keeps background rounding visually stable at every widget size.
-          replace_once(
-              '''// MARK: - Face renderer\n\nprivate struct HaloPixelPalFace: View {''',
-              '''// MARK: - Face renderer\n\nprivate struct HaloPixelPalRelativeRoundedRectangle: Shape {\n    let radiusFraction: Double\n\n    func path(in rect: CGRect) -> Path {\n        let fraction = min(0.5, max(0.0, radiusFraction))\n        let radius = min(rect.width, rect.height) * fraction\n        return Path(roundedRect: rect, cornerRadius: radius)\n    }\n}\n\nprivate struct HaloPixelPalFace: View {''',
-              'relative background shape'
+              '''        ZStack {\n            background\n                .clipShape(HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius))\n            if preferences.inactiveLEDIntensity > 0.001 {\n                Canvas { context, size in\n                    let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)\n                    let inactiveColor = preferences.inactiveLEDUsesFaceColor ? faceColor : preferences.inactiveLEDColor.color\n                    for y in 0..<logicalGrid {\n                        for x in 0..<logicalGrid {\n                            let rect = geometry.led(x: x, y: y)\n                            let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius\n                            context.fill(Path(roundedRect: rect, cornerRadius: radius),\n                                         with: .color(inactiveColor.opacity(preferences.inactiveLEDIntensity)),\n                                         style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001))\n                        }\n                    }\n                }\n            }\n            Canvas { context, size in''',
+              '''        ZStack {\n            ZStack {\n                background\n                if preferences.inactiveLEDIntensity > 0.001 {\n                    Canvas { context, size in\n                        let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)\n                        let inactiveColor = preferences.inactiveLEDUsesFaceColor ? faceColor : preferences.inactiveLEDColor.color\n                        for y in 0..<logicalGrid {\n                            for x in 0..<logicalGrid {\n                                let rect = geometry.led(x: x, y: y)\n                                let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius\n                                context.fill(Path(roundedRect: rect, cornerRadius: radius),\n                                             with: .color(inactiveColor.opacity(preferences.inactiveLEDIntensity)),\n                                             style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001))\n                            }\n                        }\n                    }\n                }\n            }\n            .clipShape(HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius))\n\n            Canvas { context, size in''',
+              'LED display surface grouping'
           )
 
-          # Round only the background surface; the character can still use the full logical canvas.
           replace_once(
-              '''            background\n            if preferences.inactiveLEDIntensity > 0.001 {''',
-              '''            background\n                .clipShape(HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius))\n            if preferences.inactiveLEDIntensity > 0.001 {''',
-              'background corner radius rendering'
-          )
-
-          # Inactive matrix pixels respect the pixel corner radius.
-          replace_once(
-              '''                            context.fill(Path(geometry.led(x: x, y: y)),\n                                         with: .color(inactiveColor.opacity(preferences.inactiveLEDIntensity)),\n                                         style: FillStyle(antialiased: false))''',
-              '''                            let rect = geometry.led(x: x, y: y)\n                            let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius\n                            context.fill(Path(roundedRect: rect, cornerRadius: radius),\n                                         with: .color(inactiveColor.opacity(preferences.inactiveLEDIntensity)),\n                                         style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001))''',
-              'inactive pixel rounding'
-          )
-
-          # Active sprite pixels use the same radius, preserving one coherent LED style.
-          replace_once(
-              '''                    let rect = geometry.led(x: logicalX, y: logicalY)\n                    context.fill(Path(rect), with: .color(color(for: role).opacity(opacity)),\n                                 style: FillStyle(antialiased: false))''',
-              '''                    let rect = geometry.led(x: logicalX, y: logicalY)\n                    let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius\n                    context.fill(Path(roundedRect: rect, cornerRadius: radius),\n                                 with: .color(color(for: role).opacity(opacity)),\n                                 style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001))''',
-              'active pixel rounding'
-          )
-
-          # Expose both controls alongside the existing background / LED appearance controls.
-          replace_once(
-              '''                if pal.preferences.backgroundStyle != .transparent {\n                    HStack {\n                        Text("Surface opacity")\n                        Slider(value: bind(\\.backgroundOpacity), in: 0...1)\n                        Text("\\(Int(pal.preferences.backgroundOpacity * 100))%")\n                            .font(.caption.monospacedDigit())\n                            .frame(width: 38, alignment: .trailing)\n                    }\n                }\n                Toggle("Match inactive LEDs to face color", isOn: bind(\\.inactiveLEDUsesFaceColor))''',
               '''                if pal.preferences.backgroundStyle != .transparent {\n                    HStack {\n                        Text("Surface opacity")\n                        Slider(value: bind(\\.backgroundOpacity), in: 0...1)\n                        Text("\\(Int(pal.preferences.backgroundOpacity * 100))%")\n                            .font(.caption.monospacedDigit())\n                            .frame(width: 38, alignment: .trailing)\n                    }\n                    HStack {\n                        Text("Background corner radius")\n                        Slider(value: bind(\\.backgroundCornerRadius), in: 0...0.5)\n                        Text("\\(Int(pal.preferences.backgroundCornerRadius * 100))%")\n                            .font(.caption.monospacedDigit())\n                            .frame(width: 38, alignment: .trailing)\n                    }\n                }\n                Toggle("Match inactive LEDs to face color", isOn: bind(\\.inactiveLEDUsesFaceColor))''',
-              'background radius settings'
-          )
-          replace_once(
-              '''                HStack {\n                    Text("Inactive LED brightness")\n                    Slider(value: bind(\\.inactiveLEDIntensity), in: 0...0.35)\n                    Text("\\(Int(pal.preferences.inactiveLEDIntensity * 100))%")\n                        .font(.caption.monospacedDigit())\n                        .frame(width: 38, alignment: .trailing)\n                }\n\n                HStack {\n                    Text("Face fill")''',
-              '''                HStack {\n                    Text("Inactive LED brightness")\n                    Slider(value: bind(\\.inactiveLEDIntensity), in: 0...0.35)\n                    Text("\\(Int(pal.preferences.inactiveLEDIntensity * 100))%")\n                        .font(.caption.monospacedDigit())\n                        .frame(width: 38, alignment: .trailing)\n                }\n                HStack {\n                    Text("Pixel corner radius")\n                    Slider(value: bind(\\.pixelCornerRadius), in: 0...0.5)\n                    Text("\\(Int(pal.preferences.pixelCornerRadius * 100))%")\n                        .font(.caption.monospacedDigit())\n                        .frame(width: 38, alignment: .trailing)\n                }\n\n                HStack {\n                    Text("Face fill")''',
-              'pixel radius settings'
+              '''                if pal.preferences.backgroundStyle != .transparent {\n                    HStack {\n                        Text("Surface opacity")\n                        Slider(value: bind(\\.backgroundOpacity), in: 0...1)\n                        Text("\\(Int(pal.preferences.backgroundOpacity * 100))%")\n                            .font(.caption.monospacedDigit())\n                            .frame(width: 38, alignment: .trailing)\n                    }\n                }\n                HStack {\n                    Text("Background corner radius")\n                    Slider(value: bind(\\.backgroundCornerRadius), in: 0...0.5)\n                    Text("\\(Int(pal.preferences.backgroundCornerRadius * 100))%")\n                        .font(.caption.monospacedDigit())\n                        .frame(width: 38, alignment: .trailing)\n                }\n                Text("Rounds the LED display background, including the inactive LED matrix, without clipping the active Pixel Pal pixels.")\n                    .font(.caption2)\n                    .foregroundStyle(.secondary)\n                Toggle("Match inactive LEDs to face color", isOn: bind(\\.inactiveLEDUsesFaceColor))''',
+              'background radius settings semantics'
           )
 
           path.write_text(s)
           PY
 
-      - name: Verify corner radius contract
+      - name: Verify display radius contract
         run: |
           python3 - <<'PY'
           from pathlib import Path
           s = Path('Halo/Views/PixelPetWidget.swift').read_text()
           required = [
-              'var backgroundCornerRadius = 0.0',
-              'var pixelCornerRadius = 0.0',
-              'case backgroundStyle, backgroundColor, backgroundOpacity, backgroundCornerRadius, pixelCornerRadius',
-              'value.backgroundCornerRadius = min(0.5, max(0.0, backgroundCornerRadius))',
-              'value.pixelCornerRadius = min(0.5, max(0.0, pixelCornerRadius))',
-              'HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius)',
-              'preferences.pixelCornerRadius > 0.001',
-              'Text("Background corner radius")',
+              'ZStack {\n                background\n                if preferences.inactiveLEDIntensity > 0.001',
+              '.clipShape(HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius))',
+              'Rounds the LED display background, including the inactive LED matrix, without clipping the active Pixel Pal pixels.',
               'Text("Pixel corner radius")',
           ]
           missing = [item for item in required if item not in s]
           if missing:
-              raise SystemExit('Missing Pixel Pet radius contract: ' + ', '.join(missing))
+              raise SystemExit('Missing LED display radius contract: ' + ', '.join(missing))
           PY
 
       - name: Parse Pixel Pet source
@@ -137,5 +79,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add Halo/Views/PixelPetWidget.swift
-          git commit -m 'Add Pixel Pet corner radius controls'
+          git commit -m 'Fix Pixel Pet LED display radius'
           git push origin HEAD:main
