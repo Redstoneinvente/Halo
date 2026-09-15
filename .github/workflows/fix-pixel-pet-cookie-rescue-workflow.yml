@@ -1,0 +1,57 @@
+name: Fix Pixel Pet Cookie Rescue Workflow
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-pixel-pet-cookie-rescue-workflow.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fix duplicate furious-duration matcher
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/pixel-pet-cookie-rescue.yml')
+          s = path.read_text()
+          old = """          replace_once(
+              '            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)\\n',
+              '            react(escalation, seconds: escalation == .furious ? 2.22 : 3.4)\\n',
+              'single tap furious duration',
+          )
+          replace_once(
+              '            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)\\n',
+              '            react(escalation, seconds: escalation == .furious ? 2.22 : 3.4)\\n',
+              'double tap furious duration',
+          )
+"""
+          new = """          duration_old = '            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)\\n'
+          duration_new = '            react(escalation, seconds: escalation == .furious ? 2.22 : 3.4)\\n'
+          if s.count(duration_old) != 2:
+              raise SystemExit(f'furious duration: expected two matches, found {s.count(duration_old)}')
+          s = s.replace(duration_old, duration_new)
+"""
+          if old not in s:
+              raise SystemExit('Expected duplicate furious-duration matcher block was not found.')
+          path.write_text(s.replace(old, new, 1))
+          PY
+
+      - name: Commit workflow fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/pixel-pet-cookie-rescue.yml
+          git commit -m "Fix Pixel Pet cookie rescue matcher"
+          git pull --rebase origin main
+          git push origin HEAD:main
