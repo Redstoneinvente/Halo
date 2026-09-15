@@ -1,4 +1,4 @@
-name: Add Pixel Pet Furious Escalation
+name: Add Pixel Pet Cookie Rescue
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Add furious tap escalation and shutter
+      - name: Add cookie rescue and synchronized fury ending
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -26,353 +26,282 @@ jobs:
           path = Path('Halo/Views/PixelPetWidget.swift')
           s = path.read_text()
 
-          if 'case furious' in s and 'drawFuryDoor' in s:
-              print('Furious escalation already present; validating existing implementation.')
-              raise SystemExit(0)
+          if 'func feedFuryCookie()' not in s:
+              def replace_once(old, new, label):
+                  global s
+                  count = s.count(old)
+                  if count != 1:
+                      raise SystemExit(f'{label}: expected one match, found {count}')
+                  s = s.replace(old, new, 1)
 
-          def replace_once(old, new, label):
-              global s
-              count = s.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected one match, found {count}')
-              s = s.replace(old, new, 1)
+              replace_once(
+                  '    @Published private(set) var reaction: HaloPixelPalExpression?\n'
+                  '    @Published private(set) var reactionStarted = Date()\n',
+                  '    @Published private(set) var reaction: HaloPixelPalExpression?\n'
+                  '    @Published private(set) var reactionStarted = Date()\n'
+                  '    @Published private(set) var cookieRescueStarted: Date?\n',
+                  'cookie rescue published state',
+              )
+              replace_once(
+                  '    private var clearReactionWork: DispatchWorkItem?\n',
+                  '    private var clearReactionWork: DispatchWorkItem?\n'
+                  '    private var cookieRescueWork: DispatchWorkItem?\n',
+                  'cookie rescue work item',
+              )
+              replace_once(
+                  '    func react(_ expression: HaloPixelPalExpression, seconds: Double = 1.7) {\n'
+                  '        clearReactionWork?.cancel()\n'
+                  '        reactionStarted = Date()\n',
+                  '    func react(_ expression: HaloPixelPalExpression, seconds: Double = 1.7) {\n'
+                  '        clearReactionWork?.cancel()\n'
+                  '        if expression != .furious {\n'
+                  '            cookieRescueWork?.cancel()\n'
+                  '            cookieRescueStarted = nil\n'
+                  '        }\n'
+                  '        reactionStarted = Date()\n',
+                  'reaction clears cookie rescue',
+              )
 
-          replace_once(
-              '    case annoyed\n    case wink\n',
-              '    case annoyed\n    case furious\n    case wink\n',
-              'furious expression enum',
-          )
+              duration_old = '            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)\n'
+              duration_new = '            react(escalation, seconds: escalation == .furious ? 2.82 : 3.4)\n'
+              if s.count(duration_old) != 2:
+                  raise SystemExit(f'furious duration: expected two matches, found {s.count(duration_old)}')
+              s = s.replace(duration_old, duration_new)
 
-          replace_once(
-              '    static let winkEye = HaloPixelPalSprite(rows: [\n'
-              '        "p...p",\n'
-              '        ".ppp."\n'
-              '    ])\n\n'
-              '    static let worriedBrow = HaloPixelPalSprite(rows: ["pp..."])\n'
-              '    static let annoyedBrow = HaloPixelPalSprite(rows: ["..ppp"])\n',
-              '    static let winkEye = HaloPixelPalSprite(rows: [\n'
-              '        "p...p",\n'
-              '        ".ppp."\n'
-              '    ])\n'
-              '    static let furiousEye = HaloPixelPalSprite(rows: [\n'
-              '        "ppppp",\n'
-              '        ".ppp.",\n'
-              '        "..p.."\n'
-              '    ])\n\n'
-              '    static let worriedBrow = HaloPixelPalSprite(rows: ["pp..."])\n'
-              '    static let annoyedBrow = HaloPixelPalSprite(rows: ["..ppp"])\n'
-              '    static let furiousBrow = HaloPixelPalSprite(rows: [\n'
-              '        "pp...",\n'
-              '        ".pp..",\n'
-              '        "..pp."\n'
-              '    ])\n',
-              'furious eyes and brows',
-          )
+              long_press_marker = (
+                  '    func longPressed() {\n'
+                  '        guard preferences.longPressReaction else { return }\n'
+              )
+              cookie_action = (
+                  '    func feedFuryCookie() {\n'
+                  '        guard reaction == .furious, cookieRescueStarted == nil else { return }\n'
+                  '        clearReactionWork?.cancel()\n'
+                  '        let started = Date()\n'
+                  '        cookieRescueStarted = started\n'
+                  '        let work = DispatchWorkItem { [weak self] in\n'
+                  '            guard let self, self.reaction == .furious, self.cookieRescueStarted == started else { return }\n'
+                  '            self.cookieRescueStarted = nil\n'
+                  '            self.react(.happy, seconds: 2.4)\n'
+                  '        }\n'
+                  '        cookieRescueWork = work\n'
+                  '        DispatchQueue.main.asyncAfter(deadline: .now() + 0.62, execute: work)\n'
+                  '    }\n\n'
+              )
+              replace_once(long_press_marker, cookie_action + long_press_marker, 'cookie rescue store action')
 
-          replace_once(
-              '    static let mouthFrown = HaloPixelPalSprite(rows: [\n'
-              '        "..p..",\n'
-              '        ".p.p.",\n'
-              '        "p...p"\n'
-              '    ])\n'
-              '    static let mouthCat = HaloPixelPalSprite(rows: [\n',
-              '    static let mouthFrown = HaloPixelPalSprite(rows: [\n'
-              '        "..p..",\n'
-              '        ".p.p.",\n'
-              '        "p...p"\n'
-              '    ])\n'
-              '    static let mouthGrimace = HaloPixelPalSprite(rows: [\n'
-              '        ".ppppp.",\n'
-              '        "pwwwwwp",\n'
-              '        ".ppppp."\n'
-              '    ])\n'
-              '    static let mouthCat = HaloPixelPalSprite(rows: [\n',
-              'furious mouth',
-          )
+              replace_once(
+                  '        clearReactionWork?.cancel()\n'
+                  '        tapIndex = 0\n',
+                  '        clearReactionWork?.cancel()\n'
+                  '        cookieRescueWork?.cancel()\n'
+                  '        cookieRescueStarted = nil\n'
+                  '        tapIndex = 0\n',
+                  'reset cookie rescue state',
+              )
 
-          old_taps = (
-              '    func tapped() {\n'
-              '        guard preferences.tapReaction else { return }\n'
-              '        if shouldBecomeAngry(forPhysicalTapCount: 1) {\n'
-              '            react(.annoyed, seconds: 3.4)\n'
-              '            return\n'
-              '        }\n'
-              '        let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]\n'
-              '        react(sequence[tapIndex % sequence.count])\n'
-              '        tapIndex += 1\n'
-              '    }\n\n'
-              '    func doubleTapped() {\n'
-              '        guard preferences.doubleTapReaction else { return }\n'
-              '        if shouldBecomeAngry(forPhysicalTapCount: 2) {\n'
-              '            react(.annoyed, seconds: 3.4)\n'
-              '            return\n'
-              '        }\n'
-              '        react(.love, seconds: 2.2)\n'
-              '    }\n\n'
-              '    private func shouldBecomeAngry(forPhysicalTapCount count: Int) -> Bool {\n'
-              '        if reaction == .annoyed { return true }\n'
-              '        return tapBurst.register(count: count, at: Date().timeIntervalSinceReferenceDate)\n'
-              '    }\n'
-          )
-          new_taps = (
-              '    func tapped() {\n'
-              '        guard preferences.tapReaction, reaction != .furious else { return }\n'
-              '        if let escalation = escalatedTapReaction(forPhysicalTapCount: 1) {\n'
-              '            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)\n'
-              '            return\n'
-              '        }\n'
-              '        let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]\n'
-              '        react(sequence[tapIndex % sequence.count])\n'
-              '        tapIndex += 1\n'
-              '    }\n\n'
-              '    func doubleTapped() {\n'
-              '        guard preferences.doubleTapReaction, reaction != .furious else { return }\n'
-              '        if let escalation = escalatedTapReaction(forPhysicalTapCount: 2) {\n'
-              '            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)\n'
-              '            return\n'
-              '        }\n'
-              '        react(.love, seconds: 2.2)\n'
-              '    }\n\n'
-              '    private func escalatedTapReaction(forPhysicalTapCount count: Int) -> HaloPixelPalExpression? {\n'
-              '        let triggered = tapBurst.register(count: count, at: Date().timeIntervalSinceReferenceDate)\n'
-              '        if reaction == .annoyed {\n'
-              '            return triggered ? .furious : .annoyed\n'
-              '        }\n'
-              '        return triggered ? .annoyed : nil\n'
-              '    }\n'
-          )
-          replace_once(old_taps, new_taps, 'two-stage angry tap escalation')
+              replace_once(
+                  '                    reactionElapsed: pal.reaction.map { _ in timeline.date.timeIntervalSince(pal.reactionStarted) },\n'
+                  '                    pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero\n',
+                  '                    reactionElapsed: pal.reaction.map { _ in timeline.date.timeIntervalSince(pal.reactionStarted) },\n'
+                  '                    cookieRescueElapsed: pal.cookieRescueStarted.map { timeline.date.timeIntervalSince($0) },\n'
+                  '                    pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero,\n'
+                  '                    onCookieTap: { pal.feedFuryCookie() }\n',
+                  'pass cookie rescue state to renderer',
+              )
 
-          replace_once(
-              '                accessory: reaction == .annoyed ? .horns : nil,\n',
-              '                accessory: (reaction == .annoyed || reaction == .furious) ? .horns : nil,\n',
-              'furious horns',
-          )
-          replace_once(
-              '        case .annoyed, .shocked, .surprised: return .alert\n',
-              '        case .annoyed, .furious, .shocked, .surprised: return .alert\n',
-              'furious alert FX',
-          )
+              replace_once(
+                  '    var reactionElapsed: TimeInterval? = nil\n'
+                  '    var pointer: CGPoint = .zero\n',
+                  '    var reactionElapsed: TimeInterval? = nil\n'
+                  '    var cookieRescueElapsed: TimeInterval? = nil\n'
+                  '    var pointer: CGPoint = .zero\n'
+                  '    var onCookieTap: (() -> Void)? = nil\n',
+                  'face cookie rescue inputs',
+              )
 
-          replace_once(
-              '    private var faceColor: Color { preferences.faceColor }\n'
-              '    private var accentColor: Color { preferences.accentColor.color }\n'
-              '    private var blushColor: Color { preferences.blushColor.color }\n',
-              '    private var faceColor: Color {\n'
-              '        expression == .furious ? Color(red: 1.0, green: 0.11, blue: 0.07) : preferences.faceColor\n'
-              '    }\n'
-              '    private var accentColor: Color {\n'
-              '        expression == .furious ? Color(red: 1.0, green: 0.52, blue: 0.08) : preferences.accentColor.color\n'
-              '    }\n'
-              '    private var blushColor: Color {\n'
-              '        expression == .furious ? Color(red: 0.62, green: 0.02, blue: 0.02) : preferences.blushColor.color\n'
-              '    }\n',
-              'furious red palette',
-          )
+              old_overlay = (
+                  '            if expression == .furious, let reactionElapsed = reactionElapsed {\n'
+                  '                Canvas { context, size in\n'
+                  '                    drawFuryDoor(context: &context, size: size, elapsed: reactionElapsed)\n'
+                  '                }\n'
+                  '                .allowsHitTesting(false)\n'
+                  '            }\n'
+              )
+              new_overlay = (
+                  '            if expression == .furious, let reactionElapsed = reactionElapsed {\n'
+                  '                Canvas { context, size in\n'
+                  '                    drawFuryDoor(\n'
+                  '                        context: &context,\n'
+                  '                        size: size,\n'
+                  '                        elapsed: reactionElapsed,\n'
+                  '                        cookieRescueElapsed: cookieRescueElapsed\n'
+                  '                    )\n'
+                  '                }\n'
+                  '                .allowsHitTesting(false)\n\n'
+                  '                if cookieRescueElapsed == nil, reactionElapsed >= 1.05, reactionElapsed < 2.15, let onCookieTap {\n'
+                  '                    GeometryReader { proxy in\n'
+                  '                        let hitSize = max(24.0, min(proxy.size.width, proxy.size.height) * 0.30)\n'
+                  '                        Button(action: onCookieTap) {\n'
+                  '                            Color.clear\n'
+                  '                                .frame(width: hitSize, height: hitSize)\n'
+                  '                                .contentShape(Rectangle())\n'
+                  '                        }\n'
+                  '                        .buttonStyle(.plain)\n'
+                  '                        .position(x: proxy.size.width / 2, y: proxy.size.height / 2)\n'
+                  '                        .accessibilityLabel("Give Pixel Pal the cookie")\n'
+                  '                        .help("Give Pixel Pal the cookie")\n'
+                  '                    }\n'
+                  '                }\n'
+                  '            }\n'
+              )
+              replace_once(old_overlay, new_overlay, 'interactive cookie overlay')
 
-          old_face_canvas = (
-              '            Canvas { context, size in\n'
-              '                draw(context: &context, size: size)\n'
-              '            }\n'
-              '            .shadow(\n'
-              '                color: faceColor.opacity(preferences.glowIntensity * 0.55),\n'
-              '                radius: 1 + 7 * preferences.glowIntensity\n'
-              '            )\n'
-          )
-          new_face_canvas = (
-              '            Canvas { context, size in\n'
-              '                draw(context: &context, size: size)\n'
-              '            }\n'
-              '            .shadow(\n'
-              '                color: faceColor.opacity(preferences.glowIntensity * 0.55),\n'
-              '                radius: 1 + 7 * preferences.glowIntensity\n'
-              '            )\n\n'
-              '            if expression == .furious, let reactionElapsed = reactionElapsed {\n'
-              '                Canvas { context, size in\n'
-              '                    drawFuryDoor(context: &context, size: size, elapsed: reactionElapsed)\n'
-              '                }\n'
-              '                .allowsHitTesting(false)\n'
-              '            }\n'
-          )
-          replace_once(old_face_canvas, new_face_canvas, 'furious shutter overlay')
+              start = s.find('    private func furyDoorClosure(elapsed: TimeInterval) -> Double {\n')
+              end_marker = '    @ViewBuilder\n    private var background: some View {\n'
+              end = s.find(end_marker, start)
+              if start < 0 or end < 0:
+                  raise SystemExit('Could not locate fury door helper region.')
 
-          background_marker = '    @ViewBuilder\n    private var background: some View {\n'
-          door_helpers = (
-              '    private func furyDoorClosure(elapsed: TimeInterval) -> Double {\n'
-              '        if reduceMotion {\n'
-              '            return elapsed >= 0.65 && elapsed < 1.55 ? 1.0 : 0.0\n'
-              '        }\n'
-              '        func smooth(_ value: Double) -> Double {\n'
-              '            let p = min(1.0, max(0.0, value))\n'
-              '            return p * p * (3.0 - 2.0 * p)\n'
-              '        }\n'
-              '        if elapsed < 0.55 { return 0 }\n'
-              '        if elapsed < 1.05 { return smooth((elapsed - 0.55) / 0.50) }\n'
-              '        if elapsed < 1.55 { return 1 }\n'
-              '        if elapsed < 2.20 { return 1 - smooth((elapsed - 1.55) / 0.65) }\n'
-              '        return 0\n'
-              '    }\n\n'
-              '    private func drawFuryDoor(context: inout GraphicsContext, size: CGSize, elapsed: TimeInterval) {\n'
-              '        let closure = furyDoorClosure(elapsed: elapsed)\n'
-              '        guard closure > 0.001 else { return }\n\n'
-              '        let panelWidth = size.width * 0.5 * closure\n'
-              '        let edgeWidth = max(1.0, min(size.width, size.height) / 48.0)\n'
-              '        let panelColor = Color(red: 0.12, green: 0.015, blue: 0.012).opacity(0.98)\n'
-              '        let edgeColor = Color(red: 0.95, green: 0.08, blue: 0.04).opacity(0.92)\n'
-              '        let seamColor = Color.black.opacity(0.42)\n\n'
-              '        func paintRect(_ rect: CGRect, _ color: Color) {\n'
-              '            var path = Path()\n'
-              '            path.addRect(rect)\n'
-              '            context.fill(path, with: .color(color))\n'
-              '        }\n\n'
-              '        paintRect(CGRect(x: 0, y: 0, width: panelWidth, height: size.height), panelColor)\n'
-              '        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: panelWidth, height: size.height), panelColor)\n'
-              '        paintRect(CGRect(x: max(0, panelWidth - edgeWidth), y: 0, width: edgeWidth, height: size.height), edgeColor)\n'
-              '        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: edgeWidth, height: size.height), edgeColor)\n\n'
-              '        for row in 1..<4 {\n'
-              '            let y = size.height * CGFloat(row) / 4.0\n'
-              '            paintRect(CGRect(x: 0, y: y, width: panelWidth, height: edgeWidth), seamColor)\n'
-              '            paintRect(CGRect(x: size.width - panelWidth, y: y, width: panelWidth, height: edgeWidth), seamColor)\n'
-              '        }\n'
-              '    }\n\n'
-          )
-          replace_once(background_marker, door_helpers + background_marker, 'furious door helpers')
+              helpers = '''    private func furyDoorClosure(elapsed: TimeInterval, cookieRescueElapsed: TimeInterval?) -> Double {
+        func smooth(_ value: Double) -> Double {
+            let p = min(1.0, max(0.0, value))
+            return p * p * (3.0 - 2.0 * p)
+        }
+        if let rescue = cookieRescueElapsed {
+            return max(0.0, 1.0 - smooth(rescue / 0.55))
+        }
+        if reduceMotion {
+            return elapsed >= 0.65 && elapsed < 2.80 ? 1.0 : 0.0
+        }
+        if elapsed < 0.55 { return 0 }
+        if elapsed < 1.05 { return smooth((elapsed - 0.55) / 0.50) }
+        if elapsed < 2.15 { return 1 }
+        if elapsed < 2.80 { return 1 - smooth((elapsed - 2.15) / 0.65) }
+        return 0
+    }
 
-          replace_once(
-              '    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, smug }\n',
-              '    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, furious, smug }\n',
-              'furious eye pose enum',
-          )
-          replace_once(
-              '        case .dizzy: return .dizzy\n        case .smug: return .smug\n',
-              '        case .dizzy: return .dizzy\n        case .furious: return .furious\n        case .smug: return .smug\n',
-              'furious eye pose mapping',
-          )
-          replace_once(
-              '        case .dizzy:\n'
-              '            render(.init(HaloPixelPalSprites.xEye, x: 3, y: 6), 1, 0, 0)\n'
-              '            render(.init(HaloPixelPalSprites.xEye, x: 16, y: 6, mirrorX: true), 1, 0, 0)\n'
-              '        case .smug:\n',
-              '        case .dizzy:\n'
-              '            render(.init(HaloPixelPalSprites.xEye, x: 3, y: 6), 1, 0, 0)\n'
-              '            render(.init(HaloPixelPalSprites.xEye, x: 16, y: 6, mirrorX: true), 1, 0, 0)\n'
-              '        case .furious:\n'
-              '            render(.init(HaloPixelPalSprites.furiousEye, x: leftX, y: y + 1), 1, 0, 0)\n'
-              '            render(.init(HaloPixelPalSprites.furiousEye, x: rightX, y: y + 1, mirrorX: true), 1, 0, 0)\n'
-              '        case .smug:\n',
-              'furious eye drawing',
-          )
+    private func drawFuryDoor(
+        context: inout GraphicsContext,
+        size: CGSize,
+        elapsed: TimeInterval,
+        cookieRescueElapsed: TimeInterval?
+    ) {
+        let closure = furyDoorClosure(elapsed: elapsed, cookieRescueElapsed: cookieRescueElapsed)
+        guard closure > 0.001 else { return }
 
-          replace_once(
-              '        case .annoyed, .focused:\n'
-              '            render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.95, 0, 0)\n'
-              '            render(.init(HaloPixelPalSprites.annoyedBrow, x: rightX, y: y, mirrorX: true), 0.95, 0, 0)\n',
-              '        case .furious:\n'
-              '            render(.init(HaloPixelPalSprites.furiousBrow, x: leftX, y: 2), 1, 0, 0)\n'
-              '            render(.init(HaloPixelPalSprites.furiousBrow, x: rightX, y: 2, mirrorX: true), 1, 0, 0)\n'
-              '        case .annoyed, .focused:\n'
-              '            render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.95, 0, 0)\n'
-              '            render(.init(HaloPixelPalSprites.annoyedBrow, x: rightX, y: y, mirrorX: true), 0.95, 0, 0)\n',
-              'furious brows drawing',
-          )
+        let panelWidth = size.width * 0.5 * closure
+        let edgeWidth = max(1.0, min(size.width, size.height) / 48.0)
+        let panelColor = Color(red: 0.12, green: 0.015, blue: 0.012).opacity(0.98)
+        let edgeColor = Color(red: 0.95, green: 0.08, blue: 0.04).opacity(0.92)
+        let seamColor = Color.black.opacity(0.42)
 
-          replace_once(
-              '        case .worried, .sad, .crying, .annoyed: return HaloPixelPalSprites.mouthFrown\n'
-              '        case .shy: return HaloPixelPalSprites.mouthTiny\n',
-              '        case .worried, .sad, .crying, .annoyed: return HaloPixelPalSprites.mouthFrown\n'
-              '        case .furious: return HaloPixelPalSprites.mouthGrimace\n'
-              '        case .shy: return HaloPixelPalSprites.mouthTiny\n',
-              'furious mouth mapping',
-          )
+        func paintRect(_ rect: CGRect, _ color: Color) {
+            var path = Path()
+            path.addRect(rect)
+            context.fill(path, with: .color(color))
+        }
 
-          replace_once(
-              '    private func drawCheeks(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n'
-              '        let sprite: HaloPixelPalSprite\n',
-              '    private func drawCheeks(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n'
-              '        if expression == .furious { return }\n'
-              '        let sprite: HaloPixelPalSprite\n',
-              'suppress cheeks while furious',
-          )
+        paintRect(CGRect(x: 0, y: 0, width: panelWidth, height: size.height), panelColor)
+        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: panelWidth, height: size.height), panelColor)
+        paintRect(CGRect(x: max(0, panelWidth - edgeWidth), y: 0, width: edgeWidth, height: size.height), edgeColor)
+        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: edgeWidth, height: size.height), edgeColor)
 
-          replace_once(
-              '            if expression == .annoyed {\n'
-              '                return (Int(round(sin(t * 11.0))) * one, 0)\n'
-              '            }\n',
-              '            if expression == .furious {\n'
-              '                return (Int(round(sin(t * 18.0))) * two, Int(round(cos(t * 13.0))) * one)\n'
-              '            }\n'
-              '            if expression == .annoyed {\n'
-              '                return (Int(round(sin(t * 11.0))) * one, 0)\n'
-              '            }\n',
-              'furious reaction shake',
-          )
-          replace_once(
-              '        case .annoyed:\n'
-              '            return (Int(round(sin(t * 11.0))) * one, 0)\n'
-              '        case .dizzy:\n',
-              '        case .annoyed:\n'
-              '            return (Int(round(sin(t * 11.0))) * one, 0)\n'
-              '        case .furious:\n'
-              '            return (Int(round(sin(t * 18.0))) * two, Int(round(cos(t * 13.0))) * one)\n'
-              '        case .dizzy:\n',
-              'furious preview shake',
-          )
+        for row in 1..<4 {
+            let y = size.height * CGFloat(row) / 4.0
+            paintRect(CGRect(x: 0, y: y, width: panelWidth, height: edgeWidth), seamColor)
+            paintRect(CGRect(x: size.width - panelWidth, y: y, width: panelWidth, height: edgeWidth), seamColor)
+        }
 
-          replace_once(
-              '                    animationTime: timeline.date.timeIntervalSince(previewEpoch)\n'
-              '                )\n',
-              '                    animationTime: timeline.date.timeIntervalSince(previewEpoch),\n'
-              '                    reactionElapsed: previewExpression == .furious ? timeline.date.timeIntervalSince(previewEpoch) : nil\n'
-              '                )\n',
-              'furious preview shutter timing',
-          )
-          replace_once(
-              '                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .dizzy, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in\n',
-              '                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .dizzy, .furious, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in\n',
-              'furious quick preview button',
-          )
-          replace_once(
-              '        case .annoyed, .surprised, .shocked: return .alert\n',
-              '        case .annoyed, .furious, .surprised, .shocked: return .alert\n',
-              'furious preview FX',
-          )
+        if let rescue = cookieRescueElapsed {
+            drawFuryCookie(context: &context, size: size, consumeProgress: min(1.0, rescue / 0.48))
+        } else if elapsed >= 1.05 && elapsed < 2.15 {
+            drawFuryCookie(context: &context, size: size, consumeProgress: 0)
+        }
+    }
 
-          path.write_text(s)
+    private func drawFuryCookie(context: inout GraphicsContext, size: CGSize, consumeProgress: Double) {
+        let pattern = [
+            "..bbb..",
+            ".bbbbb.",
+            "bbdbdbb",
+            "bbbbbbb",
+            "bdbbbdb",
+            ".bbdbb.",
+            "..bbb.."
+        ]
+        let pixel = max(1.0, min(size.width, size.height) / 30.0)
+        let cookieSide = pixel * 7.0
+        let origin = CGPoint(x: (size.width - cookieSide) / 2.0, y: (size.height - cookieSide) / 2.0)
+        let visibleColumns = max(0, min(7, Int(ceil(7.0 * (1.0 - consumeProgress)))))
+        let dough = Color(red: 0.92, green: 0.55, blue: 0.18)
+        let edge = Color(red: 0.62, green: 0.28, blue: 0.07)
+        let chip = Color(red: 0.25, green: 0.09, blue: 0.025)
+
+        func paintCookiePixel(_ rect: CGRect, _ color: Color) {
+            var path = Path()
+            path.addRect(rect)
+            context.fill(path, with: .color(color))
+        }
+
+        for (y, row) in pattern.enumerated() {
+            for (x, value) in row.enumerated() where x < visibleColumns && value != "." {
+                let rect = CGRect(
+                    x: origin.x + CGFloat(x) * pixel,
+                    y: origin.y + CGFloat(y) * pixel,
+                    width: pixel,
+                    height: pixel
+                )
+                let isOuter = x == 0 || x == 6 || y == 0 || y == 6
+                paintCookiePixel(rect, value == "d" ? chip : (isOuter ? edge : dough))
+            }
+        }
+
+        if consumeProgress > 0.08 && consumeProgress < 0.95 {
+            let crumb = max(1.0, pixel * 0.72)
+            let t = CGFloat(consumeProgress)
+            let crumbs = [
+                CGPoint(x: size.width / 2 + pixel * 3.2 + pixel * 2.4 * t, y: size.height / 2 - pixel * 1.7 - pixel * 2.0 * t),
+                CGPoint(x: size.width / 2 + pixel * 2.4 + pixel * 1.5 * t, y: size.height / 2 + pixel * 0.2 + pixel * 1.7 * t),
+                CGPoint(x: size.width / 2 + pixel * 1.4 + pixel * 2.0 * t, y: size.height / 2 + pixel * 2.0 - pixel * 0.8 * t)
+            ]
+            for (index, point) in crumbs.enumerated() {
+                paintCookiePixel(
+                    CGRect(x: point.x, y: point.y, width: crumb, height: crumb),
+                    (index == 1 ? chip : dough).opacity(1.0 - consumeProgress)
+                )
+            }
+        }
+    }
+
+'''
+              s = s[:start] + helpers + s[end:]
+              path.write_text(s)
+          else:
+              print('Cookie rescue already present; validating.')
           PY
 
-      - name: Verify furious escalation contract
+      - name: Verify cookie rescue contract
         run: |
           python3 - <<'PY'
           from pathlib import Path
           s = Path('Halo/Views/PixelPetWidget.swift').read_text()
           required = [
-              'case furious',
-              'static let furiousEye',
-              'static let furiousBrow',
-              'static let mouthGrimace',
-              'guard preferences.tapReaction, reaction != .furious else { return }',
-              'guard preferences.doubleTapReaction, reaction != .furious else { return }',
-              'private func escalatedTapReaction',
-              'return triggered ? .furious : .annoyed',
-              'escalation == .furious ? 4.6 : 3.4',
-              '(reaction == .annoyed || reaction == .furious) ? .horns : nil',
-              'expression == .furious ? Color(red: 1.0, green: 0.11, blue: 0.07)',
-              'drawFuryDoor(context: &context, size: size, elapsed: reactionElapsed)',
-              'if elapsed < 2.20 { return 1 - smooth((elapsed - 1.55) / 0.65) }',
-              'case .furious: return .furious',
-              'case .furious: return HaloPixelPalSprites.mouthGrimace',
-              'if expression == .furious { return }',
-              'sin(t * 18.0)',
-              'previewExpression == .furious ? timeline.date.timeIntervalSince(previewEpoch) : nil',
-              '.dizzy, .furious, .shy',
-              'var dizzyRotationThresholdTurns = 0.8',
+              '@Published private(set) var cookieRescueStarted: Date?',
+              'func feedFuryCookie()',
+              'escalation == .furious ? 2.82 : 3.4',
+              'cookieRescueElapsed: pal.cookieRescueStarted.map',
+              'onCookieTap: { pal.feedFuryCookie() }',
+              'reactionElapsed >= 1.05, reactionElapsed < 2.15',
+              'drawFuryCookie(context: &context, size: size',
+              'self.react(.happy, seconds: 2.4)',
+              'return elapsed >= 0.65 && elapsed < 2.80 ? 1.0 : 0.0',
           ]
-          missing = [m for m in required if m not in s]
+          missing = [marker for marker in required if marker not in s]
           if missing:
-              raise SystemExit(f'Missing furious escalation markers: {missing}')
-          if 'private func shouldBecomeAngry' in s:
-              raise SystemExit('Old one-stage angry tap logic is still present.')
-          print('Furious escalation and existing dizzy threshold verified.')
+              raise SystemExit(f'Missing cookie rescue markers: {missing}')
+          if 'escalation == .furious ? 4.6 : 3.4' in s:
+              raise SystemExit('Old furious duration remains.')
+          print('Cookie rescue contract verified.')
           PY
 
       - name: Parse Pixel Pet source
@@ -390,5 +319,6 @@ jobs:
             echo "No source changes to commit."
             exit 0
           fi
-          git commit -m "Add Pixel Pet furious tap escalation"
+          git commit -m "Add Pixel Pet shutter cookie rescue"
+          git pull --rebase origin main
           git push origin HEAD:main
