@@ -760,6 +760,9 @@ private struct HaloPixelPalContext {
         if p.lowBatteryReaction, let battery = system.battery, battery <= 15 {
             return .init(expression: .worried, accessory: .bandage, fx: .sweat)
         }
+        if p.chargingReaction, let battery = system.battery, battery >= 100, !system.onBattery {
+            return .init(expression: .superHappy, accessory: .crown, fx: .sparkle)
+        }
         if p.chargingReaction && system.charging {
             return .init(expression: .love, accessory: .halo, fx: .hearts)
         }
