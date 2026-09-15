@@ -190,6 +190,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         updateArtworkPreference()
         if hudEngine == nil { hudEngine = HaloHUDEngine(workspace: self); hudEngine?.start() }
         evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey(); updateRetroGameHotkey(); updateClipboardCIHotkey()
+        HaloCustomCIRuntimeStore.shared.attach(to: self)
         pollMedia()
 
         bluetooth.$lastEvent
@@ -235,7 +236,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.evaluateRules(); self?.hudEngine?.configurationDidChange() }.store(in: &subscriptions)
     }
-    func stop() { pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); bluetooth.stop(); systemAudioFallback?.stop(); systemAudioFallback = nil; hudEngine?.stop(); hudEngine = nil; hotkey.stop(); retroGameHotkey.stop(); clipboardCIHotkey.stop(); clipboard.reset(); media.disconnect() }
+    func stop() { HaloCustomCIRuntimeStore.shared.detach(); pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); bluetooth.stop(); systemAudioFallback?.stop(); systemAudioFallback = nil; hudEngine?.stop(); hudEngine = nil; hotkey.stop(); retroGameHotkey.stop(); clipboardCIHotkey.stop(); clipboard.reset(); media.disconnect() }
     private func schedulePersistence() {
         pendingSave?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.persist() }
@@ -583,4 +584,384 @@ private final class SystemAudioMediaFallback {
         }
         ownsFallback = false
     }
+}
+
+// MARK: - Custom CI runtime
+
+struct HaloCustomCIInvalidPackage: Identifiable {
+    let id = UUID()
+    let name: String
+    let url: URL
+    let issues: [HaloCIValidationIssue]
+}
+
+struct HaloCustomCICandidate {
+    let package: HaloCIParsedPackage
+    let priority: Double
+    let manual: Bool
+}
+
+private struct HaloCustomCIStoredState: Codable {
+    var boolValues: [String: Bool] = [:]
+    var numberValues: [String: Double] = [:]
+}
+
+private struct HaloCustomCIPackagePreferences: Codable {
+    var enabled = true
+    var priority = 50.0
+    var grantedPermissions: Set<String> = []
+    var state = HaloCustomCIStoredState()
+}
+
+@MainActor
+final class HaloCustomCIRuntimeStore: ObservableObject {
+    static let shared = HaloCustomCIRuntimeStore()
+
+    @Published private(set) var packages: [HaloCIParsedPackage] = []
+    @Published private(set) var invalidPackages: [HaloCustomCIInvalidPackage] = []
+    @Published private(set) var manualActivationID: String?
+    @Published private(set) var contextRevision = 0
+    @Published var notice: String?
+    @Published var errorMessage: String?
+
+    private let defaults = UserDefaults.standard
+    private let preferencesKey = "HaloCustomCI.packagePreferences.v1"
+    private var preferences: [String: HaloCustomCIPackagePreferences] = [:]
+    private var suppressedPackageIDs = Set<String>()
+    private var subscriptions = Set<AnyCancellable>()
+    private weak var workspace: WorkspaceStore?
+
+    private init() {
+        if let data = defaults.data(forKey: preferencesKey),
+           let saved = try? JSONDecoder().decode([String: HaloCustomCIPackagePreferences].self, from: data) {
+            preferences = saved
+        }
+        reload()
+    }
+
+    private var installRoot: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return base.appendingPathComponent("Halo", isDirectory: true).appendingPathComponent("CustomCI", isDirectory: true)
+    }
+
+    func attach(to workspace: WorkspaceStore) {
+        if self.workspace === workspace, !subscriptions.isEmpty { return }
+        self.workspace = workspace
+        subscriptions.removeAll()
+
+        workspace.media.$isPlaying.receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
+        workspace.system.$battery.receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
+        workspace.system.$charging.receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
+        workspace.$runningApps.receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
+        Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+            .sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
+    }
+
+    func detach() {
+        subscriptions.removeAll()
+        workspace = nil
+        manualActivationID = nil
+        suppressedPackageIDs.removeAll()
+    }
+
+    func reload() {
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: installRoot, withIntermediateDirectories: true)
+            let urls = try fm.contentsOfDirectory(at: installRoot, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+                .filter { $0.pathExtension.lowercased() == "haloci" }
+            var valid: [HaloCIParsedPackage] = []
+            var invalid: [HaloCustomCIInvalidPackage] = []
+            for url in urls {
+                let report = HaloCIPackageValidator.validatePackage(at: url)
+                if let package = report.package {
+                    valid.append(package)
+                } else {
+                    invalid.append(HaloCustomCIInvalidPackage(name: url.deletingPathExtension().lastPathComponent, url: url, issues: report.issues))
+                }
+            }
+            packages = valid.sorted { lhs, rhs in
+                if lhs.manifest.name.localizedCaseInsensitiveCompare(rhs.manifest.name) == .orderedSame {
+                    return lhs.manifest.id < rhs.manifest.id
+                }
+                return lhs.manifest.name.localizedCaseInsensitiveCompare(rhs.manifest.name) == .orderedAscending
+            }
+            invalidPackages = invalid.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            if let manualActivationID, !packages.contains(where: { $0.manifest.id == manualActivationID }) { self.manualActivationID = nil }
+            contextDidChange()
+        } catch {
+            errorMessage = "Could not load Custom CI packages: \(error.localizedDescription)"
+        }
+    }
+
+    func chooseAndImportPackage() {
+        let panel = NSOpenPanel()
+        panel.title = "Import Custom CI"
+        panel.message = "Choose an unpacked .haloCI package directory. Halo validates it before installation."
+        panel.prompt = "Import"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        importPackage(from: url)
+    }
+
+    func importPackage(from source: URL) {
+        notice = nil; errorMessage = nil
+        let sourceReport = HaloCIPackageValidator.validatePackage(at: source)
+        guard let sourcePackage = sourceReport.package else {
+            errorMessage = validationMessage(prefix: "Custom CI validation failed", issues: sourceReport.issues)
+            return
+        }
+
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: installRoot, withIntermediateDirectories: true)
+            let destination = installRoot.appendingPathComponent(sourcePackage.manifest.id).appendingPathExtension("haloCI")
+            if source.standardizedFileURL == destination.standardizedFileURL { reload(); return }
+
+            let staging = installRoot.appendingPathComponent(".staging-\(UUID().uuidString)").appendingPathExtension("haloCI")
+            let backup = installRoot.appendingPathComponent(".backup-\(UUID().uuidString)")
+            defer { try? fm.removeItem(at: staging); try? fm.removeItem(at: backup) }
+            try fm.copyItem(at: source, to: staging)
+            let stagedReport = HaloCIPackageValidator.validatePackage(at: staging)
+            guard stagedReport.package != nil else { throw HaloCustomCIImportError.invalid(validationMessage(prefix: "Staged package validation failed", issues: stagedReport.issues)) }
+
+            if fm.fileExists(atPath: destination.path) { try fm.moveItem(at: destination, to: backup) }
+            do {
+                try fm.moveItem(at: staging, to: destination)
+                if fm.fileExists(atPath: backup.path) { try? fm.removeItem(at: backup) }
+            } catch {
+                if fm.fileExists(atPath: backup.path), !fm.fileExists(atPath: destination.path) { try? fm.moveItem(at: backup, to: destination) }
+                throw error
+            }
+
+            reload()
+            notice = "Installed \(sourcePackage.manifest.name) \(sourcePackage.manifest.version). Permissions remain user-controlled."
+        } catch let error as HaloCustomCIImportError {
+            errorMessage = error.localizedDescription
+        } catch {
+            errorMessage = "Could not install Custom CI: \(error.localizedDescription)"
+        }
+    }
+
+    func removePackage(_ id: String) {
+        guard let package = package(id: id) else { return }
+        do {
+            try FileManager.default.removeItem(at: package.rootURL)
+            preferences.removeValue(forKey: id)
+            suppressedPackageIDs.remove(id)
+            if manualActivationID == id { manualActivationID = nil }
+            persistPreferences()
+            reload()
+        } catch { errorMessage = "Could not remove \(package.manifest.name): \(error.localizedDescription)" }
+    }
+
+    func package(id: String) -> HaloCIParsedPackage? { packages.first { $0.manifest.id == id } }
+    func isEnabled(_ id: String) -> Bool { preferences[id]?.enabled ?? true }
+    func priority(_ id: String) -> Double { min(100, max(0, preferences[id]?.priority ?? 50)) }
+    func grantedPermissions(_ id: String) -> Set<String> { preferences[id]?.grantedPermissions ?? [] }
+    func requestedPermissions(_ package: HaloCIParsedPackage) -> [String] {
+        Array(Set(package.manifest.permissions)).sorted()
+    }
+    func hasPermission(_ id: String, _ permission: String) -> Bool { grantedPermissions(id).contains(permission) }
+
+    func setEnabled(_ enabled: Bool, packageID: String) {
+        mutatePreferences(packageID) { $0.enabled = enabled }
+        if !enabled {
+            if manualActivationID == packageID { manualActivationID = nil }
+            suppressedPackageIDs.remove(packageID)
+        }
+        contextDidChange()
+    }
+
+    func setPriority(_ priority: Double, packageID: String) {
+        mutatePreferences(packageID) { $0.priority = min(100, max(0, priority)) }
+        contextDidChange()
+    }
+
+    func setPermission(_ permission: String, granted: Bool, packageID: String) {
+        guard let package = package(id: packageID), requestedPermissions(package).contains(permission), HaloCISDK.supportedPermissions.contains(permission) else { return }
+        mutatePreferences(packageID) { prefs in
+            if granted { prefs.grantedPermissions.insert(permission) } else { prefs.grantedPermissions.remove(permission) }
+        }
+        contextDidChange()
+    }
+
+    func requestManualActivation(_ id: String) {
+        guard package(id: id) != nil, isEnabled(id) else { return }
+        suppressedPackageIDs.remove(id)
+        manualActivationID = id
+        contextRevision &+= 1
+        NotificationCenter.default.post(name: .init("HaloCustomCIOpenRequested"), object: id)
+    }
+
+    func clearManualActivation() {
+        guard manualActivationID != nil else { return }
+        manualActivationID = nil
+        contextRevision &+= 1
+    }
+
+    func dismiss(_ id: String) {
+        if manualActivationID == id { manualActivationID = nil }
+        suppressedPackageIDs.insert(id)
+        contextRevision &+= 1
+        NotificationCenter.default.post(name: .init("HaloCustomCICloseRequested"), object: id)
+    }
+
+    func activeCandidate(workspace: WorkspaceStore, globalDisabled: Bool) -> HaloCustomCICandidate? {
+        guard !globalDisabled else { return nil }
+        if let id = manualActivationID, let package = package(id: id), isEnabled(id) {
+            return HaloCustomCICandidate(package: package, priority: 1001, manual: true)
+        }
+        let snapshot = triggerSnapshot(workspace: workspace)
+        return packages.filter { package in
+            let id = package.manifest.id
+            return isEnabled(id) && !suppressedPackageIDs.contains(id) &&
+                HaloCITriggerEvaluator.matches(package.triggers, snapshot: snapshot, grantedPermissions: grantedPermissions(id))
+        }.map { HaloCustomCICandidate(package: $0, priority: priority($0.manifest.id), manual: false) }
+         .max { lhs, rhs in lhs.priority == rhs.priority ? lhs.package.manifest.id > rhs.package.manifest.id : lhs.priority < rhs.priority }
+    }
+
+    func dataBus(for package: HaloCIParsedPackage, workspace: WorkspaceStore, expanded: Bool) -> [String: String] {
+        let grants = grantedPermissions(package.manifest.id)
+        var data: [String: String] = [
+            "halo.surface.state": expanded ? "expanded" : "closed",
+            "halo.surface.isExpanded": expanded ? "true" : "false",
+            "system.battery.isCharging": workspace.system.charging ? "true" : "false",
+            "system.lowPowerMode": workspace.system.lowPower ? "true" : "false",
+            "system.cpu.usedPercent": format(workspace.system.cpuUsage),
+            "system.memory.usedPercent": format(workspace.system.memoryUsage),
+            "system.storage.usedPercent": format(workspace.system.diskUsage)
+        ]
+        if let battery = workspace.system.battery { data["system.battery.level"] = String(battery) }
+        if grants.contains("Media.ReadState") {
+            data["media.isPlaying"] = workspace.media.isPlaying ? "true" : "false"
+            data["media.title"] = workspace.media.title
+            data["media.artist"] = workspace.media.artist
+            data["media.album"] = workspace.media.album
+        }
+        if grants.contains("Applications.Observe") {
+            let app = NSWorkspace.shared.frontmostApplication
+            data["apps.active.bundleID"] = app?.bundleIdentifier ?? ""
+            data["apps.active.name"] = app?.localizedName ?? ""
+        }
+        return data
+    }
+
+    func boolState(packageID: String, key: String, default defaultValue: Bool) -> Bool {
+        preferences[packageID]?.state.boolValues[key] ?? defaultValue
+    }
+    func setBoolState(_ value: Bool, packageID: String, key: String) {
+        mutateState(packageID) { $0.boolValues[key] = value }
+    }
+    func numberState(packageID: String, key: String, default defaultValue: Double) -> Double {
+        preferences[packageID]?.state.numberValues[key] ?? defaultValue
+    }
+    func setNumberState(_ value: Double, packageID: String, key: String) {
+        guard value.isFinite else { return }
+        mutateState(packageID) { $0.numberValues[key] = value }
+    }
+
+    func assetURL(packageID: String, source: String) -> URL? {
+        guard source.hasPrefix("asset:"), let package = package(id: packageID) else { return nil }
+        let relative = String(source.dropFirst("asset:".count))
+        guard !relative.hasPrefix("/"), !relative.contains("..") else { return nil }
+        let url = package.rootURL.appendingPathComponent(relative).standardizedFileURL
+        guard url.path.hasPrefix(package.rootURL.standardizedFileURL.path + "/"), FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+
+    func perform(_ action: HaloCIActionDescriptor, package: HaloCIParsedPackage, workspace: WorkspaceStore, data: [String: String]) {
+        let id = package.manifest.id
+        if let permission = HaloCISDK.permissionForAction(action.id), !hasPermission(id, permission) {
+            errorMessage = "\(package.manifest.name) needs \(permission) before it can perform \(action.id)."
+            return
+        }
+        let value = HaloCIBindingResolver.resolve(action.value ?? action.arguments?["value"] ?? action.arguments?["url"] ?? "", data: data)
+        switch action.id {
+        case "halo.ci.close": dismiss(id)
+        case "clipboard.copy":
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(value, forType: .string)
+        case "url.open":
+            guard let url = URL(string: value), let scheme = url.scheme?.lowercased(), ["https", "http", "mailto"].contains(scheme) else {
+                errorMessage = "Custom CI tried to open an unsupported URL."; return
+            }
+            let alert = NSAlert()
+            alert.messageText = "Allow \(package.manifest.name) to open this URL?"
+            alert.informativeText = url.absoluteString
+            alert.addButton(withTitle: "Open")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(url) }
+        case "media.playPause": workspace.media.perform("playpause", app: workspace.settings.mediaApp)
+        case "media.next": workspace.media.perform("next track", app: workspace.settings.mediaApp)
+        case "media.previous": workspace.media.perform("previous track", app: workspace.settings.mediaApp)
+        default: errorMessage = "Unsupported Custom CI action: \(action.id)"
+        }
+    }
+
+    private func contextDidChange() {
+        if let workspace, !suppressedPackageIDs.isEmpty {
+            let snapshot = triggerSnapshot(workspace: workspace)
+            let removable = suppressedPackageIDs.filter { id in
+                guard let package = package(id: id) else { return true }
+                return !HaloCITriggerEvaluator.matches(package.triggers, snapshot: snapshot, grantedPermissions: grantedPermissions(id))
+            }
+            suppressedPackageIDs.subtract(removable)
+        }
+        contextRevision &+= 1
+    }
+
+    private func triggerSnapshot(workspace: WorkspaceStore) -> HaloCITriggerSnapshot {
+        let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: Date())
+        return HaloCITriggerSnapshot(
+            mediaIsPlaying: workspace.media.isPlaying,
+            activeApplicationBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "",
+            batteryLevel: workspace.system.battery.map(Double.init),
+            charging: workspace.system.charging,
+            minuteOfDay: (components.hour ?? 0) * 60 + (components.minute ?? 0)
+        )
+    }
+
+    private func mutatePreferences(_ id: String, _ body: (inout HaloCustomCIPackagePreferences) -> Void) {
+        var value = preferences[id] ?? HaloCustomCIPackagePreferences()
+        body(&value)
+        preferences[id] = value
+        persistPreferences()
+        objectWillChange.send()
+    }
+
+    private func mutateState(_ id: String, _ body: (inout HaloCustomCIStoredState) -> Void) {
+        var prefs = preferences[id] ?? HaloCustomCIPackagePreferences()
+        let previous = prefs.state
+        body(&prefs.state)
+        let totalKeys = prefs.state.boolValues.count + prefs.state.numberValues.count
+        guard totalKeys <= 64, let encoded = try? JSONEncoder().encode(prefs.state), encoded.count <= 32_768 else {
+            prefs.state = previous
+            errorMessage = "Custom CI state quota exceeded (64 keys / 32 KB)."
+            return
+        }
+        preferences[id] = prefs
+        persistPreferences()
+        objectWillChange.send()
+    }
+
+    private func persistPreferences() {
+        if let data = try? JSONEncoder().encode(preferences) { defaults.set(data, forKey: preferencesKey) }
+    }
+
+    private func validationMessage(prefix: String, issues: [HaloCIValidationIssue]) -> String {
+        let details = issues.filter { $0.severity == .error }.prefix(4).map { "\($0.path): \($0.message)" }.joined(separator: "\n")
+        return details.isEmpty ? prefix : prefix + "\n" + details
+    }
+    private func format(_ value: Double) -> String { String(format: "%.2f", value) }
+}
+
+private enum HaloCustomCIImportError: LocalizedError {
+    case invalid(String)
+    var errorDescription: String? { switch self { case .invalid(let message): return message } }
 }

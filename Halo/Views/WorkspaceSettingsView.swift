@@ -970,6 +970,8 @@ private struct ContextInterfaceLibraryView: View {
                 .padding(.vertical, 6)
             }
 
+            HaloCustomCISettingsSection()
+
             Section {
                 Label("CI can react to live system context without turning the notch into one giant settings page.", systemImage: "rectangle.stack.badge.plus")
                     .font(.caption)
@@ -2585,5 +2587,154 @@ private struct HaloAccountLicenseSettingsView: View {
             Link("Manage LicenseSeat account", destination: URL(string: "https://licenseseat.com")!)
             Link("Contact Halo support · r.support@redstoneinvente.com", destination: URL(string: "mailto:r.support@redstoneinvente.com")!)
         }
+    }
+}
+
+private struct HaloCustomCISettingsSection: View {
+    @ObservedObject private var runtime = HaloCustomCIRuntimeStore.shared
+    @AppStorage("HaloDisableCustomCI") private var disableCustomCI = false
+
+    var body: some View {
+        Section("Custom CI") {
+            Toggle("Disable custom CI", isOn: $disableCustomCI)
+                .onChange(of: disableCustomCI) { disabled in
+                    if disabled { runtime.clearManualActivation() }
+                }
+            Text(disableCustomCI
+                 ? "Custom CI packages stay installed, but none can render, trigger, or run brokered actions while this switch is on. Built-in Halo CIs are unaffected."
+                 : "Loaded .haloCI packages are enabled through Halo\'s declarative CI SDK. They render with Halo-owned components and cannot run Swift, JavaScript, shell commands, dylibs, or arbitrary native code.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            HStack {
+                Button("Import .haloCI…") { runtime.chooseAndImportPackage() }
+                    .disabled(disableCustomCI)
+                Button("Reload") { runtime.reload() }
+                    .disabled(disableCustomCI)
+                Spacer()
+                Text("SDK 0.1 · declarative")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            if let notice = runtime.notice, !notice.isEmpty {
+                Label(notice, systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+            }
+            if let error = runtime.errorMessage, !error.isEmpty {
+                Label(error, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red)
+            }
+        }
+
+        if !disableCustomCI {
+            Section("Loaded custom CI") {
+                if runtime.packages.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("No custom CIs loaded", systemImage: "rectangle.stack.badge.plus")
+                            .font(.headline)
+                        Text("Import an unpacked folder ending in .haloCI. Halo validates the manifest, declarative component tree, bindings, triggers, actions, assets, permissions, size limits and executable-content rules before installing it.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }.padding(.vertical, 6)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 270), spacing: 12)], alignment: .leading, spacing: 12) {
+                        ForEach(runtime.packages, id: \.manifest.id) { package in
+                            HaloCustomCIPackageCard(package: package)
+                        }
+                    }.padding(.vertical, 5)
+                }
+            }
+
+            if !runtime.invalidPackages.isEmpty {
+                Section("Custom CI diagnostics") {
+                    ForEach(runtime.invalidPackages) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(item.name, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            ForEach(Array(item.issues.filter { $0.severity == .error }.prefix(4))) { issue in
+                                Text("\(issue.path): \(issue.message)").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }.padding(.vertical, 4)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct HaloCustomCIPackageCard: View {
+    let package: HaloCIParsedPackage
+    @ObservedObject private var runtime = HaloCustomCIRuntimeStore.shared
+    @State private var hovered = false
+
+    private var id: String { package.manifest.id }
+    private var requested: [String] { runtime.requestedPermissions(package) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "rectangle.3.group.bubble.left.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 38, height: 38)
+                    .background(Color.accentColor.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(package.manifest.name).font(.headline).lineLimit(1)
+                    Text("\(package.manifest.author) · v\(package.manifest.version)")
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { runtime.isEnabled(id) },
+                    set: { runtime.setEnabled($0, packageID: id) }
+                )).labelsHidden().toggleStyle(.switch)
+            }
+
+            if !package.manifest.description.isEmpty {
+                Text(package.manifest.description).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+            }
+
+            LabeledContent("Priority") {
+                Slider(value: Binding(
+                    get: { runtime.priority(id) },
+                    set: { runtime.setPriority($0, packageID: id) }
+                ), in: 0...100, step: 1)
+                .frame(maxWidth: 120)
+                Text("\(Int(runtime.priority(id)))").font(.caption.monospacedDigit()).frame(width: 28)
+            }.font(.caption)
+
+            if !requested.isEmpty {
+                Divider()
+                Text("Permissions").font(.caption.weight(.semibold))
+                ForEach(requested, id: \.self) { permission in
+                    Toggle(permission, isOn: Binding(
+                        get: { runtime.hasPermission(id, permission) },
+                        set: { runtime.setPermission(permission, granted: $0, packageID: id) }
+                    )).font(.caption)
+                }
+                Text("Permissions are per CI and can be revoked here at any time.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+
+            if !package.issues.filter({ $0.severity == .warning }).isEmpty {
+                Label("\(package.issues.filter { $0.severity == .warning }.count) validation warning(s)", systemImage: "exclamationmark.circle")
+                    .font(.caption2).foregroundStyle(.orange)
+            }
+
+            HStack {
+                Button("Open") { runtime.requestManualActivation(id) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(!runtime.isEnabled(id))
+                Spacer()
+                Text("Priority \(Int(runtime.priority(id)))")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Button("Remove", role: .destructive) { runtime.removePackage(id) }
+                    .controlSize(.small)
+            }
+        }
+        .padding(13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(hovered ? 0.075 : 0.045), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .stroke(hovered ? Color.accentColor.opacity(0.38) : Color.primary.opacity(0.08), lineWidth: 1))
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovered)
     }
 }

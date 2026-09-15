@@ -2185,7 +2185,7 @@ private struct ClipboardContextView: View {
 }
 
 private enum ActiveContextInterface: String {
-    case drop, teleprompter, transfer, clipboard, music, bluetooth, retro
+    case drop, teleprompter, transfer, clipboard, custom, music, bluetooth, retro
 }
 
 struct SurfaceView: View {
@@ -2195,6 +2195,7 @@ struct SurfaceView: View {
     @ObservedObject private var bluetooth = BluetoothStateService.shared
     @ObservedObject private var transfer = TransferActivityMonitor.shared
     @ObservedObject private var clipboardCI = ClipboardContextMonitor.shared
+    @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
     @State private var clipboardOpenedNotch = false
     @State private var teleprompterActive = false
     @AppStorage("HaloContextTeleprompterEnabled") private var teleprompterCIEnabled = true
@@ -2203,6 +2204,7 @@ struct SurfaceView: View {
     @AppStorage("HaloContextTransferPriority") private var transferPriority = 65.0
     @AppStorage("HaloContextClipboardEnabled") private var clipboardCIEnabled = true
     @AppStorage("HaloContextClipboardPriority") private var clipboardPriority = 68.0
+    @AppStorage("HaloDisableCustomCI") private var disableCustomCI = false
     @AppStorage("HaloContextTransferUseFullNotchArea") private var transferUsesFullNotchArea = true
     @AppStorage("HaloContextTransferKeepClosedNotchContents") private var transferKeepsClosedContents = false
     @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
@@ -2232,6 +2234,9 @@ struct SurfaceView: View {
         return (bluetoothShowOnChanges && bluetooth.lastEvent != nil) ||
             (bluetoothShowWhileConnected && !bluetooth.connectedDevices.isEmpty)
     }
+    private var activeCustomCandidate: HaloCustomCICandidate? {
+        customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI)
+    }
     private var activeContext: ActiveContextInterface? {
         var candidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] = []
         if dropCIEnabled && state.dropTargeted {
@@ -2248,6 +2253,9 @@ struct SurfaceView: View {
         }
         if clipboardCIEnabled && clipboardCI.isActive {
             candidates.append((.clipboard, clipboardCI.manualPresentation ? 1000 : clipboardPriority, 3))
+        }
+        if let custom = activeCustomCandidate {
+            candidates.append((.custom, custom.priority, custom.manual ? 100 : 3))
         }
         if contextOptions.enabled && workspace.media.isPlaying {
             candidates.append((.music, contextMusicPriority, 2))
@@ -2267,6 +2275,7 @@ struct SurfaceView: View {
     private var teleprompterContextActive: Bool { activeContext == .teleprompter }
     private var transferContextActive: Bool { activeContext == .transfer }
     private var clipboardContextActive: Bool { activeContext == .clipboard }
+    private var customContextActive: Bool { activeContext == .custom }
     private var contextOwnsFullSurface: Bool {
         guard state.expanded else { return false }
         switch activeContext {
@@ -2277,6 +2286,7 @@ struct SurfaceView: View {
         case .teleprompter: return true
         case .transfer: return false
         case .clipboard: return false
+        case .custom: return false
         case .none: return false
         }
     }
@@ -2289,6 +2299,7 @@ struct SurfaceView: View {
         case .teleprompter: return false
         case .transfer: return false
         case .clipboard: return false
+        case .custom: return false
         case .none:
             // The two opened-layout systems are mutually exclusive. The Default
             // layout is the only system allowed to keep its closed-notch strip.
@@ -2332,7 +2343,9 @@ struct SurfaceView: View {
                 if !contextOwnsFullSurface &&
                     !(state.expanded && activeContext == nil && usesVisualWorkspace) {
                     Group {
-                      if !state.expanded && (state.compactWidth < 48 || state.compactHeight < 16) {
+                      if !state.expanded && customContextActive, let candidate = activeCustomCandidate {
+                        HaloCustomCISurfaceView(package: candidate.package, surfaceState: state, workspace: workspace)
+                      } else if !state.expanded && (state.compactWidth < 48 || state.compactHeight < 16) {
                         Circle().fill(store.deadline == nil ? accent : .green).frame(width: 6, height: 6)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                       } else if !state.expanded {
@@ -2363,7 +2376,11 @@ struct SurfaceView: View {
                     .accessibilityAddTraits(.isButton)
                 }
                 if state.expanded {
-                    if transferContextActive {
+                    if customContextActive, let candidate = activeCustomCandidate {
+                        HaloCustomCISurfaceView(package: candidate.package, surfaceState: state, workspace: workspace)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                    } else if transferContextActive {
                         TransferContextView(monitor: transfer, surfaceState: state)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                             .transition(.opacity.combined(with: .scale(scale: 0.985)))
@@ -2501,6 +2518,17 @@ struct SurfaceView: View {
             Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
             ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { _ in
+            guard !disableCustomCI else { return }
+            state.collapseTask?.cancel()
+            state.expanded = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCICloseRequested"))) { _ in
+            state.contextPreferredSize = nil
+            state.contextPreferredCompactWidth = nil
+            state.contextMinimumExpandedWidth = nil
+            if !state.pinned { state.expanded = false }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloClipboardCIToggle"))) { _ in
             guard clipboardCIEnabled else { return }
             if clipboardContextActive && state.expanded {
@@ -2567,7 +2595,7 @@ struct SurfaceView: View {
                 state.expanded = true
             }
         }
-        .onAppear { workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive), token: openVisibilityToken) }
+        .onAppear { workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive), token: openVisibilityToken) }
         .onDisappear { workspace.setOpenedNotchVisible(false, token: openVisibilityToken) }
         .onChange(of: state.expanded) { expanded in
             if teleprompterContextActive && expanded {
@@ -2575,7 +2603,7 @@ struct SurfaceView: View {
                 workspace.setOpenedNotchVisible(false, token: openVisibilityToken)
                 return
             }
-            workspace.setOpenedNotchVisible(expanded && (activeContext == nil || transferContextActive || clipboardContextActive), token: openVisibilityToken)
+            workspace.setOpenedNotchVisible(expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive), token: openVisibilityToken)
             if !expanded {
                 state.contextPreferredSize = nil
                 if transferContextActive {
@@ -2639,12 +2667,12 @@ struct SurfaceView: View {
                 clipboardCI.setInteractionActive(false)
                 if activeContext != nil { clipboardOpenedNotch = false }
             }
-            if !transferContextActive && !clipboardContextActive {
+            if !transferContextActive && !clipboardContextActive && !customContextActive {
                 state.contextPreferredCompactWidth = nil
                 state.contextMinimumExpandedWidth = nil
                 if activeContext != nil { state.contextPreferredSize = nil }
             }
-            workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive), token: openVisibilityToken)
+            workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive), token: openVisibilityToken)
         }
     }
 
@@ -4719,5 +4747,271 @@ private enum ContextMusicArtworkReader {
               data.count <= 1_000_000, let result = try? JSONDecoder().decode(LRCLyrics.self, from: data) else { return "" }
         if let requested = duration, let returned = result.duration, abs(requested - returned) > 2.5 { return "" }
         return result.syncedLyrics ?? ""
+    }
+}
+
+// MARK: - Declarative Custom CI renderer
+
+private struct HaloCustomCISurfaceView: View {
+    let package: HaloCIParsedPackage
+    @ObservedObject var surfaceState: SurfaceState
+    @ObservedObject var workspace: WorkspaceStore
+    @ObservedObject private var runtime = HaloCustomCIRuntimeStore.shared
+
+    private var expanded: Bool { surfaceState.expanded }
+    private var root: HaloCIComponent? { expanded ? package.interface.expanded : package.interface.closed }
+    private var data: [String: String] { runtime.dataBus(for: package, workspace: workspace, expanded: expanded) }
+
+    var body: some View {
+        Group {
+            if let root {
+                HaloCustomCIComponentRenderer(package: package, workspace: workspace, runtime: runtime, data: data).render(root)
+            } else {
+                HStack(spacing: 7) {
+                    Image(systemName: "rectangle.3.group.bubble.left.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(package.manifest.name)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onAppear { publishSizing() }
+        .onChange(of: expanded) { _ in publishSizing() }
+        .onChange(of: runtime.contextRevision) { _ in publishSizing() }
+    }
+
+    private func publishSizing() {
+        let expandedRoot = package.interface.expanded
+        let expandedWidth = min(1100, max(260, expandedRoot.width ?? 560))
+        let expandedHeight = min(820, max(110, expandedRoot.height ?? 260))
+        surfaceState.contextMinimumExpandedWidth = min(expandedWidth, max(220, surfaceState.physicalNotchWidth + 32))
+        surfaceState.contextPreferredSize = CGSize(width: expandedWidth, height: expandedHeight)
+        if let closed = package.interface.closed {
+            surfaceState.contextPreferredCompactWidth = min(720, max(48, closed.width ?? max(surfaceState.physicalNotchWidth + 28, 190)))
+        } else {
+            surfaceState.contextPreferredCompactWidth = min(720, max(90, surfaceState.physicalNotchWidth + 28))
+        }
+    }
+}
+
+@MainActor
+private struct HaloCustomCIComponentRenderer {
+    let package: HaloCIParsedPackage
+    let workspace: WorkspaceStore
+    let runtime: HaloCustomCIRuntimeStore
+    let data: [String: String]
+
+    func render(_ component: HaloCIComponent) -> AnyView {
+        let raw: AnyView
+        switch component.type {
+        case "Text":
+            raw = AnyView(textView(component))
+        case "Image":
+            raw = AnyView(imageView(component))
+        case "Icon":
+            raw = AnyView(Image(systemName: component.systemName ?? "sparkles").resizable().scaledToFit())
+        case "Button":
+            raw = AnyView(Button {
+                if let action = component.action { runtime.perform(action, package: package, workspace: workspace, data: data) }
+            } label: {
+                if let children = component.children, !children.isEmpty {
+                    childStack(children, axis: "horizontal", spacing: component.spacing ?? 7)
+                } else {
+                    Label(resolve(component.text ?? "Action"), systemImage: component.systemName ?? "arrow.right.circle.fill")
+                }
+            }.buttonStyle(.borderless))
+        case "Toggle":
+            let key = component.stateKey ?? "toggle"
+            raw = AnyView(Toggle(resolve(component.text ?? "Option"), isOn: Binding(
+                get: { runtime.boolState(packageID: package.manifest.id, key: key, default: component.defaultBool ?? false) },
+                set: { runtime.setBoolState($0, packageID: package.manifest.id, key: key) }
+            )).toggleStyle(.switch))
+        case "Slider":
+            let key = component.stateKey ?? "slider"
+            let minimum = component.minimum ?? 0
+            let maximum = max(minimum + 0.000001, component.maximum ?? 1)
+            let step = max(0.000001, component.step ?? ((maximum - minimum) / 100))
+            raw = AnyView(Slider(value: Binding(
+                get: { min(maximum, max(minimum, runtime.numberState(packageID: package.manifest.id, key: key, default: component.defaultNumber ?? minimum))) },
+                set: { runtime.setNumberState($0, packageID: package.manifest.id, key: key) }
+            ), in: minimum...maximum, step: step))
+        case "Progress":
+            raw = AnyView(ProgressView(value: normalizedProgress(component.value)))
+        case "ProgressRing":
+            let progress = normalizedProgress(component.value)
+            raw = AnyView(ZStack {
+                Circle().stroke(Color.white.opacity(0.12), lineWidth: 4)
+                Circle().trim(from: 0, to: progress).stroke(Color.accentColor, style: StrokeStyle(lineWidth: 4, lineCap: .round)).rotationEffect(.degrees(-90))
+                Text("\(Int((progress * 100).rounded()))%").font(.system(size: 9, weight: .semibold, design: .rounded))
+            }.aspectRatio(1, contentMode: .fit))
+        case "Spacer": raw = AnyView(Spacer(minLength: component.width ?? 4))
+        case "Divider": raw = AnyView(Divider().opacity(0.45))
+        case "HStack": raw = AnyView(childStack(component.children ?? [], axis: "horizontal", spacing: component.spacing ?? 8))
+        case "VStack": raw = AnyView(childStack(component.children ?? [], axis: "vertical", spacing: component.spacing ?? 8))
+        case "ZStack": raw = AnyView(ZStack { childViews(component.children ?? []) })
+        case "Grid":
+            let columns = min(8, max(1, component.columns ?? 2))
+            raw = AnyView(LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: component.spacing ?? 8), count: columns), spacing: component.spacing ?? 8) { childViews(component.children ?? []) })
+        case "ScrollView":
+            if component.axis == "horizontal" {
+                raw = AnyView(ScrollView(.horizontal, showsIndicators: false) { childStack(component.children ?? [], axis: "horizontal", spacing: component.spacing ?? 8) })
+            } else {
+                raw = AnyView(ScrollView(.vertical, showsIndicators: false) { childStack(component.children ?? [], axis: "vertical", spacing: component.spacing ?? 8) })
+            }
+        case "Badge":
+            raw = AnyView(Text(resolve(component.text ?? "Badge")).font(.system(size: 9, weight: .semibold, design: .rounded)).padding(.horizontal, 8).padding(.vertical, 4).background(Color.white.opacity(0.10), in: Capsule()))
+        case "NotchContainer":
+            raw = AnyView(childStack(component.children ?? [], axis: component.axis == "horizontal" ? "horizontal" : "vertical", spacing: component.spacing ?? 8))
+        case "MediaArtwork":
+            if runtime.hasPermission(package.manifest.id, "Media.ReadState"), let image = workspace.media.artworkImage {
+                raw = AnyView(Image(nsImage: image).resizable().scaledToFill().clipShape(RoundedRectangle(cornerRadius: component.cornerRadius ?? 10, style: .continuous)))
+            } else {
+                raw = AnyView(placeholder(symbol: "music.note", title: runtime.hasPermission(package.manifest.id, "Media.ReadState") ? "No artwork" : "Media permission off"))
+            }
+        case "AppIcon":
+            if runtime.hasPermission(package.manifest.id, "Applications.Observe"), let icon = NSWorkspace.shared.frontmostApplication?.icon {
+                raw = AnyView(Image(nsImage: icon).resizable().scaledToFit())
+            } else {
+                raw = AnyView(placeholder(symbol: "app", title: runtime.hasPermission(package.manifest.id, "Applications.Observe") ? "No app" : "App permission off"))
+            }
+        case "DeviceBattery":
+            let level = Double(workspace.system.battery ?? 0) / 100
+            raw = AnyView(HStack(spacing: 6) {
+                Image(systemName: workspace.system.charging ? "battery.100percent.bolt" : "battery.100percent")
+                ProgressView(value: level)
+                if let battery = workspace.system.battery { Text("\(battery)%").monospacedDigit() }
+            }.font(.caption))
+        case "SystemMetric": raw = AnyView(systemMetric(component.metric ?? "cpu"))
+        case "ActivityIndicator": raw = AnyView(ProgressView().controlSize(.small))
+        default: raw = AnyView(EmptyView())
+        }
+        return applyStyle(raw, component: component)
+    }
+
+    private func textView(_ component: HaloCIComponent) -> some View {
+        let text = Text(resolve(component.text ?? component.value ?? ""))
+        switch component.style {
+        case "title": return AnyView(text.font(.title3.bold()))
+        case "headline": return AnyView(text.font(.headline))
+        case "caption": return AnyView(text.font(.caption))
+        case "monospaced": return AnyView(text.font(.system(.body, design: .monospaced)))
+        default: return AnyView(text.font(.body))
+        }
+    }
+
+    private func imageView(_ component: HaloCIComponent) -> some View {
+        Group {
+            if let source = component.source,
+               let url = runtime.assetURL(packageID: package.manifest.id, source: source),
+               let image = NSImage(contentsOf: url) {
+                Image(nsImage: image).resizable().scaledToFit()
+            } else {
+                placeholder(symbol: "photo", title: "Asset unavailable")
+            }
+        }
+    }
+
+    private func childViews(_ children: [HaloCIComponent]) -> some View {
+        ForEach(Array(children.enumerated()), id: \.offset) { _, child in render(child) }
+    }
+
+    @ViewBuilder
+    private func childStack(_ children: [HaloCIComponent], axis: String, spacing: Double) -> some View {
+        if axis == "horizontal" {
+            HStack(alignment: .center, spacing: spacing) { childViews(children) }
+        } else {
+            VStack(alignment: .leading, spacing: spacing) { childViews(children) }
+        }
+    }
+
+    private func systemMetric(_ metric: String) -> some View {
+        let title: String
+        let value: String
+        let symbol: String
+        switch metric {
+        case "battery": title = "Battery"; value = workspace.system.battery.map { "\($0)%" } ?? "—"; symbol = "battery.100percent"
+        case "memory": title = "Memory"; value = String(format: "%.0f%%", workspace.system.memoryUsage); symbol = "memorychip"
+        case "storage": title = "Storage"; value = String(format: "%.0f%%", workspace.system.diskUsage); symbol = "internaldrive"
+        case "networkDown": title = "Down"; value = byteRate(workspace.system.networkDownPerSecond); symbol = "arrow.down"
+        case "networkUp": title = "Up"; value = byteRate(workspace.system.networkUpPerSecond); symbol = "arrow.up"
+        case "thermal": title = "Thermal"; value = workspace.system.thermalState; symbol = "thermometer.medium"
+        default: title = "CPU"; value = String(format: "%.0f%%", workspace.system.cpuUsage); symbol = "cpu"
+        }
+        return AnyView(HStack(spacing: 7) {
+            Image(systemName: symbol).foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.caption2).foregroundStyle(.secondary)
+                Text(value).font(.caption.weight(.semibold)).monospacedDigit()
+            }
+        })
+    }
+
+    private func placeholder(symbol: String, title: String) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: symbol).font(.title3)
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func applyStyle(_ view: AnyView, component: HaloCIComponent) -> AnyView {
+        var result = view
+        if let width = component.width, let height = component.height {
+            result = AnyView(result.frame(width: width, height: height))
+        } else if let width = component.width {
+            result = AnyView(result.frame(width: width))
+        } else if let height = component.height {
+            result = AnyView(result.frame(height: height))
+        }
+        if let lineLimit = component.lineLimit { result = AnyView(result.lineLimit(lineLimit)) }
+        if let foreground = component.foreground, let color = color(foreground) { result = AnyView(result.foregroundStyle(color)) }
+        if let padding = component.padding { result = AnyView(result.padding(padding)) }
+        if let background = component.background, let color = color(background) {
+            let radius = component.cornerRadius ?? 0
+            result = AnyView(result.background(color, in: RoundedRectangle(cornerRadius: radius, style: .continuous)))
+        }
+        if let label = component.accessibilityLabel, !label.isEmpty { result = AnyView(result.accessibilityLabel(label)) }
+        return result
+    }
+
+    private func resolve(_ value: String) -> String { HaloCIBindingResolver.resolve(value, data: data) }
+    private func normalizedProgress(_ value: String?) -> Double {
+        guard let value else { return 0 }
+        let resolved = resolve(value).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var number = Double(resolved), number.isFinite else { return 0 }
+        if number > 1 { number /= 100 }
+        return min(1, max(0, number))
+    }
+
+    private func color(_ raw: String) -> Color? {
+        switch raw.lowercased() {
+        case "accent": return .accentColor
+        case "white": return .white
+        case "black": return .black
+        case "clear": return .clear
+        case "secondary": return .white.opacity(0.62)
+        case "green": return .green
+        case "orange": return .orange
+        case "red": return .red
+        case "blue": return .blue
+        default:
+            var hex = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if hex.hasPrefix("#") { hex.removeFirst() }
+            guard hex.count == 6 || hex.count == 8, let value = UInt64(hex, radix: 16) else { return nil }
+            if hex.count == 6 {
+                return Color(red: Double((value >> 16) & 0xFF) / 255, green: Double((value >> 8) & 0xFF) / 255, blue: Double(value & 0xFF) / 255)
+            }
+            return Color(red: Double((value >> 24) & 0xFF) / 255, green: Double((value >> 16) & 0xFF) / 255, blue: Double((value >> 8) & 0xFF) / 255, opacity: Double(value & 0xFF) / 255)
+        }
+    }
+
+    private func byteRate(_ bytes: Double) -> String {
+        if bytes >= 1_000_000_000 { return String(format: "%.1f GB/s", bytes / 1_000_000_000) }
+        if bytes >= 1_000_000 { return String(format: "%.1f MB/s", bytes / 1_000_000) }
+        if bytes >= 1_000 { return String(format: "%.0f KB/s", bytes / 1_000) }
+        return String(format: "%.0f B/s", bytes)
     }
 }

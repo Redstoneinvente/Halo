@@ -1,0 +1,1 @@
+{"match":"any","triggers":[{"type":"mediaPlaying","bool":true}]}

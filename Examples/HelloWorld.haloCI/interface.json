@@ -1,0 +1,24 @@
+{
+  "closed": {
+    "type": "HStack", "width": 250, "height": 40, "spacing": 7, "padding": 7,
+    "children": [
+      { "type": "Icon", "systemName": "music.note", "width": 14, "height": 14, "foreground": "accent" },
+      { "type": "Text", "text": "{{ media.title }}", "style": "caption", "lineLimit": 1 }
+    ]
+  },
+  "expanded": {
+    "type": "NotchContainer", "width": 560, "height": 250, "spacing": 12, "padding": 18,
+    "children": [
+      { "type": "Text", "text": "HELLO CUSTOM CI", "style": "caption", "foreground": "accent" },
+      { "type": "Text", "text": "{{ media.title }}", "style": "headline", "lineLimit": 1 },
+      { "type": "Text", "text": "{{ media.artist }}", "style": "caption", "foreground": "secondary", "lineLimit": 1 },
+      { "type": "HStack", "spacing": 8, "children": [
+        { "type": "Button", "text": "Previous", "systemName": "backward.fill", "accessibilityLabel": "Previous track", "action": { "id": "media.previous" } },
+        { "type": "Button", "text": "Play / Pause", "systemName": "playpause.fill", "accessibilityLabel": "Play or pause media", "action": { "id": "media.playPause" } },
+        { "type": "Button", "text": "Next", "systemName": "forward.fill", "accessibilityLabel": "Next track", "action": { "id": "media.next" } }
+      ]},
+      { "type": "Toggle", "text": "Example local preference", "stateKey": "example.enabled", "defaultBool": true, "accessibilityLabel": "Example local preference" },
+      { "type": "Button", "text": "Close CI", "systemName": "xmark", "accessibilityLabel": "Close Hello CI", "action": { "id": "halo.ci.close" } }
+    ]
+  }
+}

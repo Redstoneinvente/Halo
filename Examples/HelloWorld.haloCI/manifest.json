@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "sdkVersion": "0.1",
+  "id": "com.redstoneinvente.examples.hello",
+  "name": "Hello CI",
+  "author": "Redstoneinvente",
+  "version": "1.0.0",
+  "minimumHaloVersion": "1.0.0",
+  "entryInterface": "interface.json",
+  "description": "Starter Custom CI showing bindings, local UI and brokered media actions.",
+  "permissions": ["Media.ReadState", "Media.Control"],
+  "capabilities": ["AutomaticTriggers", "MediaControls", "LocalState"],
+  "supportedSurfaces": ["notch"],
+  "supportedStates": ["closed", "expanded"]
+}

@@ -1124,3 +1124,151 @@ CI Runtime ──versioned IPC──> Isolated Script Host
 ```
 
 The key idea is simple: **CI should be extremely capable without making Halo itself unsafe or impossible to maintain.**
+
+---
+
+## Implemented Custom CI SDK 0.1 contract
+
+Halo now includes an in-app **declarative** Custom CI runtime. Built-in Context Interfaces remain native Halo features; custom packages are a separate library section and only enter the existing central CI arbitration as another candidate.
+
+### Package format
+
+SDK 0.1 currently imports an **unpacked directory** ending in `.haloCI`:
+
+```text
+MyInterface.haloCI/
+  manifest.json
+  interface.json
+  triggers.json        # optional
+  assets/              # optional; local images only
+  localization/        # reserved for a later SDK revision
+```
+
+Packed/archive `.haloCI` files are not extracted yet. `scripts/` and executable/script content are rejected. Custom CIs never execute third-party Swift, JavaScript, shell commands, dylibs, or arbitrary native code inside Halo.
+
+Installed packages live under Halo\'s Application Support `CustomCI` directory. Re-importing the same manifest `id` updates that package while preserving its per-CI preferences where possible.
+
+### Global switch and library
+
+Settings → Context Notch Interface has a dedicated **Custom CI** section beneath the existing **Available CI** section.
+
+- **Disable custom CI = off**: all loaded custom CIs are visible and can be enabled, prioritized, permissioned, opened manually, updated, or removed.
+- **Disable custom CI = on**: packages remain installed but cannot render, trigger, or run brokered actions. Built-in Halo CIs are unaffected.
+
+Each package also has its own enable toggle, priority, permission grants, and isolated local state.
+
+### Manifest
+
+```json
+{
+  "schemaVersion": 1,
+  "sdkVersion": "0.1",
+  "id": "com.example.nowplaying",
+  "name": "Now Playing",
+  "author": "Example Developer",
+  "version": "1.0.0",
+  "minimumHaloVersion": "1.0.0",
+  "entryInterface": "interface.json",
+  "description": "A small media CI",
+  "permissions": ["Media.ReadState", "Media.Control"],
+  "capabilities": ["AutomaticTriggers", "MediaControls"],
+  "supportedSurfaces": ["notch"],
+  "supportedStates": ["closed", "expanded"]
+}
+```
+
+Supported permissions: `Media.ReadState`, `Media.Control`, `Applications.Observe`, `Clipboard.Write`, `URL.Open`.
+
+Supported capability labels: `LocalAssets`, `LocalState`, `AutomaticTriggers`, `MediaControls`. Capabilities are descriptive; they never grant authority. Permissions remain explicit and revocable.
+
+### Interface document
+
+`expanded` is required; `closed` is optional. If closed support is declared but no closed root exists, Halo shows a safe package-name fallback.
+
+```json
+{
+  "closed": {
+    "type": "HStack",
+    "width": 230,
+    "height": 40,
+    "spacing": 7,
+    "children": [
+      { "type": "Icon", "systemName": "music.note" },
+      { "type": "Text", "text": "{{ media.title }}", "lineLimit": 1 }
+    ]
+  },
+  "expanded": {
+    "type": "VStack",
+    "width": 560,
+    "height": 240,
+    "spacing": 10,
+    "padding": 16,
+    "children": [
+      { "type": "Text", "text": "{{ media.title }}", "style": "headline" },
+      {
+        "type": "Button",
+        "text": "Play / Pause",
+        "accessibilityLabel": "Play or pause media",
+        "action": { "id": "media.playPause" }
+      }
+    ]
+  }
+}
+```
+
+Supported components: `Text`, `Image`, `Icon`, `Button`, `Toggle`, `Slider`, `Progress`, `ProgressRing`, `Spacer`, `Divider`, `HStack`, `VStack`, `ZStack`, `Grid`, `ScrollView`, `Badge`, `NotchContainer`, `MediaArtwork`, `AppIcon`, `DeviceBattery`, `SystemMetric`, `ActivityIndicator`.
+
+The bounded component field set is: `type`, `id`, `text`, `value`, `source`, `systemName`, `metric`, `children`, `action`, `spacing`, `padding`, `width`, `height`, `cornerRadius`, `lineLimit`, `foreground`, `background`, `alignment`, `axis`, `columns`, `accessibilityLabel`, `stateKey`, `defaultBool`, `defaultNumber`, `minimum`, `maximum`, `step`, `style`. Unknown fields fail validation.
+
+`Image` accepts only package-local `asset:<relative-path>` sources. `SystemMetric.metric` accepts `battery`, `cpu`, `memory`, `storage`, `networkDown`, `networkUp`, or `thermal`. Toggle/Slider state is namespaced by CI id and bounded to 64 keys / 32 KB.
+
+### Bindings
+
+Bindings are simple interpolation only—no expression language, reflection, JavaScript, `eval`, or arbitrary property access:
+
+```text
+{{ media.title }}
+```
+
+Supported keys: `halo.surface.state`, `halo.surface.isExpanded`, `system.battery.level`, `system.battery.isCharging`, `system.lowPowerMode`, `system.cpu.usedPercent`, `system.memory.usedPercent`, `system.storage.usedPercent`, `media.isPlaying`, `media.title`, `media.artist`, `media.album`, `apps.active.bundleID`, `apps.active.name`.
+
+Media keys require `Media.ReadState`; application keys require `Applications.Observe`. Protected values are absent from a package\'s data bus until permission is granted.
+
+### Brokered actions
+
+SDK 0.1 button actions are inline descriptors. Supported actions are:
+
+- `halo.ci.close`
+- `clipboard.copy` — `Clipboard.Write`
+- `url.open` — `URL.Open`; only `http`, `https`, or `mailto`, with a confirmation prompt
+- `media.playPause` — `Media.Control`
+- `media.next` — `Media.Control`
+- `media.previous` — `Media.Control`
+
+No action can launch a process, shell, script, dylib, arbitrary selector, or arbitrary AppKit/Swift call.
+
+### Triggers
+
+`triggers.json` is optional. Without automatic triggers a package can still be opened manually.
+
+```json
+{
+  "match": "any",
+  "triggers": [
+    { "type": "mediaPlaying", "bool": true },
+    { "type": "activeApplication", "value": "com.apple.Music" }
+  ]
+}
+```
+
+Supported trigger types: `manual`, `mediaPlaying`, `activeApplication`, `batteryBelow`, `batteryAbove`, `charging`, `timeWindow` (`startMinute` / `endMinute`, 0...1439). `match` is `any` or `all`. `manual` is never an automatic match. Protected triggers require their declared + granted permission.
+
+### Surface lifecycle and arbitration
+
+Custom CIs do not create a second notch window. They use Halo\'s existing open/closed surface state and central priority arbitration. The winning custom package replaces notch content, while Halo retains hover/click/pin/collapse, animation, geometry, display ownership, and safety boundaries. Manual package activation gets temporary priority above automatic contexts because it is an explicit user request. Automatic packages use their configured 0...100 priority. Collapsing a manually opened custom CI returns to normal Halo; automatic packages remain eligible while their trigger remains true. `halo.ci.close` suppresses an automatic package until its trigger goes false, preventing reopen loops.
+
+### Validation and limits
+
+Halo validates a package before installation and again after staging. SDK 0.1 rejects or bounds unknown schema/SDK versions and fields, unsupported components/bindings/actions/triggers/permissions/capabilities/surfaces, undeclared permissions, path traversal, symbolic links, missing/unsupported assets, executable/script content, malformed JSON, packages over 128 files or 10 MB, JSON files over 512 KB, component trees over 180 nodes or depth 16, and out-of-range layout/control values. Interactive controls without an accessibility label produce a warning.
+
+A working starter package is committed at `Examples/HelloWorld.haloCI/`.
