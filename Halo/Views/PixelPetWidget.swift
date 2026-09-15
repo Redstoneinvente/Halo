@@ -147,7 +147,7 @@ struct HaloPixelPalRGB: Codable, Equatable {
 struct HaloPixelPalPreferences: Codable, Equatable {
     // Legacy persisted field retained so Codable stays backward-compatible.
     var showCheeks: Bool = true
-    var version = 5
+    var version = 6
 
     // Appearance
     var faceStyle: HaloPixelPalFaceStyle = .soft
@@ -161,6 +161,8 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     var backgroundStyle: HaloPixelPalBackgroundStyle = .transparent
     var backgroundColor = HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)
     var backgroundOpacity = 1.0
+    var backgroundCornerRadius = 0.0
+    var pixelCornerRadius = 0.0
     var inactiveLEDIntensity = 0.075
     var inactiveLEDUsesFaceColor = true
     var inactiveLEDColor = HaloPixelPalRGB(red: 0.36, green: 0.40, blue: 0.46)
@@ -198,7 +200,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case version
         case faceStyle, eyeStyle, mouthStyle, cheekStyle, palette, customColor, accentColor, blushColor
-        case backgroundStyle, backgroundColor, backgroundOpacity, inactiveLEDIntensity, inactiveLEDUsesFaceColor, inactiveLEDColor, faceScale, glowIntensity
+        case backgroundStyle, backgroundColor, backgroundOpacity, backgroundCornerRadius, pixelCornerRadius, inactiveLEDIntensity, inactiveLEDUsesFaceColor, inactiveLEDColor, faceScale, glowIntensity
         case accessoryMode, selectedAccessory, allowedAccessories
         case automaticBlinking, animationSpeed, animationIntensity
         case hoverReaction, tapReaction, doubleTapReaction, longPressReaction
@@ -210,7 +212,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        version = 5
+        version = 6
         faceStyle = try c.decodeIfPresent(HaloPixelPalFaceStyle.self, forKey: .faceStyle) ?? .soft
         eyeStyle = try c.decodeIfPresent(HaloPixelPalEyeStyle.self, forKey: .eyeStyle) ?? .glossy
         mouthStyle = try c.decodeIfPresent(HaloPixelPalMouthStyle.self, forKey: .mouthStyle) ?? .automatic
@@ -226,6 +228,8 @@ struct HaloPixelPalPreferences: Codable, Equatable {
         backgroundStyle = try c.decodeIfPresent(HaloPixelPalBackgroundStyle.self, forKey: .backgroundStyle) ?? .transparent
         backgroundColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .backgroundColor) ?? HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)
         backgroundOpacity = try c.decodeIfPresent(Double.self, forKey: .backgroundOpacity) ?? 1.0
+        backgroundCornerRadius = try c.decodeIfPresent(Double.self, forKey: .backgroundCornerRadius) ?? 0.0
+        pixelCornerRadius = try c.decodeIfPresent(Double.self, forKey: .pixelCornerRadius) ?? 0.0
         inactiveLEDIntensity = try c.decodeIfPresent(Double.self, forKey: .inactiveLEDIntensity) ?? 0.075
         inactiveLEDUsesFaceColor = try c.decodeIfPresent(Bool.self, forKey: .inactiveLEDUsesFaceColor) ?? true
         inactiveLEDColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .inactiveLEDColor) ?? HaloPixelPalRGB(red: 0.36, green: 0.40, blue: 0.46)
@@ -258,12 +262,14 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     func normalized() -> Self {
         var value = self
-        value.version = 5
+        value.version = 6
         value.animationSpeed = min(2.0, max(0.35, animationSpeed))
         value.animationIntensity = min(1.0, max(0.0, animationIntensity))
         value.faceScale = min(1.0, max(0.76, faceScale))
         value.glowIntensity = min(1.0, max(0.0, glowIntensity))
         value.backgroundOpacity = min(1.0, max(0.0, backgroundOpacity))
+        value.backgroundCornerRadius = min(0.5, max(0.0, backgroundCornerRadius))
+        value.pixelCornerRadius = min(0.5, max(0.0, pixelCornerRadius))
         value.inactiveLEDIntensity = min(0.35, max(0.0, inactiveLEDIntensity))
         value.customColor = Self.clamped(customColor)
         value.accentColor = Self.clamped(accentColor)
@@ -926,6 +932,16 @@ struct HaloPixelPetWidget: View {
 
 // MARK: - Face renderer
 
+private struct HaloPixelPalRelativeRoundedRectangle: Shape {
+    let radiusFraction: Double
+
+    func path(in rect: CGRect) -> Path {
+        let fraction = min(0.5, max(0.0, radiusFraction))
+        let radius = min(rect.width, rect.height) * fraction
+        return Path(roundedRect: rect, cornerRadius: radius)
+    }
+}
+
 private struct HaloPixelPalFace: View {
     let expression: HaloPixelPalExpression
     let contextualAccessory: HaloPixelPalAccessory?
@@ -948,15 +964,18 @@ private struct HaloPixelPalFace: View {
     var body: some View {
         ZStack {
             background
+                .clipShape(HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius))
             if preferences.inactiveLEDIntensity > 0.001 {
                 Canvas { context, size in
                     let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)
                     let inactiveColor = preferences.inactiveLEDUsesFaceColor ? faceColor : preferences.inactiveLEDColor.color
                     for y in 0..<logicalGrid {
                         for x in 0..<logicalGrid {
-                            context.fill(Path(geometry.led(x: x, y: y)),
+                            let rect = geometry.led(x: x, y: y)
+                            let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius
+                            context.fill(Path(roundedRect: rect, cornerRadius: radius),
                                          with: .color(inactiveColor.opacity(preferences.inactiveLEDIntensity)),
-                                         style: FillStyle(antialiased: false))
+                                         style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001))
                         }
                     }
                 }
@@ -1043,8 +1062,10 @@ private struct HaloPixelPalFace: View {
                     let logicalY = placed.y + rowIndex + motion.y + extraY
                     guard logicalX >= 0, logicalY >= 0, logicalX < logicalGrid, logicalY < logicalGrid else { continue }
                     let rect = geometry.led(x: logicalX, y: logicalY)
-                    context.fill(Path(rect), with: .color(color(for: role).opacity(opacity)),
-                                 style: FillStyle(antialiased: false))
+                    let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius
+                    context.fill(Path(roundedRect: rect, cornerRadius: radius),
+                                 with: .color(color(for: role).opacity(opacity)),
+                                 style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001))
                 }
             }
         }
@@ -1455,6 +1476,13 @@ private struct HaloPixelPalSettingsView: View {
                             .font(.caption.monospacedDigit())
                             .frame(width: 38, alignment: .trailing)
                     }
+                    HStack {
+                        Text("Background corner radius")
+                        Slider(value: bind(\.backgroundCornerRadius), in: 0...0.5)
+                        Text("\(Int(pal.preferences.backgroundCornerRadius * 100))%")
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 38, alignment: .trailing)
+                    }
                 }
                 Toggle("Match inactive LEDs to face color", isOn: bind(\.inactiveLEDUsesFaceColor))
                 if !pal.preferences.inactiveLEDUsesFaceColor {
@@ -1464,6 +1492,13 @@ private struct HaloPixelPalSettingsView: View {
                     Text("Inactive LED brightness")
                     Slider(value: bind(\.inactiveLEDIntensity), in: 0...0.35)
                     Text("\(Int(pal.preferences.inactiveLEDIntensity * 100))%")
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 38, alignment: .trailing)
+                }
+                HStack {
+                    Text("Pixel corner radius")
+                    Slider(value: bind(\.pixelCornerRadius), in: 0...0.5)
+                    Text("\(Int(pal.preferences.pixelCornerRadius * 100))%")
                         .font(.caption.monospacedDigit())
                         .frame(width: 38, alignment: .trailing)
                 }
