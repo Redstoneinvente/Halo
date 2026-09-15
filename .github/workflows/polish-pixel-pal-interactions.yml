@@ -1,4 +1,4 @@
-name: Fix Pixel Pet Dizzy Gesture
+name: Add Configurable Pixel Pet Dizzy Threshold
 
 on:
   push:
@@ -18,12 +18,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Fix dizzy gesture sensitivity
+      - name: Add configurable dizzy threshold
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
           path = Path('Halo/Views/PixelPetWidget.swift')
           s = path.read_text()
+
+          if 'var dizzyRotationThresholdTurns = 0.8' in s:
+              print('Configurable dizzy threshold already present; validating existing implementation.')
+              raise SystemExit(0)
 
           def replace_once(old, new, label):
               global s
@@ -32,74 +37,115 @@ jobs:
                   raise SystemExit(f'{label}: expected one match, found {count}')
               s = s.replace(old, new, 1)
 
-          old = (
-              "    static let sampleWindow: TimeInterval = 0.95\n"
-              "    static let cooldown: TimeInterval = 2.4\n"
-              "    static let minimumRotation = Double.pi * 2.4\n"
-              "    static let minimumDuration: TimeInterval = 0.28\n"
-              "    static let minimumPathSpeed = 1.7\n"
-              "    static let minimumDirectionConsistency = 0.80\n"
-              "    static let minimumRadius = 0.16\n"
-              "    static let maximumRadius = 0.48\n"
-              "    static let maximumRadiusSpread = 0.20\n"
-              "    static let minimumSamples = 10\n"
-          )
-          new = (
-              "    // One quick, natural circle should be enough.\n"
-              "    static let sampleWindow: TimeInterval = 1.15\n"
-              "    static let cooldown: TimeInterval = 2.0\n"
-              "    static let minimumRotation = Double.pi * 1.55\n"
-              "    static let minimumDuration: TimeInterval = 0.12\n"
-              "    static let minimumPathSpeed = 0.85\n"
-              "    static let minimumDirectionConsistency = 0.55\n"
-              "    static let minimumRadius = 0.08\n"
-              "    static let maximumRadius = 0.68\n"
-              "    static let maximumRadiusSpread = 0.36\n"
-              "    static let minimumSamples = 6\n"
-          )
-          replace_once(old, new, 'detector thresholds')
           replace_once(
-              "        if let last = samples.last, now - last.time > 0.18 {\n",
-              "        if let last = samples.last, now - last.time > 0.28 {\n",
-              'sample continuity gap',
+              '    var version = 6\n',
+              '    var version = 7\n',
+              'schema version property',
           )
           replace_once(
-              "                            at: timeline.date.timeIntervalSinceReferenceDate\n",
-              "                            at: Date().timeIntervalSinceReferenceDate\n",
-              'live hover timestamp',
+              '    var animationIntensity = 0.85\n\n    // Direct interactions\n',
+              '    var animationIntensity = 0.85\n    var dizzyRotationThresholdTurns = 0.8\n\n    // Direct interactions\n',
+              'dizzy threshold preference',
           )
           replace_once(
-              "                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in\n",
-              "                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .dizzy, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in\n",
-              'visible dizzy preview button',
+              '        case automaticBlinking, animationSpeed, animationIntensity\n',
+              '        case automaticBlinking, animationSpeed, animationIntensity, dizzyRotationThresholdTurns\n',
+              'coding key',
           )
           replace_once(
-              "        .help(\"Hover, click, double-click or long-press Pixel Pal · right-click for settings\")\n",
-              "        .help(\"Hover, click, double-click, long-press, or quickly circle the cursor around Pixel Pal · right-click for settings\")\n",
-              'interaction help',
+              '        version = 6\n',
+              '        version = 7\n',
+              'decoded schema version',
           )
+          replace_once(
+              '        animationIntensity = try c.decodeIfPresent(Double.self, forKey: .animationIntensity) ?? 0.85\n\n        hoverReaction',
+              '        animationIntensity = try c.decodeIfPresent(Double.self, forKey: .animationIntensity) ?? 0.85\n        dizzyRotationThresholdTurns = try c.decodeIfPresent(Double.self, forKey: .dizzyRotationThresholdTurns) ?? 0.8\n\n        hoverReaction',
+              'decode dizzy threshold',
+          )
+          replace_once(
+              '        value.version = 6\n        value.animationSpeed',
+              '        value.version = 7\n        value.animationSpeed',
+              'normalized schema version',
+          )
+          replace_once(
+              '        value.animationIntensity = min(1.0, max(0.0, animationIntensity))\n        value.faceScale',
+              '        value.animationIntensity = min(1.0, max(0.0, animationIntensity))\n        value.dizzyRotationThresholdTurns = min(2.0, max(0.35, dizzyRotationThresholdTurns))\n        value.faceScale',
+              'normalize dizzy threshold',
+          )
+
+          replace_once(
+              '    static let minimumRotation = Double.pi * 1.55\n',
+              '',
+              'remove hardcoded rotation threshold',
+          )
+          replace_once(
+              '    mutating func register(location: CGPoint, size: CGSize, at now: TimeInterval) -> Bool {\n',
+              '    mutating func register(location: CGPoint, size: CGSize, at now: TimeInterval, minimumRotationTurns: Double) -> Bool {\n',
+              'detector configurable signature',
+          )
+          replace_once(
+              '        let radiusSpread = maxRadius - minRadius\n\n        guard abs(signedRotation) >= Self.minimumRotation,\n',
+              '        let radiusSpread = maxRadius - minRadius\n        let minimumRotation = Double.pi * 2.0 * min(2.0, max(0.35, minimumRotationTurns))\n\n        guard abs(signedRotation) >= minimumRotation,\n',
+              'detector configurable threshold',
+          )
+          replace_once(
+              '                            at: Date().timeIntervalSinceReferenceDate\n                        ) {\n',
+              '                            at: Date().timeIntervalSinceReferenceDate,\n                            minimumRotationTurns: pal.preferences.dizzyRotationThresholdTurns\n                        ) {\n',
+              'pass preference into detector',
+          )
+
+          interaction_old = (
+              '                HStack {\n'
+              '                    Text("Animation intensity")\n'
+              '                    Slider(value: bind(\\.animationIntensity), in: 0...1)\n'
+              '                }\n'
+              '                Toggle("Automatic blinking + rare wink", isOn: bind(\\.automaticBlinking))\n'
+          )
+          interaction_new = (
+              '                HStack {\n'
+              '                    Text("Animation intensity")\n'
+              '                    Slider(value: bind(\\.animationIntensity), in: 0...1)\n'
+              '                }\n'
+              '                HStack {\n'
+              '                    Text("Dizzy threshold")\n'
+              '                    Slider(value: bind(\\.dizzyRotationThresholdTurns), in: 0.35...2.0, step: 0.05)\n'
+              '                    Text("\\(pal.preferences.dizzyRotationThresholdTurns, specifier: \"%.2f\") turns")\n'
+              '                        .font(.caption.monospacedDigit())\n'
+              '                        .frame(width: 76, alignment: .trailing)\n'
+              '                }\n'
+              '                Text("How much fast circular cursor movement is required before Pixel Pet becomes dizzy. Lower values trigger sooner.")\n'
+              '                    .font(.caption2)\n'
+              '                    .foregroundStyle(.secondary)\n'
+              '                Toggle("Automatic blinking + rare wink", isOn: bind(\\.automaticBlinking))\n'
+          )
+          replace_once(interaction_old, interaction_new, 'dizzy threshold settings UI')
+
           path.write_text(s)
           PY
 
-      - name: Verify dizzy contract
+      - name: Verify configurable dizzy threshold
         run: |
           python3 - <<'PY'
           from pathlib import Path
           s = Path('Halo/Views/PixelPetWidget.swift').read_text()
           required = [
-              'case dizzy',
-              'static let minimumRotation = Double.pi * 1.55',
-              'static let minimumSamples = 6',
-              'at: Date().timeIntervalSinceReferenceDate',
-              'HaloPixelPalExpression.happy, .superHappy, .love, .dizzy',
-              'case .dizzy: return .dizzy',
-              'HaloPixelPalSprites.xEye',
-              'quickly circle the cursor around Pixel Pal',
+              'var version = 7',
+              'var dizzyRotationThresholdTurns = 0.8',
+              'case automaticBlinking, animationSpeed, animationIntensity, dizzyRotationThresholdTurns',
+              'decodeIfPresent(Double.self, forKey: .dizzyRotationThresholdTurns) ?? 0.8',
+              'value.dizzyRotationThresholdTurns = min(2.0, max(0.35, dizzyRotationThresholdTurns))',
+              'minimumRotationTurns: Double',
+              'let minimumRotation = Double.pi * 2.0 * min(2.0, max(0.35, minimumRotationTurns))',
+              'minimumRotationTurns: pal.preferences.dizzyRotationThresholdTurns',
+              'Text("Dizzy threshold")',
+              'Slider(value: bind(\\.dizzyRotationThresholdTurns), in: 0.35...2.0, step: 0.05)',
           ]
           missing = [m for m in required if m not in s]
           if missing:
-              raise SystemExit(f'Missing dizzy markers: {missing}')
-          print('Dizzy implementation verified.')
+              raise SystemExit(f'Missing configurable dizzy threshold markers: {missing}')
+          if 'static let minimumRotation = Double.pi * 1.55' in s:
+              raise SystemExit('Hardcoded dizzy rotation threshold is still present.')
+          print('Configurable dizzy threshold verified.')
           PY
 
       - name: Parse Pixel Pet source
@@ -108,10 +154,14 @@ jobs:
       - name: Full Xcode build
         run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build
 
-      - name: Commit fix
+      - name: Commit implementation
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Halo/Views/PixelPetWidget.swift
-          git commit -m "Fix Pixel Pet dizzy gesture"
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "Add configurable Pixel Pet dizzy threshold"
           git push origin HEAD:main
