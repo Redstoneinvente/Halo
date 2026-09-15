@@ -1,1 +1,1 @@
-apply custom ci sdk retry 5 2026-09-15 10:02 +0400
+apply custom ci sdk retry 6 2026-09-15 10:06 +0400
