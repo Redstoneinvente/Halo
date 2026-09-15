@@ -5,6 +5,7 @@ on:
     paths:
       - 'Halo/**'
       - 'Tests/**'
+      - 'Scripts/validate_pixel_pal.py'
       - '.github/workflows/validate-pixel-pal.yml'
 permissions:
   contents: read
@@ -14,5 +15,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Compile and exercise Pixel Pal in isolation
+        run: python3 Scripts/validate_pixel_pal.py
       - name: Build Halo and run core tests
+        if: always()
         run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build test
