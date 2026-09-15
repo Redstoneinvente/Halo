@@ -1060,16 +1060,17 @@ private struct HaloPixelPalFace: View {
         }
     }
 
-    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight }
+    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, smug }
 
     private var eyePose: EyePose {
         switch expression {
         case .blink, .sleepy, .bored: return .closed
-        case .happy, .superHappy, .music: return .happy
+        case .happy, .superHappy, .music, .shy: return .happy
         case .love: return .heart
         case .excited, .shocked: return .star
-        case .wink: return .winkRight
-        case .mischievous, .smug: return .winkRight
+        case .wink, .mischievous: return .winkRight
+        case .confused: return .confused
+        case .smug: return .smug
         default: return .open
         }
     }
@@ -1112,6 +1113,15 @@ private struct HaloPixelPalFace: View {
             let open = HaloPixelPalSprites.openEye(preferences.eyeStyle)
             render(.init(open, x: leftX, y: y), 1, 0, 0)
             render(.init(HaloPixelPalSprites.winkEye, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)
+        case .confused:
+            let open = HaloPixelPalSprites.openEye(preferences.eyeStyle)
+            let closed = HaloPixelPalSprites.closedEye(preferences.eyeStyle)
+            render(.init(open, x: leftX, y: y), 1, 0, 0)
+            render(.init(closed, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)
+        case .smug:
+            let eye = HaloPixelPalSprite(rows: ["ppppp", ".ppp."])
+            render(.init(eye, x: leftX, y: y + 2), 1, 0, 0)
+            render(.init(eye, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)
         }
     }
 
@@ -1129,8 +1139,13 @@ private struct HaloPixelPalFace: View {
         case .surprised, .shocked:
             render(.init(HaloPixelPalSprites.raisedBrow, x: leftX, y: 3), 0.95, 0, 0)
             render(.init(HaloPixelPalSprites.raisedBrow, x: rightX, y: 3, mirrorX: true), 0.95, 0, 0)
-        case .mischievous, .smug:
-            render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.80, 0, 0)
+        case .confused:
+            render(.init(HaloPixelPalSprites.raisedBrow, x: leftX, y: 3), 0.95, 0, 0)
+            render(.init(HaloPixelPalSprites.worriedBrow, x: rightX, y: y, mirrorX: true), 0.88, 0, 0)
+        case .mischievous:
+            render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.82, 0, 0)
+        case .smug:
+            render(.init(HaloPixelPalSprites.raisedBrow, x: rightX, y: 3, mirrorX: true), 0.78, 0, 0)
         default:
             break
         }
@@ -1138,7 +1153,8 @@ private struct HaloPixelPalFace: View {
 
     private func automaticMouth() -> HaloPixelPalSprite? {
         switch expression {
-        case .neutral, .focused, .confused: return HaloPixelPalSprites.mouthTiny
+        case .neutral, .focused: return HaloPixelPalSprites.mouthTiny
+        case .confused: return HaloPixelPalSprites.mouthO
         case .blink, .sleepy, .bored: return HaloPixelPalSprites.mouthFlat
         case .happy, .music: return HaloPixelPalSprites.mouthSmile
         case .superHappy, .excited, .love: return HaloPixelPalSprites.mouthBigSmile
@@ -1263,12 +1279,15 @@ private struct HaloPixelPalFace: View {
         let speed = max(0.35, preferences.animationSpeed)
         let intensity = preferences.animationIntensity
         let t = max(0, animationTime) * speed
+        let one = intensity > 0.28 ? 1 : 0
+        let two = intensity > 0.75 ? 2 : one
         if let reactionElapsed {
+            if expression == .annoyed {
+                return (Int(round(sin(t * 11.0))) * one, 0)
+            }
             return (0, HaloPixelPalAnimationTiming.bounce(elapsed: reactionElapsed * speed,
                                                          intensity: intensity, reduceMotion: reduceMotion))
         }
-        let one = intensity > 0.28 ? 1 : 0
-        let two = intensity > 0.75 ? 2 : one
 
         switch expression {
         case .happy, .superHappy, .love:
@@ -1568,7 +1587,7 @@ private struct HaloPixelPalSettingsView: View {
         GroupBox("Expression & animation preview") {
             VStack(alignment: .leading, spacing: 10) {
                 Picker("Expression", selection: $previewExpression) {
-                    ForEach(HaloPixelPalExpression.allCases) { Text($0.title).tag($0) }
+                    ForEach(HaloPixelPalExpression.allCases.filter { $0 != .blink }) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.menu)
 
