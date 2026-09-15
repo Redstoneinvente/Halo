@@ -1,0 +1,76 @@
+name: Apply Calendar and Widget Polish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/calendar-widget-polish-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply Calendar and widget polish
+        run: python3 scripts/apply_calendar_widget_polish.py
+
+      - name: Verify source contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          ent = Path('Halo/Halo.entitlements').read_text()
+          integrations = Path('Halo/Services/Integrations.swift').read_text()
+          modules = Path('Halo/Views/ModuleViews.swift').read_text()
+          models = Path('Halo/Core/WidgetModels.swift').read_text()
+          settings = Path('Halo/Views/WidgetSettingsView.swift').read_text()
+          adaptive = Path('Halo/Views/VisualWorkspaceAdaptiveWidgets.swift').read_text()
+          required = [
+              'com.apple.security.personal-information.calendars',
+              'func requestAccessIfNeeded()',
+              'calendarPermissionBadge',
+              'VisualAdaptiveElementAvailability',
+              'visualAdaptiveConfigurableElementKeys',
+              'visualAdaptiveSupportsMaximumItems',
+              'Elements at \\(footprint.key)',
+              'exclamationmark.triangle.fill',
+              'guard module.visualAdaptiveElementAvailability(key, footprint: footprint).available else { return false }',
+              'in: 2...8',
+              'in: 1...4',
+          ]
+          haystack = ent + integrations + modules + models + settings + adaptive
+          missing = [x for x in required if x not in haystack]
+          if missing:
+              raise SystemExit('Missing polish contract: ' + ', '.join(missing))
+          PY
+
+      - name: Parse changed Swift sources
+        run: |
+          xcrun swiftc -parse Halo/Services/Integrations.swift
+          xcrun swiftc -parse Halo/Core/WidgetModels.swift
+          xcrun swiftc -parse Halo/Views/ModuleViews.swift
+          xcrun swiftc -parse Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+          xcrun swiftc -parse Halo/Views/WidgetSettingsView.swift
+
+      - name: Full Xcode build
+        run: |
+          set -o pipefail
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build | tee /tmp/halo-calendar-widget-polish.log
+
+      - name: Commit implementation
+        run: |
+          if git diff --quiet; then
+            echo 'No implementation changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Halo.entitlements Halo/Services/Integrations.swift Halo/Core/WidgetModels.swift Halo/Views/ModuleViews.swift Halo/Views/VisualWorkspaceAdaptiveWidgets.swift Halo/Views/WidgetSettingsView.swift Docs/WidgetCustomization.md
+          git commit -m 'Polish calendar permissions and widget inspector'
+          git push origin HEAD:main
