@@ -55,3 +55,5 @@ jobs:
           git commit -m "Fix Pixel Pet cookie rescue matcher"
           git pull --rebase origin main
           git push origin HEAD:main
+
+# rerun
