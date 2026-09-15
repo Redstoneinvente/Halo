@@ -60,45 +60,44 @@ jobs:
                   '''        value.blushColor = Self.clamped(blushColor)\n        value.backgroundColor = Self.clamped(backgroundColor)\n        value.inactiveLEDColor = Self.clamped(inactiveLEDColor)\n        value.allowedAccessories''',
                   'inactive LED color normalization'
               )
-              # Preferences schema revision; decoding remains backward-compatible.
               s = s.replace('var version = 4', 'var version = 5', 1)
               s = s.replace('        version = 4', '        version = 5', 1)
               s = s.replace('        value.version = 4', '        value.version = 5', 1)
 
-          # Make inactive LED matrix appearance configurable.
           replace_once(
               '''            Canvas { context, size in\n                let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)\n                for y in 0..<logicalGrid {\n                    for x in 0..<logicalGrid {\n                        context.fill(Path(geometry.led(x: x, y: y)),\n                                     with: .color(faceColor.opacity(0.075)),\n                                     style: FillStyle(antialiased: false))\n                    }\n                }\n            }''',
               '''            if preferences.inactiveLEDIntensity > 0.001 {\n                Canvas { context, size in\n                    let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)\n                    let inactiveColor = preferences.inactiveLEDUsesFaceColor ? faceColor : preferences.inactiveLEDColor.color\n                    for y in 0..<logicalGrid {\n                        for x in 0..<logicalGrid {\n                            context.fill(Path(geometry.led(x: x, y: y)),\n                                         with: .color(inactiveColor.opacity(preferences.inactiveLEDIntensity)),\n                                         style: FillStyle(antialiased: false))\n                        }\n                    }\n                }\n            }''',
               'inactive LED matrix renderer'
           )
 
-          # Surface opacity now participates in every non-transparent background style.
           replace_once(
               '''        case .black:\n            Color.black\n        case .custom:\n            preferences.backgroundColor.color\n        case .glow:\n            ZStack {\n                Color.black.opacity(0.74)\n                RadialGradient(\n                    colors: [faceColor.opacity(0.10 + 0.28 * preferences.glowIntensity), .clear],\n                    center: .center,\n                    startRadius: 0,\n                    endRadius: 180\n                )\n            }''',
               '''        case .black:\n            Color.black.opacity(preferences.backgroundOpacity)\n        case .custom:\n            preferences.backgroundColor.color.opacity(preferences.backgroundOpacity)\n        case .glow:\n            ZStack {\n                Color.black.opacity(0.74 * preferences.backgroundOpacity)\n                RadialGradient(\n                    colors: [faceColor.opacity(0.10 + 0.28 * preferences.glowIntensity), .clear],\n                    center: .center,\n                    startRadius: 0,\n                    endRadius: 180\n                )\n                .opacity(preferences.backgroundOpacity)\n            }''',
               'background surface opacity'
           )
 
-          # Expression preview should never be masked by a manually selected mouth/accessory.
-          replace_once(
-              '                    preferences: pal.preferences,',
-              '                    preferences: expressionPreviewPreferences,',
-              'expression preview preferences'
-          )
+          # Target only the large settings header preview; the same preference line also exists elsewhere.
+          header_start = s.index('    private var header: some View {')
+          header_end = s.index('    private var appearanceSection: some View {', header_start)
+          header = s[header_start:header_end]
+          needle = '                    preferences: pal.preferences,'
+          if header.count(needle) != 1:
+              raise SystemExit(f'expression preview preferences: expected one header match, found {header.count(needle)}')
+          header = header.replace(needle, '                    preferences: expressionPreviewPreferences,', 1)
+          s = s[:header_start] + header + s[header_end:]
+
           replace_once(
               '''                    animationTime: timeline.date.timeIntervalSince(previewEpoch)\n                )''',
               '''                    animationTime: timeline.date.timeIntervalSince(previewEpoch)\n                )\n                .id(previewExpression)''',
               'force expression preview refresh'
           )
 
-          # Expand background controls in settings.
           replace_once(
               '''                Picker("Background", selection: bind(\\.backgroundStyle)) {\n                    ForEach(HaloPixelPalBackgroundStyle.allCases) { Text($0.rawValue).tag($0) }\n                }\n                if pal.preferences.backgroundStyle == .custom {\n                    ColorPicker("Background color", selection: rgbBinding(\\.backgroundColor))\n                }\n\n                HStack {''',
               '''                Text("Background display").font(.caption.weight(.semibold)).foregroundStyle(.secondary)\n                Picker("Surface", selection: bind(\\.backgroundStyle)) {\n                    ForEach(HaloPixelPalBackgroundStyle.allCases) { Text($0.rawValue).tag($0) }\n                }\n                if pal.preferences.backgroundStyle == .custom {\n                    ColorPicker("Surface color", selection: rgbBinding(\\.backgroundColor))\n                }\n                if pal.preferences.backgroundStyle != .transparent {\n                    HStack {\n                        Text("Surface opacity")\n                        Slider(value: bind(\\.backgroundOpacity), in: 0...1)\n                        Text("\\(Int(pal.preferences.backgroundOpacity * 100))%")\n                            .font(.caption.monospacedDigit())\n                            .frame(width: 38, alignment: .trailing)\n                    }\n                }\n                Toggle("Match inactive LEDs to face color", isOn: bind(\\.inactiveLEDUsesFaceColor))\n                if !pal.preferences.inactiveLEDUsesFaceColor {\n                    ColorPicker("Inactive LED color", selection: rgbBinding(\\.inactiveLEDColor))\n                }\n                HStack {\n                    Text("Inactive LED brightness")\n                    Slider(value: bind(\\.inactiveLEDIntensity), in: 0...0.35)\n                    Text("\\(Int(pal.preferences.inactiveLEDIntensity * 100))%")\n                        .font(.caption.monospacedDigit())\n                        .frame(width: 38, alignment: .trailing)\n                }\n\n                HStack {''',
               'background settings UI'
           )
 
-          # One reliable selection path: update preview, reset its animation, and show the same live reaction.
           replace_once(
               '''                Picker("Expression", selection: $previewExpression) {\n                    ForEach(HaloPixelPalExpression.allCases.filter { $0 != .blink }) { Text($0.title).tag($0) }\n                }\n                .pickerStyle(.menu)''',
               '''                Picker("Expression", selection: $previewExpression) {\n                    ForEach(HaloPixelPalExpression.allCases.filter { $0 != .blink }) { Text($0.title).tag($0) }\n                }\n                .pickerStyle(.menu)\n                .onChange(of: previewExpression) { expression in\n                    previewEpoch = Date()\n                    pal.react(expression, seconds: 2.2)\n                }''',
@@ -110,7 +109,6 @@ jobs:
               'expression quick button path'
           )
 
-          # Dedicated preview preferences keep expression-controlled mouth visible while retaining appearance/background choices.
           replace_once(
               '''    private var previewFX: HaloPixelPalFX {''',
               '''    private var expressionPreviewPreferences: HaloPixelPalPreferences {\n        var value = pal.preferences\n        value.mouthStyle = .automatic\n        value.accessoryMode = .contextual\n        value.selectedAccessory = .none\n        return value\n    }\n\n    private var previewFX: HaloPixelPalFX {''',
@@ -119,7 +117,6 @@ jobs:
 
           pet.write_text(s)
 
-          # Add direct Pixel Pet Settings entry to the Visual Workspace inspector.
           workspace = Path('Halo/Views/WidgetSettingsView.swift')
           w = workspace.read_text()
           old = '''            Picker("Presentation", selection: binding.presentation) { ForEach(OpenNotchPresentation.allCases) { Text($0.rawValue).tag($0) } }\n            Picker("Priority", selection: binding.priority) { ForEach(OpenNotchPriority.allCases) { Text($0.rawValue).tag($0) } }\n        }'''
