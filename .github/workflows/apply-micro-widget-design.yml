@@ -1,4 +1,4 @@
-name: Apply Micro Widget Design
+name: Repair Micro Widget Build
 
 on:
   push:
@@ -11,76 +11,73 @@ permissions:
   contents: write
 
 jobs:
-  apply:
+  repair:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Repair staged patch against current widget sources
+      - name: Repair micro widget compile errors
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('scripts/apply_micro_widget_design.py')
+          p = Path('Halo/Views/VisualWorkspaceAdaptiveWidgets.swift')
           s = p.read_text()
-          fixes = {
-              'case .micro: preview(lines: 3)': 'case .micro: preview(lines: 4)',
-              'case .micro: micro(region: true)': 'case .micro: primaryAction(iconOnly: true)',
-              'Text(contentKind(entry.text))': 'Text(contentIcon(entry.text) == "link" ? "LINK" : "TEXT")',
-              'Text(value.value)': 'Text(value.text)',
-              'formatTime(elapsed)': 'format(elapsed)',
-              'formatTime(lap)': 'format(lap)',
+
+          replacements = {
+              'ForEach(orderedMetrics.prefix(8)) { item in': 'ForEach(Array(orderedMetrics.prefix(8).enumerated()), id: \\.offset) { _, item in',
+              'Text(itemValue.value).monospacedDigit().foregroundStyle(.secondary)': 'Text(itemValue.text).monospacedDigit().foregroundStyle(.secondary)',
+              'micro(region: true)': 'captureMicroVisual',
           }
-          for old, new in fixes.items():
-              if old in s:
-                  s = s.replace(old, new)
-          # SurfaceView currently contains one BuiltinOrIntegrationWidget shelf route; if an
-          # indexed/search response ever duplicates it, the patcher should target the first real
-          # source declaration rather than aborting merely because the search view duplicated text.
+          for old, new in replacements.items():
+              if old not in s:
+                  raise SystemExit(f'Missing expected source: {old}')
+              s = s.replace(old, new, 1)
+
+          anchor = '    private var compactActions: some View { HStack(spacing: context.spacing) { captureButton; ocrButton }.disabled(service.busy) }'
+          micro = '''    private var captureMicroVisual: some View {
+              let region = context.settings.capturePrimaryAction == .region
+              return ZStack {
+                  RoundedRectangle(cornerRadius: 13, style: .continuous)
+                      .fill(style.accentColor.color.opacity(0.055))
+                  RoundedRectangle(cornerRadius: 13, style: .continuous)
+                      .stroke(style.accentColor.color.opacity(0.42), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                  VStack(spacing: 4) {
+                      if service.busy {
+                          ProgressView().controlSize(.small)
+                      } else {
+                          Image(systemName: region ? "viewfinder" : "text.viewfinder")
+                              .font(.system(size: 22, weight: .semibold))
+                              .foregroundStyle(style.accentColor.color)
+                      }
+                      Text(region ? "CAPTURE" : "OCR")
+                          .font(.system(size: 7, weight: .bold, design: .rounded))
+                          .foregroundStyle(.secondary)
+                  }
+              }
+              .padding(3)
+          }
+
+'''
+          if anchor not in s:
+              raise SystemExit('Missing capture insertion anchor')
+          s = s.replace(anchor, micro + anchor, 1)
           p.write_text(s)
           PY
 
-      - name: Apply deliberate 1x1 widget design
-        run: python3 scripts/apply_micro_widget_design.py
+      - name: Parse repaired Swift source
+        run: xcrun swiftc -parse Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
 
-      - name: Normalize generated Swift key paths
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          for name in [
-              'Halo/Views/VisualWorkspaceAdaptiveWidgets.swift',
-              'Halo/Views/ModuleViews.swift',
-              'Halo/Views/SurfaceView.swift',
-          ]:
-              p = Path(name)
-              s = p.read_text()
-              # Raw Python payloads intentionally protect backslashes while staged; Swift needs
-              # one backslash for key paths/environment values.
-              s = s.replace('\\\\.', '\\.')
-              p.write_text(s)
-          PY
-
-      - name: Parse changed Swift sources
-        run: |
-          xcrun swiftc -parse Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
-          xcrun swiftc -parse Halo/Views/ModuleViews.swift
-          xcrun swiftc -parse Halo/Views/SurfaceView.swift
-
-      - name: Commit implementation
-        run: |
-          if git diff --quiet; then
-            echo 'No source changes to commit.'
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Halo/Views/VisualWorkspaceAdaptiveWidgets.swift Halo/Views/ModuleViews.swift Halo/Views/SurfaceView.swift Docs/WidgetCustomization.md
-          git commit -m 'Implement deliberate 1x1 widget interactions'
-          git push origin HEAD:main
-
-      - name: Build Halo
-        continue-on-error: true
+      - name: Build Halo strictly
         run: |
           set -o pipefail
           xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build | tee /tmp/halo-build.log
+
+      - name: Commit compile fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+          git commit -m 'Fix deliberate 1x1 widget compile errors'
+          git push origin HEAD:main
