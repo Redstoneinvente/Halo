@@ -756,6 +756,7 @@ final class HaloPixelPalStore: ObservableObject {
     }
     @Published private(set) var reaction: HaloPixelPalExpression?
     @Published private(set) var reactionStarted = Date()
+    @Published private(set) var cookieRescueStarted: Date?
     private var tapIndex = 0
     private var pressIndex = 0
     private var tapBurst = HaloPixelPalTapBurst()
@@ -764,6 +765,7 @@ final class HaloPixelPalStore: ObservableObject {
     private let preferencesKey = "HaloPixelPal.preferences.v4"
     private let legacyKeys = ["HaloPixelPal.preferences.v3", "HaloPixelPal.preferences.v2"]
     private var clearReactionWork: DispatchWorkItem?
+    private var cookieRescueWork: DispatchWorkItem?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -792,6 +794,10 @@ final class HaloPixelPalStore: ObservableObject {
 
     func react(_ expression: HaloPixelPalExpression, seconds: Double = 1.7) {
         clearReactionWork?.cancel()
+        if expression != .furious {
+            cookieRescueWork?.cancel()
+            cookieRescueStarted = nil
+        }
         reactionStarted = Date()
         reaction = expression
         let work = DispatchWorkItem { [weak self] in self?.reaction = nil }
@@ -802,7 +808,7 @@ final class HaloPixelPalStore: ObservableObject {
     func tapped() {
         guard preferences.tapReaction, reaction != .furious else { return }
         if let escalation = escalatedTapReaction(forPhysicalTapCount: 1) {
-            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)
+            react(escalation, seconds: escalation == .furious ? 2.82 : 3.4)
             return
         }
         let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]
@@ -813,7 +819,7 @@ final class HaloPixelPalStore: ObservableObject {
     func doubleTapped() {
         guard preferences.doubleTapReaction, reaction != .furious else { return }
         if let escalation = escalatedTapReaction(forPhysicalTapCount: 2) {
-            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)
+            react(escalation, seconds: escalation == .furious ? 2.82 : 3.4)
             return
         }
         react(.love, seconds: 2.2)
@@ -827,6 +833,20 @@ final class HaloPixelPalStore: ObservableObject {
         return triggered ? .annoyed : nil
     }
 
+    func feedFuryCookie() {
+        guard reaction == .furious, cookieRescueStarted == nil else { return }
+        clearReactionWork?.cancel()
+        let started = Date()
+        cookieRescueStarted = started
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.reaction == .furious, self.cookieRescueStarted == started else { return }
+            self.cookieRescueStarted = nil
+            self.react(.happy, seconds: 2.4)
+        }
+        cookieRescueWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.62, execute: work)
+    }
+
     func longPressed() {
         guard preferences.longPressReaction else { return }
         let sequence: [HaloPixelPalExpression] = [.sleepy, .shy, .smug]
@@ -838,6 +858,8 @@ final class HaloPixelPalStore: ObservableObject {
         preferences = HaloPixelPalPreferences()
         reaction = nil
         clearReactionWork?.cancel()
+        cookieRescueWork?.cancel()
+        cookieRescueStarted = nil
         tapIndex = 0
         pressIndex = 0
         tapBurst.reset()
@@ -1008,7 +1030,9 @@ struct HaloPixelPetWidget: View {
                     reduceMotion: reduceMotion,
                     animationTime: timeline.date.timeIntervalSince(pal.reaction == nil ? animationEpoch : pal.reactionStarted),
                     reactionElapsed: pal.reaction.map { _ in timeline.date.timeIntervalSince(pal.reactionStarted) },
-                    pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero
+                    cookieRescueElapsed: pal.cookieRescueStarted.map { timeline.date.timeIntervalSince($0) },
+                    pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero,
+                    onCookieTap: { pal.feedFuryCookie() }
                 )
                 .frame(width: side, height: side)
                 .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
@@ -1094,7 +1118,9 @@ private struct HaloPixelPalFace: View {
     let reduceMotion: Bool
     var animationTime: TimeInterval = 0
     var reactionElapsed: TimeInterval? = nil
+    var cookieRescueElapsed: TimeInterval? = nil
     var pointer: CGPoint = .zero
+    var onCookieTap: (() -> Void)? = nil
     @Environment(\.displayScale) private var displayScale
 
     private let logicalGrid = 24
@@ -1141,31 +1167,59 @@ private struct HaloPixelPalFace: View {
 
             if expression == .furious, let reactionElapsed = reactionElapsed {
                 Canvas { context, size in
-                    drawFuryDoor(context: &context, size: size, elapsed: reactionElapsed)
+                    drawFuryDoor(
+                        context: &context,
+                        size: size,
+                        elapsed: reactionElapsed,
+                        cookieRescueElapsed: cookieRescueElapsed
+                    )
                 }
                 .allowsHitTesting(false)
+
+                if cookieRescueElapsed == nil, reactionElapsed >= 1.05, reactionElapsed < 2.15, let onCookieTap {
+                    GeometryReader { proxy in
+                        let hitSize = max(24.0, min(proxy.size.width, proxy.size.height) * 0.30)
+                        Button(action: onCookieTap) {
+                            Color.clear
+                                .frame(width: hitSize, height: hitSize)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                        .accessibilityLabel("Give Pixel Pal the cookie")
+                        .help("Give Pixel Pal the cookie")
+                    }
+                }
             }
         }
         .clipped()
     }
 
-    private func furyDoorClosure(elapsed: TimeInterval) -> Double {
-        if reduceMotion {
-            return elapsed >= 0.65 && elapsed < 1.55 ? 1.0 : 0.0
-        }
+    private func furyDoorClosure(elapsed: TimeInterval, cookieRescueElapsed: TimeInterval?) -> Double {
         func smooth(_ value: Double) -> Double {
             let p = min(1.0, max(0.0, value))
             return p * p * (3.0 - 2.0 * p)
         }
+        if let rescue = cookieRescueElapsed {
+            return max(0.0, 1.0 - smooth(rescue / 0.55))
+        }
+        if reduceMotion {
+            return elapsed >= 0.65 && elapsed < 2.80 ? 1.0 : 0.0
+        }
         if elapsed < 0.55 { return 0 }
         if elapsed < 1.05 { return smooth((elapsed - 0.55) / 0.50) }
-        if elapsed < 1.55 { return 1 }
-        if elapsed < 2.20 { return 1 - smooth((elapsed - 1.55) / 0.65) }
+        if elapsed < 2.15 { return 1 }
+        if elapsed < 2.80 { return 1 - smooth((elapsed - 2.15) / 0.65) }
         return 0
     }
 
-    private func drawFuryDoor(context: inout GraphicsContext, size: CGSize, elapsed: TimeInterval) {
-        let closure = furyDoorClosure(elapsed: elapsed)
+    private func drawFuryDoor(
+        context: inout GraphicsContext,
+        size: CGSize,
+        elapsed: TimeInterval,
+        cookieRescueElapsed: TimeInterval?
+    ) {
+        let closure = furyDoorClosure(elapsed: elapsed, cookieRescueElapsed: cookieRescueElapsed)
         guard closure > 0.001 else { return }
 
         let panelWidth = size.width * 0.5 * closure
@@ -1189,6 +1243,66 @@ private struct HaloPixelPalFace: View {
             let y = size.height * CGFloat(row) / 4.0
             paintRect(CGRect(x: 0, y: y, width: panelWidth, height: edgeWidth), seamColor)
             paintRect(CGRect(x: size.width - panelWidth, y: y, width: panelWidth, height: edgeWidth), seamColor)
+        }
+
+        if let rescue = cookieRescueElapsed {
+            drawFuryCookie(context: &context, size: size, consumeProgress: min(1.0, rescue / 0.48))
+        } else if elapsed >= 1.05 && elapsed < 2.15 {
+            drawFuryCookie(context: &context, size: size, consumeProgress: 0)
+        }
+    }
+
+    private func drawFuryCookie(context: inout GraphicsContext, size: CGSize, consumeProgress: Double) {
+        let pattern = [
+            "..bbb..",
+            ".bbbbb.",
+            "bbdbdbb",
+            "bbbbbbb",
+            "bdbbbdb",
+            ".bbdbb.",
+            "..bbb.."
+        ]
+        let pixel = max(1.0, min(size.width, size.height) / 30.0)
+        let cookieSide = pixel * 7.0
+        let origin = CGPoint(x: (size.width - cookieSide) / 2.0, y: (size.height - cookieSide) / 2.0)
+        let visibleColumns = max(0, min(7, Int(ceil(7.0 * (1.0 - consumeProgress)))))
+        let dough = Color(red: 0.92, green: 0.55, blue: 0.18)
+        let edge = Color(red: 0.62, green: 0.28, blue: 0.07)
+        let chip = Color(red: 0.25, green: 0.09, blue: 0.025)
+
+        func paintCookiePixel(_ rect: CGRect, _ color: Color) {
+            var path = Path()
+            path.addRect(rect)
+            context.fill(path, with: .color(color))
+        }
+
+        for (y, row) in pattern.enumerated() {
+            for (x, value) in row.enumerated() where x < visibleColumns && value != "." {
+                let rect = CGRect(
+                    x: origin.x + CGFloat(x) * pixel,
+                    y: origin.y + CGFloat(y) * pixel,
+                    width: pixel,
+                    height: pixel
+                )
+                let isOuter = x == 0 || x == 6 || y == 0 || y == 6
+                paintCookiePixel(rect, value == "d" ? chip : (isOuter ? edge : dough))
+            }
+        }
+
+        if consumeProgress > 0.08 && consumeProgress < 0.95 {
+            let crumb = max(1.0, pixel * 0.72)
+            let t = CGFloat(consumeProgress)
+            let crumbs = [
+                CGPoint(x: size.width / 2 + pixel * 3.2 + pixel * 2.4 * t, y: size.height / 2 - pixel * 1.7 - pixel * 2.0 * t),
+                CGPoint(x: size.width / 2 + pixel * 2.4 + pixel * 1.5 * t, y: size.height / 2 + pixel * 0.2 + pixel * 1.7 * t),
+                CGPoint(x: size.width / 2 + pixel * 1.4 + pixel * 2.0 * t, y: size.height / 2 + pixel * 2.0 - pixel * 0.8 * t)
+            ]
+            for (index, point) in crumbs.enumerated() {
+                paintCookiePixel(
+                    CGRect(x: point.x, y: point.y, width: crumb, height: crumb),
+                    (index == 1 ? chip : dough).opacity(1.0 - consumeProgress)
+                )
+            }
         }
     }
 
