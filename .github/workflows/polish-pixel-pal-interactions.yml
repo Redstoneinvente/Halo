@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/pixel-pal-interactions-trigger.txt'
+      - '.github/workflows/polish-pixel-pal-interactions.yml'
   workflow_dispatch:
 
 permissions:
