@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - '.github/pixelpal-v2-rebuild.b64'
+      - '.github/workflows/rebuild-pixelpal-v2.yml'
 
 permissions:
   contents: write
@@ -24,6 +25,20 @@ jobs:
           payload = Path('.github/pixelpal-v2-rebuild.b64').read_text().strip()
           source = gzip.decompress(base64.b64decode(payload))
           Path('Halo/Views/PixelPetWidget.swift').write_bytes(source)
+          PY
+
+      - name: Fix legacy preference coding key
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('Halo/Views/PixelPetWidget.swift')
+          source = path.read_text()
+          marker = 'struct HaloPixelPalPreferences: Codable, Equatable {'
+          if marker not in source:
+              raise SystemExit('HaloPixelPalPreferences marker not found')
+          if 'var showCheeks:' not in source and 'let showCheeks:' not in source:
+              source = source.replace(marker, marker + '\n    // Retained for backward compatibility with previously persisted Pixel Pal preferences.\n    var showCheeks: Bool = true', 1)
+          path.write_text(source)
           PY
 
       - name: Parse Pixel Pal
