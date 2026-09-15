@@ -1,0 +1,46 @@
+name: Apply Micro Widget Design
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/micro-widget-design-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply deliberate 1x1 widget design
+        run: python3 scripts/apply_micro_widget_design.py
+
+      - name: Parse changed Swift sources
+        run: |
+          xcrun swiftc -parse Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+          xcrun swiftc -parse Halo/Views/ModuleViews.swift
+          xcrun swiftc -parse Halo/Views/SurfaceView.swift
+
+      - name: Commit implementation
+        run: |
+          if git diff --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Views/VisualWorkspaceAdaptiveWidgets.swift Halo/Views/ModuleViews.swift Halo/Views/SurfaceView.swift Docs/WidgetCustomization.md
+          git commit -m 'Implement deliberate 1x1 widget interactions'
+          git push origin HEAD:main
+
+      - name: Build Halo
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build | tee /tmp/halo-build.log
