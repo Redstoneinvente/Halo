@@ -33,61 +33,61 @@ jobs:
                   raise SystemExit(f'{label}: expected one match, found {count}')
               s = s.replace(old, new, 1)
 
-          replace_once(
-              '''    static let sampleWindow: TimeInterval = 0.95
-    static let cooldown: TimeInterval = 2.4
-    static let minimumRotation = Double.pi * 2.4
-    static let minimumDuration: TimeInterval = 0.28
-    static let minimumPathSpeed = 1.7
-    static let minimumDirectionConsistency = 0.80
-    static let minimumRadius = 0.16
-    static let maximumRadius = 0.48
-    static let maximumRadiusSpread = 0.20
-    static let minimumSamples = 10
-''',
-              '''    // One quick, natural circle should be enough. The consistency checks still
-    // reject ordinary back-and-forth cursor movement and loose zig-zags.
-    static let sampleWindow: TimeInterval = 1.15
-    static let cooldown: TimeInterval = 2.0
-    static let minimumRotation = Double.pi * 1.55
-    static let minimumDuration: TimeInterval = 0.12
-    static let minimumPathSpeed = 0.85
-    static let minimumDirectionConsistency = 0.55
-    static let minimumRadius = 0.08
-    static let maximumRadius = 0.68
-    static let maximumRadiusSpread = 0.36
-    static let minimumSamples = 6
-''',
-              'detector thresholds',
+          old = (
+              "    static let sampleWindow: TimeInterval = 0.95\n"
+              "    static let cooldown: TimeInterval = 2.4\n"
+              "    static let minimumRotation = Double.pi * 2.4\n"
+              "    static let minimumDuration: TimeInterval = 0.28\n"
+              "    static let minimumPathSpeed = 1.7\n"
+              "    static let minimumDirectionConsistency = 0.80\n"
+              "    static let minimumRadius = 0.16\n"
+              "    static let maximumRadius = 0.48\n"
+              "    static let maximumRadiusSpread = 0.20\n"
+              "    static let minimumSamples = 10\n"
           )
+          new = (
+              "    // One quick, natural circle should be enough. The consistency checks still\n"
+              "    // reject ordinary back-and-forth cursor movement and loose zig-zags.\n"
+              "    static let sampleWindow: TimeInterval = 1.15\n"
+              "    static let cooldown: TimeInterval = 2.0\n"
+              "    static let minimumRotation = Double.pi * 1.55\n"
+              "    static let minimumDuration: TimeInterval = 0.12\n"
+              "    static let minimumPathSpeed = 0.85\n"
+              "    static let minimumDirectionConsistency = 0.55\n"
+              "    static let minimumRadius = 0.08\n"
+              "    static let maximumRadius = 0.68\n"
+              "    static let maximumRadiusSpread = 0.36\n"
+              "    static let minimumSamples = 6\n"
+          )
+          replace_once(old, new, 'detector thresholds')
 
           replace_once(
-              '        if let last = samples.last, now - last.time > 0.18 {\n',
-              '        if let last = samples.last, now - last.time > 0.28 {\n',
+              "        if let last = samples.last, now - last.time > 0.18 {\n",
+              "        if let last = samples.last, now - last.time > 0.28 {\n",
               'sample continuity gap',
           )
 
           replace_once(
-              '                            at: timeline.date.timeIntervalSinceReferenceDate\n',
-              '                            at: Date().timeIntervalSinceReferenceDate\n',
+              "                            at: timeline.date.timeIntervalSinceReferenceDate\n",
+              "                            at: Date().timeIntervalSinceReferenceDate\n",
               'live hover timestamp',
           )
 
           replace_once(
-              '                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in\n',
-              '                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .dizzy, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in\n',
+              "                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in\n",
+              "                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .dizzy, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in\n",
               'visible dizzy preview button',
           )
 
           replace_once(
-              '        case .sleepy: return .sleepZ\n        case .annoyed, .surprised, .shocked: return .alert\n',
-              '        case .sleepy: return .sleepZ\n        case .dizzy: return .dizzy\n        case .annoyed, .surprised, .shocked: return .alert\n',
+              "        case .sleepy: return .sleepZ\n        case .annoyed, .surprised, .shocked: return .alert\n",
+              "        case .sleepy: return .sleepZ\n        case .dizzy: return .dizzy\n        case .annoyed, .surprised, .shocked: return .alert\n",
               'settings preview fx',
           )
 
           replace_once(
-              '        .help("Hover, click, double-click or long-press Pixel Pal · right-click for settings")\n',
-              '        .help("Hover, click, double-click, long-press, or quickly circle the cursor around Pixel Pal · right-click for settings")\n',
+              "        .help(\"Hover, click, double-click or long-press Pixel Pal · right-click for settings\")\n",
+              "        .help(\"Hover, click, double-click, long-press, or quickly circle the cursor around Pixel Pal · right-click for settings\")\n",
               'interaction help',
           )
 
@@ -131,11 +131,10 @@ jobs:
           MIN_SAMPLES = 6
 
           def detects(points):
-              points = [p for p in points if MIN_RADIUS <= p[3] <= MAX_RADIUS]
-              if len(points) < MIN_SAMPLES:
+              if not points:
                   return False
               now = points[-1][0]
-              points = [p for p in points if now - p[0] <= WINDOW]
+              points = [p for p in points if now - p[0] <= WINDOW and MIN_RADIUS <= p[3] <= MAX_RADIUS]
               if len(points) < MIN_SAMPLES:
                   return False
               duration = points[-1][0] - points[0][0]
@@ -145,40 +144,45 @@ jobs:
               radii = []
               for i, (_, x, y, r) in enumerate(points):
                   radii.append(r)
-                  if i == 0: continue
-                  px, py = points[i-1][1], points[i-1][2]
+                  if i == 0:
+                      continue
+                  px, py = points[i - 1][1], points[i - 1][2]
                   a = math.atan2(y, x)
                   pa = math.atan2(py, px)
                   d = a - pa
-                  while d > math.pi: d -= 2 * math.pi
-                  while d < -math.pi: d += 2 * math.pi
+                  while d > math.pi:
+                      d -= 2 * math.pi
+                  while d < -math.pi:
+                      d += 2 * math.pi
                   signed += d
                   absolute += abs(d)
-                  distance += math.hypot(x-px, y-py)
+                  distance += math.hypot(x - px, y - py)
               if absolute <= 0.001:
                   return False
               return (
-                  abs(signed) >= MIN_ROT and
-                  abs(signed)/absolute >= MIN_CONSISTENCY and
-                  distance/duration >= MIN_SPEED and
-                  max(radii)-min(radii) <= MAX_SPREAD
+                  abs(signed) >= MIN_ROT
+                  and abs(signed) / absolute >= MIN_CONSISTENCY
+                  and distance / duration >= MIN_SPEED
+                  and max(radii) - min(radii) <= MAX_SPREAD
               )
 
           def circle(duration, turns=1.0, radius=0.31, samples=24):
-              return [
-                  (duration*i/(samples-1), radius*math.cos(2*math.pi*turns*i/(samples-1)), radius*math.sin(2*math.pi*turns*i/(samples-1)), radius)
-                  for i in range(samples)
-              ]
+              out = []
+              for i in range(samples):
+                  t = duration * i / (samples - 1)
+                  a = 2 * math.pi * turns * i / (samples - 1)
+                  out.append((t, radius * math.cos(a), radius * math.sin(a), radius))
+              return out
 
           assert detects(circle(0.72, turns=0.95)), 'one quick natural circle should trigger'
-          assert not detects(circle(2.0, turns=1.0, samples=40)), 'slow circle should not trigger in the rolling window'
+          assert not detects(circle(2.0, turns=1.0, samples=40)), 'slow circle should not trigger in rolling window'
 
           zig = []
           for i in range(24):
-              t = 0.72*i/23
+              t = 0.72 * i / 23
               x = 0.30 if i % 2 == 0 else -0.30
-              y = -0.22 + 0.44*(i/23)
-              zig.append((t, x, y, math.hypot(x,y)))
+              y = -0.22 + 0.44 * (i / 23)
+              zig.append((t, x, y, math.hypot(x, y)))
           assert not detects(zig), 'fast zig-zag should not trigger'
           print('Natural circle triggers; slow circle and zig-zag remain rejected.')
           PY
