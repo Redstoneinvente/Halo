@@ -130,7 +130,10 @@ jobs:
           python3 -m py_compile /tmp/apply_custom_ci.py
 
       - name: Apply Custom CI SDK
-        run: python3 /tmp/apply_custom_ci.py
+        shell: bash
+        run: |
+          python3 /tmp/apply_custom_ci.py
+          python3 scripts/complete_custom_ci_sdk.py /tmp/apply_custom_ci.py
 
       - name: Verify required Custom CI UX
         shell: bash
@@ -164,6 +167,7 @@ jobs:
         shell: bash
         run: |
           rm -rf scripts/custom-ci-patch
+          rm -f scripts/complete_custom_ci_sdk.py
           rm -f .github/custom-ci-sdk-trigger.txt
           rm -f .github/workflows/apply-custom-ci-sdk.yml
 
