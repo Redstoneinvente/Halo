@@ -147,7 +147,7 @@ struct HaloPixelPalRGB: Codable, Equatable {
 struct HaloPixelPalPreferences: Codable, Equatable {
     // Legacy persisted field retained so Codable stays backward-compatible.
     var showCheeks: Bool = true
-    var version = 4
+    var version = 5
 
     // Appearance
     var faceStyle: HaloPixelPalFaceStyle = .soft
@@ -160,6 +160,10 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     var blushColor = HaloPixelPalRGB(red: 1.0, green: 0.38, blue: 0.58)
     var backgroundStyle: HaloPixelPalBackgroundStyle = .transparent
     var backgroundColor = HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)
+    var backgroundOpacity = 1.0
+    var inactiveLEDIntensity = 0.075
+    var inactiveLEDUsesFaceColor = true
+    var inactiveLEDColor = HaloPixelPalRGB(red: 0.36, green: 0.40, blue: 0.46)
     var faceScale = 1.0
     var glowIntensity = 0.10
 
@@ -194,7 +198,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case version
         case faceStyle, eyeStyle, mouthStyle, cheekStyle, palette, customColor, accentColor, blushColor
-        case backgroundStyle, backgroundColor, faceScale, glowIntensity
+        case backgroundStyle, backgroundColor, backgroundOpacity, inactiveLEDIntensity, inactiveLEDUsesFaceColor, inactiveLEDColor, faceScale, glowIntensity
         case accessoryMode, selectedAccessory, allowedAccessories
         case automaticBlinking, animationSpeed, animationIntensity
         case hoverReaction, tapReaction, doubleTapReaction, longPressReaction
@@ -206,7 +210,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        version = 4
+        version = 5
         faceStyle = try c.decodeIfPresent(HaloPixelPalFaceStyle.self, forKey: .faceStyle) ?? .soft
         eyeStyle = try c.decodeIfPresent(HaloPixelPalEyeStyle.self, forKey: .eyeStyle) ?? .glossy
         mouthStyle = try c.decodeIfPresent(HaloPixelPalMouthStyle.self, forKey: .mouthStyle) ?? .automatic
@@ -221,6 +225,10 @@ struct HaloPixelPalPreferences: Codable, Equatable {
         blushColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .blushColor) ?? HaloPixelPalRGB(red: 1.0, green: 0.38, blue: 0.58)
         backgroundStyle = try c.decodeIfPresent(HaloPixelPalBackgroundStyle.self, forKey: .backgroundStyle) ?? .transparent
         backgroundColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .backgroundColor) ?? HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)
+        backgroundOpacity = try c.decodeIfPresent(Double.self, forKey: .backgroundOpacity) ?? 1.0
+        inactiveLEDIntensity = try c.decodeIfPresent(Double.self, forKey: .inactiveLEDIntensity) ?? 0.075
+        inactiveLEDUsesFaceColor = try c.decodeIfPresent(Bool.self, forKey: .inactiveLEDUsesFaceColor) ?? true
+        inactiveLEDColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .inactiveLEDColor) ?? HaloPixelPalRGB(red: 0.36, green: 0.40, blue: 0.46)
         faceScale = try c.decodeIfPresent(Double.self, forKey: .faceScale) ?? 1.0
         glowIntensity = try c.decodeIfPresent(Double.self, forKey: .glowIntensity) ?? 0.10
 
@@ -250,15 +258,18 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     func normalized() -> Self {
         var value = self
-        value.version = 4
+        value.version = 5
         value.animationSpeed = min(2.0, max(0.35, animationSpeed))
         value.animationIntensity = min(1.0, max(0.0, animationIntensity))
         value.faceScale = min(1.0, max(0.76, faceScale))
         value.glowIntensity = min(1.0, max(0.0, glowIntensity))
+        value.backgroundOpacity = min(1.0, max(0.0, backgroundOpacity))
+        value.inactiveLEDIntensity = min(0.35, max(0.0, inactiveLEDIntensity))
         value.customColor = Self.clamped(customColor)
         value.accentColor = Self.clamped(accentColor)
         value.blushColor = Self.clamped(blushColor)
         value.backgroundColor = Self.clamped(backgroundColor)
+        value.inactiveLEDColor = Self.clamped(inactiveLEDColor)
         value.allowedAccessories = Array(Set(allowedAccessories.filter { $0 != .none }))
             .sorted { $0.rawValue < $1.rawValue }
         return value
@@ -937,13 +948,16 @@ private struct HaloPixelPalFace: View {
     var body: some View {
         ZStack {
             background
-            Canvas { context, size in
-                let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)
-                for y in 0..<logicalGrid {
-                    for x in 0..<logicalGrid {
-                        context.fill(Path(geometry.led(x: x, y: y)),
-                                     with: .color(faceColor.opacity(0.075)),
-                                     style: FillStyle(antialiased: false))
+            if preferences.inactiveLEDIntensity > 0.001 {
+                Canvas { context, size in
+                    let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)
+                    let inactiveColor = preferences.inactiveLEDUsesFaceColor ? faceColor : preferences.inactiveLEDColor.color
+                    for y in 0..<logicalGrid {
+                        for x in 0..<logicalGrid {
+                            context.fill(Path(geometry.led(x: x, y: y)),
+                                         with: .color(inactiveColor.opacity(preferences.inactiveLEDIntensity)),
+                                         style: FillStyle(antialiased: false))
+                        }
                     }
                 }
             }
@@ -964,18 +978,19 @@ private struct HaloPixelPalFace: View {
         case .transparent:
             Color.clear
         case .black:
-            Color.black
+            Color.black.opacity(preferences.backgroundOpacity)
         case .custom:
-            preferences.backgroundColor.color
+            preferences.backgroundColor.color.opacity(preferences.backgroundOpacity)
         case .glow:
             ZStack {
-                Color.black.opacity(0.74)
+                Color.black.opacity(0.74 * preferences.backgroundOpacity)
                 RadialGradient(
                     colors: [faceColor.opacity(0.10 + 0.28 * preferences.glowIntensity), .clear],
                     center: .center,
                     startRadius: 0,
                     endRadius: 180
                 )
+                .opacity(preferences.backgroundOpacity)
             }
         }
     }
@@ -1377,11 +1392,12 @@ private struct HaloPixelPalSettingsView: View {
                     contextualAccessory: previewAccessory,
                     fx: previewFX,
                     squareSize: 2,
-                    preferences: pal.preferences,
+                    preferences: expressionPreviewPreferences,
                     date: timeline.date,
                     reduceMotion: reduceMotion,
                     animationTime: timeline.date.timeIntervalSince(previewEpoch)
                 )
+                .id(previewExpression)
             }
             .frame(width: 150, height: 150)
             .background(Color.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -1424,11 +1440,32 @@ private struct HaloPixelPalSettingsView: View {
                 ColorPicker("Accent / FX color", selection: rgbBinding(\.accentColor))
                 ColorPicker("Blush color", selection: rgbBinding(\.blushColor))
 
-                Picker("Background", selection: bind(\.backgroundStyle)) {
+                Text("Background display").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Picker("Surface", selection: bind(\.backgroundStyle)) {
                     ForEach(HaloPixelPalBackgroundStyle.allCases) { Text($0.rawValue).tag($0) }
                 }
                 if pal.preferences.backgroundStyle == .custom {
-                    ColorPicker("Background color", selection: rgbBinding(\.backgroundColor))
+                    ColorPicker("Surface color", selection: rgbBinding(\.backgroundColor))
+                }
+                if pal.preferences.backgroundStyle != .transparent {
+                    HStack {
+                        Text("Surface opacity")
+                        Slider(value: bind(\.backgroundOpacity), in: 0...1)
+                        Text("\(Int(pal.preferences.backgroundOpacity * 100))%")
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 38, alignment: .trailing)
+                    }
+                }
+                Toggle("Match inactive LEDs to face color", isOn: bind(\.inactiveLEDUsesFaceColor))
+                if !pal.preferences.inactiveLEDUsesFaceColor {
+                    ColorPicker("Inactive LED color", selection: rgbBinding(\.inactiveLEDColor))
+                }
+                HStack {
+                    Text("Inactive LED brightness")
+                    Slider(value: bind(\.inactiveLEDIntensity), in: 0...0.35)
+                    Text("\(Int(pal.preferences.inactiveLEDIntensity * 100))%")
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 38, alignment: .trailing)
                 }
 
                 HStack {
@@ -1590,12 +1627,15 @@ private struct HaloPixelPalSettingsView: View {
                     ForEach(HaloPixelPalExpression.allCases.filter { $0 != .blink }) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.menu)
+                .onChange(of: previewExpression) { expression in
+                    previewEpoch = Date()
+                    pal.react(expression, seconds: 2.2)
+                }
 
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 5), spacing: 7) {
                     ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in
                         Button(expression.title) {
                             previewExpression = expression
-                            pal.react(expression, seconds: 2.2)
                         }
                         .buttonStyle(.bordered)
                     }
@@ -1613,6 +1653,14 @@ private struct HaloPixelPalSettingsView: View {
             Spacer()
             Button("Reset") { pal.reset() }
         }
+    }
+
+    private var expressionPreviewPreferences: HaloPixelPalPreferences {
+        var value = pal.preferences
+        value.mouthStyle = .automatic
+        value.accessoryMode = .contextual
+        value.selectedAccessory = .none
+        return value
     }
 
     private var previewFX: HaloPixelPalFX {

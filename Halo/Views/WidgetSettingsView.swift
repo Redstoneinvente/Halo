@@ -1633,6 +1633,17 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
             Toggle("Visible", isOn: Binding(get: { !binding.wrappedValue.hidden }, set: { binding.wrappedValue.hidden = !$0 }))
             Picker("Presentation", selection: binding.presentation) { ForEach(OpenNotchPresentation.allCases) { Text($0.rawValue).tag($0) } }
             Picker("Priority", selection: binding.priority) { ForEach(OpenNotchPriority.allCases) { Text($0.rawValue).tag($0) } }
+            if item.module == .pet {
+                Button {
+                    HaloPixelPalSettingsWindowController.shared.show()
+                } label: {
+                    Label("Pixel Pet Settings…", systemImage: "slider.horizontal.3")
+                }
+                .buttonStyle(.borderedProminent)
+                Text("Expressions, face style, accessories, animation and LED/background appearance are configured in Pixel Pet Settings.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
         Section("Grid Size & Position") {
             Picker("Standard size", selection: gridSizePresetBinding(item.id)) {
