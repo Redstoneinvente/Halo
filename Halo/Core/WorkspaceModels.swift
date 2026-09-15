@@ -525,7 +525,7 @@ struct OpenNotchItem: Codable, Equatable, Identifiable {
         value.sizing = try sizing.validated()
         value.gridPlacement = try gridPlacement?.validated()
         if module == .pet, var placement = value.gridPlacement {
-            let side = min(4, max(1, max(placement.columnSpan, placement.rowSpan)))
+            let side = 4
             placement.columnSpan = side
             placement.rowSpan = side
             placement.column = min(max(0, 8 - side), max(0, placement.column))
@@ -757,6 +757,9 @@ struct OpenNotchLayout: Codable, Equatable {
     mutating func normalizeGridItems(pinnedID: UUID? = nil) {
         guard var items = gridItems else { return }
         items = Self.workspaceWidgetItems(items)
+        if items.contains(where: { $0.module == .pet }), resolvedGridColumns < 4 {
+            gridColumns = 4
+        }
         let columns = resolvedGridColumns
         var occupied = Set<Int>()
         let ordered: [Int]
@@ -769,7 +772,7 @@ struct OpenNotchLayout: Codable, Equatable {
             let fallback = Self.defaultGridSpan(for: items[index])
             var placement = (items[index].gridPlacement ?? OpenNotchGridPlacement(columnSpan: fallback.columns, rowSpan: fallback.rows)).clamped(columns: columns)
             if items[index].module == .pet {
-                let side = min(min(4, columns), max(placement.columnSpan, placement.rowSpan))
+                let side = 4
                 placement.columnSpan = side
                 placement.rowSpan = side
                 placement.column = min(max(0, columns - side), max(0, placement.column))
@@ -806,7 +809,7 @@ struct OpenNotchLayout: Codable, Equatable {
         if let module = item.module {
             switch module {
             case .media, .calendar, .system: return (3, 2)
-            case .pet: return (1, 1)
+            case .pet: return (4, 4)
             case .shelf, .clipboard, .launcher, .activities, .notes: return (2, 2)
             case .clock, .timer, .audio, .capture, .stopwatch, .developer: return (2, 1)
             }

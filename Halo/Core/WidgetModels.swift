@@ -997,14 +997,14 @@ extension ModuleID {
         case .stopwatch: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 2, rows: 2), rich: .init(columns: 4, rows: 3))
         case .clock: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 3, rows: 1), rich: .init(columns: 4, rows: 2))
         case .activities, .developer: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 2, rows: 2), rich: .init(columns: 4, rows: 3))
-        case .pet: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 2, rows: 2), rich: .init(columns: 4, rows: 4))
+        case .pet: return .init(minimum: .init(columns: 4, rows: 4), everyday: .init(columns: 4, rows: 4), rich: .init(columns: 4, rows: 4))
         }
     }
 
     func visualWidgetSizeHint(for footprint: VisualWidgetFootprint) -> String {
         let recommendation = visualWidgetSizeRecommendation
         if self == .pet {
-            if footprint.columns != footprint.rows { return "Pixel Pal supports square sizes only: 1×1, 2×2, 3×3, or 4×4." }
+            if footprint.columns != 4 || footprint.rows != 4 { return "Pixel Pal requires a 4×4 footprint." }
             return "Pixel Pal · square face-only retro expression at \(footprint.columns)×\(footprint.rows)."
         }
         if footprint.area == 1 && self == .notes { return "1×1 is Quick Note capture only · actual note content starts at 2×2." }
