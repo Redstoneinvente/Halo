@@ -639,16 +639,17 @@ struct HaloPixelPalCursorOrbitDetector {
         let y: Double
     }
 
-    static let sampleWindow: TimeInterval = 0.95
-    static let cooldown: TimeInterval = 2.4
-    static let minimumRotation = Double.pi * 2.4
-    static let minimumDuration: TimeInterval = 0.28
-    static let minimumPathSpeed = 1.7
-    static let minimumDirectionConsistency = 0.80
-    static let minimumRadius = 0.16
-    static let maximumRadius = 0.48
-    static let maximumRadiusSpread = 0.20
-    static let minimumSamples = 10
+    // One quick, natural circle should be enough.
+    static let sampleWindow: TimeInterval = 1.15
+    static let cooldown: TimeInterval = 2.0
+    static let minimumRotation = Double.pi * 1.55
+    static let minimumDuration: TimeInterval = 0.12
+    static let minimumPathSpeed = 0.85
+    static let minimumDirectionConsistency = 0.55
+    static let minimumRadius = 0.08
+    static let maximumRadius = 0.68
+    static let maximumRadiusSpread = 0.36
+    static let minimumSamples = 6
 
     private var samples: [Sample] = []
     private var lastTrigger = -Double.infinity
@@ -673,7 +674,7 @@ struct HaloPixelPalCursorOrbitDetector {
             return false
         }
 
-        if let last = samples.last, now - last.time > 0.18 {
+        if let last = samples.last, now - last.time > 0.28 {
             resetPath()
         }
 
@@ -996,7 +997,7 @@ struct HaloPixelPetWidget: View {
                         if orbitDetector.register(
                             location: location,
                             size: CGSize(width: side, height: side),
-                            at: timeline.date.timeIntervalSinceReferenceDate
+                            at: Date().timeIntervalSinceReferenceDate
                         ) {
                             pal.react(.dizzy, seconds: 1.9)
                         }
@@ -1034,7 +1035,7 @@ struct HaloPixelPetWidget: View {
             Button("Pixel Pal Settings…") { HaloPixelPalSettingsWindowController.shared.show() }
         }
         .accessibilityLabel("Halo Pixel Pal")
-        .help("Hover, click, double-click or long-press Pixel Pal · right-click for settings")
+        .help("Hover, click, double-click, long-press, or quickly circle the cursor around Pixel Pal · right-click for settings")
     }
 
     private func resolvedExpression(base: HaloPixelPalExpression, date: Date) -> HaloPixelPalExpression {
@@ -1816,7 +1817,7 @@ private struct HaloPixelPalSettingsView: View {
                 }
 
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 5), spacing: 7) {
-                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in
+                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .dizzy, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in
                         Button(expression.title) {
                             previewExpression = expression
                         }
