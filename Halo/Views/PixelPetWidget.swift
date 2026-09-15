@@ -28,6 +28,7 @@ enum HaloPixelPalExpression: String, Codable, CaseIterable, Identifiable {
     case mischievous
     case smug
     case annoyed
+    case furious
     case wink
     case music
 
@@ -445,9 +446,19 @@ private enum HaloPixelPalSprites {
         "p...p",
         ".ppp."
     ])
+    static let furiousEye = HaloPixelPalSprite(rows: [
+        "ppppp",
+        ".ppp.",
+        "..p.."
+    ])
 
     static let worriedBrow = HaloPixelPalSprite(rows: ["pp..."])
     static let annoyedBrow = HaloPixelPalSprite(rows: ["..ppp"])
+    static let furiousBrow = HaloPixelPalSprite(rows: [
+        "pp...",
+        ".pp..",
+        "..pp."
+    ])
     static let raisedBrow = HaloPixelPalSprite(rows: [".pp.."])
 
     static let mouthTiny = HaloPixelPalSprite(rows: [
@@ -482,6 +493,11 @@ private enum HaloPixelPalSprites {
         "..p..",
         ".p.p.",
         "p...p"
+    ])
+    static let mouthGrimace = HaloPixelPalSprite(rows: [
+        ".ppppp.",
+        "pwwwwwp",
+        ".ppppp."
     ])
     static let mouthCat = HaloPixelPalSprite(rows: [
         "p.p.p",
@@ -784,9 +800,9 @@ final class HaloPixelPalStore: ObservableObject {
     }
 
     func tapped() {
-        guard preferences.tapReaction else { return }
-        if shouldBecomeAngry(forPhysicalTapCount: 1) {
-            react(.annoyed, seconds: 3.4)
+        guard preferences.tapReaction, reaction != .furious else { return }
+        if let escalation = escalatedTapReaction(forPhysicalTapCount: 1) {
+            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)
             return
         }
         let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]
@@ -795,17 +811,20 @@ final class HaloPixelPalStore: ObservableObject {
     }
 
     func doubleTapped() {
-        guard preferences.doubleTapReaction else { return }
-        if shouldBecomeAngry(forPhysicalTapCount: 2) {
-            react(.annoyed, seconds: 3.4)
+        guard preferences.doubleTapReaction, reaction != .furious else { return }
+        if let escalation = escalatedTapReaction(forPhysicalTapCount: 2) {
+            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)
             return
         }
         react(.love, seconds: 2.2)
     }
 
-    private func shouldBecomeAngry(forPhysicalTapCount count: Int) -> Bool {
-        if reaction == .annoyed { return true }
-        return tapBurst.register(count: count, at: Date().timeIntervalSinceReferenceDate)
+    private func escalatedTapReaction(forPhysicalTapCount count: Int) -> HaloPixelPalExpression? {
+        let triggered = tapBurst.register(count: count, at: Date().timeIntervalSinceReferenceDate)
+        if reaction == .annoyed {
+            return triggered ? .furious : .annoyed
+        }
+        return triggered ? .annoyed : nil
     }
 
     func longPressed() {
@@ -852,7 +871,7 @@ private struct HaloPixelPalContext {
         if let reaction = pal.reaction {
             return .init(
                 expression: reaction,
-                accessory: reaction == .annoyed ? .horns : nil,
+                accessory: (reaction == .annoyed || reaction == .furious) ? .horns : nil,
                 fx: fx(for: reaction)
             )
         }
@@ -931,7 +950,7 @@ private struct HaloPixelPalContext {
         case .crying: return .tears
         case .sleepy: return .sleepZ
         case .dizzy: return .dizzy
-        case .annoyed, .shocked, .surprised: return .alert
+        case .annoyed, .furious, .shocked, .surprised: return .alert
         default: return .none
         }
     }
@@ -1080,9 +1099,15 @@ private struct HaloPixelPalFace: View {
 
     private let logicalGrid = 24
 
-    private var faceColor: Color { preferences.faceColor }
-    private var accentColor: Color { preferences.accentColor.color }
-    private var blushColor: Color { preferences.blushColor.color }
+    private var faceColor: Color {
+        expression == .furious ? Color(red: 1.0, green: 0.11, blue: 0.07) : preferences.faceColor
+    }
+    private var accentColor: Color {
+        expression == .furious ? Color(red: 1.0, green: 0.52, blue: 0.08) : preferences.accentColor.color
+    }
+    private var blushColor: Color {
+        expression == .furious ? Color(red: 0.62, green: 0.02, blue: 0.02) : preferences.blushColor.color
+    }
 
     var body: some View {
         ZStack {
@@ -1113,8 +1138,58 @@ private struct HaloPixelPalFace: View {
                 color: faceColor.opacity(preferences.glowIntensity * 0.55),
                 radius: 1 + 7 * preferences.glowIntensity
             )
+
+            if expression == .furious, let reactionElapsed = reactionElapsed {
+                Canvas { context, size in
+                    drawFuryDoor(context: &context, size: size, elapsed: reactionElapsed)
+                }
+                .allowsHitTesting(false)
+            }
         }
         .clipped()
+    }
+
+    private func furyDoorClosure(elapsed: TimeInterval) -> Double {
+        if reduceMotion {
+            return elapsed >= 0.65 && elapsed < 1.55 ? 1.0 : 0.0
+        }
+        func smooth(_ value: Double) -> Double {
+            let p = min(1.0, max(0.0, value))
+            return p * p * (3.0 - 2.0 * p)
+        }
+        if elapsed < 0.55 { return 0 }
+        if elapsed < 1.05 { return smooth((elapsed - 0.55) / 0.50) }
+        if elapsed < 1.55 { return 1 }
+        if elapsed < 2.20 { return 1 - smooth((elapsed - 1.55) / 0.65) }
+        return 0
+    }
+
+    private func drawFuryDoor(context: inout GraphicsContext, size: CGSize, elapsed: TimeInterval) {
+        let closure = furyDoorClosure(elapsed: elapsed)
+        guard closure > 0.001 else { return }
+
+        let panelWidth = size.width * 0.5 * closure
+        let edgeWidth = max(1.0, min(size.width, size.height) / 48.0)
+        let panelColor = Color(red: 0.12, green: 0.015, blue: 0.012).opacity(0.98)
+        let edgeColor = Color(red: 0.95, green: 0.08, blue: 0.04).opacity(0.92)
+        let seamColor = Color.black.opacity(0.42)
+
+        func paintRect(_ rect: CGRect, _ color: Color) {
+            var path = Path()
+            path.addRect(rect)
+            context.fill(path, with: .color(color))
+        }
+
+        paintRect(CGRect(x: 0, y: 0, width: panelWidth, height: size.height), panelColor)
+        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: panelWidth, height: size.height), panelColor)
+        paintRect(CGRect(x: max(0, panelWidth - edgeWidth), y: 0, width: edgeWidth, height: size.height), edgeColor)
+        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: edgeWidth, height: size.height), edgeColor)
+
+        for row in 1..<4 {
+            let y = size.height * CGFloat(row) / 4.0
+            paintRect(CGRect(x: 0, y: y, width: panelWidth, height: edgeWidth), seamColor)
+            paintRect(CGRect(x: size.width - panelWidth, y: y, width: panelWidth, height: edgeWidth), seamColor)
+        }
     }
 
     @ViewBuilder
@@ -1222,7 +1297,7 @@ private struct HaloPixelPalFace: View {
         }
     }
 
-    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, smug }
+    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, furious, smug }
 
     private var eyePose: EyePose {
         switch expression {
@@ -1233,6 +1308,7 @@ private struct HaloPixelPalFace: View {
         case .wink, .mischievous: return .winkRight
         case .confused: return .confused
         case .dizzy: return .dizzy
+        case .furious: return .furious
         case .smug: return .smug
         default: return .open
         }
@@ -1284,6 +1360,9 @@ private struct HaloPixelPalFace: View {
         case .dizzy:
             render(.init(HaloPixelPalSprites.xEye, x: 3, y: 6), 1, 0, 0)
             render(.init(HaloPixelPalSprites.xEye, x: 16, y: 6, mirrorX: true), 1, 0, 0)
+        case .furious:
+            render(.init(HaloPixelPalSprites.furiousEye, x: leftX, y: y + 1), 1, 0, 0)
+            render(.init(HaloPixelPalSprites.furiousEye, x: rightX, y: y + 1, mirrorX: true), 1, 0, 0)
         case .smug:
             let eye = HaloPixelPalSprite(rows: ["ppppp", ".ppp."])
             render(.init(eye, x: leftX, y: y + 2), 1, 0, 0)
@@ -1299,6 +1378,9 @@ private struct HaloPixelPalFace: View {
         case .worried, .sad, .crying, .shy:
             render(.init(HaloPixelPalSprites.worriedBrow, x: leftX, y: y), 0.95, 0, 0)
             render(.init(HaloPixelPalSprites.worriedBrow, x: rightX, y: y, mirrorX: true), 0.95, 0, 0)
+        case .furious:
+            render(.init(HaloPixelPalSprites.furiousBrow, x: leftX, y: 2), 1, 0, 0)
+            render(.init(HaloPixelPalSprites.furiousBrow, x: rightX, y: 2, mirrorX: true), 1, 0, 0)
         case .annoyed, .focused:
             render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.95, 0, 0)
             render(.init(HaloPixelPalSprites.annoyedBrow, x: rightX, y: y, mirrorX: true), 0.95, 0, 0)
@@ -1326,6 +1408,7 @@ private struct HaloPixelPalFace: View {
         case .superHappy, .excited, .love: return HaloPixelPalSprites.mouthBigSmile
         case .surprised, .shocked: return HaloPixelPalSprites.mouthO
         case .worried, .sad, .crying, .annoyed: return HaloPixelPalSprites.mouthFrown
+        case .furious: return HaloPixelPalSprites.mouthGrimace
         case .shy: return HaloPixelPalSprites.mouthTiny
         case .mischievous, .smug, .wink: return HaloPixelPalSprites.mouthSmug
         }
@@ -1351,6 +1434,7 @@ private struct HaloPixelPalFace: View {
     }
 
     private func drawCheeks(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
+        if expression == .furious { return }
         let sprite: HaloPixelPalSprite
         switch preferences.cheekStyle {
         case .none: return
@@ -1466,6 +1550,9 @@ private struct HaloPixelPalFace: View {
             if expression == .dizzy {
                 return (Int(round(sin(t * 10.5))) * two, Int(round(cos(t * 7.5))) * one)
             }
+            if expression == .furious {
+                return (Int(round(sin(t * 18.0))) * two, Int(round(cos(t * 13.0))) * one)
+            }
             if expression == .annoyed {
                 return (Int(round(sin(t * 11.0))) * one, 0)
             }
@@ -1488,6 +1575,8 @@ private struct HaloPixelPalFace: View {
             return (Int(round(sin(t * 0.8))) * one, one)
         case .annoyed:
             return (Int(round(sin(t * 11.0))) * one, 0)
+        case .furious:
+            return (Int(round(sin(t * 18.0))) * two, Int(round(cos(t * 13.0))) * one)
         case .dizzy:
             return (Int(round(sin(t * 10.5))) * two, Int(round(cos(t * 7.5))) * one)
         case .neutral:
@@ -1566,7 +1655,8 @@ private struct HaloPixelPalSettingsView: View {
                     preferences: expressionPreviewPreferences,
                     date: timeline.date,
                     reduceMotion: reduceMotion,
-                    animationTime: timeline.date.timeIntervalSince(previewEpoch)
+                    animationTime: timeline.date.timeIntervalSince(previewEpoch),
+                    reactionElapsed: previewExpression == .furious ? timeline.date.timeIntervalSince(previewEpoch) : nil
                 )
                 .id(previewExpression)
             }
@@ -1831,7 +1921,7 @@ private struct HaloPixelPalSettingsView: View {
                 }
 
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 5), spacing: 7) {
-                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .dizzy, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in
+                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .dizzy, .furious, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in
                         Button(expression.title) {
                             previewExpression = expression
                         }
@@ -1870,7 +1960,7 @@ private struct HaloPixelPalSettingsView: View {
         case .crying: return .tears
         case .sleepy: return .sleepZ
         case .dizzy: return .dizzy
-        case .annoyed, .surprised, .shocked: return .alert
+        case .annoyed, .furious, .surprised, .shocked: return .alert
         default: return .none
         }
     }
