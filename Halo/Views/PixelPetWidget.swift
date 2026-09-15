@@ -844,7 +844,7 @@ final class HaloPixelPalStore: ObservableObject {
             self.react(.happy, seconds: 2.4)
         }
         cookieRescueWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.62, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.02, execute: work)
     }
 
     func longPressed() {
@@ -1176,6 +1176,17 @@ private struct HaloPixelPalFace: View {
                 }
                 .allowsHitTesting(false)
 
+                if let rescue = cookieRescueElapsed, rescue >= 0.55 {
+                    Canvas { context, size in
+                        drawFuryCookie(
+                            context: &context,
+                            size: size,
+                            consumeProgress: min(1.0, max(0.0, (rescue - 0.55) / 0.40))
+                        )
+                    }
+                    .allowsHitTesting(false)
+                }
+
                 if cookieRescueElapsed == nil, reactionElapsed >= 1.05, reactionElapsed < 2.15, let onCookieTap {
                     GeometryReader { proxy in
                         let hitSize = max(24.0, min(proxy.size.width, proxy.size.height) * 0.30)
@@ -1245,8 +1256,8 @@ private struct HaloPixelPalFace: View {
             paintRect(CGRect(x: size.width - panelWidth, y: y, width: panelWidth, height: edgeWidth), seamColor)
         }
 
-        if let rescue = cookieRescueElapsed {
-            drawFuryCookie(context: &context, size: size, consumeProgress: min(1.0, rescue / 0.48))
+        if cookieRescueElapsed != nil {
+            drawFuryCookie(context: &context, size: size, consumeProgress: 0)
         } else if elapsed >= 1.05 && elapsed < 2.15 {
             drawFuryCookie(context: &context, size: size, consumeProgress: 0)
         }
