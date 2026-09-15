@@ -1,0 +1,344 @@
+name: Add Pixel Pet Cookie Rescue
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pixel-pet-cookie-rescue.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add shutter cookie rescue interaction
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('Halo/Views/PixelPetWidget.swift')
+          s = path.read_text()
+
+          if 'func feedFuryCookie()' in s and 'cookieRescueElapsed' in s:
+              print('Cookie rescue already present; validating existing implementation.')
+              raise SystemExit(0)
+
+          def replace_once(old, new, label):
+              global s
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              s = s.replace(old, new, 1)
+
+          replace_once(
+              '    @Published private(set) var reaction: HaloPixelPalExpression?\n'
+              '    @Published private(set) var reactionStarted = Date()\n',
+              '    @Published private(set) var reaction: HaloPixelPalExpression?\n'
+              '    @Published private(set) var reactionStarted = Date()\n'
+              '    @Published private(set) var cookieRescueStarted: Date?\n',
+              'cookie rescue published state',
+          )
+
+          replace_once(
+              '    private var clearReactionWork: DispatchWorkItem?\n',
+              '    private var clearReactionWork: DispatchWorkItem?\n'
+              '    private var cookieRescueWork: DispatchWorkItem?\n',
+              'cookie rescue work item',
+          )
+
+          replace_once(
+              '    func react(_ expression: HaloPixelPalExpression, seconds: Double = 1.7) {\n'
+              '        clearReactionWork?.cancel()\n'
+              '        reactionStarted = Date()\n',
+              '    func react(_ expression: HaloPixelPalExpression, seconds: Double = 1.7) {\n'
+              '        clearReactionWork?.cancel()\n'
+              '        if expression != .furious {\n'
+              '            cookieRescueWork?.cancel()\n'
+              '            cookieRescueStarted = nil\n'
+              '        }\n'
+              '        reactionStarted = Date()\n',
+              'reaction clears cookie rescue',
+          )
+
+          replace_once(
+              '            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)\n',
+              '            react(escalation, seconds: escalation == .furious ? 2.22 : 3.4)\n',
+              'single tap furious duration',
+          )
+          replace_once(
+              '            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)\n',
+              '            react(escalation, seconds: escalation == .furious ? 2.22 : 3.4)\n',
+              'double tap furious duration',
+          )
+
+          marker = (
+              '    func longPressed() {\n'
+              '        guard preferences.longPressReaction else { return }\n'
+          )
+          insert = (
+              '    func feedFuryCookie() {\n'
+              '        guard reaction == .furious, cookieRescueStarted == nil else { return }\n'
+              '        clearReactionWork?.cancel()\n'
+              '        let started = Date()\n'
+              '        cookieRescueStarted = started\n'
+              '        let work = DispatchWorkItem { [weak self] in\n'
+              '            guard let self, self.reaction == .furious, self.cookieRescueStarted == started else { return }\n'
+              '            self.cookieRescueStarted = nil\n'
+              '            self.react(.happy, seconds: 2.4)\n'
+              '        }\n'
+              '        cookieRescueWork = work\n'
+              '        DispatchQueue.main.asyncAfter(deadline: .now() + 0.62, execute: work)\n'
+              '    }\n\n'
+          )
+          replace_once(marker, insert + marker, 'cookie rescue store action')
+
+          replace_once(
+              '        clearReactionWork?.cancel()\n'
+              '        tapIndex = 0\n',
+              '        clearReactionWork?.cancel()\n'
+              '        cookieRescueWork?.cancel()\n'
+              '        cookieRescueStarted = nil\n'
+              '        tapIndex = 0\n',
+              'reset cookie rescue state',
+          )
+
+          replace_once(
+              '                    reactionElapsed: pal.reaction.map { _ in timeline.date.timeIntervalSince(pal.reactionStarted) },\n'
+              '                    pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero\n',
+              '                    reactionElapsed: pal.reaction.map { _ in timeline.date.timeIntervalSince(pal.reactionStarted) },\n'
+              '                    cookieRescueElapsed: pal.cookieRescueStarted.map { timeline.date.timeIntervalSince($0) },\n'
+              '                    pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero,\n'
+              '                    onCookieTap: { pal.feedFuryCookie() }\n',
+              'pass cookie rescue state to renderer',
+          )
+
+          replace_once(
+              '    var reactionElapsed: TimeInterval? = nil\n'
+              '    var pointer: CGPoint = .zero\n',
+              '    var reactionElapsed: TimeInterval? = nil\n'
+              '    var cookieRescueElapsed: TimeInterval? = nil\n'
+              '    var pointer: CGPoint = .zero\n'
+              '    var onCookieTap: (() -> Void)? = nil\n',
+              'face cookie rescue inputs',
+          )
+
+          old_overlay = (
+              '            if expression == .furious, let reactionElapsed = reactionElapsed {\n'
+              '                Canvas { context, size in\n'
+              '                    drawFuryDoor(context: &context, size: size, elapsed: reactionElapsed)\n'
+              '                }\n'
+              '                .allowsHitTesting(false)\n'
+              '            }\n'
+          )
+          new_overlay = (
+              '            if expression == .furious, let reactionElapsed = reactionElapsed {\n'
+              '                Canvas { context, size in\n'
+              '                    drawFuryDoor(\n'
+              '                        context: &context,\n'
+              '                        size: size,\n'
+              '                        elapsed: reactionElapsed,\n'
+              '                        cookieRescueElapsed: cookieRescueElapsed\n'
+              '                    )\n'
+              '                }\n'
+              '                .allowsHitTesting(false)\n\n'
+              '                if cookieRescueElapsed == nil, reactionElapsed >= 1.05, reactionElapsed < 1.55, let onCookieTap {\n'
+              '                    GeometryReader { proxy in\n'
+              '                        let hitSize = max(24.0, min(proxy.size.width, proxy.size.height) * 0.30)\n'
+              '                        Button(action: onCookieTap) {\n'
+              '                            Color.clear\n'
+              '                                .frame(width: hitSize, height: hitSize)\n'
+              '                                .contentShape(Rectangle())\n'
+              '                        }\n'
+              '                        .buttonStyle(.plain)\n'
+              '                        .position(x: proxy.size.width / 2, y: proxy.size.height / 2)\n'
+              '                        .accessibilityLabel("Give Pixel Pal the cookie")\n'
+              '                        .help("Give Pixel Pal the cookie")\n'
+              '                    }\n'
+              '                }\n'
+              '            }\n'
+          )
+          replace_once(old_overlay, new_overlay, 'interactive cookie overlay')
+
+          old_helpers = (
+              '    private func furyDoorClosure(elapsed: TimeInterval) -> Double {\n'
+              '        if reduceMotion {\n'
+              '            return elapsed >= 0.65 && elapsed < 1.55 ? 1.0 : 0.0\n'
+              '        }\n'
+              '        func smooth(_ value: Double) -> Double {\n'
+              '            let p = min(1.0, max(0.0, value))\n'
+              '            return p * p * (3.0 - 2.0 * p)\n'
+              '        }\n'
+              '        if elapsed < 0.55 { return 0 }\n'
+              '        if elapsed < 1.05 { return smooth((elapsed - 0.55) / 0.50) }\n'
+              '        if elapsed < 1.55 { return 1 }\n'
+              '        if elapsed < 2.20 { return 1 - smooth((elapsed - 1.55) / 0.65) }\n'
+              '        return 0\n'
+              '    }\n\n'
+              '    private func drawFuryDoor(context: inout GraphicsContext, size: CGSize, elapsed: TimeInterval) {\n'
+              '        let closure = furyDoorClosure(elapsed: elapsed)\n'
+              '        guard closure > 0.001 else { return }\n\n'
+              '        let panelWidth = size.width * 0.5 * closure\n'
+              '        let edgeWidth = max(1.0, min(size.width, size.height) / 48.0)\n'
+              '        let panelColor = Color(red: 0.12, green: 0.015, blue: 0.012).opacity(0.98)\n'
+              '        let edgeColor = Color(red: 0.95, green: 0.08, blue: 0.04).opacity(0.92)\n'
+              '        let seamColor = Color.black.opacity(0.42)\n\n'
+              '        func paintRect(_ rect: CGRect, _ color: Color) {\n'
+              '            var path = Path()\n'
+              '            path.addRect(rect)\n'
+              '            context.fill(path, with: .color(color))\n'
+              '        }\n\n'
+              '        paintRect(CGRect(x: 0, y: 0, width: panelWidth, height: size.height), panelColor)\n'
+              '        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: panelWidth, height: size.height), panelColor)\n'
+              '        paintRect(CGRect(x: max(0, panelWidth - edgeWidth), y: 0, width: edgeWidth, height: size.height), edgeColor)\n'
+              '        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: edgeWidth, height: size.height), edgeColor)\n\n'
+              '        for row in 1..<4 {\n'
+              '            let y = size.height * CGFloat(row) / 4.0\n'
+              '            paintRect(CGRect(x: 0, y: y, width: panelWidth, height: edgeWidth), seamColor)\n'
+              '            paintRect(CGRect(x: size.width - panelWidth, y: y, width: panelWidth, height: edgeWidth), seamColor)\n'
+              '        }\n'
+              '    }\n'
+          )
+
+          new_helpers = (
+              '    private func furyDoorClosure(elapsed: TimeInterval, cookieRescueElapsed: TimeInterval?) -> Double {\n'
+              '        func smooth(_ value: Double) -> Double {\n'
+              '            let p = min(1.0, max(0.0, value))\n'
+              '            return p * p * (3.0 - 2.0 * p)\n'
+              '        }\n'
+              '        if let rescue = cookieRescueElapsed {\n'
+              '            return max(0.0, 1.0 - smooth(rescue / 0.55))\n'
+              '        }\n'
+              '        if reduceMotion {\n'
+              '            return elapsed >= 0.65 && elapsed < 1.55 ? 1.0 : 0.0\n'
+              '        }\n'
+              '        if elapsed < 0.55 { return 0 }\n'
+              '        if elapsed < 1.05 { return smooth((elapsed - 0.55) / 0.50) }\n'
+              '        if elapsed < 1.55 { return 1 }\n'
+              '        if elapsed < 2.20 { return 1 - smooth((elapsed - 1.55) / 0.65) }\n'
+              '        return 0\n'
+              '    }\n\n'
+              '    private func drawFuryDoor(\n'
+              '        context: inout GraphicsContext,\n'
+              '        size: CGSize,\n'
+              '        elapsed: TimeInterval,\n'
+              '        cookieRescueElapsed: TimeInterval?\n'
+              '    ) {\n'
+              '        let closure = furyDoorClosure(elapsed: elapsed, cookieRescueElapsed: cookieRescueElapsed)\n'
+              '        guard closure > 0.001 else { return }\n\n'
+              '        let panelWidth = size.width * 0.5 * closure\n'
+              '        let edgeWidth = max(1.0, min(size.width, size.height) / 48.0)\n'
+              '        let panelColor = Color(red: 0.12, green: 0.015, blue: 0.012).opacity(0.98)\n'
+              '        let edgeColor = Color(red: 0.95, green: 0.08, blue: 0.04).opacity(0.92)\n'
+              '        let seamColor = Color.black.opacity(0.42)\n\n'
+              '        func paintRect(_ rect: CGRect, _ color: Color) {\n'
+              '            var path = Path()\n'
+              '            path.addRect(rect)\n'
+              '            context.fill(path, with: .color(color))\n'
+              '        }\n\n'
+              '        paintRect(CGRect(x: 0, y: 0, width: panelWidth, height: size.height), panelColor)\n'
+              '        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: panelWidth, height: size.height), panelColor)\n'
+              '        paintRect(CGRect(x: max(0, panelWidth - edgeWidth), y: 0, width: edgeWidth, height: size.height), edgeColor)\n'
+              '        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: edgeWidth, height: size.height), edgeColor)\n\n'
+              '        for row in 1..<4 {\n'
+              '            let y = size.height * CGFloat(row) / 4.0\n'
+              '            paintRect(CGRect(x: 0, y: y, width: panelWidth, height: edgeWidth), seamColor)\n'
+              '            paintRect(CGRect(x: size.width - panelWidth, y: y, width: panelWidth, height: edgeWidth), seamColor)\n'
+              '        }\n\n'
+              '        if let rescue = cookieRescueElapsed {\n'
+              '            drawFuryCookie(context: &context, size: size, consumeProgress: min(1.0, rescue / 0.48))\n'
+              '        } else if elapsed >= 1.05 && elapsed < 1.55 {\n'
+              '            drawFuryCookie(context: &context, size: size, consumeProgress: 0)\n'
+              '        }\n'
+              '    }\n\n'
+              '    private func drawFuryCookie(context: inout GraphicsContext, size: CGSize, consumeProgress: Double) {\n'
+              '        let pattern = [\n'
+              '            "..bbb..",\n'
+              '            ".bbbbb.",\n'
+              '            "bbdbdbb",\n'
+              '            "bbbbbbb",\n'
+              '            "bdbbbdb",\n'
+              '            ".bbdbb.",\n'
+              '            "..bbb.."\n'
+              '        ]\n'
+              '        let pixel = max(1.0, min(size.width, size.height) / 30.0)\n'
+              '        let cookieSide = pixel * 7.0\n'
+              '        let origin = CGPoint(x: (size.width - cookieSide) / 2.0, y: (size.height - cookieSide) / 2.0)\n'
+              '        let visibleColumns = max(0, min(7, Int(ceil(7.0 * (1.0 - consumeProgress)))))\n'
+              '        let dough = Color(red: 0.92, green: 0.55, blue: 0.18)\n'
+              '        let edge = Color(red: 0.62, green: 0.28, blue: 0.07)\n'
+              '        let chip = Color(red: 0.25, green: 0.09, blue: 0.025)\n\n'
+              '        for (y, row) in pattern.enumerated() {\n'
+              '            for (x, value) in row.enumerated() where x < visibleColumns && value != "." {\n'
+              '                let rect = CGRect(x: origin.x + CGFloat(x) * pixel, y: origin.y + CGFloat(y) * pixel, width: pixel, height: pixel)\n'
+              '                let isOuter = x == 0 || x == 6 || y == 0 || y == 6\n'
+              '                context.fill(Path(rect), with: .color(value == "d" ? chip : (isOuter ? edge : dough)))\n'
+              '            }\n'
+              '        }\n\n'
+              '        if consumeProgress > 0.08 && consumeProgress < 0.95 {\n'
+              '            let crumb = max(1.0, pixel * 0.72)\n'
+              '            let t = CGFloat(consumeProgress)\n'
+              '            let crumbs = [\n'
+              '                CGPoint(x: size.width / 2 + pixel * 3.2 + pixel * 2.4 * t, y: size.height / 2 - pixel * 1.7 - pixel * 2.0 * t),\n'
+              '                CGPoint(x: size.width / 2 + pixel * 2.4 + pixel * 1.5 * t, y: size.height / 2 + pixel * 0.2 + pixel * 1.7 * t),\n'
+              '                CGPoint(x: size.width / 2 + pixel * 1.4 + pixel * 2.0 * t, y: size.height / 2 + pixel * 2.0 - pixel * 0.8 * t)\n'
+              '            ]\n'
+              '            for (index, point) in crumbs.enumerated() {\n'
+              '                let color = index == 1 ? chip : dough\n'
+              '                context.fill(Path(CGRect(x: point.x, y: point.y, width: crumb, height: crumb)), with: .color(color.opacity(1.0 - consumeProgress)))\n'
+              '            }\n'
+              '        }\n'
+              '    }\n'
+          )
+          replace_once(old_helpers, new_helpers, 'cookie-aware shutter and cookie rendering')
+
+          path.write_text(s)
+          PY
+
+      - name: Verify cookie rescue contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('Halo/Views/PixelPetWidget.swift').read_text()
+          required = [
+              '@Published private(set) var cookieRescueStarted: Date?',
+              'func feedFuryCookie()',
+              'escalation == .furious ? 2.22 : 3.4',
+              'cookieRescueElapsed: pal.cookieRescueStarted.map',
+              'onCookieTap: { pal.feedFuryCookie() }',
+              'drawFuryCookie(context: &context, size: size',
+              'Button(action: onCookieTap)',
+              'self.react(.happy, seconds: 2.4)',
+          ]
+          missing = [marker for marker in required if marker not in s]
+          if missing:
+              raise SystemExit(f'Missing cookie rescue markers: {missing}')
+          if 'escalation == .furious ? 4.6 : 3.4' in s:
+              raise SystemExit('Old furious duration is still present.')
+          print('Cookie rescue interaction verified.')
+          PY
+
+      - name: Parse Pixel Pet source
+        run: xcrun swiftc -parse Halo/Views/PixelPetWidget.swift
+
+      - name: Full Xcode build
+        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Views/PixelPetWidget.swift
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "Add Pixel Pet shutter cookie rescue"
+          git pull --rebase origin main
+          git push origin HEAD:main
