@@ -324,10 +324,10 @@ private enum HaloPixelPalSprites {
         case .glossy:
             return .init(rows: [
                 ".pppp.",
-                "pswppp",
-                "pssppp",
-                "pppppp",
-                "ppppap",
+                "pwwssp",
+                "pwsssp",
+                "pssssp",
+                "ppsspp",
                 ".aaaa."
             ])
         case .classic:
@@ -420,7 +420,10 @@ private enum HaloPixelPalSprites {
     static let annoyedBrow = HaloPixelPalSprite(rows: ["..ppp"])
     static let raisedBrow = HaloPixelPalSprite(rows: [".pp.."])
 
-    static let mouthTiny = HaloPixelPalSprite(rows: ["pp"])
+    static let mouthTiny = HaloPixelPalSprite(rows: [
+        "p.p",
+        ".p."
+    ])
     static let mouthFlat = HaloPixelPalSprite(rows: ["ppppp"])
     static let mouthSmile = HaloPixelPalSprite(rows: [
         "p...p",
@@ -459,9 +462,9 @@ private enum HaloPixelPalSprites {
         ".ppp."
     ])
 
-    static let cheekSoft = HaloPixelPalSprite(rows: ["bb"])
-    static let cheekKawaii = HaloPixelPalSprite(rows: ["bbb", ".b."])
-    static let cheekShy = HaloPixelPalSprite(rows: ["b.b", ".b."])
+    static let cheekSoft = HaloPixelPalSprite(rows: [".bb."])
+    static let cheekKawaii = HaloPixelPalSprite(rows: ["bbbb", ".bb."])
+    static let cheekShy = HaloPixelPalSprite(rows: ["b..b", ".bb."])
 
     static let tear = HaloPixelPalSprite(rows: [
         "a",
@@ -1105,7 +1108,6 @@ private struct HaloPixelPalFace: View {
     }
 
     private func drawCheeks(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
-        guard preferences.faceStyle != .minimal else { return }
         let sprite: HaloPixelPalSprite
         switch preferences.cheekStyle {
         case .none: return
@@ -1113,9 +1115,9 @@ private struct HaloPixelPalFace: View {
         case .kawaii: sprite = HaloPixelPalSprites.cheekKawaii
         case .shy: sprite = HaloPixelPalSprites.cheekShy
         }
-        let opacity: Double = expression == .shy || expression == .love ? 1.0 : 0.72
-        render(.init(sprite, x: 2, y: 14), opacity, 0, 0)
-        render(.init(sprite, x: max(0, 22 - sprite.width), y: 14, mirrorX: true), opacity, 0, 0)
+        let opacity: Double = expression == .shy || expression == .love ? 1.0 : 0.90
+        render(.init(sprite, x: 2, y: 13), opacity, 0, 0)
+        render(.init(sprite, x: max(0, 22 - sprite.width), y: 13, mirrorX: true), opacity, 0, 0)
     }
 
     private var resolvedAccessory: HaloPixelPalAccessory {
