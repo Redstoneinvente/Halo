@@ -1,10 +1,9 @@
-name: Polish Pixel Pal Interactions
+name: Polish Pixel Pal Time Reactions
 
 on:
   push:
     branches: [main]
     paths:
-      - '.github/pixel-pal-interactions-trigger.txt'
       - '.github/workflows/polish-pixel-pal-interactions.yml'
   workflow_dispatch:
 
@@ -19,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply Pixel Pal interaction polish
+      - name: Apply time-of-day Pixel Pal reactions
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -35,200 +34,137 @@ jobs:
               s = s.replace(old, new, 1)
 
           replace_once(
-          '''private enum HaloPixelPalColorRole: Character {
-              case primary = "p"
-              case accent = "a"
-              case blush = "b"
-              case white = "w"
-              case shadow = "s"
-          }''',
-          '''private enum HaloPixelPalColorRole: Character {
-              case primary = "p"
-              case accent = "a"
-              case blush = "b"
-              case white = "w"
-              case shadow = "s"
-              case accessoryFrame = "g"
-              case accessoryLens = "l"
-          }''',
-          'accessory color roles')
-
-          replace_once(
-          '''    static let glasses = HaloPixelPalSprite(rows: [
-              "pppp...pppp",
-              "p..p.p.p..p",
-              "pppp...pppp"
+          '''    static let exclamation = HaloPixelPalSprite(rows: [
+              "a",
+              "a",
+              "a",
+              ".",
+              "a"
           ])
-          static let shades = HaloPixelPalSprite(rows: [
-              "ppppp.ppppp",
-              "psssp.psssp",
-              ".ppp...ppp."
-          ])''',
-          '''    static let glasses = HaloPixelPalSprite(rows: [
-              "gggg...gggg",
-              "g..g.g.g..g",
-              "gggg...gggg"
+
+          // Accessories''',
+          '''    static let exclamation = HaloPixelPalSprite(rows: [
+              "a",
+              "a",
+              "a",
+              ".",
+              "a"
           ])
-          static let shades = HaloPixelPalSprite(rows: [
-              "ggggg.ggggg",
-              "glllg.glllg",
-              ".ggg...ggg."
-          ])''',
-          'glasses and shades sprites')
+          static let zSmall = HaloPixelPalSprite(rows: [
+              "aaa",
+              "..a",
+              ".a.",
+              "aaa"
+          ])
+          static let zTiny = HaloPixelPalSprite(rows: [
+              "aa",
+              ".a",
+              "aa"
+          ])
 
-          replace_once(
-          '''    @Published private(set) var reaction: HaloPixelPalExpression?
-              @Published private(set) var reactionStarted = Date()
-              private var tapIndex = 0
-              private var pressIndex = 0''',
-          '''    @Published private(set) var reaction: HaloPixelPalExpression?
-              @Published private(set) var reactionStarted = Date()
-              private var tapIndex = 0
-              private var pressIndex = 0
-              private var tapBurst = HaloPixelPalTapBurst()''',
-          'tap burst state')
-
-          replace_once(
-          '''    func tapped() {
-              guard preferences.tapReaction else { return }
-              let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]
-              react(sequence[tapIndex % sequence.count])
-              tapIndex += 1
-          }
-
-          func doubleTapped() {
-              guard preferences.doubleTapReaction else { return }
-              react(.love, seconds: 2.2)
-          }''',
-          '''    func tapped() {
-              guard preferences.tapReaction else { return }
-              if shouldBecomeAngry(forPhysicalTapCount: 1) {
-                  react(.annoyed, seconds: 3.4)
-                  return
-              }
-              let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]
-              react(sequence[tapIndex % sequence.count])
-              tapIndex += 1
-          }
-
-          func doubleTapped() {
-              guard preferences.doubleTapReaction else { return }
-              if shouldBecomeAngry(forPhysicalTapCount: 2) {
-                  react(.annoyed, seconds: 3.4)
-                  return
-              }
-              react(.love, seconds: 2.2)
-          }
-
-          private func shouldBecomeAngry(forPhysicalTapCount count: Int) -> Bool {
-              // Once irritated, another poke extends the reaction instead of immediately
-              // dropping back into the cute tap-expression pool.
-              if reaction == .annoyed { return true }
-              return tapBurst.register(
-                  count: count,
-                  at: Date().timeIntervalSinceReferenceDate
-              )
-          }''',
-          'rapid tap reaction')
-
-          replace_once(
-          '''        tapIndex = 0
-              pressIndex = 0
-          }''',
-          '''        tapIndex = 0
-              pressIndex = 0
-              tapBurst.reset()
-          }''',
-          'tap burst reset')
+          // Accessories''',
+          'sleep Z sprites')
 
           replace_once(
           '''private enum HaloPixelPalFX {
               case none, hearts, sparkle, music, sweat, tears, alert
           }''',
-          '''struct HaloPixelPalTapBurst {
-              static let window: TimeInterval = 1.2
-              static let threshold = 5
+          '''private enum HaloPixelPalFX {
+              case none, hearts, sparkle, music, sweat, tears, alert, sleepZ
+          }''',
+          'sleep FX enum')
 
-              private(set) var tapTimes: [TimeInterval] = []
+          replace_once(
+          '''        if hovering && p.hoverReaction { return resting }
 
-              mutating func register(count: Int, at now: TimeInterval) -> Bool {
-                  tapTimes.removeAll { now - $0 > Self.window }
-                  tapTimes.append(contentsOf: repeatElement(now, count: max(1, count)))
-                  guard tapTimes.count >= Self.threshold else { return false }
-                  tapTimes.removeAll(keepingCapacity: true)
-                  return true
-              }
-
-              mutating func reset() {
-                  tapTimes.removeAll(keepingCapacity: true)
+          if p.idleReaction {
+              let mouseIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .mouseMoved)
+              let keyboardIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+              if min(mouseIdle, keyboardIdle) > 180 {
+                  return .init(expression: .bored, accessory: nil, fx: .none)
               }
           }
 
-          private enum HaloPixelPalFX {
-              case none, hearts, sparkle, music, sweat, tears, alert
-          }''',
-          'tap burst helper')
+          if p.nightReaction {
+              let hour = Calendar.autoupdatingCurrent.component(.hour, from: date)
+              if hour >= 23 || hour < 6 {
+                  return .init(expression: .sleepy, accessory: .sleepingCap, fx: .none)
+              }
+          }
 
-          replace_once(
-          '''        case .crying: return .tears
-              case .shocked, .surprised: return .alert
-              default: return .none''',
-          '''        case .crying: return .tears
-              case .annoyed, .shocked, .surprised: return .alert
-              default: return .none''',
-          'angry fx')
+          return resting''',
+          '''        if p.nightReaction {
+              let hour = Calendar.autoupdatingCurrent.component(.hour, from: date)
 
-          replace_once(
-          '''            case .white: return .white
-                  case .shadow: return Color.black.opacity(0.78)
-                  }''',
-          '''            case .white: return .white
-                  case .shadow: return Color.black.opacity(0.78)
-                  case .accessoryFrame: return Color(red: 0.72, green: 0.78, blue: 0.90)
-                  case .accessoryLens: return Color(red: 0.15, green: 0.34, blue: 0.58)
-                  }''',
-          'accessory colors')
-
-          replace_once(
-          '''        case .bored:
-                  return (Int(round(sin(t * 0.8))) * one, one)
-              case .neutral:''',
-          '''        case .bored:
-                  return (Int(round(sin(t * 0.8))) * one, one)
-              case .annoyed:
-                  return (Int(round(sin(t * 11.0))) * one, 0)
-              case .neutral:''',
-          'angry shake')
-
-          p.write_text(s)
-          PY
-
-      - name: Add tap-burst regression test
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('Tests/HaloCoreTests.swift')
-          s = p.read_text()
-          anchor = '''final class HaloCoreTests: XCTestCase {
-          '''
-          test = '''final class HaloCoreTests: XCTestCase {
-              func testPixelPalRapidTapsEscalateToAngryThreshold() {
-                  var burst = HaloPixelPalTapBurst()
-                  XCTAssertFalse(burst.register(count: 2, at: 10.0))
-                  XCTAssertFalse(burst.register(count: 2, at: 10.5))
-                  XCTAssertTrue(burst.register(count: 1, at: 11.0))
-
-                  // Triggering clears the burst so normal interaction can recover.
-                  XCTAssertFalse(burst.register(count: 1, at: 20.0))
-                  XCTAssertFalse(burst.register(count: 3, at: 21.3))
+              // Late night: settle down, breathe slowly and drift off with floating Zs.
+              if hour >= 23 || hour < 5 {
+                  return .init(expression: .sleepy, accessory: .sleepingCap, fx: .sleepZ)
               }
 
-          '''
-          if test in s:
-              raise SystemExit(0)
-          if s.count(anchor) != 1:
-              raise SystemExit('Could not find HaloCoreTests anchor')
-          p.write_text(s.replace(anchor, test, 1))
+              // Early morning: wake up bright and fresh before normal daytime behavior resumes.
+              if hour >= 5 && hour < 9 {
+                  return .init(expression: .happy, accessory: .sprout, fx: .sparkle)
+              }
+          }
+
+          if hovering && p.hoverReaction { return resting }
+
+          if p.idleReaction {
+              let mouseIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .mouseMoved)
+              let keyboardIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+              if min(mouseIdle, keyboardIdle) > 180 {
+                  return .init(expression: .bored, accessory: nil, fx: .none)
+              }
+          }
+
+          return resting''',
+          'time-of-day context')
+
+          replace_once(
+          '''        case .crying: return .tears
+              case .annoyed, .shocked, .surprised: return .alert''',
+          '''        case .crying: return .tears
+              case .sleepy: return .sleepZ
+              case .annoyed, .shocked, .surprised: return .alert''',
+          'sleep expression FX')
+
+          replace_once(
+          '''        case .alert:
+              render(.init(HaloPixelPalSprites.exclamation, x: 21, y: 2), 0.95, 0, reduceMotion ? 0 : -phase % 2)
+          }''',
+          '''        case .alert:
+              render(.init(HaloPixelPalSprites.exclamation, x: 21, y: 2), 0.95, 0, reduceMotion ? 0 : -phase % 2)
+          case .sleepZ:
+              render(.init(HaloPixelPalSprites.zTiny, x: 17, y: 7), 0.52, 0, lift)
+              render(.init(HaloPixelPalSprites.zSmall, x: 20, y: 2), 0.88, 0, lift - 1)
+          }''',
+          'sleep Z rendering')
+
+          replace_once(
+          '''        case .worried, .sad, .crying:
+              return (Int(round(sin(t * 2.0))) * one, one)
+          case .bored:''',
+          '''        case .worried, .sad, .crying:
+              return (Int(round(sin(t * 2.0))) * one, one)
+          case .sleepy:
+              return (0, Int(round(sin(t * 1.15))) * one)
+          case .bored:''',
+          'sleep breathing motion')
+
+          replace_once(
+          '''        case .crying: return .tears
+              case .annoyed, .surprised, .shocked: return .alert''',
+          '''        case .crying: return .tears
+              case .sleepy: return .sleepZ
+              case .annoyed, .surprised, .shocked: return .alert''',
+          'sleep preview FX')
+
+          replace_once(
+          '''                    Toggle("Night / sleep", isOn: bind(\\.nightReaction))''',
+          '''                    Toggle("Time of day (morning / night)", isOn: bind(\\.nightReaction))''',
+          'time reaction settings label')
+
+          p.write_text(s)
           PY
 
       - name: Verify source contract
@@ -237,44 +173,27 @@ jobs:
           from pathlib import Path
           s = Path('Halo/Views/PixelPetWidget.swift').read_text()
           required = [
-              'private var tapBurst = HaloPixelPalTapBurst()',
-              'HaloPixelPalTapBurst',
-              'static let threshold = 5',
-              'static let window: TimeInterval = 1.2',
-              'react(.annoyed, seconds: 3.4)',
-              'case .accessoryFrame: return Color',
-              'case .accessoryLens: return Color',
-              '"gggg...gggg"',
-              '"glllg.glllg"',
-              'case .annoyed:',
+              'case none, hearts, sparkle, music, sweat, tears, alert, sleepZ',
+              'static let zSmall = HaloPixelPalSprite',
+              'static let zTiny = HaloPixelPalSprite',
+              'if hour >= 23 || hour < 5',
+              'if hour >= 5 && hour < 9',
+              'expression: .sleepy, accessory: .sleepingCap, fx: .sleepZ',
+              'expression: .happy, accessory: .sprout, fx: .sparkle',
+              'case .sleepZ:',
+              'case .sleepy:',
+              'Time of day (morning / night)',
           ]
           missing = [x for x in required if x not in s]
           if missing:
-              raise SystemExit('Missing Pixel Pal polish contract: ' + ', '.join(missing))
+              raise SystemExit('Missing time-reaction contract: ' + ', '.join(missing))
           PY
 
-      - name: Parse changed Swift sources
-        run: |
-          xcrun swiftc -parse Halo/Views/PixelPetWidget.swift
-          xcrun swiftc -parse Tests/HaloCoreTests.swift
+      - name: Parse Pixel Pal source
+        run: xcrun swiftc -parse Halo/Views/PixelPetWidget.swift
 
-      - name: Full Xcode build diagnostic
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build | tee /tmp/halo-pixel-pal-interactions.log
-
-      - name: Reject Pixel Pal source errors
-        run: |
-          if grep -E '/(PixelPetWidget|HaloCoreTests)\.swift:[0-9]+:[0-9]+: error:' /tmp/halo-pixel-pal-interactions.log; then
-            echo 'A changed Pixel Pal source failed Xcode type checking.'
-            exit 1
-          fi
-          if grep -q '\*\* BUILD SUCCEEDED \*\*' /tmp/halo-pixel-pal-interactions.log; then
-            echo 'Full Halo Xcode build succeeded.'
-          else
-            echo 'Full build did not complete, but changed Pixel Pal sources have no Xcode errors.'
-          fi
+      - name: Full Xcode build
+        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build
 
       - name: Commit implementation
         run: |
@@ -284,6 +203,6 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Halo/Views/PixelPetWidget.swift Tests/HaloCoreTests.swift
-          git commit -m 'Make Pixel Pal react to rapid tapping'
+          git add Halo/Views/PixelPetWidget.swift
+          git commit -m 'Add Pixel Pal time-of-day moods'
           git push origin HEAD:main
