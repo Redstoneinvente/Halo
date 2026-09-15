@@ -148,7 +148,7 @@ struct HaloPixelPalRGB: Codable, Equatable {
 struct HaloPixelPalPreferences: Codable, Equatable {
     // Legacy persisted field retained so Codable stays backward-compatible.
     var showCheeks: Bool = true
-    var version = 6
+    var version = 7
 
     // Appearance
     var faceStyle: HaloPixelPalFaceStyle = .soft
@@ -179,6 +179,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     var automaticBlinking = true
     var animationSpeed = 1.0
     var animationIntensity = 0.85
+    var dizzyRotationThresholdTurns = 0.8
 
     // Direct interactions
     var hoverReaction = true
@@ -203,7 +204,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
         case faceStyle, eyeStyle, mouthStyle, cheekStyle, palette, customColor, accentColor, blushColor
         case backgroundStyle, backgroundColor, backgroundOpacity, backgroundCornerRadius, pixelCornerRadius, inactiveLEDIntensity, inactiveLEDUsesFaceColor, inactiveLEDColor, faceScale, glowIntensity
         case accessoryMode, selectedAccessory, allowedAccessories
-        case automaticBlinking, animationSpeed, animationIntensity
+        case automaticBlinking, animationSpeed, animationIntensity, dizzyRotationThresholdTurns
         case hoverReaction, tapReaction, doubleTapReaction, longPressReaction
         case contextReactions, chargingReaction, lowBatteryReaction, musicReaction
         case timerReaction, appReaction, idleReaction, nightReaction
@@ -213,7 +214,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        version = 6
+        version = 7
         faceStyle = try c.decodeIfPresent(HaloPixelPalFaceStyle.self, forKey: .faceStyle) ?? .soft
         eyeStyle = try c.decodeIfPresent(HaloPixelPalEyeStyle.self, forKey: .eyeStyle) ?? .glossy
         mouthStyle = try c.decodeIfPresent(HaloPixelPalMouthStyle.self, forKey: .mouthStyle) ?? .automatic
@@ -245,6 +246,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
         automaticBlinking = try c.decodeIfPresent(Bool.self, forKey: .automaticBlinking) ?? true
         animationSpeed = try c.decodeIfPresent(Double.self, forKey: .animationSpeed) ?? 1.0
         animationIntensity = try c.decodeIfPresent(Double.self, forKey: .animationIntensity) ?? 0.85
+        dizzyRotationThresholdTurns = try c.decodeIfPresent(Double.self, forKey: .dizzyRotationThresholdTurns) ?? 0.8
 
         hoverReaction = try c.decodeIfPresent(Bool.self, forKey: .hoverReaction) ?? true
         tapReaction = try c.decodeIfPresent(Bool.self, forKey: .tapReaction) ?? true
@@ -263,9 +265,10 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     func normalized() -> Self {
         var value = self
-        value.version = 6
+        value.version = 7
         value.animationSpeed = min(2.0, max(0.35, animationSpeed))
         value.animationIntensity = min(1.0, max(0.0, animationIntensity))
+        value.dizzyRotationThresholdTurns = min(2.0, max(0.35, dizzyRotationThresholdTurns))
         value.faceScale = min(1.0, max(0.76, faceScale))
         value.glowIntensity = min(1.0, max(0.0, glowIntensity))
         value.backgroundOpacity = min(1.0, max(0.0, backgroundOpacity))
@@ -642,7 +645,6 @@ struct HaloPixelPalCursorOrbitDetector {
     // One quick, natural circle should be enough.
     static let sampleWindow: TimeInterval = 1.15
     static let cooldown: TimeInterval = 2.0
-    static let minimumRotation = Double.pi * 1.55
     static let minimumDuration: TimeInterval = 0.12
     static let minimumPathSpeed = 0.85
     static let minimumDirectionConsistency = 0.55
@@ -654,7 +656,7 @@ struct HaloPixelPalCursorOrbitDetector {
     private var samples: [Sample] = []
     private var lastTrigger = -Double.infinity
 
-    mutating func register(location: CGPoint, size: CGSize, at now: TimeInterval) -> Bool {
+    mutating func register(location: CGPoint, size: CGSize, at now: TimeInterval, minimumRotationTurns: Double) -> Bool {
         guard size.width > 1, size.height > 1 else {
             resetPath()
             return false
@@ -713,8 +715,9 @@ struct HaloPixelPalCursorOrbitDetector {
         let directionConsistency = abs(signedRotation) / absoluteRotation
         let pathSpeed = pathDistance / duration
         let radiusSpread = maxRadius - minRadius
+        let minimumRotation = Double.pi * 2.0 * min(2.0, max(0.35, minimumRotationTurns))
 
-        guard abs(signedRotation) >= Self.minimumRotation,
+        guard abs(signedRotation) >= minimumRotation,
               directionConsistency >= Self.minimumDirectionConsistency,
               pathSpeed >= Self.minimumPathSpeed,
               radiusSpread <= Self.maximumRadiusSpread else { return false }
@@ -997,7 +1000,8 @@ struct HaloPixelPetWidget: View {
                         if orbitDetector.register(
                             location: location,
                             size: CGSize(width: side, height: side),
-                            at: Date().timeIntervalSinceReferenceDate
+                            at: Date().timeIntervalSinceReferenceDate,
+                            minimumRotationTurns: pal.preferences.dizzyRotationThresholdTurns
                         ) {
                             pal.react(.dizzy, seconds: 1.9)
                         }
@@ -1776,6 +1780,16 @@ private struct HaloPixelPalSettingsView: View {
                     Text("Animation intensity")
                     Slider(value: bind(\.animationIntensity), in: 0...1)
                 }
+                HStack {
+                    Text("Dizzy threshold")
+                    Slider(value: bind(\.dizzyRotationThresholdTurns), in: 0.35...2.0, step: 0.05)
+                    Text("\(pal.preferences.dizzyRotationThresholdTurns, specifier: "%.2f") turns")
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 76, alignment: .trailing)
+                }
+                Text("How much fast circular cursor movement is required before Pixel Pet becomes dizzy. Lower values trigger sooner.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 Toggle("Automatic blinking + rare wink", isOn: bind(\.automaticBlinking))
                 Toggle("React on hover", isOn: bind(\.hoverReaction))
                 Toggle("React on click", isOn: bind(\.tapReaction))
