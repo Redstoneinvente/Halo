@@ -1,0 +1,1 @@
+Apply the adaptive Halo Pixel Pet integration and require a successful full Xcode Debug build before committing it.
