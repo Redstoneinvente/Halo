@@ -32,9 +32,10 @@ jobs:
                       return i
               raise SystemExit(f'Could not find line: {text}')
 
-          # Add authored Z sprites immediately before the accessory section.
+          # Add authored Z sprites inside the sprite catalog, immediately before its accessory section.
           if not any('static let zSmall' in line for line in lines):
-              accessories = find_line('// Accessories')
+              sprites_start = find_line('private enum HaloPixelPalSprites {')
+              accessories = find_line('// Accessories', sprites_start)
               z = [
                   '    static let zSmall = HaloPixelPalSprite(rows: [',
                   '        "aaa",',
