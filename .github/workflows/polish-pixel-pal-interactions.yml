@@ -1,4 +1,4 @@
-name: Fix Pixel Pet Display Background Radius
+name: Add Pixel Pet Full-Charge Reaction
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply radius to the LED display surface
+      - name: Add full-charge Pixel Pet reaction
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -26,42 +26,51 @@ jobs:
           path = Path('Halo/Views/PixelPetWidget.swift')
           s = path.read_text()
 
-          def replace_once(old, new, label):
-              global s
-              count = s.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected one match, found {count}')
-              s = s.replace(old, new, 1)
+          old = '''        if p.lowBatteryReaction, let battery = system.battery, battery <= 15 {
+              return .init(expression: .worried, accessory: .bandage, fx: .sweat)
+          }
+          if p.chargingReaction && system.charging {
+              return .init(expression: .love, accessory: .halo, fx: .hearts)
+          }
+          if p.musicReaction && media.isPlaying {'''
 
-          replace_once(
-              '''        ZStack {\n            background\n                .clipShape(HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius))\n            if preferences.inactiveLEDIntensity > 0.001 {\n                Canvas { context, size in\n                    let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)\n                    let inactiveColor = preferences.inactiveLEDUsesFaceColor ? faceColor : preferences.inactiveLEDColor.color\n                    for y in 0..<logicalGrid {\n                        for x in 0..<logicalGrid {\n                            let rect = geometry.led(x: x, y: y)\n                            let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius\n                            context.fill(Path(roundedRect: rect, cornerRadius: radius),\n                                         with: .color(inactiveColor.opacity(preferences.inactiveLEDIntensity)),\n                                         style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001))\n                        }\n                    }\n                }\n            }\n            Canvas { context, size in''',
-              '''        ZStack {\n            ZStack {\n                background\n                if preferences.inactiveLEDIntensity > 0.001 {\n                    Canvas { context, size in\n                        let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)\n                        let inactiveColor = preferences.inactiveLEDUsesFaceColor ? faceColor : preferences.inactiveLEDColor.color\n                        for y in 0..<logicalGrid {\n                            for x in 0..<logicalGrid {\n                                let rect = geometry.led(x: x, y: y)\n                                let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius\n                                context.fill(Path(roundedRect: rect, cornerRadius: radius),\n                                             with: .color(inactiveColor.opacity(preferences.inactiveLEDIntensity)),\n                                             style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001))\n                            }\n                        }\n                    }\n                }\n            }\n            .clipShape(HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius))\n\n            Canvas { context, size in''',
-              'LED display surface grouping'
-          )
+          new = '''        if p.lowBatteryReaction, let battery = system.battery, battery <= 15 {
+              return .init(expression: .worried, accessory: .bandage, fx: .sweat)
+          }
+          if p.chargingReaction, let battery = system.battery, battery >= 100, !system.onBattery {
+              return .init(expression: .superHappy, accessory: .crown, fx: .sparkle)
+          }
+          if p.chargingReaction && system.charging {
+              return .init(expression: .love, accessory: .halo, fx: .hearts)
+          }
+          if p.musicReaction && media.isPlaying {'''
 
-          replace_once(
-              '''                if pal.preferences.backgroundStyle != .transparent {\n                    HStack {\n                        Text("Surface opacity")\n                        Slider(value: bind(\\.backgroundOpacity), in: 0...1)\n                        Text("\\(Int(pal.preferences.backgroundOpacity * 100))%")\n                            .font(.caption.monospacedDigit())\n                            .frame(width: 38, alignment: .trailing)\n                    }\n                    HStack {\n                        Text("Background corner radius")\n                        Slider(value: bind(\\.backgroundCornerRadius), in: 0...0.5)\n                        Text("\\(Int(pal.preferences.backgroundCornerRadius * 100))%")\n                            .font(.caption.monospacedDigit())\n                            .frame(width: 38, alignment: .trailing)\n                    }\n                }\n                Toggle("Match inactive LEDs to face color", isOn: bind(\\.inactiveLEDUsesFaceColor))''',
-              '''                if pal.preferences.backgroundStyle != .transparent {\n                    HStack {\n                        Text("Surface opacity")\n                        Slider(value: bind(\\.backgroundOpacity), in: 0...1)\n                        Text("\\(Int(pal.preferences.backgroundOpacity * 100))%")\n                            .font(.caption.monospacedDigit())\n                            .frame(width: 38, alignment: .trailing)\n                    }\n                }\n                HStack {\n                    Text("Background corner radius")\n                    Slider(value: bind(\\.backgroundCornerRadius), in: 0...0.5)\n                    Text("\\(Int(pal.preferences.backgroundCornerRadius * 100))%")\n                        .font(.caption.monospacedDigit())\n                        .frame(width: 38, alignment: .trailing)\n                }\n                Text("Rounds the LED display background, including the inactive LED matrix, without clipping the active Pixel Pal pixels.")\n                    .font(.caption2)\n                    .foregroundStyle(.secondary)\n                Toggle("Match inactive LEDs to face color", isOn: bind(\\.inactiveLEDUsesFaceColor))''',
-              'background radius settings semantics'
-          )
+          count = s.count(old)
+          if count != 1:
+              raise SystemExit(f'full-charge context block: expected one match, found {count}')
 
-          path.write_text(s)
+          path.write_text(s.replace(old, new, 1))
           PY
 
-      - name: Verify display radius contract
+      - name: Verify full-charge contract
         run: |
           python3 - <<'PY'
           from pathlib import Path
           s = Path('Halo/Views/PixelPetWidget.swift').read_text()
           required = [
-              'ZStack {\n                background\n                if preferences.inactiveLEDIntensity > 0.001',
-              '.clipShape(HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius))',
-              'Rounds the LED display background, including the inactive LED matrix, without clipping the active Pixel Pal pixels.',
-              'Text("Pixel corner radius")',
+              'if p.chargingReaction, let battery = system.battery, battery >= 100, !system.onBattery {',
+              'return .init(expression: .superHappy, accessory: .crown, fx: .sparkle)',
+              'if p.chargingReaction && system.charging {',
+              'return .init(expression: .love, accessory: .halo, fx: .hearts)',
           ]
           missing = [item for item in required if item not in s]
           if missing:
-              raise SystemExit('Missing LED display radius contract: ' + ', '.join(missing))
+              raise SystemExit('Missing full-charge Pixel Pet contract: ' + ', '.join(missing))
+
+          full = s.index(required[0])
+          charging = s.index(required[2])
+          if full >= charging:
+              raise SystemExit('Full-charge reaction must take priority over ordinary charging.')
           PY
 
       - name: Parse Pixel Pet source
@@ -79,5 +88,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add Halo/Views/PixelPetWidget.swift
-          git commit -m 'Fix Pixel Pet LED display radius'
+          git commit -m 'Add Pixel Pet full-charge reaction'
           git push origin HEAD:main
