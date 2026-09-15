@@ -26,30 +26,22 @@ jobs:
           path = Path('Halo/Views/PixelPetWidget.swift')
           s = path.read_text()
 
-          old = '''        if p.lowBatteryReaction, let battery = system.battery, battery <= 15 {
-              return .init(expression: .worried, accessory: .bandage, fx: .sweat)
-          }
-          if p.chargingReaction && system.charging {
-              return .init(expression: .love, accessory: .halo, fx: .hearts)
-          }
-          if p.musicReaction && media.isPlaying {'''
+          charging = '''        if p.chargingReaction && system.charging {
+            return .init(expression: .love, accessory: .halo, fx: .hearts)
+        }
+'''
+          full_charge = '''        if p.chargingReaction, let battery = system.battery, battery >= 100, !system.onBattery {
+            return .init(expression: .superHappy, accessory: .crown, fx: .sparkle)
+        }
+'''
 
-          new = '''        if p.lowBatteryReaction, let battery = system.battery, battery <= 15 {
-              return .init(expression: .worried, accessory: .bandage, fx: .sweat)
-          }
-          if p.chargingReaction, let battery = system.battery, battery >= 100, !system.onBattery {
-              return .init(expression: .superHappy, accessory: .crown, fx: .sparkle)
-          }
-          if p.chargingReaction && system.charging {
-              return .init(expression: .love, accessory: .halo, fx: .hearts)
-          }
-          if p.musicReaction && media.isPlaying {'''
-
-          count = s.count(old)
+          if full_charge in s:
+              raise SystemExit('Full-charge reaction is already present; refusing to duplicate it.')
+          count = s.count(charging)
           if count != 1:
-              raise SystemExit(f'full-charge context block: expected one match, found {count}')
+              raise SystemExit(f'ordinary charging block: expected one match, found {count}')
 
-          path.write_text(s.replace(old, new, 1))
+          path.write_text(s.replace(charging, full_charge + charging, 1))
           PY
 
       - name: Verify full-charge contract
