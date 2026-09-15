@@ -1,4 +1,4 @@
-name: Add Pixel Pet Full-Charge Reaction
+name: Add Pixel Pet Dizzy Orbit Reaction
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Add full-charge Pixel Pet reaction
+      - name: Add dizzy orbit reaction
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -26,41 +26,405 @@ jobs:
           path = Path('Halo/Views/PixelPetWidget.swift')
           s = path.read_text()
 
-          charging = "        if p.chargingReaction && system.charging {\n"
-          full_charge = (
-              "        if p.chargingReaction, let battery = system.battery, battery >= 100, !system.onBattery {\n"
-              "            return .init(expression: .superHappy, accessory: .crown, fx: .sparkle)\n"
-              "        }\n"
+          markers = [
+              '    case dizzy\n',
+              'struct HaloPixelPalCursorOrbitDetector {',
+              'case .dizzy: return .dizzy',
+              'pal.react(.dizzy, seconds: 1.9)',
+          ]
+          present = [marker in s for marker in markers]
+          if all(present):
+              print('Dizzy orbit reaction is already installed; validating existing implementation.')
+              raise SystemExit(0)
+          if any(present):
+              raise SystemExit('Partial dizzy orbit implementation detected; refusing an unsafe patch.')
+
+          def replace_once(source, old, new, label):
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              return source.replace(old, new, 1)
+
+          s = replace_once(
+              s,
+              "    case confused\n    case worried\n",
+              "    case confused\n    case dizzy\n    case worried\n",
+              'expression enum',
           )
 
-          if full_charge in s:
-              raise SystemExit('Full-charge reaction is already present; refusing to duplicate it.')
-          count = s.count(charging)
-          if count != 1:
-              raise SystemExit(f'ordinary charging block: expected one match, found {count}')
+          x_eye = "\n".join([
+              "    static let xEye = HaloPixelPalSprite(rows: [",
+              "        \"p...p\",",
+              "        \".p.p.\",",
+              "        \"..p..\",",
+              "        \".p.p.\",",
+              "        \"p...p\"",
+              "    ])",
+              "",
+          ])
+          s = replace_once(
+              s,
+              "    static let winkEye = HaloPixelPalSprite(rows: [\n",
+              x_eye + "    static let winkEye = HaloPixelPalSprite(rows: [\n",
+              'x-eye sprite',
+          )
 
-          path.write_text(s.replace(charging, full_charge + charging, 1))
+          detector = "\n".join([
+              "struct HaloPixelPalCursorOrbitDetector {",
+              "    private struct Sample {",
+              "        let time: TimeInterval",
+              "        let angle: Double",
+              "        let radius: Double",
+              "        let x: Double",
+              "        let y: Double",
+              "    }",
+              "",
+              "    static let sampleWindow: TimeInterval = 0.95",
+              "    static let cooldown: TimeInterval = 2.4",
+              "    static let minimumRotation = Double.pi * 2.4",
+              "    static let minimumDuration: TimeInterval = 0.28",
+              "    static let minimumPathSpeed = 1.7",
+              "    static let minimumDirectionConsistency = 0.80",
+              "    static let minimumRadius = 0.16",
+              "    static let maximumRadius = 0.48",
+              "    static let maximumRadiusSpread = 0.20",
+              "    static let minimumSamples = 10",
+              "",
+              "    private var samples: [Sample] = []",
+              "    private var lastTrigger = -Double.infinity",
+              "",
+              "    mutating func register(location: CGPoint, size: CGSize, at now: TimeInterval) -> Bool {",
+              "        guard size.width > 1, size.height > 1 else {",
+              "            resetPath()",
+              "            return false",
+              "        }",
+              "",
+              "        if now - lastTrigger < Self.cooldown {",
+              "            resetPath()",
+              "            return false",
+              "        }",
+              "",
+              "        let side = Double(min(size.width, size.height))",
+              "        let dx = (Double(location.x) - Double(size.width) * 0.5) / side",
+              "        let dy = (Double(location.y) - Double(size.height) * 0.5) / side",
+              "        let radius = hypot(dx, dy)",
+              "        guard radius >= Self.minimumRadius, radius <= Self.maximumRadius else {",
+              "            resetPath()",
+              "            return false",
+              "        }",
+              "",
+              "        if let last = samples.last, now - last.time > 0.18 {",
+              "            resetPath()",
+              "        }",
+              "",
+              "        samples.append(.init(time: now, angle: atan2(dy, dx), radius: radius, x: dx, y: dy))",
+              "        samples.removeAll { now - $0.time > Self.sampleWindow }",
+              "",
+              "        guard samples.count >= Self.minimumSamples,",
+              "              let first = samples.first,",
+              "              let last = samples.last else { return false }",
+              "",
+              "        let duration = last.time - first.time",
+              "        guard duration >= Self.minimumDuration else { return false }",
+              "",
+              "        var signedRotation = 0.0",
+              "        var absoluteRotation = 0.0",
+              "        var pathDistance = 0.0",
+              "        var minRadius = Double.greatestFiniteMagnitude",
+              "        var maxRadius = 0.0",
+              "",
+              "        for index in samples.indices {",
+              "            let sample = samples[index]",
+              "            minRadius = min(minRadius, sample.radius)",
+              "            maxRadius = max(maxRadius, sample.radius)",
+              "            guard index > samples.startIndex else { continue }",
+              "",
+              "            let previous = samples[index - 1]",
+              "            var delta = sample.angle - previous.angle",
+              "            while delta > .pi { delta -= 2 * .pi }",
+              "            while delta < -.pi { delta += 2 * .pi }",
+              "            signedRotation += delta",
+              "            absoluteRotation += abs(delta)",
+              "            pathDistance += hypot(sample.x - previous.x, sample.y - previous.y)",
+              "        }",
+              "",
+              "        guard absoluteRotation > 0.001 else { return false }",
+              "        let directionConsistency = abs(signedRotation) / absoluteRotation",
+              "        let pathSpeed = pathDistance / duration",
+              "        let radiusSpread = maxRadius - minRadius",
+              "",
+              "        guard abs(signedRotation) >= Self.minimumRotation,",
+              "              directionConsistency >= Self.minimumDirectionConsistency,",
+              "              pathSpeed >= Self.minimumPathSpeed,",
+              "              radiusSpread <= Self.maximumRadiusSpread else { return false }",
+              "",
+              "        lastTrigger = now",
+              "        resetPath()",
+              "        return true",
+              "    }",
+              "",
+              "    mutating func resetPath() {",
+              "        samples.removeAll(keepingCapacity: true)",
+              "    }",
+              "}",
+              "",
+          ])
+          s = replace_once(
+              s,
+              "@MainActor\nfinal class HaloPixelPalStore: ObservableObject {\n",
+              detector + "@MainActor\nfinal class HaloPixelPalStore: ObservableObject {\n",
+              'orbit detector',
+          )
+
+          s = replace_once(
+              s,
+              "private enum HaloPixelPalFX {\n    case none, hearts, sparkle, music, sweat, tears, alert, sleepZ\n}\n",
+              "private enum HaloPixelPalFX {\n    case none, hearts, sparkle, dizzy, music, sweat, tears, alert, sleepZ\n}\n",
+              'fx enum',
+          )
+
+          s = replace_once(
+              s,
+              "        case .sleepy: return .sleepZ\n        case .annoyed, .shocked, .surprised: return .alert\n",
+              "        case .sleepy: return .sleepZ\n        case .dizzy: return .dizzy\n        case .annoyed, .shocked, .surprised: return .alert\n",
+              'context dizzy fx',
+          )
+
+          s = replace_once(
+              s,
+              "    @State private var pointer = CGPoint.zero\n    @State private var animationEpoch = Date()\n",
+              "    @State private var pointer = CGPoint.zero\n    @State private var animationEpoch = Date()\n    @State private var orbitDetector = HaloPixelPalCursorOrbitDetector()\n",
+              'widget detector state',
+          )
+
+          hover_old = (
+              "                    case .active(let location):\n"
+              "                        hovering = true\n"
+              "                        let next = CGPoint(x: ((location.x / max(1, proxy.size.width) - 0.5) * 2).rounded(),\n"
+          )
+          hover_new = (
+              "                    case .active(let location):\n"
+              "                        hovering = true\n"
+              "                        if orbitDetector.register(\n"
+              "                            location: location,\n"
+              "                            size: CGSize(width: side, height: side),\n"
+              "                            at: timeline.date.timeIntervalSinceReferenceDate\n"
+              "                        ) {\n"
+              "                            pal.react(.dizzy, seconds: 1.9)\n"
+              "                        }\n"
+              "                        let next = CGPoint(x: ((location.x / max(1, proxy.size.width) - 0.5) * 2).rounded(),\n"
+          )
+          s = replace_once(s, hover_old, hover_new, 'hover orbit trigger')
+
+          s = replace_once(
+              s,
+              "                    case .ended:\n                        hovering = false\n                        pointer = .zero\n",
+              "                    case .ended:\n                        hovering = false\n                        pointer = .zero\n                        orbitDetector.resetPath()\n",
+              'hover reset',
+          )
+
+          s = replace_once(
+              s,
+              "        .onDisappear { hovering = false; pointer = .zero }\n",
+              "        .onDisappear { hovering = false; pointer = .zero; orbitDetector.resetPath() }\n",
+              'disappear reset',
+          )
+
+          s = replace_once(
+              s,
+              "    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, smug }\n",
+              "    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, smug }\n",
+              'eye pose enum',
+          )
+
+          s = replace_once(
+              s,
+              "        case .confused: return .confused\n        case .smug: return .smug\n",
+              "        case .confused: return .confused\n        case .dizzy: return .dizzy\n        case .smug: return .smug\n",
+              'dizzy eye pose mapping',
+          )
+
+          eye_old = (
+              "        case .confused:\n"
+              "            let open = HaloPixelPalSprites.openEye(preferences.eyeStyle)\n"
+              "            let closed = HaloPixelPalSprites.closedEye(preferences.eyeStyle)\n"
+              "            render(.init(open, x: leftX, y: y), 1, 0, 0)\n"
+              "            render(.init(closed, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)\n"
+              "        case .smug:\n"
+          )
+          eye_new = (
+              "        case .confused:\n"
+              "            let open = HaloPixelPalSprites.openEye(preferences.eyeStyle)\n"
+              "            let closed = HaloPixelPalSprites.closedEye(preferences.eyeStyle)\n"
+              "            render(.init(open, x: leftX, y: y), 1, 0, 0)\n"
+              "            render(.init(closed, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)\n"
+              "        case .dizzy:\n"
+              "            render(.init(HaloPixelPalSprites.xEye, x: 3, y: 6), 1, 0, 0)\n"
+              "            render(.init(HaloPixelPalSprites.xEye, x: 16, y: 6, mirrorX: true), 1, 0, 0)\n"
+              "        case .smug:\n"
+          )
+          s = replace_once(s, eye_old, eye_new, 'dizzy eyes')
+
+          s = replace_once(
+              s,
+              "        case .confused: return HaloPixelPalSprites.mouthO\n",
+              "        case .confused, .dizzy: return HaloPixelPalSprites.mouthO\n",
+              'dizzy mouth',
+          )
+
+          sparkle_old = (
+              "        case .sparkle:\n"
+              "            render(.init(HaloPixelPalSprites.sparkle, x: 1, y: 2), 0.90, 0, lift)\n"
+              "            render(.init(HaloPixelPalSprites.sparkle, x: 20, y: 5), 0.72, 0, -lift)\n"
+              "        case .music:\n"
+          )
+          sparkle_new = (
+              "        case .sparkle:\n"
+              "            render(.init(HaloPixelPalSprites.sparkle, x: 1, y: 2), 0.90, 0, lift)\n"
+              "            render(.init(HaloPixelPalSprites.sparkle, x: 20, y: 5), 0.72, 0, -lift)\n"
+              "        case .dizzy:\n"
+              "            switch phase {\n"
+              "            case 0:\n"
+              "                render(.init(HaloPixelPalSprites.sparkle, x: 2, y: 2), 0.96, 0, 0)\n"
+              "                render(.init(HaloPixelPalSprites.sparkle, x: 19, y: 5), 0.66, 0, 0)\n"
+              "            case 1:\n"
+              "                render(.init(HaloPixelPalSprites.sparkle, x: 7, y: 1), 0.78, 0, 0)\n"
+              "                render(.init(HaloPixelPalSprites.sparkle, x: 14, y: 6), 0.92, 0, 0)\n"
+              "            case 2:\n"
+              "                render(.init(HaloPixelPalSprites.sparkle, x: 19, y: 2), 0.96, 0, 0)\n"
+              "                render(.init(HaloPixelPalSprites.sparkle, x: 2, y: 5), 0.66, 0, 0)\n"
+              "            default:\n"
+              "                render(.init(HaloPixelPalSprites.sparkle, x: 14, y: 1), 0.78, 0, 0)\n"
+              "                render(.init(HaloPixelPalSprites.sparkle, x: 7, y: 6), 0.92, 0, 0)\n"
+              "            }\n"
+              "        case .music:\n"
+          )
+          s = replace_once(s, sparkle_old, sparkle_new, 'dizzy fx renderer')
+
+          reaction_old = (
+              "        if let reactionElapsed {\n"
+              "            if expression == .annoyed {\n"
+          )
+          reaction_new = (
+              "        if let reactionElapsed {\n"
+              "            if expression == .dizzy {\n"
+              "                return (Int(round(sin(t * 10.5))) * two, Int(round(cos(t * 7.5))) * one)\n"
+              "            }\n"
+              "            if expression == .annoyed {\n"
+          )
+          s = replace_once(s, reaction_old, reaction_new, 'dizzy reaction wobble')
+
+          s = replace_once(
+              s,
+              "        case .annoyed:\n            return (Int(round(sin(t * 11.0))) * one, 0)\n        case .neutral:\n",
+              "        case .annoyed:\n            return (Int(round(sin(t * 11.0))) * one, 0)\n        case .dizzy:\n            return (Int(round(sin(t * 10.5))) * two, Int(round(cos(t * 7.5))) * one)\n        case .neutral:\n",
+              'dizzy idle preview wobble',
+          )
+
+          s = replace_once(
+              s,
+              "        case .sleepy: return .sleepZ\n        case .annoyed, .surprised, .shocked: return .alert\n",
+              "        case .sleepy: return .sleepZ\n        case .dizzy: return .dizzy\n        case .annoyed, .surprised, .shocked: return .alert\n",
+              'preview dizzy fx',
+          )
+
+          path.write_text(s)
           PY
 
-      - name: Verify full-charge contract
+      - name: Verify dizzy orbit contract
         run: |
           python3 - <<'PY'
           from pathlib import Path
           s = Path('Halo/Views/PixelPetWidget.swift').read_text()
           required = [
-              'if p.chargingReaction, let battery = system.battery, battery >= 100, !system.onBattery {',
-              'return .init(expression: .superHappy, accessory: .crown, fx: .sparkle)',
-              'if p.chargingReaction && system.charging {',
-              'return .init(expression: .love, accessory: .halo, fx: .hearts)',
+              'case dizzy',
+              'struct HaloPixelPalCursorOrbitDetector {',
+              'static let sampleWindow: TimeInterval = 0.95',
+              'static let minimumRotation = Double.pi * 2.4',
+              'static let minimumDirectionConsistency = 0.80',
+              'static let cooldown: TimeInterval = 2.4',
+              'pal.react(.dizzy, seconds: 1.9)',
+              'orbitDetector.resetPath()',
+              'case .dizzy: return .dizzy',
+              'HaloPixelPalSprites.xEye',
+              'case .confused, .dizzy: return HaloPixelPalSprites.mouthO',
+              'if expression == .dizzy {',
           ]
           missing = [item for item in required if item not in s]
           if missing:
-              raise SystemExit('Missing full-charge Pixel Pet contract: ' + ', '.join(missing))
+              raise SystemExit('Missing dizzy orbit contract: ' + ', '.join(missing))
+          if s.count('pal.react(.dizzy, seconds: 1.9)') != 1:
+              raise SystemExit('Dizzy hover trigger must exist exactly once.')
+          if s.count('struct HaloPixelPalCursorOrbitDetector {') != 1:
+              raise SystemExit('Orbit detector must exist exactly once.')
+          PY
 
-          full = s.index(required[0])
-          charging = s.index(required[2])
-          if full >= charging:
-              raise SystemExit('Full-charge reaction must take priority over ordinary charging.')
+      - name: Test orbit gesture thresholds
+        run: |
+          python3 - <<'PY'
+          import math
+
+          WINDOW = 0.95
+          MIN_ROTATION = math.pi * 2.4
+          MIN_DURATION = 0.28
+          MIN_SPEED = 1.7
+          MIN_CONSISTENCY = 0.80
+          MAX_SPREAD = 0.20
+          MIN_SAMPLES = 10
+
+          def metrics(points):
+              samples = [(t, math.atan2(y, x), math.hypot(x, y), x, y) for t, x, y in points]
+              duration = samples[-1][0] - samples[0][0]
+              signed = absolute = distance = 0.0
+              radii = []
+              for i, sample in enumerate(samples):
+                  radii.append(sample[2])
+                  if i == 0:
+                      continue
+                  previous = samples[i - 1]
+                  delta = sample[1] - previous[1]
+                  while delta > math.pi:
+                      delta -= 2 * math.pi
+                  while delta < -math.pi:
+                      delta += 2 * math.pi
+                  signed += delta
+                  absolute += abs(delta)
+                  distance += math.hypot(sample[3] - previous[3], sample[4] - previous[4])
+              return duration, signed, absolute, distance / duration, max(radii) - min(radii)
+
+          def triggers(points):
+              if len(points) < MIN_SAMPLES:
+                  return False
+              duration, signed, absolute, speed, spread = metrics(points)
+              consistency = abs(signed) / absolute if absolute else 0
+              return (duration >= MIN_DURATION and abs(signed) >= MIN_ROTATION and
+                      consistency >= MIN_CONSISTENCY and speed >= MIN_SPEED and spread <= MAX_SPREAD)
+
+          count = 28
+          fast_circle = []
+          for i in range(count):
+              t = 0.72 * i / (count - 1)
+              angle = 2 * math.pi * 1.35 * i / (count - 1)
+              fast_circle.append((t, 0.31 * math.cos(angle), 0.31 * math.sin(angle)))
+          if not triggers(fast_circle):
+              raise SystemExit('A fast 1.35-turn circle should trigger dizziness.')
+
+          slow_circle = []
+          for i in range(count):
+              t = 2.4 * i / (count - 1)
+              angle = 2 * math.pi * 1.35 * i / (count - 1)
+              slow_circle.append((t, 0.31 * math.cos(angle), 0.31 * math.sin(angle)))
+          if triggers(slow_circle):
+              raise SystemExit('A slow circle must not trigger dizziness.')
+
+          zigzag = []
+          for i in range(count):
+              t = 0.72 * i / (count - 1)
+              x = -0.32 + 0.64 * i / (count - 1)
+              y = 0.05 if i % 2 else -0.05
+              zigzag.append((t, x, y))
+          if triggers(zigzag):
+              raise SystemExit('A fast non-circular zigzag must not trigger dizziness.')
           PY
 
       - name: Parse Pixel Pet source
@@ -78,5 +442,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add Halo/Views/PixelPetWidget.swift
-          git commit -m 'Add Pixel Pet full-charge reaction'
+          git commit -m 'Add Pixel Pet dizzy orbit reaction'
           git push origin HEAD:main
