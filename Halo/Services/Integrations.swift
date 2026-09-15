@@ -23,6 +23,15 @@ final class CalendarService: ObservableObject {
     private var activationObserver: AnyCancellable?
 
     var hasAccess: Bool { Self.canReadEvents(authorizationStatus) }
+    var permissionNeedsDecision: Bool { authorizationStatus == .notDetermined }
+
+    /// Ask only on first use. Once the user has made a choice, refreshing the
+    /// calendar must never keep throwing permission UI at them.
+    func requestAccessIfNeeded() {
+        syncAuthorizationStatus()
+        if authorizationStatus == .notDetermined { requestAccess() }
+        else { refresh() }
+    }
 
     init() {
         eventObserver = NotificationCenter.default.publisher(for: .EKEventStoreChanged)
@@ -180,7 +189,7 @@ final class CalendarService: ObservableObject {
         }
         switch authorizationStatus {
         case .notDetermined:
-            return "Calendar access has not been granted yet."
+            return "Calendar events are optional. Halo Calendar still works without access."
         case .denied:
             return "Calendar access is denied. Enable Halo in System Settings → Privacy & Security → Calendars."
         case .restricted:

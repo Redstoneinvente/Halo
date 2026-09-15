@@ -755,56 +755,58 @@ struct VisualWorkspaceCalendarView: View {
     }
 
     var body: some View {
-        Group {
-            if service.hasAccess {
-                Group {
-                    switch effectiveView {
-                    case .automatic: todayTile
-                    case .today: todayPresentation
-                    case .agenda: agendaPresentation
-                    case .dayTimeline: dayTimelinePresentation
-                    case .week: weekPresentation
-                    case .month: monthPresentation
-                    case .monthAgenda: monthAgendaPresentation
-                    case .split: splitPresentation
-                    case .upcoming: upcomingPresentation
-                    case .minimal: minimalPresentation
-                    }
+        ZStack(alignment: .topTrailing) {
+            Group {
+                switch effectiveView {
+                case .automatic: todayTile
+                case .today: todayPresentation
+                case .agenda: agendaPresentation
+                case .dayTimeline: dayTimelinePresentation
+                case .week: weekPresentation
+                case .month: monthPresentation
+                case .monthAgenda: monthAgendaPresentation
+                case .split: splitPresentation
+                case .upcoming: upcomingPresentation
+                case .minimal: minimalPresentation
                 }
-            } else {
-                calendarAccessState
             }
+            if !service.hasAccess { calendarPermissionBadge }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(style.backgroundColor.color.opacity(settings.backgroundOpacity))
         .animation(.spring(response: 0.34, dampingFraction: 0.88), value: family)
         .animation(.easeInOut(duration: 0.2), value: selectedDate)
         .animation(.easeInOut(duration: 0.2), value: selectedEventIdentifier)
-        .onAppear { service.refresh(); loadMonth() }
+        .onAppear {
+            service.refresh()
+            loadMonth()
+            // Calendar dates/month navigation are local and permission-free. Event access is
+            // requested once, only to enrich the widget with real events.
+            service.requestAccessIfNeeded()
+        }
         .onChange(of: monthAnchor) { _ in loadMonth() }
         .onChange(of: service.calendarRevision) { _ in loadMonth() }
     }
 
-    private var calendarAccessState: some View {
+    private var calendarPermissionBadge: some View {
         Button { service.requestAccess() } label: {
-            VStack(spacing: family == .micro ? 3 : 7) {
-                Image(systemName: "calendar.badge.exclamationmark")
-                    .font(.system(size: family == .micro ? 18 : 26, weight: .medium))
-                    .foregroundStyle(accent)
-                if family != .micro {
-                    Text("Calendar Access")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    Text("Allow Halo to read your calendars, including subscribed holiday and observance calendars.")
-                        .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(3)
-                    Text("Enable Calendar")
-                        .font(.caption).foregroundStyle(accent)
+            Group {
+                if family == .micro {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 7, weight: .bold))
+                        .frame(width: 16, height: 16)
+                } else {
+                    Label("Events Off", systemImage: "calendar.badge.exclamationmark")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .padding(.horizontal, 7).padding(.vertical, 4)
                 }
             }
-            .padding(family == .micro ? 2 : 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .foregroundStyle(accent)
+            .background(Color.black.opacity(0.28), in: Capsule())
         }
         .buttonStyle(.plain)
-        .help(service.status)
+        .padding(family == .micro ? 3 : 5)
+        .help(service.status + " Calendar dates and navigation remain available without event permission.")
     }
 
     private static func family(columns: Int, rows: Int, width: CGFloat?, height: CGFloat?) -> VisualCalendarFamily {
@@ -984,7 +986,7 @@ struct VisualWorkspaceCalendarView: View {
         .haloMicroInteraction(accent: accent, help: imminent ? "Next event in \(minutesUntil ?? 0) minutes" : "Calendar · click for today · hold for agenda", tapShowsPopover: true, onTap: {}) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(Date(), format: .dateTime.weekday(.wide).month(.wide).day()).font(.headline)
-                if filteredToday.isEmpty { Text("No more events today").foregroundStyle(.secondary) }
+                if filteredToday.isEmpty { Text(service.hasAccess ? "No more events today" : "Event access is off — dates still work normally.").foregroundStyle(.secondary) }
                 ForEach(filteredToday.prefix(5), id: \.eventIdentifier) { event in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(event.title).lineLimit(1)
@@ -1001,7 +1003,7 @@ struct VisualWorkspaceCalendarView: View {
             Divider().opacity(0.22)
             let events = Array(filteredToday.prefix(max(1, min(visibleEventLimit, max(1, columns - 1)))))
             if events.isEmpty {
-                Text("Nothing scheduled").font(.caption).foregroundStyle(.secondary)
+                Text(service.hasAccess ? "Nothing scheduled" : "Events off").font(.caption).foregroundStyle(.secondary)
             } else {
                 ForEach(Array(events.enumerated()), id: \.offset) { _, event in
                     compactHorizontalEvent(event)
@@ -1040,7 +1042,7 @@ struct VisualWorkspaceCalendarView: View {
                     .font(dateFont(prominent ? 16 : 12)).lineLimit(1)
             }
             Spacer()
-            if family != .verticalAgenda { Text(filteredToday.isEmpty ? "Clear" : "\(filteredToday.count) event\(filteredToday.count == 1 ? "" : "s")").font(.caption2).foregroundStyle(.secondary) }
+            if family != .verticalAgenda { Text(!service.hasAccess ? "Events off" : (filteredToday.isEmpty ? "Clear" : "\(filteredToday.count) event\(filteredToday.count == 1 ? "" : "s")")).font(.caption2).foregroundStyle(.secondary) }
         }
     }
 
@@ -1227,8 +1229,13 @@ struct VisualWorkspaceCalendarView: View {
     }
 
     private var subtleEmptyState: some View {
-        HStack(spacing: 6) { Image(systemName: "sparkles").foregroundStyle(accent); Text("Nothing scheduled").foregroundStyle(.secondary); Spacer() }
-            .font(.caption).padding(.vertical, 4)
+        HStack(spacing: 6) {
+            Image(systemName: service.hasAccess ? "sparkles" : "calendar.badge.exclamationmark").foregroundStyle(accent)
+            Text(service.hasAccess ? "Nothing scheduled" : "Calendar works · enable Events to show your schedule")
+                .foregroundStyle(.secondary).lineLimit(2)
+            Spacer()
+        }
+        .font(.caption).padding(.vertical, 4)
     }
 
     private func timelineHourRow(_ hour: Int) -> some View {

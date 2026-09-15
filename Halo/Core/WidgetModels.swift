@@ -1184,10 +1184,13 @@ struct VisualAdaptiveWidgetOptions: Codable, Equatable {
 
     func resolvedInformationPriority(for module: ModuleID) -> [String] {
         var result: [String] = []
-        let valid = Set(module.widgetElements.map(\.key))
+        let source = module.visualAdaptiveConfigurableElementKeys.isEmpty
+            ? module.widgetElements.map(\.key)
+            : module.visualAdaptiveConfigurableElementKeys
+        let valid = Set(source)
         for key in informationPriority where valid.contains(key) && !result.contains(key) { result.append(key) }
         for key in module.visualAdaptiveDefaultInformationOrder where valid.contains(key) && !result.contains(key) { result.append(key) }
-        for key in module.widgetElements.map(\.key) where !result.contains(key) { result.append(key) }
+        for key in source where !result.contains(key) { result.append(key) }
         return result
     }
 
@@ -1281,6 +1284,95 @@ extension ModuleID {
         case .capture: return ["actions", "result", "progress", "resultActions", "status", "hint"]
         case .stopwatch: return ["time", "controls", "state"]
         default: return widgetElements.map(\.key)
+        }
+    }
+}
+
+struct VisualAdaptiveElementAvailability {
+    let available: Bool
+    let reason: String?
+}
+
+extension ModuleID {
+    /// Inspector capability flags. If a setting is not consumed by a renderer, the editor must
+    /// not pretend that it is configurable.
+    var visualAdaptiveSupportsMaximumItems: Bool {
+        switch self {
+        case .shelf, .audio, .clipboard, .system, .launcher, .activities: return true
+        default: return false
+        }
+    }
+
+    var visualAdaptiveSupportsControlToggle: Bool {
+        switch self {
+        case .timer, .media, .audio, .clipboard, .stopwatch: return true
+        default: return false
+        }
+    }
+
+    func visualAdaptiveMaximumItemsAffects(_ footprint: VisualWidgetFootprint) -> Bool {
+        guard visualAdaptiveSupportsMaximumItems else { return false }
+        switch self {
+        case .audio:
+            return footprint.area >= 6
+        case .shelf, .clipboard, .system, .launcher, .activities:
+            return footprint.area > 1
+        default:
+            return false
+        }
+    }
+
+    func visualAdaptiveControlToggleAffects(_ footprint: VisualWidgetFootprint) -> Bool {
+        guard visualAdaptiveSupportsControlToggle else { return false }
+        switch self {
+        case .timer, .clipboard, .stopwatch:
+            return footprint.area > 1
+        case .media, .audio:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Only keys which the adaptive renderer actually consumes belong here. This intentionally
+    /// excludes legacy element controls that do nothing in a Visual Workspace renderer.
+    var visualAdaptiveConfigurableElementKeys: [String] {
+        switch self {
+        case .timer:
+            return ["countdown", "controls", "progress", "status", "endTime", "presets"]
+        case .media:
+            return ["artwork", "track", "controls", "artist", "progress", "timing", "album", "source", "shuffle", "repeat", "visualizer"]
+        default:
+            return []
+        }
+    }
+
+    func visualAdaptiveElementAvailability(_ key: String, footprint: VisualWidgetFootprint) -> VisualAdaptiveElementAvailability {
+        func yes() -> VisualAdaptiveElementAvailability { .init(available: true, reason: nil) }
+        func no(_ reason: String) -> VisualAdaptiveElementAvailability { .init(available: false, reason: reason) }
+
+        switch self {
+        case .timer:
+            switch key {
+            case "countdown": return yes()
+            case "controls": return footprint.area >= 2 ? yes() : no("Visible controls start at 2×1 / 1×2. The 1×1 tile keeps its click/hold interaction instead.")
+            case "progress": return (footprint.area >= 4 || footprint.columns >= 4 || footprint.rows >= 3) ? yes() : no("Progress needs more room; use at least 2×2, 4×1, or a 1×3 vertical tile.")
+            case "presets": return footprint.area >= 4 ? yes() : no("Preset buttons need at least a 2×2-sized footprint.")
+            case "status", "endTime": return (footprint.rows >= 4 || footprint.stage == .dashboard) ? yes() : no("Timer metadata appears on tall or dashboard layouts.")
+            default: return no("This element is not rendered by the adaptive Timer.")
+            }
+        case .media:
+            switch key {
+            case "artwork", "track", "controls": return yes()
+            case "artist": return footprint.area >= 2 ? yes() : no("Artist metadata starts above 1×1.")
+            case "progress": return (footprint.area >= 4 || footprint.columns >= 6 || footprint.rows >= 3) ? yes() : no("Playback progress needs at least a medium footprint.")
+            case "album", "source": return footprint.area >= 4 ? yes() : no("Secondary media metadata starts at medium layouts.")
+            case "timing": return ((footprint.columns >= 4 && footprint.rows >= 2) || (footprint.columns >= 3 && footprint.rows >= 3)) ? yes() : no("Elapsed / remaining time is reserved for expanded media layouts.")
+            case "shuffle", "repeat", "visualizer": return (footprint.columns >= 6 && footprint.rows >= 3) ? yes() : no("This tool is reserved for dashboard/hero media layouts (6×3 or larger).")
+            default: return no("This element is not rendered by the adaptive Media widget.")
+            }
+        default:
+            return no("This widget uses dedicated controls instead of legacy per-element toggles.")
         }
     }
 }

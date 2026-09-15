@@ -59,7 +59,7 @@ private final class VisualCalendarSourceBrowser: ObservableObject {
             rebuildEventStore()
             refresh()
             return
-        @unknown default:
+        default:
             break
         }
 
@@ -146,7 +146,7 @@ private final class VisualCalendarSourceBrowser: ObservableObject {
             return "Calendar access is restricted on this Mac."
         case .authorized:
             return "Calendar access granted."
-        @unknown default:
+        default:
             return "Calendar access is unavailable."
         }
     }
@@ -1560,8 +1560,8 @@ private func gridItemPreview(_ item: OpenNotchItem, size: CGSize) -> some View {
             else if let region = selectedRegion.flatMap(findRegion) { regionInspector(region) }
             else {
                 Section("Visual Workspace Grid") {
-                    Stepper("Columns: \(opened.resolvedGridColumns)", value: gridColumnsBinding, in: 2...12)
-                    Stepper("Rows: \(opened.resolvedGridRows)", value: gridRowsBinding, in: 1...12)
+                    Stepper("Columns: \(opened.resolvedGridColumns)", value: gridColumnsBinding, in: 2...8)
+                    Stepper("Rows: \(opened.resolvedGridRows)", value: gridRowsBinding, in: 1...4)
                     PreciseSlider(title: "Grid gap", value: gridGapBinding, range: 0...32, step: 1, suffix: "pt")
                     if opened.resolvedContentMode == .scroll {
                         PreciseSlider(title: "Scroll cell height", value: gridCellHeightBinding, range: 56...320, step: 2, suffix: "pt")
@@ -1642,11 +1642,11 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
             Stepper("Width: \(placement.wrappedValue.columnSpan) column\(placement.wrappedValue.columnSpan == 1 ? "" : "s")",
                     value: placement.columnSpan, in: 1...opened.resolvedGridColumns)
             Stepper("Height: \(placement.wrappedValue.rowSpan) row\(placement.wrappedValue.rowSpan == 1 ? "" : "s")",
-                    value: placement.rowSpan, in: 1...12)
+                    value: placement.rowSpan, in: 1...4)
             Divider()
             Stepper("Column: \(placement.wrappedValue.column + 1)", value: placement.column,
                     in: 0...max(0, opened.resolvedGridColumns - placement.wrappedValue.columnSpan))
-            Stepper("Row: \(placement.wrappedValue.row + 1)", value: placement.row, in: 0...48)
+            Stepper("Row: \(placement.wrappedValue.row + 1)", value: placement.row, in: 0...max(0, 4 - placement.wrappedValue.rowSpan))
         }
         if let module = item.module {
             widgetBlockInspector(itemID: item.id, module: module)
@@ -1703,7 +1703,9 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
                 }
             }
             Toggle("Show title", isOn: style.showTitle)
-            Toggle("Show header icon", isOn: Binding(get: { style.wrappedValue.showsHeaderIcon }, set: { style.wrappedValue.showHeaderIcon = $0 }))
+            if style.wrappedValue.showTitle {
+                Toggle("Show header icon", isOn: Binding(get: { style.wrappedValue.showsHeaderIcon }, set: { style.wrappedValue.showHeaderIcon = $0 }))
+            }
             Picker("Content alignment", selection: style.content.withDefault(WidgetContentOptions()).alignment) {
                 ForEach(WidgetContentAlignment.allCases) { Text($0.title).tag($0) }
             }
@@ -1717,7 +1719,7 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
             visualCalendarSizeOverrideInspector(itemID: itemID, style: style)
         }
         if module.visualAdaptiveSupported {
-            visualAdaptiveSettings(style: style, module: module)
+            visualAdaptiveSettings(itemID: itemID, style: style, module: module)
             visualAdaptiveSizeOverrideInspector(itemID: itemID, style: style, module: module)
         }
         Section("Block Styling") {
@@ -1746,30 +1748,41 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
             PreciseSlider(title: "Corner radius", value: style.cornerRadius, range: 0...40, step: 1, suffix: "pt")
             PreciseSlider(title: "Internal padding", value: style.padding, range: 0...32, step: 1, suffix: "pt")
         }
-        Section("Typography") {
-            Picker("Font", selection: style.fontFamily) { ForEach(WidgetFontFamily.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
-            Picker("Weight", selection: style.weight) { ForEach(WidgetFontWeight.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
-            PreciseSlider(title: "Base text size", value: style.fontSize, range: 10...40, step: 1, suffix: "pt")
-            ColorPicker("Text", selection: Binding(get: { style.wrappedValue.textColor.color }, set: { style.wrappedValue.textColor = WidgetColor($0) }), supportsOpacity: false)
-            ColorPicker("Accent", selection: Binding(get: { style.wrappedValue.accentColor.color }, set: { style.wrappedValue.accentColor = WidgetColor($0) }), supportsOpacity: false)
+        if module.visualAdaptiveSupported || module == .calendar || module == .clock {
+            Section("Colors") {
+                ColorPicker("Text", selection: Binding(get: { style.wrappedValue.textColor.color }, set: { style.wrappedValue.textColor = WidgetColor($0) }), supportsOpacity: false)
+                ColorPicker("Accent", selection: Binding(get: { style.wrappedValue.accentColor.color }, set: { style.wrappedValue.accentColor = WidgetColor($0) }), supportsOpacity: false)
+                Text("Typography for adaptive widgets is controlled by the widget's own renderer. Halo hides legacy font controls here rather than exposing settings that only affect part of the widget.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        } else {
+            Section("Typography") {
+                Picker("Font", selection: style.fontFamily) { ForEach(WidgetFontFamily.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+                Picker("Weight", selection: style.weight) { ForEach(WidgetFontWeight.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+                PreciseSlider(title: "Base text size", value: style.fontSize, range: 10...40, step: 1, suffix: "pt")
+                ColorPicker("Text", selection: Binding(get: { style.wrappedValue.textColor.color }, set: { style.wrappedValue.textColor = WidgetColor($0) }), supportsOpacity: false)
+                ColorPicker("Accent", selection: Binding(get: { style.wrappedValue.accentColor.color }, set: { style.wrappedValue.accentColor = WidgetColor($0) }), supportsOpacity: false)
+            }
         }
-        Section("Displayed Content") {
-            ForEach(module.widgetElements) { descriptor in
-                let element = widgetElementStyleBinding(itemID, module: module, descriptor: descriptor)
-                DisclosureGroup {
-                    styleInspector(element, defaultVisible: descriptor.defaultVisible)
-                } label: {
-                    Toggle(isOn: Binding(
-                        get: { element.wrappedValue?.visible ?? descriptor.defaultVisible },
-                        set: { visible in
-                            var value = element.wrappedValue ?? WidgetElementStyle()
-                            value.visible = visible
-                            element.wrappedValue = value
-                        }
-                    )) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(descriptor.title)
-                            Text(descriptor.detail).font(.caption2).foregroundStyle(.secondary)
+        if !module.visualAdaptiveSupported && module != .calendar && module != .clock {
+            Section("Displayed Content") {
+                ForEach(module.widgetElements) { descriptor in
+                    let element = widgetElementStyleBinding(itemID, module: module, descriptor: descriptor)
+                    DisclosureGroup {
+                        styleInspector(element, defaultVisible: descriptor.defaultVisible)
+                    } label: {
+                        Toggle(isOn: Binding(
+                            get: { element.wrappedValue?.visible ?? descriptor.defaultVisible },
+                            set: { visible in
+                                var value = element.wrappedValue ?? WidgetElementStyle()
+                                value.visible = visible
+                                element.wrappedValue = value
+                            }
+                        )) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(descriptor.title)
+                                Text(descriptor.detail).font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -1782,38 +1795,68 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
 
 
 
-    @ViewBuilder private func visualAdaptiveSettings(style: Binding<WidgetStyle>, module: ModuleID) -> some View {
+    @ViewBuilder private func visualAdaptiveSettings(itemID: UUID, style: Binding<WidgetStyle>, module: ModuleID) -> some View {
         let adaptive = style.visualAdaptive.withDefault(VisualAdaptiveWidgetOptions.defaults(for: module))
+        let placement = findItem(itemID)?.gridPlacement ?? OpenNotchGridPlacement()
+        let footprint = VisualWidgetFootprint(columns: placement.columnSpan, rows: placement.rowSpan)
         Section("Adaptive Layout") {
+            HStack {
+                Label("\(footprint.key) · \(footprint.stage.rawValue)", systemImage: "rectangle.grid.2x2")
+                    .font(.system(size: 11, weight: .semibold))
+                Spacer()
+                Text(footprint.orientation.rawValue.capitalized).font(.caption2).foregroundStyle(.secondary)
+            }
+            Text(module.visualWidgetSizeHint(for: footprint)).font(.caption2).foregroundStyle(.secondary)
             Picker("Presentation", selection: adaptive.preferredPresentation) { ForEach(VisualAdaptivePresentation.allCases) { Text($0.rawValue).tag($0) } }
             Picker("Density", selection: adaptive.density) { ForEach(VisualAdaptiveDensity.allCases) { Text($0.rawValue).tag($0) } }
-            Stepper("Maximum items: \(adaptive.wrappedValue.maxItems)", value: adaptive.maxItems, in: 1...30)
-            Toggle("Show controls", isOn: adaptive.showControls)
+            if module.visualAdaptiveMaximumItemsAffects(footprint) {
+                Stepper("Maximum items: \(adaptive.wrappedValue.maxItems)", value: adaptive.maxItems, in: 1...30)
+            }
+            if module.visualAdaptiveControlToggleAffects(footprint) {
+                Toggle("Show controls", isOn: adaptive.showControls)
+            }
             Button("Reset All Size Overrides") { adaptive.wrappedValue.sizeOverrides = [:] }.disabled(adaptive.wrappedValue.sizeOverrides.isEmpty)
-            Text("Automatic is recommended. Width, height and aspect ratio independently choose Micro, Compact, Horizontal, Vertical, Standard, Expanded, Dashboard or Hero layouts.")
+            Text("Only controls consumed by this widget are shown. Automatic is recommended; Halo changes hierarchy and density from 1×1 through 8×4.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        Section("Information Priority") {
-            if !module.visualAdaptiveAlwaysInformation.isEmpty {
-                Text("Always").font(.caption2).foregroundStyle(.secondary)
-                ForEach(module.visualAdaptiveAlwaysInformation, id: \.self) { key in
-                    Label(module.widgetElements.first(where: { $0.key == key })?.title ?? key, systemImage: "checkmark.circle.fill").foregroundStyle(.secondary)
-                }
-            }
-            Text("Lower-priority information disappears first as the widget becomes constrained.").font(.caption2).foregroundStyle(.secondary)
-            ForEach(adaptive.wrappedValue.resolvedInformationPriority(for: module).filter { !module.visualAdaptiveAlwaysInformation.contains($0) }, id: \.self) { key in
-                HStack(spacing: 7) {
-                    Toggle(module.widgetElements.first(where: { $0.key == key })?.title ?? key, isOn: adaptiveInformationEnabled(adaptive, key))
-                    Spacer(minLength: 2)
-                    Button { moveAdaptiveInformation(adaptive, module: module, key: key, direction: -1) } label: { Image(systemName: "chevron.up") }.buttonStyle(.borderless)
-                    Button { moveAdaptiveInformation(adaptive, module: module, key: key, direction: 1) } label: { Image(systemName: "chevron.down") }.buttonStyle(.borderless)
+        if !module.visualAdaptiveConfigurableElementKeys.isEmpty {
+            Section("Elements at \(footprint.key)") {
+                Text("Unavailable elements are disabled for this exact footprint. The warning explains how much room the renderer needs.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                ForEach(module.visualAdaptiveConfigurableElementKeys, id: \.self) { key in
+                    let title = module.widgetElements.first(where: { $0.key == key })?.title ?? key
+                    let availability = module.visualAdaptiveElementAvailability(key, footprint: footprint)
+                    let always = module.visualAdaptiveAlwaysInformation.contains(key)
+                    HStack(spacing: 7) {
+                        if always {
+                            Label(title, systemImage: "checkmark.circle.fill").foregroundStyle(.secondary)
+                        } else {
+                            Toggle(title, isOn: adaptiveInformationEnabled(adaptive, key))
+                                .disabled(!availability.available)
+                        }
+                        if !availability.available {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .help(availability.reason ?? "This element does not fit the current widget size.")
+                        }
+                        Spacer(minLength: 2)
+                        if !always {
+                            Button { moveAdaptiveInformation(adaptive, module: module, key: key, direction: -1) } label: { Image(systemName: "chevron.up") }
+                                .buttonStyle(.borderless).disabled(!availability.available)
+                            Button { moveAdaptiveInformation(adaptive, module: module, key: key, direction: 1) } label: { Image(systemName: "chevron.down") }
+                                .buttonStyle(.borderless).disabled(!availability.available)
+                        }
+                    }
+                    if !availability.available, let reason = availability.reason {
+                        Text(reason).font(.caption2).foregroundStyle(.orange)
+                    }
                 }
             }
         }
-        visualAdaptiveModuleSettings(adaptive, module: module)
+        visualAdaptiveModuleSettings(adaptive, module: module, footprint: footprint)
     }
 
-    @ViewBuilder private func visualAdaptiveModuleSettings(_ adaptive: Binding<VisualAdaptiveWidgetOptions>, module: ModuleID) -> some View {
+    @ViewBuilder private func visualAdaptiveModuleSettings(_ adaptive: Binding<VisualAdaptiveWidgetOptions>, module: ModuleID, footprint: VisualWidgetFootprint) -> some View {
         switch module {
         case .timer:
             Section("Timer") {
@@ -1825,16 +1868,20 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
             }
         case .media:
             Section("Media") {
-                Picker("Micro style", selection: adaptive.mediaMicroStyle) { ForEach(VisualMediaMicroStyle.allCases) { Text($0.rawValue).tag($0) } }
+                if footprint.area == 1 { Picker("Micro style", selection: adaptive.mediaMicroStyle) { ForEach(VisualMediaMicroStyle.allCases) { Text($0.rawValue).tag($0) } } }
                 Picker("Artwork shape", selection: adaptive.mediaArtworkShape) { ForEach(VisualAdaptiveArtworkShape.allCases) { Text($0.rawValue).tag($0) } }
                 PreciseSlider(title: "Artwork scale", value: Binding(get: { Double(adaptive.wrappedValue.mediaArtworkScale) }, set: { adaptive.wrappedValue.mediaArtworkScale = CGFloat($0) }), range: 0.5...1.8, step: 0.05, suffix: "×", decimals: 2)
                 PreciseSlider(title: "Artwork corner radius", value: Binding(get: { Double(adaptive.wrappedValue.mediaArtworkCornerRadius) }, set: { adaptive.wrappedValue.mediaArtworkCornerRadius = CGFloat($0) }), range: 0...60, step: 1, suffix: "pt")
-                Toggle("Artwork background", isOn: adaptive.mediaArtworkBackground)
-                if adaptive.wrappedValue.mediaArtworkBackground { PreciseSlider(title: "Artwork background blur", value: Binding(get: { Double(adaptive.wrappedValue.mediaArtworkBlur) }, set: { adaptive.wrappedValue.mediaArtworkBlur = CGFloat($0) }), range: 0...40, step: 1, suffix: "pt") }
+                if footprint.area > 1 {
+                    Toggle("Artwork background", isOn: adaptive.mediaArtworkBackground)
+                    if adaptive.wrappedValue.mediaArtworkBackground { PreciseSlider(title: "Artwork background blur", value: Binding(get: { Double(adaptive.wrappedValue.mediaArtworkBlur) }, set: { adaptive.wrappedValue.mediaArtworkBlur = CGFloat($0) }), range: 0...40, step: 1, suffix: "pt") }
+                }
                 Toggle("Artwork-derived accent", isOn: adaptive.mediaUseArtworkColors)
                 Picker("Progress", selection: adaptive.mediaProgressStyle) { ForEach(VisualAdaptiveProgressStyle.allCases) { Text($0.rawValue).tag($0) } }
-                Toggle("Visualizer on large layouts", isOn: adaptive.mediaVisualizer)
-                if adaptive.wrappedValue.mediaVisualizer { Picker("Visualizer position", selection: adaptive.mediaVisualizerPosition) { ForEach(VisualAdaptiveVisualizerPosition.allCases) { Text($0.rawValue).tag($0) } } }
+                if module.visualAdaptiveElementAvailability("visualizer", footprint: footprint).available {
+                    Toggle("Visualizer", isOn: adaptive.mediaVisualizer)
+                    if adaptive.wrappedValue.mediaVisualizer { Picker("Visualizer position", selection: adaptive.mediaVisualizerPosition) { ForEach(VisualAdaptiveVisualizerPosition.allCases) { Text($0.rawValue).tag($0) } } }
+                }
                 Text("Shuffle and repeat only appear when the connected player reports support. Lyrics remain hidden because Halo does not currently expose a reliable lyric source to this widget.").font(.caption2).foregroundStyle(.secondary)
             }
         case .audio:
@@ -1938,6 +1985,7 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
         let placement = findItem(itemID)?.gridPlacement ?? OpenNotchGridPlacement()
         let columns = min(8, max(1, placement.columnSpan))
         let rows = min(4, max(1, placement.rowSpan))
+        let footprint = VisualWidgetFootprint(columns: columns, rows: rows)
         let key = VisualAdaptiveWidgetOptions.sizeKey(columns: columns, rows: rows)
         let adaptive = style.visualAdaptive.withDefault(VisualAdaptiveWidgetOptions.defaults(for: module))
         let override = Binding<VisualAdaptiveSizeOverride?>(get: { adaptive.wrappedValue.sizeOverrides[key] }, set: { replacement in
@@ -1953,19 +2001,35 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
                 let value = override.withDefault(VisualAdaptiveSizeOverride())
                 Picker("Presentation", selection: value.presentation.withDefault(.automatic)) { ForEach(VisualAdaptivePresentation.allCases) { Text($0.rawValue).tag($0) } }
                 Picker("Density", selection: value.density.withDefault(adaptive.wrappedValue.density)) { ForEach(VisualAdaptiveDensity.allCases) { Text($0.rawValue).tag($0) } }
-                Stepper("Maximum items: \(value.wrappedValue.maxItems ?? adaptive.wrappedValue.maxItems)", value: value.maxItems.withDefault(adaptive.wrappedValue.maxItems), in: 1...30)
-                Toggle("Show controls", isOn: value.showControls.withDefault(adaptive.wrappedValue.showControls))
-                Text("Information for this size").font(.caption).foregroundStyle(.secondary)
-                ForEach(module.widgetElements.filter { !module.visualAdaptiveAlwaysInformation.contains($0.key) }) { descriptor in
-                    Toggle(descriptor.title, isOn: Binding(get: {
-                        let hidden = value.wrappedValue.hiddenInformation ?? adaptive.wrappedValue.hiddenInformation
-                        return !hidden.contains(descriptor.key)
-                    }, set: { enabled in
-                        var hidden = value.wrappedValue.hiddenInformation ?? adaptive.wrappedValue.hiddenInformation
-                        if enabled { hidden.removeAll { $0 == descriptor.key } }
-                        else if !hidden.contains(descriptor.key) { hidden.append(descriptor.key) }
-                        value.wrappedValue.hiddenInformation = hidden
-                    }))
+                if module.visualAdaptiveMaximumItemsAffects(footprint) {
+                    Stepper("Maximum items: \(value.wrappedValue.maxItems ?? adaptive.wrappedValue.maxItems)", value: value.maxItems.withDefault(adaptive.wrappedValue.maxItems), in: 1...30)
+                }
+                if module.visualAdaptiveControlToggleAffects(footprint) {
+                    Toggle("Show controls", isOn: value.showControls.withDefault(adaptive.wrappedValue.showControls))
+                }
+                let configurable = module.visualAdaptiveConfigurableElementKeys.filter { !module.visualAdaptiveAlwaysInformation.contains($0) }
+                if !configurable.isEmpty {
+                    Text("Elements for this size").font(.caption).foregroundStyle(.secondary)
+                    ForEach(configurable, id: \.self) { elementKey in
+                        let descriptor = module.widgetElements.first(where: { $0.key == elementKey })
+                        let availability = module.visualAdaptiveElementAvailability(elementKey, footprint: footprint)
+                        HStack {
+                            Toggle(descriptor?.title ?? elementKey, isOn: Binding(get: {
+                                let hidden = value.wrappedValue.hiddenInformation ?? adaptive.wrappedValue.hiddenInformation
+                                return !hidden.contains(elementKey)
+                            }, set: { enabled in
+                                var hidden = value.wrappedValue.hiddenInformation ?? adaptive.wrappedValue.hiddenInformation
+                                if enabled { hidden.removeAll { $0 == elementKey } }
+                                else if !hidden.contains(elementKey) { hidden.append(elementKey) }
+                                value.wrappedValue.hiddenInformation = hidden
+                            }))
+                            .disabled(!availability.available)
+                            if !availability.available {
+                                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                                    .help(availability.reason ?? "Unavailable at this size")
+                            }
+                        }
+                    }
                 }
                 Button("Reset This Size to Automatic") { override.wrappedValue = nil }
             } else {

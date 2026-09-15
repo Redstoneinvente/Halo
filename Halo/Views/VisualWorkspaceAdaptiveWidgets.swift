@@ -342,10 +342,14 @@ private struct AdaptiveResolvedContext {
     var information: Set<String> { settings.visibleInformation(for: module, capacity: footprint.informationCapacity) }
     var itemLimit: Int { min(settings.maxItems, footprint.itemCapacity) }
     func shows(_ key: String) -> Bool {
+        let configurable = module.visualAdaptiveConfigurableElementKeys
+        // Dedicated adaptive widgets do not use the legacy element-style map.
+        // This prevents old/hidden settings from silently suppressing their UI.
+        guard !configurable.isEmpty else { return true }
+        guard configurable.contains(key) else { return true }
+        guard module.visualAdaptiveElementAvailability(key, footprint: footprint).available else { return false }
         if module.visualAdaptiveAlwaysInformation.contains(key) { return true }
-        guard information.contains(key) else { return false }
-        guard let descriptor = module.widgetElements.first(where: { $0.key == key }) else { return true }
-        return style.elementStyle(for: descriptor).visible
+        return information.contains(key)
     }
 }
 
@@ -523,7 +527,7 @@ struct VisualWorkspaceTimerView: View {
     }
 
     @ViewBuilder private var compactPrimaryControl: some View {
-        if context.settings.showControls {
+        if context.settings.showControls && context.shows("controls") {
             if store.deadline != nil || store.pausedSeconds > 0 {
                 Button { store.pauseResume() } label: { Image(systemName: store.deadline == nil ? "play.fill" : "pause.fill") }.buttonStyle(.plain)
             } else {
@@ -856,7 +860,10 @@ private struct VisualAdaptiveMediaView: View {
             case .artwork:
                 artworkView(size: min(artworkSize, 84))
             case .artworkPlay:
-                ZStack(alignment: .bottomTrailing) { artworkView(size: min(artworkSize, 84)); playButton.circleStyle.padding(4) }
+                ZStack(alignment: .bottomTrailing) {
+                    artworkView(size: min(artworkSize, 84))
+                    if settings.showControls && context.shows("controls") { playButton.circleStyle.padding(4) }
+                }
             case .title:
                 VStack(spacing: 4) {
                     Image(systemName: service.isPlaying ? "waveform" : "play.fill").foregroundStyle(style.accentColor.color)
@@ -874,7 +881,7 @@ private struct VisualAdaptiveMediaView: View {
                 if context.shows("artist") { Text(service.artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
             }
             Spacer(minLength: 2)
-            if settings.showControls { playButton }
+            if settings.showControls && context.shows("controls") { playButton }
         }
     }
 
@@ -977,7 +984,7 @@ private struct VisualAdaptiveMediaView: View {
     }
 
     @ViewBuilder private func mediaControls(compact: Bool) -> some View {
-        if service.connectedApp != nil {
+        if settings.showControls && context.shows("controls") && service.connectedApp != nil {
             HStack(spacing: compact ? 9 : 13) {
                 if !compact && context.shows("controls") { Button { service.perform("previous track", app: app) } label: { Image(systemName: "backward.end.fill") } }
                 playButton
@@ -1078,10 +1085,15 @@ private struct VisualAdaptiveAudioView: View {
         } popover: {
             VStack(alignment: .leading, spacing: 10) {
                 Text(selectedName).font(.headline).lineLimit(1)
-                HStack { Image(systemName: speakerSymbol); Text("\(percent)%").monospacedDigit(); Spacer(); Button("Mute") { service.toggleMute() }.disabled(!service.canSetVolume) }
-                if service.canSetVolume { volumeSlider }
-                if service.devices.count > 1 { outputPicker }
-                if media.connectedApp != nil { HStack { Button { media.perform("previous track", app: mediaApp) } label: { Image(systemName: "backward.fill") }; Button { media.perform("playpause", app: mediaApp) } label: { Image(systemName: "playpause.fill") }; Button { media.perform("next track", app: mediaApp) } label: { Image(systemName: "forward.fill") } } }
+                HStack {
+                    if context.settings.audioShowDeviceIcon { Image(systemName: speakerSymbol) }
+                    if context.settings.audioShowPercentage { Text("\(percent)%").monospacedDigit() }
+                    Spacer()
+                    if context.settings.showControls { Button("Mute") { service.toggleMute() }.disabled(!service.canSetVolume) }
+                }
+                if context.settings.audioShowSlider && service.canSetVolume { volumeSlider }
+                if context.settings.audioShowOutputSelector && service.devices.count > 1 { outputPicker }
+                if context.settings.showControls && media.connectedApp != nil { HStack { Button { media.perform("previous track", app: mediaApp) } label: { Image(systemName: "backward.fill") }; Button { media.perform("playpause", app: mediaApp) } label: { Image(systemName: "playpause.fill") }; Button { media.perform("next track", app: mediaApp) } label: { Image(systemName: "forward.fill") } } }
             }
         }
         .background(HaloMicroScrollCapture { delta in
@@ -1089,7 +1101,7 @@ private struct VisualAdaptiveAudioView: View {
             service.setVolume(min(1, max(0, service.volume + Float(delta > 0 ? 0.04 : -0.04))))
         }.allowsHitTesting(true))
     }
-    private var compact: some View { HStack(spacing: 7) { Image(systemName: speakerSymbol).foregroundStyle(style.accentColor.color); Text("\(percent)%").font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit(); Spacer(minLength: 2); if context.settings.showControls && service.canSetVolume { Button { service.toggleMute() } label: { Image(systemName: service.volume <= 0.001 ? "speaker.wave.2" : "speaker.slash") }.buttonStyle(.plain) } } }
+    private var compact: some View { HStack(spacing: 7) { if context.settings.audioShowDeviceIcon { Image(systemName: speakerSymbol).foregroundStyle(style.accentColor.color) }; if context.settings.audioShowPercentage { Text("\(percent)%").font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit() }; Spacer(minLength: 2); if context.settings.showControls && service.canSetVolume { Button { service.toggleMute() } label: { Image(systemName: service.volume <= 0.001 ? "speaker.wave.2" : "speaker.slash") }.buttonStyle(.plain) } } }
     private var horizontal: some View {
         HStack(spacing: context.spacing) {
             if context.settings.audioShowDeviceIcon { Image(systemName: speakerSymbol).foregroundStyle(style.accentColor.color) }
@@ -1101,8 +1113,8 @@ private struct VisualAdaptiveAudioView: View {
     }
     private var vertical: some View {
         VStack(spacing: context.spacing) {
-            Image(systemName: speakerSymbol).font(.system(size: 24, weight: .semibold)).foregroundStyle(style.accentColor.color)
-            Text("\(percent)%").font(.system(size: 28, weight: .bold, design: .rounded)).monospacedDigit()
+            if context.settings.audioShowDeviceIcon { Image(systemName: speakerSymbol).font(.system(size: 24, weight: .semibold)).foregroundStyle(style.accentColor.color) }
+            if context.settings.audioShowPercentage { Text("\(percent)%").font(.system(size: 28, weight: .bold, design: .rounded)).monospacedDigit() }
             Text(selectedName).font(.caption).lineLimit(2).multilineTextAlignment(.center)
             if context.rows >= 3 && context.settings.audioShowSlider && service.canSetVolume { volumeSlider }
             if context.rows >= 4 && context.settings.audioShowOutputSelector { outputPicker }
@@ -1110,7 +1122,12 @@ private struct VisualAdaptiveAudioView: View {
     }
     private var standard: some View {
         VStack(alignment: .leading, spacing: context.spacing) {
-            HStack { Label(selectedName, systemImage: speakerSymbol).lineLimit(1); Spacer(); Text("\(percent)%").font(.title3.bold()).monospacedDigit() }
+            HStack {
+                if context.settings.audioShowDeviceIcon { Image(systemName: speakerSymbol).foregroundStyle(style.accentColor.color) }
+                Text(selectedName).lineLimit(1)
+                Spacer()
+                if context.settings.audioShowPercentage { Text("\(percent)%").font(.title3.bold()).monospacedDigit() }
+            }
             if context.settings.audioShowSlider && service.canSetVolume { volumeSlider }
             if context.settings.audioShowOutputSelector { outputPicker }
         }
@@ -1421,7 +1438,7 @@ private struct VisualAdaptiveLauncherView: View {
     @ViewBuilder private var micro: some View {
         let favorites = favoriteApps
         let primary = favorites.first
-        let running = workspace.runningApps.first
+        let running = context.settings.launcherShowRunningApps ? workspace.runningApps.first : nil
         ZStack {
             if favorites.count > 1 {
                 RoundedRectangle(cornerRadius: 13, style: .continuous).fill(style.accentColor.color.opacity(0.12)).frame(width: 52, height: 52).offset(x: 7, y: 6)
@@ -1483,20 +1500,20 @@ private struct VisualAdaptiveLauncherView: View {
     private func appStrip(limit: Int) -> some View {
         HStack(spacing: context.spacing) {
             ForEach(Array(favoriteApps.prefix(limit)), id: \.bundle) { favoriteButton($0, compact: true) }
-            if favoriteApps.isEmpty { ForEach(Array(visibleApps.prefix(limit)), id: \.processIdentifier) { runningButton($0, compact: true) } }
+            if favoriteApps.isEmpty && context.settings.launcherShowRunningApps { ForEach(Array(visibleApps.prefix(limit)), id: \.processIdentifier) { runningButton($0, compact: true) } }
         }
     }
     private func appList(limit: Int) -> some View {
         VStack(spacing: context.spacing * 0.7) {
-            ForEach(Array(visibleApps.prefix(limit)), id: \.processIdentifier) { runningButton($0, compact: false) }
-            if visibleApps.isEmpty { Text("No running apps").font(.caption).foregroundStyle(.secondary) }
+            if context.settings.launcherShowRunningApps { ForEach(Array(visibleApps.prefix(limit)), id: \.processIdentifier) { runningButton($0, compact: false) } }
+            if !context.settings.launcherShowRunningApps || visibleApps.isEmpty { Text(context.settings.launcherShowRunningApps ? "No running apps" : "Running apps hidden").font(.caption).foregroundStyle(.secondary) }
             Spacer(minLength: 0)
         }
     }
     private var standard: some View {
         VStack(alignment: .leading, spacing: context.spacing) {
             if context.settings.launcherShowSearch { TextField("Search apps", text: $query) }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: context.spacing), count: min(context.settings.launcherColumns, max(2, context.columns))), spacing: context.spacing) { ForEach(Array(visibleApps.prefix(context.settings.maxItems)), id: \.processIdentifier) { runningButton($0, compact: true) } }
+            if context.settings.launcherShowRunningApps { LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: context.spacing), count: min(context.settings.launcherColumns, max(2, context.columns))), spacing: context.spacing) { ForEach(Array(visibleApps.prefix(context.settings.maxItems)), id: \.processIdentifier) { runningButton($0, compact: true) } } }
         }
     }
     private var large: some View {
@@ -1645,9 +1662,11 @@ private struct VisualAdaptiveNotesView: View {
                         .font(.system(size: 7, weight: .bold, design: .rounded))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 2)
-                    Text("\(words)w")
-                        .font(.system(size: 7, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
+                    if context.settings.notesShowCounts {
+                        Text("\(words)w")
+                            .font(.system(size: 7, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             if isMicro {
@@ -1727,7 +1746,7 @@ private struct VisualAdaptiveCaptureView: View {
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: context.contentAlignment)
     }
     private var compactActions: some View { HStack(spacing: context.spacing) { captureButton; ocrButton }.disabled(service.busy) }
-    private var vertical: some View { VStack(spacing: context.spacing) { captureButton; ocrButton; if service.busy { ProgressView().controlSize(.small) }; if !service.recognizedText.isEmpty && context.rows >= 3 { Text(service.recognizedText).font(.caption2).lineLimit(4).frame(maxWidth: .infinity, alignment: .leading) } }.disabled(service.busy) }
+    private var vertical: some View { VStack(spacing: context.spacing) { captureButton; ocrButton; if service.busy { ProgressView().controlSize(.small) }; if context.settings.captureShowOCR && !service.recognizedText.isEmpty && context.rows >= 3 { Text(service.recognizedText).font(.caption2).lineLimit(4).frame(maxWidth: .infinity, alignment: .leading) } }.disabled(service.busy) }
     private var standard: some View { VStack(alignment: .leading, spacing: context.spacing) { compactActions; if service.busy { ProgressView("Working…") }; if context.settings.captureShowOCR && !service.recognizedText.isEmpty { Text(service.recognizedText).textSelection(.enabled).lineLimit(6) } } }
     private var large: some View {
         VStack(alignment: .leading, spacing: context.spacing) {

@@ -122,3 +122,10 @@ Across adaptive widgets: hover may reveal secondary state without rearranging th
 ### State-aware adaptation
 
 A footprint may change presentation without changing size. Examples already supported by the adaptive renderers include Timer idle/running/completed state, Audio switching from volume to artwork while media plays, Calendar changing a date tile to an imminent-event countdown, System rotating/promoting metrics, Capture showing work-in-progress state, and File Shelf changing from a portal into a browsable grid/preview as space grows.
+
+
+### Inspector truthfulness
+
+The Visual Workspace inspector must never expose a control that the selected widget renderer does not consume. Adaptive widgets use module capability flags for global controls such as Maximum Items and Show Controls. Legacy per-element styling is hidden for adaptive widgets unless the renderer actually supports it.
+
+Element availability is also footprint-aware. If an element is supported by the widget but cannot fit the selected footprint, its toggle is disabled and an orange warning explains the minimum/shape requirement. The renderer uses the same availability contract, so editor state and runtime output cannot disagree. Calendar is intentionally permission-tolerant: date, week and month navigation always work; EventKit permission only enriches the widget with personal events.
