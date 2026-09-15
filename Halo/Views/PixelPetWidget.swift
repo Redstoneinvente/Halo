@@ -2,35 +2,47 @@ import SwiftUI
 import AppKit
 import CoreGraphics
 
-// MARK: - Pixel Pal
-// Pixel Pal is a face-only retro expression widget.
-// It deliberately avoids bodies, habitats, care mechanics, props and status UI.
-// Every supported footprint is square. A 1×1 face uses a 5×5 logical pixel grid
-// (~25 cells total); larger squares increase expressive resolution, not content.
+// MARK: - Pixel Pal v2
+// Canonical direction: Docs/PixelPalV2.md
+// Premium, face-first pixel character. Authored sprite data is the source of truth.
+// No body, room, habitat, hunger/energy loop, dashboard, or care-game mechanics.
 
 enum HaloPixelPalExpression: String, Codable, CaseIterable, Identifiable {
     case neutral
     case blink
     case happy
+    case superHappy
     case excited
     case love
     case sleepy
-    case annoyed
+    case bored
+    case focused
+    case surprised
+    case shocked
     case confused
     case worried
-    case surprised
-    case focused
-    case music
-    case bored
+    case sad
+    case crying
+    case shy
     case mischievous
+    case smug
+    case annoyed
+    case wink
+    case music
 
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+
+    var title: String {
+        switch self {
+        case .superHappy: return "Super Happy"
+        default: return rawValue.capitalized
+        }
+    }
 }
 
 enum HaloPixelPalFaceStyle: String, Codable, CaseIterable, Identifiable {
-    case minimal = "Minimal"
     case soft = "Soft"
+    case minimal = "Minimal"
     case robot = "Robot"
     case cat = "Cat"
 
@@ -38,9 +50,9 @@ enum HaloPixelPalFaceStyle: String, Codable, CaseIterable, Identifiable {
 }
 
 enum HaloPixelPalEyeStyle: String, Codable, CaseIterable, Identifiable {
+    case glossy = "Glossy"
     case classic = "Classic"
     case dot = "Dot"
-    case glossy = "Glossy"
     case wide = "Wide"
     case digital = "Digital"
     case sparkle = "Sparkle"
@@ -54,6 +66,44 @@ enum HaloPixelPalMouthStyle: String, Codable, CaseIterable, Identifiable {
     case tiny = "Tiny"
     case smile = "Smile"
     case flat = "Flat"
+    case cat = "Cat"
+    case open = "Open"
+
+    var id: String { rawValue }
+}
+
+enum HaloPixelPalCheekStyle: String, Codable, CaseIterable, Identifiable {
+    case none = "None"
+    case soft = "Soft"
+    case kawaii = "Kawaii"
+    case shy = "Shy"
+
+    var id: String { rawValue }
+}
+
+enum HaloPixelPalAccessory: String, Codable, CaseIterable, Identifiable {
+    case none = "None"
+    case bow = "Bow"
+    case catEars = "Cat Ears"
+    case glasses = "Glasses"
+    case shades = "Shades"
+    case headphones = "Headphones"
+    case halo = "Halo"
+    case horns = "Horns"
+    case flower = "Flower"
+    case sleepingCap = "Sleeping Cap"
+    case crown = "Crown"
+    case sprout = "Sprout"
+    case bandage = "Bandage"
+
+    var id: String { rawValue }
+}
+
+enum HaloPixelPalAccessoryMode: String, Codable, CaseIterable, Identifiable {
+    case off = "Off"
+    case manual = "Manual"
+    case contextual = "Contextual"
+    case randomAllowed = "Random Allowed"
 
     var id: String { rawValue }
 }
@@ -68,13 +118,13 @@ enum HaloPixelPalBackgroundStyle: String, Codable, CaseIterable, Identifiable {
 }
 
 enum HaloPixelPalPalette: String, Codable, CaseIterable, Identifiable {
-    case white = "White"
-    case green = "Retro Green"
+    case white = "Pearl"
+    case green = "Mint"
     case amber = "Amber"
-    case cyan = "Cyan"
-    case pink = "Pink"
-    case purple = "Purple"
-    case red = "Red"
+    case cyan = "Sky"
+    case pink = "Sakura"
+    case purple = "Lavender"
+    case red = "Coral"
     case custom = "Custom"
 
     var id: String { rawValue }
@@ -95,24 +145,33 @@ struct HaloPixelPalRGB: Codable, Equatable {
 }
 
 struct HaloPixelPalPreferences: Codable, Equatable {
-    var version = 3
+    // Legacy persisted field retained so Codable stays backward-compatible.
+    var showCheeks: Bool = true
+    var version = 4
 
     // Appearance
     var faceStyle: HaloPixelPalFaceStyle = .soft
-    var eyeStyle: HaloPixelPalEyeStyle = .classic
+    var eyeStyle: HaloPixelPalEyeStyle = .glossy
     var mouthStyle: HaloPixelPalMouthStyle = .automatic
+    var cheekStyle: HaloPixelPalCheekStyle = .soft
     var palette: HaloPixelPalPalette = .white
-    var customColor = HaloPixelPalRGB(red: 0.42, green: 1.0, blue: 0.62)
-    var accentColor = HaloPixelPalRGB(red: 1.0, green: 0.42, blue: 0.72)
+    var customColor = HaloPixelPalRGB(red: 0.90, green: 0.96, blue: 1.0)
+    var accentColor = HaloPixelPalRGB(red: 1.0, green: 0.42, blue: 0.68)
+    var blushColor = HaloPixelPalRGB(red: 1.0, green: 0.38, blue: 0.58)
     var backgroundStyle: HaloPixelPalBackgroundStyle = .transparent
-    var backgroundColor = HaloPixelPalRGB(red: 0.03, green: 0.03, blue: 0.04)
-    var faceScale = 1.0
-    var glowIntensity = 0.0
-    var showCheeks = true
+    var backgroundColor = HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)
+    var faceScale = 0.98
+    var glowIntensity = 0.10
+
+    // Accessories
+    var accessoryMode: HaloPixelPalAccessoryMode = .contextual
+    var selectedAccessory: HaloPixelPalAccessory = .none
+    var allowedAccessories: [HaloPixelPalAccessory] = HaloPixelPalAccessory.allCases.filter { $0 != .none }
 
     // Animation
     var automaticBlinking = true
     var animationSpeed = 1.0
+    var animationIntensity = 0.85
 
     // Direct interactions
     var hoverReaction = true
@@ -133,34 +192,52 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case version, faceStyle, eyeStyle, mouthStyle, palette, customColor, accentColor
-        case backgroundStyle, backgroundColor, faceScale, glowIntensity, showCheeks
-        case automaticBlinking, animationSpeed
+        case version
+        case faceStyle, eyeStyle, mouthStyle, cheekStyle, palette, customColor, accentColor, blushColor
+        case backgroundStyle, backgroundColor, faceScale, glowIntensity
+        case accessoryMode, selectedAccessory, allowedAccessories
+        case automaticBlinking, animationSpeed, animationIntensity
         case hoverReaction, tapReaction, doubleTapReaction, longPressReaction
         case contextReactions, chargingReaction, lowBatteryReaction, musicReaction
         case timerReaction, appReaction, idleReaction, nightReaction
+        // v3 legacy
+        case showCheeks
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        version = 3
+        version = 4
         faceStyle = try c.decodeIfPresent(HaloPixelPalFaceStyle.self, forKey: .faceStyle) ?? .soft
-        eyeStyle = try c.decodeIfPresent(HaloPixelPalEyeStyle.self, forKey: .eyeStyle) ?? .classic
+        eyeStyle = try c.decodeIfPresent(HaloPixelPalEyeStyle.self, forKey: .eyeStyle) ?? .glossy
         mouthStyle = try c.decodeIfPresent(HaloPixelPalMouthStyle.self, forKey: .mouthStyle) ?? .automatic
+        if let decodedCheeks = try c.decodeIfPresent(HaloPixelPalCheekStyle.self, forKey: .cheekStyle) {
+            cheekStyle = decodedCheeks
+        } else {
+            cheekStyle = (try c.decodeIfPresent(Bool.self, forKey: .showCheeks) ?? true) ? .soft : .none
+        }
         palette = try c.decodeIfPresent(HaloPixelPalPalette.self, forKey: .palette) ?? .white
-        customColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .customColor) ?? HaloPixelPalRGB(red: 0.42, green: 1.0, blue: 0.62)
-        accentColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .accentColor) ?? HaloPixelPalRGB(red: 1.0, green: 0.42, blue: 0.72)
+        customColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .customColor) ?? HaloPixelPalRGB(red: 0.90, green: 0.96, blue: 1.0)
+        accentColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .accentColor) ?? HaloPixelPalRGB(red: 1.0, green: 0.42, blue: 0.68)
+        blushColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .blushColor) ?? HaloPixelPalRGB(red: 1.0, green: 0.38, blue: 0.58)
         backgroundStyle = try c.decodeIfPresent(HaloPixelPalBackgroundStyle.self, forKey: .backgroundStyle) ?? .transparent
-        backgroundColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .backgroundColor) ?? HaloPixelPalRGB(red: 0.03, green: 0.03, blue: 0.04)
-        faceScale = try c.decodeIfPresent(Double.self, forKey: .faceScale) ?? 1.0
-        glowIntensity = try c.decodeIfPresent(Double.self, forKey: .glowIntensity) ?? 0
-        showCheeks = try c.decodeIfPresent(Bool.self, forKey: .showCheeks) ?? true
+        backgroundColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .backgroundColor) ?? HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)
+        faceScale = try c.decodeIfPresent(Double.self, forKey: .faceScale) ?? 0.98
+        glowIntensity = try c.decodeIfPresent(Double.self, forKey: .glowIntensity) ?? 0.10
+
+        accessoryMode = try c.decodeIfPresent(HaloPixelPalAccessoryMode.self, forKey: .accessoryMode) ?? .contextual
+        selectedAccessory = try c.decodeIfPresent(HaloPixelPalAccessory.self, forKey: .selectedAccessory) ?? .none
+        allowedAccessories = try c.decodeIfPresent([HaloPixelPalAccessory].self, forKey: .allowedAccessories)
+            ?? HaloPixelPalAccessory.allCases.filter { $0 != .none }
+
         automaticBlinking = try c.decodeIfPresent(Bool.self, forKey: .automaticBlinking) ?? true
-        animationSpeed = try c.decodeIfPresent(Double.self, forKey: .animationSpeed) ?? 1
+        animationSpeed = try c.decodeIfPresent(Double.self, forKey: .animationSpeed) ?? 1.0
+        animationIntensity = try c.decodeIfPresent(Double.self, forKey: .animationIntensity) ?? 0.85
+
         hoverReaction = try c.decodeIfPresent(Bool.self, forKey: .hoverReaction) ?? true
         tapReaction = try c.decodeIfPresent(Bool.self, forKey: .tapReaction) ?? true
         doubleTapReaction = try c.decodeIfPresent(Bool.self, forKey: .doubleTapReaction) ?? true
         longPressReaction = try c.decodeIfPresent(Bool.self, forKey: .longPressReaction) ?? true
+
         contextReactions = try c.decodeIfPresent(Bool.self, forKey: .contextReactions) ?? true
         chargingReaction = try c.decodeIfPresent(Bool.self, forKey: .chargingReaction) ?? true
         lowBatteryReaction = try c.decodeIfPresent(Bool.self, forKey: .lowBatteryReaction) ?? true
@@ -173,13 +250,17 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     func normalized() -> Self {
         var value = self
-        value.version = 3
+        value.version = 4
         value.animationSpeed = min(2.0, max(0.35, animationSpeed))
-        value.faceScale = min(1.0, max(0.72, faceScale))
+        value.animationIntensity = min(1.0, max(0.0, animationIntensity))
+        value.faceScale = min(1.0, max(0.76, faceScale))
         value.glowIntensity = min(1.0, max(0.0, glowIntensity))
         value.customColor = Self.clamped(customColor)
         value.accentColor = Self.clamped(accentColor)
+        value.blushColor = Self.clamped(blushColor)
         value.backgroundColor = Self.clamped(backgroundColor)
+        value.allowedAccessories = Array(Set(allowedAccessories.filter { $0 != .none }))
+            .sorted { $0.rawValue < $1.rawValue }
         return value
     }
 
@@ -193,17 +274,299 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     var faceColor: Color {
         switch palette {
-        case .white: return Color(white: 0.97)
-        case .green: return Color(red: 0.40, green: 1.0, blue: 0.52)
-        case .amber: return Color(red: 1.0, green: 0.67, blue: 0.20)
-        case .cyan: return Color(red: 0.28, green: 0.92, blue: 1.0)
-        case .pink: return Color(red: 1.0, green: 0.42, blue: 0.72)
-        case .purple: return Color(red: 0.69, green: 0.48, blue: 1.0)
-        case .red: return Color(red: 1.0, green: 0.32, blue: 0.28)
+        case .white: return Color(red: 0.96, green: 0.98, blue: 1.0)
+        case .green: return Color(red: 0.45, green: 1.0, blue: 0.72)
+        case .amber: return Color(red: 1.0, green: 0.73, blue: 0.31)
+        case .cyan: return Color(red: 0.45, green: 0.91, blue: 1.0)
+        case .pink: return Color(red: 1.0, green: 0.58, blue: 0.78)
+        case .purple: return Color(red: 0.76, green: 0.64, blue: 1.0)
+        case .red: return Color(red: 1.0, green: 0.45, blue: 0.44)
         case .custom: return customColor.color
         }
     }
 }
+
+// MARK: - Sprite model
+
+private enum HaloPixelPalColorRole: Character {
+    case primary = "p"
+    case accent = "a"
+    case blush = "b"
+    case white = "w"
+    case shadow = "s"
+}
+
+private struct HaloPixelPalSprite {
+    let rows: [String]
+
+    var width: Int { rows.map(\.count).max() ?? 0 }
+    var height: Int { rows.count }
+}
+
+private struct HaloPixelPalPlacedSprite {
+    let sprite: HaloPixelPalSprite
+    let x: Int
+    let y: Int
+    let mirrorX: Bool
+
+    init(_ sprite: HaloPixelPalSprite, x: Int, y: Int, mirrorX: Bool = false) {
+        self.sprite = sprite
+        self.x = x
+        self.y = y
+        self.mirrorX = mirrorX
+    }
+}
+
+private enum HaloPixelPalSprites {
+    // Eyes are authored components. They are intentionally higher-resolution than v1/v3.
+    static func openEye(_ style: HaloPixelPalEyeStyle) -> HaloPixelPalSprite {
+        switch style {
+        case .glossy:
+            return .init(rows: [
+                ".ppp..",
+                "ppwpp.",
+                "ppppp.",
+                "pppsp.",
+                ".aaa.."
+            ])
+        case .classic:
+            return .init(rows: [
+                ".pp..",
+                "ppp..",
+                "pwp..",
+                "ppp.."
+            ])
+        case .dot:
+            return .init(rows: [
+                "pp",
+                "pp"
+            ])
+        case .wide:
+            return .init(rows: [
+                ".pppp.",
+                "ppwppp",
+                "pppppp",
+                ".aaaa."
+            ])
+        case .digital:
+            return .init(rows: [
+                "pppp.",
+                "p..p.",
+                "p.wp.",
+                "pppp."
+            ])
+        case .sparkle:
+            return .init(rows: [
+                "..a..",
+                ".apa.",
+                "apwpa",
+                ".apa.",
+                "..a.."
+            ])
+        }
+    }
+
+    static func closedEye(_ style: HaloPixelPalEyeStyle) -> HaloPixelPalSprite {
+        switch style {
+        case .dot:
+            return .init(rows: ["pp"])
+        case .wide:
+            return .init(rows: ["ppppp"])
+        case .sparkle:
+            return .init(rows: [".apa."])
+        default:
+            return .init(rows: [".ppp.", "p...p"])
+        }
+    }
+
+    static func happyEye(_ style: HaloPixelPalEyeStyle) -> HaloPixelPalSprite {
+        switch style {
+        case .dot:
+            return .init(rows: ["p.p", ".p."])
+        case .wide:
+            return .init(rows: ["p...p", ".ppp."])
+        case .digital:
+            return .init(rows: ["p..p", ".pp."])
+        case .sparkle:
+            return .init(rows: ["a...a", ".apa.", "..p.."])
+        case .classic, .glossy:
+            return .init(rows: ["p...p", ".p.p.", "..p.."])
+        }
+    }
+
+    static let heartEye = HaloPixelPalSprite(rows: [
+        ".aa.aa.",
+        "aaaaaaa",
+        ".aaaaa.",
+        "..aaa..",
+        "...a..."
+    ])
+
+    static let starEye = HaloPixelPalSprite(rows: [
+        "..a..",
+        "a.a.a",
+        ".apa.",
+        "a.a.a",
+        "..a.."
+    ])
+
+    static let winkEye = HaloPixelPalSprite(rows: [
+        "p...p",
+        ".ppp."
+    ])
+
+    static let worriedBrow = HaloPixelPalSprite(rows: ["pp..."])
+    static let annoyedBrow = HaloPixelPalSprite(rows: ["..ppp"])
+    static let raisedBrow = HaloPixelPalSprite(rows: [".pp.."])
+
+    static let mouthTiny = HaloPixelPalSprite(rows: ["pp"])
+    static let mouthFlat = HaloPixelPalSprite(rows: ["ppppp"])
+    static let mouthSmile = HaloPixelPalSprite(rows: [
+        "p...p",
+        ".p.p.",
+        "..p.."
+    ])
+    static let mouthBigSmile = HaloPixelPalSprite(rows: [
+        "p.....p",
+        ".ppppp.",
+        ".pwwwp.",
+        "..aaa.."
+    ])
+    static let mouthOpen = HaloPixelPalSprite(rows: [
+        ".ppp.",
+        "p...p",
+        "p.a.p",
+        ".ppp."
+    ])
+    static let mouthO = HaloPixelPalSprite(rows: [
+        ".pp.",
+        "p..p",
+        "p..p",
+        ".pp."
+    ])
+    static let mouthFrown = HaloPixelPalSprite(rows: [
+        "..p..",
+        ".p.p.",
+        "p...p"
+    ])
+    static let mouthCat = HaloPixelPalSprite(rows: [
+        "p.p.p",
+        ".p.p."
+    ])
+    static let mouthSmug = HaloPixelPalSprite(rows: [
+        "....p",
+        ".ppp."
+    ])
+
+    static let cheekSoft = HaloPixelPalSprite(rows: ["bb"])
+    static let cheekKawaii = HaloPixelPalSprite(rows: ["bbb", ".b."])
+    static let cheekShy = HaloPixelPalSprite(rows: ["b.b", ".b."])
+
+    static let tear = HaloPixelPalSprite(rows: [
+        "a",
+        "a",
+        "w"
+    ])
+    static let sweat = HaloPixelPalSprite(rows: [
+        ".a",
+        "aa",
+        ".a"
+    ])
+    static let sparkle = HaloPixelPalSprite(rows: [
+        ".a.",
+        "awa",
+        ".a."
+    ])
+    static let heart = HaloPixelPalSprite(rows: [
+        "a.a",
+        "aaa",
+        ".a."
+    ])
+    static let musicNote = HaloPixelPalSprite(rows: [
+        ".aa",
+        "..a",
+        "..a",
+        ".aa",
+        ".a."
+    ])
+    static let exclamation = HaloPixelPalSprite(rows: [
+        "a",
+        "a",
+        "a",
+        ".",
+        "a"
+    ])
+
+    // Accessories
+    static let bow = HaloPixelPalSprite(rows: [
+        "aa...aa",
+        "aaa.aaa",
+        ".aaaaa.",
+        "...a..."
+    ])
+    static let catEar = HaloPixelPalSprite(rows: [
+        "p...p",
+        "pp.pp",
+        "p...p"
+    ])
+    static let glasses = HaloPixelPalSprite(rows: [
+        "pppp...pppp",
+        "p..p.p.p..p",
+        "pppp...pppp"
+    ])
+    static let shades = HaloPixelPalSprite(rows: [
+        "ppppp.ppppp",
+        "psssp.psssp",
+        ".ppp...ppp."
+    ])
+    static let headphones = HaloPixelPalSprite(rows: [
+        "..ppppppp..",
+        ".p.......p.",
+        "pp.......pp",
+        "pa.......ap"
+    ])
+    static let halo = HaloPixelPalSprite(rows: [
+        "..aaaaa..",
+        ".a.....a.",
+        "..aaaaa.."
+    ])
+    static let horns = HaloPixelPalSprite(rows: [
+        "p.......p",
+        "pp.....pp",
+        ".p.....p."
+    ])
+    static let flower = HaloPixelPalSprite(rows: [
+        ".a.",
+        "apa",
+        ".a."
+    ])
+    static let sleepingCap = HaloPixelPalSprite(rows: [
+        "....aaa...",
+        "...aaaaa..",
+        "..aaaaaaa.",
+        ".aaaaaaaaa",
+        "pppppppppp",
+        ".........a"
+    ])
+    static let crown = HaloPixelPalSprite(rows: [
+        "a..a..a",
+        "aa.a.aa",
+        ".aaaaa.",
+        ".aaaaa."
+    ])
+    static let sprout = HaloPixelPalSprite(rows: [
+        ".a.a.",
+        "..a..",
+        "..a.."
+    ])
+    static let bandage = HaloPixelPalSprite(rows: [
+        "ppppp",
+        "pwwwp",
+        "ppppp"
+    ])
+}
+
+// MARK: - Store and context
 
 @MainActor
 final class HaloPixelPalStore: ObservableObject {
@@ -216,8 +579,8 @@ final class HaloPixelPalStore: ObservableObject {
     @Published private(set) var hovering = false
 
     private let defaults: UserDefaults
-    private let preferencesKey = "HaloPixelPal.preferences.v3"
-    private let legacyPreferencesKey = "HaloPixelPal.preferences.v2"
+    private let preferencesKey = "HaloPixelPal.preferences.v4"
+    private let legacyKeys = ["HaloPixelPal.preferences.v3", "HaloPixelPal.preferences.v2"]
     private var clearReactionWork: DispatchWorkItem?
 
     init(defaults: UserDefaults = .standard) {
@@ -225,12 +588,18 @@ final class HaloPixelPalStore: ObservableObject {
         if let data = defaults.data(forKey: preferencesKey),
            let decoded = try? JSONDecoder().decode(HaloPixelPalPreferences.self, from: data) {
             preferences = decoded.normalized()
-        } else if let legacyData = defaults.data(forKey: legacyPreferencesKey),
-                  let decoded = try? JSONDecoder().decode(HaloPixelPalPreferences.self, from: legacyData) {
-            preferences = decoded.normalized()
-        } else {
-            preferences = HaloPixelPalPreferences()
+            return
         }
+
+        for key in legacyKeys {
+            if let data = defaults.data(forKey: key),
+               let decoded = try? JSONDecoder().decode(HaloPixelPalPreferences.self, from: data) {
+                preferences = decoded.normalized()
+                persist()
+                return
+            }
+        }
+        preferences = HaloPixelPalPreferences()
     }
 
     func update<T>(_ keyPath: WritableKeyPath<HaloPixelPalPreferences, T>, _ value: T) {
@@ -239,7 +608,7 @@ final class HaloPixelPalStore: ObservableObject {
         preferences = next.normalized()
     }
 
-    func react(_ expression: HaloPixelPalExpression, seconds: Double = 1.6) {
+    func react(_ expression: HaloPixelPalExpression, seconds: Double = 1.7) {
         clearReactionWork?.cancel()
         reaction = expression
         let work = DispatchWorkItem { [weak self] in self?.reaction = nil }
@@ -247,25 +616,25 @@ final class HaloPixelPalStore: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
     }
 
-    func setHovering(_ value: Bool) {
-        hovering = value
-    }
+    func setHovering(_ value: Bool) { hovering = value }
 
     func tapped() {
         guard preferences.tapReaction else { return }
-        let sequence: [HaloPixelPalExpression] = [.happy, .love, .excited, .confused, .mischievous]
-        let index = Int(Date().timeIntervalSinceReferenceDate / 1.5) % sequence.count
+        let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]
+        let index = Int(Date().timeIntervalSinceReferenceDate / 1.2) % sequence.count
         react(sequence[index])
     }
 
     func doubleTapped() {
         guard preferences.doubleTapReaction else { return }
-        react(.love, seconds: 2.0)
+        react(.love, seconds: 2.2)
     }
 
     func longPressed() {
         guard preferences.longPressReaction else { return }
-        react(.sleepy, seconds: 2.2)
+        let sequence: [HaloPixelPalExpression] = [.sleepy, .shy, .smug]
+        let index = Int(Date().timeIntervalSinceReferenceDate / 2.0) % sequence.count
+        react(sequence[index], seconds: 2.4)
     }
 
     func reset() {
@@ -281,8 +650,14 @@ final class HaloPixelPalStore: ObservableObject {
     }
 }
 
+private enum HaloPixelPalFX {
+    case none, hearts, sparkle, music, sweat, tears, alert
+}
+
 private struct HaloPixelPalContext {
     let expression: HaloPixelPalExpression
+    let accessory: HaloPixelPalAccessory?
+    let fx: HaloPixelPalFX
 
     @MainActor
     static func resolve(
@@ -292,51 +667,79 @@ private struct HaloPixelPalContext {
         pal: HaloPixelPalStore,
         date: Date
     ) -> Self {
-        if let reaction = pal.reaction { return .init(expression: reaction) }
-        let preferences = pal.preferences
-        if pal.hovering && preferences.hoverReaction { return .init(expression: .happy) }
-        guard preferences.contextReactions else { return .init(expression: .neutral) }
-
-        if preferences.timerReaction && store.finished { return .init(expression: .surprised) }
-        if preferences.chargingReaction && system.charging { return .init(expression: .love) }
-        if preferences.lowBatteryReaction, let battery = system.battery, battery <= 15 {
-            return .init(expression: .worried)
-        }
-        if preferences.musicReaction && media.isPlaying { return .init(expression: .music) }
-        if preferences.timerReaction && (store.deadline != nil || store.pausedSeconds > 0) {
-            return .init(expression: .focused)
+        if let reaction = pal.reaction {
+            return .init(expression: reaction, accessory: nil, fx: fx(for: reaction))
         }
 
-        if preferences.appReaction {
+        let p = pal.preferences
+        if pal.hovering && p.hoverReaction {
+            return .init(expression: .shy, accessory: nil, fx: .sparkle)
+        }
+        guard p.contextReactions else {
+            return .init(expression: .neutral, accessory: nil, fx: .none)
+        }
+
+        if p.timerReaction && store.finished {
+            return .init(expression: .shocked, accessory: nil, fx: .alert)
+        }
+        if p.lowBatteryReaction, let battery = system.battery, battery <= 15 {
+            return .init(expression: .worried, accessory: .bandage, fx: .sweat)
+        }
+        if p.chargingReaction && system.charging {
+            return .init(expression: .love, accessory: .halo, fx: .hearts)
+        }
+        if p.musicReaction && media.isPlaying {
+            return .init(expression: .music, accessory: .headphones, fx: .music)
+        }
+        if p.timerReaction && (store.deadline != nil || store.pausedSeconds > 0) {
+            return .init(expression: .focused, accessory: nil, fx: .none)
+        }
+
+        if p.appReaction {
             let app = NSWorkspace.shared.frontmostApplication
             let bundle = app?.bundleIdentifier?.lowercased() ?? ""
             let appName = app?.localizedName?.lowercased() ?? ""
             if bundle == "com.apple.dt.xcode" || appName == "xcode" {
-                return .init(expression: .focused)
+                return .init(expression: .focused, accessory: .glasses, fx: .none)
             }
-
             let gameHints = ["steam", "minecraft", "roblox", "retroarch", "whisky", "crossover"]
             if gameHints.contains(where: { bundle.contains($0) || appName.contains($0) }) {
-                return .init(expression: .excited)
+                return .init(expression: .excited, accessory: .shades, fx: .sparkle)
             }
         }
 
-        if preferences.idleReaction {
+        if p.idleReaction {
             let mouseIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .mouseMoved)
             let keyboardIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
             if min(mouseIdle, keyboardIdle) > 180 {
-                return .init(expression: .bored)
+                return .init(expression: .bored, accessory: nil, fx: .none)
             }
         }
 
-        if preferences.nightReaction {
+        if p.nightReaction {
             let hour = Calendar.autoupdatingCurrent.component(.hour, from: date)
-            if hour >= 23 || hour < 6 { return .init(expression: .sleepy) }
+            if hour >= 23 || hour < 6 {
+                return .init(expression: .sleepy, accessory: .sleepingCap, fx: .none)
+            }
         }
 
-        return .init(expression: .neutral)
+        return .init(expression: .neutral, accessory: nil, fx: .none)
+    }
+
+    private static func fx(for expression: HaloPixelPalExpression) -> HaloPixelPalFX {
+        switch expression {
+        case .love: return .hearts
+        case .superHappy, .excited, .shy: return .sparkle
+        case .music: return .music
+        case .worried: return .sweat
+        case .crying: return .tears
+        case .shocked, .surprised: return .alert
+        default: return .none
+        }
     }
 }
+
+// MARK: - Widget
 
 struct HaloPixelPetWidget: View {
     @Environment(\.openNotchGridColumnSpan) private var gridColumnSpan
@@ -357,23 +760,25 @@ struct HaloPixelPetWidget: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: reduceMotion ? 0.5 : 1.0 / 12.0, paused: false)) { timeline in
+        TimelineView(.animation(minimumInterval: reduceMotion ? 0.45 : 1.0 / 18.0, paused: false)) { timeline in
             GeometryReader { proxy in
                 let columns = min(4, max(1, gridColumnSpan ?? 1))
                 let rows = min(4, max(1, gridRowSpan ?? columns))
                 let squareSize = min(columns, rows)
-                let context = HaloPixelPalContext.resolve(
+                let state = HaloPixelPalContext.resolve(
                     store: store,
                     media: media,
                     system: system,
                     pal: pal,
                     date: timeline.date
                 )
-                let expression = resolvedExpression(base: context.expression, date: timeline.date)
+                let expression = resolvedExpression(base: state.expression, date: timeline.date)
                 let side = max(1, min(proxy.size.width, proxy.size.height))
 
                 HaloPixelPalFace(
                     expression: expression,
+                    contextualAccessory: state.accessory,
+                    fx: state.fx,
                     squareSize: squareSize,
                     preferences: pal.preferences,
                     date: timeline.date,
@@ -387,46 +792,58 @@ struct HaloPixelPetWidget: View {
         .onHover { pal.setHovering($0) }
         .onTapGesture(count: 2) { pal.doubleTapped() }
         .onTapGesture(count: 1) { pal.tapped() }
-        .onLongPressGesture(minimumDuration: 0.6) { pal.longPressed() }
+        .onLongPressGesture(minimumDuration: 0.55) { pal.longPressed() }
         .contextMenu {
             Menu("Expression") {
                 ForEach(HaloPixelPalExpression.allCases.filter { $0 != .blink }) { expression in
-                    Button(expression.title) { pal.react(expression, seconds: 2) }
+                    Button(expression.title) { pal.react(expression, seconds: 2.2) }
                 }
             }
             Divider()
             Button("Pixel Pal Settings…") { HaloPixelPalSettingsWindowController.shared.show() }
         }
         .accessibilityLabel("Halo Pixel Pal")
-        .help("Click, double-click, hover or long-press the face · right-click for settings")
+        .help("Hover, click, double-click or long-press Pixel Pal · right-click for settings")
     }
 
     private func resolvedExpression(base: HaloPixelPalExpression, date: Date) -> HaloPixelPalExpression {
         guard base == .neutral, pal.preferences.automaticBlinking, !reduceMotion else { return base }
         let speed = max(0.35, pal.preferences.animationSpeed)
         let cycle = date.timeIntervalSinceReferenceDate * speed
-        let phase = cycle.truncatingRemainder(dividingBy: 5.4)
-        return phase > 5.12 ? .blink : .neutral
+        let phase = cycle.truncatingRemainder(dividingBy: 12.0)
+        if phase > 11.72 { return .blink }
+        if phase > 7.18 && phase < 7.42 { return .wink }
+        return base
     }
 }
 
+// MARK: - Face renderer
+
 private struct HaloPixelPalFace: View {
     let expression: HaloPixelPalExpression
+    let contextualAccessory: HaloPixelPalAccessory?
+    let fx: HaloPixelPalFX
     let squareSize: Int
     let preferences: HaloPixelPalPreferences
     let date: Date
     let reduceMotion: Bool
 
+    private let logicalGrid = 24
+
     private var faceColor: Color { preferences.faceColor }
     private var accentColor: Color { preferences.accentColor.color }
+    private var blushColor: Color { preferences.blushColor.color }
 
     var body: some View {
         ZStack {
             background
             Canvas { context, size in
-                drawFace(context: &context, size: size)
+                draw(context: &context, size: size)
             }
-            .shadow(color: faceColor.opacity(preferences.glowIntensity * 0.55), radius: 2 + 8 * preferences.glowIntensity)
+            .shadow(
+                color: faceColor.opacity(preferences.glowIntensity * 0.55),
+                radius: 1 + 7 * preferences.glowIntensity
+            )
         }
         .clipped()
     }
@@ -442,364 +859,311 @@ private struct HaloPixelPalFace: View {
             preferences.backgroundColor.color
         case .glow:
             ZStack {
-                Color.black.opacity(0.82)
+                Color.black.opacity(0.74)
                 RadialGradient(
-                    colors: [faceColor.opacity(0.18 + 0.30 * preferences.glowIntensity), .clear],
+                    colors: [faceColor.opacity(0.10 + 0.28 * preferences.glowIntensity), .clear],
                     center: .center,
                     startRadius: 0,
-                    endRadius: 160
+                    endRadius: 180
                 )
             }
         }
     }
 
-    private func drawFace(context: inout GraphicsContext, size: CGSize) {
-        let level = min(4, max(1, squareSize))
-        let gridByLevel = [5, 7, 9, 11]
-        let grid = gridByLevel[level - 1]
+    private func draw(context: inout GraphicsContext, size: CGSize) {
         let targetSide = min(size.width, size.height) * preferences.faceScale
-        let pixel = max(1, floor(targetSide / CGFloat(grid)))
-        let rendered = pixel * CGFloat(grid)
+        let pixel = max(1, floor(targetSide / CGFloat(logicalGrid)))
+        let rendered = pixel * CGFloat(logicalGrid)
         let origin = CGPoint(
             x: floor((size.width - rendered) / 2),
             y: floor((size.height - rendered) / 2)
         )
 
-        func block(_ x: Int, _ y: Int, _ w: Int = 1, _ h: Int = 1, _ tone: Color? = nil, opacity: Double = 1) {
-            guard x >= 0, y >= 0, w > 0, h > 0, x + w <= grid, y + h <= grid else { return }
-            let rect = CGRect(
-                x: origin.x + CGFloat(x) * pixel,
-                y: origin.y + CGFloat(y) * pixel,
-                width: CGFloat(w) * pixel,
-                height: CGFloat(h) * pixel
-            )
-            context.fill(Path(rect), with: .color((tone ?? faceColor).opacity(opacity)))
-        }
+        let motion = logicalMotion()
 
-        let center = grid / 2
-        let eyeY = max(1, Int(Double(grid) * 0.28))
-        let leftEyeX = max(0, Int(Double(grid) * 0.20))
-        let rightEyeX = min(grid - 1, Int(Double(grid) * 0.70))
-        let mouthY = min(grid - 1, Int(Double(grid) * 0.68))
-        let eyeShift = neutralEyeShift(grid: grid)
-
-        func eyeStart(_ x: Int, width: Int, mirror: Bool) -> Int {
-            let shifted = min(grid - 1, max(0, x + eyeShift))
-            if mirror {
-                return max(0, min(grid - width, shifted - max(0, width - 1)))
+        func color(for role: HaloPixelPalColorRole) -> Color {
+            switch role {
+            case .primary: return faceColor
+            case .accent: return accentColor
+            case .blush: return blushColor
+            case .white: return .white
+            case .shadow: return Color.black.opacity(0.78)
             }
-            return max(0, min(grid - width, shifted))
         }
 
-        func standardEye(_ x: Int, _ y: Int, mirror: Bool = false) {
-            let resolvedX = min(grid - 1, max(0, x + eyeShift))
-            switch preferences.eyeStyle {
-            case .dot:
-                block(resolvedX, y)
-
-            case .classic:
-                if level == 1 {
-                    block(resolvedX, y)
-                } else {
-                    block(resolvedX, y, 1, min(2, grid - y))
-                    if level >= 3, y > 0 {
-                        block(resolvedX, y - 1, 1, 1, accentColor, opacity: 0.72)
-                    }
-                }
-
-            case .glossy:
-                if level == 1 {
-                    block(resolvedX, y)
-                } else {
-                    let start = eyeStart(x, width: 2, mirror: mirror)
-                    block(start, y, 2, min(2, grid - y))
-                    // The bright one-pixel catchlight is deliberately different from
-                    // the face palette, like the glossy pixel eyes in the reference set.
-                    block(start + (mirror ? 0 : 1), y, 1, 1, Color.white)
-                    if level >= 3, y + 2 < grid {
-                        block(start + (mirror ? 1 : 0), y + 2, 1, 1, accentColor, opacity: 0.78)
-                    }
-                }
-
-            case .wide:
-                let width = level == 1 ? 1 : (level >= 3 ? 3 : 2)
-                let start = eyeStart(x, width: width, mirror: mirror)
-                block(start, y, width, 1)
-                if level >= 3, y + 1 < grid {
-                    block(start + width / 2, y + 1, 1, 1, accentColor, opacity: 0.82)
-                }
-
-            case .digital:
-                if level == 1 {
-                    block(resolvedX, y)
-                } else {
-                    let start = eyeStart(x, width: 2, mirror: mirror)
-                    block(start, y, 2, 1)
-                    if y + 1 < grid { block(mirror ? start + 1 : start, y + 1) }
-                    if level >= 3, y + 2 < grid { block(start, y + 2, 2, 1, accentColor, opacity: 0.78) }
-                }
-
-            case .sparkle:
-                if level == 1 {
-                    block(resolvedX, y, 1, 1, accentColor)
-                } else {
-                    block(resolvedX, y, 1, 1, Color.white)
-                    if resolvedX > 0 { block(resolvedX - 1, y, 1, 1, accentColor) }
-                    if resolvedX + 1 < grid { block(resolvedX + 1, y, 1, 1, accentColor) }
-                    if y > 0 { block(resolvedX, y - 1, 1, 1, accentColor) }
-                    if y + 1 < grid { block(resolvedX, y + 1, 1, 1, accentColor) }
+        func render(_ placed: HaloPixelPalPlacedSprite, opacity: Double = 1.0, extraX: Int = 0, extraY: Int = 0) {
+            let rows = placed.sprite.rows
+            for (rowIndex, row) in rows.enumerated() {
+                let chars = Array(row)
+                for (columnIndex, char) in chars.enumerated() {
+                    guard let role = HaloPixelPalColorRole(rawValue: char) else { continue }
+                    let sourceX = placed.mirrorX ? (chars.count - 1 - columnIndex) : columnIndex
+                    let logicalX = placed.x + sourceX + motion.x + extraX
+                    let logicalY = placed.y + rowIndex + motion.y + extraY
+                    guard logicalX >= 0, logicalY >= 0, logicalX < logicalGrid, logicalY < logicalGrid else { continue }
+                    let rect = CGRect(
+                        x: origin.x + CGFloat(logicalX) * pixel,
+                        y: origin.y + CGFloat(logicalY) * pixel,
+                        width: pixel,
+                        height: pixel
+                    )
+                    context.fill(Path(rect), with: .color(color(for: role).opacity(opacity)))
                 }
             }
         }
 
-        func lineEye(_ x: Int, _ y: Int, mirror: Bool = false) {
-            let width: Int
-            switch preferences.eyeStyle {
-            case .dot: width = 1
-            case .wide: width = level == 1 ? 1 : min(3, grid)
-            case .sparkle: width = 1
-            case .digital, .classic, .glossy: width = level == 1 ? 1 : 2
-            }
-            let start = eyeStart(x, width: width, mirror: mirror)
-            block(start, y, width, 1)
-            if preferences.eyeStyle == .sparkle, level > 1, y > 0 {
-                block(start, y - 1, 1, 1, accentColor, opacity: 0.72)
-            }
+        drawFaceStyle(render: render)
+        drawEyes(render: render)
+        drawBrows(render: render)
+        drawMouth(render: render)
+        drawCheeks(render: render)
+        drawAccessory(render: render)
+        drawFX(render: render)
+    }
+
+    private func drawFaceStyle(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
+        switch preferences.faceStyle {
+        case .soft:
+            break
+        case .minimal:
+            break
+        case .robot:
+            let left = HaloPixelPalSprite(rows: ["p", "a", "p"])
+            render(.init(left, x: 1, y: 10), 0.75, 0, 0)
+            render(.init(left, x: 22, y: 10), 0.75, 0, 0)
+        case .cat:
+            let ear = HaloPixelPalSprite(rows: [
+                "p...p",
+                "pp.pp",
+                ".p.p."
+            ])
+            render(.init(ear, x: 1, y: 1), 0.95, 0, 0)
+            render(.init(ear, x: 18, y: 1, mirrorX: true), 0.95, 0, 0)
+        }
+    }
+
+    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight }
+
+    private var eyePose: EyePose {
+        switch expression {
+        case .blink, .sleepy, .bored: return .closed
+        case .happy, .superHappy, .music: return .happy
+        case .love: return .heart
+        case .excited, .shocked: return .star
+        case .wink: return .winkRight
+        case .mischievous, .smug: return .winkRight
+        default: return .open
+        }
+    }
+
+    private func drawEyes(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
+        let leftX = 3
+        let rightX = 15
+        let y = 7
+
+        func drawOpenPair() {
+            let eye = HaloPixelPalSprites.openEye(preferences.eyeStyle)
+            render(.init(eye, x: leftX, y: y), 1, 0, 0)
+            render(.init(eye, x: rightX, y: y, mirrorX: true), 1, 0, 0)
         }
 
-        func happyEye(_ x: Int, _ y: Int, mirror: Bool) {
-            switch preferences.eyeStyle {
-            case .dot:
-                block(min(grid - 1, max(0, x)), min(grid - 1, y + (level > 1 ? 1 : 0)))
+        switch eyePose {
+        case .open:
+            drawOpenPair()
+        case .happy:
+            let eye = HaloPixelPalSprites.happyEye(preferences.eyeStyle)
+            render(.init(eye, x: leftX, y: y + 1), 1, 0, 0)
+            render(.init(eye, x: rightX, y: y + 1, mirrorX: true), 1, 0, 0)
+        case .closed:
+            let eye = HaloPixelPalSprites.closedEye(preferences.eyeStyle)
+            render(.init(eye, x: leftX, y: y + 2), 1, 0, 0)
+            render(.init(eye, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)
+        case .heart:
+            render(.init(HaloPixelPalSprites.heartEye, x: 2, y: 6), 1, 0, 0)
+            render(.init(HaloPixelPalSprites.heartEye, x: 15, y: 6, mirrorX: true), 1, 0, 0)
+        case .star:
+            render(.init(HaloPixelPalSprites.starEye, x: 3, y: 6), 1, 0, 0)
+            render(.init(HaloPixelPalSprites.starEye, x: 16, y: 6, mirrorX: true), 1, 0, 0)
+        case .winkLeft:
+            let open = HaloPixelPalSprites.openEye(preferences.eyeStyle)
+            render(.init(HaloPixelPalSprites.winkEye, x: leftX, y: y + 2), 1, 0, 0)
+            render(.init(open, x: rightX, y: y, mirrorX: true), 1, 0, 0)
+        case .winkRight:
+            let open = HaloPixelPalSprites.openEye(preferences.eyeStyle)
+            render(.init(open, x: leftX, y: y), 1, 0, 0)
+            render(.init(HaloPixelPalSprites.winkEye, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)
+        }
+    }
 
-            case .sparkle:
-                let centerX = min(grid - 1, max(0, x))
-                if level == 1 {
-                    block(centerX, y, 1, 1, accentColor)
-                } else {
-                    block(centerX, y, 1, 1, Color.white)
-                    if centerX > 0 { block(centerX - 1, y, 1, 1, accentColor) }
-                    if centerX + 1 < grid { block(centerX + 1, y, 1, 1, accentColor) }
-                    if y + 1 < grid { block(centerX, y + 1, 1, 1, accentColor) }
-                }
+    private func drawBrows(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
+        let leftX = 3
+        let rightX = 16
+        let y = 4
+        switch expression {
+        case .worried, .sad, .crying, .shy:
+            render(.init(HaloPixelPalSprites.worriedBrow, x: leftX, y: y), 0.95, 0, 0)
+            render(.init(HaloPixelPalSprites.worriedBrow, x: rightX, y: y, mirrorX: true), 0.95, 0, 0)
+        case .annoyed, .focused:
+            render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.95, 0, 0)
+            render(.init(HaloPixelPalSprites.annoyedBrow, x: rightX, y: y, mirrorX: true), 0.95, 0, 0)
+        case .surprised, .shocked:
+            render(.init(HaloPixelPalSprites.raisedBrow, x: leftX, y: 3), 0.95, 0, 0)
+            render(.init(HaloPixelPalSprites.raisedBrow, x: rightX, y: 3, mirrorX: true), 0.95, 0, 0)
+        case .mischievous, .smug:
+            render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.80, 0, 0)
+        default:
+            break
+        }
+    }
 
-            case .wide:
-                if level == 1 {
-                    block(x, y)
-                } else {
-                    let width = level >= 3 ? 3 : 2
-                    let start = eyeStart(x, width: width, mirror: mirror)
-                    block(start, y + 1 < grid ? y + 1 : y, width, 1)
-                    block(mirror ? start : min(grid - 1, start + width - 1), y)
-                }
+    private func automaticMouth() -> HaloPixelPalSprite? {
+        switch expression {
+        case .neutral, .focused, .confused: return HaloPixelPalSprites.mouthTiny
+        case .blink, .sleepy, .bored: return HaloPixelPalSprites.mouthFlat
+        case .happy, .music: return HaloPixelPalSprites.mouthSmile
+        case .superHappy, .excited, .love: return HaloPixelPalSprites.mouthBigSmile
+        case .surprised, .shocked: return HaloPixelPalSprites.mouthO
+        case .worried, .sad, .crying, .annoyed: return HaloPixelPalSprites.mouthFrown
+        case .shy: return HaloPixelPalSprites.mouthTiny
+        case .mischievous, .smug, .wink: return HaloPixelPalSprites.mouthSmug
+        }
+    }
 
-            case .digital:
-                if level == 1 {
-                    block(x, y)
-                } else {
-                    let start = eyeStart(x, width: 2, mirror: mirror)
-                    block(start, min(grid - 1, y + 1), 2, 1)
-                    block(mirror ? start + 1 : start, y)
-                }
+    private func selectedMouth() -> HaloPixelPalSprite? {
+        switch preferences.mouthStyle {
+        case .automatic: return automaticMouth()
+        case .none: return nil
+        case .tiny: return HaloPixelPalSprites.mouthTiny
+        case .smile: return HaloPixelPalSprites.mouthSmile
+        case .flat: return HaloPixelPalSprites.mouthFlat
+        case .cat: return HaloPixelPalSprites.mouthCat
+        case .open: return HaloPixelPalSprites.mouthOpen
+        }
+    }
 
-            case .classic, .glossy:
-                if level == 1 {
-                    block(x, y)
-                } else if mirror {
-                    block(max(0, x - 1), min(grid - 1, y + 1))
-                    block(x, y)
-                    if preferences.eyeStyle == .glossy, level >= 3, x > 0 {
-                        block(x - 1, y, 1, 1, Color.white)
-                    }
-                } else {
-                    block(x, y)
-                    block(min(grid - 1, x + 1), min(grid - 1, y + 1))
-                    if preferences.eyeStyle == .glossy, level >= 3, x + 1 < grid {
-                        block(x + 1, y, 1, 1, Color.white)
-                    }
-                }
+    private func drawMouth(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
+        guard let mouth = selectedMouth() else { return }
+        let x = max(0, (logicalGrid - mouth.width) / 2)
+        let y = expression == .superHappy || expression == .excited ? 15 : 16
+        render(.init(mouth, x: x, y: y), 1, 0, 0)
+    }
+
+    private func drawCheeks(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
+        guard preferences.faceStyle != .minimal else { return }
+        let sprite: HaloPixelPalSprite
+        switch preferences.cheekStyle {
+        case .none: return
+        case .soft: sprite = HaloPixelPalSprites.cheekSoft
+        case .kawaii: sprite = HaloPixelPalSprites.cheekKawaii
+        case .shy: sprite = HaloPixelPalSprites.cheekShy
+        }
+        let opacity: Double = expression == .shy || expression == .love ? 1.0 : 0.72
+        render(.init(sprite, x: 2, y: 14), opacity, 0, 0)
+        render(.init(sprite, x: max(0, 22 - sprite.width), y: 14, mirrorX: true), opacity, 0, 0)
+    }
+
+    private var resolvedAccessory: HaloPixelPalAccessory {
+        switch preferences.accessoryMode {
+        case .off:
+            return .none
+        case .manual:
+            return preferences.selectedAccessory
+        case .contextual:
+            return contextualAccessory ?? preferences.selectedAccessory
+        case .randomAllowed:
+            let choices = preferences.allowedAccessories.filter { $0 != .none }
+            guard !choices.isEmpty else { return .none }
+            let interval = Int(date.timeIntervalSinceReferenceDate / 45)
+            return choices[abs(interval) % choices.count]
+        }
+    }
+
+    private func drawAccessory(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
+        switch resolvedAccessory {
+        case .none:
+            if preferences.faceStyle == .cat {
+                return
             }
+        case .bow:
+            render(.init(HaloPixelPalSprites.bow, x: 1, y: 1), 1, 0, 0)
+        case .catEars:
+            render(.init(HaloPixelPalSprites.catEar, x: 3, y: 1), 1, 0, 0)
+            render(.init(HaloPixelPalSprites.catEar, x: 16, y: 1, mirrorX: true), 1, 0, 0)
+        case .glasses:
+            render(.init(HaloPixelPalSprites.glasses, x: 6, y: 8), 0.96, 0, 0)
+        case .shades:
+            render(.init(HaloPixelPalSprites.shades, x: 6, y: 7), 1, 0, 0)
+        case .headphones:
+            render(.init(HaloPixelPalSprites.headphones, x: 6, y: 4), 1, 0, 0)
+        case .halo:
+            render(.init(HaloPixelPalSprites.halo, x: 8, y: 1), 0.94, 0, 0)
+        case .horns:
+            render(.init(HaloPixelPalSprites.horns, x: 7, y: 1), 1, 0, 0)
+        case .flower:
+            render(.init(HaloPixelPalSprites.flower, x: 18, y: 2), 1, 0, 0)
+        case .sleepingCap:
+            render(.init(HaloPixelPalSprites.sleepingCap, x: 7, y: 0), 1, 0, 0)
+        case .crown:
+            render(.init(HaloPixelPalSprites.crown, x: 9, y: 1), 1, 0, 0)
+        case .sprout:
+            render(.init(HaloPixelPalSprites.sprout, x: 10, y: 1), 1, 0, 0)
+        case .bandage:
+            render(.init(HaloPixelPalSprites.bandage, x: 17, y: 4), 0.88, 0, 0)
         }
+    }
 
-        func heartEye(_ x: Int, _ y: Int, mirror: Bool = false) {
-            if level == 1 {
-                block(x, y, 1, 1, accentColor)
-            } else {
-                let start = eyeStart(x, width: 2, mirror: mirror)
-                block(start, y, 2, 1, accentColor)
-                if y + 1 < grid { block(start, y + 1, 2, 1, accentColor) }
-                if y + 2 < grid { block(start + (mirror ? 0 : 1), y + 2, 1, 1, accentColor) }
-                if preferences.eyeStyle == .glossy {
-                    block(start + (mirror ? 1 : 0), y, 1, 1, Color.white)
-                }
-            }
+    private func drawFX(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
+        let phase = Int(date.timeIntervalSinceReferenceDate * max(0.35, preferences.animationSpeed) * 4) % 4
+        let lift = reduceMotion ? 0 : -(phase / 2)
+        switch fx {
+        case .none:
+            break
+        case .hearts:
+            render(.init(HaloPixelPalSprites.heart, x: 1, y: 3), 0.90, 0, lift)
+            render(.init(HaloPixelPalSprites.heart, x: 20, y: 2), 0.72, 0, lift - 1)
+        case .sparkle:
+            render(.init(HaloPixelPalSprites.sparkle, x: 1, y: 2), 0.90, 0, lift)
+            render(.init(HaloPixelPalSprites.sparkle, x: 20, y: 5), 0.72, 0, -lift)
+        case .music:
+            render(.init(HaloPixelPalSprites.musicNote, x: 19, y: 1), 0.90, 0, lift)
+        case .sweat:
+            render(.init(HaloPixelPalSprites.sweat, x: 20, y: 5), 0.92, 0, lift)
+        case .tears:
+            render(.init(HaloPixelPalSprites.tear, x: 5, y: 12), 0.95, 0, phase / 2)
+            render(.init(HaloPixelPalSprites.tear, x: 18, y: 12), 0.95, 0, phase / 2)
+        case .alert:
+            render(.init(HaloPixelPalSprites.exclamation, x: 21, y: 2), 0.95, 0, reduceMotion ? 0 : -phase % 2)
         }
+    }
 
-        func drawMouth(_ suggested: HaloPixelPalMouthStyle) {
-            let mode = preferences.mouthStyle == .automatic ? suggested : preferences.mouthStyle
-            switch mode {
-            case .none:
-                break
-            case .tiny:
-                block(center, mouthY)
-            case .flat:
-                let width = level == 1 ? 1 : min(3, grid)
-                block(max(0, center - width / 2), mouthY, width, 1)
-            case .smile:
-                if level == 1 {
-                    block(center, mouthY)
-                    if mouthY > 0 { block(max(0, center - 1), mouthY - 1) }
-                    if mouthY > 0, center + 1 < grid { block(center + 1, mouthY - 1) }
-                } else {
-                    block(max(0, center - 2), max(0, mouthY - 1))
-                    block(max(0, center - 1), mouthY, min(3, grid - max(0, center - 1)), 1)
-                    if center + 2 < grid { block(center + 2, max(0, mouthY - 1)) }
-                }
-            case .automatic:
-                break
-            }
-        }
-
-        func cheeks() {
-            guard preferences.showCheeks, preferences.faceStyle == .soft, level > 1 else { return }
-            let y = min(grid - 1, mouthY - 1)
-            block(0, y, 1, 1, accentColor, opacity: 0.72)
-            block(grid - 1, y, 1, 1, accentColor, opacity: 0.72)
-        }
-
-        func styleAccents() {
-            switch preferences.faceStyle {
-            case .minimal:
-                break
-            case .soft:
-                cheeks()
-            case .robot:
-                if level > 1 {
-                    block(0, center, 1, 1, accentColor, opacity: 0.55)
-                    block(grid - 1, center, 1, 1, accentColor, opacity: 0.55)
-                }
-            case .cat:
-                if level > 1 {
-                    block(0, 0)
-                    block(grid - 1, 0)
-                    if level > 2 {
-                        block(1, 1, 1, 1, accentColor, opacity: 0.75)
-                        block(grid - 2, 1, 1, 1, accentColor, opacity: 0.75)
-                    }
-                }
-            }
-        }
+    private func logicalMotion() -> (x: Int, y: Int) {
+        guard !reduceMotion else { return (0, 0) }
+        let speed = max(0.35, preferences.animationSpeed)
+        let intensity = preferences.animationIntensity
+        let t = date.timeIntervalSinceReferenceDate * speed
+        let one = intensity > 0.28 ? 1 : 0
+        let two = intensity > 0.75 ? 2 : one
 
         switch expression {
-        case .neutral:
-            standardEye(leftEyeX, eyeY)
-            standardEye(rightEyeX, eyeY, mirror: true)
-            drawMouth(.tiny)
-
-        case .blink:
-            lineEye(leftEyeX, eyeY)
-            lineEye(rightEyeX, eyeY, mirror: true)
-            drawMouth(.tiny)
-
-        case .happy:
-            happyEye(leftEyeX, eyeY, mirror: false)
-            happyEye(rightEyeX, eyeY, mirror: true)
-            drawMouth(.smile)
-
-        case .excited:
-            standardEye(leftEyeX, eyeY)
-            standardEye(rightEyeX, eyeY, mirror: true)
-            if preferences.mouthStyle == .none {
-                break
-            }
-            if level == 1 {
-                block(center, mouthY, 1, 1, accentColor)
-            } else {
-                block(max(0, center - 1), mouthY, min(3, grid - max(0, center - 1)), min(2, grid - mouthY), accentColor)
-            }
-
-        case .love:
-            heartEye(leftEyeX, eyeY)
-            heartEye(rightEyeX, eyeY, mirror: true)
-            drawMouth(.smile)
-
-        case .sleepy:
-            lineEye(leftEyeX, eyeY)
-            lineEye(rightEyeX, eyeY, mirror: true)
-            drawMouth(.flat)
-
-        case .annoyed:
-            lineEye(leftEyeX, eyeY)
-            lineEye(rightEyeX, eyeY, mirror: true)
-            if level > 1 {
-                block(max(0, leftEyeX - 1), max(0, eyeY - 1), min(2, grid - max(0, leftEyeX - 1)), 1)
-                block(max(0, rightEyeX), max(0, eyeY - 1), min(2, grid - rightEyeX), 1)
-            }
-            drawMouth(.flat)
-
-        case .confused:
-            standardEye(leftEyeX, eyeY)
-            lineEye(rightEyeX, eyeY, mirror: true)
-            if level > 1, rightEyeX + 1 < grid, eyeY + 1 < grid { block(rightEyeX + 1, eyeY + 1) }
-            drawMouth(.tiny)
-
-        case .worried:
-            standardEye(leftEyeX, eyeY)
-            standardEye(rightEyeX, eyeY, mirror: true)
-            if level > 1 {
-                block(max(0, leftEyeX - 1), max(0, eyeY - 1), 1, 1)
-                block(min(grid - 1, rightEyeX + 1), max(0, eyeY - 1), 1, 1)
-            }
-            drawMouth(.flat)
-
-        case .surprised:
-            standardEye(leftEyeX, eyeY)
-            standardEye(rightEyeX, eyeY, mirror: true)
-            if preferences.mouthStyle != .none {
-                block(center, mouthY)
-                if level > 1, mouthY + 1 < grid { block(center, mouthY + 1) }
-            }
-
-        case .focused:
-            standardEye(leftEyeX, eyeY)
-            standardEye(rightEyeX, eyeY, mirror: true)
-            if level > 1 {
-                block(max(0, leftEyeX - 1), max(0, eyeY - 1), min(2, grid - max(0, leftEyeX - 1)), 1)
-                block(max(0, rightEyeX), max(0, eyeY - 1), min(2, grid - rightEyeX), 1)
-            }
-            drawMouth(.tiny)
-
-        case .music:
-            happyEye(leftEyeX, eyeY, mirror: false)
-            happyEye(rightEyeX, eyeY, mirror: true)
-            drawMouth(.smile)
-            if level > 2 {
-                block(grid - 2, 0, 1, 2, accentColor)
-                block(grid - 3, 1, 1, 1, accentColor)
-            }
-
+        case .happy, .superHappy, .love:
+            return (0, Int(round(sin(t * 5.2))) < 0 ? -one : 0)
+        case .excited, .music:
+            return (Int(round(sin(t * 6.4))) * one, Int(round(cos(t * 6.4))) * one)
+        case .shocked, .surprised:
+            return (0, Int(round(abs(sin(t * 7.0)))) * -two)
+        case .worried, .sad, .crying:
+            return (Int(round(sin(t * 2.0))) * one, one)
         case .bored:
-            lineEye(leftEyeX, min(grid - 1, eyeY + 1))
-            lineEye(rightEyeX, min(grid - 1, eyeY + 1), mirror: true)
-            drawMouth(.flat)
-
-        case .mischievous:
-            standardEye(leftEyeX, eyeY)
-            lineEye(rightEyeX, eyeY, mirror: true)
-            drawMouth(.smile)
+            return (Int(round(sin(t * 0.8))) * one, one)
+        case .neutral:
+            return (0, Int(round(sin(t * 0.65))) * one)
+        default:
+            return (0, 0)
         }
-
-        styleAccents()
-    }
-
-    private func neutralEyeShift(grid: Int) -> Int {
-        guard expression == .neutral, !reduceMotion else { return 0 }
-        let cycle = Int(date.timeIntervalSinceReferenceDate * max(0.35, preferences.animationSpeed) / 2.2) % 8
-        if cycle == 2 { return -1 }
-        if cycle == 5 { return 1 }
-        return 0
     }
 }
+
+// MARK: - Settings
 
 @MainActor
 final class HaloPixelPalSettingsWindowController {
@@ -815,7 +1179,7 @@ final class HaloPixelPalSettingsWindowController {
 
         let controller = NSHostingController(rootView: HaloPixelPalSettingsView())
         let window = NSWindow(
-            contentRect: CGRect(x: 0, y: 0, width: 560, height: 720),
+            contentRect: CGRect(x: 0, y: 0, width: 650, height: 790),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -823,7 +1187,7 @@ final class HaloPixelPalSettingsWindowController {
         window.title = "Halo · Pixel Pal"
         window.contentViewController = controller
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 520, height: 620)
+        window.minSize = NSSize(width: 600, height: 680)
         window.center()
         self.window = window
 
@@ -834,13 +1198,15 @@ final class HaloPixelPalSettingsWindowController {
 
 private struct HaloPixelPalSettingsView: View {
     @ObservedObject private var pal = HaloPixelPalStore.shared
-    @State private var previewExpression: HaloPixelPalExpression = .neutral
+    @State private var previewExpression: HaloPixelPalExpression = .happy
+    @State private var previewAccessory: HaloPixelPalAccessory? = nil
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 appearanceSection
+                accessorySection
                 interactionSection
                 contextSection
                 expressionSection
@@ -848,26 +1214,28 @@ private struct HaloPixelPalSettingsView: View {
             }
             .padding(22)
         }
-        .frame(minWidth: 520, minHeight: 620)
+        .frame(minWidth: 600, minHeight: 680)
     }
 
     private var header: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: 22) {
             HaloPixelPalFace(
                 expression: previewExpression,
+                contextualAccessory: previewAccessory,
+                fx: previewFX,
                 squareSize: 2,
                 preferences: pal.preferences,
                 date: Date(),
-                reduceMotion: true
+                reduceMotion: false
             )
-            .frame(width: 112, height: 112)
-            .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .frame(width: 150, height: 150)
+            .background(Color.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Pixel Pal").font(.title2.weight(.bold))
-                Text("A face-only 8-bit expression living in Halo.")
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Pixel Pal v2").font(.title2.weight(.bold))
+                Text("A premium pixel-art face with authored expressions, accessories and contextual animation.")
                     .foregroundStyle(.secondary)
-                Text("1×1 starts at 5×5 logical pixels · square sizes only.")
+                Text("24×24 logical canvas · square-only · face-first")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
@@ -876,28 +1244,30 @@ private struct HaloPixelPalSettingsView: View {
 
     private var appearanceSection: some View {
         GroupBox("Appearance") {
-            VStack(alignment: .leading, spacing: 12) {
-                Picker("Face style", selection: bind(\.faceStyle)) {
-                    ForEach(HaloPixelPalFaceStyle.allCases) { Text($0.rawValue).tag($0) }
-                }
-                Picker("Eyes", selection: bind(\.eyeStyle)) {
-                    ForEach(HaloPixelPalEyeStyle.allCases) { Text($0.rawValue).tag($0) }
-                }
-                eyeStyleGallery
+            VStack(alignment: .leading, spacing: 13) {
+                Text("Face style").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                visualFaceStyleGrid
+
+                Text("Eyes").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                visualEyeStyleGrid
+
                 Picker("Mouth", selection: bind(\.mouthStyle)) {
                     ForEach(HaloPixelPalMouthStyle.allCases) { Text($0.rawValue).tag($0) }
                 }
-                Toggle("Cheek accents", isOn: bind(\.showCheeks))
+                Picker("Cheeks", selection: bind(\.cheekStyle)) {
+                    ForEach(HaloPixelPalCheekStyle.allCases) { Text($0.rawValue).tag($0) }
+                }
 
                 Divider()
 
-                Picker("Pixel color", selection: bind(\.palette)) {
+                Picker("Palette", selection: bind(\.palette)) {
                     ForEach(HaloPixelPalPalette.allCases) { Text($0.rawValue).tag($0) }
                 }
                 if pal.preferences.palette == .custom {
-                    ColorPicker("Custom pixel color", selection: rgbBinding(\.customColor))
+                    ColorPicker("Primary pixel color", selection: rgbBinding(\.customColor))
                 }
-                ColorPicker("Accent color", selection: rgbBinding(\.accentColor))
+                ColorPicker("Accent / FX color", selection: rgbBinding(\.accentColor))
+                ColorPicker("Blush color", selection: rgbBinding(\.blushColor))
 
                 Picker("Background", selection: bind(\.backgroundStyle)) {
                     ForEach(HaloPixelPalBackgroundStyle.allCases) { Text($0.rawValue).tag($0) }
@@ -908,7 +1278,7 @@ private struct HaloPixelPalSettingsView: View {
 
                 HStack {
                     Text("Face fill")
-                    Slider(value: bind(\.faceScale), in: 0.72...1.0)
+                    Slider(value: bind(\.faceScale), in: 0.76...1.0)
                     Text("\(Int(pal.preferences.faceScale * 100))%")
                         .font(.caption.monospacedDigit())
                         .frame(width: 38, alignment: .trailing)
@@ -917,74 +1287,124 @@ private struct HaloPixelPalSettingsView: View {
                     Text("Glow")
                     Slider(value: bind(\.glowIntensity), in: 0...1)
                 }
-                HStack {
-                    Text("Animation speed")
-                    Slider(value: bind(\.animationSpeed), in: 0.35...2.0)
+            }
+            .padding(.top, 5)
+        }
+    }
+
+    private var visualFaceStyleGrid: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+            ForEach(HaloPixelPalFaceStyle.allCases) { style in
+                previewTile(title: style.rawValue, selected: style == pal.preferences.faceStyle) {
+                    pal.update(\.faceStyle, style)
+                } preview: {
+                    HaloPixelPalFace(
+                        expression: .happy,
+                        contextualAccessory: nil,
+                        fx: .none,
+                        squareSize: 2,
+                        preferences: previewPreferences(faceStyle: style),
+                        date: Date(),
+                        reduceMotion: true
+                    )
                 }
-                Toggle("Automatic blinking", isOn: bind(\.automaticBlinking))
+            }
+        }
+    }
+
+    private var visualEyeStyleGrid: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+            ForEach(HaloPixelPalEyeStyle.allCases) { style in
+                previewTile(title: style.rawValue, selected: style == pal.preferences.eyeStyle) {
+                    pal.update(\.eyeStyle, style)
+                    previewExpression = .neutral
+                } preview: {
+                    HaloPixelPalFace(
+                        expression: .neutral,
+                        contextualAccessory: nil,
+                        fx: .none,
+                        squareSize: 2,
+                        preferences: previewPreferences(eyeStyle: style),
+                        date: Date(),
+                        reduceMotion: true
+                    )
+                }
+            }
+        }
+    }
+
+    private func previewTile<Preview: View>(
+        title: String,
+        selected: Bool,
+        action: @escaping () -> Void,
+        @ViewBuilder preview: () -> Preview
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                preview()
+                    .frame(width: 64, height: 64)
+                    .background(Color.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                Text(title)
+                    .font(.caption2.weight(selected ? .bold : .regular))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(selected ? Color.accentColor.opacity(0.12) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(selected ? Color.accentColor.opacity(0.75) : Color.secondary.opacity(0.16), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var accessorySection: some View {
+        GroupBox("Accessories") {
+            VStack(alignment: .leading, spacing: 11) {
+                Picker("Mode", selection: bind(\.accessoryMode)) {
+                    ForEach(HaloPixelPalAccessoryMode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                if pal.preferences.accessoryMode != .off {
+                    Picker("Accessory", selection: bind(\.selectedAccessory)) {
+                        ForEach(HaloPixelPalAccessory.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .onChange(of: pal.preferences.selectedAccessory) { value in
+                        previewAccessory = value == .none ? nil : value
+                    }
+                }
+                if pal.preferences.accessoryMode == .randomAllowed {
+                    Text("Random mode rotates through all enabled accessories every ~45 seconds.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Contextual mode can automatically add headphones for music, glasses for Xcode, shades for games, a sleeping cap at night, and more.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             .padding(.top, 4)
         }
     }
 
-    private var eyeStyleGallery: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-            ForEach(HaloPixelPalEyeStyle.allCases) { style in
-                Button {
-                    pal.update(\.eyeStyle, style)
-                    previewExpression = .neutral
-                } label: {
-                    VStack(spacing: 5) {
-                        HaloPixelPalFace(
-                            expression: .neutral,
-                            squareSize: 2,
-                            preferences: previewPreferences(eyeStyle: style),
-                            date: Date(),
-                            reduceMotion: true
-                        )
-                        .frame(width: 54, height: 54)
-                        .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-                        Text(style.rawValue)
-                            .font(.caption2.weight(style == pal.preferences.eyeStyle ? .bold : .regular))
-                            .foregroundStyle(.primary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(style == pal.preferences.eyeStyle ? Color.accentColor.opacity(0.12) : Color.clear)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(style == pal.preferences.eyeStyle ? Color.accentColor.opacity(0.72) : Color.secondary.opacity(0.15), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func previewPreferences(eyeStyle: HaloPixelPalEyeStyle) -> HaloPixelPalPreferences {
-        var value = pal.preferences
-        value.eyeStyle = eyeStyle
-        value.mouthStyle = .tiny
-        value.showCheeks = false
-        value.backgroundStyle = .black
-        value.glowIntensity = 0
-        return value
-    }
-
     private var interactionSection: some View {
-        GroupBox("Interactions") {
+        GroupBox("Animation & interactions") {
             VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Animation speed")
+                    Slider(value: bind(\.animationSpeed), in: 0.35...2.0)
+                }
+                HStack {
+                    Text("Animation intensity")
+                    Slider(value: bind(\.animationIntensity), in: 0...1)
+                }
+                Toggle("Automatic blinking + rare wink", isOn: bind(\.automaticBlinking))
                 Toggle("React on hover", isOn: bind(\.hoverReaction))
                 Toggle("React on click", isOn: bind(\.tapReaction))
                 Toggle("React on double-click", isOn: bind(\.doubleTapReaction))
                 Toggle("React on long press", isOn: bind(\.longPressReaction))
-                Text("Click reactions rotate through cute expressions. Double-click gives a love reaction; long press makes the face sleepy.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
             .padding(.top, 4)
         }
@@ -1009,19 +1429,21 @@ private struct HaloPixelPalSettingsView: View {
     }
 
     private var expressionSection: some View {
-        GroupBox("Expression preview") {
+        GroupBox("Expression & animation preview") {
             VStack(alignment: .leading, spacing: 10) {
                 Picker("Expression", selection: $previewExpression) {
                     ForEach(HaloPixelPalExpression.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.menu)
 
-                HStack {
-                    Button("Happy") { previewExpression = .happy; pal.react(.happy, seconds: 2) }
-                    Button("Love") { previewExpression = .love; pal.react(.love, seconds: 2) }
-                    Button("Excited") { previewExpression = .excited; pal.react(.excited, seconds: 2) }
-                    Button("Sleepy") { previewExpression = .sleepy; pal.react(.sleepy, seconds: 2) }
-                    Button("Mischievous") { previewExpression = .mischievous; pal.react(.mischievous, seconds: 2) }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 5), spacing: 7) {
+                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in
+                        Button(expression.title) {
+                            previewExpression = expression
+                            pal.react(expression, seconds: 2.2)
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 }
             }
             .padding(.top, 4)
@@ -1030,12 +1452,37 @@ private struct HaloPixelPalSettingsView: View {
 
     private var footer: some View {
         HStack(alignment: .bottom) {
-            Text("Pixel Pal always maximizes its square canvas. 1×1 uses a 5×5 logical grid; 2×2, 3×3 and 4×4 increase resolution while remaining face-only.")
+            Text("Pixel Pal v2 uses a 24×24 authored pixel canvas with layered eyes, brows, mouths, cheeks, accessories and FX. It remains face-first at every supported square size.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
             Button("Reset") { pal.reset() }
         }
+    }
+
+    private var previewFX: HaloPixelPalFX {
+        switch previewExpression {
+        case .love: return .hearts
+        case .superHappy, .excited, .shy: return .sparkle
+        case .music: return .music
+        case .worried: return .sweat
+        case .crying: return .tears
+        case .surprised, .shocked: return .alert
+        default: return .none
+        }
+    }
+
+    private func previewPreferences(
+        faceStyle: HaloPixelPalFaceStyle? = nil,
+        eyeStyle: HaloPixelPalEyeStyle? = nil
+    ) -> HaloPixelPalPreferences {
+        var value = pal.preferences
+        if let faceStyle { value.faceStyle = faceStyle }
+        if let eyeStyle { value.eyeStyle = eyeStyle }
+        value.accessoryMode = .off
+        value.backgroundStyle = .black
+        value.glowIntensity = 0
+        return value
     }
 
     private func bind<T>(_ path: WritableKeyPath<HaloPixelPalPreferences, T>) -> Binding<T> {
