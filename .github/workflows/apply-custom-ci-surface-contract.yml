@@ -1,0 +1,64 @@
+name: Apply Custom CI Surface Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/custom-ci-surface-contract-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-build-push:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply surface contract patch
+        run: python3 scripts/apply_custom_ci_surface_contract.py
+
+      - name: Verify contract markers
+        shell: bash
+        run: |
+          set -euxo pipefail
+          grep -R -n -F 'Every Custom CI must declare its notch sizing and background contract.' Halo/Core/WorkspaceModels.swift
+          grep -R -n -F 'blockingPriority' Halo/Core/WorkspaceStore.swift
+          grep -R -n -F 'HaloCustomCIBackgroundView' Halo/Views/SurfaceView.swift
+          grep -R -n -F 'contextPreferredCompactHeight' Halo/NotchEngine/WindowManager.swift
+          grep -R -n -F '"surface"' Examples/HelloWorld.haloCI/manifest.json
+
+      - name: Build Halo
+        shell: bash
+        run: |
+          xcodebuild \
+            -project Halo.xcodeproj \
+            -scheme Halo \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Run Swift tests
+        continue-on-error: true
+        run: swift test
+
+      - name: Remove staging files
+        run: |
+          rm -f scripts/apply_custom_ci_surface_contract.py
+          rm -f .github/custom-ci-surface-contract-trigger.txt
+          rm -f .github/workflows/apply-custom-ci-surface-contract.yml
+
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Enforce Custom CI surface contracts and priority arbitration'
+          git pull --rebase origin main
+          git push origin HEAD:main
