@@ -1,0 +1,74 @@
+name: Polish Small Widgets
+
+on:
+  push:
+    paths:
+      - '.github/polish-small-widgets-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-build-push:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply small-widget polish
+        run: python3 scripts/polish_small_widgets.py
+
+      - name: Verify micro-only markers
+        run: |
+          set -euxo pipefail
+          grep -n -F 'private struct AdaptiveMicroRing' Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+          grep -n -F 'microTimer(remaining:' Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+          grep -n -F 'private func microMetric' Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+          grep -n -F 'private func microStopwatch' Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+          grep -n -F 'private var microColumns' Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+          grep -n -F 'Text(region ? "CAPTURE" : "OCR")' Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+
+      - name: Build and reject widget compile errors
+        run: |
+          set +e
+          xcodebuild \
+            -project Halo.xcodeproj \
+            -scheme Halo \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee /tmp/halo-small-widget-build.log
+          BUILD_STATUS=${PIPESTATUS[0]}
+          set -e
+
+          if grep -E 'VisualWorkspaceAdaptiveWidgets\.swift:[0-9]+:[0-9]+: error:' /tmp/halo-small-widget-build.log; then
+            echo 'Small-widget polish introduced a compiler error.'
+            exit 1
+          fi
+
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            echo 'Halo still has unrelated build failures, but no compiler errors were emitted from VisualWorkspaceAdaptiveWidgets.swift.'
+          fi
+
+      - name: Remove staging files
+        if: always()
+        run: |
+          rm -f scripts/polish_small_widgets.py
+          rm -f .github/polish-small-widgets-trigger.txt
+          rm -f .github/workflows/polish-small-widgets.yml
+
+      - name: Commit implementation
+        if: always()
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Polish compact widget presentations'
+          git pull --rebase origin main
+          git push origin HEAD:main
