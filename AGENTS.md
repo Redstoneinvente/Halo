@@ -6,9 +6,10 @@ This file contains repository-level instructions for AI coding agents and automa
 
 Any task involving Halo **CI (Custom Interfaces)**, CI packages, CI SDK, CI Studio, CI triggers/contexts, CI actions, third-party CI distribution, marketplace CIs, executable CI logic, or CI permissions must treat the following documents as authoritative:
 
-1. `Docs/CISDK.md`
-2. `Docs/Architecture.md`
-3. `Docs/Plugins.md`
+1. `Docs/CustomCI_Authoring.md` — practical public authoring guide and current SDK 0.1 surface/trigger/context/action reference
+2. `Docs/CISDK.md` — canonical SDK architecture and contract direction
+3. `Docs/Architecture.md`
+4. `Docs/Plugins.md`
 
 Read them **before modifying code**.
 
@@ -26,6 +27,7 @@ Read them **before modifying code**.
 - Preserve CI package/API compatibility unless a breaking change is explicitly versioned.
 - Add tests for parsers, validators, permissions, bindings, triggers, actions, migrations, and failure paths introduced by the change.
 - Update `Docs/CISDK.md` whenever a public CI SDK contract changes.
+- Update `Docs/CustomCI_Authoring.md` whenever an author-visible component, binding/context key, trigger, action, permission, capability, sizing/background rule, or package field changes.
 
 ### Required implementation behavior
 
