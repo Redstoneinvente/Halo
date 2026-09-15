@@ -33,6 +33,27 @@ def append_once(path: Path, marker: str, payload: str) -> None:
         path.write_text(text.rstrip() + "\n\n" + payload.strip() + "\n")
 
 
+# Repair two serialization scars in the staged SDK payload. These are artifacts of
+# the temporary chunk transport, not part of the SDK design. Keeping this repair here
+# means the committed Swift source is canonical even if the staging files are removed.
+models_path = Path("Halo/Core/WorkspaceModels.swift")
+models = models_path.read_text()
+models = models.replace(
+    "init(from decoder: Decoder) throws { {",
+    "init(from decoder: Decoder) throws {",
+)
+models = models.replace(
+    '        }\nn", issues: &issues) { triggers = decoded }\n        }\n\n        let errors = issues.contains { $0.severity == .error }',
+    '        }\n\n        let errors = issues.contains { $0.severity == .error }',
+)
+# Be defensive if whitespace changed slightly in the staged payload.
+models = models.replace(
+    'n", issues: &issues) { triggers = decoded }\n        }\n',
+    '',
+)
+models_path.write_text(models)
+
+
 # Runtime: keep it in the already-compiled WorkspaceStore source, then attach it
 # to the existing service lifecycle rather than creating a parallel app runtime.
 workspace_path = Path("Halo/Core/WorkspaceStore.swift")
