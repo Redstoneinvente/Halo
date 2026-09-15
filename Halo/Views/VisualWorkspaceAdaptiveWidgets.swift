@@ -1071,10 +1071,10 @@ private struct VisualAdaptiveSystemView: View {
         .haloMicroInteraction(accent: metricColor(metric), help: "System · scroll metrics · hold for details", tapShowsPopover: true, onTap: {}) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("System").font(.headline)
-                ForEach(orderedMetrics.prefix(8)) { item in
+                ForEach(Array(orderedMetrics.prefix(8).enumerated()), id: \.offset) { _, item in
                     let itemValue = metricValue(item)
                     Button { if let index = orderedMetrics.firstIndex(of: item) { microMetricOffset = index } } label: {
-                        HStack { Image(systemName: item.symbol).frame(width: 18); Text(item.title); Spacer(); Text(itemValue.value).monospacedDigit().foregroundStyle(.secondary) }
+                        HStack { Image(systemName: item.symbol).frame(width: 18); Text(item.title); Spacer(); Text(itemValue.text).monospacedDigit().foregroundStyle(.secondary) }
                     }.buttonStyle(.plain)
                 }
             }.frame(width: 250)
@@ -1472,7 +1472,7 @@ private struct VisualAdaptiveCaptureView: View {
         Group {
             switch context.family {
             case .micro:
-                micro(region: true)
+                primaryAction(iconOnly: true)
                     .haloMicroInteraction(accent: style.accentColor.color, help: "Capture · click region · hold for capture tools") {
                         service.capture { store.addFiles([$0]) }
                     } popover: {
