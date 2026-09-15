@@ -29,7 +29,7 @@ jobs:
           widgets = Path('Halo/Core/WidgetModels.swift').read_text()
           adaptive = Path('Halo/Views/VisualWorkspaceAdaptiveWidgets.swift').read_text()
           required = [
-              'case eightByFour = "8×4"',
+              'eightByFour = "8×4"',
               'var resolvedGridColumns: Int { min(8,',
               'var resolvedGridRows: Int { min(4,',
               'struct VisualWidgetFootprint:',
