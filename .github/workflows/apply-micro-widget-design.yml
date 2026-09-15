@@ -18,8 +18,48 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Repair staged patch against current widget sources
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/apply_micro_widget_design.py')
+          s = p.read_text()
+          fixes = {
+              'case .micro: preview(lines: 3)': 'case .micro: preview(lines: 4)',
+              'case .micro: micro(region: true)': 'case .micro: primaryAction(iconOnly: true)',
+              'Text(contentKind(entry.text))': 'Text(contentIcon(entry.text) == "link" ? "LINK" : "TEXT")',
+              'Text(value.value)': 'Text(value.text)',
+              'formatTime(elapsed)': 'format(elapsed)',
+              'formatTime(lap)': 'format(lap)',
+          }
+          for old, new in fixes.items():
+              if old in s:
+                  s = s.replace(old, new)
+          # SurfaceView currently contains one BuiltinOrIntegrationWidget shelf route; if an
+          # indexed/search response ever duplicates it, the patcher should target the first real
+          # source declaration rather than aborting merely because the search view duplicated text.
+          p.write_text(s)
+          PY
+
       - name: Apply deliberate 1x1 widget design
         run: python3 scripts/apply_micro_widget_design.py
+
+      - name: Normalize generated Swift key paths
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          for name in [
+              'Halo/Views/VisualWorkspaceAdaptiveWidgets.swift',
+              'Halo/Views/ModuleViews.swift',
+              'Halo/Views/SurfaceView.swift',
+          ]:
+              p = Path(name)
+              s = p.read_text()
+              # Raw Python payloads intentionally protect backslashes while staged; Swift needs
+              # one backslash for key paths/environment values.
+              s = s.replace('\\\\.', '\\.')
+              p.write_text(s)
+          PY
 
       - name: Parse changed Swift sources
         run: |
