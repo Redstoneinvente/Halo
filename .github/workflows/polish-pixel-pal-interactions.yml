@@ -22,6 +22,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import base64
 
           path = Path('Halo/Views/PixelPetWidget.swift')
           s = path.read_text()
@@ -35,30 +36,18 @@ jobs:
                   s = s.replace(old, new, 1)
 
               replace_once(
-                  '    @Published private(set) var reaction: HaloPixelPalExpression?\n'
-                  '    @Published private(set) var reactionStarted = Date()\n',
-                  '    @Published private(set) var reaction: HaloPixelPalExpression?\n'
-                  '    @Published private(set) var reactionStarted = Date()\n'
-                  '    @Published private(set) var cookieRescueStarted: Date?\n',
+                  '    @Published private(set) var reaction: HaloPixelPalExpression?\n    @Published private(set) var reactionStarted = Date()\n',
+                  '    @Published private(set) var reaction: HaloPixelPalExpression?\n    @Published private(set) var reactionStarted = Date()\n    @Published private(set) var cookieRescueStarted: Date?\n',
                   'cookie rescue published state',
               )
               replace_once(
                   '    private var clearReactionWork: DispatchWorkItem?\n',
-                  '    private var clearReactionWork: DispatchWorkItem?\n'
-                  '    private var cookieRescueWork: DispatchWorkItem?\n',
+                  '    private var clearReactionWork: DispatchWorkItem?\n    private var cookieRescueWork: DispatchWorkItem?\n',
                   'cookie rescue work item',
               )
               replace_once(
-                  '    func react(_ expression: HaloPixelPalExpression, seconds: Double = 1.7) {\n'
-                  '        clearReactionWork?.cancel()\n'
-                  '        reactionStarted = Date()\n',
-                  '    func react(_ expression: HaloPixelPalExpression, seconds: Double = 1.7) {\n'
-                  '        clearReactionWork?.cancel()\n'
-                  '        if expression != .furious {\n'
-                  '            cookieRescueWork?.cancel()\n'
-                  '            cookieRescueStarted = nil\n'
-                  '        }\n'
-                  '        reactionStarted = Date()\n',
+                  '    func react(_ expression: HaloPixelPalExpression, seconds: Double = 1.7) {\n        clearReactionWork?.cancel()\n        reactionStarted = Date()\n',
+                  '    func react(_ expression: HaloPixelPalExpression, seconds: Double = 1.7) {\n        clearReactionWork?.cancel()\n        if expression != .furious {\n            cookieRescueWork?.cancel()\n            cookieRescueStarted = nil\n        }\n        reactionStarted = Date()\n',
                   'reaction clears cookie rescue',
               )
 
@@ -68,92 +57,30 @@ jobs:
                   raise SystemExit(f'furious duration: expected two matches, found {s.count(duration_old)}')
               s = s.replace(duration_old, duration_new)
 
-              long_press_marker = (
-                  '    func longPressed() {\n'
-                  '        guard preferences.longPressReaction else { return }\n'
-              )
-              cookie_action = (
-                  '    func feedFuryCookie() {\n'
-                  '        guard reaction == .furious, cookieRescueStarted == nil else { return }\n'
-                  '        clearReactionWork?.cancel()\n'
-                  '        let started = Date()\n'
-                  '        cookieRescueStarted = started\n'
-                  '        let work = DispatchWorkItem { [weak self] in\n'
-                  '            guard let self, self.reaction == .furious, self.cookieRescueStarted == started else { return }\n'
-                  '            self.cookieRescueStarted = nil\n'
-                  '            self.react(.happy, seconds: 2.4)\n'
-                  '        }\n'
-                  '        cookieRescueWork = work\n'
-                  '        DispatchQueue.main.asyncAfter(deadline: .now() + 0.62, execute: work)\n'
-                  '    }\n\n'
-              )
-              replace_once(long_press_marker, cookie_action + long_press_marker, 'cookie rescue store action')
+              marker = '    func longPressed() {\n        guard preferences.longPressReaction else { return }\n'
+              insert = '    func feedFuryCookie() {\n        guard reaction == .furious, cookieRescueStarted == nil else { return }\n        clearReactionWork?.cancel()\n        let started = Date()\n        cookieRescueStarted = started\n        let work = DispatchWorkItem { [weak self] in\n            guard let self, self.reaction == .furious, self.cookieRescueStarted == started else { return }\n            self.cookieRescueStarted = nil\n            self.react(.happy, seconds: 2.4)\n        }\n        cookieRescueWork = work\n        DispatchQueue.main.asyncAfter(deadline: .now() + 0.62, execute: work)\n    }\n\n'
+              replace_once(marker, insert + marker, 'cookie rescue store action')
 
               replace_once(
-                  '        clearReactionWork?.cancel()\n'
-                  '        tapIndex = 0\n',
-                  '        clearReactionWork?.cancel()\n'
-                  '        cookieRescueWork?.cancel()\n'
-                  '        cookieRescueStarted = nil\n'
-                  '        tapIndex = 0\n',
+                  '        clearReactionWork?.cancel()\n        tapIndex = 0\n',
+                  '        clearReactionWork?.cancel()\n        cookieRescueWork?.cancel()\n        cookieRescueStarted = nil\n        tapIndex = 0\n',
                   'reset cookie rescue state',
               )
 
               replace_once(
-                  '                    reactionElapsed: pal.reaction.map { _ in timeline.date.timeIntervalSince(pal.reactionStarted) },\n'
-                  '                    pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero\n',
-                  '                    reactionElapsed: pal.reaction.map { _ in timeline.date.timeIntervalSince(pal.reactionStarted) },\n'
-                  '                    cookieRescueElapsed: pal.cookieRescueStarted.map { timeline.date.timeIntervalSince($0) },\n'
-                  '                    pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero,\n'
-                  '                    onCookieTap: { pal.feedFuryCookie() }\n',
+                  '                    reactionElapsed: pal.reaction.map { _ in timeline.date.timeIntervalSince(pal.reactionStarted) },\n                    pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero\n',
+                  '                    reactionElapsed: pal.reaction.map { _ in timeline.date.timeIntervalSince(pal.reactionStarted) },\n                    cookieRescueElapsed: pal.cookieRescueStarted.map { timeline.date.timeIntervalSince($0) },\n                    pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero,\n                    onCookieTap: { pal.feedFuryCookie() }\n',
                   'pass cookie rescue state to renderer',
               )
 
               replace_once(
-                  '    var reactionElapsed: TimeInterval? = nil\n'
-                  '    var pointer: CGPoint = .zero\n',
-                  '    var reactionElapsed: TimeInterval? = nil\n'
-                  '    var cookieRescueElapsed: TimeInterval? = nil\n'
-                  '    var pointer: CGPoint = .zero\n'
-                  '    var onCookieTap: (() -> Void)? = nil\n',
+                  '    var reactionElapsed: TimeInterval? = nil\n    var pointer: CGPoint = .zero\n',
+                  '    var reactionElapsed: TimeInterval? = nil\n    var cookieRescueElapsed: TimeInterval? = nil\n    var pointer: CGPoint = .zero\n    var onCookieTap: (() -> Void)? = nil\n',
                   'face cookie rescue inputs',
               )
 
-              old_overlay = (
-                  '            if expression == .furious, let reactionElapsed = reactionElapsed {\n'
-                  '                Canvas { context, size in\n'
-                  '                    drawFuryDoor(context: &context, size: size, elapsed: reactionElapsed)\n'
-                  '                }\n'
-                  '                .allowsHitTesting(false)\n'
-                  '            }\n'
-              )
-              new_overlay = (
-                  '            if expression == .furious, let reactionElapsed = reactionElapsed {\n'
-                  '                Canvas { context, size in\n'
-                  '                    drawFuryDoor(\n'
-                  '                        context: &context,\n'
-                  '                        size: size,\n'
-                  '                        elapsed: reactionElapsed,\n'
-                  '                        cookieRescueElapsed: cookieRescueElapsed\n'
-                  '                    )\n'
-                  '                }\n'
-                  '                .allowsHitTesting(false)\n\n'
-                  '                if cookieRescueElapsed == nil, reactionElapsed >= 1.05, reactionElapsed < 2.15, let onCookieTap {\n'
-                  '                    GeometryReader { proxy in\n'
-                  '                        let hitSize = max(24.0, min(proxy.size.width, proxy.size.height) * 0.30)\n'
-                  '                        Button(action: onCookieTap) {\n'
-                  '                            Color.clear\n'
-                  '                                .frame(width: hitSize, height: hitSize)\n'
-                  '                                .contentShape(Rectangle())\n'
-                  '                        }\n'
-                  '                        .buttonStyle(.plain)\n'
-                  '                        .position(x: proxy.size.width / 2, y: proxy.size.height / 2)\n'
-                  '                        .accessibilityLabel("Give Pixel Pal the cookie")\n'
-                  '                        .help("Give Pixel Pal the cookie")\n'
-                  '                    }\n'
-                  '                }\n'
-                  '            }\n'
-              )
+              old_overlay = '            if expression == .furious, let reactionElapsed = reactionElapsed {\n                Canvas { context, size in\n                    drawFuryDoor(context: &context, size: size, elapsed: reactionElapsed)\n                }\n                .allowsHitTesting(false)\n            }\n'
+              new_overlay = '            if expression == .furious, let reactionElapsed = reactionElapsed {\n                Canvas { context, size in\n                    drawFuryDoor(\n                        context: &context,\n                        size: size,\n                        elapsed: reactionElapsed,\n                        cookieRescueElapsed: cookieRescueElapsed\n                    )\n                }\n                .allowsHitTesting(false)\n\n                if cookieRescueElapsed == nil, reactionElapsed >= 1.05, reactionElapsed < 2.15, let onCookieTap {\n                    GeometryReader { proxy in\n                        let hitSize = max(24.0, min(proxy.size.width, proxy.size.height) * 0.30)\n                        Button(action: onCookieTap) {\n                            Color.clear\n                                .frame(width: hitSize, height: hitSize)\n                                .contentShape(Rectangle())\n                        }\n                        .buttonStyle(.plain)\n                        .position(x: proxy.size.width / 2, y: proxy.size.height / 2)\n                        .accessibilityLabel("Give Pixel Pal the cookie")\n                        .help("Give Pixel Pal the cookie")\n                    }\n                }\n            }\n'
               replace_once(old_overlay, new_overlay, 'interactive cookie overlay')
 
               start = s.find('    private func furyDoorClosure(elapsed: TimeInterval) -> Double {\n')
@@ -162,118 +89,8 @@ jobs:
               if start < 0 or end < 0:
                   raise SystemExit('Could not locate fury door helper region.')
 
-              helpers = '''    private func furyDoorClosure(elapsed: TimeInterval, cookieRescueElapsed: TimeInterval?) -> Double {
-        func smooth(_ value: Double) -> Double {
-            let p = min(1.0, max(0.0, value))
-            return p * p * (3.0 - 2.0 * p)
-        }
-        if let rescue = cookieRescueElapsed {
-            return max(0.0, 1.0 - smooth(rescue / 0.55))
-        }
-        if reduceMotion {
-            return elapsed >= 0.65 && elapsed < 2.80 ? 1.0 : 0.0
-        }
-        if elapsed < 0.55 { return 0 }
-        if elapsed < 1.05 { return smooth((elapsed - 0.55) / 0.50) }
-        if elapsed < 2.15 { return 1 }
-        if elapsed < 2.80 { return 1 - smooth((elapsed - 2.15) / 0.65) }
-        return 0
-    }
-
-    private func drawFuryDoor(
-        context: inout GraphicsContext,
-        size: CGSize,
-        elapsed: TimeInterval,
-        cookieRescueElapsed: TimeInterval?
-    ) {
-        let closure = furyDoorClosure(elapsed: elapsed, cookieRescueElapsed: cookieRescueElapsed)
-        guard closure > 0.001 else { return }
-
-        let panelWidth = size.width * 0.5 * closure
-        let edgeWidth = max(1.0, min(size.width, size.height) / 48.0)
-        let panelColor = Color(red: 0.12, green: 0.015, blue: 0.012).opacity(0.98)
-        let edgeColor = Color(red: 0.95, green: 0.08, blue: 0.04).opacity(0.92)
-        let seamColor = Color.black.opacity(0.42)
-
-        func paintRect(_ rect: CGRect, _ color: Color) {
-            var path = Path()
-            path.addRect(rect)
-            context.fill(path, with: .color(color))
-        }
-
-        paintRect(CGRect(x: 0, y: 0, width: panelWidth, height: size.height), panelColor)
-        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: panelWidth, height: size.height), panelColor)
-        paintRect(CGRect(x: max(0, panelWidth - edgeWidth), y: 0, width: edgeWidth, height: size.height), edgeColor)
-        paintRect(CGRect(x: size.width - panelWidth, y: 0, width: edgeWidth, height: size.height), edgeColor)
-
-        for row in 1..<4 {
-            let y = size.height * CGFloat(row) / 4.0
-            paintRect(CGRect(x: 0, y: y, width: panelWidth, height: edgeWidth), seamColor)
-            paintRect(CGRect(x: size.width - panelWidth, y: y, width: panelWidth, height: edgeWidth), seamColor)
-        }
-
-        if let rescue = cookieRescueElapsed {
-            drawFuryCookie(context: &context, size: size, consumeProgress: min(1.0, rescue / 0.48))
-        } else if elapsed >= 1.05 && elapsed < 2.15 {
-            drawFuryCookie(context: &context, size: size, consumeProgress: 0)
-        }
-    }
-
-    private func drawFuryCookie(context: inout GraphicsContext, size: CGSize, consumeProgress: Double) {
-        let pattern = [
-            "..bbb..",
-            ".bbbbb.",
-            "bbdbdbb",
-            "bbbbbbb",
-            "bdbbbdb",
-            ".bbdbb.",
-            "..bbb.."
-        ]
-        let pixel = max(1.0, min(size.width, size.height) / 30.0)
-        let cookieSide = pixel * 7.0
-        let origin = CGPoint(x: (size.width - cookieSide) / 2.0, y: (size.height - cookieSide) / 2.0)
-        let visibleColumns = max(0, min(7, Int(ceil(7.0 * (1.0 - consumeProgress)))))
-        let dough = Color(red: 0.92, green: 0.55, blue: 0.18)
-        let edge = Color(red: 0.62, green: 0.28, blue: 0.07)
-        let chip = Color(red: 0.25, green: 0.09, blue: 0.025)
-
-        func paintCookiePixel(_ rect: CGRect, _ color: Color) {
-            var path = Path()
-            path.addRect(rect)
-            context.fill(path, with: .color(color))
-        }
-
-        for (y, row) in pattern.enumerated() {
-            for (x, value) in row.enumerated() where x < visibleColumns && value != "." {
-                let rect = CGRect(
-                    x: origin.x + CGFloat(x) * pixel,
-                    y: origin.y + CGFloat(y) * pixel,
-                    width: pixel,
-                    height: pixel
-                )
-                let isOuter = x == 0 || x == 6 || y == 0 || y == 6
-                paintCookiePixel(rect, value == "d" ? chip : (isOuter ? edge : dough))
-            }
-        }
-
-        if consumeProgress > 0.08 && consumeProgress < 0.95 {
-            let crumb = max(1.0, pixel * 0.72)
-            let t = CGFloat(consumeProgress)
-            let crumbs = [
-                CGPoint(x: size.width / 2 + pixel * 3.2 + pixel * 2.4 * t, y: size.height / 2 - pixel * 1.7 - pixel * 2.0 * t),
-                CGPoint(x: size.width / 2 + pixel * 2.4 + pixel * 1.5 * t, y: size.height / 2 + pixel * 0.2 + pixel * 1.7 * t),
-                CGPoint(x: size.width / 2 + pixel * 1.4 + pixel * 2.0 * t, y: size.height / 2 + pixel * 2.0 - pixel * 0.8 * t)
-            ]
-            for (index, point) in crumbs.enumerated() {
-                paintCookiePixel(
-                    CGRect(x: point.x, y: point.y, width: crumb, height: crumb),
-                    (index == 1 ? chip : dough).opacity(1.0 - consumeProgress)
-                )
-            }
-        }
-    }
-
-'''
+              helper_b64 = 'ICAgIHByaXZhdGUgZnVuYyBmdXJ5RG9vckNsb3N1cmUoZWxhcHNlZDogVGltZUludGVydmFsLCBjb29raWVSZXNjdWVFbGFwc2VkOiBUaW1lSW50ZXJ2YWw/KSAtPiBEb3VibGUgewogICAgICAgIGZ1bmMgc21vb3RoKF8gdmFsdWU6IERvdWJsZSkgLT4gRG91YmxlIHsKICAgICAgICAgICAgbGV0IHAgPSBtaW4oMS4wLCBtYXgoMC4wLCB2YWx1ZSkpCiAgICAgICAgICAgIHJldHVybiBwICogcCAqICgzLjAgLSAyLjAgKiBwKQogICAgICAgIH0KICAgICAgICBpZiBsZXQgcmVzY3VlID0gY29va2llUmVzY3VlRWxhcHNlZCB7CiAgICAgICAgICAgIHJldHVybiBtYXgoMC4wLCAxLjAgLSBzbW9vdGgocmVzY3VlIC8gMC41NSkpCiAgICAgICAgfQogICAgICAgIGlmIHJlZHVjZU1vdGlvbiB7CiAgICAgICAgICAgIHJldHVybiBlbGFwc2VkID49IDAuNjUgJiYgZWxhcHNlZCA8IDIuODAgPyAxLjAgOiAwLjAKICAgICAgICB9CiAgICAgICAgaWYgZWxhcHNlZCA8IDAuNTUgeyByZXR1cm4gMCB9CiAgICAgICAgaWYgZWxhcHNlZCA8IDEuMDUgeyByZXR1cm4gc21vb3RoKChlbGFwc2VkIC0gMC41NSkgLyAwLjUwKSB9CiAgICAgICAgaWYgZWxhcHNlZCA8IDIuMTUgeyByZXR1cm4gMSB9CiAgICAgICAgaWYgZWxhcHNlZCA8IDIuODAgeyByZXR1cm4gMSAtIHNtb290aCgoZWxhcHNlZCAtIDIuMTUpIC8gMC42NSkgfQogICAgICAgIHJldHVybiAwCiAgICB9CgogICAgcHJpdmF0ZSBmdW5jIGRyYXdGdXJ5RG9vcigKICAgICAgICBjb250ZXh0OiBpbm91dCBHcmFwaGljc0NvbnRleHQsCiAgICAgICAgc2l6ZTogQ0dTaXplLAogICAgICAgIGVsYXBzZWQ6IFRpbWVJbnRlcnZhbCwKICAgICAgICBjb29raWVSZXNjdWVFbGFwc2VkOiBUaW1lSW50ZXJ2YWw/CiAgICApIHsKICAgICAgICBsZXQgY2xvc3VyZSA9IGZ1cnlEb29yQ2xvc3VyZShlbGFwc2VkOiBlbGFwc2VkLCBjb29raWVSZXNjdWVFbGFwc2VkOiBjb29raWVSZXNjdWVFbGFwc2VkKQogICAgICAgIGd1YXJkIGNsb3N1cmUgPiAwLjAwMSBlbHNlIHsgcmV0dXJuIH0KCiAgICAgICAgbGV0IHBhbmVsV2lkdGggPSBzaXplLndpZHRoICogMC41ICogY2xvc3VyZQogICAgICAgIGxldCBlZGdlV2lkdGggPSBtYXgoMS4wLCBtaW4oc2l6ZS53aWR0aCwgc2l6ZS5oZWlnaHQpIC8gNDguMCkKICAgICAgICBsZXQgcGFuZWxDb2xvciA9IENvbG9yKHJlZDogMC4xMiwgZ3JlZW46IDAuMDE1LCBibHVlOiAwLjAxMikub3BhY2l0eSgwLjk4KQogICAgICAgIGxldCBlZGdlQ29sb3IgPSBDb2xvcihyZWQ6IDAuOTUsIGdyZWVuOiAwLjA4LCBibHVlOiAwLjA0KS5vcGFjaXR5KDAuOTIpCiAgICAgICAgbGV0IHNlYW1Db2xvciA9IENvbG9yLmJsYWNrLm9wYWNpdHkoMC40MikKCiAgICAgICAgZnVuYyBwYWludFJlY3QoXyByZWN0OiBDR1JlY3QsIF8gY29sb3I6IENvbG9yKSB7CiAgICAgICAgICAgIHZhciBwYXRoID0gUGF0aCgpCiAgICAgICAgICAgIHBhdGguYWRkUmVjdChyZWN0KQogICAgICAgICAgICBjb250ZXh0LmZpbGwocGF0aCwgd2l0aDogLmNvbG9yKGNvbG9yKSkKICAgICAgICB9CgogICAgICAgIHBhaW50UmVjdChDR1JlY3QoeDogMCwgeTogMCwgd2lkdGg6IHBhbmVsV2lkdGgsIGhlaWdodDogc2l6ZS5oZWlnaHQpLCBwYW5lbENvbG9yKQogICAgICAgIHBhaW50UmVjdChDR1JlY3QoeDogc2l6ZS53aWR0aCAtIHBhbmVsV2lkdGgsIHk6IDAsIHdpZHRoOiBwYW5lbFdpZHRoLCBoZWlnaHQ6IHNpemUuaGVpZ2h0KSwgcGFuZWxDb2xvcikKICAgICAgICBwYWludFJlY3QoQ0dSZWN0KHg6IG1heCgwLCBwYW5lbFdpZHRoIC0gZWRnZVdpZHRoKSwgeTogMCwgd2lkdGg6IGVkZ2VXaWR0aCwgaGVpZ2h0OiBzaXplLmhlaWdodCksIGVkZ2VDb2xvcikKICAgICAgICBwYWludFJlY3QoQ0dSZWN0KHg6IHNpemUud2lkdGggLSBwYW5lbFdpZHRoLCB5OiAwLCB3aWR0aDogZWRnZVdpZHRoLCBoZWlnaHQ6IHNpemUuaGVpZ2h0KSwgZWRnZUNvbG9yKQoKICAgICAgICBmb3Igcm93IGluIDEuLjw0IHsKICAgICAgICAgICAgbGV0IHkgPSBzaXplLmhlaWdodCAqIENHRmxvYXQocm93KSAvIDQuMAogICAgICAgICAgICBwYWludFJlY3QoQ0dSZWN0KHg6IDAsIHk6IHksIHdpZHRoOiBwYW5lbFdpZHRoLCBoZWlnaHQ6IGVkZ2VXaWR0aCksIHNlYW1Db2xvcikKICAgICAgICAgICAgcGFpbnRSZWN0KENHUmVjdCh4OiBzaXplLndpZHRoIC0gcGFuZWxXaWR0aCwgeTogeSwgd2lkdGg6IHBhbmVsV2lkdGgsIGhlaWdodDogZWRnZVdpZHRoKSwgc2VhbUNvbG9yKQogICAgICAgIH0KCiAgICAgICAgaWYgbGV0IHJlc2N1ZSA9IGNvb2tpZVJlc2N1ZUVsYXBzZWQgewogICAgICAgICAgICBkcmF3RnVyeUNvb2tpZShjb250ZXh0OiAmY29udGV4dCwgc2l6ZTogc2l6ZSwgY29uc3VtZVByb2dyZXNzOiBtaW4oMS4wLCByZXNjdWUgLyAwLjQ4KSkKICAgICAgICB9IGVsc2UgaWYgZWxhcHNlZCA+PSAxLjA1ICYmIGVsYXBzZWQgPCAyLjE1IHsKICAgICAgICAgICAgZHJhd0Z1cnlDb29raWUoY29udGV4dDogJmNvbnRleHQsIHNpemU6IHNpemUsIGNvbnN1bWVQcm9ncmVzczogMCkKICAgICAgICB9CiAgICB9CgogICAgcHJpdmF0ZSBmdW5jIGRyYXdGdXJ5Q29va2llKGNvbnRleHQ6IGlub3V0IEdyYXBoaWNzQ29udGV4dCwgc2l6ZTogQ0dTaXplLCBjb25zdW1lUHJvZ3Jlc3M6IERvdWJsZSkgewogICAgICAgIGxldCBwYXR0ZXJuID0gWwogICAgICAgICAgICAiLi5iYmIuLiIsCiAgICAgICAgICAgICIuYmJiYmIuIiwKICAgICAgICAgICAgImJiZGJkYmIiLAogICAgICAgICAgICAiYmJiYmJiYiIsCiAgICAgICAgICAgICJiZGJiYmRiIiwKICAgICAgICAgICAgIi5iYmRiYi4iLAogICAgICAgICAgICAiLi5iYmIuLiIKICAgICAgICBdCiAgICAgICAgbGV0IHBpeGVsID0gbWF4KDEuMCwgbWluKHNpemUud2lkdGgsIHNpemUuaGVpZ2h0KSAvIDMwLjApCiAgICAgICAgbGV0IGNvb2tpZVNpZGUgPSBwaXhlbCAqIDcuMAogICAgICAgIGxldCBvcmlnaW4gPSBDR1BvaW50KHg6IChzaXplLndpZHRoIC0gY29va2llU2lkZSkgLyAyLjAsIHk6IChzaXplLmhlaWdodCAtIGNvb2tpZVNpZGUpIC8gMi4wKQogICAgICAgIGxldCB2aXNpYmxlQ29sdW1ucyA9IG1heCgwLCBtaW4oNywgSW50KGNlaWwoNy4wICogKDEuMCAtIGNvbnN1bWVQcm9ncmVzcykpKSkpCiAgICAgICAgbGV0IGRvdWdoID0gQ29sb3IocmVkOiAwLjkyLCBncmVlbjogMC41NSwgYmx1ZTogMC4xOCkKICAgICAgICBsZXQgZWRnZSA9IENvbG9yKHJlZDogMC42MiwgZ3JlZW46IDAuMjgsIGJsdWU6IDAuMDcpCiAgICAgICAgbGV0IGNoaXAgPSBDb2xvcihyZWQ6IDAuMjUsIGdyZWVuOiAwLjA5LCBibHVlOiAwLjAyNSkKCiAgICAgICAgZnVuYyBwYWludENvb2tpZVBpeGVsKF8gcmVjdDogQ0dSZWN0LCBfIGNvbG9yOiBDb2xvcikgewogICAgICAgICAgICB2YXIgcGF0aCA9IFBhdGgoKQogICAgICAgICAgICBwYXRoLmFkZFJlY3QocmVjdCkKICAgICAgICAgICAgY29udGV4dC5maWxsKHBhdGgsIHdpdGg6IC5jb2xvcihjb2xvcikpCiAgICAgICAgfQoKICAgICAgICBmb3IgKHksIHJvdykgaW4gcGF0dGVybi5lbnVtZXJhdGVkKCkgewogICAgICAgICAgICBmb3IgKHgsIHZhbHVlKSBpbiByb3cuZW51bWVyYXRlZCgpIHdoZXJlIHggPCB2aXNpYmxlQ29sdW1ucyAmJiB2YWx1ZSAhPSAiLiIgewogICAgICAgICAgICAgICAgbGV0IHJlY3QgPSBDR1JlY3QoCiAgICAgICAgICAgICAgICAgICAgeDogb3JpZ2luLnggKyBDR0Zsb2F0KHgpICogcGl4ZWwsCiAgICAgICAgICAgICAgICAgICAgeTogb3JpZ2luLnkgKyBDR0Zsb2F0KHkpICogcGl4ZWwsCiAgICAgICAgICAgICAgICAgICAgd2lkdGg6IHBpeGVsLAogICAgICAgICAgICAgICAgICAgIGhlaWdodDogcGl4ZWwKICAgICAgICAgICAgICAgICkKICAgICAgICAgICAgICAgIGxldCBpc091dGVyID0geCA9PSAwIHx8IHggPT0gNiB8fCB5ID09IDAgfHwgeSA9PSA2CiAgICAgICAgICAgICAgICBwYWludENvb2tpZVBpeGVsKHJlY3QsIHZhbHVlID09ICJkIiA/IGNoaXAgOiAoaXNPdXRlciA/IGVkZ2UgOiBkb3VnaCkpCiAgICAgICAgICAgIH0KICAgICAgICB9CgogICAgICAgIGlmIGNvbnN1bWVQcm9ncmVzcyA+IDAuMDggJiYgY29uc3VtZVByb2dyZXNzIDwgMC45NSB7CiAgICAgICAgICAgIGxldCBjcnVtYiA9IG1heCgxLjAsIHBpeGVsICogMC43MikKICAgICAgICAgICAgbGV0IHQgPSBDR0Zsb2F0KGNvbnN1bWVQcm9ncmVzcykKICAgICAgICAgICAgbGV0IGNydW1icyA9IFsKICAgICAgICAgICAgICAgIENHUG9pbnQoeDogc2l6ZS53aWR0aCAvIDIgKyBwaXhlbCAqIDMuMiArIHBpeGVsICogMi40ICogdCwgeTogc2l6ZS5oZWlnaHQgLyAyIC0gcGl4ZWwgKiAxLjcgLSBwaXhlbCAqIDIuMCAqIHQpLAogICAgICAgICAgICAgICAgQ0dQb2ludCh4OiBzaXplLndpZHRoIC8gMiArIHBpeGVsICogMi40ICsgcGl4ZWwgKiAxLjUgKiB0LCB5OiBzaXplLmhlaWdodCAvIDIgKyBwaXhlbCAqIDAuMiArIHBpeGVsICogMS43ICogdCksCiAgICAgICAgICAgICAgICBDR1BvaW50KHg6IHNpemUud2lkdGggLyAyICsgcGl4ZWwgKiAxLjQgKyBwaXhlbCAqIDIuMCAqIHQsIHk6IHNpemUuaGVpZ2h0IC8gMiArIHBpeGVsICogMi4wIC0gcGl4ZWwgKiAwLjggKiB0KQogICAgICAgICAgICBdCiAgICAgICAgICAgIGZvciAoaW5kZXgsIHBvaW50KSBpbiBjcnVtYnMuZW51bWVyYXRlZCgpIHsKICAgICAgICAgICAgICAgIHBhaW50Q29va2llUGl4ZWwoCiAgICAgICAgICAgICAgICAgICAgQ0dSZWN0KHg6IHBvaW50LngsIHk6IHBvaW50LnksIHdpZHRoOiBjcnVtYiwgaGVpZ2h0OiBjcnVtYiksCiAgICAgICAgICAgICAgICAgICAgKGluZGV4ID09IDEgPyBjaGlwIDogZG91Z2gpLm9wYWNpdHkoMS4wIC0gY29uc3VtZVByb2dyZXNzKQogICAgICAgICAgICAgICAgKQogICAgICAgICAgICB9CiAgICAgICAgfQogICAgfQoK'
+              helpers = base64.b64decode(helper_b64).decode('utf-8')
               s = s[:start] + helpers + s[end:]
               path.write_text(s)
           else:
