@@ -37,6 +37,26 @@ If a requested implementation conflicts with `Docs/CISDK.md`, stop the conflicti
 
 A demo that works is not sufficient. CI SDK work must also be validated, permission-safe, isolated, testable, backwards-aware, and compatible with Halo's existing surface/window architecture.
 
+## Pixel Pal work
+
+Any task involving Pixel Pal, the built-in pet/face widget, its expressions, sprites, accessories, animation system, settings, contextual reactions, or persisted Pixel Pal preferences must treat `Docs/PixelPalV2.md` as authoritative product and implementation direction.
+
+Read it **before modifying Pixel Pal code**.
+
+### Hard rules
+
+- Pixel Pal is face-first. Do not turn it into a Tamagotchi, habitat, room, body-based pet simulator, dashboard, or care game.
+- Supported footprints are square-only: `1×1`, `2×2`, `3×3`, and `4×4`.
+- Do not preserve crude low-resolution geometry merely for backwards consistency. Increase logical sprite resolution when visual quality requires it.
+- Prefer authored, reusable pixel-sprite data and layered composition over one-off procedural rectangle logic.
+- Eye, mouth, face, accessory, and theme options must produce visibly meaningful differences in the actual renderer, not only in settings state.
+- Keep the face large within its square and preserve crisp integer-aligned pixel rendering.
+- Context reactions must use real Halo/macOS state already available to the app. Do not fake unsupported context sources.
+- Migrate old Pixel Pal preferences safely and version persistence changes deliberately.
+- Respect macOS Reduce Motion.
+- Add tests for migrations, expression/state priority, square normalization, sprite validity, and new runtime logic.
+- Run a full Halo Xcode build before claiming a Pixel Pal implementation is complete.
+
 ## General repository behavior
 
 Prefer focused changes over speculative rewrites. Preserve established architecture unless the task explicitly requires an architectural change and that change is documented.
