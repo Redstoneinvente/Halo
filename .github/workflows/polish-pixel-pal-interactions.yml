@@ -22,55 +22,57 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           path = Path('Halo/Views/PixelPetWidget.swift')
           s = path.read_text()
 
-          if 'rescue - 0.55' in s and 'deadline: .now() + 1.02' in s:
-              print('Sequential cookie rescue already present; validating.')
-              raise SystemExit(0)
-
-          def replace_once(old, new, label):
-              global s
-              count = s.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected one match, found {count}')
+          if 'rescue - 0.55' not in s:
+              old = '        DispatchQueue.main.asyncAfter(deadline: .now() + 0.62, execute: work)\n'
+              new = '        DispatchQueue.main.asyncAfter(deadline: .now() + 1.02, execute: work)\n'
+              if s.count(old) != 1:
+                  raise SystemExit(f'happy delay: expected 1 match, found {s.count(old)}')
               s = s.replace(old, new, 1)
 
-          replace_once(
-              '        DispatchQueue.main.asyncAfter(deadline: .now() + 0.62, execute: work)\n',
-              '        DispatchQueue.main.asyncAfter(deadline: .now() + 1.02, execute: work)\n',
-              'happy transition delay',
-          )
+              old = (
+                  '        if let rescue = cookieRescueElapsed {\n'
+                  '            drawFuryCookie(context: &context, size: size, consumeProgress: min(1.0, rescue / 0.48))\n'
+                  '        } else if elapsed >= 1.05 && elapsed < 2.15 {\n'
+              )
+              new = (
+                  '        if cookieRescueElapsed != nil {\n'
+                  '            drawFuryCookie(context: &context, size: size, consumeProgress: 0)\n'
+                  '        } else if elapsed >= 1.05 && elapsed < 2.15 {\n'
+              )
+              if s.count(old) != 1:
+                  raise SystemExit(f'whole-cookie during opening: expected 1 match, found {s.count(old)}')
+              s = s.replace(old, new, 1)
 
-          replace_once(
-              '        if let rescue = cookieRescueElapsed {\n            drawFuryCookie(context: &context, size: size, consumeProgress: min(1.0, rescue / 0.48))\n        } else if elapsed >= 1.05 && elapsed < 2.15 {\n',
-              '        if cookieRescueElapsed != nil {\n            drawFuryCookie(context: &context, size: size, consumeProgress: 0)\n        } else if elapsed >= 1.05 && elapsed < 2.15 {\n',
-              'keep cookie whole while shutter opens',
-          )
-
-          anchor = '''                .allowsHitTesting(false)
-
-                if cookieRescueElapsed == nil, reactionElapsed >= 1.05, reactionElapsed < 2.15, let onCookieTap {
-'''
-          replacement = '''                .allowsHitTesting(false)
-
-                if let rescue = cookieRescueElapsed, rescue >= 0.55 {
-                    Canvas { context, size in
-                        drawFuryCookie(
-                            context: &context,
-                            size: size,
-                            consumeProgress: min(1.0, max(0.0, (rescue - 0.55) / 0.40))
-                        )
-                    }
-                    .allowsHitTesting(false)
-                }
-
-                if cookieRescueElapsed == nil, reactionElapsed >= 1.05, reactionElapsed < 2.15, let onCookieTap {
-'''
-          replace_once(anchor, replacement, 'post-open cookie consumption overlay')
-
-          path.write_text(s)
+              anchor = (
+                  '                .allowsHitTesting(false)\n'
+                  '\n'
+                  '                if cookieRescueElapsed == nil, reactionElapsed >= 1.05, reactionElapsed < 2.15, let onCookieTap {\n'
+              )
+              replacement = (
+                  '                .allowsHitTesting(false)\n'
+                  '\n'
+                  '                if let rescue = cookieRescueElapsed, rescue >= 0.55 {\n'
+                  '                    Canvas { context, size in\n'
+                  '                        drawFuryCookie(\n'
+                  '                            context: &context,\n'
+                  '                            size: size,\n'
+                  '                            consumeProgress: min(1.0, max(0.0, (rescue - 0.55) / 0.40))\n'
+                  '                        )\n'
+                  '                    }\n'
+                  '                    .allowsHitTesting(false)\n'
+                  '                }\n'
+                  '\n'
+                  '                if cookieRescueElapsed == nil, reactionElapsed >= 1.05, reactionElapsed < 2.15, let onCookieTap {\n'
+              )
+              if s.count(anchor) != 1:
+                  raise SystemExit(f'cookie consumption overlay anchor: expected 1 match, found {s.count(anchor)}')
+              s = s.replace(anchor, replacement, 1)
+              path.write_text(s)
+          else:
+              print('Sequential rescue already present; validating.')
           PY
 
       - name: Verify sequential cookie rescue
@@ -86,11 +88,11 @@ jobs:
               'consumeProgress: 0',
               'self.react(.happy, seconds: 2.4)',
           ]
-          missing = [marker for marker in required if marker not in s]
+          missing = [m for m in required if m not in s]
           if missing:
-              raise SystemExit(f'Missing sequential cookie rescue markers: {missing}')
+              raise SystemExit(f'Missing sequential rescue markers: {missing}')
           if 'min(1.0, rescue / 0.48)' in s:
-              raise SystemExit('Cookie is still being consumed while the shutter opens.')
+              raise SystemExit('Cookie still consumes while shutter is opening.')
           print('Sequential cookie rescue verified.')
           PY
 
