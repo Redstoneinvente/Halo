@@ -1,4 +1,4 @@
-name: Polish Pixel Pal Time Reactions
+name: Repair Pixel Pal Expressions
 
 on:
   push:
@@ -18,140 +18,85 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply time-of-day Pixel Pal reactions
+      - name: Repair expression rendering
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
           p = Path('Halo/Views/PixelPetWidget.swift')
-          lines = p.read_text().splitlines()
+          s = p.read_text()
 
-          def find_line(text, start=0):
-              for i in range(start, len(lines)):
-                  if lines[i].strip() == text:
-                      return i
-              raise SystemExit(f'Could not find line: {text}')
+          def replace_once(old, new, label):
+              global s
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              s = s.replace(old, new, 1)
 
-          # Add authored Z sprites inside the sprite catalog, immediately before its accessory section.
-          if not any('static let zSmall' in line for line in lines):
-              sprites_start = find_line('private enum HaloPixelPalSprites {')
-              accessories = find_line('// Accessories', sprites_start)
-              z = [
-                  '    static let zSmall = HaloPixelPalSprite(rows: [',
-                  '        "aaa",',
-                  '        "..a",',
-                  '        ".a.",',
-                  '        "aaa"',
-                  '    ])',
-                  '    static let zTiny = HaloPixelPalSprite(rows: [',
-                  '        "aa",',
-                  '        ".a",',
-                  '        "aa"',
-                  '    ])',
-                  '',
-              ]
-              lines[accessories:accessories] = z
-
-          # Add the sleep FX enum case.
-          enum_line = find_line('case none, hearts, sparkle, music, sweat, tears, alert')
-          lines[enum_line] = lines[enum_line].replace(
-              'case none, hearts, sparkle, music, sweat, tears, alert',
-              'case none, hearts, sparkle, music, sweat, tears, alert, sleepZ'
+          replace_once(
+              '    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight }',
+              '    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, smug }',
+              'eye pose enum'
           )
 
-          # Time-of-day mood takes priority over hover/idle so late night remains sleepy.
-          hover = find_line('if hovering && p.hoverReaction { return resting }')
-          idle = find_line('if p.idleReaction {', hover)
-          night = find_line('if p.nightReaction {', idle)
-          final_return = find_line('return resting', night)
-          indent = '        '
-          replacement = [
-              indent + 'if p.nightReaction {',
-              indent + '    let hour = Calendar.autoupdatingCurrent.component(.hour, from: date)',
-              '',
-              indent + '    // Late night: settle down, breathe slowly and drift off with floating Zs.',
-              indent + '    if hour >= 23 || hour < 5 {',
-              indent + '        return .init(expression: .sleepy, accessory: .sleepingCap, fx: .sleepZ)',
-              indent + '    }',
-              '',
-              indent + '    // Early morning: wake up bright and fresh before normal daytime behavior resumes.',
-              indent + '    if hour >= 5 && hour < 9 {',
-              indent + '        return .init(expression: .happy, accessory: .sprout, fx: .sparkle)',
-              indent + '    }',
-              indent + '}',
-              '',
-              indent + 'if hovering && p.hoverReaction { return resting }',
-              '',
-              indent + 'if p.idleReaction {',
-              indent + '    let mouseIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .mouseMoved)',
-              indent + '    let keyboardIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)',
-              indent + '    if min(mouseIdle, keyboardIdle) > 180 {',
-              indent + '        return .init(expression: .bored, accessory: nil, fx: .none)',
-              indent + '    }',
-              indent + '}',
-              '',
-          ]
-          lines[hover:final_return] = replacement
+          replace_once(
+              '''        case .blink, .sleepy, .bored: return .closed\n        case .happy, .superHappy, .music: return .happy\n        case .love: return .heart\n        case .excited, .shocked: return .star\n        case .wink: return .winkRight\n        case .mischievous, .smug: return .winkRight\n        default: return .open''',
+              '''        case .blink, .sleepy, .bored: return .closed\n        case .happy, .superHappy, .music, .shy: return .happy\n        case .love: return .heart\n        case .excited, .shocked: return .star\n        case .wink, .mischievous: return .winkRight\n        case .confused: return .confused\n        case .smug: return .smug\n        default: return .open''',
+              'eye pose mapping'
+          )
 
-          # Sleepy expressions get Zs even when manually previewed/reacted.
-          fx_start = find_line('private static func fx(for expression: HaloPixelPalExpression) -> HaloPixelPalFX {')
-          fx_crying = find_line('case .crying: return .tears', fx_start)
-          if lines[fx_crying + 1].strip() != 'case .sleepy: return .sleepZ':
-              lines.insert(fx_crying + 1, '        case .sleepy: return .sleepZ')
+          replace_once(
+              '''        case .winkRight:\n            let open = HaloPixelPalSprites.openEye(preferences.eyeStyle)\n            render(.init(open, x: leftX, y: y), 1, 0, 0)\n            render(.init(HaloPixelPalSprites.winkEye, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)\n        }''',
+              '''        case .winkRight:\n            let open = HaloPixelPalSprites.openEye(preferences.eyeStyle)\n            render(.init(open, x: leftX, y: y), 1, 0, 0)\n            render(.init(HaloPixelPalSprites.winkEye, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)\n        case .confused:\n            let open = HaloPixelPalSprites.openEye(preferences.eyeStyle)\n            let closed = HaloPixelPalSprites.closedEye(preferences.eyeStyle)\n            render(.init(open, x: leftX, y: y), 1, 0, 0)\n            render(.init(closed, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)\n        case .smug:\n            let eye = HaloPixelPalSprite(rows: [\"ppppp\", \".ppp.\"])\n            render(.init(eye, x: leftX, y: y + 2), 1, 0, 0)\n            render(.init(eye, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)\n        }''',
+              'distinct confused and smug eyes'
+          )
 
-          # Render two drifting Z glyphs at different scales/heights.
-          draw_start = find_line('private func drawFX(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {')
-          alert = find_line('case .alert:', draw_start)
-          if not any(lines[i].strip() == 'case .sleepZ:' for i in range(alert, min(alert + 8, len(lines)))):
-              lines[alert + 2:alert + 2] = [
-                  '        case .sleepZ:',
-                  '            render(.init(HaloPixelPalSprites.zTiny, x: 17, y: 7), 0.52, 0, lift)',
-                  '            render(.init(HaloPixelPalSprites.zSmall, x: 20, y: 2), 0.88, 0, lift - 1)',
-              ]
+          replace_once(
+              '''        case .surprised, .shocked:\n            render(.init(HaloPixelPalSprites.raisedBrow, x: leftX, y: 3), 0.95, 0, 0)\n            render(.init(HaloPixelPalSprites.raisedBrow, x: rightX, y: 3, mirrorX: true), 0.95, 0, 0)\n        case .mischievous, .smug:\n            render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.80, 0, 0)\n        default:''',
+              '''        case .surprised, .shocked:\n            render(.init(HaloPixelPalSprites.raisedBrow, x: leftX, y: 3), 0.95, 0, 0)\n            render(.init(HaloPixelPalSprites.raisedBrow, x: rightX, y: 3, mirrorX: true), 0.95, 0, 0)\n        case .confused:\n            render(.init(HaloPixelPalSprites.raisedBrow, x: leftX, y: 3), 0.95, 0, 0)\n            render(.init(HaloPixelPalSprites.worriedBrow, x: rightX, y: y, mirrorX: true), 0.88, 0, 0)\n        case .mischievous:\n            render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.82, 0, 0)\n        case .smug:\n            render(.init(HaloPixelPalSprites.raisedBrow, x: rightX, y: 3, mirrorX: true), 0.78, 0, 0)\n        default:''',
+              'distinct expression brows'
+          )
 
-          # Slow sleepy breathing/bobbing.
-          motion_start = find_line('private func logicalMotion() -> (x: Int, y: Int) {')
-          bored = find_line('case .bored:', motion_start)
-          if lines[bored - 1].strip() != 'return (0, Int(round(sin(t * 1.15))) * one)':
-              lines[bored:bored] = [
-                  '        case .sleepy:',
-                  '            return (0, Int(round(sin(t * 1.15))) * one)',
-              ]
+          replace_once(
+              '        case .neutral, .focused, .confused: return HaloPixelPalSprites.mouthTiny',
+              '        case .neutral, .focused: return HaloPixelPalSprites.mouthTiny\n        case .confused: return HaloPixelPalSprites.mouthO',
+              'confused mouth'
+          )
 
-          # Settings preview mirrors the real sleepy FX.
-          preview_start = find_line('private var previewFX: HaloPixelPalFX {')
-          preview_crying = find_line('case .crying: return .tears', preview_start)
-          if lines[preview_crying + 1].strip() != 'case .sleepy: return .sleepZ':
-              lines.insert(preview_crying + 1, '        case .sleepy: return .sleepZ')
+          replace_once(
+              '''        let t = max(0, animationTime) * speed\n        if let reactionElapsed {\n            return (0, HaloPixelPalAnimationTiming.bounce(elapsed: reactionElapsed * speed,\n                                                         intensity: intensity, reduceMotion: reduceMotion))\n        }\n        let one = intensity > 0.28 ? 1 : 0\n        let two = intensity > 0.75 ? 2 : one''',
+              '''        let t = max(0, animationTime) * speed\n        let one = intensity > 0.28 ? 1 : 0\n        let two = intensity > 0.75 ? 2 : one\n        if let reactionElapsed {\n            if expression == .annoyed {\n                return (Int(round(sin(t * 11.0))) * one, 0)\n            }\n            return (0, HaloPixelPalAnimationTiming.bounce(elapsed: reactionElapsed * speed,\n                                                         intensity: intensity, reduceMotion: reduceMotion))\n        }''',
+              'annoyed reaction motion'
+          )
 
-          # Broaden the existing user-facing toggle label without changing persisted keys.
-          label = find_line('Toggle("Night / sleep", isOn: bind(\\.nightReaction))')
-          lines[label] = lines[label].replace('Night / sleep', 'Time of day (morning / night)')
+          replace_once(
+              '                    ForEach(HaloPixelPalExpression.allCases) { Text($0.title).tag($0) }',
+              '                    ForEach(HaloPixelPalExpression.allCases.filter { $0 != .blink }) { Text($0.title).tag($0) }',
+              'remove blink from manual preview picker'
+          )
 
-          p.write_text('\n'.join(lines) + '\n')
+          p.write_text(s)
           PY
 
-      - name: Verify source contract
+      - name: Verify expression contract
         run: |
           python3 - <<'PY'
           from pathlib import Path
           s = Path('Halo/Views/PixelPetWidget.swift').read_text()
           required = [
-              'case none, hearts, sparkle, music, sweat, tears, alert, sleepZ',
-              'static let zSmall = HaloPixelPalSprite',
-              'static let zTiny = HaloPixelPalSprite',
-              'if hour >= 23 || hour < 5',
-              'if hour >= 5 && hour < 9',
-              'expression: .sleepy, accessory: .sleepingCap, fx: .sleepZ',
-              'expression: .happy, accessory: .sprout, fx: .sparkle',
-              'case .sleepZ:',
-              'case .sleepy: return .sleepZ',
-              'sin(t * 1.15)',
-              'Time of day (morning / night)',
+              'case open, happy, closed, heart, star, winkLeft, winkRight, confused, smug',
+              'case .happy, .superHappy, .music, .shy: return .happy',
+              'case .confused: return .confused',
+              'case .smug: return .smug',
+              'case .confused:',
+              'let eye = HaloPixelPalSprite(rows: ["ppppp", ".ppp."])',
+              'case .confused: return HaloPixelPalSprites.mouthO',
+              'if expression == .annoyed',
+              'HaloPixelPalExpression.allCases.filter { $0 != .blink }',
           ]
           missing = [x for x in required if x not in s]
           if missing:
-              raise SystemExit('Missing time-reaction contract: ' + ', '.join(missing))
+              raise SystemExit('Missing repaired-expression contract: ' + ', '.join(missing))
           PY
 
       - name: Parse Pixel Pal source
@@ -169,5 +114,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add Halo/Views/PixelPetWidget.swift
-          git commit -m 'Add Pixel Pal time-of-day moods'
+          git commit -m 'Repair Pixel Pal expressions'
           git push origin HEAD:main
