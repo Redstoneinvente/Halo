@@ -126,6 +126,42 @@ private struct AdaptiveProgressBar: View {
     }
 }
 
+private struct AdaptiveMicroRing<Content: View>: View {
+    let progress: Double?
+    let accent: Color
+    private let content: Content
+
+    init(progress: Double?, accent: Color, @ViewBuilder content: () -> Content) {
+        self.progress = progress
+        self.accent = accent
+        self.content = content()
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let side = max(38, min(proxy.size.width, proxy.size.height))
+            let lineWidth = max(3, min(5, side * 0.052))
+            let resolvedProgress = min(1, max(0, progress ?? 0.16))
+            ZStack {
+                Circle()
+                    .fill(accent.opacity(0.045))
+                Circle()
+                    .stroke(Color.primary.opacity(0.085), lineWidth: lineWidth)
+                Circle()
+                    .trim(from: 0, to: resolvedProgress)
+                    .stroke(accent.opacity(progress == nil ? 0.58 : 0.98),
+                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                content
+                    .frame(maxWidth: side * 0.74, maxHeight: side * 0.74)
+            }
+            .frame(width: side, height: side)
+            .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct AdaptiveSpectrumView: View {
     let accent: Color
     @State private var snapshot = AudioSpectrumSnapshot()
@@ -263,7 +299,7 @@ struct VisualWorkspaceTimerView: View {
     @ViewBuilder private func content(remaining: TimeInterval, elapsed: TimeInterval, progress: Double) -> some View {
         switch context.family {
         case .micro:
-            primaryTime(remaining: remaining, elapsed: elapsed, progress: progress, scale: 1.0)
+            microTimer(remaining: remaining, elapsed: elapsed, progress: progress)
         case .compact:
             HStack(spacing: context.spacing) {
                 primaryTime(remaining: remaining, elapsed: elapsed, progress: progress, scale: 0.88)
@@ -283,6 +319,28 @@ struct VisualWorkspaceTimerView: View {
             }
         case .expanded, .dashboard, .hero:
             heroTimer(remaining: remaining, elapsed: elapsed, progress: progress)
+        }
+    }
+
+    private func microTimer(remaining: TimeInterval, elapsed: TimeInterval, progress: Double) -> some View {
+        let value = context.settings.timerMode == .elapsed ? elapsed : remaining
+        let text = formatDuration(value)
+        let active = store.deadline != nil || store.pausedSeconds > 0 || store.finished
+        let ringProgress = active ? progress : 0
+        let symbol = store.finished ? "checkmark" : store.deadline != nil ? "timer" : store.pausedSeconds > 0 ? "pause.fill" : "play.fill"
+        return AdaptiveMicroRing(progress: ringProgress, accent: style.accentColor.color) {
+            VStack(spacing: 2) {
+                Image(systemName: symbol)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(style.accentColor.color)
+                Text(store.finished ? "Done" : text)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.56)
+                    .contentTransition(.numericText())
+            }
+            .padding(5)
         }
     }
 
@@ -655,7 +713,19 @@ private struct VisualAdaptiveAudioView: View {
     }
 
     private var speakerSymbol: String { service.volume <= 0.001 ? "speaker.slash.fill" : service.volume < 0.45 ? "speaker.wave.1.fill" : "speaker.wave.3.fill" }
-    private var micro: some View { VStack(spacing: 3) { Image(systemName: speakerSymbol).font(.system(size: 21, weight: .semibold)).foregroundStyle(style.accentColor.color); Text("\(percent)%").font(.system(size: 22, weight: .bold, design: .rounded)).monospacedDigit() } }
+    private var micro: some View {
+        AdaptiveMicroRing(progress: min(1, max(0, Double(service.volume))), accent: style.accentColor.color) {
+            VStack(spacing: 2) {
+                Image(systemName: speakerSymbol)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(style.accentColor.color)
+                Text("\(percent)%")
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+        }
+    }
     private var compact: some View { HStack(spacing: 7) { Image(systemName: speakerSymbol).foregroundStyle(style.accentColor.color); Text("\(percent)%").font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit(); Spacer(minLength: 2); if context.settings.showControls && service.canSetVolume { Button { service.toggleMute() } label: { Image(systemName: service.volume <= 0.001 ? "speaker.wave.2" : "speaker.slash") }.buttonStyle(.plain) } } }
     private var horizontal: some View {
         HStack(spacing: context.spacing) {
@@ -744,7 +814,31 @@ private struct VisualAdaptiveClipboardView: View {
     private var micro: some View {
         Group {
             if let entry = service.entries.first {
-                VStack(spacing: 3) { Image(systemName: contentIcon(entry.text)).foregroundStyle(style.accentColor.color); Text(preview(entry.text, limit: min(28, context.settings.clipboardPreviewLength))).font(.system(size: 9, weight: .medium)).lineLimit(3).multilineTextAlignment(.center) }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Image(systemName: contentIcon(entry.text))
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(style.accentColor.color)
+                        Text(contentIcon(entry.text) == "link" ? "LINK" : "TEXT")
+                            .font(.system(size: 7, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 2)
+                        Text("\(service.entries.count)")
+                            .font(.system(size: 8, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .padding(.horizontal, 4).padding(.vertical, 2)
+                            .background(style.accentColor.color.opacity(0.12), in: Capsule())
+                    }
+                    Text(preview(entry.text, limit: min(42, context.settings.clipboardPreviewLength)))
+                        .font(.system(size: 9, weight: .medium))
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(7)
+                .background(style.textColor.color.opacity(0.035), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .overlay(alignment: .leading) {
+                    Capsule().fill(style.accentColor.color.opacity(0.75)).frame(width: 2.5).padding(.vertical, 8)
+                }
             } else { empty(icon: "doc.on.clipboard", text: "Empty") }
         }
     }
@@ -822,7 +916,7 @@ private struct VisualAdaptiveSystemView: View {
     var body: some View {
         Group {
             switch context.family {
-            case .micro: metricCard(context.settings.systemPrimaryMetric, prominent: true)
+            case .micro: microMetric(context.settings.systemPrimaryMetric)
             case .compact: HStack(spacing: 6) { ForEach(Array(orderedMetrics.prefix(2))) { metricCard($0, prominent: true) } }
             case .horizontal: horizontal
             case .vertical: vertical
@@ -831,6 +925,26 @@ private struct VisualAdaptiveSystemView: View {
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: context.contentAlignment)
             .onAppear { service.refresh(detailed: true) }
+    }
+
+    private func microMetric(_ metric: VisualSystemMetric) -> some View {
+        let value = metricValue(metric)
+        return AdaptiveMicroRing(progress: value.percent.map { min(1, max(0, $0 / 100)) }, accent: metricColor(metric)) {
+            VStack(spacing: 2) {
+                Image(systemName: metric.symbol)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(metricColor(metric))
+                Text(value.text)
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.56)
+                Text(metric.shortTitle.uppercased())
+                    .font(.system(size: 6.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
     }
 
     private var horizontal: some View {
@@ -932,9 +1046,54 @@ private struct VisualAdaptiveLauncherView: View {
     }
 
     @ViewBuilder private var micro: some View {
-        if let favorite = favoriteApps.first { favoriteButton(favorite, compact: true) }
-        else if let app = visibleApps.first { runningButton(app, compact: true) }
-        else { VStack(spacing: 3) { Image(systemName: "square.grid.2x2").font(.system(size: 25)).foregroundStyle(style.accentColor.color); Text("Apps").font(.caption2) } }
+        let favorites = Array(favoriteApps.prefix(4))
+        if !favorites.isEmpty {
+            LazyVGrid(columns: microColumns, spacing: 5) {
+                ForEach(favorites, id: \.bundle) { microFavoriteButton($0) }
+            }
+            .padding(3)
+        } else {
+            let apps = Array(visibleApps.prefix(4))
+            if !apps.isEmpty {
+                LazyVGrid(columns: microColumns, spacing: 5) {
+                    ForEach(apps, id: \.processIdentifier) { microRunningButton($0) }
+                }
+                .padding(3)
+            } else {
+                VStack(spacing: 3) {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(style.accentColor.color)
+                    Text("Apps").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var microColumns: [GridItem] {
+        [GridItem(.flexible(), spacing: 5), GridItem(.flexible(), spacing: 5)]
+    }
+
+    private func microFavoriteButton(_ app: FavoriteApp) -> some View {
+        Button { NSWorkspace.shared.open(app.url) } label: {
+            Image(nsImage: app.icon)
+                .resizable().scaledToFit()
+                .frame(width: min(28, context.settings.launcherIconSize), height: min(28, context.settings.launcherIconSize))
+                .frame(maxWidth: .infinity, minHeight: 31)
+                .background(style.textColor.color.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(app.name)
+    }
+
+    private func microRunningButton(_ app: NSRunningApplication) -> some View {
+        Button { app.activate(options: .activateIgnoringOtherApps) } label: {
+            appIcon(app, size: min(28, context.settings.launcherIconSize))
+                .frame(maxWidth: .infinity, minHeight: 31)
+                .background(style.textColor.color.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(app.localizedName ?? "App")
     }
     private func appStrip(limit: Int) -> some View {
         HStack(spacing: context.spacing) {
@@ -1022,7 +1181,22 @@ private struct VisualAdaptiveActivitiesView: View {
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: context.contentAlignment)
     }
-    private var micro: some View { VStack(spacing: 2) { Text("\(workspace.activities.count)").font(.system(size: 27, weight: .bold, design: .rounded)).monospacedDigit(); Text("Active").font(.caption2).foregroundStyle(.secondary) } }
+    private var micro: some View {
+        let first = activities.first
+        return AdaptiveMicroRing(progress: first?.progress, accent: style.accentColor.color) {
+            VStack(spacing: 1) {
+                Image(systemName: workspace.activities.isEmpty ? "checkmark" : "waveform.path")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(style.accentColor.color)
+                Text("\(workspace.activities.count)")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                Text(workspace.activities.isEmpty ? "QUIET" : "LIVE")
+                    .font(.system(size: 6.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
     private var compact: some View { Group { if let activity = activities.first { HStack(spacing: 8) { Image(systemName: "waveform.path").foregroundStyle(style.accentColor.color); Text(activity.title).font(.system(size: 11, weight: .semibold)).lineLimit(1); Spacer(); if context.settings.activitiesShowProgress, let p = activity.progress { Text("\(Int(p * 100))%").font(.caption).monospacedDigit() } } } else { Label("All Quiet", systemImage: "checkmark.circle").foregroundStyle(.secondary) } } }
     private func list(limit: Int, rich: Bool) -> some View {
         VStack(alignment: .leading, spacing: context.spacing) {
@@ -1065,7 +1239,43 @@ private struct VisualAdaptiveNotesView: View {
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
-    private func preview(lines: Int) -> some View { VStack(alignment: .leading, spacing: 4) { if context.family == .micro { Image(systemName: "note.text").foregroundStyle(style.accentColor.color) }; Text(trimmed.isEmpty ? context.settings.notesPlaceholder : trimmed).font(style.font(scale: context.family == .micro ? 0.72 : 0.86)).foregroundStyle(trimmed.isEmpty ? .secondary : .primary).lineLimit(lines).frame(maxWidth: .infinity, alignment: .leading) } }
+    private func preview(lines: Int) -> some View {
+        let isMicro = context.family == .micro
+        let words = workspace.settings.notes.split { $0.isWhitespace || $0.isNewline }.count
+        return VStack(alignment: .leading, spacing: isMicro ? 4 : 4) {
+            if isMicro {
+                HStack(spacing: 4) {
+                    Image(systemName: "note.text")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(style.accentColor.color)
+                    Text("NOTE")
+                        .font(.system(size: 7, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 2)
+                    Text("\(words)w")
+                        .font(.system(size: 7, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(trimmed.isEmpty ? context.settings.notesPlaceholder : trimmed)
+                .font(style.font(scale: isMicro ? 0.70 : 0.86))
+                .foregroundStyle(trimmed.isEmpty ? .secondary : .primary)
+                .lineLimit(lines)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(isMicro ? 7 : 0)
+        .background {
+            if isMicro {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(style.textColor.color.opacity(0.035))
+            }
+        }
+        .overlay(alignment: .leading) {
+            if isMicro {
+                Capsule().fill(style.accentColor.color.opacity(0.72)).frame(width: 2.5).padding(.vertical, 8)
+            }
+        }
+    }
     private func editor(showHeader: Bool) -> some View {
         VStack(alignment: .leading, spacing: context.spacing * 0.7) {
             if showHeader { HStack { Text("Quick Note").font(style.font(scale: 0.9)).fontWeight(.semibold); Spacer(); if context.settings.notesShowCounts { Text(noteStats).font(.caption2).foregroundStyle(.secondary) } } }
@@ -1125,7 +1335,36 @@ private struct VisualAdaptiveCaptureView: View {
             if let error = service.error { Text(error).font(.caption).foregroundStyle(.orange) }
         }
     }
-    @ViewBuilder private func primaryAction(iconOnly: Bool) -> some View { if context.settings.capturePrimaryAction == .region { Button { capture() } label: { if iconOnly { Image(systemName: "viewfinder").font(.system(size: 25, weight: .semibold)) } else { Label("Capture", systemImage: "viewfinder") } }.buttonStyle(.plain) } else { Button { service.chooseImage() } label: { if iconOnly { Image(systemName: "text.viewfinder").font(.system(size: 25, weight: .semibold)) } else { Label("OCR", systemImage: "text.viewfinder") } }.buttonStyle(.plain) } }
+    @ViewBuilder private func primaryAction(iconOnly: Bool) -> some View {
+        let region = context.settings.capturePrimaryAction == .region
+        Button { region ? capture() : service.chooseImage() } label: {
+            if iconOnly {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(style.accentColor.color.opacity(0.055))
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .stroke(style.accentColor.color.opacity(0.42), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    VStack(spacing: 4) {
+                        if service.busy {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: region ? "viewfinder" : "text.viewfinder")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(style.accentColor.color)
+                        }
+                        Text(region ? "CAPTURE" : "OCR")
+                            .font(.system(size: 7, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(3)
+            } else {
+                Label(region ? "Capture" : "OCR", systemImage: region ? "viewfinder" : "text.viewfinder")
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(service.busy)
+    }
     private var captureButton: some View { Button { capture() } label: { Label("Capture", systemImage: "viewfinder").frame(maxWidth: .infinity) }.buttonStyle(.bordered) }
     private var ocrButton: some View { Button { service.chooseImage() } label: { Label("OCR", systemImage: "text.viewfinder").frame(maxWidth: .infinity) }.buttonStyle(.bordered) }
     private func capture() { service.capture { url in store.addFiles([url]) } }
@@ -1163,7 +1402,7 @@ private struct VisualAdaptiveStopwatchView: View {
     }
     @ViewBuilder private func content(elapsed: TimeInterval) -> some View {
         switch context.family {
-        case .micro: timeText(elapsed, scale: 1.0)
+        case .micro: microStopwatch(elapsed: elapsed)
         case .compact: HStack { timeText(elapsed, scale: 0.9); Spacer(); primaryStopwatchControl }
         case .horizontal: HStack(spacing: context.spacing) { timeText(elapsed, scale: 1.0); Spacer(); stopwatchControls(compact: true) }
         case .vertical: VStack(spacing: context.spacing) { timeText(elapsed, scale: 1.05); if context.settings.stopwatchShowLaps { lapList(limit: min(context.settings.stopwatchLapCount, max(1, context.rows - 1))) }; stopwatchControls(compact: true); Spacer(minLength: 0) }
@@ -1171,6 +1410,19 @@ private struct VisualAdaptiveStopwatchView: View {
         case .expanded, .dashboard, .hero: hero(elapsed: elapsed)
         }
     }
+    private func microStopwatch(elapsed: TimeInterval) -> some View {
+        let sweep = min(1, max(0, elapsed.truncatingRemainder(dividingBy: 60) / 60))
+        return AdaptiveMicroRing(progress: sweep, accent: style.accentColor.color) {
+            VStack(spacing: 2) {
+                Image(systemName: workspace.stopwatchStart == nil ? "pause.fill" : "stopwatch.fill")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(style.accentColor.color)
+                timeText(elapsed, scale: 0.72)
+            }
+            .padding(5)
+        }
+    }
+
     private func hero(elapsed: TimeInterval) -> some View { VStack(spacing: context.spacing) { if style.showTitle { AdaptiveHeader(title: "STOPWATCH", symbol: "stopwatch", style: style) }; Spacer(minLength: 0); timeText(elapsed, scale: context.family == .hero ? 1.9 : 1.55); stopwatchControls(compact: false); if context.settings.stopwatchShowLaps { Divider().opacity(0.16); HStack { Text("LAPS").font(.caption2).foregroundStyle(.secondary); Spacer() }; lapList(limit: context.settings.stopwatchLapCount) }; Spacer(minLength: 0) } }
     private func timeText(_ elapsed: TimeInterval, scale: Double) -> some View { Text(format(elapsed)).font(.system(size: max(18, style.fontSize * scale * context.settings.stopwatchTimeScale), weight: .bold, design: .rounded)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.55).contentTransition(.numericText()) }
     @ViewBuilder private var primaryStopwatchControl: some View { if context.settings.showControls { Button { workspace.toggleStopwatch() } label: { Image(systemName: workspace.stopwatchStart == nil ? "play.fill" : "pause.fill") }.buttonStyle(.plain) } }
