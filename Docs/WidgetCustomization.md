@@ -81,3 +81,44 @@ Default interaction language:
 Current deliberate micro presentations include: Timer countdown ring, File Shelf top-item portal, adaptive Audio artwork/volume, Calendar date/imminent-event countdown, Clipboard object-type/history card, single System metric gauge, single Launcher app/group portal, Quick Note capture surface, Capture command/status tile, and Stopwatch chronograph sweep.
 
 Do not put readable note prose, event names, filenames, lap lists, several system metrics, or four tappable launcher icons inside 1×1. Those belong to larger footprints or the long-press popover.
+
+
+---
+
+## Canonical 8×4 footprint system
+
+Halo's Visual Workspace has one canonical sizing contract: **8 columns × 4 rows**. A widget can occupy any of the 32 footprints from **1×1 through 8×4**. `OpenNotchGridSizePreset` exposes every legal footprint and layout validation clamps imported/legacy geometry into this envelope.
+
+The renderer treats footprint as semantic information, not merely pixels:
+
+- **Micro** — roughly 1×1, 2×1, 1×2. One dominant datum/visual and one safe primary action.
+- **Compact** — roughly 2×2 through 4×2 (and narrow vertical equivalents). Primary information plus a small number of controls.
+- **Rich** — medium/large footprints. Lists, grids, previews, secondary metadata and deeper interaction become appropriate.
+- **Dashboard** — 6×3 through 8×4. Multiple logical sections; 8×4 should feel like a miniature application rather than a stretched card.
+
+`VisualWidgetFootprint` is the single source of truth for stage, orientation, information capacity and item capacity. Horizontal and vertical footprints must use intentional hierarchy; never implement a vertical widget by simply rotating a horizontal one. Resize transitions should preserve state and morph between the same widget's representations.
+
+### Per-widget minimums
+
+| Widget | Absolute minimum | Everyday | Rich |
+| --- | --- | --- | --- |
+| Timer | 1×1 | 2×2 | 4×3 |
+| File Shelf | 1×1 portal | 3×2 | 5×3 |
+| Audio / Media | 1×1 | 3×2 | 5×3 |
+| Calendar | 1×1 | 3×2 | 5×4 |
+| Clipboard | 1×1 portal | 2×2 | 5×3 |
+| System | 1×1 | 3×2 | 5×3 |
+| Launcher | 1×1 | 3×2 | 5×4 |
+| Notes | 1×1 capture only | 3×2 | 4×4 |
+| Capture | 1×1 | 3×1 | 4×3 |
+| Stopwatch | 1×1 | 2×2 | 4×3 |
+
+The 1×1 rule is strict: at most one primary datum and one dominant visual. Filenames, event names, note prose, lap lists, multi-metric dashboards and dense controls belong in larger footprints. When content does not fit, degrade to a deliberately simpler representation instead of shrinking it below legibility.
+
+### Interaction language
+
+Across adaptive widgets: hover may reveal secondary state without rearranging the tile; press is the safe primary action; ~450 ms hold reveals contextual controls; right-click remains the context/settings path; scroll is reserved for natural adjustment/navigation; content is draggable only where the content itself has drag semantics. Avoid destructive double-click actions.
+
+### State-aware adaptation
+
+A footprint may change presentation without changing size. Examples already supported by the adaptive renderers include Timer idle/running/completed state, Audio switching from volume to artwork while media plays, Calendar changing a date tile to an imminent-event countdown, System rotating/promoting metrics, Capture showing work-in-progress state, and File Shelf changing from a portal into a browsable grid/preview as space grows.

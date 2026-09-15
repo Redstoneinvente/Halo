@@ -3729,7 +3729,8 @@ struct BuiltinOrIntegrationWidget: View {
             if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceTimerView(store: store) }
             else { timer }
         case .shelf:
-            if gridColumnSpan == 1, gridRowSpan == 1 { microShelf } else { shelf }
+            if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceAdaptiveModuleView(module: .shelf, store: store, workspace: store.workspace) }
+            else { shelf }
         default: ModuleRegistry().view(for: module, store: store)
         }
     }

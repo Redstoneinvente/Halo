@@ -255,30 +255,28 @@ struct OpenNotchSizing: Codable, Equatable {
 }
 
 enum OpenNotchGridSizePreset: String, Codable, CaseIterable, Identifiable {
-    case oneByOne = "1×1"
-    case twoByOne = "2×1"
-    case oneByTwo = "1×2"
-    case twoByTwo = "2×2"
-    case threeByOne = "3×1"
-    case threeByTwo = "3×2"
-    case twoByThree = "2×3"
-    case threeByThree = "3×3"
-    case fourByTwo = "4×2"
-    case fourByThree = "4×3"
+    // Every legal Halo widget footprint. Keep raw values stable: they are persisted in UI state.
+    case oneByOne = "1×1", twoByOne = "2×1", threeByOne = "3×1", fourByOne = "4×1"
+    case fiveByOne = "5×1", sixByOne = "6×1", sevenByOne = "7×1", eightByOne = "8×1"
+    case oneByTwo = "1×2", twoByTwo = "2×2", threeByTwo = "3×2", fourByTwo = "4×2"
+    case fiveByTwo = "5×2", sixByTwo = "6×2", sevenByTwo = "7×2", eightByTwo = "8×2"
+    case oneByThree = "1×3", twoByThree = "2×3", threeByThree = "3×3", fourByThree = "4×3"
+    case fiveByThree = "5×3", sixByThree = "6×3", sevenByThree = "7×3", eightByThree = "8×3"
+    case oneByFour = "1×4", twoByFour = "2×4", threeByFour = "3×4", fourByFour = "4×4"
+    case fiveByFour = "5×4", sixByFour = "6×4", sevenByFour = "7×4", eightByFour = "8×4"
     case custom = "Custom"
+
     var id: String { rawValue }
     var span: (columns: Int, rows: Int)? {
         switch self {
-        case .oneByOne: return (1, 1)
-        case .twoByOne: return (2, 1)
-        case .oneByTwo: return (1, 2)
-        case .twoByTwo: return (2, 2)
-        case .threeByOne: return (3, 1)
-        case .threeByTwo: return (3, 2)
-        case .twoByThree: return (2, 3)
-        case .threeByThree: return (3, 3)
-        case .fourByTwo: return (4, 2)
-        case .fourByThree: return (4, 3)
+        case .oneByOne: return (1, 1); case .twoByOne: return (2, 1); case .threeByOne: return (3, 1); case .fourByOne: return (4, 1)
+        case .fiveByOne: return (5, 1); case .sixByOne: return (6, 1); case .sevenByOne: return (7, 1); case .eightByOne: return (8, 1)
+        case .oneByTwo: return (1, 2); case .twoByTwo: return (2, 2); case .threeByTwo: return (3, 2); case .fourByTwo: return (4, 2)
+        case .fiveByTwo: return (5, 2); case .sixByTwo: return (6, 2); case .sevenByTwo: return (7, 2); case .eightByTwo: return (8, 2)
+        case .oneByThree: return (1, 3); case .twoByThree: return (2, 3); case .threeByThree: return (3, 3); case .fourByThree: return (4, 3)
+        case .fiveByThree: return (5, 3); case .sixByThree: return (6, 3); case .sevenByThree: return (7, 3); case .eightByThree: return (8, 3)
+        case .oneByFour: return (1, 4); case .twoByFour: return (2, 4); case .threeByFour: return (3, 4); case .fourByFour: return (4, 4)
+        case .fiveByFour: return (5, 4); case .sixByFour: return (6, 4); case .sevenByFour: return (7, 4); case .eightByFour: return (8, 4)
         case .custom: return nil
         }
     }
@@ -294,20 +292,20 @@ struct OpenNotchGridPlacement: Codable, Equatable {
     var rowSpan = 1
 
     func clamped(columns: Int) -> OpenNotchGridPlacement {
-        let columnCount = max(1, columns)
+        let columnCount = min(8, max(1, columns))
         var value = self
         value.columnSpan = min(columnCount, max(1, columnSpan))
-        value.rowSpan = min(12, max(1, rowSpan))
+        value.rowSpan = min(4, max(1, rowSpan))
         value.column = min(max(0, columnCount - value.columnSpan), max(0, column))
-        value.row = min(48, max(0, row))
+        value.row = min(max(0, 4 - value.rowSpan), max(0, row))
         return value
     }
     func validated() throws -> OpenNotchGridPlacement {
         var value = self
-        value.column = min(48, max(0, column))
-        value.row = min(48, max(0, row))
-        value.columnSpan = min(12, max(1, columnSpan))
-        value.rowSpan = min(12, max(1, rowSpan))
+        value.columnSpan = min(8, max(1, columnSpan))
+        value.rowSpan = min(4, max(1, rowSpan))
+        value.column = min(max(0, 8 - value.columnSpan), max(0, column))
+        value.row = min(max(0, 4 - value.rowSpan), max(0, row))
         return value
     }
 }
@@ -710,8 +708,8 @@ struct OpenNotchLayout: Codable, Equatable {
     var resolvedColumnWeights: [Double] { Self.resolvedTrackWeights(columnWeights) }
     var resolvedRowWeights: [Double] { Self.resolvedTrackWeights(rowWeights) }
     var usesFreeformRegions: Bool { regions.contains { $0.frame != nil } }
-    var resolvedGridColumns: Int { min(12, max(2, gridColumns ?? 4)) }
-    var resolvedGridRows: Int { min(12, max(1, gridRows ?? 3)) }
+    var resolvedGridColumns: Int { min(8, max(2, gridColumns ?? 4)) }
+    var resolvedGridRows: Int { min(4, max(1, gridRows ?? 3)) }
     var resolvedGridGap: Double {
         let value = gridGap ?? 8
         return value.isFinite ? min(32, max(0, value)) : 8
@@ -804,7 +802,8 @@ struct OpenNotchLayout: Codable, Equatable {
 
     private static func canPlace(_ placement: OpenNotchGridPlacement, columns: Int, occupied: Set<Int>) -> Bool {
         guard placement.column >= 0, placement.row >= 0,
-              placement.column + placement.columnSpan <= columns else { return false }
+              placement.column + placement.columnSpan <= columns,
+              placement.row + placement.rowSpan <= 4 else { return false }
         for row in placement.row..<(placement.row + placement.rowSpan) {
             for column in placement.column..<(placement.column + placement.columnSpan) {
                 if occupied.contains(row * 64 + column) { return false }
@@ -824,13 +823,14 @@ struct OpenNotchLayout: Codable, Equatable {
     private static func firstAvailablePlacement(columnSpan: Int, rowSpan: Int, columns: Int,
                                                 occupied: Set<Int>) -> OpenNotchGridPlacement {
         let span = min(columns, max(1, columnSpan))
-        for row in 0..<48 {
+        for row in 0..<4 {
             for column in 0...max(0, columns - span) {
                 let candidate = OpenNotchGridPlacement(column: column, row: row, columnSpan: span, rowSpan: max(1, rowSpan))
                 if canPlace(candidate, columns: columns, occupied: occupied) { return candidate }
             }
         }
-        return OpenNotchGridPlacement(column: 0, row: 48, columnSpan: span, rowSpan: max(1, rowSpan))
+        let boundedRows = min(4, max(1, rowSpan))
+        return OpenNotchGridPlacement(column: 0, row: max(0, 4 - boundedRows), columnSpan: span, rowSpan: boundedRows)
     }
 
     private static func resolvedTrackWeights(_ saved: [Double]?) -> [Double] {
@@ -972,18 +972,18 @@ struct OpenNotchLayout: Codable, Equatable {
             ])
 
         case .informationDense:
-            // A deliberate six-row mosaic rather than a vertical pile of compact cards.
-            return grid(8, 6, cellHeight: 88, gap: 7, [
+            // Maximum-density composition inside Halo's canonical 8×4 workspace.
+            return grid(8, 4, cellHeight: 92, gap: 7, [
                 item(.clock,      0, 0, 2, 1, .compact, .high),
                 item(.timer,      2, 0, 2, 1, .compact, .high),
                 item(.audio,      4, 0, 2, 1, .compact, .normal),
                 item(.activities, 6, 0, 2, 1, .compact, .normal),
-                item(.calendar,   0, 1, 4, 3, .expanded, .high),
-                item(.system,     4, 1, 4, 3, .expanded, .high),
-                item(.clipboard,  0, 4, 2, 2, .expanded, .normal),
-                item(.shelf,      2, 4, 2, 2, .expanded, .normal),
-                item(.launcher,   4, 4, 2, 2, .expanded, .normal),
-                item(.notes,      6, 4, 2, 2, .expanded, .normal)
+                item(.calendar,   0, 1, 4, 2, .expanded, .high),
+                item(.system,     4, 1, 4, 2, .expanded, .high),
+                item(.clipboard,  0, 3, 2, 1, .compact, .normal),
+                item(.shelf,      2, 3, 2, 1, .compact, .normal),
+                item(.launcher,   4, 3, 2, 1, .compact, .normal),
+                item(.notes,      6, 3, 2, 1, .compact, .normal)
             ])
 
         case .showcase:
@@ -1008,8 +1008,8 @@ struct OpenNotchLayout: Codable, Equatable {
         if let rowWeights { guard rowWeights.allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }; value.rowWeights = Self.resolvedTrackWeights(rowWeights) }
         value.regions = try regions.prefix(9).map { try $0.validated() }
         value.gridItems = try gridItems.map { try $0.prefix(80).map { try $0.validated() } }
-        if let gridColumns { value.gridColumns = min(12, max(2, gridColumns)) }
-        if let gridRows { value.gridRows = min(12, max(1, gridRows)) }
+        if let gridColumns { value.gridColumns = min(8, max(2, gridColumns)) }
+        if let gridRows { value.gridRows = min(4, max(1, gridRows)) }
         if let gridGap { guard gridGap.isFinite else { throw CocoaError(.fileReadCorruptFile) }; value.gridGap = min(32, max(0, gridGap)) }
         if let gridCellHeight { guard gridCellHeight.isFinite else { throw CocoaError(.fileReadCorruptFile) }; value.gridCellHeight = min(320, max(56, gridCellHeight)) }
         value.gridPadding = try gridPadding?.validated()

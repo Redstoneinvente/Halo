@@ -928,6 +928,87 @@ struct WidgetChromeOptions: Codable, Equatable {
 }
 
 
+// MARK: - Canonical widget footprint system
+
+enum VisualWidgetStage: String, Codable, CaseIterable, Identifiable {
+    case micro = "Micro", compact = "Compact", rich = "Rich", dashboard = "Dashboard"
+    var id: String { rawValue }
+}
+
+enum VisualWidgetOrientation: String, Codable { case square, horizontal, vertical }
+
+struct VisualWidgetFootprint: Hashable, Codable {
+    let columns: Int
+    let rows: Int
+
+    init(columns: Int, rows: Int) {
+        self.columns = min(8, max(1, columns))
+        self.rows = min(4, max(1, rows))
+    }
+
+    var key: String { "\(columns)x\(rows)" }
+    var area: Int { columns * rows }
+    var orientation: VisualWidgetOrientation { columns == rows ? .square : (columns > rows ? .horizontal : .vertical) }
+    var stage: VisualWidgetStage {
+        if area <= 2 { return .micro }
+        if (rows <= 2 && columns <= 4) || (columns <= 2 && rows <= 4) { return .compact }
+        if columns >= 6 && rows >= 3 { return .dashboard }
+        return .rich
+    }
+    var informationCapacity: Int {
+        switch stage {
+        case .micro: return min(3, 1 + area)
+        case .compact: return min(7, 2 + area)
+        case .rich: return min(13, 3 + area / 2)
+        case .dashboard: return min(18, 6 + area / 2)
+        }
+    }
+    var itemCapacity: Int {
+        switch stage {
+        case .micro: return max(1, area)
+        case .compact: return min(8, max(2, area))
+        case .rich: return min(18, max(4, area))
+        case .dashboard: return min(32, area)
+        }
+    }
+    func contains(columns requiredColumns: Int, rows requiredRows: Int) -> Bool {
+        columns >= requiredColumns && rows >= requiredRows
+    }
+}
+
+struct VisualWidgetSizeRecommendation: Equatable {
+    let minimum: VisualWidgetFootprint
+    let everyday: VisualWidgetFootprint
+    let rich: VisualWidgetFootprint
+}
+
+extension ModuleID {
+    var visualWidgetSizeRecommendation: VisualWidgetSizeRecommendation {
+        switch self {
+        case .timer: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 2, rows: 2), rich: .init(columns: 4, rows: 3))
+        case .shelf: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 3, rows: 2), rich: .init(columns: 5, rows: 3))
+        case .media, .audio: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 3, rows: 2), rich: .init(columns: 5, rows: 3))
+        case .calendar: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 3, rows: 2), rich: .init(columns: 5, rows: 4))
+        case .clipboard: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 2, rows: 2), rich: .init(columns: 5, rows: 3))
+        case .system: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 3, rows: 2), rich: .init(columns: 5, rows: 3))
+        case .launcher: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 3, rows: 2), rich: .init(columns: 5, rows: 4))
+        case .notes: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 3, rows: 2), rich: .init(columns: 4, rows: 4))
+        case .capture: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 3, rows: 1), rich: .init(columns: 4, rows: 3))
+        case .stopwatch: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 2, rows: 2), rich: .init(columns: 4, rows: 3))
+        case .clock: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 3, rows: 1), rich: .init(columns: 4, rows: 2))
+        case .activities, .developer: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 2, rows: 2), rich: .init(columns: 4, rows: 3))
+        }
+    }
+
+    func visualWidgetSizeHint(for footprint: VisualWidgetFootprint) -> String {
+        let recommendation = visualWidgetSizeRecommendation
+        if footprint.area == 1 && self == .notes { return "1×1 is Quick Note capture only · actual note content starts at 2×2." }
+        if footprint.contains(columns: recommendation.rich.columns, rows: recommendation.rich.rows) { return "Rich layout · secondary panels and deeper controls are available." }
+        if footprint.contains(columns: recommendation.everyday.columns, rows: recommendation.everyday.rows) { return "Recommended everyday layout." }
+        return "Compact layout · Halo prioritizes glanceable information and safe primary actions."
+    }
+}
+
 // MARK: - Visual Workspace adaptive widget system
 
 enum VisualAdaptivePresentation: String, Codable, CaseIterable, Identifiable {
@@ -1075,6 +1156,7 @@ struct VisualAdaptiveWidgetOptions: Codable, Equatable {
         value.informationPriority = module.visualAdaptiveDefaultInformationOrder
         switch module {
         case .timer: value.maxItems = 5
+        case .shelf: value.maxItems = 12
         case .media: value.maxItems = 8; value.mediaVisualizer = false
         case .audio: value.maxItems = 8
         case .clipboard: value.maxItems = 8
@@ -1164,7 +1246,7 @@ struct VisualAdaptiveWidgetOptions: Codable, Equatable {
 extension ModuleID {
     var visualAdaptiveSupported: Bool {
         switch self {
-        case .timer, .media, .audio, .clipboard, .system, .launcher, .activities, .notes, .capture, .stopwatch: return true
+        case .timer, .shelf, .media, .audio, .clipboard, .system, .launcher, .activities, .notes, .capture, .stopwatch: return true
         default: return false
         }
     }
@@ -1172,6 +1254,7 @@ extension ModuleID {
     var visualAdaptiveAlwaysInformation: [String] {
         switch self {
         case .timer: return ["countdown"]
+        case .shelf: return ["files"]
         case .media: return ["artwork", "track"]
         case .audio: return ["volumeValue"]
         case .clipboard: return ["entries"]
@@ -1187,6 +1270,7 @@ extension ModuleID {
     var visualAdaptiveDefaultInformationOrder: [String] {
         switch self {
         case .timer: return ["countdown", "controls", "progress", "status", "endTime", "presets"]
+        case .shelf: return ["files", "summary", "actions", "footer"]
         case .media: return ["artwork", "track", "controls", "artist", "progress", "timing", "album", "shuffle", "repeat", "visualizer", "source", "playback", "status", "detection", "palette", "lyrics"]
         case .audio: return ["volumeValue", "output", "volume", "summary", "levels", "actions", "status"]
         case .clipboard: return ["entries", "search", "summary", "actions", "footer"]

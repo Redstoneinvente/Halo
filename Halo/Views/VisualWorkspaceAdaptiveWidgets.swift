@@ -274,6 +274,8 @@ struct VisualWorkspaceAdaptiveModuleView: View {
 
     var body: some View {
         switch module {
+        case .shelf:
+            VisualAdaptiveShelfView(store: store)
         case .media:
             VisualAdaptiveMediaView(service: workspace.media, app: workspace.settings.mediaApp)
         case .audio:
@@ -310,6 +312,7 @@ private struct AdaptiveResolvedContext {
     let width: CGFloat?
     let height: CGFloat?
     let settings: VisualAdaptiveWidgetOptions
+    let footprint: VisualWidgetFootprint
     let family: VisualAdaptiveFamily
 
     init(module: ModuleID, style: WidgetStyle, columns: Int?, rows: Int?, width: CGFloat?, height: CGFloat?) {
@@ -319,6 +322,7 @@ private struct AdaptiveResolvedContext {
         self.rows = min(4, max(1, rows ?? Self.estimateRows(height)))
         self.width = width
         self.height = height
+        self.footprint = VisualWidgetFootprint(columns: self.columns, rows: self.rows)
         let base = style.resolvedVisualAdaptive(for: module)
         let effective = base.effective(columns: self.columns, rows: self.rows)
         self.settings = effective
@@ -335,7 +339,8 @@ private struct AdaptiveResolvedContext {
 
     var spacing: CGFloat { max(3, CGFloat(style.resolvedContent.spacing) * settings.density.spacingScale) }
     var contentAlignment: Alignment { style.resolvedContent.alignment.alignment }
-    var information: Set<String> { settings.visibleInformation(for: module, capacity: family.informationCapacity) }
+    var information: Set<String> { settings.visibleInformation(for: module, capacity: footprint.informationCapacity) }
+    var itemLimit: Int { min(settings.maxItems, footprint.itemCapacity) }
     func shows(_ key: String) -> Bool {
         if module.visualAdaptiveAlwaysInformation.contains(key) { return true }
         guard information.contains(key) else { return false }
@@ -567,6 +572,236 @@ struct VisualWorkspaceTimerView: View {
             return minutes >= 60 ? String(format: "%d:%02d", minutes / 60, minutes % 60) : "\(minutes)m"
         }
         return whole >= 3600 ? String(format: "%d:%02d:%02d", whole / 3600, whole / 60 % 60, whole % 60) : String(format: "%02d:%02d", whole / 60, whole % 60)
+    }
+}
+
+
+// MARK: - File Shelf
+
+private struct VisualAdaptiveShelfView: View {
+    @Environment(\.widgetStyle) private var style
+    @Environment(\.openNotchAvailableWidth) private var availableWidth
+    @Environment(\.openNotchAvailableHeight) private var availableHeight
+    @Environment(\.openNotchGridColumnSpan) private var gridColumnSpan
+    @Environment(\.openNotchGridRowSpan) private var gridRowSpan
+    @ObservedObject var store: AppStore
+    @State private var selectedURL: URL?
+
+    private var context: AdaptiveResolvedContext {
+        AdaptiveResolvedContext(module: .shelf, style: style, columns: gridColumnSpan, rows: gridRowSpan,
+                                width: availableWidth, height: availableHeight)
+    }
+    private var orderedFiles: [URL] {
+        let pinned = store.files.filter { store.pinnedFiles.contains($0) }
+        let regular = store.files.filter { !store.pinnedFiles.contains($0) }
+        return pinned + regular
+    }
+    private var effectiveSelection: URL? { selectedURL.flatMap { store.files.contains($0) ? $0 : nil } ?? orderedFiles.first }
+
+    var body: some View {
+        Group {
+            if context.footprint.area == 1 { microShelf }
+            else if context.footprint.rows == 1 { horizontalShelf }
+            else if context.footprint.columns == 1 { verticalShelf }
+            else if context.footprint.stage == .dashboard || (context.columns >= 5 && context.rows >= 3) { dashboardShelf }
+            else { gridShelf }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: context.contentAlignment)
+        .animation(.spring(response: 0.34, dampingFraction: 0.88), value: context.footprint)
+    }
+
+    private var microShelf: some View {
+        let shown = Array(orderedFiles.prefix(3))
+        return ZStack {
+            if shown.isEmpty {
+                Image(systemName: "tray.and.arrow.down.fill")
+                    .font(.system(size: 23, weight: .semibold)).foregroundStyle(style.accentColor.color)
+            } else {
+                ForEach(Array(shown.enumerated().reversed()), id: \.offset) { index, url in
+                    shelfIcon(url, size: 34)
+                        .offset(x: CGFloat(index) * 3 - 3, y: CGFloat(index) * -3 + 3)
+                        .rotationEffect(.degrees(Double(index - 1) * 3.2))
+                }
+                if store.files.count > 1 {
+                    Text("\(store.files.count)")
+                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                        .padding(4).background(style.accentColor.color, in: Circle())
+                        .foregroundStyle(.white).offset(x: 21, y: -21)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .haloMicroInteraction(accent: style.accentColor.color,
+                              help: shown.isEmpty ? "File Shelf · click to add files" : "File Shelf · click latest · hold for shelf") {
+            if let first = orderedFiles.first { NSWorkspace.shared.open(first) } else { store.chooseFiles() }
+        } popover: {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack { Text("File Shelf").font(.headline); Spacer(); Button("Add…") { store.chooseFiles() } }
+                if shown.isEmpty { Text("Drop files onto Halo or add them here.").foregroundStyle(.secondary) }
+                ForEach(Array(orderedFiles.prefix(5).enumerated()), id: \.offset) { _, url in
+                    shelfRow(url, compact: true)
+                }
+            }.frame(width: 280)
+        }
+    }
+
+    private var horizontalShelf: some View {
+        HStack(spacing: max(5, context.spacing * 0.72)) {
+            let shown = Array(orderedFiles.prefix(max(1, min(context.itemLimit, context.columns))))
+            if shown.isEmpty { emptyShelf }
+            else {
+                ForEach(Array(shown.enumerated()), id: \.offset) { _, url in
+                    Button { NSWorkspace.shared.open(url) } label: {
+                        HStack(spacing: 5) {
+                            shelfIcon(url, size: context.columns >= 5 ? 28 : 24)
+                            if context.columns >= 4 { Text(url.deletingPathExtension().lastPathComponent).font(.caption).lineLimit(1) }
+                        }
+                    }.buttonStyle(.plain).contextMenu { fileMenu(url) }
+                }
+                Spacer(minLength: 0)
+                if context.columns >= 6 { Button { store.chooseFiles() } label: { Image(systemName: "plus.circle.fill") }.buttonStyle(.plain).help("Add files") }
+            }
+        }
+    }
+
+    private var verticalShelf: some View {
+        VStack(spacing: max(5, context.spacing * 0.72)) {
+            let shown = Array(orderedFiles.prefix(max(1, min(context.itemLimit, context.rows))))
+            if shown.isEmpty { emptyShelf }
+            else {
+                ForEach(Array(shown.enumerated()), id: \.offset) { _, url in
+                    Button { NSWorkspace.shared.open(url) } label: {
+                        VStack(spacing: 3) {
+                            shelfIcon(url, size: 28)
+                            if context.rows >= 3 { Text(url.deletingPathExtension().lastPathComponent).font(.system(size: 8, weight: .medium)).lineLimit(1) }
+                        }.frame(maxWidth: .infinity)
+                    }.buttonStyle(.plain).contextMenu { fileMenu(url) }
+                }
+                if context.rows >= 4 { Button { store.chooseFiles() } label: { Image(systemName: "plus") }.buttonStyle(.plain) }
+            }
+        }
+    }
+
+    private var gridShelf: some View {
+        VStack(alignment: .leading, spacing: context.spacing) {
+            if context.columns >= 3 {
+                HStack {
+                    Text("FILES").font(.system(size: 9, weight: .bold, design: .rounded)).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(store.files.count)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    Button { store.chooseFiles() } label: { Image(systemName: "plus") }.buttonStyle(.plain)
+                }
+            }
+            if orderedFiles.isEmpty { emptyShelf }
+            else {
+                let gridColumns = max(1, min(context.columns, context.rows == 2 ? 4 : 5))
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: context.spacing), count: gridColumns), spacing: context.spacing) {
+                    ForEach(Array(orderedFiles.prefix(context.itemLimit).enumerated()), id: \.offset) { _, url in
+                        fileTile(url, detailed: context.rows >= 3)
+                    }
+                }
+            }
+        }
+    }
+
+    private var dashboardShelf: some View {
+        HStack(alignment: .top, spacing: context.spacing * 1.15) {
+            VStack(alignment: .leading, spacing: context.spacing) {
+                HStack {
+                    Label("File Shelf", systemImage: "tray.full.fill").font(.headline)
+                    Spacer()
+                    Button("Add…") { store.chooseFiles() }.controlSize(.small)
+                    if !store.files.isEmpty { Button("Clear") { store.clearShelf() }.controlSize(.small) }
+                }
+                if orderedFiles.isEmpty { emptyShelf }
+                else {
+                    let gridColumns = min(5, max(3, context.columns - 2))
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: context.spacing), count: gridColumns), spacing: context.spacing) {
+                        ForEach(Array(orderedFiles.prefix(context.itemLimit).enumerated()), id: \.offset) { _, url in
+                            fileTile(url, detailed: true)
+                        }
+                    }
+                }
+            }.frame(maxWidth: .infinity)
+            if context.columns >= 5 {
+                Divider().opacity(0.18)
+                VStack(alignment: .leading, spacing: 8) {
+                    if let url = effectiveSelection {
+                        shelfIcon(url, size: min(96, max(56, (availableHeight ?? 220) * 0.28)))
+                        Text(url.lastPathComponent).font(.headline).lineLimit(2)
+                        Text(fileDetail(url)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        HStack {
+                            Button("Open") { NSWorkspace.shared.open(url) }
+                            Button("Preview") { store.shelfPreview.show(url) }
+                        }.controlSize(.small)
+                        Button(store.pinnedFiles.contains(url) ? "Unpin" : "Pin") { store.toggleFilePin(url) }.controlSize(.small)
+                    } else {
+                        Text("Select a file").foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }.frame(minWidth: 130, maxWidth: 190, maxHeight: .infinity, alignment: .topLeading)
+            }
+        }
+    }
+
+    private var emptyShelf: some View {
+        Button { store.chooseFiles() } label: {
+            VStack(spacing: 6) {
+                Image(systemName: "tray.and.arrow.down.fill").font(.system(size: 24, weight: .semibold)).foregroundStyle(style.accentColor.color)
+                if context.footprint.area > 2 { Text("Drop files here or Add…").font(.caption).foregroundStyle(.secondary) }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }.buttonStyle(.plain)
+    }
+
+    private func fileTile(_ url: URL, detailed: Bool) -> some View {
+        Button { selectedURL = url } label: {
+            VStack(spacing: 5) {
+                ZStack(alignment: .topTrailing) {
+                    shelfIcon(url, size: detailed ? 42 : 34)
+                    if store.pinnedFiles.contains(url) { Image(systemName: "pin.fill").font(.system(size: 8)).foregroundStyle(style.accentColor.color) }
+                }
+                Text(url.deletingPathExtension().lastPathComponent).font(.system(size: detailed ? 10 : 9, weight: .medium)).lineLimit(detailed ? 2 : 1).multilineTextAlignment(.center)
+                if detailed && context.rows >= 3 { Text(fileKind(url)).font(.system(size: 7, weight: .semibold, design: .rounded)).foregroundStyle(.secondary).lineLimit(1) }
+            }.frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture(count: 2).onEnded { NSWorkspace.shared.open(url) })
+        .contextMenu { fileMenu(url) }
+        .onDrag { NSItemProvider(contentsOf: url) ?? NSItemProvider() }
+    }
+
+    private func shelfRow(_ url: URL, compact: Bool) -> some View {
+        Button { NSWorkspace.shared.open(url) } label: {
+            HStack(spacing: 8) {
+                shelfIcon(url, size: compact ? 24 : 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(url.lastPathComponent).lineLimit(1)
+                    Text(fileDetail(url)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
+            }
+        }.buttonStyle(.plain).contextMenu { fileMenu(url) }
+    }
+
+    @ViewBuilder private func fileMenu(_ url: URL) -> some View {
+        Button("Open") { NSWorkspace.shared.open(url) }
+        Button("Quick Look") { store.shelfPreview.show(url) }
+        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        Button(store.pinnedFiles.contains(url) ? "Unpin" : "Pin") { store.toggleFilePin(url) }
+        Divider()
+        Button("Remove from Shelf") { store.removeFile(url) }
+    }
+
+    private func shelfIcon(_ url: URL, size: CGFloat) -> some View {
+        Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().scaledToFit().frame(width: size, height: size)
+    }
+    private func fileKind(_ url: URL) -> String { url.hasDirectoryPath ? "FOLDER" : (url.pathExtension.isEmpty ? "FILE" : url.pathExtension.uppercased()) }
+    private func fileDetail(_ url: URL) -> String {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]) else { return "Original unavailable" }
+        if values.isDirectory == true { return "Folder" }
+        let size = ByteCountFormatter.string(fromByteCount: Int64(values.fileSize ?? 0), countStyle: .file)
+        let kind = url.pathExtension.isEmpty ? "File" : url.pathExtension.uppercased()
+        return "\(kind) · \(size)"
     }
 }
 
