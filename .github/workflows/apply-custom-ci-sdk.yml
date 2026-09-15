@@ -1,0 +1,74 @@
+name: Apply Custom CI SDK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/custom-ci-sdk-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct patch script
+        shell: bash
+        run: |
+          cat scripts/custom-ci-patch/part* > /tmp/apply_custom_ci.py
+          python3 -m py_compile /tmp/apply_custom_ci.py
+
+      - name: Apply Custom CI SDK
+        run: python3 /tmp/apply_custom_ci.py
+
+      - name: Verify required Custom CI UX
+        shell: bash
+        run: |
+          grep -q 'Disable custom CI' Halo/Views/WorkspaceSettingsView.swift
+          grep -q 'Import .haloCI' Halo/Views/WorkspaceSettingsView.swift
+          grep -q 'HaloCustomCIRuntimeStore' Halo/Core/WorkspaceStore.swift
+          grep -q 'HaloCIPackageValidator' Halo/Core/WorkspaceModels.swift
+          grep -q 'custom' Halo/Views/SurfaceView.swift
+          test -f Examples/HelloWorld.haloCI/manifest.json
+          test -f Examples/HelloWorld.haloCI/interface.json
+
+      - name: Run Swift package tests
+        run: swift test
+
+      - name: Build Halo
+        shell: bash
+        run: |
+          xcodebuild \
+            -project Halo.xcodeproj \
+            -scheme Halo \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Remove temporary patch staging
+        shell: bash
+        run: |
+          rm -rf scripts/custom-ci-patch
+          rm -f .github/custom-ci-sdk-trigger.txt
+          rm -f .github/workflows/apply-custom-ci-sdk.yml
+
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Add declarative Custom CI SDK and import flow'
+          git push origin HEAD:main
