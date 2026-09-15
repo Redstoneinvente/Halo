@@ -2234,35 +2234,25 @@ struct SurfaceView: View {
         return (bluetoothShowOnChanges && bluetooth.lastEvent != nil) ||
             (bluetoothShowWhileConnected && !bluetooth.connectedDevices.isEmpty)
     }
+    private var builtInContextCandidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] {
+        var candidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] = []
+        if dropCIEnabled && state.dropTargeted { candidates.append((.drop, dropPriority, 4)) }
+        if retroCIEnabled && retroGameRequested { candidates.append((.retro, retroPriority, 4)) }
+        if teleprompterCIEnabled && teleprompterActive { candidates.append((.teleprompter, teleprompterPriority, 3)) }
+        if transferCIEnabled && transfer.isActive { candidates.append((.transfer, transferPriority, 3)) }
+        if clipboardCIEnabled && clipboardCI.isActive { candidates.append((.clipboard, clipboardCI.manualPresentation ? 1000 : clipboardPriority, 3)) }
+        if contextOptions.enabled && workspace.media.isPlaying { candidates.append((.music, contextMusicPriority, 2)) }
+        if bluetoothEligible { candidates.append((.bluetooth, bluetoothPriority, 1)) }
+        return candidates
+    }
+    private var highestBuiltInContextPriority: Double? { builtInContextCandidates.map { $0.priority }.max() }
     private var activeCustomCandidate: HaloCustomCICandidate? {
-        customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI)
+        customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI,
+                                 blockingPriority: highestBuiltInContextPriority)
     }
     private var activeContext: ActiveContextInterface? {
-        var candidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] = []
-        if dropCIEnabled && state.dropTargeted {
-            candidates.append((.drop, dropPriority, 4))
-        }
-        if retroCIEnabled && retroGameRequested {
-            candidates.append((.retro, retroPriority, 4))
-        }
-        if teleprompterCIEnabled && teleprompterActive {
-            candidates.append((.teleprompter, teleprompterPriority, 3))
-        }
-        if transferCIEnabled && transfer.isActive {
-            candidates.append((.transfer, transferPriority, 3))
-        }
-        if clipboardCIEnabled && clipboardCI.isActive {
-            candidates.append((.clipboard, clipboardCI.manualPresentation ? 1000 : clipboardPriority, 3))
-        }
-        if let custom = activeCustomCandidate {
-            candidates.append((.custom, custom.priority, custom.manual ? 100 : 3))
-        }
-        if contextOptions.enabled && workspace.media.isPlaying {
-            candidates.append((.music, contextMusicPriority, 2))
-        }
-        if bluetoothEligible {
-            candidates.append((.bluetooth, bluetoothPriority, 1))
-        }
+        var candidates = builtInContextCandidates
+        if let custom = activeCustomCandidate { candidates.append((.custom, custom.priority, custom.manual ? 100 : 3)) }
         return candidates.max { lhs, rhs in
             if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
             return lhs.tieRank < rhs.tieRank
@@ -2286,7 +2276,7 @@ struct SurfaceView: View {
         case .teleprompter: return true
         case .transfer: return false
         case .clipboard: return false
-        case .custom: return false
+        case .custom: return true
         case .none: return false
         }
     }
@@ -2518,14 +2508,20 @@ struct SurfaceView: View {
             Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
             ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { _ in
-            guard !disableCustomCI else { return }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { note in
+            guard !disableCustomCI, let requestedID = note.object as? String else { return }
+            guard customContextActive, activeCustomCandidate?.package.manifest.id == requestedID else {
+                customCI.clearManualActivation()
+                customCI.notice = "Custom CI did not open because a higher-priority CI currently owns the notch."
+                return
+            }
             state.collapseTask?.cancel()
             state.expanded = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCICloseRequested"))) { _ in
             state.contextPreferredSize = nil
             state.contextPreferredCompactWidth = nil
+            state.contextPreferredCompactHeight = nil
             state.contextMinimumExpandedWidth = nil
             if !state.pinned { state.expanded = false }
         }
@@ -2669,6 +2665,7 @@ struct SurfaceView: View {
             }
             if !transferContextActive && !clipboardContextActive && !customContextActive {
                 state.contextPreferredCompactWidth = nil
+                state.contextPreferredCompactHeight = nil
                 state.contextMinimumExpandedWidth = nil
                 if activeContext != nil { state.contextPreferredSize = nil }
             }
@@ -2682,12 +2679,14 @@ struct SurfaceView: View {
                 TransferSurfaceBackground(monitor: transfer)
             } else if clipboardContextActive {
                 ClipboardSurfaceBackground(monitor: clipboardCI)
+            } else if customContextActive, let candidate = activeCustomCandidate {
+                HaloCustomCIBackgroundView(contract: candidate.package.manifest.surface.background, expanded: state.expanded)
             } else if state.expanded && activeContext == nil && usesVisualWorkspace {
                 OpenNotchBackgroundView(options: layout.resolvedOpenNotchLayout.appearance, fallback: layout.appearance, theme: theme, system: workspace.system)
             } else {
                 SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
             }
-            if !transferContextActive && !clipboardContextActive && (!state.expanded || layout.closedNotch?.applyBackgroundWhenOpened == true) {
+            if !transferContextActive && !clipboardContextActive && !customContextActive && (!state.expanded || layout.closedNotch?.applyBackgroundWhenOpened == true) {
                 AlbumNotchBackground(options: closedBackgroundOptions, media: workspace.media, system: workspace.system)
             }
         }
@@ -4752,48 +4751,128 @@ private enum ContextMusicArtworkReader {
 
 // MARK: - Declarative Custom CI renderer
 
+private struct HaloCustomCIContentSizePreferenceKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let next = nextValue()
+        if next.width > 0 && next.height > 0 { value = next }
+    }
+}
+
 private struct HaloCustomCISurfaceView: View {
     let package: HaloCIParsedPackage
     @ObservedObject var surfaceState: SurfaceState
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject private var runtime = HaloCustomCIRuntimeStore.shared
+    @State private var measuredClosed: CGSize = .zero
+    @State private var measuredExpanded: CGSize = .zero
 
     private var expanded: Bool { surfaceState.expanded }
     private var root: HaloCIComponent? { expanded ? package.interface.expanded : package.interface.closed }
     private var data: [String: String] { runtime.dataBus(for: package, workspace: workspace, expanded: expanded) }
+    private var dynamicSizing: Bool { package.manifest.surface.sizing.mode == "dynamic" }
+
+    @ViewBuilder private var renderedContent: some View {
+        if let root {
+            HaloCustomCIComponentRenderer(package: package, workspace: workspace, runtime: runtime, data: data).render(root)
+        } else {
+            HStack(spacing: 7) {
+                Image(systemName: "rectangle.3.group.bubble.left.fill").font(.system(size: 10, weight: .semibold))
+                Text(package.manifest.name).font(.system(size: 10, weight: .semibold, design: .rounded)).lineLimit(1)
+            }.padding(.horizontal, 10)
+        }
+    }
 
     var body: some View {
         Group {
-            if let root {
-                HaloCustomCIComponentRenderer(package: package, workspace: workspace, runtime: runtime, data: data).render(root)
+            if dynamicSizing {
+                renderedContent
+                    .fixedSize(horizontal: true, vertical: true)
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: HaloCustomCIContentSizePreferenceKey.self, value: proxy.size)
+                    })
             } else {
-                HStack(spacing: 7) {
-                    Image(systemName: "rectangle.3.group.bubble.left.fill")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text(package.manifest.name)
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .lineLimit(1)
-                }
-                .padding(.horizontal, 10)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                renderedContent
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .clipped()
+        .onPreferenceChange(HaloCustomCIContentSizePreferenceKey.self) { size in
+            guard dynamicSizing, size.width > 0, size.height > 0 else { return }
+            if expanded { measuredExpanded = size } else { measuredClosed = size }
+            publishSizing()
+        }
         .onAppear { publishSizing() }
         .onChange(of: expanded) { _ in publishSizing() }
         .onChange(of: runtime.contextRevision) { _ in publishSizing() }
     }
 
+    private func resolved(_ rule: HaloCISizeRule, measured: CGSize, closed: Bool) -> CGSize {
+        let sizing = package.manifest.surface.sizing
+        if sizing.mode == "static" {
+            return CGSize(width: rule.width ?? (closed ? 190 : 560), height: rule.height ?? (closed ? 40 : 260))
+        }
+        let preferred = CGSize(width: rule.preferredWidth ?? (closed ? 190 : 560),
+                               height: rule.preferredHeight ?? (closed ? 40 : 260))
+        let source = measured.width > 0 && measured.height > 0 ? measured : preferred
+        return CGSize(width: min(rule.maxWidth ?? source.width, max(rule.minWidth ?? source.width, source.width)),
+                      height: min(rule.maxHeight ?? source.height, max(rule.minHeight ?? source.height, source.height)))
+    }
+
     private func publishSizing() {
-        let expandedRoot = package.interface.expanded
-        let expandedWidth = min(1100, max(260, expandedRoot.width ?? 560))
-        let expandedHeight = min(820, max(110, expandedRoot.height ?? 260))
-        surfaceState.contextMinimumExpandedWidth = min(expandedWidth, max(220, surfaceState.physicalNotchWidth + 32))
-        surfaceState.contextPreferredSize = CGSize(width: expandedWidth, height: expandedHeight)
-        if let closed = package.interface.closed {
-            surfaceState.contextPreferredCompactWidth = min(720, max(48, closed.width ?? max(surfaceState.physicalNotchWidth + 28, 190)))
+        let sizing = package.manifest.surface.sizing
+        let expandedSize = resolved(sizing.expanded, measured: measuredExpanded, closed: false)
+        surfaceState.contextMinimumExpandedWidth = sizing.mode == "dynamic"
+            ? (sizing.expanded.minWidth ?? expandedSize.width)
+            : expandedSize.width
+        surfaceState.contextPreferredSize = expandedSize
+        if let closed = sizing.closed {
+            let closedSize = resolved(closed, measured: measuredClosed, closed: true)
+            surfaceState.contextPreferredCompactWidth = closedSize.width
+            surfaceState.contextPreferredCompactHeight = closedSize.height
         } else {
-            surfaceState.contextPreferredCompactWidth = min(720, max(90, surfaceState.physicalNotchWidth + 28))
+            surfaceState.contextPreferredCompactWidth = nil
+            surfaceState.contextPreferredCompactHeight = nil
+        }
+    }
+}
+
+private struct HaloCustomCIBackgroundView: View {
+    let contract: HaloCIBackgroundContract
+    let expanded: Bool
+    private var style: HaloCIBackgroundStyle { expanded ? contract.expanded : (contract.closed ?? contract.expanded) }
+    var body: some View {
+        let opacity = min(1, max(0, style.opacity ?? 1))
+        ZStack {
+            switch style.type {
+            case "gradient":
+                LinearGradient(colors: [color(style.color ?? "#101014"), color(style.secondaryColor ?? style.color ?? "#101014")],
+                               startPoint: .topLeading, endPoint: .bottomTrailing).opacity(opacity)
+            case "glass":
+                color(style.color ?? "#101014").opacity(min(1, opacity * 0.72))
+                Rectangle().fill(.ultraThinMaterial).opacity(min(1, 0.30 + (style.blur ?? 0) / 60))
+            case "clear":
+                Color.clear
+            default:
+                color(style.color ?? "#101014").opacity(opacity)
+            }
+        }.allowsHitTesting(false)
+    }
+
+    private func color(_ raw: String) -> Color {
+        switch raw.lowercased() {
+        case "accent": return .accentColor; case "white": return .white; case "black": return .black
+        case "clear": return .clear; case "secondary": return .white.opacity(0.62); case "green": return .green
+        case "orange": return .orange; case "red": return .red; case "blue": return .blue
+        default:
+            var hex = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if hex.hasPrefix("#") { hex.removeFirst() }
+            guard (hex.count == 6 || hex.count == 8), let value = UInt64(hex, radix: 16) else { return .black }
+            if hex.count == 6 {
+                return Color(red: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255)
+            }
+            return Color(red: Double((value >> 24) & 255) / 255, green: Double((value >> 16) & 255) / 255,
+                         blue: Double((value >> 8) & 255) / 255, opacity: Double(value & 255) / 255)
         }
     }
 }

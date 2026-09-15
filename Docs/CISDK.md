@@ -1272,3 +1272,28 @@ Custom CIs do not create a second notch window. They use Halo\'s existing open/c
 Halo validates a package before installation and again after staging. SDK 0.1 rejects or bounds unknown schema/SDK versions and fields, unsupported components/bindings/actions/triggers/permissions/capabilities/surfaces, undeclared permissions, path traversal, symbolic links, missing/unsupported assets, executable/script content, malformed JSON, packages over 128 files or 10 MB, JSON files over 512 KB, component trees over 180 nodes or depth 16, and out-of-range layout/control values. Interactive controls without an accessibility label produce a warning.
 
 A working starter package is committed at `Examples/HelloWorld.haloCI/`.
+
+
+## Surface ownership contract: sizing, background, and priority
+
+Every `.haloCI` package must declare `manifest.json.surface`. A Custom CI is rejected at import time if this contract is missing.
+
+```json
+"surface": {
+  "sizing": {
+    "mode": "static",
+    "closed": { "width": 250, "height": 40 },
+    "expanded": { "width": 560, "height": 250 }
+  },
+  "background": {
+    "closed": { "type": "solid", "color": "#0C0D10", "opacity": 1 },
+    "expanded": { "type": "gradient", "color": "#0C0D10", "secondaryColor": "#161A24", "opacity": 1 }
+  }
+}
+```
+
+`static` sizing makes the declared dimensions authoritative. `dynamic` sizing measures Halo's declarative render tree and clamps it to required `minWidth`, `preferredWidth`, `maxWidth`, `minHeight`, `preferredHeight`, and `maxHeight` values for each supported state. The physical camera/notch remains a hard safety floor on notched Macs, and the visible display bounds remain a hard ceiling.
+
+A Custom CI always owns its background while it owns the notch. Backgrounds are state-specific and currently support `solid`, `gradient`, `glass`, and `clear`. Halo's normal workspace/album-art background is not composited behind an active Custom CI.
+
+CI arbitration occurs before trigger evaluation. Halo evaluates eligible CIs from highest priority downward and stops at the first owner. If a built-in or Custom CI with a higher priority already owns/claims the notch, a lower-priority Custom CI is not trigger-evaluated, does not animate, and does not open. Manual Open requests use the CI's configured priority; they do not bypass a higher-priority owner.

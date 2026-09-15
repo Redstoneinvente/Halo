@@ -27,6 +27,7 @@ final class SurfaceState: ObservableObject {
     @Published var layoutOverride: WorkspaceLayout?
     @Published var contextPreferredSize: CGSize?
     @Published var contextPreferredCompactWidth: CGFloat?
+    @Published var contextPreferredCompactHeight: CGFloat?
     @Published var contextMinimumExpandedWidth: CGFloat?
     /// Per-surface drag state keeps Drop CI scoped to the display beneath the dragged item.
     @Published var dropTargeted = false
@@ -296,6 +297,7 @@ final class WindowManager {
         var subscription: AnyCancellable?
         var contextSizeSubscription: AnyCancellable?
         var contextCompactSizeSubscription: AnyCancellable?
+        var contextCompactHeightSubscription: AnyCancellable?
         init() {
             panel = HaloPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             panel.isReleasedWhenClosed = false
@@ -314,7 +316,7 @@ final class WindowManager {
         }
         func stop() {
             animator.cancel(); state.collapseTask?.cancel(); state.dropExitTask?.cancel()
-            subscription?.cancel(); contextSizeSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); panel.close(); ambientPanel.close()
+            subscription?.cancel(); contextSizeSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); contextCompactHeightSubscription?.cancel(); panel.close(); ambientPanel.close()
         }
     }
 
@@ -1160,7 +1162,9 @@ final class WindowManager {
                 continue
             }
 
-            var target = geometry.frame(expanded: false)
+            var target = (host.state.contextPreferredCompactWidth != nil || host.state.contextPreferredCompactHeight != nil)
+                ? targetFrame(host: host, expanded: false)
+                : geometry.frame(expanded: false)
             if geometry.style == .detached {
                 target.origin.x = host.panel.frame.midX - target.width / 2
                 target.origin.y = host.panel.frame.maxY - target.height
@@ -1268,17 +1272,30 @@ final class WindowManager {
         return frame
     }
 
-    private func adjustedClosedFrame(host: Host, requestedWidth: CGFloat?) -> CGRect {
+    private func adjustedClosedFrame(host: Host, requestedWidth: CGFloat?, requestedHeight: CGFloat?) -> CGRect {
         guard let geometry = host.geometry else { return .zero }
         let base = geometry.frame(expanded: false)
-        guard let requestedWidth, requestedWidth.isFinite else { return base }
+        guard requestedWidth != nil || requestedHeight != nil else { return base }
 
         let margin: CGFloat = 8
-        let physicalFloor = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
-            ? geometry.physicalNotchWidth + 16 : 64
-        let maximum = max(physicalFloor, geometry.visible.width - margin * 2)
-        let width = min(maximum, max(physicalFloor, requestedWidth))
-        var frame = CGRect(x: base.midX - width / 2, y: base.minY, width: width, height: base.height)
+        let physicalWidthFloor = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
+            ? geometry.physicalNotchWidth + 16 : 48
+        let physicalHeightFloor = geometry.attachedToNotch && host.state.physicalNotchHeight > 0
+            ? host.state.physicalNotchHeight : 16
+        let maximumWidth = max(physicalWidthFloor, geometry.visible.width - margin * 2)
+        let maximumHeight = min(220, max(physicalHeightFloor, geometry.visible.height - margin * 2))
+        let desiredWidth = requestedWidth?.isFinite == true ? requestedWidth! : base.width
+        let desiredHeight = requestedHeight?.isFinite == true ? requestedHeight! : base.height
+        let width = min(maximumWidth, max(physicalWidthFloor, desiredWidth))
+        let height = min(maximumHeight, max(physicalHeightFloor, desiredHeight))
+        var frame: CGRect
+        if geometry.style == .bottom {
+            frame = CGRect(x: base.midX - width / 2, y: base.minY, width: width, height: height)
+        } else {
+            frame = CGRect(x: base.midX - width / 2, y: base.maxY - height, width: width, height: height)
+        }
+        if geometry.style == .left { frame.origin.x = base.minX }
+        if geometry.style == .right { frame.origin.x = base.maxX - width }
         if frame.minX < geometry.visible.minX + margin { frame.origin.x = geometry.visible.minX + margin }
         if frame.maxX > geometry.visible.maxX - margin { frame.origin.x = geometry.visible.maxX - margin - width }
         return frame
@@ -1288,7 +1305,8 @@ final class WindowManager {
         guard host.geometry != nil else { return .zero }
         return expanded
             ? adjustedExpandedFrame(host: host, requested: host.state.contextPreferredSize)
-            : adjustedClosedFrame(host: host, requestedWidth: host.state.contextPreferredCompactWidth)
+            : adjustedClosedFrame(host: host, requestedWidth: host.state.contextPreferredCompactWidth,
+                                  requestedHeight: host.state.contextPreferredCompactHeight)
     }
 
     private func notchAmbientFrame(for geometry: SurfaceGeometry) -> CGRect {
@@ -1496,6 +1514,26 @@ final class WindowManager {
                     host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
                                        preset: .smooth,
                                        animations: host.state.theme.animations && !host.state.editingGeometry,
+                                       opening: true, style: geometry.style, liveViewportResize: true,
+                                       synchronizeClosedGeometry: true,
+                                       closedCameraFrame: self.physicalCameraFrame(for: geometry))
+                }
+                host.contextCompactHeightSubscription = host.state.$contextPreferredCompactHeight.dropFirst().removeDuplicates(by: { lhs, rhs in
+                    switch (lhs, rhs) {
+                    case (nil, nil): return true
+                    case let (a?, b?): return abs(a - b) < 1
+                    default: return false
+                    }
+                }).receive(on: DispatchQueue.main).sink { [weak self, weak host] _ in
+                    guard let self, let host, let geometry = host.geometry, !host.state.expanded else { return }
+                    let target = self.targetFrame(host: host, expanded: false)
+                    guard host.targetFrame != target else { return }
+                    host.targetFrame = target
+                    var motion = geometry.appearance.surface
+                    motion.opening = .resize; motion.closing = .resize
+                    motion.duration = min(0.30, max(0.14, motion.duration))
+                    host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
+                                       preset: .smooth, animations: host.state.theme.animations && !host.state.editingGeometry,
                                        opening: true, style: geometry.style, liveViewportResize: true,
                                        synchronizeClosedGeometry: true,
                                        closedCameraFrame: self.physicalCameraFrame(for: geometry))

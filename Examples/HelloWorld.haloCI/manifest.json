@@ -8,8 +8,46 @@
   "minimumHaloVersion": "1.0.0",
   "entryInterface": "interface.json",
   "description": "Starter Custom CI showing bindings, local UI and brokered media actions.",
-  "permissions": ["Media.ReadState", "Media.Control"],
-  "capabilities": ["AutomaticTriggers", "MediaControls", "LocalState"],
-  "supportedSurfaces": ["notch"],
-  "supportedStates": ["closed", "expanded"]
+  "permissions": [
+    "Media.ReadState",
+    "Media.Control"
+  ],
+  "capabilities": [
+    "AutomaticTriggers",
+    "MediaControls",
+    "LocalState"
+  ],
+  "supportedSurfaces": [
+    "notch"
+  ],
+  "supportedStates": [
+    "closed",
+    "expanded"
+  ],
+  "surface": {
+    "sizing": {
+      "mode": "static",
+      "closed": {
+        "width": 250,
+        "height": 40
+      },
+      "expanded": {
+        "width": 560,
+        "height": 250
+      }
+    },
+    "background": {
+      "closed": {
+        "type": "solid",
+        "color": "#0C0D10",
+        "opacity": 1
+      },
+      "expanded": {
+        "type": "gradient",
+        "color": "#0C0D10",
+        "secondaryColor": "#161A24",
+        "opacity": 1
+      }
+    }
+  }
 }

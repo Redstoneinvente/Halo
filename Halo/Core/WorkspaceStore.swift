@@ -812,18 +812,36 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         NotificationCenter.default.post(name: .init("HaloCustomCICloseRequested"), object: id)
     }
 
-    func activeCandidate(workspace: WorkspaceStore, globalDisabled: Bool) -> HaloCustomCICandidate? {
+    func activeCandidate(workspace: WorkspaceStore, globalDisabled: Bool,
+                         blockingPriority: Double? = nil) -> HaloCustomCICandidate? {
         guard !globalDisabled else { return nil }
-        if let id = manualActivationID, let package = package(id: id), isEnabled(id) {
-            return HaloCustomCICandidate(package: package, priority: 1001, manual: true)
-        }
+        let floor = blockingPriority ?? -Double.infinity
         let snapshot = triggerSnapshot(workspace: workspace)
-        return packages.filter { package in
+        let ordered = packages.filter { package in
             let id = package.manifest.id
-            return isEnabled(id) && !suppressedPackageIDs.contains(id) &&
-                HaloCITriggerEvaluator.matches(package.triggers, snapshot: snapshot, grantedPermissions: grantedPermissions(id))
-        }.map { HaloCustomCICandidate(package: $0, priority: priority($0.manifest.id), manual: false) }
-         .max { lhs, rhs in lhs.priority == rhs.priority ? lhs.package.manifest.id > rhs.package.manifest.id : lhs.priority < rhs.priority }
+            return isEnabled(id) && priority(id) >= floor &&
+                (!suppressedPackageIDs.contains(id) || manualActivationID == id)
+        }.sorted { lhs, rhs in
+            let lp = priority(lhs.manifest.id), rp = priority(rhs.manifest.id)
+            if lp != rp { return lp > rp }
+            let lm = manualActivationID == lhs.manifest.id, rm = manualActivationID == rhs.manifest.id
+            if lm != rm { return lm }
+            return lhs.manifest.id < rhs.manifest.id
+        }
+
+        // Arbitration happens before trigger evaluation. Once a higher-priority package
+        // claims the surface, lower-priority packages are not evaluated at all.
+        for package in ordered {
+            let id = package.manifest.id
+            if manualActivationID == id {
+                return HaloCustomCICandidate(package: package, priority: priority(id), manual: true)
+            }
+            if HaloCITriggerEvaluator.matches(package.triggers, snapshot: snapshot,
+                                              grantedPermissions: grantedPermissions(id)) {
+                return HaloCustomCICandidate(package: package, priority: priority(id), manual: false)
+            }
+        }
+        return nil
     }
 
     func dataBus(for package: HaloCIParsedPackage, workspace: WorkspaceStore, expanded: Bool) -> [String: String] {

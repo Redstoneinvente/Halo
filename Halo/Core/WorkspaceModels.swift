@@ -1755,6 +1755,70 @@ enum HaloCISDK {
     }
 }
 
+struct HaloCISizeRule: Codable, Equatable {
+    var width: Double?
+    var height: Double?
+    var minWidth: Double?
+    var preferredWidth: Double?
+    var maxWidth: Double?
+    var minHeight: Double?
+    var preferredHeight: Double?
+    var maxHeight: Double?
+
+    init(width: Double? = nil, height: Double? = nil,
+         minWidth: Double? = nil, preferredWidth: Double? = nil, maxWidth: Double? = nil,
+         minHeight: Double? = nil, preferredHeight: Double? = nil, maxHeight: Double? = nil) {
+        self.width = width; self.height = height
+        self.minWidth = minWidth; self.preferredWidth = preferredWidth; self.maxWidth = maxWidth
+        self.minHeight = minHeight; self.preferredHeight = preferredHeight; self.maxHeight = maxHeight
+    }
+}
+
+struct HaloCISurfaceSizing: Codable, Equatable {
+    /// `static` means exact declared dimensions. `dynamic` means Halo measures the rendered
+    /// declarative tree and clamps it to the declared min/preferred/max bounds.
+    var mode: String
+    var closed: HaloCISizeRule?
+    var expanded: HaloCISizeRule
+}
+
+struct HaloCIBackgroundStyle: Codable, Equatable {
+    /// solid, gradient, glass, or clear
+    var type: String
+    var color: String?
+    var secondaryColor: String?
+    var opacity: Double?
+    var blur: Double?
+
+    init(type: String = "solid", color: String? = "#101014", secondaryColor: String? = nil,
+         opacity: Double? = 1, blur: Double? = 0) {
+        self.type = type; self.color = color; self.secondaryColor = secondaryColor
+        self.opacity = opacity; self.blur = blur
+    }
+}
+
+struct HaloCIBackgroundContract: Codable, Equatable {
+    var closed: HaloCIBackgroundStyle?
+    var expanded: HaloCIBackgroundStyle
+}
+
+struct HaloCISurfaceContract: Codable, Equatable {
+    var sizing: HaloCISurfaceSizing
+    var background: HaloCIBackgroundContract
+
+    static let safeDefault = HaloCISurfaceContract(
+        sizing: HaloCISurfaceSizing(
+            mode: "static",
+            closed: HaloCISizeRule(width: 190, height: 40),
+            expanded: HaloCISizeRule(width: 560, height: 260)
+        ),
+        background: HaloCIBackgroundContract(
+            closed: HaloCIBackgroundStyle(type: "solid", color: "#101014"),
+            expanded: HaloCIBackgroundStyle(type: "solid", color: "#101014")
+        )
+    )
+}
+
 struct HaloCIManifest: Codable, Equatable {
     var schemaVersion: Int
     var sdkVersion: String
@@ -1769,21 +1833,24 @@ struct HaloCIManifest: Codable, Equatable {
     var capabilities: [String]
     var supportedSurfaces: [String]
     var supportedStates: [String]
+    var surface: HaloCISurfaceContract
 
     init(schemaVersion: Int = 1, sdkVersion: String = "0.1", id: String, name: String,
          author: String, version: String, minimumHaloVersion: String = "1.0.0",
          entryInterface: String = "interface.json", description: String = "",
          permissions: [String] = [], capabilities: [String] = [],
-         supportedSurfaces: [String] = ["notch"], supportedStates: [String] = ["closed", "expanded"]) {
+         supportedSurfaces: [String] = ["notch"], supportedStates: [String] = ["closed", "expanded"],
+         surface: HaloCISurfaceContract = .safeDefault) {
         self.schemaVersion = schemaVersion; self.sdkVersion = sdkVersion; self.id = id; self.name = name
         self.author = author; self.version = version; self.minimumHaloVersion = minimumHaloVersion
         self.entryInterface = entryInterface; self.description = description; self.permissions = permissions
         self.capabilities = capabilities; self.supportedSurfaces = supportedSurfaces; self.supportedStates = supportedStates
+        self.surface = surface
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, sdkVersion, id, name, author, version, minimumHaloVersion, entryInterface,
-             description, permissions, capabilities, supportedSurfaces, supportedStates
+             description, permissions, capabilities, supportedSurfaces, supportedStates, surface
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1800,6 +1867,7 @@ struct HaloCIManifest: Codable, Equatable {
         capabilities = try c.decodeIfPresent([String].self, forKey: .capabilities) ?? []
         supportedSurfaces = try c.decodeIfPresent([String].self, forKey: .supportedSurfaces) ?? ["notch"]
         supportedStates = try c.decodeIfPresent([String].self, forKey: .supportedStates) ?? ["expanded"]
+        surface = try c.decodeIfPresent(HaloCISurfaceContract.self, forKey: .surface) ?? .safeDefault
     }
 }
 
@@ -1952,8 +2020,16 @@ enum HaloCIBindingResolver {
 enum HaloCIPackageValidator {
     private static let manifestKeys: Set<String> = [
         "schemaVersion", "sdkVersion", "id", "name", "author", "version", "minimumHaloVersion",
-        "entryInterface", "description", "permissions", "capabilities", "supportedSurfaces", "supportedStates"
+        "entryInterface", "description", "permissions", "capabilities", "supportedSurfaces", "supportedStates", "surface"
     ]
+    private static let surfaceKeys: Set<String> = ["sizing", "background"]
+    private static let sizingKeys: Set<String> = ["mode", "closed", "expanded"]
+    private static let sizeRuleKeys: Set<String> = [
+        "width", "height", "minWidth", "preferredWidth", "maxWidth",
+        "minHeight", "preferredHeight", "maxHeight"
+    ]
+    private static let backgroundKeys: Set<String> = ["closed", "expanded"]
+    private static let backgroundStyleKeys: Set<String> = ["type", "color", "secondaryColor", "opacity", "blur"]
     private static let interfaceKeys: Set<String> = ["closed", "expanded"]
     private static let componentKeys: Set<String> = [
         "type", "id", "text", "value", "source", "systemName", "metric", "children", "action",
@@ -2015,6 +2091,11 @@ enum HaloCIPackageValidator {
             return HaloCIValidationReport(package: nil, issues: issues)
         }
         validateManifest(manifest, issues: &issues)
+        if let surfaceObject = manifestObject["surface"] as? [String: Any] {
+            validateSurfaceRaw(surfaceObject, manifest: manifest, issues: &issues)
+        } else {
+            issues.append(.init(.error, "manifest.json.surface", "Every Custom CI must declare its notch sizing and background contract."))
+        }
 
         guard safeRelativePath(manifest.entryInterface) else {
             issues.append(.init(.error, "manifest.json.entryInterface", "entryInterface must be a relative path inside the package."))
@@ -2072,6 +2153,82 @@ enum HaloCIPackageValidator {
 
     private static func rejectUnknownKeys(in object: [String: Any], allowed: Set<String>, path: String, issues: inout [HaloCIValidationIssue]) {
         for key in object.keys where !allowed.contains(key) { issues.append(.init(.error, path + "." + key, "Unknown SDK 0.1 field.")) }
+    }
+
+    private static func validateSurfaceRaw(_ object: [String: Any], manifest: HaloCIManifest,
+                                           issues: inout [HaloCIValidationIssue]) {
+        rejectUnknownKeys(in: object, allowed: surfaceKeys, path: "manifest.json.surface", issues: &issues)
+        guard let sizing = object["sizing"] as? [String: Any] else {
+            issues.append(.init(.error, "manifest.json.surface.sizing", "sizing is required.")); return
+        }
+        rejectUnknownKeys(in: sizing, allowed: sizingKeys, path: "manifest.json.surface.sizing", issues: &issues)
+        let mode = sizing["mode"] as? String ?? ""
+        guard ["static", "dynamic"].contains(mode) else {
+            issues.append(.init(.error, "manifest.json.surface.sizing.mode", "Sizing mode must be static or dynamic.")); return
+        }
+
+        func validateRule(_ raw: Any?, state: String, required: Bool) {
+            let path = "manifest.json.surface.sizing.\(state)"
+            guard let rule = raw as? [String: Any] else {
+                if required { issues.append(.init(.error, path, "A \(state) size contract is required.")) }
+                return
+            }
+            rejectUnknownKeys(in: rule, allowed: sizeRuleKeys, path: path, issues: &issues)
+            let closed = state == "closed"
+            let widthRange: ClosedRange<Double> = closed ? 48...720 : 160...1100
+            let heightRange: ClosedRange<Double> = closed ? 16...160 : 96...820
+            func checked(_ key: String, range: ClosedRange<Double>) -> Double? {
+                guard let value = number(rule[key]), value.isFinite, range.contains(value) else {
+                    issues.append(.init(.error, path + "." + key, "Missing or outside the supported \(state) size range.")); return nil
+                }
+                return value
+            }
+            if mode == "static" {
+                _ = checked("width", range: widthRange); _ = checked("height", range: heightRange)
+                for key in ["minWidth", "preferredWidth", "maxWidth", "minHeight", "preferredHeight", "maxHeight"] where rule[key] != nil {
+                    issues.append(.init(.error, path + "." + key, "Dynamic bounds are not allowed when sizing.mode is static."))
+                }
+            } else {
+                if rule["width"] != nil || rule["height"] != nil {
+                    issues.append(.init(.error, path, "Dynamic sizing uses min/preferred/max bounds instead of width/height."))
+                }
+                let minW = checked("minWidth", range: widthRange), prefW = checked("preferredWidth", range: widthRange), maxW = checked("maxWidth", range: widthRange)
+                let minH = checked("minHeight", range: heightRange), prefH = checked("preferredHeight", range: heightRange), maxH = checked("maxHeight", range: heightRange)
+                if let minW, let prefW, let maxW, !(minW <= prefW && prefW <= maxW) { issues.append(.init(.error, path, "Width bounds must satisfy minWidth <= preferredWidth <= maxWidth.")) }
+                if let minH, let prefH, let maxH, !(minH <= prefH && prefH <= maxH) { issues.append(.init(.error, path, "Height bounds must satisfy minHeight <= preferredHeight <= maxHeight.")) }
+            }
+        }
+        let states = Set(manifest.supportedStates)
+        validateRule(sizing["expanded"], state: "expanded", required: true)
+        validateRule(sizing["closed"], state: "closed", required: states.contains("closed"))
+
+        guard let background = object["background"] as? [String: Any] else {
+            issues.append(.init(.error, "manifest.json.surface.background", "Every Custom CI must own its background.")); return
+        }
+        rejectUnknownKeys(in: background, allowed: backgroundKeys, path: "manifest.json.surface.background", issues: &issues)
+        func validateBackground(_ raw: Any?, state: String, required: Bool) {
+            let path = "manifest.json.surface.background.\(state)"
+            guard let style = raw as? [String: Any] else {
+                if required { issues.append(.init(.error, path, "A \(state) background is required.")) }
+                return
+            }
+            rejectUnknownKeys(in: style, allowed: backgroundStyleKeys, path: path, issues: &issues)
+            guard let type = style["type"] as? String, ["solid", "gradient", "glass", "clear"].contains(type) else {
+                issues.append(.init(.error, path + ".type", "Background type must be solid, gradient, glass, or clear.")); return
+            }
+            if let opacity = number(style["opacity"]), !(0...1).contains(opacity) { issues.append(.init(.error, path + ".opacity", "Opacity must be 0...1.")) }
+            if let blur = number(style["blur"]), !(0...40).contains(blur) { issues.append(.init(.error, path + ".blur", "Blur must be 0...40.")) }
+            func validColor(_ key: String, required: Bool) {
+                guard let raw = style[key] as? String else { if required { issues.append(.init(.error, path + "." + key, "A color is required.")) }; return }
+                let named = ["accent", "white", "black", "clear", "secondary", "green", "orange", "red", "blue"].contains(raw.lowercased())
+                let hex = matches(raw, #"^#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$"#)
+                if !named && !hex { issues.append(.init(.error, path + "." + key, "Use a supported named color or #RRGGBB/#RRGGBBAA.")) }
+            }
+            validColor("color", required: type == "solid" || type == "gradient" || type == "glass")
+            validColor("secondaryColor", required: type == "gradient")
+        }
+        validateBackground(background["expanded"], state: "expanded", required: true)
+        validateBackground(background["closed"], state: "closed", required: states.contains("closed"))
     }
 
     private static func validateManifest(_ manifest: HaloCIManifest, issues: inout [HaloCIValidationIssue]) {
