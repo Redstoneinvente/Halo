@@ -294,6 +294,8 @@ private enum HaloPixelPalColorRole: Character {
     case blush = "b"
     case white = "w"
     case shadow = "s"
+    case accessoryFrame = "g"
+    case accessoryLens = "l"
 }
 
 private struct HaloPixelPalSprite {
@@ -514,14 +516,14 @@ private enum HaloPixelPalSprites {
         "p...p"
     ])
     static let glasses = HaloPixelPalSprite(rows: [
-        "pppp...pppp",
-        "p..p.p.p..p",
-        "pppp...pppp"
+        "gggg...gggg",
+        "g..g.g.g..g",
+        "gggg...gggg"
     ])
     static let shades = HaloPixelPalSprite(rows: [
-        "ppppp.ppppp",
-        "psssp.psssp",
-        ".ppp...ppp."
+        "ggggg.ggggg",
+        "glllg.glllg",
+        ".ggg...ggg."
     ])
     static let headphones = HaloPixelPalSprite(rows: [
         "..ppppppp..",
@@ -572,6 +574,25 @@ private enum HaloPixelPalSprites {
 
 // MARK: - Store and context
 
+struct HaloPixelPalTapBurst {
+    static let window: TimeInterval = 1.2
+    static let threshold = 5
+
+    private(set) var tapTimes: [TimeInterval] = []
+
+    mutating func register(count: Int, at now: TimeInterval) -> Bool {
+        tapTimes.removeAll { now - $0 > Self.window }
+        tapTimes.append(contentsOf: repeatElement(now, count: max(1, count)))
+        guard tapTimes.count >= Self.threshold else { return false }
+        tapTimes.removeAll(keepingCapacity: true)
+        return true
+    }
+
+    mutating func reset() {
+        tapTimes.removeAll(keepingCapacity: true)
+    }
+}
+
 @MainActor
 final class HaloPixelPalStore: ObservableObject {
     static let shared = HaloPixelPalStore()
@@ -583,6 +604,7 @@ final class HaloPixelPalStore: ObservableObject {
     @Published private(set) var reactionStarted = Date()
     private var tapIndex = 0
     private var pressIndex = 0
+    private var tapBurst = HaloPixelPalTapBurst()
 
     private let defaults: UserDefaults
     private let preferencesKey = "HaloPixelPal.preferences.v4"
@@ -623,9 +645,12 @@ final class HaloPixelPalStore: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
     }
 
-
     func tapped() {
         guard preferences.tapReaction else { return }
+        if shouldBecomeAngry(forPhysicalTapCount: 1) {
+            react(.annoyed, seconds: 3.4)
+            return
+        }
         let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]
         react(sequence[tapIndex % sequence.count])
         tapIndex += 1
@@ -633,7 +658,16 @@ final class HaloPixelPalStore: ObservableObject {
 
     func doubleTapped() {
         guard preferences.doubleTapReaction else { return }
+        if shouldBecomeAngry(forPhysicalTapCount: 2) {
+            react(.annoyed, seconds: 3.4)
+            return
+        }
         react(.love, seconds: 2.2)
+    }
+
+    private func shouldBecomeAngry(forPhysicalTapCount count: Int) -> Bool {
+        if reaction == .annoyed { return true }
+        return tapBurst.register(count: count, at: Date().timeIntervalSinceReferenceDate)
     }
 
     func longPressed() {
@@ -649,6 +683,7 @@ final class HaloPixelPalStore: ObservableObject {
         clearReactionWork?.cancel()
         tapIndex = 0
         pressIndex = 0
+        tapBurst.reset()
     }
 
     private func persist() {
@@ -677,7 +712,11 @@ private struct HaloPixelPalContext {
         date: Date
     ) -> Self {
         if let reaction = pal.reaction {
-            return .init(expression: reaction, accessory: nil, fx: fx(for: reaction))
+            return .init(
+                expression: reaction,
+                accessory: reaction == .annoyed ? .horns : nil,
+                fx: fx(for: reaction)
+            )
         }
 
         let p = pal.preferences
@@ -742,7 +781,7 @@ private struct HaloPixelPalContext {
         case .music: return .music
         case .worried: return .sweat
         case .crying: return .tears
-        case .shocked, .surprised: return .alert
+        case .annoyed, .shocked, .surprised: return .alert
         default: return .none
         }
     }
@@ -953,6 +992,8 @@ private struct HaloPixelPalFace: View {
             case .blush: return blushColor
             case .white: return .white
             case .shadow: return Color.black.opacity(0.78)
+            case .accessoryFrame: return Color(red: 0.72, green: 0.78, blue: 0.90)
+            case .accessoryLens: return Color(red: 0.15, green: 0.34, blue: 0.58)
             }
         }
 
@@ -1217,6 +1258,8 @@ private struct HaloPixelPalFace: View {
             return (Int(round(sin(t * 2.0))) * one, one)
         case .bored:
             return (Int(round(sin(t * 0.8))) * one, one)
+        case .annoyed:
+            return (Int(round(sin(t * 11.0))) * one, 0)
         case .neutral:
             let phase = t.truncatingRemainder(dividingBy: 8)
             return (0, phase > 6.8 && phase < 7.4 ? -one : 0)
@@ -1535,7 +1578,7 @@ private struct HaloPixelPalSettingsView: View {
         case .music: return .music
         case .worried: return .sweat
         case .crying: return .tears
-        case .surprised, .shocked: return .alert
+        case .annoyed, .surprised, .shocked: return .alert
         default: return .none
         }
     }
