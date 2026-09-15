@@ -24,11 +24,36 @@ jobs:
         run: |
           : > /tmp/apply_custom_ci.py
           for part in $(find scripts/custom-ci-patch -type f -name 'part*' | sort); do
-            # Staging chunks were committed as text files and each acquired one
-            # separator newline. Remove only that artificial trailing newline so
-            # arbitrary mid-token chunk boundaries are reconstructed byte-for-byte.
             perl -0pe 's/\n\z//' "$part" >> /tmp/apply_custom_ci.py
           done
+
+          # The staged generator wrapped large Swift source payloads in single-quoted
+          # Python literals. Swift prose may legitimately contain apostrophes, so repair
+          # only the OUTER quotes. Embedded Swift double-quotes were already escaped by
+          # the generator, making double-quoted Python literals safe here.
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('/tmp/apply_custom_ci.py')
+          lines = path.read_text().splitlines()
+          repaired = []
+          changed = 0
+          pattern = re.compile(r"^([A-Z][A-Z0-9_]*) = '(.*)'$")
+          for line in lines:
+              match = pattern.match(line)
+              if match:
+                  name, body = match.groups()
+                  repaired.append(f'{name} = "{body}"')
+                  changed += 1
+              else:
+                  repaired.append(line)
+          path.write_text('\n'.join(repaired) + '\n')
+          print(f'Repaired {changed} staged source literals')
+          if changed == 0:
+              raise SystemExit('No staged source literals were repaired')
+          PY
+
           python3 -m py_compile /tmp/apply_custom_ci.py
 
       - name: Apply Custom CI SDK
