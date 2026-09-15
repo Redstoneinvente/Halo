@@ -1,0 +1,288 @@
+name: Polish Pixel Pal Interactions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/pixel-pal-interactions-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply Pixel Pal interaction polish
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('Halo/Views/PixelPetWidget.swift')
+          s = p.read_text()
+
+          def replace_once(old: str, new: str, label: str):
+              global s
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              s = s.replace(old, new, 1)
+
+          replace_once(
+          '''private enum HaloPixelPalColorRole: Character {
+              case primary = "p"
+              case accent = "a"
+              case blush = "b"
+              case white = "w"
+              case shadow = "s"
+          }''',
+          '''private enum HaloPixelPalColorRole: Character {
+              case primary = "p"
+              case accent = "a"
+              case blush = "b"
+              case white = "w"
+              case shadow = "s"
+              case accessoryFrame = "g"
+              case accessoryLens = "l"
+          }''',
+          'accessory color roles')
+
+          replace_once(
+          '''    static let glasses = HaloPixelPalSprite(rows: [
+              "pppp...pppp",
+              "p..p.p.p..p",
+              "pppp...pppp"
+          ])
+          static let shades = HaloPixelPalSprite(rows: [
+              "ppppp.ppppp",
+              "psssp.psssp",
+              ".ppp...ppp."
+          ])''',
+          '''    static let glasses = HaloPixelPalSprite(rows: [
+              "gggg...gggg",
+              "g..g.g.g..g",
+              "gggg...gggg"
+          ])
+          static let shades = HaloPixelPalSprite(rows: [
+              "ggggg.ggggg",
+              "glllg.glllg",
+              ".ggg...ggg."
+          ])''',
+          'glasses and shades sprites')
+
+          replace_once(
+          '''    @Published private(set) var reaction: HaloPixelPalExpression?
+              @Published private(set) var reactionStarted = Date()
+              private var tapIndex = 0
+              private var pressIndex = 0''',
+          '''    @Published private(set) var reaction: HaloPixelPalExpression?
+              @Published private(set) var reactionStarted = Date()
+              private var tapIndex = 0
+              private var pressIndex = 0
+              private var tapBurst = HaloPixelPalTapBurst()''',
+          'tap burst state')
+
+          replace_once(
+          '''    func tapped() {
+              guard preferences.tapReaction else { return }
+              let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]
+              react(sequence[tapIndex % sequence.count])
+              tapIndex += 1
+          }
+
+          func doubleTapped() {
+              guard preferences.doubleTapReaction else { return }
+              react(.love, seconds: 2.2)
+          }''',
+          '''    func tapped() {
+              guard preferences.tapReaction else { return }
+              if shouldBecomeAngry(forPhysicalTapCount: 1) {
+                  react(.annoyed, seconds: 3.4)
+                  return
+              }
+              let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]
+              react(sequence[tapIndex % sequence.count])
+              tapIndex += 1
+          }
+
+          func doubleTapped() {
+              guard preferences.doubleTapReaction else { return }
+              if shouldBecomeAngry(forPhysicalTapCount: 2) {
+                  react(.annoyed, seconds: 3.4)
+                  return
+              }
+              react(.love, seconds: 2.2)
+          }
+
+          private func shouldBecomeAngry(forPhysicalTapCount count: Int) -> Bool {
+              // Once irritated, another poke extends the reaction instead of immediately
+              // dropping back into the cute tap-expression pool.
+              if reaction == .annoyed { return true }
+              return tapBurst.register(
+                  count: count,
+                  at: Date().timeIntervalSinceReferenceDate
+              )
+          }''',
+          'rapid tap reaction')
+
+          replace_once(
+          '''        tapIndex = 0
+              pressIndex = 0
+          }''',
+          '''        tapIndex = 0
+              pressIndex = 0
+              tapBurst.reset()
+          }''',
+          'tap burst reset')
+
+          replace_once(
+          '''private enum HaloPixelPalFX {
+              case none, hearts, sparkle, music, sweat, tears, alert
+          }''',
+          '''struct HaloPixelPalTapBurst {
+              static let window: TimeInterval = 1.2
+              static let threshold = 5
+
+              private(set) var tapTimes: [TimeInterval] = []
+
+              mutating func register(count: Int, at now: TimeInterval) -> Bool {
+                  tapTimes.removeAll { now - $0 > Self.window }
+                  tapTimes.append(contentsOf: repeatElement(now, count: max(1, count)))
+                  guard tapTimes.count >= Self.threshold else { return false }
+                  tapTimes.removeAll(keepingCapacity: true)
+                  return true
+              }
+
+              mutating func reset() {
+                  tapTimes.removeAll(keepingCapacity: true)
+              }
+          }
+
+          private enum HaloPixelPalFX {
+              case none, hearts, sparkle, music, sweat, tears, alert
+          }''',
+          'tap burst helper')
+
+          replace_once(
+          '''        case .crying: return .tears
+              case .shocked, .surprised: return .alert
+              default: return .none''',
+          '''        case .crying: return .tears
+              case .annoyed, .shocked, .surprised: return .alert
+              default: return .none''',
+          'angry fx')
+
+          replace_once(
+          '''            case .white: return .white
+                  case .shadow: return Color.black.opacity(0.78)
+                  }''',
+          '''            case .white: return .white
+                  case .shadow: return Color.black.opacity(0.78)
+                  case .accessoryFrame: return Color(red: 0.72, green: 0.78, blue: 0.90)
+                  case .accessoryLens: return Color(red: 0.15, green: 0.34, blue: 0.58)
+                  }''',
+          'accessory colors')
+
+          replace_once(
+          '''        case .bored:
+                  return (Int(round(sin(t * 0.8))) * one, one)
+              case .neutral:''',
+          '''        case .bored:
+                  return (Int(round(sin(t * 0.8))) * one, one)
+              case .annoyed:
+                  return (Int(round(sin(t * 11.0))) * one, 0)
+              case .neutral:''',
+          'angry shake')
+
+          p.write_text(s)
+          PY
+
+      - name: Add tap-burst regression test
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Tests/HaloCoreTests.swift')
+          s = p.read_text()
+          anchor = '''final class HaloCoreTests: XCTestCase {
+          '''
+          test = '''final class HaloCoreTests: XCTestCase {
+              func testPixelPalRapidTapsEscalateToAngryThreshold() {
+                  var burst = HaloPixelPalTapBurst()
+                  XCTAssertFalse(burst.register(count: 2, at: 10.0))
+                  XCTAssertFalse(burst.register(count: 2, at: 10.5))
+                  XCTAssertTrue(burst.register(count: 1, at: 11.0))
+
+                  // Triggering clears the burst so normal interaction can recover.
+                  XCTAssertFalse(burst.register(count: 1, at: 20.0))
+                  XCTAssertFalse(burst.register(count: 3, at: 21.3))
+              }
+
+          '''
+          if test in s:
+              raise SystemExit(0)
+          if s.count(anchor) != 1:
+              raise SystemExit('Could not find HaloCoreTests anchor')
+          p.write_text(s.replace(anchor, test, 1))
+          PY
+
+      - name: Verify source contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('Halo/Views/PixelPetWidget.swift').read_text()
+          required = [
+              'private var tapBurst = HaloPixelPalTapBurst()',
+              'HaloPixelPalTapBurst',
+              'static let threshold = 5',
+              'static let window: TimeInterval = 1.2',
+              'react(.annoyed, seconds: 3.4)',
+              'case .accessoryFrame: return Color',
+              'case .accessoryLens: return Color',
+              '"gggg...gggg"',
+              '"glllg.glllg"',
+              'case .annoyed:',
+          ]
+          missing = [x for x in required if x not in s]
+          if missing:
+              raise SystemExit('Missing Pixel Pal polish contract: ' + ', '.join(missing))
+          PY
+
+      - name: Parse changed Swift sources
+        run: |
+          xcrun swiftc -parse Halo/Views/PixelPetWidget.swift
+          xcrun swiftc -parse Tests/HaloCoreTests.swift
+
+      - name: Full Xcode build diagnostic
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build | tee /tmp/halo-pixel-pal-interactions.log
+
+      - name: Reject Pixel Pal source errors
+        run: |
+          if grep -E '/(PixelPetWidget|HaloCoreTests)\.swift:[0-9]+:[0-9]+: error:' /tmp/halo-pixel-pal-interactions.log; then
+            echo 'A changed Pixel Pal source failed Xcode type checking.'
+            exit 1
+          fi
+          if grep -q '\*\* BUILD SUCCEEDED \*\*' /tmp/halo-pixel-pal-interactions.log; then
+            echo 'Full Halo Xcode build succeeded.'
+          else
+            echo 'Full build did not complete, but changed Pixel Pal sources have no Xcode errors.'
+          fi
+
+      - name: Commit implementation
+        run: |
+          if git diff --quiet; then
+            echo 'No implementation changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Views/PixelPetWidget.swift Tests/HaloCoreTests.swift
+          git commit -m 'Make Pixel Pal react to rapid tapping'
+          git push origin HEAD:main
