@@ -503,6 +503,18 @@ private enum HaloPixelPalSprites {
         "a"
     ])
 
+    static let zSmall = HaloPixelPalSprite(rows: [
+        "aaa",
+        "..a",
+        ".a.",
+        "aaa"
+    ])
+    static let zTiny = HaloPixelPalSprite(rows: [
+        "aa",
+        ".a",
+        "aa"
+    ])
+
     // Accessories
     static let bow = HaloPixelPalSprite(rows: [
         "aa...aa",
@@ -694,7 +706,7 @@ final class HaloPixelPalStore: ObservableObject {
 }
 
 private enum HaloPixelPalFX {
-    case none, hearts, sparkle, music, sweat, tears, alert
+    case none, hearts, sparkle, music, sweat, tears, alert, sleepZ
 }
 
 private struct HaloPixelPalContext {
@@ -754,6 +766,20 @@ private struct HaloPixelPalContext {
             }
         }
 
+        if p.nightReaction {
+            let hour = Calendar.autoupdatingCurrent.component(.hour, from: date)
+
+            // Late night: settle down, breathe slowly and drift off with floating Zs.
+            if hour >= 23 || hour < 5 {
+                return .init(expression: .sleepy, accessory: .sleepingCap, fx: .sleepZ)
+            }
+
+            // Early morning: wake up bright and fresh before normal daytime behavior resumes.
+            if hour >= 5 && hour < 9 {
+                return .init(expression: .happy, accessory: .sprout, fx: .sparkle)
+            }
+        }
+
         if hovering && p.hoverReaction { return resting }
 
         if p.idleReaction {
@@ -761,13 +787,6 @@ private struct HaloPixelPalContext {
             let keyboardIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
             if min(mouseIdle, keyboardIdle) > 180 {
                 return .init(expression: .bored, accessory: nil, fx: .none)
-            }
-        }
-
-        if p.nightReaction {
-            let hour = Calendar.autoupdatingCurrent.component(.hour, from: date)
-            if hour >= 23 || hour < 6 {
-                return .init(expression: .sleepy, accessory: .sleepingCap, fx: .none)
             }
         }
 
@@ -781,6 +800,7 @@ private struct HaloPixelPalContext {
         case .music: return .music
         case .worried: return .sweat
         case .crying: return .tears
+        case .sleepy: return .sleepZ
         case .annoyed, .shocked, .surprised: return .alert
         default: return .none
         }
@@ -1232,6 +1252,9 @@ private struct HaloPixelPalFace: View {
             render(.init(HaloPixelPalSprites.tear, x: 18, y: 12), 0.95, 0, phase / 2)
         case .alert:
             render(.init(HaloPixelPalSprites.exclamation, x: 21, y: 2), 0.95, 0, reduceMotion ? 0 : -phase % 2)
+        case .sleepZ:
+            render(.init(HaloPixelPalSprites.zTiny, x: 17, y: 7), 0.52, 0, lift)
+            render(.init(HaloPixelPalSprites.zSmall, x: 20, y: 2), 0.88, 0, lift - 1)
         }
     }
 
@@ -1256,6 +1279,8 @@ private struct HaloPixelPalFace: View {
             return (0, Int(round(abs(sin(t * 7.0)))) * -two)
         case .worried, .sad, .crying:
             return (Int(round(sin(t * 2.0))) * one, one)
+        case .sleepy:
+            return (0, Int(round(sin(t * 1.15))) * one)
         case .bored:
             return (Int(round(sin(t * 0.8))) * one, one)
         case .annoyed:
@@ -1532,7 +1557,7 @@ private struct HaloPixelPalSettingsView: View {
                     Toggle("Timer state", isOn: bind(\.timerReaction))
                     Toggle("Xcode and games", isOn: bind(\.appReaction))
                     Toggle("Idle / away", isOn: bind(\.idleReaction))
-                    Toggle("Night / sleep", isOn: bind(\.nightReaction))
+                    Toggle("Time of day (morning / night)", isOn: bind(\.nightReaction))
                 }
             }
             .padding(.top, 4)
@@ -1578,6 +1603,7 @@ private struct HaloPixelPalSettingsView: View {
         case .music: return .music
         case .worried: return .sweat
         case .crying: return .tears
+        case .sleepy: return .sleepZ
         case .annoyed, .surprised, .shocked: return .alert
         default: return .none
         }
