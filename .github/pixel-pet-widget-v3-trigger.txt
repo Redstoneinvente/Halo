@@ -1,2 +1,0 @@
-Run targeted Pixel Pet integration and full Halo Xcode build.
-Retry with build diagnostics enabled.

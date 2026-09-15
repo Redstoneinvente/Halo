@@ -742,10 +742,16 @@ struct HaloCityRenderer: View {
     }
 
     private func club(_ size: CGSize, _ phase: Double) -> some View {
-        RoundedRectangle(cornerRadius: 4, style: .continuous)
-            .fill(accent.opacity(0.16 + abs(sin(phase * 2.0)) * 0.14))
-            .frame(width: max(28, size.width * 0.07), height: max(18, size.height * 0.10))
-            .overlay(Image(systemName: "music.note").font(.system(size: 8, weight: .bold)).foregroundStyle(accent.opacity(0.8)))
+        let pulseOpacity: Double = 0.16 + abs(sin(phase * 2.0)) * 0.14
+        let clubWidth: CGFloat = max(28, size.width * 0.07)
+        let clubHeight: CGFloat = max(18, size.height * 0.10)
+        let note = Image(systemName: "music.note")
+            .font(.system(size: 8, weight: .bold))
+            .foregroundStyle(accent.opacity(0.8))
+        return RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(accent.opacity(pulseOpacity))
+            .frame(width: clubWidth, height: clubHeight)
+            .overlay(note)
             .position(x: size.width * 0.82, y: size.height * 0.55)
     }
 

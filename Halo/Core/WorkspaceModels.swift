@@ -1,10 +1,10 @@
 import Foundation
 
 enum ModuleID: String, Codable, CaseIterable, Identifiable {
-    case clock, timer, shelf, media, audio, calendar, clipboard, system, launcher, activities, developer, notes, capture, stopwatch
-    static var allCases: [ModuleID] { [.clock, .timer, .shelf, .media, .audio, .calendar, .clipboard, .system, .launcher, .activities, .notes, .capture, .stopwatch] }
+    case clock, timer, shelf, media, audio, calendar, clipboard, system, launcher, activities, pet, developer, notes, capture, stopwatch
+    static var allCases: [ModuleID] { [.clock, .timer, .shelf, .media, .audio, .calendar, .clipboard, .system, .launcher, .activities, .pet, .notes, .capture, .stopwatch] }
     var id: String { rawValue }
-    var title: String { rawValue == "shelf" ? "File shelf" : rawValue.capitalized }
+    var title: String { rawValue == "shelf" ? "File shelf" : (self == .pet ? "Halo Pet" : rawValue.capitalized) }
     var symbol: String {
         switch self {
         case .clock: return "clock"
@@ -17,6 +17,7 @@ enum ModuleID: String, Codable, CaseIterable, Identifiable {
         case .system: return "gauge"
         case .launcher: return "app.dashed"
         case .activities: return "waveform.path"
+        case .pet: return "pawprint.fill"
         case .developer: return "chevron.left.forwardslash.chevron.right"
         case .notes: return "note.text"
         case .capture: return "camera.viewfinder"
@@ -156,6 +157,7 @@ struct WorkspaceLayout: Codable, Equatable {
         if let saved = widgets?[id.rawValue] { return saved }
         var style = WidgetStyle()
         if id == .clock { style.fontSize = 30; style.fontFamily = .rounded; style.weight = .light; style.showTitle = false }
+        if id == .pet { style.showTitle = false }
         return style
     }
     mutating func setWidgetStyle(_ style: WidgetStyle, for id: ModuleID) {
@@ -789,6 +791,7 @@ struct OpenNotchLayout: Codable, Equatable {
         if let module = item.module {
             switch module {
             case .media, .calendar, .system: return (3, 2)
+            case .pet: return (4, 2)
             case .shelf, .clipboard, .launcher, .activities, .notes: return (2, 2)
             case .clock, .timer, .audio, .capture, .stopwatch, .developer: return (2, 1)
             }

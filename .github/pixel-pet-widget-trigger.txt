@@ -1,2 +1,0 @@
-Apply adaptive Halo Pixel Pet widget from the approved 1x1 through 8x4 specification.
-Retry requested by user on 2026-09-15.

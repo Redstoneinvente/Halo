@@ -276,7 +276,7 @@ extension ModuleID {
                 .init("state", "Stopwatch state", "Running or paused state."),
                 .init("controls", "Stopwatch controls", "Start, pause, and reset.")
             ]
-        case .developer:
+        case .pet, .developer:
             return []
         }
     }
@@ -997,6 +997,7 @@ extension ModuleID {
         case .stopwatch: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 2, rows: 2), rich: .init(columns: 4, rows: 3))
         case .clock: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 3, rows: 1), rich: .init(columns: 4, rows: 2))
         case .activities, .developer: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 2, rows: 2), rich: .init(columns: 4, rows: 3))
+        case .pet: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 4, rows: 2), rich: .init(columns: 8, rows: 4))
         }
     }
 
@@ -1579,7 +1580,7 @@ extension WidgetStyle {
             seed("time", emphasis: .bold, scale: 1.45)
             seed("state", foreground: .secondary, scale: 0.84)
             seed("controls", background: .subtle, padding: 6, radius: 12)
-        case .developer:
+        case .pet, .developer:
             break
         }
         value.elementStyles = elements

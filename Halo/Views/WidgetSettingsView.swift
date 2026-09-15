@@ -728,7 +728,7 @@ struct WidgetSettingsView: View {
                 PreciseSlider(title: "Time scale", value: content.stopwatchScale, range: 0.8...4, step: 0.1, decimals: 1)
                 Toggle("Show controls", isOn: content.showControls)
             }
-        case .developer:
+        case .pet, .developer:
             EmptyView()
         }
     }

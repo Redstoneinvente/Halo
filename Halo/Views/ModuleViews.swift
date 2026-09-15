@@ -120,6 +120,8 @@ struct IntegrationModuleView: View {
         case .stopwatch:
             if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceAdaptiveModuleView(module: .stopwatch, store: store, workspace: workspace) }
             else { stopwatchContent }
+        case .pet:
+            HaloPixelPetWidget(store: store, workspace: workspace)
         default: EmptyView()
         }
     }

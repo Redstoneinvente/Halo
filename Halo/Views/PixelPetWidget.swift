@@ -191,6 +191,7 @@ private struct HaloPixelPetContext {
     let activity: HaloPixelPetActivity
     let detail: String
 
+    @MainActor
     static func resolve(store: AppStore, media: MediaService, system: SystemService, pet: HaloPixelPetStore, date: Date) -> Self {
         if let forced = pet.transientActivity { return .init(activity: forced, detail: "Interacting") }
         let needs = pet.needs(at: date)
