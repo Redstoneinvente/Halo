@@ -160,7 +160,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     var blushColor = HaloPixelPalRGB(red: 1.0, green: 0.38, blue: 0.58)
     var backgroundStyle: HaloPixelPalBackgroundStyle = .transparent
     var backgroundColor = HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)
-    var faceScale = 0.98
+    var faceScale = 1.0
     var glowIntensity = 0.10
 
     // Accessories
@@ -323,11 +323,12 @@ private enum HaloPixelPalSprites {
         switch style {
         case .glossy:
             return .init(rows: [
-                ".ppp..",
-                "ppwpp.",
-                "ppppp.",
-                "pppsp.",
-                ".aaa.."
+                ".pppp.",
+                "pswppp",
+                "pssppp",
+                "pppppp",
+                "ppppap",
+                ".aaaa."
             ])
         case .classic:
             return .init(rows: [
@@ -390,7 +391,7 @@ private enum HaloPixelPalSprites {
         case .sparkle:
             return .init(rows: ["a...a", ".apa.", "..p.."])
         case .classic, .glossy:
-            return .init(rows: ["p...p", ".p.p.", "..p.."])
+            return .init(rows: ["..p..", ".p.p.", "p...p"])
         }
     }
 
@@ -576,7 +577,9 @@ final class HaloPixelPalStore: ObservableObject {
         didSet { persist() }
     }
     @Published private(set) var reaction: HaloPixelPalExpression?
-    @Published private(set) var hovering = false
+    @Published private(set) var reactionStarted = Date()
+    private var tapIndex = 0
+    private var pressIndex = 0
 
     private let defaults: UserDefaults
     private let preferencesKey = "HaloPixelPal.preferences.v4"
@@ -610,19 +613,19 @@ final class HaloPixelPalStore: ObservableObject {
 
     func react(_ expression: HaloPixelPalExpression, seconds: Double = 1.7) {
         clearReactionWork?.cancel()
+        reactionStarted = Date()
         reaction = expression
         let work = DispatchWorkItem { [weak self] in self?.reaction = nil }
         clearReactionWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
     }
 
-    func setHovering(_ value: Bool) { hovering = value }
 
     func tapped() {
         guard preferences.tapReaction else { return }
         let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]
-        let index = Int(Date().timeIntervalSinceReferenceDate / 1.2) % sequence.count
-        react(sequence[index])
+        react(sequence[tapIndex % sequence.count])
+        tapIndex += 1
     }
 
     func doubleTapped() {
@@ -633,14 +636,16 @@ final class HaloPixelPalStore: ObservableObject {
     func longPressed() {
         guard preferences.longPressReaction else { return }
         let sequence: [HaloPixelPalExpression] = [.sleepy, .shy, .smug]
-        let index = Int(Date().timeIntervalSinceReferenceDate / 2.0) % sequence.count
-        react(sequence[index], seconds: 2.4)
+        react(sequence[pressIndex % sequence.count], seconds: 2.4)
+        pressIndex += 1
     }
 
     func reset() {
         preferences = HaloPixelPalPreferences()
         reaction = nil
-        hovering = false
+        clearReactionWork?.cancel()
+        tapIndex = 0
+        pressIndex = 0
     }
 
     private func persist() {
@@ -665,6 +670,7 @@ private struct HaloPixelPalContext {
         media: MediaService,
         system: SystemService,
         pal: HaloPixelPalStore,
+        hovering: Bool,
         date: Date
     ) -> Self {
         if let reaction = pal.reaction {
@@ -672,12 +678,10 @@ private struct HaloPixelPalContext {
         }
 
         let p = pal.preferences
-        if pal.hovering && p.hoverReaction {
-            return .init(expression: .shy, accessory: nil, fx: .sparkle)
-        }
-        guard p.contextReactions else {
-            return .init(expression: .neutral, accessory: nil, fx: .none)
-        }
+        let resting: Self = hovering && p.hoverReaction
+            ? .init(expression: .happy, accessory: nil, fx: .none)
+            : .init(expression: .neutral, accessory: nil, fx: .none)
+        guard p.contextReactions else { return resting }
 
         if p.timerReaction && store.finished {
             return .init(expression: .shocked, accessory: nil, fx: .alert)
@@ -723,7 +727,7 @@ private struct HaloPixelPalContext {
             }
         }
 
-        return .init(expression: .neutral, accessory: nil, fx: .none)
+        return resting
     }
 
     private static func fx(for expression: HaloPixelPalExpression) -> HaloPixelPalFX {
@@ -746,6 +750,10 @@ struct HaloPixelPetWidget: View {
     @Environment(\.openNotchGridRowSpan) private var gridRowSpan
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    @State private var hovering = false
+    @State private var pointer = CGPoint.zero
+    @State private var animationEpoch = Date()
+
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject private var pal = HaloPixelPalStore.shared
@@ -760,7 +768,7 @@ struct HaloPixelPetWidget: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: reduceMotion ? 0.45 : 1.0 / 18.0, paused: false)) { timeline in
+        TimelineView(.animation(minimumInterval: reduceMotion ? 0.45 : 1.0 / 24.0, paused: false)) { timeline in
             GeometryReader { proxy in
                 let columns = min(4, max(1, gridColumnSpan ?? 1))
                 let rows = min(4, max(1, gridRowSpan ?? columns))
@@ -770,6 +778,7 @@ struct HaloPixelPetWidget: View {
                     media: media,
                     system: system,
                     pal: pal,
+                    hovering: hovering,
                     date: timeline.date
                 )
                 let expression = resolvedExpression(base: state.expression, date: timeline.date)
@@ -782,17 +791,40 @@ struct HaloPixelPetWidget: View {
                     squareSize: squareSize,
                     preferences: pal.preferences,
                     date: timeline.date,
-                    reduceMotion: reduceMotion
+                    reduceMotion: reduceMotion,
+                    animationTime: timeline.date.timeIntervalSince(animationEpoch),
+                    reactionElapsed: pal.reaction.map { _ in timeline.date.timeIntervalSince(pal.reactionStarted) },
+                    pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero
                 )
                 .frame(width: side, height: side)
                 .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let location):
+                        hovering = true
+                        let next = CGPoint(x: ((location.x / max(1, proxy.size.width) - 0.5) * 2).rounded(),
+                                           y: ((location.y / max(1, proxy.size.height) - 0.5) * 2).rounded())
+                        if pointer != next { pointer = next }
+                    case .ended:
+                        hovering = false
+                        pointer = .zero
+                    }
+                }
             }
         }
         .contentShape(Rectangle())
-        .onHover { pal.setHovering($0) }
-        .onTapGesture(count: 2) { pal.doubleTapped() }
-        .onTapGesture(count: 1) { pal.tapped() }
-        .onLongPressGesture(minimumDuration: 0.55) { pal.longPressed() }
+        .gesture(
+            LongPressGesture(minimumDuration: 0.55)
+                .onEnded { _ in pal.longPressed() }
+                .exclusively(before:
+                    TapGesture(count: 2).onEnded { pal.doubleTapped() }
+                        .exclusively(before: TapGesture().onEnded { pal.tapped() })
+                )
+        )
+        .onDisappear { hovering = false; pointer = .zero }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { pal.tapped() }
+        .accessibilityAction(named: Text("Show affection")) { pal.doubleTapped() }
         .contextMenu {
             Menu("Expression") {
                 ForEach(HaloPixelPalExpression.allCases.filter { $0 != .blink }) { expression in
@@ -809,7 +841,7 @@ struct HaloPixelPetWidget: View {
     private func resolvedExpression(base: HaloPixelPalExpression, date: Date) -> HaloPixelPalExpression {
         guard base == .neutral, pal.preferences.automaticBlinking, !reduceMotion else { return base }
         let speed = max(0.35, pal.preferences.animationSpeed)
-        let cycle = date.timeIntervalSinceReferenceDate * speed
+        let cycle = date.timeIntervalSince(animationEpoch) * speed
         let phase = cycle.truncatingRemainder(dividingBy: 12.0)
         if phase > 11.72 { return .blink }
         if phase > 7.18 && phase < 7.42 { return .wink }
@@ -827,6 +859,10 @@ private struct HaloPixelPalFace: View {
     let preferences: HaloPixelPalPreferences
     let date: Date
     let reduceMotion: Bool
+    var animationTime: TimeInterval = 0
+    var reactionElapsed: TimeInterval? = nil
+    var pointer: CGPoint = .zero
+    @Environment(\.displayScale) private var displayScale
 
     private let logicalGrid = 24
 
@@ -837,6 +873,16 @@ private struct HaloPixelPalFace: View {
     var body: some View {
         ZStack {
             background
+            Canvas { context, size in
+                let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)
+                for y in 0..<logicalGrid {
+                    for x in 0..<logicalGrid {
+                        context.fill(Path(geometry.led(x: x, y: y)),
+                                     with: .color(faceColor.opacity(0.075)),
+                                     style: FillStyle(antialiased: false))
+                    }
+                }
+            }
             Canvas { context, size in
                 draw(context: &context, size: size)
             }
@@ -871,13 +917,7 @@ private struct HaloPixelPalFace: View {
     }
 
     private func draw(context: inout GraphicsContext, size: CGSize) {
-        let targetSide = min(size.width, size.height) * preferences.faceScale
-        let pixel = max(1, floor(targetSide / CGFloat(logicalGrid)))
-        let rendered = pixel * CGFloat(logicalGrid)
-        let origin = CGPoint(
-            x: floor((size.width - rendered) / 2),
-            y: floor((size.height - rendered) / 2)
-        )
+        let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)
 
         let motion = logicalMotion()
 
@@ -901,13 +941,9 @@ private struct HaloPixelPalFace: View {
                     let logicalX = placed.x + sourceX + motion.x + extraX
                     let logicalY = placed.y + rowIndex + motion.y + extraY
                     guard logicalX >= 0, logicalY >= 0, logicalX < logicalGrid, logicalY < logicalGrid else { continue }
-                    let rect = CGRect(
-                        x: origin.x + CGFloat(logicalX) * pixel,
-                        y: origin.y + CGFloat(logicalY) * pixel,
-                        width: pixel,
-                        height: pixel
-                    )
-                    context.fill(Path(rect), with: .color(color(for: role).opacity(opacity)))
+                    let rect = geometry.led(x: logicalX, y: logicalY)
+                    context.fill(Path(rect), with: .color(color(for: role).opacity(opacity)),
+                                 style: FillStyle(antialiased: false))
                 }
             }
         }
@@ -957,9 +993,11 @@ private struct HaloPixelPalFace: View {
     }
 
     private func drawEyes(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
-        let leftX = 3
-        let rightX = 15
-        let y = 7
+        let lookX = reduceMotion ? 0 : Int(pointer.x)
+        let lookY = reduceMotion ? 0 : Int(pointer.y)
+        let leftX = 3 + lookX
+        let rightX = 15 + lookX
+        let y = 7 + lookY
 
         func drawOpenPair() {
             let eye = HaloPixelPalSprites.openEye(preferences.eyeStyle)
@@ -1113,8 +1151,8 @@ private struct HaloPixelPalFace: View {
     }
 
     private func drawFX(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
-        let phase = Int(date.timeIntervalSinceReferenceDate * max(0.35, preferences.animationSpeed) * 4) % 4
-        let lift = reduceMotion ? 0 : -(phase / 2)
+        let phase = reduceMotion || preferences.animationIntensity == 0 ? 0 : Int(max(0, animationTime) * max(0.35, preferences.animationSpeed) * 4) % 4
+        let lift = -(phase / 2)
         switch fx {
         case .none:
             break
@@ -1140,7 +1178,11 @@ private struct HaloPixelPalFace: View {
         guard !reduceMotion else { return (0, 0) }
         let speed = max(0.35, preferences.animationSpeed)
         let intensity = preferences.animationIntensity
-        let t = date.timeIntervalSinceReferenceDate * speed
+        let t = max(0, animationTime) * speed
+        if let reactionElapsed {
+            return (0, HaloPixelPalAnimationTiming.bounce(elapsed: reactionElapsed * speed,
+                                                         intensity: intensity, reduceMotion: reduceMotion))
+        }
         let one = intensity > 0.28 ? 1 : 0
         let two = intensity > 0.75 ? 2 : one
 
@@ -1156,7 +1198,8 @@ private struct HaloPixelPalFace: View {
         case .bored:
             return (Int(round(sin(t * 0.8))) * one, one)
         case .neutral:
-            return (0, Int(round(sin(t * 0.65))) * one)
+            let phase = t.truncatingRemainder(dividingBy: 8)
+            return (0, phase > 6.8 && phase < 7.4 ? -one : 0)
         default:
             return (0, 0)
         }
@@ -1198,6 +1241,8 @@ final class HaloPixelPalSettingsWindowController {
 
 private struct HaloPixelPalSettingsView: View {
     @ObservedObject private var pal = HaloPixelPalStore.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var previewEpoch = Date()
     @State private var previewExpression: HaloPixelPalExpression = .happy
     @State private var previewAccessory: HaloPixelPalAccessory? = nil
 
@@ -1219,15 +1264,18 @@ private struct HaloPixelPalSettingsView: View {
 
     private var header: some View {
         HStack(spacing: 22) {
+            TimelineView(.animation(minimumInterval: reduceMotion ? 0.45 : 1.0 / 24.0)) { timeline in
             HaloPixelPalFace(
                 expression: previewExpression,
                 contextualAccessory: previewAccessory,
                 fx: previewFX,
                 squareSize: 2,
                 preferences: pal.preferences,
-                date: Date(),
-                reduceMotion: false
+                date: timeline.date,
+                reduceMotion: reduceMotion,
+                animationTime: timeline.date.timeIntervalSince(previewEpoch)
             )
+            }
             .frame(width: 150, height: 150)
             .background(Color.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
 

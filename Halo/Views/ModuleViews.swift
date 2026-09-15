@@ -41,7 +41,7 @@ struct IntegrationModuleView: View {
 
     var body: some View {
         Group {
-            if footprint == .glance {
+            if id == .pet || footprint == .glance {
                 content
             } else {
                 switch style.resolvedLayoutMode {

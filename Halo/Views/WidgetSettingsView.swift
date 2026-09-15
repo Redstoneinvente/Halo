@@ -1375,7 +1375,7 @@ private func gridItemPreview(_ item: OpenNotchItem, size: CGSize) -> some View {
         .onDrag { NSItemProvider(object: item.id.uuidString as NSString) }
         .contextMenu {
             Menu("Size") {
-                ForEach(OpenNotchGridSizePreset.allCases.filter { $0 != .custom }) { preset in
+                ForEach(OpenNotchGridSizePreset.allCases.filter { item.module == .pet ? HaloPixelPalLayout.supports($0) : $0 != .custom }) { preset in
                     Button(preset.rawValue) { applyGridSize(preset, to: item.id) }
                 }
             }
@@ -1636,13 +1636,15 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
         }
         Section("Grid Size & Position") {
             Picker("Standard size", selection: gridSizePresetBinding(item.id)) {
-                ForEach(OpenNotchGridSizePreset.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(OpenNotchGridSizePreset.allCases.filter { item.module != .pet || HaloPixelPalLayout.supports($0) }) { Text($0.rawValue).tag($0) }
             }
             let placement = gridPlacementBinding(item.id)
-            Stepper("Width: \(placement.wrappedValue.columnSpan) column\(placement.wrappedValue.columnSpan == 1 ? "" : "s")",
-                    value: placement.columnSpan, in: 1...opened.resolvedGridColumns)
-            Stepper("Height: \(placement.wrappedValue.rowSpan) row\(placement.wrappedValue.rowSpan == 1 ? "" : "s")",
-                    value: placement.rowSpan, in: 1...4)
+            if item.module != .pet {
+                Stepper("Width: \(placement.wrappedValue.columnSpan) column\(placement.wrappedValue.columnSpan == 1 ? "" : "s")",
+                        value: placement.columnSpan, in: 1...opened.resolvedGridColumns)
+                Stepper("Height: \(placement.wrappedValue.rowSpan) row\(placement.wrappedValue.rowSpan == 1 ? "" : "s")",
+                        value: placement.rowSpan, in: 1...4)
+            }
             Divider()
             Stepper("Column: \(placement.wrappedValue.column + 1)", value: placement.column,
                     in: 0...max(0, opened.resolvedGridColumns - placement.wrappedValue.columnSpan))

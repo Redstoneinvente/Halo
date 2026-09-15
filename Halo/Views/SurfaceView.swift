@@ -3372,7 +3372,7 @@ private struct OpenNotchItemView: View {
             switch item.kind {
             case .module:
                 if let module = item.module, layout.enabled.contains(module) {
-                    WidgetCard(style: style, availableHeight: slotSize.height, availableWidth: slotSize.width) {
+                    WidgetCard(style: style, availableHeight: slotSize.height, availableWidth: slotSize.width, fillsCell: module == .pet) {
                         BuiltinOrIntegrationWidget(module: module, store: store)
                     }
                     .environment(\.openNotchPresentation, presentation)

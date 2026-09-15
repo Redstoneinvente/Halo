@@ -1,0 +1,18 @@
+name: Validate Pixel Pal
+on:
+  push:
+    branches: [main, codex/pixel-pal-polish]
+    paths:
+      - 'Halo/**'
+      - 'Tests/**'
+      - '.github/workflows/validate-pixel-pal.yml'
+permissions:
+  contents: read
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Halo and run core tests
+        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build test

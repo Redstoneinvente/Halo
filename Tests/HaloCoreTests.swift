@@ -4,6 +4,74 @@ import XCTest
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    func testPixelPalSquareSizesSurviveValidationAndPersistence() throws {
+        for side in 1...4 {
+            var pet = OpenNotchItem.moduleItem(.pet)
+            pet.gridPlacement = .init(column: 0, row: 0, columnSpan: side, rowSpan: side)
+            let restored = try JSONDecoder().decode(OpenNotchItem.self, from: JSONEncoder().encode(pet)).validated()
+            XCTAssertEqual(restored.gridPlacement?.columnSpan, side)
+            XCTAssertEqual(restored.gridPlacement?.rowSpan, side)
+            var layout = OpenNotchLayout()
+            layout.gridColumns = 4
+            layout.gridItems = [restored]
+            layout.normalizeGridItems()
+            XCTAssertEqual(layout.gridItems?.first?.gridPlacement?.columnSpan, side)
+            XCTAssertEqual(layout.gridItems?.first?.gridPlacement?.rowSpan, side)
+        }
+        XCTAssertEqual(OpenNotchGridSizePreset.allCases.filter(HaloPixelPalLayout.supports),
+                       [.oneByOne, .twoByTwo, .threeByThree, .fourByFour])
+    }
+
+    func testPixelPalLegacyRectangleAndNarrowWorkspaceNormalization() throws {
+        var pet = OpenNotchItem.moduleItem(.pet)
+        pet.gridPlacement = .init(column: 7, row: 3, columnSpan: 3, rowSpan: 1)
+        let normalized = try pet.validated()
+        XCTAssertEqual(normalized.gridPlacement?.columnSpan, 2)
+        XCTAssertEqual(normalized.gridPlacement?.rowSpan, 2)
+        XCTAssertEqual(normalized.gridPlacement?.column, 6)
+        XCTAssertEqual(normalized.gridPlacement?.row, 2)
+        var layout = OpenNotchLayout()
+        layout.gridColumns = 2
+        pet.gridPlacement = .init(columnSpan: 4, rowSpan: 4)
+        layout.gridItems = [pet]
+        layout.normalizeGridItems()
+        XCTAssertEqual(layout.resolvedGridColumns, 2)
+        XCTAssertEqual(layout.gridItems?.first?.gridPlacement?.columnSpan, 2)
+        XCTAssertEqual(layout.gridItems?.first?.gridPlacement?.rowSpan, 2)
+    }
+
+    func testPixelPalLEDsFillAvailableSquareAndStayOnBackingPixels() {
+        for side in [18.0, 37, 58, 95, 137, 211, 317] {
+            for scale in [1.0, 2.0] {
+                let geometry = HaloPixelPalDisplayGeometry(size: CGSize(width: side, height: side), scale: scale, fill: 1)
+                let last = geometry.led(x: 23, y: 23)
+                XCTAssertLessThanOrEqual(side - last.maxX, 1 / scale)
+                for y in 0..<24 {
+                    for x in 0..<24 {
+                        let rect = geometry.led(x: x, y: y)
+                        XCTAssertGreaterThanOrEqual(rect.minX, 0)
+                        XCTAssertGreaterThanOrEqual(rect.minY, 0)
+                        XCTAssertLessThanOrEqual(rect.maxX, side)
+                        XCTAssertLessThanOrEqual(rect.maxY, side)
+                        for edge in [rect.minX, rect.minY, rect.maxX, rect.maxY] {
+                            XCTAssertEqual(edge * scale, (edge * scale).rounded(), accuracy: 0.00001)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testPixelPalReactionSettlesAndRespectsReducedMotion() {
+        for t in stride(from: 0.0, through: 3, by: 0.05) {
+            XCTAssertEqual(HaloPixelPalAnimationTiming.bounce(elapsed: t, intensity: 1, reduceMotion: true), 0)
+            XCTAssertEqual(HaloPixelPalAnimationTiming.bounce(elapsed: t, intensity: 0, reduceMotion: false), 0)
+        }
+        XCTAssertLessThan(HaloPixelPalAnimationTiming.bounce(elapsed: 0.1, intensity: 1, reduceMotion: false), 0)
+        XCTAssertEqual(HaloPixelPalAnimationTiming.bounce(elapsed: 0, intensity: 1, reduceMotion: false), 0)
+        XCTAssertEqual(HaloPixelPalAnimationTiming.bounce(elapsed: 1.1, intensity: 1, reduceMotion: false), 0)
+    }
+
     func testMediaWidthChangesDoNotResizeOppositeWing() {
         for leftLive in [false, true] {
             for rightLive in [false, true] {

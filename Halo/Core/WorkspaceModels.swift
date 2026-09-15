@@ -525,7 +525,7 @@ struct OpenNotchItem: Codable, Equatable, Identifiable {
         value.sizing = try sizing.validated()
         value.gridPlacement = try gridPlacement?.validated()
         if module == .pet, var placement = value.gridPlacement {
-            let side = 4
+            let side = HaloPixelPalLayout.squareSide(columns: placement.columnSpan, rows: placement.rowSpan)
             placement.columnSpan = side
             placement.rowSpan = side
             placement.column = min(max(0, 8 - side), max(0, placement.column))
@@ -757,9 +757,6 @@ struct OpenNotchLayout: Codable, Equatable {
     mutating func normalizeGridItems(pinnedID: UUID? = nil) {
         guard var items = gridItems else { return }
         items = Self.workspaceWidgetItems(items)
-        if items.contains(where: { $0.module == .pet }), resolvedGridColumns < 4 {
-            gridColumns = 4
-        }
         let columns = resolvedGridColumns
         var occupied = Set<Int>()
         let ordered: [Int]
@@ -772,7 +769,7 @@ struct OpenNotchLayout: Codable, Equatable {
             let fallback = Self.defaultGridSpan(for: items[index])
             var placement = (items[index].gridPlacement ?? OpenNotchGridPlacement(columnSpan: fallback.columns, rowSpan: fallback.rows)).clamped(columns: columns)
             if items[index].module == .pet {
-                let side = 4
+                let side = min(columns, HaloPixelPalLayout.squareSide(columns: placement.columnSpan, rows: placement.rowSpan))
                 placement.columnSpan = side
                 placement.rowSpan = side
                 placement.column = min(max(0, columns - side), max(0, placement.column))
@@ -809,7 +806,7 @@ struct OpenNotchLayout: Codable, Equatable {
         if let module = item.module {
             switch module {
             case .media, .calendar, .system: return (3, 2)
-            case .pet: return (4, 4)
+            case .pet: return (2, 2)
             case .shelf, .clipboard, .launcher, .activities, .notes: return (2, 2)
             case .clock, .timer, .audio, .capture, .stopwatch, .developer: return (2, 1)
             }
@@ -2401,5 +2398,49 @@ enum HaloCIPackageValidator {
         if let number = value as? NSNumber { return number.intValue }
         if let int = value as? Int { return int }
         return nil
+    }
+}
+
+// Shared by saved-layout validation, the size picker and the pixel renderer.
+enum HaloPixelPalLayout {
+    static func squareSide(columns: Int, rows: Int) -> Int {
+        min(4, max(1, (columns + rows) / 2))
+    }
+
+    static func supports(_ preset: OpenNotchGridSizePreset) -> Bool {
+        guard let span = preset.span else { return false }
+        return span.columns == span.rows && (1...4).contains(span.columns)
+    }
+}
+
+struct HaloPixelPalDisplayGeometry {
+    let size: CGSize
+    let scale: CGFloat
+    let fill: Double
+    static let grid = 24
+
+    var side: CGFloat { max(0, min(size.width, size.height)) * min(1, max(0.76, fill)) }
+    var origin: CGPoint { CGPoint(x: (size.width - side) / 2, y: (size.height - side) / 2) }
+
+    // Snap each boundary, rather than rounding the entire scale down and wasting space.
+    func led(x: Int, y: Int) -> CGRect {
+        let backing = max(1, scale)
+        let pitch = side / CGFloat(Self.grid)
+        let gap = pitch * backing >= 3 ? 1 / backing : 0
+        func snap(_ value: CGFloat) -> CGFloat { (value * backing).rounded() / backing }
+        let left = snap(origin.x + CGFloat(x) * pitch)
+        let top = snap(origin.y + CGFloat(y) * pitch)
+        return CGRect(x: left, y: top,
+                      width: max(0, snap(origin.x + CGFloat(x + 1) * pitch) - left - gap),
+                      height: max(0, snap(origin.y + CGFloat(y + 1) * pitch) - top - gap))
+    }
+}
+
+// A reaction starts at rest, bounces twice, then settles; idle motion has its own clock.
+enum HaloPixelPalAnimationTiming {
+    static func bounce(elapsed: TimeInterval, intensity: Double, reduceMotion: Bool) -> Int {
+        guard !reduceMotion, elapsed >= 0, elapsed < 1.1 else { return 0 }
+        let envelope = pow(1 - elapsed / 1.1, 2)
+        return -Int((abs(sin(elapsed * .pi * 2 / 0.55)) * envelope * 3 * min(1, max(0, intensity))).rounded())
     }
 }

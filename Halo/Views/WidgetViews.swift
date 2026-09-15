@@ -330,6 +330,7 @@ struct WidgetCard<Content: View>: View {
     let style: WidgetStyle
     var availableHeight: CGFloat? = nil
     var availableWidth: CGFloat? = nil
+    var fillsCell = false
     @ViewBuilder var content: Content
     @Environment(\.openNotchCompressionLevel) private var compression
     @Environment(\.openNotchBlockVerticalAlignment) private var blockVerticalAlignment
@@ -358,6 +359,7 @@ struct WidgetCard<Content: View>: View {
             fitted.minimumHeight = 0
             fitted.fontSize = min(fitted.fontSize, max(9, height * 0.18))
         }
+        if fillsCell { fitted.padding = 0; fitted.showTitle = false }
         return fitted
     }
     private var contentOptions: WidgetContentOptions { fittedStyle.resolvedContent }
