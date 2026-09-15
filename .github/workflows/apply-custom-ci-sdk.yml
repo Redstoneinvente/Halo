@@ -134,6 +134,7 @@ jobs:
         run: |
           python3 /tmp/apply_custom_ci.py
           python3 scripts/complete_custom_ci_sdk.py /tmp/apply_custom_ci.py
+          python3 scripts/repair_custom_ci_generated_source.py
 
       - name: Verify required Custom CI UX
         shell: bash
@@ -146,6 +147,7 @@ jobs:
           grep -R -n -F 'HaloCustomCIRuntimeStore' Halo
           grep -R -n -F 'HaloCIPackageValidator' Halo
           grep -R -n -F 'case custom' Halo/Views/SurfaceView.swift
+          grep -R -n -F 'path: "triggers.json", issues: &issues' Halo/Core/WorkspaceModels.swift
           test -f Examples/HelloWorld.haloCI/manifest.json
           test -f Examples/HelloWorld.haloCI/interface.json
 
@@ -169,6 +171,7 @@ jobs:
         run: |
           rm -rf scripts/custom-ci-patch
           rm -f scripts/complete_custom_ci_sdk.py
+          rm -f scripts/repair_custom_ci_generated_source.py
           rm -f .github/custom-ci-sdk-trigger.txt
           rm -f .github/workflows/apply-custom-ci-sdk.yml
 
