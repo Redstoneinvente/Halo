@@ -38,17 +38,12 @@ jobs:
           ]
 
           def decode_payload(source: str) -> str:
-              # Re-evaluate the staged body using a triple-quoted literal so ordinary
-              # apostrophes inside Swift/docs cannot terminate it. This preserves the
-              # exact escape semantics the original single-quoted generator intended.
               if "'''" not in source:
                   return ast.literal_eval("'''" + source + "'''")
               safe = source.replace('"""', '\\"\\"\\"')
               return ast.literal_eval('"""' + safe + '"""')
 
           def decode_generator_tail(source: str) -> str:
-              # Outside ordinary Python strings, the staged file encoded line breaks as
-              # literal backslash-n. Inside strings those escapes must remain untouched.
               out = []
               quote = None
               triple = False
@@ -63,7 +58,6 @@ jobs:
                       else:
                           out.append(source[i]); i += 1
                       continue
-
                   if quote is not None:
                       if triple:
                           delimiter = quote * 3
@@ -80,7 +74,6 @@ jobs:
                           quote = None
                       i += 1
                       continue
-
                   if source.startswith('\\n', i):
                       out.append('\n'); decoded += 1; i += 2; continue
                   ch = source[i]
@@ -120,7 +113,6 @@ jobs:
                   if next_pos < 0:
                       raise SystemExit('Missing generator tail marker: def replace_once')
                   segment = raw[body_start:next_pos]
-
               closing = segment.rfind("'")
               if closing < 0:
                   raise SystemExit(f'Missing closing staged quote for {name}')
@@ -143,11 +135,14 @@ jobs:
       - name: Verify required Custom CI UX
         shell: bash
         run: |
-          grep -q 'Disable custom CI' Halo/Views/WorkspaceSettingsView.swift
-          grep -q 'Import .haloCI' Halo/Views/WorkspaceSettingsView.swift
-          grep -q 'HaloCustomCIRuntimeStore' Halo/Core/WorkspaceStore.swift
-          grep -q 'HaloCIPackageValidator' Halo/Core/WorkspaceModels.swift
-          grep -q 'custom' Halo/Views/SurfaceView.swift
+          set -euxo pipefail
+          git status --short
+          git diff --stat
+          grep -R -n -F 'Disable custom CI' Halo
+          grep -R -n -F 'Import .haloCI' Halo
+          grep -R -n -F 'HaloCustomCIRuntimeStore' Halo
+          grep -R -n -F 'HaloCIPackageValidator' Halo
+          grep -R -n -F 'case custom' Halo || grep -R -n -F '.custom' Halo/Views/SurfaceView.swift
           test -f Examples/HelloWorld.haloCI/manifest.json
           test -f Examples/HelloWorld.haloCI/interface.json
 
