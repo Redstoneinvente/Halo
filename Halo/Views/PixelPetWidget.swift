@@ -20,6 +20,7 @@ enum HaloPixelPalExpression: String, Codable, CaseIterable, Identifiable {
     case surprised
     case shocked
     case confused
+    case dizzy
     case worried
     case sad
     case crying
@@ -430,6 +431,13 @@ private enum HaloPixelPalSprites {
         "..a.."
     ])
 
+    static let xEye = HaloPixelPalSprite(rows: [
+        "p...p",
+        ".p.p.",
+        "..p..",
+        ".p.p.",
+        "p...p"
+    ])
     static let winkEye = HaloPixelPalSprite(rows: [
         "p...p",
         ".ppp."
@@ -622,6 +630,103 @@ struct HaloPixelPalTapBurst {
     }
 }
 
+struct HaloPixelPalCursorOrbitDetector {
+    private struct Sample {
+        let time: TimeInterval
+        let angle: Double
+        let radius: Double
+        let x: Double
+        let y: Double
+    }
+
+    static let sampleWindow: TimeInterval = 0.95
+    static let cooldown: TimeInterval = 2.4
+    static let minimumRotation = Double.pi * 2.4
+    static let minimumDuration: TimeInterval = 0.28
+    static let minimumPathSpeed = 1.7
+    static let minimumDirectionConsistency = 0.80
+    static let minimumRadius = 0.16
+    static let maximumRadius = 0.48
+    static let maximumRadiusSpread = 0.20
+    static let minimumSamples = 10
+
+    private var samples: [Sample] = []
+    private var lastTrigger = -Double.infinity
+
+    mutating func register(location: CGPoint, size: CGSize, at now: TimeInterval) -> Bool {
+        guard size.width > 1, size.height > 1 else {
+            resetPath()
+            return false
+        }
+
+        if now - lastTrigger < Self.cooldown {
+            resetPath()
+            return false
+        }
+
+        let side = Double(min(size.width, size.height))
+        let dx = (Double(location.x) - Double(size.width) * 0.5) / side
+        let dy = (Double(location.y) - Double(size.height) * 0.5) / side
+        let radius = hypot(dx, dy)
+        guard radius >= Self.minimumRadius, radius <= Self.maximumRadius else {
+            resetPath()
+            return false
+        }
+
+        if let last = samples.last, now - last.time > 0.18 {
+            resetPath()
+        }
+
+        samples.append(.init(time: now, angle: atan2(dy, dx), radius: radius, x: dx, y: dy))
+        samples.removeAll { now - $0.time > Self.sampleWindow }
+
+        guard samples.count >= Self.minimumSamples,
+              let first = samples.first,
+              let last = samples.last else { return false }
+
+        let duration = last.time - first.time
+        guard duration >= Self.minimumDuration else { return false }
+
+        var signedRotation = 0.0
+        var absoluteRotation = 0.0
+        var pathDistance = 0.0
+        var minRadius = Double.greatestFiniteMagnitude
+        var maxRadius = 0.0
+
+        for index in samples.indices {
+            let sample = samples[index]
+            minRadius = min(minRadius, sample.radius)
+            maxRadius = max(maxRadius, sample.radius)
+            guard index > samples.startIndex else { continue }
+
+            let previous = samples[index - 1]
+            var delta = sample.angle - previous.angle
+            while delta > .pi { delta -= 2 * .pi }
+            while delta < -.pi { delta += 2 * .pi }
+            signedRotation += delta
+            absoluteRotation += abs(delta)
+            pathDistance += hypot(sample.x - previous.x, sample.y - previous.y)
+        }
+
+        guard absoluteRotation > 0.001 else { return false }
+        let directionConsistency = abs(signedRotation) / absoluteRotation
+        let pathSpeed = pathDistance / duration
+        let radiusSpread = maxRadius - minRadius
+
+        guard abs(signedRotation) >= Self.minimumRotation,
+              directionConsistency >= Self.minimumDirectionConsistency,
+              pathSpeed >= Self.minimumPathSpeed,
+              radiusSpread <= Self.maximumRadiusSpread else { return false }
+
+        lastTrigger = now
+        resetPath()
+        return true
+    }
+
+    mutating func resetPath() {
+        samples.removeAll(keepingCapacity: true)
+    }
+}
 @MainActor
 final class HaloPixelPalStore: ObservableObject {
     static let shared = HaloPixelPalStore()
@@ -723,7 +828,7 @@ final class HaloPixelPalStore: ObservableObject {
 }
 
 private enum HaloPixelPalFX {
-    case none, hearts, sparkle, music, sweat, tears, alert, sleepZ
+    case none, hearts, sparkle, dizzy, music, sweat, tears, alert, sleepZ
 }
 
 private struct HaloPixelPalContext {
@@ -821,6 +926,7 @@ private struct HaloPixelPalContext {
         case .worried: return .sweat
         case .crying: return .tears
         case .sleepy: return .sleepZ
+        case .dizzy: return .dizzy
         case .annoyed, .shocked, .surprised: return .alert
         default: return .none
         }
@@ -837,6 +943,7 @@ struct HaloPixelPetWidget: View {
     @State private var hovering = false
     @State private var pointer = CGPoint.zero
     @State private var animationEpoch = Date()
+    @State private var orbitDetector = HaloPixelPalCursorOrbitDetector()
 
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
@@ -886,12 +993,20 @@ struct HaloPixelPetWidget: View {
                     switch phase {
                     case .active(let location):
                         hovering = true
+                        if orbitDetector.register(
+                            location: location,
+                            size: CGSize(width: side, height: side),
+                            at: timeline.date.timeIntervalSinceReferenceDate
+                        ) {
+                            pal.react(.dizzy, seconds: 1.9)
+                        }
                         let next = CGPoint(x: ((location.x / max(1, proxy.size.width) - 0.5) * 2).rounded(),
                                            y: ((location.y / max(1, proxy.size.height) - 0.5) * 2).rounded())
                         if pointer != next { pointer = next }
                     case .ended:
                         hovering = false
                         pointer = .zero
+                        orbitDetector.resetPath()
                     }
                 }
             }
@@ -905,7 +1020,7 @@ struct HaloPixelPetWidget: View {
                         .exclusively(before: TapGesture().onEnded { pal.tapped() })
                 )
         )
-        .onDisappear { hovering = false; pointer = .zero }
+        .onDisappear { hovering = false; pointer = .zero; orbitDetector.resetPath() }
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { pal.tapped() }
         .accessibilityAction(named: Text("Show affection")) { pal.doubleTapped() }
@@ -1102,7 +1217,7 @@ private struct HaloPixelPalFace: View {
         }
     }
 
-    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, smug }
+    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, smug }
 
     private var eyePose: EyePose {
         switch expression {
@@ -1112,6 +1227,7 @@ private struct HaloPixelPalFace: View {
         case .excited, .shocked: return .star
         case .wink, .mischievous: return .winkRight
         case .confused: return .confused
+        case .dizzy: return .dizzy
         case .smug: return .smug
         default: return .open
         }
@@ -1160,6 +1276,9 @@ private struct HaloPixelPalFace: View {
             let closed = HaloPixelPalSprites.closedEye(preferences.eyeStyle)
             render(.init(open, x: leftX, y: y), 1, 0, 0)
             render(.init(closed, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)
+        case .dizzy:
+            render(.init(HaloPixelPalSprites.xEye, x: 3, y: 6), 1, 0, 0)
+            render(.init(HaloPixelPalSprites.xEye, x: 16, y: 6, mirrorX: true), 1, 0, 0)
         case .smug:
             let eye = HaloPixelPalSprite(rows: ["ppppp", ".ppp."])
             render(.init(eye, x: leftX, y: y + 2), 1, 0, 0)
@@ -1196,7 +1315,7 @@ private struct HaloPixelPalFace: View {
     private func automaticMouth() -> HaloPixelPalSprite? {
         switch expression {
         case .neutral, .focused: return HaloPixelPalSprites.mouthTiny
-        case .confused: return HaloPixelPalSprites.mouthO
+        case .confused, .dizzy: return HaloPixelPalSprites.mouthO
         case .blink, .sleepy, .bored: return HaloPixelPalSprites.mouthFlat
         case .happy, .music: return HaloPixelPalSprites.mouthSmile
         case .superHappy, .excited, .love: return HaloPixelPalSprites.mouthBigSmile
@@ -1301,6 +1420,21 @@ private struct HaloPixelPalFace: View {
         case .sparkle:
             render(.init(HaloPixelPalSprites.sparkle, x: 1, y: 2), 0.90, 0, lift)
             render(.init(HaloPixelPalSprites.sparkle, x: 20, y: 5), 0.72, 0, -lift)
+        case .dizzy:
+            switch phase {
+            case 0:
+                render(.init(HaloPixelPalSprites.sparkle, x: 2, y: 2), 0.96, 0, 0)
+                render(.init(HaloPixelPalSprites.sparkle, x: 19, y: 5), 0.66, 0, 0)
+            case 1:
+                render(.init(HaloPixelPalSprites.sparkle, x: 7, y: 1), 0.78, 0, 0)
+                render(.init(HaloPixelPalSprites.sparkle, x: 14, y: 6), 0.92, 0, 0)
+            case 2:
+                render(.init(HaloPixelPalSprites.sparkle, x: 19, y: 2), 0.96, 0, 0)
+                render(.init(HaloPixelPalSprites.sparkle, x: 2, y: 5), 0.66, 0, 0)
+            default:
+                render(.init(HaloPixelPalSprites.sparkle, x: 14, y: 1), 0.78, 0, 0)
+                render(.init(HaloPixelPalSprites.sparkle, x: 7, y: 6), 0.92, 0, 0)
+            }
         case .music:
             render(.init(HaloPixelPalSprites.musicNote, x: 19, y: 1), 0.90, 0, lift)
         case .sweat:
@@ -1324,6 +1458,9 @@ private struct HaloPixelPalFace: View {
         let one = intensity > 0.28 ? 1 : 0
         let two = intensity > 0.75 ? 2 : one
         if let reactionElapsed {
+            if expression == .dizzy {
+                return (Int(round(sin(t * 10.5))) * two, Int(round(cos(t * 7.5))) * one)
+            }
             if expression == .annoyed {
                 return (Int(round(sin(t * 11.0))) * one, 0)
             }
@@ -1346,6 +1483,8 @@ private struct HaloPixelPalFace: View {
             return (Int(round(sin(t * 0.8))) * one, one)
         case .annoyed:
             return (Int(round(sin(t * 11.0))) * one, 0)
+        case .dizzy:
+            return (Int(round(sin(t * 10.5))) * two, Int(round(cos(t * 7.5))) * one)
         case .neutral:
             let phase = t.truncatingRemainder(dividingBy: 8)
             return (0, phase > 6.8 && phase < 7.4 ? -one : 0)
@@ -1715,6 +1854,7 @@ private struct HaloPixelPalSettingsView: View {
         case .worried: return .sweat
         case .crying: return .tears
         case .sleepy: return .sleepZ
+        case .dizzy: return .dizzy
         case .annoyed, .surprised, .shocked: return .alert
         default: return .none
         }
