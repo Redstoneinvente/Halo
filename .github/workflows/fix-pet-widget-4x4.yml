@@ -1,0 +1,89 @@
+name: Fix Pet Widget 4x4
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-pet-widget-4x4.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Run Pet widget 4x4 fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Enforce 4x4 Pet footprint
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path: str, replacements: list[tuple[str, str]]) -> None:
+              file = Path(path)
+              text = file.read_text()
+              for old, new in replacements:
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f"Expected exactly one match in {path}, found {count}: {old}")
+                  text = text.replace(old, new)
+              file.write_text(text)
+
+          replace_exact(
+              "Halo/Core/WidgetModels.swift",
+              [
+                  (
+                      "case .pet: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 2, rows: 2), rich: .init(columns: 4, rows: 4))",
+                      "case .pet: return .init(minimum: .init(columns: 4, rows: 4), everyday: .init(columns: 4, rows: 4), rich: .init(columns: 4, rows: 4))",
+                  ),
+                  (
+                      'if footprint.columns != footprint.rows { return "Pixel Pal supports square sizes only: 1×1, 2×2, 3×3, or 4×4." }',
+                      'if footprint.columns != 4 || footprint.rows != 4 { return "Pixel Pal requires a 4×4 footprint." }',
+                  ),
+              ],
+          )
+
+          replace_exact(
+              "Halo/Core/WorkspaceModels.swift",
+              [
+                  (
+                      "let side = min(4, max(1, max(placement.columnSpan, placement.rowSpan)))",
+                      "let side = 4",
+                  ),
+                  (
+                      "        let columns = resolvedGridColumns\n        var occupied = Set<Int>()",
+                      "        if items.contains(where: { $0.module == .pet }), resolvedGridColumns < 4 {\n            gridColumns = 4\n        }\n        let columns = resolvedGridColumns\n        var occupied = Set<Int>()",
+                  ),
+                  (
+                      "let side = min(min(4, columns), max(placement.columnSpan, placement.rowSpan))",
+                      "let side = 4",
+                  ),
+                  (
+                      "case .pet: return (1, 1)",
+                      "case .pet: return (4, 4)",
+                  ),
+              ],
+          )
+
+          widget = Path("Halo/Core/WidgetModels.swift").read_text()
+          workspace = Path("Halo/Core/WorkspaceModels.swift").read_text()
+          assert "Pixel Pal supports square sizes only: 1×1, 2×2, 3×3, or 4×4." not in widget
+          assert "case .pet: return (1, 1)" not in workspace
+          assert "case .pet: return .init(minimum: .init(columns: 1, rows: 1)" not in widget
+          PY
+
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/fix-pet-widget-4x4.yml
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Core/WidgetModels.swift Halo/Core/WorkspaceModels.swift .github/workflows/fix-pet-widget-4x4.yml
+          git commit -m "fix: require 4x4 Pet widget"
+          git push origin main
