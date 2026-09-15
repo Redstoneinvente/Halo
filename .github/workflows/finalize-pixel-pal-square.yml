@@ -1,0 +1,109 @@
+name: Finalize Pixel Pal Square Sizing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/pixel-pal-square-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce square-only Pixel Pal footprints
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected 1 match, found {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              'Halo/Core/WorkspaceModels.swift',
+              '        value.gridPlacement = try gridPlacement?.validated()\n        if let style { value.style = try style.validated() }',
+              '''        value.gridPlacement = try gridPlacement?.validated()
+        if module == .pet, var placement = value.gridPlacement {
+            let side = min(4, max(1, max(placement.columnSpan, placement.rowSpan)))
+            placement.columnSpan = side
+            placement.rowSpan = side
+            placement.column = min(max(0, 8 - side), max(0, placement.column))
+            placement.row = min(max(0, 4 - side), max(0, placement.row))
+            value.gridPlacement = placement
+        }
+        if let style { value.style = try style.validated() }''',
+              'OpenNotchItem pet square validation'
+          )
+
+          replace_once(
+              'Halo/Core/WorkspaceModels.swift',
+              '''            var placement = (items[index].gridPlacement ?? OpenNotchGridPlacement(columnSpan: fallback.columns, rowSpan: fallback.rows)).clamped(columns: columns)
+            if !Self.canPlace(placement, columns: columns, occupied: occupied) {''',
+              '''            var placement = (items[index].gridPlacement ?? OpenNotchGridPlacement(columnSpan: fallback.columns, rowSpan: fallback.rows)).clamped(columns: columns)
+            if items[index].module == .pet {
+                let side = min(min(4, columns), max(placement.columnSpan, placement.rowSpan))
+                placement.columnSpan = side
+                placement.rowSpan = side
+                placement.column = min(max(0, columns - side), max(0, placement.column))
+                placement.row = min(max(0, 4 - side), max(0, placement.row))
+            }
+            if !Self.canPlace(placement, columns: columns, occupied: occupied) {''',
+              'OpenNotchLayout pet square normalization'
+          )
+
+          replace_once(
+              'Halo/Core/WorkspaceModels.swift',
+              '            case .pet: return (4, 2)',
+              '            case .pet: return (1, 1)',
+              'Pixel Pal default square span'
+          )
+
+          replace_once(
+              'Halo/Core/WidgetModels.swift',
+              '        case .pet: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 4, rows: 2), rich: .init(columns: 8, rows: 4))',
+              '        case .pet: return .init(minimum: .init(columns: 1, rows: 1), everyday: .init(columns: 2, rows: 2), rich: .init(columns: 4, rows: 4))',
+              'Pixel Pal square recommendations'
+          )
+
+          replace_once(
+              'Halo/Core/WidgetModels.swift',
+              '''        let recommendation = visualWidgetSizeRecommendation
+        if footprint.area == 1 && self == .notes { return "1×1 is Quick Note capture only · actual note content starts at 2×2." }''',
+              '''        let recommendation = visualWidgetSizeRecommendation
+        if self == .pet {
+            if footprint.columns != footprint.rows { return "Pixel Pal supports square sizes only: 1×1, 2×2, 3×3, or 4×4." }
+            return "Pixel Pal · square face-only retro expression at \(footprint.columns)×\(footprint.rows)."
+        }
+        if footprint.area == 1 && self == .notes { return "1×1 is Quick Note capture only · actual note content starts at 2×2." }''',
+              'Pixel Pal square size hint'
+          )
+          PY
+
+      - name: Parse Pixel Pal source
+        run: xcrun swiftc -parse Halo/Views/PixelPetWidget.swift
+
+      - name: Build Halo
+        run: |
+          set -o pipefail
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build
+
+      - name: Commit verified square-only integration
+        run: |
+          rm -f .github/workflows/finalize-pixel-pal-square.yml
+          rm -f .github/pixel-pal-square-trigger.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Enforce square-only Pixel Pal sizing'
+          git push origin HEAD:main

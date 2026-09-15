@@ -1,0 +1,1 @@
+Finalize the rebuilt Pixel Pal as a face-only square widget and verify the Halo Xcode build.
