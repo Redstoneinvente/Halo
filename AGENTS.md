@@ -41,7 +41,7 @@ A demo that works is not sufficient. CI SDK work must also be validated, permiss
 
 Any task involving Pixel Pal, the built-in pet/face widget, its expressions, sprites, accessories, animation system, settings, contextual reactions, or persisted Pixel Pal preferences must treat `Docs/PixelPalV2.md` as authoritative product and implementation direction.
 
-Read it **before modifying Pixel Pal code**.
+Read it **before modifying Pixel Pal code**. If older comments or implementation details conflict with the v2 specification, the v2 specification wins unless the user explicitly changes that direction.
 
 ### Hard rules
 
