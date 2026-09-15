@@ -18,51 +18,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Repair micro widget compile errors
+      - name: Repair reported compile errors
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path('Halo/Views/VisualWorkspaceAdaptiveWidgets.swift')
           s = p.read_text()
-
-          replacements = {
-              'ForEach(orderedMetrics.prefix(8)) { item in': 'ForEach(Array(orderedMetrics.prefix(8).enumerated()), id: \\.offset) { _, item in',
-              'Text(itemValue.value).monospacedDigit().foregroundStyle(.secondary)': 'Text(itemValue.text).monospacedDigit().foregroundStyle(.secondary)',
-              'micro(region: true)': 'captureMicroVisual',
-          }
-          for old, new in replacements.items():
+          fixes = [
+              ('ForEach(orderedMetrics.prefix(8)) { item in', 'ForEach(Array(orderedMetrics.prefix(8).enumerated()), id: \\.offset) { _, item in'),
+              ('Text(itemValue.value).monospacedDigit().foregroundStyle(.secondary)', 'Text(itemValue.text).monospacedDigit().foregroundStyle(.secondary)'),
+              ('micro(region: true)', 'primaryAction(iconOnly: true)'),
+          ]
+          for old, new in fixes:
               if old not in s:
-                  raise SystemExit(f'Missing expected source: {old}')
+                  raise SystemExit('Missing expected source: ' + old)
               s = s.replace(old, new, 1)
-
-          anchor = '    private var compactActions: some View { HStack(spacing: context.spacing) { captureButton; ocrButton }.disabled(service.busy) }'
-          micro = '''    private var captureMicroVisual: some View {
-              let region = context.settings.capturePrimaryAction == .region
-              return ZStack {
-                  RoundedRectangle(cornerRadius: 13, style: .continuous)
-                      .fill(style.accentColor.color.opacity(0.055))
-                  RoundedRectangle(cornerRadius: 13, style: .continuous)
-                      .stroke(style.accentColor.color.opacity(0.42), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                  VStack(spacing: 4) {
-                      if service.busy {
-                          ProgressView().controlSize(.small)
-                      } else {
-                          Image(systemName: region ? "viewfinder" : "text.viewfinder")
-                              .font(.system(size: 22, weight: .semibold))
-                              .foregroundStyle(style.accentColor.color)
-                      }
-                      Text(region ? "CAPTURE" : "OCR")
-                          .font(.system(size: 7, weight: .bold, design: .rounded))
-                          .foregroundStyle(.secondary)
-                  }
-              }
-              .padding(3)
-          }
-
-'''
-          if anchor not in s:
-              raise SystemExit('Missing capture insertion anchor')
-          s = s.replace(anchor, micro + anchor, 1)
           p.write_text(s)
           PY
 
