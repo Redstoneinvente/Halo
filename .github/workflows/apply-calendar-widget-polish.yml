@@ -37,6 +37,22 @@ jobs:
           PY
           python3 scripts/repair_calendar_widget_polish.py
 
+          # The current adaptive option model has launcherShowRunningApps, but no
+          # launcherShowFavorites setting. Favorites are already controlled by the
+          # configured favorite bundle list, so do not synthesize a placebo toggle.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Halo/Views/VisualWorkspaceAdaptiveWidgets.swift')
+          s = p.read_text()
+          bad = '        guard context.settings.launcherShowFavorites else { return [] }\n        return context.settings.launcherFavoriteBundleIDs.compactMap { bundle in'
+          good = '        context.settings.launcherFavoriteBundleIDs.compactMap { bundle in'
+          if bad in s:
+              s = s.replace(bad, good, 1)
+          if 'launcherShowFavorites' in s:
+              raise SystemExit('Unsupported launcherShowFavorites reference remains in adaptive renderer')
+          p.write_text(s)
+          PY
+
       - name: Verify source contract
         run: |
           python3 - <<'PY'
@@ -58,7 +74,7 @@ jobs:
               'Elements at \\(footprint.key)',
               'exclamationmark.triangle.fill',
               'guard !configurable.isEmpty else { return true }',
-              'launcherShowFavorites else { return [] }',
+              'launcherShowRunningApps',
               'context.settings.captureShowOCR && !service.recognizedText.isEmpty',
               'in: 2...8',
               'in: 1...4',
@@ -67,6 +83,8 @@ jobs:
           missing = [x for x in required if x not in haystack]
           if missing:
               raise SystemExit('Missing polish contract: ' + ', '.join(missing))
+          if 'launcherShowFavorites' in adaptive:
+              raise SystemExit('Unsupported launcherShowFavorites reference is exposed')
           if 'Toggle("Battery ring", isOn: adaptive.systemBatteryRing)' in settings:
               raise SystemExit('Dead System Battery ring control is still exposed')
           if 'Toggle("Metric labels", isOn: adaptive.systemShowLabels)' in settings:
