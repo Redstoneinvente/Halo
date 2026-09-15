@@ -22,7 +22,13 @@ jobs:
       - name: Reconstruct patch script
         shell: bash
         run: |
-          cat scripts/custom-ci-patch/part* > /tmp/apply_custom_ci.py
+          : > /tmp/apply_custom_ci.py
+          for part in $(find scripts/custom-ci-patch -type f -name 'part*' | sort); do
+            # Staging chunks were committed as text files and each acquired one
+            # separator newline. Remove only that artificial trailing newline so
+            # arbitrary mid-token chunk boundaries are reconstructed byte-for-byte.
+            perl -0pe 's/\n\z//' "$part" >> /tmp/apply_custom_ci.py
+          done
           python3 -m py_compile /tmp/apply_custom_ci.py
 
       - name: Apply Custom CI SDK
@@ -71,4 +77,5 @@ jobs:
             exit 0
           fi
           git commit -m 'Add declarative Custom CI SDK and import flow'
+          git pull --rebase origin main
           git push origin HEAD:main
