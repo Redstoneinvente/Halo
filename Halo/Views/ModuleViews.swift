@@ -962,17 +962,37 @@ struct VisualWorkspaceCalendarView: View {
     }
 
     private var todayTile: some View {
-        Button { selectedDate = calendar.startOfDay(for: Date()); monthAnchor = selectedDate } label: {
-            VStack(spacing: 1) {
-                Text(Date(), format: .dateTime.weekday(.abbreviated).locale(.autoupdatingCurrent))
-                    .font(dateFont(10)).textCase(.uppercase).foregroundStyle(.secondary)
-                todayHeroNumber
-                if !filteredToday.isEmpty {
-                    Circle().fill(accent).frame(width: 4, height: 4).padding(.top, 3)
+        let next = filteredToday.first { $0.endDate > Date() }
+        let minutesUntil = next.map { Int(ceil($0.startDate.timeIntervalSinceNow / 60)) }
+        let imminent = minutesUntil.map { $0 >= 0 && $0 <= 60 } ?? false
+        return Group {
+            if imminent, let minutesUntil {
+                VStack(spacing: 3) {
+                    Image(systemName: "calendar.badge.clock").font(.system(size: 12, weight: .semibold)).foregroundStyle(accent)
+                    Text("\(minutesUntil)m").font(dateFont(30)).monospacedDigit().minimumScaleFactor(0.65)
+                    Text("NEXT").font(dateFont(7)).foregroundStyle(.secondary)
                 }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
-        }.buttonStyle(.plain)
-        .simultaneousGesture(TapGesture(count: 2).onEnded { openCalendarApp() })
+            } else {
+                VStack(spacing: 1) {
+                    Text(Date(), format: .dateTime.weekday(.abbreviated).locale(.autoupdatingCurrent)).font(dateFont(9)).textCase(.uppercase).foregroundStyle(.secondary)
+                    todayHeroNumber
+                    if !filteredToday.isEmpty { Circle().fill(accent).frame(width: 4, height: 4).padding(.top, 3) }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .haloMicroInteraction(accent: accent, help: imminent ? "Next event in \(minutesUntil ?? 0) minutes" : "Calendar · click for today · hold for agenda", tapShowsPopover: true, onTap: {}) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(Date(), format: .dateTime.weekday(.wide).month(.wide).day()).font(.headline)
+                if filteredToday.isEmpty { Text("No more events today").foregroundStyle(.secondary) }
+                ForEach(filteredToday.prefix(5), id: \.eventIdentifier) { event in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(event.title).lineLimit(1)
+                        Text(event.startDate, style: .time).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }.frame(width: 280)
+        }
     }
 
     private var horizontalAgenda: some View {

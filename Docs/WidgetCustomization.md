@@ -62,3 +62,22 @@ Settings → Closed notch → Content fit enables **Auto-size to fit content** (
 Font and time-zone catalogs now open as searchable lazy lists rather than hundreds of eagerly constructed picker entries.
 
 Mac checks: enable ProMotion/120 Hz, disable Low Power Mode, record frame pacing in Instruments while opening/closing Halo and scrolling settings. Move between 60/120 Hz screens and repeat. Test both slots with long titles, large custom clock fonts, seconds, a GIF plus visualizer, extreme padding, camera offsets and auto-size on/off. Native compilation and actual delivered frame rate have not been verified in this editing environment.
+
+
+## 1×1 micro-widget design contract
+
+A 1×1 widget is a specialised glanceable state, not a compressed version of a larger widget. It should normally present one dominant visual object — a number, icon, progress ring, artwork, waveform, file thumbnail, or date — and avoid multiple labelled controls.
+
+Default interaction language:
+
+- **Hover:** subtle visual lift/illumination and a helpful tooltip; hover must never be required to understand the tile.
+- **Click:** the widget's single most obvious action. Timer and Stopwatch start/pause; Audio controls playback; File Shelf opens its top item; Capture starts the preferred supported capture flow.
+- **Press and hold (~450 ms):** compresses the tile slightly and opens the widget's compact contextual popover.
+- **Secondary click:** remains the configuration/context-menu path supplied by the workspace.
+- **Scroll:** used only where it maps naturally, such as volume, Timer preset duration, or System metric rotation.
+- **Drag:** used when the content itself is draggable, such as the top File Shelf item.
+- **Double click:** do not make destructive or primary behavior depend on it.
+
+Current deliberate micro presentations include: Timer countdown ring, File Shelf top-item portal, adaptive Audio artwork/volume, Calendar date/imminent-event countdown, Clipboard object-type/history card, single System metric gauge, single Launcher app/group portal, Quick Note capture surface, Capture command/status tile, and Stopwatch chronograph sweep.
+
+Do not put readable note prose, event names, filenames, lap lists, several system metrics, or four tappable launcher icons inside 1×1. Those belong to larger footprints or the long-press popover.

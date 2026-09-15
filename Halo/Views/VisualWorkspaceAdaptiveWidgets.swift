@@ -162,6 +162,80 @@ private struct AdaptiveMicroRing<Content: View>: View {
     }
 }
 
+
+/// Shared interaction language for deliberate 1x1 widgets. A micro widget should remain
+/// understandable without hover, while hover/press add polish and long-press exposes depth.
+struct HaloMicroInteractionModifier<PopoverContent: View>: ViewModifier {
+    let accent: Color
+    let helpText: String
+    let tapShowsPopover: Bool
+    let onTap: () -> Void
+    let popoverContent: () -> PopoverContent
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovering = false
+    @State private var pressing = false
+    @State private var suppressNextTap = false
+    @State private var showingPopover = false
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .scaleEffect(pressing ? 0.965 : (hovering ? 1.012 : 1))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(accent.opacity(pressing ? 0.095 : hovering ? 0.035 : 0))
+                    .allowsHitTesting(false)
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: hovering)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.09), value: pressing)
+            .onHover { hovering = $0 }
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.45, maximumDistance: 12)
+                    .onChanged { _ in pressing = true }
+                    .onEnded { _ in
+                        pressing = false
+                        suppressNextTap = true
+                        showingPopover = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { suppressNextTap = false }
+                    }
+            )
+            .simultaneousGesture(TapGesture().onEnded {
+                guard !suppressNextTap else { return }
+                if tapShowsPopover { showingPopover = true } else { onTap() }
+            })
+            .popover(isPresented: $showingPopover, arrowEdge: .bottom) {
+                popoverContent().padding(12).frame(minWidth: 220)
+            }
+            .help(helpText)
+    }
+}
+
+extension View {
+    func haloMicroInteraction<PopoverContent: View>(
+        accent: Color,
+        help: String,
+        tapShowsPopover: Bool = false,
+        onTap: @escaping () -> Void,
+        @ViewBuilder popover: @escaping () -> PopoverContent
+    ) -> some View {
+        modifier(HaloMicroInteractionModifier(accent: accent, helpText: help,
+                                              tapShowsPopover: tapShowsPopover,
+                                              onTap: onTap, popoverContent: popover))
+    }
+}
+
+struct HaloMicroScrollCapture: NSViewRepresentable {
+    let onScroll: (Double) -> Void
+    final class View: NSView {
+        var callback: ((Double) -> Void)?
+        override func scrollWheel(with event: NSEvent) {
+            callback?(event.scrollingDeltaY == 0 ? event.scrollingDeltaX : event.scrollingDeltaY)
+        }
+    }
+    func makeNSView(context: Context) -> View { let view = View(); view.callback = onScroll; return view }
+    func updateNSView(_ nsView: View, context: Context) { nsView.callback = onScroll }
+}
+
 private struct AdaptiveSpectrumView: View {
     let accent: Color
     @State private var snapshot = AudioSpectrumSnapshot()
@@ -203,7 +277,7 @@ struct VisualWorkspaceAdaptiveModuleView: View {
         case .media:
             VisualAdaptiveMediaView(service: workspace.media, app: workspace.settings.mediaApp)
         case .audio:
-            VisualAdaptiveAudioView(service: workspace.audio)
+            VisualAdaptiveAudioView(service: workspace.audio, media: workspace.media, mediaApp: workspace.settings.mediaApp)
         case .clipboard:
             VisualAdaptiveClipboardView(service: workspace.clipboard, enabled: workspace.settings.clipboardEnabled)
         case .system:
@@ -281,6 +355,7 @@ struct VisualWorkspaceTimerView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var store: AppStore
     @Namespace private var namespace
+    @State private var microPresetMinutes = 5
 
     private var context: AdaptiveResolvedContext { AdaptiveResolvedContext(module: .timer, style: style, columns: gridColumnSpan, rows: gridRowSpan, width: availableWidth, height: availableHeight) }
 
@@ -324,7 +399,7 @@ struct VisualWorkspaceTimerView: View {
 
     private func microTimer(remaining: TimeInterval, elapsed: TimeInterval, progress: Double) -> some View {
         let value = context.settings.timerMode == .elapsed ? elapsed : remaining
-        let text = formatDuration(value)
+        let text = microDuration(value)
         let active = store.deadline != nil || store.pausedSeconds > 0 || store.finished
         let ringProgress = active ? progress : 0
         let symbol = store.finished ? "checkmark" : store.deadline != nil ? "timer" : store.pausedSeconds > 0 ? "pause.fill" : "play.fill"
@@ -333,15 +408,42 @@ struct VisualWorkspaceTimerView: View {
                 Image(systemName: symbol)
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(style.accentColor.color)
-                Text(store.finished ? "Done" : text)
+                Text(store.finished ? "Done" : (active ? text : "\(microPresetMinutes)m"))
                     .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.56)
+                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.56)
                     .contentTransition(.numericText())
-            }
-            .padding(5)
+            }.padding(5)
         }
+        .haloMicroInteraction(accent: style.accentColor.color, help: "Timer · click to start/pause · hold for presets") {
+            if store.finished { store.resetTimer() }
+            else if store.deadline != nil || store.pausedSeconds > 0 { store.pauseResume() }
+            else { store.startTimer(minutes: microPresetMinutes) }
+        } popover: {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Quick Timer").font(.headline)
+                HStack(spacing: 6) {
+                    ForEach([1, 5, 10, 15, 30], id: \.self) { minutes in
+                        Button("\(minutes)m") { microPresetMinutes = minutes; store.startTimer(minutes: minutes) }
+                    }
+                }
+                if active { Button("Reset Timer") { store.resetTimer() } }
+            }
+        }
+        .background(HaloMicroScrollCapture { delta in
+            guard store.deadline == nil, store.pausedSeconds <= 0 else { return }
+            microPresetMinutes = min(120, max(1, microPresetMinutes + (delta > 0 ? 1 : -1)))
+        }.allowsHitTesting(true))
+        .scaleEffect(store.finished && !reduceMotion ? 1.025 : 1)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.42).repeatCount(store.finished ? 2 : 1, autoreverses: true), value: store.finished)
+    }
+
+    private func microDuration(_ interval: TimeInterval) -> String {
+        let seconds = max(0, Int(interval.rounded()))
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3600 { return "\(Int(ceil(Double(seconds) / 60)))m" }
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        return minutes == 0 ? "\(hours)h" : "\(hours)h\(minutes)m"
     }
 
     private func horizontalTimer(remaining: TimeInterval, elapsed: TimeInterval, progress: Double) -> some View {
@@ -693,6 +795,8 @@ private struct VisualAdaptiveAudioView: View {
     @Environment(\.openNotchGridColumnSpan) private var gridColumnSpan
     @Environment(\.openNotchGridRowSpan) private var gridRowSpan
     @ObservedObject var service: AudioService
+    @ObservedObject var media: MediaService
+    let mediaApp: String
 
     private var context: AdaptiveResolvedContext { AdaptiveResolvedContext(module: .audio, style: style, columns: gridColumnSpan, rows: gridRowSpan, width: availableWidth, height: availableHeight) }
     private var selectedName: String { service.devices.first(where: { $0.id == service.selected })?.name ?? "Audio Output" }
@@ -714,17 +818,41 @@ private struct VisualAdaptiveAudioView: View {
 
     private var speakerSymbol: String { service.volume <= 0.001 ? "speaker.slash.fill" : service.volume < 0.45 ? "speaker.wave.1.fill" : "speaker.wave.3.fill" }
     private var micro: some View {
-        AdaptiveMicroRing(progress: min(1, max(0, Double(service.volume))), accent: style.accentColor.color) {
-            VStack(spacing: 2) {
-                Image(systemName: speakerSymbol)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(style.accentColor.color)
-                Text("\(percent)%")
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .lineLimit(1)
+        Group {
+            if media.isPlaying, let artwork = media.artworkImage {
+                ZStack {
+                    Image(nsImage: artwork).resizable().scaledToFill()
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(style.accentColor.color.opacity(0.72), lineWidth: 2)
+                    Image(systemName: "pause.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .padding(7).background(.ultraThinMaterial, in: Circle())
+                }.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            } else {
+                AdaptiveMicroRing(progress: min(1, max(0, Double(service.volume))), accent: style.accentColor.color) {
+                    VStack(spacing: 2) {
+                        Image(systemName: speakerSymbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(style.accentColor.color)
+                        Text("\(percent)%").font(.system(size: 11, weight: .bold, design: .rounded)).monospacedDigit().lineLimit(1)
+                    }
+                }
             }
         }
+        .haloMicroInteraction(accent: style.accentColor.color, help: "Audio · click play/pause · scroll volume · hold for controls") {
+            if media.connectedApp != nil || media.isPlaying { media.perform("playpause", app: mediaApp) }
+            else if service.canSetVolume { service.toggleMute() }
+        } popover: {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(selectedName).font(.headline).lineLimit(1)
+                HStack { Image(systemName: speakerSymbol); Text("\(percent)%").monospacedDigit(); Spacer(); Button("Mute") { service.toggleMute() }.disabled(!service.canSetVolume) }
+                if service.canSetVolume { volumeSlider }
+                if service.devices.count > 1 { outputPicker }
+                if media.connectedApp != nil { HStack { Button { media.perform("previous track", app: mediaApp) } label: { Image(systemName: "backward.fill") }; Button { media.perform("playpause", app: mediaApp) } label: { Image(systemName: "playpause.fill") }; Button { media.perform("next track", app: mediaApp) } label: { Image(systemName: "forward.fill") } } }
+            }
+        }
+        .background(HaloMicroScrollCapture { delta in
+            guard service.canSetVolume else { return }
+            service.setVolume(min(1, max(0, service.volume + Float(delta > 0 ? 0.04 : -0.04))))
+        }.allowsHitTesting(true))
     }
     private var compact: some View { HStack(spacing: 7) { Image(systemName: speakerSymbol).foregroundStyle(style.accentColor.color); Text("\(percent)%").font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit(); Spacer(minLength: 2); if context.settings.showControls && service.canSetVolume { Button { service.toggleMute() } label: { Image(systemName: service.volume <= 0.001 ? "speaker.wave.2" : "speaker.slash") }.buttonStyle(.plain) } } }
     private var horizontal: some View {
@@ -814,32 +942,34 @@ private struct VisualAdaptiveClipboardView: View {
     private var micro: some View {
         Group {
             if let entry = service.entries.first {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
-                        Image(systemName: contentIcon(entry.text))
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(style.accentColor.color)
-                        Text(contentIcon(entry.text) == "link" ? "LINK" : "TEXT")
-                            .font(.system(size: 7, weight: .bold, design: .rounded))
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 2)
-                        Text("\(service.entries.count)")
-                            .font(.system(size: 8, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .padding(.horizontal, 4).padding(.vertical, 2)
-                            .background(style.accentColor.color.opacity(0.12), in: Capsule())
+                ZStack {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous).fill(style.accentColor.color.opacity(0.045)).offset(x: 5, y: 5).opacity(service.entries.count > 1 ? 1 : 0)
+                    RoundedRectangle(cornerRadius: 11, style: .continuous).fill(style.textColor.color.opacity(0.055)).offset(x: 2.5, y: 2.5).opacity(service.entries.count > 1 ? 1 : 0)
+                    RoundedRectangle(cornerRadius: 11, style: .continuous).fill(style.textColor.color.opacity(0.035))
+                    VStack(spacing: 5) {
+                        Image(systemName: contentIcon(entry.text)).font(.system(size: 22, weight: .semibold)).foregroundStyle(style.accentColor.color)
+                        Text(contentIcon(entry.text) == "link" ? "LINK" : "TEXT").font(.system(size: 8, weight: .semibold, design: .rounded)).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    Text(preview(entry.text, limit: min(42, context.settings.clipboardPreviewLength)))
-                        .font(.system(size: 9, weight: .medium))
-                        .lineLimit(3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if service.entries.count > 1 {
+                        Text("\(service.entries.count)").font(.system(size: 7, weight: .bold, design: .rounded)).padding(4).background(style.accentColor.color, in: Circle()).foregroundStyle(.white).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(5)
+                    }
                 }
-                .padding(7)
-                .background(style.textColor.color.opacity(0.035), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                .overlay(alignment: .leading) {
-                    Capsule().fill(style.accentColor.color.opacity(0.75)).frame(width: 2.5).padding(.vertical, 8)
+                .padding(5)
+                .haloMicroInteraction(accent: style.accentColor.color, help: "Clipboard · click for preview · hold for history", tapShowsPopover: true, onTap: {}) {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Text("Clipboard").font(.headline)
+                        ForEach(Array(service.entries.prefix(6))) { item in
+                            Button { service.copy(item) } label: {
+                                HStack { Image(systemName: contentIcon(item.text)); Text(item.text).lineLimit(1); Spacer() }
+                            }.buttonStyle(.plain)
+                        }
+                        Text("Clipboard history stays in memory and clears when Halo quits.").font(.caption2).foregroundStyle(.secondary)
+                    }.frame(width: 280)
                 }
-            } else { empty(icon: "doc.on.clipboard", text: "Empty") }
+            } else {
+                VStack(spacing: 5) { Image(systemName: "doc.on.clipboard").font(.system(size: 22)); Text(enabled ? "EMPTY" : "OFF").font(.caption2).foregroundStyle(.secondary) }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
     private var compact: some View {
@@ -911,12 +1041,14 @@ private struct VisualAdaptiveSystemView: View {
     @ObservedObject var service: SystemService
 
     private var context: AdaptiveResolvedContext { AdaptiveResolvedContext(module: .system, style: style, columns: gridColumnSpan, rows: gridRowSpan, width: availableWidth, height: availableHeight) }
+    @State private var microMetricOffset = 0
     private var orderedMetrics: [VisualSystemMetric] { context.settings.resolvedSystemMetrics }
+    private var microSelectedMetric: VisualSystemMetric { orderedMetrics.isEmpty ? context.settings.systemPrimaryMetric : orderedMetrics[abs(microMetricOffset) % orderedMetrics.count] }
 
     var body: some View {
         Group {
             switch context.family {
-            case .micro: microMetric(context.settings.systemPrimaryMetric)
+            case .micro: microMetric(microSelectedMetric)
             case .compact: HStack(spacing: 6) { ForEach(Array(orderedMetrics.prefix(2))) { metricCard($0, prominent: true) } }
             case .horizontal: horizontal
             case .vertical: vertical
@@ -931,20 +1063,26 @@ private struct VisualAdaptiveSystemView: View {
         let value = metricValue(metric)
         return AdaptiveMicroRing(progress: value.percent.map { min(1, max(0, $0 / 100)) }, accent: metricColor(metric)) {
             VStack(spacing: 2) {
-                Image(systemName: metric.symbol)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(metricColor(metric))
-                Text(value.text)
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.56)
-                Text(metric.shortTitle.uppercased())
-                    .font(.system(size: 6.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+                Image(systemName: metric.symbol).font(.system(size: 10, weight: .semibold)).foregroundStyle(metricColor(metric))
+                Text(value.text).font(.system(size: 11, weight: .bold, design: .rounded)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.62)
+                Text(metric.shortTitle.uppercased()).font(.system(size: 6.5, weight: .bold, design: .rounded)).foregroundStyle(.secondary).lineLimit(1)
+            }.padding(4)
         }
+        .haloMicroInteraction(accent: metricColor(metric), help: "System · scroll metrics · hold for details", tapShowsPopover: true, onTap: {}) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("System").font(.headline)
+                ForEach(orderedMetrics.prefix(8)) { item in
+                    let itemValue = metricValue(item)
+                    Button { if let index = orderedMetrics.firstIndex(of: item) { microMetricOffset = index } } label: {
+                        HStack { Image(systemName: item.symbol).frame(width: 18); Text(item.title); Spacer(); Text(itemValue.value).monospacedDigit().foregroundStyle(.secondary) }
+                    }.buttonStyle(.plain)
+                }
+            }.frame(width: 250)
+        }
+        .background(HaloMicroScrollCapture { delta in
+            guard !orderedMetrics.isEmpty else { return }
+            microMetricOffset = (microMetricOffset + (delta > 0 ? 1 : -1) + orderedMetrics.count) % orderedMetrics.count
+        }.allowsHitTesting(true))
     }
 
     private var horizontal: some View {
@@ -1046,27 +1184,39 @@ private struct VisualAdaptiveLauncherView: View {
     }
 
     @ViewBuilder private var micro: some View {
-        let favorites = Array(favoriteApps.prefix(4))
-        if !favorites.isEmpty {
-            LazyVGrid(columns: microColumns, spacing: 5) {
-                ForEach(favorites, id: \.bundle) { microFavoriteButton($0) }
+        let favorites = favoriteApps
+        let primary = favorites.first
+        let running = workspace.runningApps.first
+        ZStack {
+            if favorites.count > 1 {
+                RoundedRectangle(cornerRadius: 13, style: .continuous).fill(style.accentColor.color.opacity(0.12)).frame(width: 52, height: 52).offset(x: 7, y: 6)
+                RoundedRectangle(cornerRadius: 13, style: .continuous).fill(style.textColor.color.opacity(0.08)).frame(width: 52, height: 52).offset(x: 3, y: 3)
             }
-            .padding(3)
-        } else {
-            let apps = Array(visibleApps.prefix(4))
-            if !apps.isEmpty {
-                LazyVGrid(columns: microColumns, spacing: 5) {
-                    ForEach(apps, id: \.processIdentifier) { microRunningButton($0) }
-                }
-                .padding(3)
-            } else {
-                VStack(spacing: 3) {
-                    Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 24, weight: .medium))
-                        .foregroundStyle(style.accentColor.color)
-                    Text("Apps").font(.caption2).foregroundStyle(.secondary)
+            Group {
+                if let primary {
+                    Button { NSWorkspace.shared.open(primary.url) } label: { Image(nsImage: primary.icon).resizable().scaledToFit().padding(9) }.buttonStyle(.plain)
+                } else if let running {
+                    Button { running.activate(options: .activateIgnoringOtherApps) } label: { appIcon(running, size: min(50, context.settings.launcherIconSize + 12)).padding(7) }.buttonStyle(.plain)
+                } else {
+                    Image(systemName: "app.dashed").font(.system(size: 26, weight: .medium)).foregroundStyle(style.accentColor.color)
                 }
             }
+            .frame(width: 58, height: 58)
+            .background(style.textColor.color.opacity(0.035), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            if favorites.count > 1 {
+                Text("\(favorites.count)").font(.system(size: 7, weight: .bold, design: .rounded)).padding(4).background(style.accentColor.color, in: Circle()).foregroundStyle(.white).offset(x: 25, y: -25)
+            }
+        }
+        .haloMicroInteraction(accent: style.accentColor.color, help: "Launcher · click app · hold for group", onTap: {
+            if let primary { NSWorkspace.shared.open(primary.url) } else { running?.activate(options: .activateIgnoringOtherApps) }
+        }) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Launcher").font(.headline)
+                ForEach(favorites.prefix(8), id: \.bundle) { app in
+                    Button { NSWorkspace.shared.open(app.url) } label: { HStack { Image(nsImage: app.icon).resizable().frame(width: 22, height: 22); Text(app.name); Spacer() } }.buttonStyle(.plain)
+                }
+                if favorites.isEmpty { Text("No favorite apps configured.").font(.caption).foregroundStyle(.secondary) }
+            }.frame(width: 230)
         }
     }
 
@@ -1232,7 +1382,15 @@ private struct VisualAdaptiveNotesView: View {
     var body: some View {
         Group {
             switch context.family {
-            case .micro: preview(lines: 4)
+            case .micro:
+                preview(lines: 3)
+                    .haloMicroInteraction(accent: style.accentColor.color, help: "Quick Note · click or hold to write", tapShowsPopover: true, onTap: {}) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Quick Note").font(.headline)
+                            TextEditor(text: note).frame(width: 300, height: 150)
+                            HStack { Spacer(); Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(workspace.settings.notes, forType: .string) }.disabled(workspace.settings.notes.isEmpty) }
+                        }
+                    }
             case .compact, .horizontal: preview(lines: 2)
             case .vertical: editor(showHeader: true)
             case .standard, .expanded, .dashboard, .hero: editor(showHeader: style.showTitle)
@@ -1257,11 +1415,20 @@ private struct VisualAdaptiveNotesView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Text(trimmed.isEmpty ? context.settings.notesPlaceholder : trimmed)
-                .font(style.font(scale: isMicro ? 0.70 : 0.86))
-                .foregroundStyle(trimmed.isEmpty ? .secondary : .primary)
-                .lineLimit(lines)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if isMicro {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(0..<3, id: \.self) { index in
+                        Capsule().fill(index == 0 ? style.accentColor.color.opacity(0.55) : style.textColor.color.opacity(0.14))
+                            .frame(width: index == 2 ? 28 : index == 1 ? 42 : 50, height: 3)
+                    }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            } else {
+                Text(trimmed.isEmpty ? context.settings.notesPlaceholder : trimmed)
+                    .font(style.font(scale: 0.86))
+                    .foregroundStyle(trimmed.isEmpty ? .secondary : .primary)
+                    .lineLimit(lines)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(isMicro ? 7 : 0)
         .background {
@@ -1304,7 +1471,19 @@ private struct VisualAdaptiveCaptureView: View {
     var body: some View {
         Group {
             switch context.family {
-            case .micro: primaryAction(iconOnly: true)
+            case .micro:
+                micro(region: true)
+                    .haloMicroInteraction(accent: style.accentColor.color, help: "Capture · click region · hold for capture tools") {
+                        service.capture { store.addFiles([$0]) }
+                    } popover: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Capture").font(.headline)
+                            Button { service.capture { store.addFiles([$0]) } } label: { Label("Capture Region", systemImage: "viewfinder") }
+                            Button { service.chooseImage() } label: { Label("OCR Image", systemImage: "text.viewfinder") }
+                            if service.busy { ProgressView("Working…") }
+                            if !service.recognizedText.isEmpty { Text(service.recognizedText).font(.caption).lineLimit(4).textSelection(.enabled) }
+                        }.frame(width: 250)
+                    }
             case .compact, .horizontal: compactActions
             case .vertical: vertical
             case .standard: standard
@@ -1414,13 +1593,33 @@ private struct VisualAdaptiveStopwatchView: View {
         let sweep = min(1, max(0, elapsed.truncatingRemainder(dividingBy: 60) / 60))
         return AdaptiveMicroRing(progress: sweep, accent: style.accentColor.color) {
             VStack(spacing: 2) {
-                Image(systemName: workspace.stopwatchStart == nil ? "pause.fill" : "stopwatch.fill")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(style.accentColor.color)
-                timeText(elapsed, scale: 0.72)
-            }
-            .padding(5)
+                Image(systemName: workspace.stopwatchStart == nil ? "pause.fill" : "stopwatch.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(style.accentColor.color)
+                Text(microStopwatchTime(elapsed)).font(.system(size: 13, weight: .bold, design: .rounded)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.58).contentTransition(.numericText())
+            }.padding(5)
         }
+        .haloMicroInteraction(accent: style.accentColor.color, help: "Stopwatch · click start/pause · hold for laps") {
+            workspace.toggleStopwatch()
+        } popover: {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Stopwatch").font(.headline)
+                Text(format(elapsed)).font(.system(size: 24, weight: .bold, design: .rounded)).monospacedDigit()
+                HStack {
+                    Button(workspace.stopwatchStart == nil ? "Start" : "Pause") { workspace.toggleStopwatch() }
+                    if workspace.stopwatchStart != nil { Button("Lap") { workspace.lapStopwatch() } }
+                    Button("Reset") { workspace.resetStopwatch() }.disabled(elapsed < 0.01)
+                }
+                ForEach(Array(workspace.stopwatchLaps.suffix(4).enumerated()), id: \.offset) { index, lap in
+                    HStack { Text("Lap \(workspace.stopwatchLaps.count - 3 + index)"); Spacer(); Text(format(lap)).monospacedDigit() }.font(.caption)
+                }
+            }.frame(width: 250)
+        }
+    }
+
+    private func microStopwatchTime(_ elapsed: TimeInterval) -> String {
+        if elapsed < 60 { return String(format: "%.1f", elapsed) }
+        let total = Int(elapsed)
+        if total < 3600 { return String(format: "%d:%02d", total / 60, total % 60) }
+        return String(format: "%d:%02d", total / 3600, (total / 60) % 60)
     }
 
     private func hero(elapsed: TimeInterval) -> some View { VStack(spacing: context.spacing) { if style.showTitle { AdaptiveHeader(title: "STOPWATCH", symbol: "stopwatch", style: style) }; Spacer(minLength: 0); timeText(elapsed, scale: context.family == .hero ? 1.9 : 1.55); stopwatchControls(compact: false); if context.settings.stopwatchShowLaps { Divider().opacity(0.16); HStack { Text("LAPS").font(.caption2).foregroundStyle(.secondary); Spacer() }; lapList(limit: context.settings.stopwatchLapCount) }; Spacer(minLength: 0) } }

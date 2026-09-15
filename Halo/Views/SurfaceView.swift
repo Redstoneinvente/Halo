@@ -3728,7 +3728,8 @@ struct BuiltinOrIntegrationWidget: View {
         case .timer:
             if gridColumnSpan != nil, gridRowSpan != nil { VisualWorkspaceTimerView(store: store) }
             else { timer }
-        case .shelf: shelf
+        case .shelf:
+            if gridColumnSpan == 1, gridRowSpan == 1 { microShelf } else { shelf }
         default: ModuleRegistry().view(for: module, store: store)
         }
     }
@@ -3788,6 +3789,36 @@ struct BuiltinOrIntegrationWidget: View {
                 }
             }
         }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
+    }
+
+    private var microShelf: some View {
+        Group {
+            if let url = store.files.last {
+                ZStack {
+                    if store.files.count > 2 { RoundedRectangle(cornerRadius: 12, style: .continuous).fill(style.accentColor.color.opacity(0.10)).frame(width: 52, height: 52).offset(x: 7, y: 6) }
+                    if store.files.count > 1 { RoundedRectangle(cornerRadius: 12, style: .continuous).fill(style.textColor.color.opacity(0.08)).frame(width: 52, height: 52).offset(x: 3, y: 3) }
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().scaledToFit().padding(12)
+                        .frame(width: 58, height: 58).background(style.textColor.color.opacity(0.035), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    if store.files.count > 1 { Text("\(store.files.count)").font(.system(size: 7, weight: .bold, design: .rounded)).padding(4).background(style.accentColor.color, in: Circle()).foregroundStyle(.white).offset(x: 25, y: -25) }
+                }
+                .haloMicroInteraction(accent: style.accentColor.color, help: "File Shelf · click top file · hold to browse") {
+                    NSWorkspace.shared.open(url)
+                } popover: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack { Text("File Shelf").font(.headline); Spacer(); Button { store.chooseFiles() } label: { Image(systemName: "plus") } }
+                        ForEach(Array(store.files.reversed().prefix(6)), id: \.self) { file in
+                            Button { NSWorkspace.shared.open(file) } label: { HStack { Image(nsImage: NSWorkspace.shared.icon(forFile: file.path)).resizable().frame(width: 22, height: 22); Text(file.lastPathComponent).lineLimit(1); Spacer() } }.buttonStyle(.plain)
+                        }
+                    }.frame(width: 280)
+                }
+                .onDrag { NSItemProvider(contentsOf: url) ?? NSItemProvider(object: url.path as NSString) }
+            } else {
+                Button { store.chooseFiles() } label: {
+                    VStack(spacing: 5) { Image(systemName: "tray").font(.system(size: 24, weight: .semibold)); Text("ADD").font(.caption2).fontWeight(.bold) }
+                        .foregroundStyle(style.accentColor.color).frame(maxWidth: .infinity, maxHeight: .infinity)
+                }.buttonStyle(.plain).help("Add files to shelf")
+            }
+        }
     }
 
     private var shelf: some View {
