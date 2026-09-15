@@ -963,23 +963,26 @@ private struct HaloPixelPalFace: View {
 
     var body: some View {
         ZStack {
-            background
-                .clipShape(HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius))
-            if preferences.inactiveLEDIntensity > 0.001 {
-                Canvas { context, size in
-                    let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)
-                    let inactiveColor = preferences.inactiveLEDUsesFaceColor ? faceColor : preferences.inactiveLEDColor.color
-                    for y in 0..<logicalGrid {
-                        for x in 0..<logicalGrid {
-                            let rect = geometry.led(x: x, y: y)
-                            let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius
-                            context.fill(Path(roundedRect: rect, cornerRadius: radius),
-                                         with: .color(inactiveColor.opacity(preferences.inactiveLEDIntensity)),
-                                         style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001))
+            ZStack {
+                background
+                if preferences.inactiveLEDIntensity > 0.001 {
+                    Canvas { context, size in
+                        let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)
+                        let inactiveColor = preferences.inactiveLEDUsesFaceColor ? faceColor : preferences.inactiveLEDColor.color
+                        for y in 0..<logicalGrid {
+                            for x in 0..<logicalGrid {
+                                let rect = geometry.led(x: x, y: y)
+                                let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius
+                                context.fill(Path(roundedRect: rect, cornerRadius: radius),
+                                             with: .color(inactiveColor.opacity(preferences.inactiveLEDIntensity)),
+                                             style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001))
+                            }
                         }
                     }
                 }
             }
+            .clipShape(HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius))
+
             Canvas { context, size in
                 draw(context: &context, size: size)
             }
@@ -1476,14 +1479,17 @@ private struct HaloPixelPalSettingsView: View {
                             .font(.caption.monospacedDigit())
                             .frame(width: 38, alignment: .trailing)
                     }
-                    HStack {
-                        Text("Background corner radius")
-                        Slider(value: bind(\.backgroundCornerRadius), in: 0...0.5)
-                        Text("\(Int(pal.preferences.backgroundCornerRadius * 100))%")
-                            .font(.caption.monospacedDigit())
-                            .frame(width: 38, alignment: .trailing)
-                    }
                 }
+                HStack {
+                    Text("Background corner radius")
+                    Slider(value: bind(\.backgroundCornerRadius), in: 0...0.5)
+                    Text("\(Int(pal.preferences.backgroundCornerRadius * 100))%")
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 38, alignment: .trailing)
+                }
+                Text("Rounds the LED display background, including the inactive LED matrix, without clipping the active Pixel Pal pixels.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 Toggle("Match inactive LEDs to face color", isOn: bind(\.inactiveLEDUsesFaceColor))
                 if !pal.preferences.inactiveLEDUsesFaceColor {
                     ColorPicker("Inactive LED color", selection: rgbBinding(\.inactiveLEDColor))
