@@ -18,17 +18,77 @@ struct SettingsView: View {
     @State private var renamingProfile: UUID?
     @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
+    @State private var expandedSidebarGroups: Set<String> = ["Halo"]
+
+    private struct SidebarGroup: Identifiable {
+        let title: String
+        let icon: String
+        let items: [String]
+        var id: String { title }
+    }
+
     private var visualWorkspaceActive: Bool {
         workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace
     }
 
-    private var sections: [String] {
-        var items = ["General", "Account & License", "Appearance", "Activation Sequence"]
+    private var sidebarGroups: [SidebarGroup] {
+        var workspaceItems = ["Modules", "Widgets", "Media & Files"]
         if visualWorkspaceActive {
-            items.append("Visual Workspace Editor")
+            workspaceItems.insert("Visual Workspace Editor", at: 0)
         }
-        items.append(contentsOf: ["Modules", "Widgets", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "Update Animation", "About"])
-        return items
+        return [
+            SidebarGroup(
+                title: "Halo",
+                icon: "sparkles",
+                items: ["General", "Account & License", "Privacy", "About"]
+            ),
+            SidebarGroup(
+                title: "Interface",
+                icon: "paintpalette",
+                items: ["Appearance", "Activation Sequence", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD"]
+            ),
+            SidebarGroup(
+                title: "Workspace",
+                icon: "rectangle.3.group",
+                items: workspaceItems
+            ),
+            SidebarGroup(
+                title: "Profiles & Automation",
+                icon: "person.2.badge.gearshape",
+                items: ["Profiles", "Schedules", "Automation"]
+            ),
+            SidebarGroup(
+                title: "System",
+                icon: "gearshape.2",
+                items: ["Displays", "Plugins", "Update Animation"]
+            )
+        ]
+    }
+
+    private var sections: [String] {
+        sidebarGroups.flatMap(\.items)
+    }
+
+    private func sidebarGroupExpansion(_ group: SidebarGroup) -> Binding<Bool> {
+        Binding(
+            get: { expandedSidebarGroups.contains(group.id) },
+            set: { expanded in
+                if expanded {
+                    expandedSidebarGroups.insert(group.id)
+                } else {
+                    expandedSidebarGroups.remove(group.id)
+                }
+            }
+        )
+    }
+
+    private func sidebarMatches(in group: SidebarGroup) -> [String] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return group.items }
+        if group.title.localizedCaseInsensitiveContains(query) {
+            return group.items
+        }
+        return group.items.filter { $0.localizedCaseInsensitiveContains(query) }
     }
 
     private func isSectionUnavailable(_ name: String) -> Bool {
@@ -88,12 +148,38 @@ struct SettingsView: View {
                 }.padding(16)
                 TextField("Find a section", text: $search).textFieldStyle(.roundedBorder).padding(12)
                 List(selection: sidebarSelection) {
-                    ForEach(sections.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \.self) { name in
-                        sidebarRow(name)
-                            .tag(name)
-                            .disabled(isSectionUnavailable(name))
+                    if search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        ForEach(sidebarGroups) { group in
+                            DisclosureGroup(isExpanded: sidebarGroupExpansion(group)) {
+                                ForEach(group.items, id: \.self) { name in
+                                    sidebarRow(name)
+                                        .tag(name)
+                                        .disabled(isSectionUnavailable(name))
+                                }
+                            } label: {
+                                Label(group.title, systemImage: group.icon)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(group.items.contains(section ?? "") ? Color.accentColor : Color.secondary)
+                            }
+                        }
+                    } else {
+                        ForEach(sidebarGroups) { group in
+                            let matches = sidebarMatches(in: group)
+                            if !matches.isEmpty {
+                                Section {
+                                    ForEach(matches, id: \.self) { name in
+                                        sidebarRow(name)
+                                            .tag(name)
+                                            .disabled(isSectionUnavailable(name))
+                                    }
+                                } header: {
+                                    Label(group.title, systemImage: group.icon)
+                                }
+                            }
+                        }
                     }
-                }.listStyle(.sidebar)
+                }
+                .listStyle(.sidebar)
                 Divider()
                 VStack(alignment: .leading, spacing: 12) {
                     Link(destination: URL(string: "https://halo.redstoneinvente.com")!) { Label("Halo website", systemImage: "globe") }
@@ -128,6 +214,11 @@ struct SettingsView: View {
             } else if !active && section == "Visual Workspace Editor" {
                 section = "Appearance"
             }
+        }
+        .onChange(of: section) { selectedSection in
+            guard let selectedSection,
+                  let group = sidebarGroups.first(where: { $0.items.contains(selectedSection) }) else { return }
+            expandedSidebarGroups.insert(group.id)
         }
         .onDisappear { GeometryPreview.update(expanded: false, editing: false) }
         .alert("Halo", isPresented: Binding(get: { store.error != nil || workspace.error != nil }, set: { if !$0 { store.error = nil; workspace.error = nil } })) {
