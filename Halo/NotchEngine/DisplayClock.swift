@@ -1047,6 +1047,13 @@ private final class HaloDropZoneHostView: NSView {
     }
 }
 
+private var haloDropCIEnabled: Bool {
+    let defaults = UserDefaults.standard
+    return defaults.object(forKey: "HaloContextDropEnabled") == nil
+        ? true
+        : defaults.bool(forKey: "HaloContextDropEnabled")
+}
+
 @MainActor
 private final class HaloEmbeddedDropZoneController {
     static let shared = HaloEmbeddedDropZoneController()
@@ -1060,6 +1067,11 @@ private final class HaloEmbeddedDropZoneController {
     private(set) var dropHandled = false
 
     func begin(target: any HaloGlobalDropTarget, itemCount: Int) {
+        guard haloDropCIEnabled else {
+            target.dragStateHandler?(false, 0)
+            dismiss()
+            return
+        }
         dropHandled = false
         model.result = nil
         model.itemCount = max(1, itemCount)
@@ -2091,6 +2103,10 @@ private final class HaloGlobalFileDragMonitor {
     }
 
     private func handleMouseEvent(_ type: NSEvent.EventType) {
+        guard haloDropCIEnabled else {
+            deactivateForDisabledState()
+            return
+        }
         switch type {
         case .leftMouseDown:
             beginPointerSession()
@@ -2112,6 +2128,10 @@ private final class HaloGlobalFileDragMonitor {
     }
 
     private func pollDragSession() {
+        guard haloDropCIEnabled else {
+            deactivateForDisabledState()
+            return
+        }
         let leftButtonDown = (NSEvent.pressedMouseButtons & 1) != 0
         guard leftButtonDown else {
             if activeTarget != nil || sawMouseDrag { finishAfterDropOpportunity() }
@@ -2130,6 +2150,10 @@ private final class HaloGlobalFileDragMonitor {
     }
 
     private func inspectDragPasteboard() {
+        guard haloDropCIEnabled else {
+            deactivateForDisabledState()
+            return
+        }
         let pasteboard = NSPasteboard(name: .drag)
         let count = dragPasteboardFileCount(pasteboard)
         guard count > 0 else { return }
@@ -2153,6 +2177,10 @@ private final class HaloGlobalFileDragMonitor {
     }
 
     private func activateTarget(at point: NSPoint, count: Int) {
+        guard haloDropCIEnabled else {
+            deactivateForDisabledState()
+            return
+        }
         guard let target = targetForDrag(at: point) else { return }
         if let activeTarget, activeTarget !== target {
             activeTarget.dragStateHandler?(false, 0)
@@ -2199,6 +2227,13 @@ private final class HaloGlobalFileDragMonitor {
         }
         activeTarget?.dragStateHandler?(false, 0)
         HaloEmbeddedDropZoneController.shared.cancelIfNeeded()
+        resetSessionState()
+    }
+
+    private func deactivateForDisabledState() {
+        deferredFinishPending = false
+        activeTarget?.dragStateHandler?(false, 0)
+        HaloEmbeddedDropZoneController.shared.dismiss()
         resetSessionState()
     }
 
