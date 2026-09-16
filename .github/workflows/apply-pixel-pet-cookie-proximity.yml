@@ -1,0 +1,59 @@
+name: Apply Pixel Pet Cookie Proximity
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/pixel-pet-cookie-proximity-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add hungry cookie proximity reaction
+        run: python3 .github/scripts/add_pixel_pet_cookie_proximity.py
+
+      - name: Verify proximity interaction
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('Halo/Views/PixelPetWidget.swift').read_text()
+          required = [
+              '@State private var precisePointer = CGPoint.zero',
+              'cookiePointer: hovering ? precisePointer : nil',
+              'private var cookieApproachIntensity: Double',
+              'if isCookieAnticipating { return .cookieAnticipation }',
+              'case .cookieAnticipation:',
+              'cookieApproachIntensity >= 0.62 ? HaloPixelPalSprites.mouthOpen',
+              'if isCookieAnticipating && cookieApproachIntensity >= 0.72',
+              'let hopRate = 5.0 + eagerness * 4.5',
+          ]
+          missing = [m for m in required if m not in s]
+          if missing:
+              raise SystemExit(f'Missing cookie proximity markers: {missing}')
+          print('Cookie proximity contract verified.')
+          PY
+
+      - name: Parse Pixel Pet source
+        run: swiftc -parse Halo/Views/PixelPetWidget.swift
+
+      - name: Commit proximity reaction
+        run: |
+          if git diff --quiet -- Halo/Views/PixelPetWidget.swift; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Views/PixelPetWidget.swift
+          git commit -m "Make Pixel Pet react as cursor nears cookie"
+          git pull --rebase origin main
+          git push origin HEAD:main
