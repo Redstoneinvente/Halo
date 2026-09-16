@@ -2586,7 +2586,7 @@ struct SurfaceView: View {
             }
         }
         .onChange(of: state.dropTargeted) { active in
-            if active {
+            if active && dropCIEnabled {
                 state.collapseTask?.cancel()
                 state.expanded = true
             }
@@ -2693,7 +2693,8 @@ struct SurfaceView: View {
     }
 
     @ViewBuilder private var surfaceOverlayLayer: some View {
-        contour.stroke(state.dropTargeted ? accent : .white.opacity(0.12), lineWidth: state.dropTargeted ? 1.6 : 1)
+        let dropOverlayActive = dropCIEnabled && state.dropTargeted
+        contour.stroke(dropOverlayActive ? accent : .white.opacity(0.12), lineWidth: dropOverlayActive ? 1.6 : 1)
         if state.expanded && activeContext == nil && usesVisualWorkspace {
             OpenNotchSurfaceChrome(contour: contour, options: layout.resolvedOpenNotchLayout.appearance)
         }
@@ -3873,7 +3874,14 @@ struct BuiltinOrIntegrationWidget: View {
             if options.showFooter && store.files.count > options.maxItems {
                 WidgetElement(key: "footer") { Text("+\(store.files.count - options.maxItems) more items") }
             }
-        }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
+        }
+        .frame(maxWidth: .infinity, alignment: options.alignment.alignment)
+        .dropDestination(for: URL.self) { urls, _ in
+            let files = urls.filter(\.isFileURL)
+            guard !files.isEmpty else { return false }
+            store.addFiles(files)
+            return true
+        }
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {

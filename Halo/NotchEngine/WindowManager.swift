@@ -102,17 +102,34 @@ final class HaloPanel: NSPanel {
 final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     var dragStateHandler: ((Bool, Int) -> Void)?
     var dropHandler: (([URL]) -> Void)?
-    var dropEnabled: (() -> Bool)?
+    var dropEnabled: (() -> Bool)? {
+        didSet { refreshDropRegistration() }
+    }
+    private var dropCIRegistered = false
 
     required init(rootView: Content) {
         super.init(rootView: rootView)
-        registerForDraggedTypes([.fileURL])
+        refreshDropRegistration()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     private var acceptsFileDrop: Bool { dropEnabled?() ?? true }
+
+    /// Drop CI owns only the surface-wide drag destination. When disabled we unregister
+    /// this hosting view entirely so descendant drop targets (notably File Shelf) remain usable.
+    func refreshDropRegistration() {
+        let shouldRegister = acceptsFileDrop
+        guard shouldRegister != dropCIRegistered else { return }
+        if shouldRegister {
+            registerForDraggedTypes([.fileURL])
+        } else {
+            unregisterDraggedTypes()
+        }
+        dropCIRegistered = shouldRegister
+        if !shouldRegister { rejectFileDrop() }
+    }
 
     private func rejectFileDrop() {
         dragStateHandler?(false, 0)
@@ -308,6 +325,7 @@ final class WindowManager {
         var contextSizeSubscription: AnyCancellable?
         var contextCompactSizeSubscription: AnyCancellable?
         var contextCompactHeightSubscription: AnyCancellable?
+        var refreshDropCIRegistration: (() -> Void)?
         init() {
             panel = HaloPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             panel.isReleasedWhenClosed = false
@@ -392,11 +410,10 @@ final class WindowManager {
                 let defaults = UserDefaults.standard
                 let dropEnabled = defaults.object(forKey: "HaloContextDropEnabled") == nil
                     ? true : defaults.bool(forKey: "HaloContextDropEnabled")
-                if !dropEnabled {
-                    self.hosts.values.forEach { host in
-                        if host.state.dropTargeted {
-                            host.state.endFileDrop(collapseAfterDelay: true)
-                        }
+                self.hosts.values.forEach { host in
+                    host.refreshDropCIRegistration?()
+                    if !dropEnabled && host.state.dropTargeted {
+                        host.state.endFileDrop(collapseAfterDelay: true)
                     }
                 }
                 let next = CGSize(width: defaults.double(forKey: "HaloContextOffsetX"),
@@ -1460,6 +1477,9 @@ final class WindowManager {
                     let defaults = UserDefaults.standard
                     return defaults.object(forKey: "HaloContextDropEnabled") == nil
                         ? true : defaults.bool(forKey: "HaloContextDropEnabled")
+                }
+                host.refreshDropCIRegistration = { [weak view] in
+                    view?.refreshDropRegistration()
                 }
                 view.dragStateHandler = { [weak host] active, count in
                     guard let host else { return }

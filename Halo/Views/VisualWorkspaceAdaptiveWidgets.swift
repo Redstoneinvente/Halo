@@ -611,6 +611,12 @@ private struct VisualAdaptiveShelfView: View {
             else { gridShelf }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: context.contentAlignment)
+        .dropDestination(for: URL.self) { urls, _ in
+            let files = urls.filter(\.isFileURL)
+            guard !files.isEmpty else { return false }
+            store.addFiles(files)
+            return true
+        }
         .animation(.spring(response: 0.34, dampingFraction: 0.88), value: context.footprint)
     }
 
