@@ -386,7 +386,7 @@
 			mainGroup = 000000000000000000000002;
 			packageReferences = (
 				A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */,
-				A11C0F1A0000000000000382 /* XCRemoteSwiftPackageReference "mediaremote-adapter" */,
+				A11C0F1A0000000000000382 /* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" */,
 			);
 			productRefGroup = 000000000000000000000004 /* Products */;
 			projectDirPath = "";
@@ -641,15 +641,14 @@
 				version = 2.9.6;
 			};
 		};
-		A11C0F1A0000000000000382 /* XCRemoteSwiftPackageReference "mediaremote-adapter" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/ejbills/mediaremote-adapter.git";
-			requirement = {
-				kind = revision;
-				revision = 5b6afde3f501a3da567e23bf7f23d562938a1809;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A11C0F1A0000000000000382 /* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/MediaRemoteAdapter;
+		};
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		A11C0F1A0000000000000354 /* Sparkle */ = {
@@ -659,7 +658,7 @@
 		};
 		A11C0F1A0000000000000381 /* MediaRemoteAdapter */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = A11C0F1A0000000000000382 /* XCRemoteSwiftPackageReference "mediaremote-adapter" */;
+			package = A11C0F1A0000000000000382 /* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" */;
 			productName = MediaRemoteAdapter;
 		};
 /* End XCSwiftPackageProductDependency section */
