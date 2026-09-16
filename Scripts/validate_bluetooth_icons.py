@@ -25,5 +25,9 @@ with tempfile.TemporaryDirectory(prefix='halo-bluetooth-') as directory:
     source_path = Path(directory) / 'main.swift'
     executable = Path(directory) / 'BluetoothIconTests'
     source_path.write_text(source)
-    subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', str(source_path), '-o', str(executable)], check=True)
+    platform = Path(subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-platform-path'], text=True).strip())
+    frameworks = platform / 'Developer/Library/Frameworks'
+    subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-F', str(frameworks),
+                    '-Xlinker', '-rpath', '-Xlinker', str(frameworks),
+                    str(source_path), '-o', str(executable)], check=True)
     subprocess.run([str(executable)], check=True)
