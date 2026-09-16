@@ -1,0 +1,1 @@
+Apply Visual Workspace settings navigation ownership update.
