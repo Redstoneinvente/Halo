@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Run Drop CI disable and Pixel Pet radius fix'
+    if: github.event.head_commit.message == 'Retry Drop CI disable and Pixel Pet radius fix'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
           xcrun swiftc -parse Halo/NotchEngine/WindowManager.swift
           xcrun swiftc -parse Halo/Views/PixelPetWidget.swift
       - name: Full Xcode build
-        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build
+        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO -jobs 1 build
       - name: Commit implementation
         run: |
           git config user.name "github-actions[bot]"
