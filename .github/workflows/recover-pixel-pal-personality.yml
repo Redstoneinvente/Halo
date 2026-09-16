@@ -22,7 +22,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import base64, gzip, re
+          import ast, base64, gzip, re
 
           workflow = Path('.github/workflows/polish-pixel-pal-interactions.yml').read_text()
           match = re.search(r"printf '%s' '([^']+)' \| python3 -c", workflow)
@@ -30,21 +30,39 @@ jobs:
               raise SystemExit('Could not locate embedded personality patch payload')
 
           patcher = gzip.decompress(base64.b64decode(match.group(1))).decode()
-          helper = re.compile(
-              r"def once\(old, new, label\):\n"
-              r"    global s\n"
-              r"    count = s\.count\(old\)\n"
-              r"    if count != 1:\n"
-              r"        raise SystemExit\(f'\{label\}: expected 1 match, found \{count\}'\)\n"
-              r"    s = s\.replace\(old, new, 1\)"
-          )
-          replacement = "def once(old, new, label):\n    global s\n    count = s.count(old)\n    # drawBrows and drawFX intentionally share this guard in the current renderer.\n    # The brows block appears first, so only this named patch may consume the first match.\n    if label == 'brow suppression' and count >= 1:\n        s = s.replace(old, new, 1)\n        return\n    if count != 1:\n        raise SystemExit(f'{label}: expected 1 match, found {count}')\n    s = s.replace(old, new, 1)"
-          patcher, changed = helper.subn(lambda _: replacement, patcher, count=1)
-          if changed != 1:
-              raise SystemExit(f'Could not safely patch once() helper; replacements={changed}')
+          tree = ast.parse(patcher)
+          draw_brows_header = '    private func drawBrows(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n'
+          changed = 0
 
+          class GuardFix(ast.NodeTransformer):
+              def visit_Call(self, node):
+                  nonlocal_changed = False
+                  self.generic_visit(node)
+                  if isinstance(node.func, ast.Name) and node.func.id == 'once' and len(node.args) >= 3:
+                      label = node.args[2]
+                      if isinstance(label, ast.Constant) and label.value == 'brow suppression':
+                          old = node.args[0]
+                          new = node.args[1]
+                          if not (isinstance(old, ast.Constant) and isinstance(new, ast.Constant) and isinstance(old.value, str) and isinstance(new.value, str)):
+                              raise SystemExit('brow suppression once() arguments are not string constants')
+                          if not old.value.startswith(draw_brows_header):
+                              old.value = draw_brows_header + old.value
+                              new.value = draw_brows_header + new.value
+                          nonlocal_changed = True
+                  if nonlocal_changed:
+                      self.changed = getattr(self, 'changed', 0) + 1
+                  return node
+
+          fixer = GuardFix()
+          tree = fixer.visit(tree)
+          ast.fix_missing_locations(tree)
+          changed = getattr(fixer, 'changed', 0)
+          if changed != 1:
+              raise SystemExit(f'Expected one brow suppression call, found {changed}')
+
+          patcher = ast.unparse(tree) + '\n'
           Path('/tmp/pixel_pal_personality_recovered.py').write_text(patcher)
-          print('Recovered embedded personality patcher with contextual brow guard.')
+          print('Recovered personality patcher with a function-scoped brow guard.')
           PY
           python3 /tmp/pixel_pal_personality_recovered.py
 
