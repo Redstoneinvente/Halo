@@ -20,6 +20,21 @@ jobs:
       - name: Apply native bridge migration
         run: |
           set -euo pipefail
+          # The vendored controller's next member after libraryPath is runPerlCommand,
+          # not an `arguments` property. Normalize the helper before executing it so
+          # this migration remains safe against the source currently on main.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/remove_mediaremote_spm.py')
+          s = p.read_text()
+          old = "old_library_end = s.find('\\n    private var arguments: [String] {', old_library_start)"
+          new = "old_library_end = s.find('\\n    @discardableResult', old_library_start)"
+          if old in s:
+              s = s.replace(old, new, 1)
+              p.write_text(s)
+          elif new not in s:
+              raise SystemExit('Could not normalize MediaRemote helper libraryPath terminator')
+          PY
           python3 .github/scripts/remove_mediaremote_spm.py
 
       - name: Verify dependency and target-membership contract
@@ -118,7 +133,8 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Halo/Core/WorkspaceStore.swift \
+          git add .github/scripts/remove_mediaremote_spm.py \
+                  Halo/Core/WorkspaceStore.swift \
                   Halo/Core/MediaRemoteController.swift \
                   Halo/Core/MediaRemoteTrackInfo.swift \
                   Halo.xcodeproj/project.pbxproj \
