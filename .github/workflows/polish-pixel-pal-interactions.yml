@@ -1,4 +1,4 @@
-name: Sequence Pixel Pet Cookie Rescue
+name: Polish Pixel Pet Cookie Munch
 
 on:
   push:
@@ -18,82 +18,152 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Sequence shutter open then cookie consumption
+      - name: Enlarge cookie and add munch expression
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
+
           path = Path('Halo/Views/PixelPetWidget.swift')
           s = path.read_text()
 
-          if 'rescue - 0.55' not in s:
-              old = '        DispatchQueue.main.asyncAfter(deadline: .now() + 0.62, execute: work)\n'
-              new = '        DispatchQueue.main.asyncAfter(deadline: .now() + 1.02, execute: work)\n'
-              if s.count(old) != 1:
-                  raise SystemExit(f'happy delay: expected 1 match, found {s.count(old)}')
+          def once(old, new, label):
+              global s
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {count}')
               s = s.replace(old, new, 1)
 
-              old = (
-                  '        if let rescue = cookieRescueElapsed {\n'
-                  '            drawFuryCookie(context: &context, size: size, consumeProgress: min(1.0, rescue / 0.48))\n'
-                  '        } else if elapsed >= 1.05 && elapsed < 2.15 {\n'
-              )
-              new = (
-                  '        if cookieRescueElapsed != nil {\n'
-                  '            drawFuryCookie(context: &context, size: size, consumeProgress: 0)\n'
-                  '        } else if elapsed >= 1.05 && elapsed < 2.15 {\n'
-              )
-              if s.count(old) != 1:
-                  raise SystemExit(f'whole-cookie during opening: expected 1 match, found {s.count(old)}')
-              s = s.replace(old, new, 1)
+          once('deadline: .now() + 1.02', 'deadline: .now() + 1.16', 'happy delay')
+          once('(rescue - 0.55) / 0.40', '(rescue - 0.55) / 0.52', 'consume duration')
+          once('let hitSize = max(24.0, min(proxy.size.width, proxy.size.height) * 0.30)', 'let hitSize = max(26.0, min(proxy.size.width, proxy.size.height) * 0.34)', 'cookie hit size')
+          once('let pixel = max(1.0, min(size.width, size.height) / 30.0)', 'let pixel = max(1.0, min(size.width, size.height) / 27.0)', 'cookie visual size')
 
-              anchor = (
-                  '                .allowsHitTesting(false)\n'
-                  '\n'
-                  '                if cookieRescueElapsed == nil, reactionElapsed >= 1.05, reactionElapsed < 2.15, let onCookieTap {\n'
-              )
-              replacement = (
-                  '                .allowsHitTesting(false)\n'
-                  '\n'
-                  '                if let rescue = cookieRescueElapsed, rescue >= 0.55 {\n'
-                  '                    Canvas { context, size in\n'
-                  '                        drawFuryCookie(\n'
-                  '                            context: &context,\n'
-                  '                            size: size,\n'
-                  '                            consumeProgress: min(1.0, max(0.0, (rescue - 0.55) / 0.40))\n'
-                  '                        )\n'
-                  '                    }\n'
-                  '                    .allowsHitTesting(false)\n'
-                  '                }\n'
-                  '\n'
-                  '                if cookieRescueElapsed == nil, reactionElapsed >= 1.05, reactionElapsed < 2.15, let onCookieTap {\n'
-              )
-              if s.count(anchor) != 1:
-                  raise SystemExit(f'cookie consumption overlay anchor: expected 1 match, found {s.count(anchor)}')
-              s = s.replace(anchor, replacement, 1)
-              path.write_text(s)
-          else:
-              print('Sequential rescue already present; validating.')
+          once(
+              '    private let logicalGrid = 24\n\n    private var faceColor: Color {',
+              '    private let logicalGrid = 24\n\n    private var isEatingFuryCookie: Bool {\n        guard expression == .furious, let rescue = cookieRescueElapsed else { return false }\n        return rescue >= 0.55 && rescue < 1.16\n    }\n\n    private var faceColor: Color {',
+              'cookie munch state'
+          )
+          if s.count('expression == .furious ? Color') != 3:
+              raise SystemExit('furious colors: expected 3 matches')
+          s = s.replace('expression == .furious ? Color', 'expression == .furious && !isEatingFuryCookie ? Color')
+
+          once(
+              'private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, furious, smug }',
+              'private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, cookieMunch, furious, smug }',
+              'eye pose enum'
+          )
+          once(
+              '    private var eyePose: EyePose {\n        switch expression {',
+              '    private var eyePose: EyePose {\n        if isEatingFuryCookie { return .cookieMunch }\n        switch expression {',
+              'eye pose override'
+          )
+          once(
+              '        case .furious:\n            render(.init(HaloPixelPalSprites.furiousEye, x: leftX, y: y + 1), 1, 0, 0)',
+              '        case .cookieMunch:\n            let happy = HaloPixelPalSprites.happyEye(preferences.eyeStyle)\n            let closed = HaloPixelPalSprites.closedEye(preferences.eyeStyle)\n            let chewPhase = Int(max(0, cookieRescueElapsed ?? 0) * 14.0) % 2\n            if chewPhase == 0 {\n                render(.init(happy, x: leftX, y: y + 1), 1, 0, 0)\n                render(.init(closed, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)\n            } else {\n                render(.init(closed, x: leftX, y: y + 2), 1, 0, 0)\n                render(.init(happy, x: rightX, y: y + 1, mirrorX: true), 1, 0, 0)\n            }\n        case .furious:\n            render(.init(HaloPixelPalSprites.furiousEye, x: leftX, y: y + 1), 1, 0, 0)',
+              'munch eyes'
+          )
+          once(
+              '    private func drawBrows(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n        let leftX = 3',
+              '    private func drawBrows(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n        if isEatingFuryCookie { return }\n        let leftX = 3',
+              'munch brows'
+          )
+
+          mouth_pattern = re.compile(r'    private func drawMouth\(render: \(HaloPixelPalPlacedSprite, Double, Int, Int\) -> Void\) \{.*?\n    \}\n\n    private func drawCheeks', re.S)
+          mouth_new = '''    private func drawMouth(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
+              let mouth: HaloPixelPalSprite?
+              if isEatingFuryCookie {
+                  let chewPhase = Int(max(0, cookieRescueElapsed ?? 0) * 14.0) % 2
+                  mouth = chewPhase == 0 ? HaloPixelPalSprites.mouthOpen : HaloPixelPalSprites.mouthTiny
+              } else {
+                  mouth = selectedMouth()
+              }
+              guard let mouth else { return }
+              let x = max(0, (logicalGrid - mouth.width) / 2)
+              let y = isEatingFuryCookie ? 15 : (expression == .superHappy || expression == .excited ? 15 : 16)
+              render(.init(mouth, x: x, y: y), 1, 0, 0)
+          }
+
+          private func drawCheeks'''
+          s, n = mouth_pattern.subn(mouth_new, s, count=1)
+          if n != 1:
+              raise SystemExit(f'munch mouth block: expected 1 match, found {n}')
+
+          cheeks_pattern = re.compile(r'    private func drawCheeks\(render: \(HaloPixelPalPlacedSprite, Double, Int, Int\) -> Void\) \{.*?\n    \}\n\n    private var resolvedAccessory', re.S)
+          cheeks_new = '''    private func drawCheeks(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
+              if expression == .furious && !isEatingFuryCookie { return }
+              let sprite: HaloPixelPalSprite
+              if isEatingFuryCookie {
+                  sprite = HaloPixelPalSprites.cheekKawaii
+              } else {
+                  switch preferences.cheekStyle {
+                  case .none: return
+                  case .soft: sprite = HaloPixelPalSprites.cheekSoft
+                  case .kawaii: sprite = HaloPixelPalSprites.cheekKawaii
+                  case .shy: sprite = HaloPixelPalSprites.cheekShy
+                  }
+              }
+              let opacity: Double = isEatingFuryCookie || expression == .shy || expression == .love ? 1.0 : 0.90
+              render(.init(sprite, x: 2, y: 13), opacity, 0, 0)
+              render(.init(sprite, x: max(0, 22 - sprite.width), y: 13, mirrorX: true), opacity, 0, 0)
+          }
+
+          private var resolvedAccessory'''
+          s, n = cheeks_pattern.subn(cheeks_new, s, count=1)
+          if n != 1:
+              raise SystemExit(f'munch cheeks block: expected 1 match, found {n}')
+
+          once(
+              '    private func drawAccessory(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n        switch resolvedAccessory {',
+              '    private func drawAccessory(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n        let accessory = resolvedAccessory\n        if isEatingFuryCookie && accessory == .horns { return }\n        switch accessory {',
+              'munch accessory'
+          )
+          once(
+              '    private func drawFX(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n        let phase =',
+              '    private func drawFX(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n        if isEatingFuryCookie { return }\n        let phase =',
+              'munch fx'
+          )
+          once(
+              '        if let reactionElapsed {\n            if expression == .dizzy {',
+              '        if let reactionElapsed {\n            if isEatingFuryCookie {\n                let chew = Int(max(0, cookieRescueElapsed ?? 0) * 14.0) % 2\n                return (0, chew == 0 ? -one : 0)\n            }\n            if expression == .dizzy {',
+              'munch motion'
+          )
+
+          path.write_text(s)
+          print('Cookie enlarged and munch expression added.')
           PY
 
-      - name: Verify sequential cookie rescue
+      - name: Verify cookie munch contract
         run: |
           python3 - <<'PY'
           from pathlib import Path
           s = Path('Halo/Views/PixelPetWidget.swift').read_text()
           required = [
-              'deadline: .now() + 1.02',
-              'if let rescue = cookieRescueElapsed, rescue >= 0.55',
-              '(rescue - 0.55) / 0.40',
-              'if cookieRescueElapsed != nil',
-              'consumeProgress: 0',
-              'self.react(.happy, seconds: 2.4)',
+              'deadline: .now() + 1.16',
+              '(rescue - 0.55) / 0.52',
+              '* 0.34)',
+              '/ 27.0)',
+              'private var isEatingFuryCookie: Bool',
+              'cookieMunch, furious, smug',
+              'if isEatingFuryCookie { return .cookieMunch }',
+              'case .cookieMunch:',
+              'mouth = chewPhase == 0 ? HaloPixelPalSprites.mouthOpen : HaloPixelPalSprites.mouthTiny',
+              'sprite = HaloPixelPalSprites.cheekKawaii',
+              'if isEatingFuryCookie && accessory == .horns { return }',
           ]
-          missing = [m for m in required if m not in s]
+          missing = [marker for marker in required if marker not in s]
           if missing:
-              raise SystemExit(f'Missing sequential rescue markers: {missing}')
-          if 'min(1.0, rescue / 0.48)' in s:
-              raise SystemExit('Cookie still consumes while shutter is opening.')
-          print('Sequential cookie rescue verified.')
+              raise SystemExit(f'Missing cookie munch markers: {missing}')
+          stale = [
+              'deadline: .now() + 1.02',
+              '(rescue - 0.55) / 0.40',
+              'min(proxy.size.width, proxy.size.height) * 0.30',
+              'min(size.width, size.height) / 30.0',
+          ]
+          leftovers = [marker for marker in stale if marker in s]
+          if leftovers:
+              raise SystemExit(f'Stale cookie markers remain: {leftovers}')
+          print('Cookie munch contract verified.')
           PY
 
       - name: Parse Pixel Pet source
@@ -111,6 +181,6 @@ jobs:
             echo "No source changes to commit."
             exit 0
           fi
-          git commit -m "Sequence Pixel Pet cookie rescue"
+          git commit -m "Polish Pixel Pet cookie munch"
           git pull --rebase origin main
           git push origin HEAD:main
