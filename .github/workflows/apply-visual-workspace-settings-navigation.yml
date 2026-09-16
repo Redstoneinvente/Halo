@@ -33,25 +33,37 @@ jobs:
               'Text("Default only")',
               'Image(systemName: "lock.fill")',
               'List(selection: sidebarSelection)',
-              '.selectionDisabled(isSectionUnavailable(name))',
               'guard !isSectionUnavailable(candidate) else { return }',
+              '.disabled(isSectionUnavailable(name))',
               'OpenedNotchWorkspaceEditor(layout: $workspace.settings.layout, showsCloseButton: false)',
+              '.layoutPriority(1)',
               'case "Visual Workspace Editor": return "rectangle.3.group"',
           ]
           widget_required = [
               'var showsCloseButton = true',
               'if showsCloseButton {',
-              'GeometryReader { proxy in',
+              'editorLayout(availableSize: proxy.size)',
+              'availableSize.width < 900',
+              'VSplitView {',
+              'HStack(spacing: 0) {',
+              'private var editorCanvasPane: some View',
+              'ViewThatFits(in: .horizontal)',
               'preview(canvasSize: previewCanvasSize(for: proxy.size))',
               'private func previewCanvasSize(for available: CGSize) -> CGSize',
               '.frame(width: canvasSize.width, height: canvasSize.height)',
-              'inspector\n                    .frame(minWidth: 340, idealWidth: 390, maxWidth: 460)',
+          ]
+          forbidden = [
+              '.selectionDisabled(isSectionUnavailable(name))',
+              '.frame(minWidth: 920, minHeight: 620)',
           ]
           missing = [m for m in settings_required if m not in settings]
           missing += [m for m in widget_required if m not in widgets]
+          present_forbidden = [m for m in forbidden if m in settings or m in widgets]
           if missing:
               raise SystemExit(f'Missing Visual Workspace polish markers: {missing}')
-          print('Visual Workspace navigation and layout contract verified.')
+          if present_forbidden:
+              raise SystemExit(f'Forbidden Visual Workspace legacy markers remain: {present_forbidden}')
+          print('Visual Workspace navigation and responsive layout contract verified.')
           PY
 
       - name: Parse changed Swift sources
@@ -89,6 +101,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Halo/Views/WorkspaceSettingsView.swift Halo/Views/WidgetSettingsView.swift
-          git commit -m "Polish Visual Workspace settings navigation"
+          git commit -m "Fix Visual Workspace sidebar and responsive layout"
           git pull --rebase origin main
           git push origin HEAD:main
