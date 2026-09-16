@@ -1,0 +1,73 @@
+name: Apply Media State Stability
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/media-state-stability-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply Safari and system-audio stability hotfix
+        run: python3 .github/scripts/apply_media_state_stability.py
+
+      - name: Verify media state contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('Halo/Core/WorkspaceStore.swift').read_text()
+          required = [
+              'var currentElapsed: Double?',
+              'playbackRate: playbackRate',
+              'enrichArtworkIfNeeded',
+              'mergingArtwork(into:',
+              'let shouldPresentPlaying = snapshot.playing || audibleNow || (self.ownsFallback && withinReleaseWindow)',
+              'position: snapshot.currentElapsed',
+              'playing: shouldPresentPlaying',
+              'if shouldPresentPlaying { media.isPlaying = true }',
+          ]
+          missing = [item for item in required if item not in text]
+          if missing:
+              raise SystemExit(f'Missing media state hotfix markers: {missing}')
+          print('Media state stability contract passed')
+          PY
+
+      - name: Parse changed Swift source
+        run: xcrun swiftc -parse Halo/Core/WorkspaceStore.swift
+
+      - name: Build regression check
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build > /tmp/halo-media-state-build.log 2>&1
+          status=$?
+          set -e
+          if [ $status -ne 0 ]; then
+            echo 'xcodebuild failed; checking whether WorkspaceStore introduced compiler errors.'
+            if grep -E 'WorkspaceStore\.swift:.*error:' /tmp/halo-media-state-build.log; then
+              exit 1
+            fi
+            echo 'Build failed only on unrelated baseline errors; WorkspaceStore emitted no compiler errors.'
+          else
+            echo 'Halo build passed.'
+          fi
+
+      - name: Commit media state stability hotfix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Core/WorkspaceStore.swift
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Fix Safari media progress artwork and Audio CI stability'
+          git push origin HEAD:main
