@@ -18,34 +18,48 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Patch settings navigation
+      - name: Patch settings navigation and editor layout
         run: python3 .github/scripts/patch_visual_workspace_settings_navigation.py
 
       - name: Verify Visual Workspace navigation contract
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          s = Path('Halo/Views/WorkspaceSettingsView.swift').read_text()
-          required = [
+          settings = Path('Halo/Views/WorkspaceSettingsView.swift').read_text()
+          widgets = Path('Halo/Views/WidgetSettingsView.swift').read_text()
+          settings_required = [
               'items.append("Visual Workspace Editor")',
               'visualWorkspaceActive && (name == "Modules" || name == "Widgets")',
-              'Text("Default")',
+              'Text("Default only")',
               'Image(systemName: "lock.fill")',
-              '.disabled(isSectionUnavailable(name))',
-              'OpenedNotchWorkspaceEditor(layout: $workspace.settings.layout)',
+              'List(selection: sidebarSelection)',
+              '.selectionDisabled(isSectionUnavailable(name))',
+              'guard !isSectionUnavailable(candidate) else { return }',
+              'OpenedNotchWorkspaceEditor(layout: $workspace.settings.layout, showsCloseButton: false)',
               'case "Visual Workspace Editor": return "rectangle.3.group"',
-              'section = "Visual Workspace Editor"',
           ]
-          missing = [m for m in required if m not in s]
+          widget_required = [
+              'var showsCloseButton = true',
+              'if showsCloseButton {',
+              'GeometryReader { proxy in',
+              'preview(canvasSize: previewCanvasSize(for: proxy.size))',
+              'private func previewCanvasSize(for available: CGSize) -> CGSize',
+              '.frame(width: canvasSize.width, height: canvasSize.height)',
+              'inspector\n                    .frame(minWidth: 340, idealWidth: 390, maxWidth: 460)',
+          ]
+          missing = [m for m in settings_required if m not in settings]
+          missing += [m for m in widget_required if m not in widgets]
           if missing:
-              raise SystemExit(f'Missing Visual Workspace navigation markers: {missing}')
-          print('Visual Workspace navigation contract verified.')
+              raise SystemExit(f'Missing Visual Workspace polish markers: {missing}')
+          print('Visual Workspace navigation and layout contract verified.')
           PY
 
-      - name: Parse settings source
-        run: swiftc -parse Halo/Views/WorkspaceSettingsView.swift
+      - name: Parse changed Swift sources
+        run: |
+          swiftc -parse Halo/Views/WorkspaceSettingsView.swift
+          swiftc -parse Halo/Views/WidgetSettingsView.swift
 
-      - name: Build Halo for settings regression check
+      - name: Build Halo for Visual Workspace regression check
         run: |
           set +e
           xcodebuild \
@@ -57,24 +71,24 @@ jobs:
             build 2>&1 | tee /tmp/halo-build.log
           BUILD_STATUS=${PIPESTATUS[0]}
           echo "Full build exit status: ${BUILD_STATUS}"
-          if grep -E 'WorkspaceSettingsView\.swift:[0-9]+:[0-9]+: error:' /tmp/halo-build.log; then
-            echo "WorkspaceSettingsView introduced a compile error."
+          if grep -E '(WorkspaceSettingsView|WidgetSettingsView)\.swift:[0-9]+:[0-9]+: error:' /tmp/halo-build.log; then
+            echo "Visual Workspace settings/editor changes introduced a compile error."
             exit 1
           fi
           if [ "${BUILD_STATUS}" -ne 0 ]; then
-            echo "Full Halo build has unrelated baseline failures; no WorkspaceSettingsView error was emitted."
+            echo "Full Halo build has unrelated baseline failures; no changed-file error was emitted."
           fi
           exit 0
 
-      - name: Commit navigation update
+      - name: Commit Visual Workspace polish
         run: |
-          if git diff --quiet -- Halo/Views/WorkspaceSettingsView.swift; then
+          if git diff --quiet -- Halo/Views/WorkspaceSettingsView.swift Halo/Views/WidgetSettingsView.swift; then
             echo "No source changes to commit."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Halo/Views/WorkspaceSettingsView.swift
-          git commit -m "Route Visual Workspace settings to its editor"
+          git add Halo/Views/WorkspaceSettingsView.swift Halo/Views/WidgetSettingsView.swift
+          git commit -m "Polish Visual Workspace settings navigation"
           git pull --rebase origin main
           git push origin HEAD:main
