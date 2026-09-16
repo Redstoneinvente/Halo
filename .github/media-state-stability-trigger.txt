@@ -1,0 +1,2 @@
+Apply Safari/system-audio media state stability hotfix.
+Triggered: 2026-09-16
