@@ -1,0 +1,31 @@
+name: Apply Bluetooth system artwork
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/bluetooth-system-artwork-trigger.txt'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Patch Bluetooth artwork lookup
+        run: python3 .github/scripts/patch_bluetooth_system_artwork.py
+      - name: Validate focused Bluetooth production code
+        run: python3 Scripts/validate_bluetooth_icons.py
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Core/PersonalizationModels.swift
+          git commit -m "Prefer macOS Bluetooth device artwork"
+          git push origin HEAD:main
