@@ -1,0 +1,1 @@
+Trigger global Drop CI disable fix after confirming the global Finder drag monitor bypassed the feature toggle.
