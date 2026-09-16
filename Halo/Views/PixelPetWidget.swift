@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import CoreGraphics
+import UniformTypeIdentifiers
 
 // MARK: - Pixel Pal v2
 // Canonical direction: Docs/PixelPalV2.md
@@ -21,6 +22,19 @@ enum HaloPixelPalExpression: String, Codable, CaseIterable, Identifiable {
     case shocked
     case confused
     case dizzy
+    case curious
+    case sneeze
+    case hiccup
+    case yawn
+    case panic
+    case judging
+    case petting
+    case poked
+    case chasing
+    case peek
+    case satisfied
+    case full
+    case proud
     case worried
     case sad
     case crying
@@ -146,10 +160,41 @@ struct HaloPixelPalRGB: Codable, Equatable {
     }
 }
 
+
+enum HaloPixelPalPersonality: String, Codable, CaseIterable, Identifiable {
+    case cute = "Cute"
+    case chaotic = "Chaotic"
+    case chill = "Chill"
+    case grumpy = "Grumpy"
+    case shy = "Shy"
+
+    var id: String { rawValue }
+
+    var chaseChance: Double {
+        switch self {
+        case .cute: return 0.14
+        case .chaotic: return 0.34
+        case .chill: return 0.05
+        case .grumpy: return 0.11
+        case .shy: return 0.08
+        }
+    }
+
+    var ambientScale: Double {
+        switch self {
+        case .cute: return 1.0
+        case .chaotic: return 1.45
+        case .chill: return 0.62
+        case .grumpy: return 0.82
+        case .shy: return 0.76
+        }
+    }
+}
+
 struct HaloPixelPalPreferences: Codable, Equatable {
     // Legacy persisted field retained so Codable stays backward-compatible.
     var showCheeks: Bool = true
-    var version = 7
+    var version = 8
 
     // Appearance
     var faceStyle: HaloPixelPalFaceStyle = .soft
@@ -181,6 +226,19 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     var animationSpeed = 1.0
     var animationIntensity = 0.85
     var dizzyRotationThresholdTurns = 0.8
+    var personality: HaloPixelPalPersonality = .cute
+
+    // Personality micro-behaviours
+    var alwaysCookie = true
+    var pettingReaction = true
+    var pokeReaction = true
+    var chaseReaction = true
+    var peekReaction = true
+    var fileCuriosityReaction = true
+    var ambientReaction = true
+    var rareReaction = true
+    var seasonalReaction = true
+    var shortTermMoodReaction = true
 
     // Direct interactions
     var hoverReaction = true
@@ -205,7 +263,9 @@ struct HaloPixelPalPreferences: Codable, Equatable {
         case faceStyle, eyeStyle, mouthStyle, cheekStyle, palette, customColor, accentColor, blushColor
         case backgroundStyle, backgroundColor, backgroundOpacity, backgroundCornerRadius, pixelCornerRadius, inactiveLEDIntensity, inactiveLEDUsesFaceColor, inactiveLEDColor, faceScale, glowIntensity
         case accessoryMode, selectedAccessory, allowedAccessories
-        case automaticBlinking, animationSpeed, animationIntensity, dizzyRotationThresholdTurns
+        case automaticBlinking, animationSpeed, animationIntensity, dizzyRotationThresholdTurns, personality
+        case alwaysCookie, pettingReaction, pokeReaction, chaseReaction, peekReaction
+        case fileCuriosityReaction, ambientReaction, rareReaction, seasonalReaction, shortTermMoodReaction
         case hoverReaction, tapReaction, doubleTapReaction, longPressReaction
         case contextReactions, chargingReaction, lowBatteryReaction, musicReaction
         case timerReaction, appReaction, idleReaction, nightReaction
@@ -215,7 +275,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        version = 7
+        version = 8
         faceStyle = try c.decodeIfPresent(HaloPixelPalFaceStyle.self, forKey: .faceStyle) ?? .soft
         eyeStyle = try c.decodeIfPresent(HaloPixelPalEyeStyle.self, forKey: .eyeStyle) ?? .glossy
         mouthStyle = try c.decodeIfPresent(HaloPixelPalMouthStyle.self, forKey: .mouthStyle) ?? .automatic
@@ -248,6 +308,17 @@ struct HaloPixelPalPreferences: Codable, Equatable {
         animationSpeed = try c.decodeIfPresent(Double.self, forKey: .animationSpeed) ?? 1.0
         animationIntensity = try c.decodeIfPresent(Double.self, forKey: .animationIntensity) ?? 0.85
         dizzyRotationThresholdTurns = try c.decodeIfPresent(Double.self, forKey: .dizzyRotationThresholdTurns) ?? 0.8
+        personality = try c.decodeIfPresent(HaloPixelPalPersonality.self, forKey: .personality) ?? .cute
+        alwaysCookie = try c.decodeIfPresent(Bool.self, forKey: .alwaysCookie) ?? true
+        pettingReaction = try c.decodeIfPresent(Bool.self, forKey: .pettingReaction) ?? true
+        pokeReaction = try c.decodeIfPresent(Bool.self, forKey: .pokeReaction) ?? true
+        chaseReaction = try c.decodeIfPresent(Bool.self, forKey: .chaseReaction) ?? true
+        peekReaction = try c.decodeIfPresent(Bool.self, forKey: .peekReaction) ?? true
+        fileCuriosityReaction = try c.decodeIfPresent(Bool.self, forKey: .fileCuriosityReaction) ?? true
+        ambientReaction = try c.decodeIfPresent(Bool.self, forKey: .ambientReaction) ?? true
+        rareReaction = try c.decodeIfPresent(Bool.self, forKey: .rareReaction) ?? true
+        seasonalReaction = try c.decodeIfPresent(Bool.self, forKey: .seasonalReaction) ?? true
+        shortTermMoodReaction = try c.decodeIfPresent(Bool.self, forKey: .shortTermMoodReaction) ?? true
 
         hoverReaction = try c.decodeIfPresent(Bool.self, forKey: .hoverReaction) ?? true
         tapReaction = try c.decodeIfPresent(Bool.self, forKey: .tapReaction) ?? true
@@ -266,7 +337,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     func normalized() -> Self {
         var value = self
-        value.version = 7
+        value.version = 8
         value.animationSpeed = min(2.0, max(0.35, animationSpeed))
         value.animationIntensity = min(1.0, max(0.0, animationIntensity))
         value.dizzyRotationThresholdTurns = min(2.0, max(0.35, dizzyRotationThresholdTurns))
@@ -506,6 +577,33 @@ private enum HaloPixelPalSprites {
     static let mouthSmug = HaloPixelPalSprite(rows: [
         "....p",
         ".ppp."
+    ])
+    static let mouthLick = HaloPixelPalSprite(rows: [
+        "p...p",
+        ".ppp.",
+        "...aa"
+    ])
+    static let fileIcon = HaloPixelPalSprite(rows: [
+        "ppppp.",
+        "p...pp",
+        "p....p",
+        "p.aa.p",
+        "p....p",
+        "pppppp"
+    ])
+    static let ghost = HaloPixelPalSprite(rows: [
+        ".www.",
+        "wwwww",
+        "wpwpw",
+        "wwwww",
+        "w.w.w"
+    ])
+    static let butterfly = HaloPixelPalSprite(rows: [
+        "a...a",
+        "aa.aa",
+        ".apa.",
+        "aa.aa",
+        "a...a"
     ])
 
     static let cheekSoft = HaloPixelPalSprite(rows: [".bb."])
@@ -747,6 +845,111 @@ struct HaloPixelPalCursorOrbitDetector {
         samples.removeAll(keepingCapacity: true)
     }
 }
+
+
+enum HaloPixelPalStrokeEvent {
+    case petting
+    case zigzag
+}
+
+struct HaloPixelPalStrokeDetector {
+    private struct Sample {
+        let time: TimeInterval
+        let x: Double
+        let y: Double
+    }
+
+    private var samples: [Sample] = []
+    private var lastTrigger = -Double.infinity
+    static let window: TimeInterval = 0.95
+    static let cooldown: TimeInterval = 1.45
+
+    mutating func register(location: CGPoint, size: CGSize, at now: TimeInterval) -> HaloPixelPalStrokeEvent? {
+        guard size.width > 1, size.height > 1 else {
+            resetPath()
+            return nil
+        }
+        if now - lastTrigger < Self.cooldown {
+            resetPath()
+            return nil
+        }
+
+        let x = Double(location.x / size.width)
+        let y = Double(location.y / size.height)
+        guard x >= 0, x <= 1, y >= 0, y <= 1 else {
+            resetPath()
+            return nil
+        }
+
+        if let last = samples.last, now - last.time > 0.24 {
+            resetPath()
+        }
+        samples.append(.init(time: now, x: x, y: y))
+        samples.removeAll { now - $0.time > Self.window }
+        guard samples.count >= 7, let first = samples.first, let last = samples.last else { return nil }
+
+        let duration = max(0.001, last.time - first.time)
+        var path = 0.0
+        var horizontalPath = 0.0
+        var directionChanges = 0
+        var lastDirection = 0
+        var minX = 1.0, maxX = 0.0, minY = 1.0, maxY = 0.0
+
+        for index in samples.indices {
+            let sample = samples[index]
+            minX = min(minX, sample.x); maxX = max(maxX, sample.x)
+            minY = min(minY, sample.y); maxY = max(maxY, sample.y)
+            guard index > samples.startIndex else { continue }
+            let previous = samples[index - 1]
+            let dx = sample.x - previous.x
+            let dy = sample.y - previous.y
+            path += hypot(dx, dy)
+            horizontalPath += abs(dx)
+            let direction = dx > 0.008 ? 1 : (dx < -0.008 ? -1 : 0)
+            if direction != 0 {
+                if lastDirection != 0 && direction != lastDirection { directionChanges += 1 }
+                lastDirection = direction
+            }
+        }
+
+        let speed = path / duration
+        let horizontalSpan = maxX - minX
+        let verticalSpread = maxY - minY
+        let upperFace = samples.filter { $0.y <= 0.58 }.count >= Int(Double(samples.count) * 0.78)
+
+        if upperFace,
+           speed >= 0.18, speed <= 1.35,
+           horizontalPath >= 0.28,
+           horizontalSpan >= 0.16,
+           verticalSpread <= 0.20,
+           directionChanges >= 2 {
+            lastTrigger = now
+            resetPath()
+            return .petting
+        }
+
+        if speed >= 1.55,
+           horizontalPath >= 0.50,
+           directionChanges >= 4,
+           verticalSpread <= 0.45 {
+            lastTrigger = now
+            resetPath()
+            return .zigzag
+        }
+
+        return nil
+    }
+
+    mutating func resetPath() {
+        samples.removeAll(keepingCapacity: true)
+    }
+}
+
+struct HaloPixelPalMoodSnapshot {
+    let affection: Double
+    let irritation: Double
+}
+
 @MainActor
 final class HaloPixelPalStore: ObservableObject {
     static let shared = HaloPixelPalStore()
@@ -757,6 +960,9 @@ final class HaloPixelPalStore: ObservableObject {
     @Published private(set) var reaction: HaloPixelPalExpression?
     @Published private(set) var reactionStarted = Date()
     @Published private(set) var cookieRescueStarted: Date?
+    @Published private(set) var cookieFeedStarted: Date?
+    @Published private(set) var cookieSatisfactionStarted: Date?
+    @Published private(set) var cookieFeedOrdinal = 0
     private var tapIndex = 0
     private var pressIndex = 0
     private var tapBurst = HaloPixelPalTapBurst()
@@ -766,6 +972,12 @@ final class HaloPixelPalStore: ObservableObject {
     private let legacyKeys = ["HaloPixelPal.preferences.v3", "HaloPixelPal.preferences.v2"]
     private var clearReactionWork: DispatchWorkItem?
     private var cookieRescueWork: DispatchWorkItem?
+    private var cookieSequenceWorks: [DispatchWorkItem] = []
+    private var lastCookieAt: Date?
+    private var moodUpdatedAt = Date()
+    private var affectionPoints = 0.0
+    private var irritationPoints = 0.0
+    private var lastChaseRoll = Date.distantPast
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -808,7 +1020,13 @@ final class HaloPixelPalStore: ObservableObject {
     func tapped() {
         guard preferences.tapReaction, reaction != .furious else { return }
         if let escalation = escalatedTapReaction(forPhysicalTapCount: 1) {
+            recordIrritation(escalation == .furious ? 1.4 : 0.75)
             react(escalation, seconds: escalation == .furious ? 2.82 : 3.4)
+            return
+        }
+        if preferences.pokeReaction {
+            recordIrritation(0.34)
+            react(.poked, seconds: 0.72)
             return
         }
         let sequence: [HaloPixelPalExpression] = [.happy, .shy, .mischievous, .superHappy, .confused]
@@ -822,6 +1040,7 @@ final class HaloPixelPalStore: ObservableObject {
             react(escalation, seconds: escalation == .furious ? 2.82 : 3.4)
             return
         }
+        recordAffection(0.75)
         react(.love, seconds: 2.2)
     }
 
@@ -836,20 +1055,159 @@ final class HaloPixelPalStore: ObservableObject {
     func feedFuryCookie() {
         guard reaction == .furious, cookieRescueStarted == nil else { return }
         clearReactionWork?.cancel()
+        cancelCookieSequence()
+
         let started = Date()
         cookieRescueStarted = started
-        let work = DispatchWorkItem { [weak self] in
+        cookieFeedOrdinal = 1
+        recordAffection(1.0)
+
+        let beginChew = DispatchWorkItem { [weak self] in
+            guard let self, self.reaction == .furious, self.cookieRescueStarted == started else { return }
+            self.cookieFeedStarted = Date()
+        }
+        let satisfy = DispatchWorkItem { [weak self] in
             guard let self, self.reaction == .furious, self.cookieRescueStarted == started else { return }
             self.cookieRescueStarted = nil
+            self.cookieFeedStarted = nil
+            self.cookieSatisfactionStarted = Date()
+            self.reactionStarted = Date()
+            self.reaction = .satisfied
+        }
+        let settle = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.cookieSatisfactionStarted = nil
             self.react(.happy, seconds: 2.4)
         }
-        cookieRescueWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.16, execute: work)
+
+        cookieSequenceWorks = [beginChew, satisfy, settle]
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55, execute: beginChew)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.16, execute: satisfy)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.78, execute: settle)
+    }
+
+    func feedCookie() {
+        if reaction == .furious {
+            feedFuryCookie()
+            return
+        }
+        guard preferences.alwaysCookie,
+              cookieFeedStarted == nil,
+              cookieSatisfactionStarted == nil else { return }
+
+        let now = Date()
+        if let lastCookieAt, now.timeIntervalSince(lastCookieAt) > 18 {
+            cookieFeedOrdinal = 0
+        }
+        lastCookieAt = now
+        cookieFeedOrdinal += 1
+
+        if cookieFeedOrdinal >= 4 {
+            recordAffection(0.12)
+            react(.full, seconds: 2.0)
+            return
+        }
+
+        cancelCookieSequence()
+        clearReactionWork?.cancel()
+        cookieFeedStarted = now
+        cookieSatisfactionStarted = nil
+        reactionStarted = now
+        reaction = cookieFeedOrdinal == 2 ? .superHappy : .happy
+        recordAffection(cookieFeedOrdinal == 2 ? 0.95 : 0.62)
+
+        let ordinal = cookieFeedOrdinal
+        let satisfy = DispatchWorkItem { [weak self] in
+            guard let self, self.cookieFeedStarted == now else { return }
+            self.cookieFeedStarted = nil
+            self.cookieSatisfactionStarted = Date()
+            self.reactionStarted = Date()
+            self.reaction = .satisfied
+        }
+        let settle = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.cookieSatisfactionStarted = nil
+            let final: HaloPixelPalExpression = ordinal == 2 ? .superHappy : (ordinal == 3 ? .shy : .happy)
+            self.react(final, seconds: ordinal == 2 ? 2.4 : 1.9)
+        }
+        cookieSequenceWorks = [satisfy, settle]
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.96, execute: satisfy)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.62, execute: settle)
+    }
+
+    func petted() {
+        guard preferences.pettingReaction, reaction != .furious else { return }
+        recordAffection(0.68)
+        react(.petting, seconds: 1.15)
+    }
+
+    func peeked() {
+        guard preferences.peekReaction, reaction == nil else { return }
+        react(.peek, seconds: 0.92)
+    }
+
+    func fileCuriosity(dropped: Bool) {
+        guard preferences.fileCuriosityReaction, reaction != .furious else { return }
+        recordAffection(dropped ? 0.18 : 0.05)
+        if dropped {
+            react(.proud, seconds: 1.15)
+        }
+    }
+
+    func considerChase(at now: Date) {
+        guard preferences.chaseReaction,
+              reaction == nil,
+              now.timeIntervalSince(lastChaseRoll) >= 4.2 else { return }
+        lastChaseRoll = now
+        let mood = moodSnapshot(at: now)
+        var chance = preferences.personality.chaseChance
+        if mood.irritation > mood.affection + 0.8 { chance *= 1.45 }
+        if Double.random(in: 0...1) < chance {
+            react(preferences.personality == .shy ? .peek : .chasing, seconds: 1.18)
+        }
+    }
+
+    func moodSnapshot(at date: Date) -> HaloPixelPalMoodSnapshot {
+        let elapsed = max(0, date.timeIntervalSince(moodUpdatedAt))
+        return .init(
+            affection: max(0, affectionPoints - elapsed * 0.028),
+            irritation: max(0, irritationPoints - elapsed * 0.040)
+        )
+    }
+
+    private func applyMoodDecay(at date: Date) {
+        let snapshot = moodSnapshot(at: date)
+        affectionPoints = snapshot.affection
+        irritationPoints = snapshot.irritation
+        moodUpdatedAt = date
+    }
+
+    private func recordAffection(_ amount: Double) {
+        guard preferences.shortTermMoodReaction else { return }
+        let now = Date()
+        applyMoodDecay(at: now)
+        affectionPoints = min(4.0, affectionPoints + amount)
+        irritationPoints = max(0, irritationPoints - amount * 0.34)
+    }
+
+    private func recordIrritation(_ amount: Double) {
+        guard preferences.shortTermMoodReaction else { return }
+        let now = Date()
+        applyMoodDecay(at: now)
+        irritationPoints = min(4.0, irritationPoints + amount)
+        affectionPoints = max(0, affectionPoints - amount * 0.18)
+    }
+
+    private func cancelCookieSequence() {
+        cookieRescueWork?.cancel()
+        cookieSequenceWorks.forEach { $0.cancel() }
+        cookieSequenceWorks.removeAll(keepingCapacity: true)
     }
 
     func longPressed() {
         guard preferences.longPressReaction else { return }
         let sequence: [HaloPixelPalExpression] = [.sleepy, .shy, .smug]
+        recordAffection(0.24)
         react(sequence[pressIndex % sequence.count], seconds: 2.4)
         pressIndex += 1
     }
@@ -859,7 +1217,15 @@ final class HaloPixelPalStore: ObservableObject {
         reaction = nil
         clearReactionWork?.cancel()
         cookieRescueWork?.cancel()
+        cancelCookieSequence()
         cookieRescueStarted = nil
+        cookieFeedStarted = nil
+        cookieSatisfactionStarted = nil
+        cookieFeedOrdinal = 0
+        lastCookieAt = nil
+        affectionPoints = 0
+        irritationPoints = 0
+        moodUpdatedAt = Date()
         tapIndex = 0
         pressIndex = 0
         tapBurst.reset()
@@ -874,6 +1240,7 @@ final class HaloPixelPalStore: ObservableObject {
 
 private enum HaloPixelPalFX {
     case none, hearts, sparkle, dizzy, music, sweat, tears, alert, sleepZ
+    case file, dreamCookie, dreamHeart, dreamMusic, ghost, butterfly
 }
 
 private struct HaloPixelPalContext {
@@ -888,6 +1255,8 @@ private struct HaloPixelPalContext {
         system: SystemService,
         pal: HaloPixelPalStore,
         hovering: Bool,
+        fileTargeted: Bool,
+        audio: AudioSpectrumSnapshot,
         date: Date
     ) -> Self {
         if let reaction = pal.reaction {
@@ -902,24 +1271,72 @@ private struct HaloPixelPalContext {
         let resting: Self = hovering && p.hoverReaction
             ? .init(expression: .happy, accessory: nil, fx: .none)
             : .init(expression: .neutral, accessory: nil, fx: .none)
+
+        if fileTargeted && p.fileCuriosityReaction {
+            let peek = Int(date.timeIntervalSinceReferenceDate * 2.0) % 5 == 0
+            return .init(expression: peek ? .peek : .curious, accessory: nil, fx: .file)
+        }
+
+        if hovering && p.shortTermMoodReaction {
+            let mood = pal.moodSnapshot(at: date)
+            if mood.irritation >= 2.2 {
+                return .init(expression: .annoyed, accessory: .horns, fx: .alert)
+            }
+            if mood.affection >= 2.25 {
+                return .init(expression: .love, accessory: nil, fx: .hearts)
+            }
+        }
+
         guard p.contextReactions else { return resting }
+
+        let mouseIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .mouseMoved)
+        let keyboardIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+        let idleSeconds = min(mouseIdle, keyboardIdle)
 
         if p.timerReaction && store.finished {
             return .init(expression: .shocked, accessory: nil, fx: .alert)
         }
-        if p.lowBatteryReaction, let battery = system.battery, battery <= 15 {
-            return .init(expression: .worried, accessory: .bandage, fx: .sweat)
+
+        if p.lowBatteryReaction, let battery = system.battery {
+            if battery <= 5 {
+                return .init(expression: .panic, accessory: .bandage, fx: .tears)
+            }
+            if battery <= 10 {
+                return .init(expression: .worried, accessory: .bandage, fx: .sweat)
+            }
+            if battery <= 15 {
+                return .init(expression: .worried, accessory: .bandage, fx: .sweat)
+            }
         }
+
         if p.chargingReaction, let battery = system.battery, battery >= 100, !system.onBattery {
             return .init(expression: .superHappy, accessory: .crown, fx: .sparkle)
         }
         if p.chargingReaction && system.charging {
+            if let battery = system.battery, battery <= 15 {
+                return .init(expression: .superHappy, accessory: .halo, fx: .hearts)
+            }
             return .init(expression: .love, accessory: .halo, fx: .hearts)
         }
+
         if p.musicReaction && media.isPlaying {
+            if audio.available && (audio.bass > 0.68 || audio.overall > 0.62) {
+                return .init(expression: .excited, accessory: .headphones, fx: .music)
+            }
             return .init(expression: .music, accessory: .headphones, fx: .music)
         }
-        if p.timerReaction && (store.deadline != nil || store.pausedSeconds > 0) {
+
+        if p.timerReaction, let deadline = store.deadline {
+            let remaining = max(0, deadline.timeIntervalSince(date))
+            if remaining <= 3.2 {
+                return .init(expression: .shocked, accessory: nil, fx: .alert)
+            }
+            if remaining <= 10 {
+                return .init(expression: .surprised, accessory: nil, fx: .alert)
+            }
+            return .init(expression: .focused, accessory: nil, fx: .none)
+        }
+        if p.timerReaction && store.pausedSeconds > 0 {
             return .init(expression: .focused, accessory: nil, fx: .none)
         }
 
@@ -927,37 +1344,104 @@ private struct HaloPixelPalContext {
             let app = NSWorkspace.shared.frontmostApplication
             let bundle = app?.bundleIdentifier?.lowercased() ?? ""
             let appName = app?.localizedName?.lowercased() ?? ""
-            if bundle == "com.apple.dt.xcode" || appName == "xcode" {
+
+            if bundle == "com.apple.dt.xcode" || appName == "xcode"
+                || bundle.contains("unity3d") || appName == "unity" {
                 return .init(expression: .focused, accessory: .glasses, fx: .none)
             }
+
             let gameHints = ["steam", "minecraft", "roblox", "retroarch", "whisky", "crossover"]
             if gameHints.contains(where: { bundle.contains($0) || appName.contains($0) }) {
                 return .init(expression: .excited, accessory: .shades, fx: .sparkle)
+            }
+
+            let callHints = ["zoom", "facetime", "msteams", "teams"]
+            if callHints.contains(where: { bundle.contains($0) || appName.contains($0) }) {
+                return .init(expression: .shy, accessory: .flower, fx: .sparkle)
+            }
+
+            if bundle == "com.apple.finder" || appName == "finder" {
+                return .init(expression: .curious, accessory: nil, fx: .none)
             }
         }
 
         if p.nightReaction {
             let hour = Calendar.autoupdatingCurrent.component(.hour, from: date)
-
-            // Late night: settle down, breathe slowly and drift off with floating Zs.
             if hour >= 23 || hour < 5 {
-                return .init(expression: .sleepy, accessory: .sleepingCap, fx: .sleepZ)
+                let phase = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 36)
+                if hour >= 2 && hour < 5 && idleSeconds < 30 && phase < 2.2 {
+                    return .init(expression: .judging, accessory: .sleepingCap, fx: .none)
+                }
+                if phase < 3.0 {
+                    return .init(expression: .yawn, accessory: .sleepingCap, fx: .sleepZ)
+                }
+                if phase < 12 {
+                    return .init(expression: .sleepy, accessory: .sleepingCap, fx: .sleepZ)
+                }
+                if phase < 20 {
+                    return .init(expression: .sleepy, accessory: .sleepingCap, fx: .dreamCookie)
+                }
+                if phase < 28 {
+                    return .init(expression: .sleepy, accessory: .sleepingCap, fx: .dreamHeart)
+                }
+                return .init(expression: .sleepy, accessory: .sleepingCap, fx: .dreamMusic)
             }
 
-            // Early morning: wake up bright and fresh before normal daytime behavior resumes.
             if hour >= 5 && hour < 9 {
+                let phase = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 28)
+                if phase < 1.8 {
+                    return .init(expression: .yawn, accessory: .sleepingCap, fx: .sleepZ)
+                }
+                if phase < 3.4 {
+                    return .init(expression: .sleepy, accessory: .sprout, fx: .none)
+                }
                 return .init(expression: .happy, accessory: .sprout, fx: .sparkle)
+            }
+        }
+
+        if p.seasonalReaction {
+            let components = Calendar.autoupdatingCurrent.dateComponents([.month, .day], from: date)
+            let month = components.month ?? 0
+            let day = components.day ?? 0
+            let phase = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 50)
+            if month == 10 && day >= 28 && phase < 2.2 {
+                return .init(expression: .mischievous, accessory: .horns, fx: .ghost)
+            }
+            if month == 12 && day >= 20 && phase < 2.2 {
+                return .init(expression: .proud, accessory: .crown, fx: .sparkle)
+            }
+            if month == 1 && day == 1 && phase < 4.0 {
+                return .init(expression: .superHappy, accessory: .crown, fx: .sparkle)
+            }
+        }
+
+        if p.ambientReaction && !hovering {
+            let scale = max(0.5, p.personality.ambientScale)
+            let cycleLength = 173.0 / scale
+            let raw = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: cycleLength)
+            let phase = raw / cycleLength * 173.0
+
+            if phase >= 12 && phase < 12.85 {
+                return .init(expression: .sneeze, accessory: nil, fx: .sparkle)
+            }
+            if phase >= 49 && phase < 51.2 {
+                return .init(expression: .hiccup, accessory: nil, fx: .alert)
+            }
+            if phase >= 91 && phase < 93.0 {
+                return .init(expression: .curious, accessory: nil, fx: .sparkle)
+            }
+            if p.rareReaction && phase >= 141 && phase < 143.2 {
+                let day = Calendar.autoupdatingCurrent.ordinality(of: .day, in: .era, for: date) ?? 0
+                return .init(expression: .surprised,
+                             accessory: nil,
+                             fx: day.isMultiple(of: 2) ? .butterfly : .ghost)
             }
         }
 
         if hovering && p.hoverReaction { return resting }
 
-        if p.idleReaction {
-            let mouseIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .mouseMoved)
-            let keyboardIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
-            if min(mouseIdle, keyboardIdle) > 180 {
-                return .init(expression: .bored, accessory: nil, fx: .none)
-            }
+        if p.idleReaction && idleSeconds > 180 {
+            return .init(expression: .bored, accessory: nil, fx: .none)
         }
 
         return resting
@@ -966,13 +1450,13 @@ private struct HaloPixelPalContext {
     private static func fx(for expression: HaloPixelPalExpression) -> HaloPixelPalFX {
         switch expression {
         case .love: return .hearts
-        case .superHappy, .excited, .shy: return .sparkle
+        case .superHappy, .excited, .shy, .proud, .satisfied, .petting: return .sparkle
         case .music: return .music
         case .worried: return .sweat
-        case .crying: return .tears
-        case .sleepy: return .sleepZ
+        case .crying, .panic: return .tears
+        case .sleepy, .yawn: return .sleepZ
         case .dizzy: return .dizzy
-        case .annoyed, .furious, .shocked, .surprised: return .alert
+        case .hiccup, .poked, .annoyed, .furious, .shocked, .surprised: return .alert
         default: return .none
         }
     }
@@ -989,6 +1473,8 @@ struct HaloPixelPetWidget: View {
     @State private var pointer = CGPoint.zero
     @State private var animationEpoch = Date()
     @State private var orbitDetector = HaloPixelPalCursorOrbitDetector()
+    @State private var strokeDetector = HaloPixelPalStrokeDetector()
+    @State private var fileDragTargeted = false
 
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
@@ -1009,12 +1495,15 @@ struct HaloPixelPetWidget: View {
                 let columns = min(4, max(1, gridColumnSpan ?? 1))
                 let rows = min(4, max(1, gridRowSpan ?? columns))
                 let squareSize = min(columns, rows)
+                let audioSnapshot = AudioSpectrumService.shared.snapshot()
                 let state = HaloPixelPalContext.resolve(
                     store: store,
                     media: media,
                     system: system,
                     pal: pal,
                     hovering: hovering,
+                    fileTargeted: fileDragTargeted,
+                    audio: audioSnapshot,
                     date: timeline.date
                 )
                 let expression = resolvedExpression(base: state.expression, date: timeline.date)
@@ -1031,30 +1520,62 @@ struct HaloPixelPetWidget: View {
                     animationTime: timeline.date.timeIntervalSince(pal.reaction == nil ? animationEpoch : pal.reactionStarted),
                     reactionElapsed: pal.reaction.map { _ in timeline.date.timeIntervalSince(pal.reactionStarted) },
                     cookieRescueElapsed: pal.cookieRescueStarted.map { timeline.date.timeIntervalSince($0) },
+                    cookieFeedElapsed: pal.cookieFeedStarted.map { timeline.date.timeIntervalSince($0) },
+                    cookieSatisfactionElapsed: pal.cookieSatisfactionStarted.map { timeline.date.timeIntervalSince($0) },
+                    cookieFeedOrdinal: pal.cookieFeedOrdinal,
+                    audioEnergy: audioSnapshot.available ? max(audioSnapshot.overall, audioSnapshot.bass * 0.9) : 0,
                     pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero,
-                    onCookieTap: { pal.feedFuryCookie() }
+                    showAlwaysCookie: pal.preferences.alwaysCookie,
+                    onCookieTap: { pal.feedCookie() }
                 )
                 .frame(width: side, height: side)
                 .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
                 .onContinuousHover { phase in
                     switch phase {
                     case .active(let location):
+                        let now = Date()
+                        let entering = !hovering
                         hovering = true
-                        if orbitDetector.register(
+
+                        if entering,
+                           pal.preferences.peekReaction,
+                           (location.x <= side * 0.18 || location.x >= side * 0.82 || location.y <= side * 0.16) {
+                            pal.peeked()
+                        }
+
+                        let orbitTriggered = orbitDetector.register(
                             location: location,
                             size: CGSize(width: side, height: side),
-                            at: Date().timeIntervalSinceReferenceDate,
+                            at: now.timeIntervalSinceReferenceDate,
                             minimumRotationTurns: pal.preferences.dizzyRotationThresholdTurns
-                        ) {
+                        )
+                        if orbitTriggered {
+                            strokeDetector.resetPath()
                             pal.react(.dizzy, seconds: 1.9)
+                        } else if let event = strokeDetector.register(
+                            location: location,
+                            size: CGSize(width: side, height: side),
+                            at: now.timeIntervalSinceReferenceDate
+                        ) {
+                            switch event {
+                            case .petting: pal.petted()
+                            case .zigzag: pal.react(.confused, seconds: 1.25)
+                            }
                         }
-                        let next = CGPoint(x: ((location.x / max(1, proxy.size.width) - 0.5) * 2).rounded(),
-                                           y: ((location.y / max(1, proxy.size.height) - 0.5) * 2).rounded())
+
+                        pal.considerChase(at: now)
+
+                        let next = CGPoint(
+                            x: ((location.x / max(1, side) - 0.5) * 2).rounded(),
+                            y: ((location.y / max(1, side) - 0.5) * 2).rounded()
+                        )
                         if pointer != next { pointer = next }
+
                     case .ended:
                         hovering = false
                         pointer = .zero
                         orbitDetector.resetPath()
+                        strokeDetector.resetPath()
                     }
                 }
             }
@@ -1068,11 +1589,30 @@ struct HaloPixelPetWidget: View {
                         .exclusively(before: TapGesture().onEnded { pal.tapped() })
                 )
         )
-        .onDisappear { hovering = false; pointer = .zero; orbitDetector.resetPath() }
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $fileDragTargeted) { _ in
+            pal.fileCuriosity(dropped: true)
+            return false
+        }
+        .onChange(of: fileDragTargeted) { targeted in
+            if targeted { pal.fileCuriosity(dropped: false) }
+        }
+        .onAppear { syncAudioSpectrum() }
+        .onChange(of: media.isPlaying) { _ in syncAudioSpectrum() }
+        .onChange(of: pal.preferences.musicReaction) { _ in syncAudioSpectrum() }
+        .onChange(of: pal.preferences.contextReactions) { _ in syncAudioSpectrum() }
+        .onDisappear {
+            hovering = false
+            pointer = .zero
+            orbitDetector.resetPath()
+            strokeDetector.resetPath()
+            AudioSpectrumService.shared.setActive(false, owner: "pixel-pal")
+        }
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { pal.tapped() }
         .accessibilityAction(named: Text("Show affection")) { pal.doubleTapped() }
+        .accessibilityAction(named: Text("Feed cookie")) { pal.feedCookie() }
         .contextMenu {
+            Button("Feed Cookie") { pal.feedCookie() }
             Menu("Expression") {
                 ForEach(HaloPixelPalExpression.allCases.filter { $0 != .blink }) { expression in
                     Button(expression.title) { pal.react(expression, seconds: 2.2) }
@@ -1082,7 +1622,14 @@ struct HaloPixelPetWidget: View {
             Button("Pixel Pal Settings…") { HaloPixelPalSettingsWindowController.shared.show() }
         }
         .accessibilityLabel("Halo Pixel Pal")
-        .help("Hover, click, double-click, long-press, or quickly circle the cursor around Pixel Pal · right-click for settings")
+        .help("Pet, poke, feed, drag files over, click, double-click, long-press, or draw quick cursor gestures around Pixel Pal · right-click for settings")
+    }
+
+    private func syncAudioSpectrum() {
+        AudioSpectrumService.shared.setActive(
+            pal.preferences.contextReactions && pal.preferences.musicReaction && media.isPlaying,
+            owner: "pixel-pal"
+        )
     }
 
     private func resolvedExpression(base: HaloPixelPalExpression, date: Date) -> HaloPixelPalExpression {
@@ -1119,7 +1666,12 @@ private struct HaloPixelPalFace: View {
     var animationTime: TimeInterval = 0
     var reactionElapsed: TimeInterval? = nil
     var cookieRescueElapsed: TimeInterval? = nil
+    var cookieFeedElapsed: TimeInterval? = nil
+    var cookieSatisfactionElapsed: TimeInterval? = nil
+    var cookieFeedOrdinal: Int = 0
+    var audioEnergy: Double = 0
     var pointer: CGPoint = .zero
+    var showAlwaysCookie = true
     var onCookieTap: (() -> Void)? = nil
     @Environment(\.displayScale) private var displayScale
 
@@ -1128,6 +1680,22 @@ private struct HaloPixelPalFace: View {
     private var isEatingFuryCookie: Bool {
         guard expression == .furious, let rescue = cookieRescueElapsed else { return false }
         return rescue >= 0.55 && rescue < 1.16
+    }
+
+    private var isEatingSnackCookie: Bool {
+        guard let elapsed = cookieFeedElapsed else { return false }
+        return elapsed >= 0 && elapsed < 0.96
+    }
+
+    private var isEatingAnyCookie: Bool { isEatingFuryCookie || isEatingSnackCookie }
+
+    private var cookieChewElapsed: TimeInterval {
+        if isEatingFuryCookie { return max(0, (cookieRescueElapsed ?? 0) - 0.55) }
+        return max(0, cookieFeedElapsed ?? 0)
+    }
+
+    private var isCookieSatisfied: Bool {
+        expression == .satisfied || cookieSatisfactionElapsed != nil
     }
 
     private var faceColor: Color {
@@ -1170,6 +1738,42 @@ private struct HaloPixelPalFace: View {
                 radius: 1 + 7 * preferences.glowIntensity
             )
 
+            if isEatingSnackCookie, let elapsed = cookieFeedElapsed {
+                Canvas { context, size in
+                    drawFuryCookie(
+                        context: &context,
+                        size: size,
+                        consumeProgress: min(1.0, max(0.0, elapsed / 0.90))
+                    )
+                }
+                .allowsHitTesting(false)
+            }
+
+            if showAlwaysCookie,
+               expression != .furious,
+               !isEatingSnackCookie,
+               !isCookieSatisfied,
+               let onCookieTap {
+                Canvas { context, size in
+                    drawCookieBadge(context: &context, size: size)
+                }
+                .allowsHitTesting(false)
+
+                GeometryReader { proxy in
+                    let side = min(proxy.size.width, proxy.size.height)
+                    let hitSize = max(24.0, side * 0.24)
+                    Button(action: onCookieTap) {
+                        Color.clear
+                            .frame(width: hitSize, height: hitSize)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .position(x: proxy.size.width * 0.82, y: proxy.size.height * 0.82)
+                    .accessibilityLabel("Feed Pixel Pal a cookie")
+                    .help("Feed Pixel Pal")
+                }
+            }
+
             if expression == .furious, let reactionElapsed = reactionElapsed {
                 Canvas { context, size in
                     drawFuryDoor(
@@ -1209,6 +1813,41 @@ private struct HaloPixelPalFace: View {
             }
         }
         .clipped()
+    }
+
+
+    private func drawCookieBadge(context: inout GraphicsContext, size: CGSize) {
+        let pattern = [
+            ".bbb.",
+            "bbdbb",
+            "bbbbb",
+            "bdbdb",
+            ".bbb."
+        ]
+        let pixel = max(1.0, min(size.width, size.height) / 34.0)
+        let badgeSide = pixel * 5.0
+        let origin = CGPoint(
+            x: size.width * 0.82 - badgeSide / 2.0,
+            y: size.height * 0.82 - badgeSide / 2.0
+        )
+        let dough = Color(red: 0.94, green: 0.58, blue: 0.19)
+        let edge = Color(red: 0.66, green: 0.30, blue: 0.075)
+        let chip = Color(red: 0.24, green: 0.08, blue: 0.02)
+
+        for (y, row) in pattern.enumerated() {
+            for (x, value) in row.enumerated() where value != "." {
+                let rect = CGRect(
+                    x: origin.x + CGFloat(x) * pixel,
+                    y: origin.y + CGFloat(y) * pixel,
+                    width: pixel,
+                    height: pixel
+                )
+                var path = Path()
+                path.addRect(rect)
+                let outer = x == 0 || x == 4 || y == 0 || y == 4
+                context.fill(path, with: .color(value == "d" ? chip : (outer ? edge : dough)))
+            }
+        }
     }
 
     private func furyDoorClosure(elapsed: TimeInterval, cookieRescueElapsed: TimeInterval?) -> Double {
@@ -1430,14 +2069,18 @@ private struct HaloPixelPalFace: View {
     private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, cookieMunch, furious, smug }
 
     private var eyePose: EyePose {
-        if isEatingFuryCookie { return .cookieMunch }
+        if isEatingAnyCookie { return .cookieMunch }
         switch expression {
         case .blink, .sleepy, .bored: return .closed
-        case .happy, .superHappy, .music, .shy: return .happy
+        case .happy, .superHappy, .music, .shy, .petting, .satisfied, .proud: return .happy
         case .love: return .heart
-        case .excited, .shocked: return .star
-        case .wink, .mischievous: return .winkRight
-        case .confused: return .confused
+        case .excited, .shocked, .panic: return .star
+        case .wink, .mischievous, .peek: return .winkRight
+        case .confused, .curious, .judging: return .confused
+        case .sneeze, .yawn: return .closed
+        case .hiccup, .poked: return .winkLeft
+        case .chasing: return .open
+        case .full: return .smug
         case .dizzy: return .dizzy
         case .furious: return .furious
         case .smug: return .smug
@@ -1494,8 +2137,17 @@ private struct HaloPixelPalFace: View {
         case .cookieMunch:
             let happy = HaloPixelPalSprites.happyEye(preferences.eyeStyle)
             let closed = HaloPixelPalSprites.closedEye(preferences.eyeStyle)
-            let chewPhase = Int(max(0, cookieRescueElapsed ?? 0) * 14.0) % 2
-            if chewPhase == 0 {
+            let chewPhase = Int(cookieChewElapsed * (cookieFeedOrdinal == 2 ? 18.0 : 14.0)) % 2
+            if cookieFeedOrdinal == 2 {
+                let star = HaloPixelPalSprites.starEye
+                if chewPhase == 0 {
+                    render(.init(star, x: leftX, y: y), 1, 0, 0)
+                    render(.init(happy, x: rightX, y: y + 1, mirrorX: true), 1, 0, 0)
+                } else {
+                    render(.init(happy, x: leftX, y: y + 1), 1, 0, 0)
+                    render(.init(star, x: rightX, y: y, mirrorX: true), 1, 0, 0)
+                }
+            } else if chewPhase == 0 {
                 render(.init(happy, x: leftX, y: y + 1), 1, 0, 0)
                 render(.init(closed, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)
             } else {
@@ -1513,21 +2165,21 @@ private struct HaloPixelPalFace: View {
     }
 
     private func drawBrows(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
-        if isEatingFuryCookie { return }
+        if isEatingAnyCookie || isCookieSatisfied { return }
         let leftX = 3
         let rightX = 16
         let y = 4
         switch expression {
-        case .worried, .sad, .crying, .shy:
+        case .worried, .sad, .crying, .shy, .panic:
             render(.init(HaloPixelPalSprites.worriedBrow, x: leftX, y: y), 0.95, 0, 0)
             render(.init(HaloPixelPalSprites.worriedBrow, x: rightX, y: y, mirrorX: true), 0.95, 0, 0)
         case .furious:
             render(.init(HaloPixelPalSprites.furiousBrow, x: leftX, y: 2), 1, 0, 0)
             render(.init(HaloPixelPalSprites.furiousBrow, x: rightX, y: 2, mirrorX: true), 1, 0, 0)
-        case .annoyed, .focused:
+        case .annoyed, .focused, .judging, .full:
             render(.init(HaloPixelPalSprites.annoyedBrow, x: leftX, y: y), 0.95, 0, 0)
             render(.init(HaloPixelPalSprites.annoyedBrow, x: rightX, y: y, mirrorX: true), 0.95, 0, 0)
-        case .surprised, .shocked:
+        case .surprised, .shocked, .hiccup, .poked:
             render(.init(HaloPixelPalSprites.raisedBrow, x: leftX, y: 3), 0.95, 0, 0)
             render(.init(HaloPixelPalSprites.raisedBrow, x: rightX, y: 3, mirrorX: true), 0.95, 0, 0)
         case .confused:
@@ -1545,15 +2197,16 @@ private struct HaloPixelPalFace: View {
     private func automaticMouth() -> HaloPixelPalSprite? {
         switch expression {
         case .neutral, .focused: return HaloPixelPalSprites.mouthTiny
-        case .confused, .dizzy: return HaloPixelPalSprites.mouthO
-        case .blink, .sleepy, .bored: return HaloPixelPalSprites.mouthFlat
-        case .happy, .music: return HaloPixelPalSprites.mouthSmile
+        case .confused, .dizzy, .curious, .hiccup, .poked, .panic: return HaloPixelPalSprites.mouthO
+        case .blink, .sleepy, .bored, .judging: return HaloPixelPalSprites.mouthFlat
+        case .happy, .music, .petting, .proud: return HaloPixelPalSprites.mouthSmile
         case .superHappy, .excited, .love: return HaloPixelPalSprites.mouthBigSmile
-        case .surprised, .shocked: return HaloPixelPalSprites.mouthO
+        case .surprised, .shocked, .sneeze, .yawn: return HaloPixelPalSprites.mouthOpen
         case .worried, .sad, .crying, .annoyed: return HaloPixelPalSprites.mouthFrown
         case .furious: return HaloPixelPalSprites.mouthGrimace
         case .shy: return HaloPixelPalSprites.mouthTiny
-        case .mischievous, .smug, .wink: return HaloPixelPalSprites.mouthSmug
+        case .mischievous, .smug, .wink, .chasing, .peek, .full: return HaloPixelPalSprites.mouthSmug
+        case .satisfied: return HaloPixelPalSprites.mouthLick
         }
     }
 
@@ -1571,22 +2224,22 @@ private struct HaloPixelPalFace: View {
 
     private func drawMouth(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
     let mouth: HaloPixelPalSprite?
-    if isEatingFuryCookie {
-        let chewPhase = Int(max(0, cookieRescueElapsed ?? 0) * 14.0) % 2
+    if isEatingAnyCookie {
+        let chewPhase = Int(cookieChewElapsed * (cookieFeedOrdinal == 2 ? 18.0 : 14.0)) % 2
         mouth = chewPhase == 0 ? HaloPixelPalSprites.mouthOpen : HaloPixelPalSprites.mouthTiny
     } else {
         mouth = selectedMouth()
     }
     guard let mouth else { return }
     let x = max(0, (logicalGrid - mouth.width) / 2)
-    let y = isEatingFuryCookie ? 15 : (expression == .superHappy || expression == .excited ? 15 : 16)
+    let y = isEatingAnyCookie ? 15 : (expression == .superHappy || expression == .excited ? 15 : 16)
     render(.init(mouth, x: x, y: y), 1, 0, 0)
 }
 
     private func drawCheeks(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
     if expression == .furious && !isEatingFuryCookie { return }
     let sprite: HaloPixelPalSprite
-    if isEatingFuryCookie {
+    if isEatingAnyCookie || isCookieSatisfied {
         sprite = HaloPixelPalSprites.cheekKawaii
     } else {
         switch preferences.cheekStyle {
@@ -1596,7 +2249,7 @@ private struct HaloPixelPalFace: View {
         case .shy: sprite = HaloPixelPalSprites.cheekShy
         }
     }
-    let opacity: Double = isEatingFuryCookie || expression == .shy || expression == .love ? 1.0 : 0.90
+    let opacity: Double = isEatingAnyCookie || isCookieSatisfied || expression == .shy || expression == .love || expression == .petting ? 1.0 : 0.90
     render(.init(sprite, x: 2, y: 13), opacity, 0, 0)
     render(.init(sprite, x: max(0, 22 - sprite.width), y: 13, mirrorX: true), opacity, 0, 0)
 }
@@ -1619,7 +2272,7 @@ private struct HaloPixelPalFace: View {
 
     private func drawAccessory(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
         let accessory = resolvedAccessory
-        if isEatingFuryCookie && accessory == .horns { return }
+        if (isEatingAnyCookie || isCookieSatisfied) && accessory == .horns { return }
         switch accessory {
         case .none:
             if preferences.faceStyle == .cat {
@@ -1654,7 +2307,7 @@ private struct HaloPixelPalFace: View {
     }
 
     private func drawFX(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
-        if isEatingFuryCookie { return }
+        if isEatingAnyCookie { return }
         let phase = reduceMotion || preferences.animationIntensity == 0 ? 0 : Int(max(0, animationTime) * max(0.35, preferences.animationSpeed) * 4) % 4
         let lift = -(phase / 2)
         switch fx {
@@ -1693,6 +2346,19 @@ private struct HaloPixelPalFace: View {
         case .sleepZ:
             render(.init(HaloPixelPalSprites.zTiny, x: 17, y: 7), 0.52, 0, lift)
             render(.init(HaloPixelPalSprites.zSmall, x: 20, y: 2), 0.88, 0, lift - 1)
+        case .file:
+            render(.init(HaloPixelPalSprites.fileIcon, x: 9, y: 1), 0.88, 0, lift)
+        case .dreamCookie:
+            render(.init(HaloPixelPalSprites.heart, x: 19, y: 3), 0.28, 0, lift)
+            render(.init(HaloPixelPalSprites.sparkle, x: 21, y: 1), 0.42, 0, lift - 1)
+        case .dreamHeart:
+            render(.init(HaloPixelPalSprites.heart, x: 20, y: 2), 0.72, 0, lift)
+        case .dreamMusic:
+            render(.init(HaloPixelPalSprites.musicNote, x: 20, y: 2), 0.68, 0, lift)
+        case .ghost:
+            render(.init(HaloPixelPalSprites.ghost, x: 19, y: 2), 0.72, 0, lift)
+        case .butterfly:
+            render(.init(HaloPixelPalSprites.butterfly, x: 19, y: 3), 0.78, 0, -lift)
         }
     }
 
@@ -1704,12 +2370,33 @@ private struct HaloPixelPalFace: View {
         let one = intensity > 0.28 ? 1 : 0
         let two = intensity > 0.75 ? 2 : one
         if let reactionElapsed {
-            if isEatingFuryCookie {
-                let chew = Int(max(0, cookieRescueElapsed ?? 0) * 14.0) % 2
+            if isEatingAnyCookie {
+                let chew = Int(cookieChewElapsed * (cookieFeedOrdinal == 2 ? 18.0 : 14.0)) % 2
                 return (0, chew == 0 ? -one : 0)
             }
             if expression == .dizzy {
                 return (Int(round(sin(t * 10.5))) * two, Int(round(cos(t * 7.5))) * one)
+            }
+            if expression == .petting {
+                return (Int(pointer.x) * one, Int(round(sin(t * 4.0))) < 0 ? -one : 0)
+            }
+            if expression == .poked {
+                return (-Int(pointer.x) * one, Int(round(abs(sin(t * 9.5)))) * -one)
+            }
+            if expression == .chasing {
+                return (Int(pointer.x) * two, Int(pointer.y) * one)
+            }
+            if expression == .peek {
+                return (Int(pointer.x) * two, 0)
+            }
+            if expression == .sneeze {
+                return (Int(round(sin(t * 16.0))) * one, Int(round(abs(sin(t * 8.0)))) * one)
+            }
+            if expression == .hiccup {
+                return (0, Int(round(abs(sin(t * 7.0)))) * -two)
+            }
+            if expression == .panic {
+                return (Int(round(sin(t * 17.0))) * two, Int(round(cos(t * 13.0))) * one)
             }
             if expression == .furious {
                 return (Int(round(sin(t * 18.0))) * two, Int(round(cos(t * 13.0))) * one)
@@ -1724,8 +2411,12 @@ private struct HaloPixelPalFace: View {
         switch expression {
         case .happy, .superHappy, .love:
             return (0, Int(round(sin(t * 5.2))) < 0 ? -one : 0)
-        case .excited, .music:
-            return (Int(round(sin(t * 6.4))) * one, Int(round(cos(t * 6.4))) * one)
+        case .music:
+            let beat = audioEnergy > 0.68 ? two : (audioEnergy > 0.34 ? one : 0)
+            return (Int(round(sin(t * 6.4))) * one, -beat)
+        case .excited:
+            let beat = audioEnergy > 0.62 ? two : one
+            return (Int(round(sin(t * 6.4))) * one, Int(round(cos(t * 6.4))) * beat)
         case .shocked, .surprised:
             return (0, Int(round(abs(sin(t * 7.0)))) * -two)
         case .worried, .sad, .crying:
@@ -1738,6 +2429,26 @@ private struct HaloPixelPalFace: View {
             return (Int(round(sin(t * 11.0))) * one, 0)
         case .furious:
             return (Int(round(sin(t * 18.0))) * two, Int(round(cos(t * 13.0))) * one)
+        case .petting:
+            return (Int(pointer.x) * one, Int(round(sin(t * 3.8))) < 0 ? -one : 0)
+        case .poked:
+            return (-Int(pointer.x) * one, -one)
+        case .chasing:
+            return (Int(pointer.x) * two, Int(pointer.y) * one)
+        case .peek:
+            return (Int(pointer.x) * two, 0)
+        case .sneeze:
+            return (Int(round(sin(t * 15.0))) * one, one)
+        case .hiccup:
+            return (0, Int(round(abs(sin(t * 7.0)))) * -two)
+        case .panic:
+            return (Int(round(sin(t * 17.0))) * two, Int(round(cos(t * 12.0))) * one)
+        case .yawn:
+            return (0, Int(round(sin(t * 1.2))) * one)
+        case .satisfied, .proud:
+            return (0, Int(round(sin(t * 3.1))) < 0 ? -one : 0)
+        case .judging, .full:
+            return (0, one)
         case .dizzy:
             return (Int(round(sin(t * 10.5))) * two, Int(round(cos(t * 7.5))) * one)
         case .neutral:
@@ -2023,6 +2734,9 @@ private struct HaloPixelPalSettingsView: View {
     private var interactionSection: some View {
         GroupBox("Animation & interactions") {
             VStack(alignment: .leading, spacing: 10) {
+                Picker("Personality", selection: bind(\.personality)) {
+                    ForEach(HaloPixelPalPersonality.allCases) { Text($0.rawValue).tag($0) }
+                }
                 HStack {
                     Text("Animation speed")
                     Slider(value: bind(\.animationSpeed), in: 0.35...2.0)
@@ -2041,6 +2755,12 @@ private struct HaloPixelPalSettingsView: View {
                 Text("How much fast circular cursor movement is required before Pixel Pet becomes dizzy. Lower values trigger sooner.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+
+                Toggle("Always show feed cookie", isOn: bind(\.alwaysCookie))
+                Toggle("Cursor petting", isOn: bind(\.pettingReaction))
+                Toggle("Cursor poking", isOn: bind(\.pokeReaction))
+                Toggle("Random cursor chase / avoidance", isOn: bind(\.chaseReaction))
+                Toggle("Peek from edges", isOn: bind(\.peekReaction))
                 Toggle("Automatic blinking + rare wink", isOn: bind(\.automaticBlinking))
                 Toggle("React on hover", isOn: bind(\.hoverReaction))
                 Toggle("React on click", isOn: bind(\.tapReaction))
@@ -2055,14 +2775,20 @@ private struct HaloPixelPalSettingsView: View {
         GroupBox("Mac context reactions") {
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("Enable context reactions", isOn: bind(\.contextReactions))
+                Toggle("File-drag curiosity", isOn: bind(\.fileCuriosityReaction))
+                Toggle("Short-term affection / irritation memory", isOn: bind(\.shortTermMoodReaction))
+                Toggle("Ambient micro-events (sneeze, hiccup, curiosity)", isOn: bind(\.ambientReaction))
+                Toggle("Rare encounters", isOn: bind(\.rareReaction))
+                Toggle("Seasonal reactions", isOn: bind(\.seasonalReaction))
+
                 if pal.preferences.contextReactions {
                     Toggle("Charging", isOn: bind(\.chargingReaction))
                     Toggle("Low battery", isOn: bind(\.lowBatteryReaction))
-                    Toggle("Music playback", isOn: bind(\.musicReaction))
-                    Toggle("Timer state", isOn: bind(\.timerReaction))
-                    Toggle("Xcode and games", isOn: bind(\.appReaction))
+                    Toggle("Music playback + beat response", isOn: bind(\.musicReaction))
+                    Toggle("Timer anticipation", isOn: bind(\.timerReaction))
+                    Toggle("Xcode, Unity, games, Finder and calls", isOn: bind(\.appReaction))
                     Toggle("Idle / away", isOn: bind(\.idleReaction))
-                    Toggle("Time of day (morning / night)", isOn: bind(\.nightReaction))
+                    Toggle("Time of day (wake-up / sleep / dreams)", isOn: bind(\.nightReaction))
                 }
             }
             .padding(.top, 4)
@@ -2082,7 +2808,7 @@ private struct HaloPixelPalSettingsView: View {
                 }
 
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 5), spacing: 7) {
-                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .dizzy, .furious, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in
+                    ForEach([HaloPixelPalExpression.happy, .superHappy, .love, .curious, .petting, .poked, .sneeze, .hiccup, .satisfied, .full, .dizzy, .furious, .shy, .mischievous, .surprised, .worried, .crying, .wink, .music]) { expression in
                         Button(expression.title) {
                             previewExpression = expression
                         }
@@ -2096,7 +2822,7 @@ private struct HaloPixelPalSettingsView: View {
 
     private var footer: some View {
         HStack(alignment: .bottom) {
-            Text("Pixel Pal v2 uses a 24×24 authored pixel canvas with layered eyes, brows, mouths, cheeks, accessories and FX. It remains face-first at every supported square size.")
+            Text("Pixel Pal v2 uses a 24×24 authored pixel canvas with layered expressions, accessories, contextual FX and a bounded personality engine. It remains face-first: no hunger bars, rooms, inventory loops or pet-care chores.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -2115,13 +2841,13 @@ private struct HaloPixelPalSettingsView: View {
     private var previewFX: HaloPixelPalFX {
         switch previewExpression {
         case .love: return .hearts
-        case .superHappy, .excited, .shy: return .sparkle
+        case .superHappy, .excited, .shy, .proud, .satisfied, .petting: return .sparkle
         case .music: return .music
         case .worried: return .sweat
-        case .crying: return .tears
-        case .sleepy: return .sleepZ
+        case .crying, .panic: return .tears
+        case .sleepy, .yawn: return .sleepZ
         case .dizzy: return .dizzy
-        case .annoyed, .furious, .surprised, .shocked: return .alert
+        case .hiccup, .poked, .annoyed, .furious, .surprised, .shocked: return .alert
         default: return .none
         }
     }

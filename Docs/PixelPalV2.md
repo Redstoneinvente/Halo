@@ -1016,3 +1016,22 @@ When an implementation shortcut conflicts with this document, prefer this docume
   clipped caps, ears and hearts. Settings use a live animation preview.
 - Validation: square persistence, rectangle/narrow-grid normalization, backing-pixel geometry,
   and reaction timing regression tests; full macOS build/test in Validate Pixel Pal.
+
+
+## 21. Personality micro-behaviour engine
+
+Pixel Pal may use bounded, transient personality behaviours that strengthen the feeling of a tiny living companion without becoming a pet-care game.
+
+Allowed examples include:
+
+- an always-available optional cookie interaction with short eating/satisfaction choreography
+- different immediate reactions to repeated treats, including temporary "full" refusal
+- crumbs, licking / satisfied faces, and brief post-treat happiness
+- cursor petting, poking, edge peeking, and occasional cursor chasing / avoidance
+- drag-over curiosity for files, represented with a tiny file glyph or face reaction
+- low-frequency sneeze, hiccup, curiosity, rare encounter, seasonal, wake-up, sleep and dream beats
+- timer anticipation, charging / low-battery escalation, app-aware expressions, and audio-energy-reactive dancing
+- short-lived affection / irritation bias that decays automatically
+- personality presets that only tune reaction probabilities and tone
+
+These systems must remain face-first, transient and low-pressure. They must not add hunger, energy, rooms, inventory management, care obligations, punishment for absence, or persistent chores.
