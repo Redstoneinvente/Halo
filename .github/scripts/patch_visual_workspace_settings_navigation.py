@@ -1,117 +1,204 @@
 from pathlib import Path
 
-path = Path("Halo/Views/WorkspaceSettingsView.swift")
-s = path.read_text()
+settings_path = Path("Halo/Views/WorkspaceSettingsView.swift")
+widgets_path = Path("Halo/Views/WidgetSettingsView.swift")
+settings = settings_path.read_text()
+widgets = widgets_path.read_text()
 
 
-def once(old: str, new: str, label: str) -> None:
-    global s
-    count = s.count(old)
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    if new in text:
+        print(f"{label}: already applied")
+        return text
+    count = text.count(old)
     if count != 1:
         raise SystemExit(f"{label}: expected 1 match, found {count}")
-    s = s.replace(old, new, 1)
+    print(f"{label}: patched")
+    return text.replace(old, new, 1)
 
 
-once(
-    '    private let sections = ["General", "Account & License", "Appearance", "Activation Sequence", "Modules", "Widgets", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "Update Animation", "About"]',
-    '''    private var visualWorkspaceActive: Bool {
-        workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace
-    }
-
-    private var sections: [String] {
-        var items = ["General", "Account & License", "Appearance", "Activation Sequence"]
-        if visualWorkspaceActive {
-            items.append("Visual Workspace Editor")
-        }
-        items.append(contentsOf: ["Modules", "Widgets", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "Update Animation", "About"])
-        return items
-    }
-
-    private func isSectionUnavailable(_ name: String) -> Bool {
-        visualWorkspaceActive && (name == "Modules" || name == "Widgets")
-    }
-
-    private func sectionHelp(_ name: String) -> String {
+settings = replace_once(
+    settings,
+    '''    private func sectionHelp(_ name: String) -> String {
         guard isSectionUnavailable(name) else { return name }
         return "Available in the Default layout only. Use Visual Workspace Editor while Visual Workspace is active."
     }
+''',
+    '''    private func sectionHelp(_ name: String) -> String {
+        guard isSectionUnavailable(name) else { return name }
+        return "\\(name) is locked while Visual Workspace is active. Configure these controls in Visual Workspace Editor, or switch Appearance → Opened Space → Layout System to Default."
+    }
 
-    @ViewBuilder
-    private func sidebarRow(_ name: String) -> some View {
-        HStack(spacing: 8) {
-            Label(name, systemImage: sectionIcon(name))
-            Spacer(minLength: 4)
-            if isSectionUnavailable(name) {
-                HStack(spacing: 3) {
-                    Text("Default")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                    Image(systemName: "lock.fill")
-                        .font(.caption2)
+    private var sidebarSelection: Binding<String?> {
+        Binding(
+            get: { section },
+            set: { candidate in
+                guard let candidate else {
+                    section = nil
+                    return
                 }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.secondary.opacity(0.10), in: Capsule())
+                guard !isSectionUnavailable(candidate) else { return }
+                section = candidate
             }
-        }
-        .padding(.vertical, 5)
-        .opacity(isSectionUnavailable(name) ? 0.5 : 1)
-        .contentShape(Rectangle())
-        .help(sectionHelp(name))
-    }''',
-    "dynamic settings sections",
+        )
+    }
+''',
+    "locked-section explanation and guarded selection",
 )
 
-once(
-    '                    ForEach(sections.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \\.self) { Label($0, systemImage: sectionIcon($0)).padding(.vertical, 5).tag($0) }',
-    '''                    ForEach(sections.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \\.self) { name in
-                        sidebarRow(name)
+settings = replace_once(
+    settings,
+    '                    Text("Default")\n',
+    '                    Text("Default only")\n',
+    "locked badge copy",
+)
+
+settings = replace_once(
+    settings,
+    '                List(selection: $section) {\n',
+    '                List(selection: sidebarSelection) {\n',
+    "guard sidebar selection",
+)
+
+settings = replace_once(
+    settings,
+    '''                        sidebarRow(name)
                             .tag(name)
                             .disabled(isSectionUnavailable(name))
-                    }''',
-    "settings sidebar rows",
+''',
+    '''                        sidebarRow(name)
+                            .tag(name)
+                            .selectionDisabled(isSectionUnavailable(name))
+''',
+    "disable list selection without killing hover help",
 )
 
-once(
-    '                        Text("Changes are saved automatically").font(.caption).foregroundStyle(.secondary)',
-    '                        Text(section == "Visual Workspace Editor" ? "Design the active Visual Workspace" : "Changes are saved automatically").font(.caption).foregroundStyle(.secondary)',
-    "detail subtitle",
-)
-
-once(
-    '                Form { content }.formStyle(.grouped).frame(maxWidth: .infinity, maxHeight: .infinity)',
-    '''                if section == "Visual Workspace Editor", visualWorkspaceActive {
-                    OpenedNotchWorkspaceEditor(layout: $workspace.settings.layout)
+settings = replace_once(
+    settings,
+    '''                    OpenedNotchWorkspaceEditor(layout: $workspace.settings.layout)
                         .frame(minWidth: 920, minHeight: 620)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    Form { content }
-                        .formStyle(.grouped)
+''',
+    '''                    OpenedNotchWorkspaceEditor(layout: $workspace.settings.layout, showsCloseButton: false)
+                        .frame(minWidth: 980, idealWidth: 1080, minHeight: 660)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }''',
-    "visual workspace editor detail",
+''',
+    "embedded editor sizing",
 )
 
-once(
-    '        }.frame(minWidth: 700, minHeight: 560)\n        .onDisappear { GeometryPreview.update(expanded: false, editing: false) }',
-    '''        }.frame(minWidth: 700, minHeight: 560)
-        .onChange(of: visualWorkspaceActive) { active in
-            if active && (section == "Modules" || section == "Widgets") {
-                section = "Visual Workspace Editor"
-            } else if !active && section == "Visual Workspace Editor" {
-                section = "Appearance"
+widgets = replace_once(
+    widgets,
+    '''struct OpenedNotchWorkspaceEditor: View {
+    @Binding var layout: WorkspaceLayout
+    @Environment(\\.dismiss) private var dismiss
+''',
+    '''struct OpenedNotchWorkspaceEditor: View {
+    @Binding var layout: WorkspaceLayout
+    var showsCloseButton = true
+    @Environment(\\.dismiss) private var dismiss
+''',
+    "editor embedding option",
+)
+
+widgets = replace_once(
+    widgets,
+    '''            HSplitView {
+                VStack(spacing: 0) {
+                    toolbar
+                    Divider()
+                    ScrollView([.horizontal, .vertical]) { preview.padding(26).frame(minWidth: 640, minHeight: 560) }
+                }.frame(minWidth: 650)
+                inspector.frame(minWidth: 320, idealWidth: 380, maxWidth: 430)
             }
-        }
-        .onDisappear { GeometryPreview.update(expanded: false, editing: false) }''',
-    "layout mode rerouting",
+''',
+    '''            HSplitView {
+                VStack(spacing: 0) {
+                    toolbar
+                    Divider()
+                    GeometryReader { proxy in
+                        ScrollView([.horizontal, .vertical]) {
+                            preview(canvasSize: previewCanvasSize(for: proxy.size))
+                                .padding(22)
+                                .frame(minWidth: proxy.size.width, minHeight: proxy.size.height, alignment: .top)
+                        }
+                    }
+                }
+                .frame(minWidth: 680, idealWidth: 760)
+                inspector
+                    .frame(minWidth: 340, idealWidth: 390, maxWidth: 460)
+                    .frame(maxHeight: .infinity)
+            }
+            .frame(minWidth: 1020, minHeight: 640)
+''',
+    "responsive editor split layout",
 )
 
-once(
-    '        case "Activation Sequence": return "power.circle"\n        case "Modules": return "square.grid.2x2"',
-    '        case "Activation Sequence": return "power.circle"\n        case "Visual Workspace Editor": return "rectangle.3.group"\n        case "Modules": return "square.grid.2x2"',
-    "visual workspace editor icon",
+widgets = replace_once(
+    widgets,
+    '''            Spacer(minLength: 16)
+            Button { dismiss() } label: {
+                Label("Close", systemImage: "xmark")
+            }
+            .keyboardShortcut(.cancelAction)
+            .help("Close Visual Workspace")
+''',
+    '''            Spacer(minLength: 16)
+            if showsCloseButton {
+                Button { dismiss() } label: {
+                    Label("Close", systemImage: "xmark")
+                }
+                .keyboardShortcut(.cancelAction)
+                .help("Close Visual Workspace")
+            }
+''',
+    "hide redundant embedded close button",
 )
 
-path.write_text(s)
-print("Visual Workspace settings navigation patched.")
+widgets = replace_once(
+    widgets,
+    '''    private var preview: some View {
+        VStack(spacing: 10) {
+''',
+    '''    private func previewCanvasSize(for available: CGSize) -> CGSize {
+        let width = min(760, max(610, available.width - 44))
+        let height = min(580, max(470, available.height - 96))
+        return CGSize(width: width, height: height)
+    }
+
+    private func preview(canvasSize: CGSize) -> some View {
+        VStack(spacing: 10) {
+''',
+    "responsive preview helper",
+)
+
+widgets = replace_once(
+    widgets,
+    '''                Text("Drag a widget onto a grid cell · choose its standard size in the inspector")
+                    .font(.caption).foregroundStyle(.secondary)
+''',
+    '''                Text("Drag a widget onto a grid cell · choose its standard size in the inspector")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
+                    .frame(maxWidth: 300, alignment: .trailing)
+''',
+    "preview instruction layout",
+)
+
+widgets = replace_once(
+    widgets,
+    '''                .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.12)))
+                .frame(width: 610, height: 470)
+                .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.84), value: opened)
+''',
+    '''                .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.12)))
+                .frame(width: canvasSize.width, height: canvasSize.height)
+                .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.84), value: opened)
+''',
+    "responsive preview canvas",
+)
+
+settings_path.write_text(settings)
+widgets_path.write_text(widgets)
+print("Visual Workspace navigation and editor layout polish applied.")
