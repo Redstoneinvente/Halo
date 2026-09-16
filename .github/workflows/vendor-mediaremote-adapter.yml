@@ -20,9 +20,6 @@ jobs:
       - name: Apply native bridge migration
         run: |
           set -euo pipefail
-          # The vendored controller's next member after libraryPath is runPerlCommand,
-          # not an `arguments` property. Normalize the helper before executing it so
-          # this migration remains safe against the source currently on main.
           python3 - <<'PY'
           from pathlib import Path
           p = Path('.github/scripts/remove_mediaremote_spm.py')
@@ -37,29 +34,74 @@ jobs:
           PY
           python3 .github/scripts/remove_mediaremote_spm.py
 
-      - name: Verify dependency and target-membership contract
+      - name: Embed Swift bridge in WorkspaceStore
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          workspace = Path('Halo/Core/WorkspaceStore.swift')
+          controller_path = Path('Halo/Core/MediaRemoteController.swift')
+          track_path = Path('Halo/Core/MediaRemoteTrackInfo.swift')
+          pbx = Path('Halo.xcodeproj/project.pbxproj')
+          marker = '// MARK: - Embedded MediaRemote bridge'
+
+          def without_imports(text: str) -> str:
+              lines = [line for line in text.splitlines() if not line.startswith('import ')]
+              return '\n'.join(lines).strip() + '\n'
+
+          ws = workspace.read_text()
+          if marker not in ws:
+              track = without_imports(track_path.read_text())
+              controller = without_imports(controller_path.read_text())
+              ws = ws.rstrip() + '\n\n' + marker + '\n\n' + track + '\n' + controller
+              workspace.write_text(ws)
+
+          # These temporary files were useful to generate/validate the bridge, but keeping
+          # the Swift types inside an already-compiled Halo source file avoids any PBX
+          # target-membership ambiguity on Xcode.
+          controller_path.unlink(missing_ok=True)
+          track_path.unlink(missing_ok=True)
+
+          project = pbx.read_text()
+          for ident in (
+              'A11C0F1A0000000000000390',
+              'A11C0F1A0000000000000391',
+              'A11C0F1A0000000000000392',
+              'A11C0F1A0000000000000393',
+          ):
+              project = re.sub(r'^.*' + re.escape(ident) + r'.*\n?', '', project, flags=re.MULTILINE)
+          pbx.write_text(project)
+          PY
+
+      - name: Verify embedded dependency contract
         run: |
           set -euo pipefail
           ! grep -q '^import MediaRemoteAdapter$' Halo/Core/WorkspaceStore.swift
           ! grep -q 'XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter"' Halo.xcodeproj/project.pbxproj
           ! grep -q 'MediaRemoteAdapter in Frameworks' Halo.xcodeproj/project.pbxproj
-          test -f Halo/Core/MediaRemoteController.swift
-          test -f Halo/Core/MediaRemoteTrackInfo.swift
-          grep -q 'Core/MediaRemoteController.swift in Sources' Halo.xcodeproj/project.pbxproj
-          grep -q 'Core/MediaRemoteTrackInfo.swift in Sources' Halo.xcodeproj/project.pbxproj
-          grep -q 'Core/MediaRemoteController.swift \*/,' Halo.xcodeproj/project.pbxproj
-          grep -q 'Core/MediaRemoteTrackInfo.swift \*/,' Halo.xcodeproj/project.pbxproj
+          ! grep -q 'A11C0F1A000000000000039[0-3]' Halo.xcodeproj/project.pbxproj
+          test ! -e Halo/Core/MediaRemoteController.swift
+          test ! -e Halo/Core/MediaRemoteTrackInfo.swift
+          grep -q '// MARK: - Embedded MediaRemote bridge' Halo/Core/WorkspaceStore.swift
+          grep -q 'public class MediaController' Halo/Core/WorkspaceStore.swift
+          grep -q 'public struct TrackInfo' Halo/Core/WorkspaceStore.swift
+          grep -q 'Bundle.main.path(forResource: "run", ofType: "pl")' Halo/Core/WorkspaceStore.swift
+          grep -q 'libHaloMediaRemoteBridge.dylib' Halo/Core/WorkspaceStore.swift
           grep -q 'Build native MediaRemote bridge' Halo.xcodeproj/project.pbxproj
-          grep -q 'Bundle.main.path(forResource: "run", ofType: "pl")' Halo/Core/MediaRemoteController.swift
-          grep -q 'libHaloMediaRemoteBridge.dylib' Halo/Core/MediaRemoteController.swift
 
-      - name: Type-check direct Halo Swift bridge
+      - name: Type-check adapter Swift surface
         run: |
           set -euo pipefail
-          xcrun swiftc -typecheck \
-            Halo/Core/MediaRemoteTrackInfo.swift \
-            Halo/Core/MediaRemoteController.swift \
-            -framework AppKit
+          python3 - <<'PY'
+          from pathlib import Path
+          ws = Path('Halo/Core/WorkspaceStore.swift').read_text()
+          marker = '// MARK: - Embedded MediaRemote bridge'
+          bridge = ws.split(marker, 1)[1]
+          Path('/tmp/HaloEmbeddedMediaRemote.swift').write_text('import AppKit\nimport Foundation\nimport Darwin\n' + bridge)
+          PY
+          xcrun swiftc -typecheck /tmp/HaloEmbeddedMediaRemote.swift -framework AppKit
 
       - name: Compile Objective-C bridge directly
         run: |
@@ -100,21 +142,18 @@ jobs:
           BUILD_STATUS=${PIPESTATUS[0]}
           set -e
 
-          # Prove Xcode actually included both direct bridge files in Halo's compile graph.
-          grep -q 'MediaRemoteController.swift' /tmp/halo-native-mediaremote-build.log
-          grep -q 'MediaRemoteTrackInfo.swift' /tmp/halo-native-mediaremote-build.log
           grep -q 'Build native MediaRemote bridge' /tmp/halo-native-mediaremote-build.log
 
-          if grep -E '(MediaRemoteController\.swift|MediaRemoteTrackInfo\.swift|WorkspaceStore\.swift|libHaloMediaRemoteBridge).*error:' /tmp/halo-native-mediaremote-build.log; then
-            echo 'Native MediaRemote integration emitted a compiler/build error'
-            exit 1
-          fi
           if grep -E '(Unable to resolve module dependency|no such module).*MediaRemoteAdapter' /tmp/halo-native-mediaremote-build.log; then
             echo 'Stale MediaRemoteAdapter SwiftPM import remains'
             exit 1
           fi
           if grep -E "cannot find ('MediaController'|type 'TrackInfo') in scope" /tmp/halo-native-mediaremote-build.log; then
-            echo 'Direct MediaRemote source membership failed'
+            echo 'Embedded MediaRemote Swift bridge is not visible to WorkspaceStore'
+            exit 1
+          fi
+          if grep -E 'WorkspaceStore\.swift:.*(MediaRemote|MediaController|TrackInfo|run\.pl|libHaloMediaRemoteBridge).*error:' /tmp/halo-native-mediaremote-build.log; then
+            echo 'Embedded MediaRemote integration emitted a compiler error'
             exit 1
           fi
 
@@ -124,7 +163,7 @@ jobs:
             test -s "$APP/Contents/Frameworks/libHaloMediaRemoteBridge.dylib"
             test -s "$APP/Contents/Resources/run.pl"
           else
-            echo "Halo full build returned $BUILD_STATUS due to unrelated source errors; MediaRemote integration itself passed."
+            echo "Halo full build returned $BUILD_STATUS because of an unrelated source error; MediaRemote integration passed."
             grep -E 'error:|unable to type-check' /tmp/halo-native-mediaremote-build.log | tail -30 || true
           fi
 
@@ -135,8 +174,6 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add .github/scripts/remove_mediaremote_spm.py \
                   Halo/Core/WorkspaceStore.swift \
-                  Halo/Core/MediaRemoteController.swift \
-                  Halo/Core/MediaRemoteTrackInfo.swift \
                   Halo.xcodeproj/project.pbxproj \
                   Halo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
           if git diff --cached --quiet; then
