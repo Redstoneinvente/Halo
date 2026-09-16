@@ -50,3 +50,5 @@ jobs:
           git add Halo/NotchEngine/WindowManager.swift Halo/Views/SurfaceView.swift Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
           git commit -m "Separate Drop CI from File Shelf drops"
           git push origin main
+
+# Triggered intentionally by an exact commit message so normal pushes cannot rerun the patch.
