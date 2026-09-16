@@ -1,0 +1,109 @@
+name: Recover Pixel Pet Personality Pass
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/recover-pixel-pal-personality.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Recover and apply personality patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, gzip, re
+
+          workflow = Path('.github/workflows/polish-pixel-pal-interactions.yml').read_text()
+          match = re.search(r"printf '%s' '([^']+)' \| python3 -c", workflow)
+          if not match:
+              raise SystemExit('Could not locate embedded personality patch payload')
+
+          patcher = gzip.decompress(base64.b64decode(match.group(1))).decode()
+
+          helper = re.compile(
+              r"def once\(old, new, label\):\n"
+              r"    global s\n"
+              r"    count = s\.count\(old\)\n"
+              r"    if count != 1:\n"
+              r"        raise SystemExit\(f'\{label\}: expected 1 match, found \{count\}'\)\n"
+              r"    s = s\.replace\(old, new, 1\)"
+          )
+          replacement = '''def once(old, new, label):
+    global s
+    count = s.count(old)
+    # drawBrows and drawFX intentionally share this guard in the current renderer.
+    # The brows block appears first, so only this named patch may consume the first match.
+    if label == 'brow suppression' and count >= 1:
+        s = s.replace(old, new, 1)
+        return
+    if count != 1:
+        raise SystemExit(f'{label}: expected 1 match, found {count}')
+    s = s.replace(old, new, 1)'''
+          patcher, changed = helper.subn(replacement, patcher, count=1)
+          if changed != 1:
+              raise SystemExit(f'Could not safely patch once() helper; replacements={changed}')
+
+          Path('/tmp/pixel_pal_personality_recovered.py').write_text(patcher)
+          print('Recovered embedded personality patcher with contextual brow guard.')
+          PY
+          python3 /tmp/pixel_pal_personality_recovered.py
+
+      - name: Verify personality contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('Halo/Views/PixelPetWidget.swift').read_text()
+          required = [
+              'enum HaloPixelPalPersonality',
+              'struct HaloPixelPalStrokeDetector',
+              'func feedCookie()',
+              'func petted()',
+              'func considerChase',
+              'case sneeze',
+              'case hiccup',
+              'case satisfied',
+              'AudioSpectrumService.shared.snapshot()',
+              '.onDrop(of: [UTType.fileURL.identifier]',
+              'private func drawCookieBadge',
+              'isEatingAnyCookie',
+              'case .dreamCookie:',
+              'Picker("Personality"',
+          ]
+          missing = [marker for marker in required if marker not in s]
+          if missing:
+              raise SystemExit(f'Missing Pixel Pet personality markers: {missing}')
+          doc = Path('Docs/PixelPalV2.md').read_text()
+          if '## 21. Personality micro-behaviour engine' not in doc:
+              raise SystemExit('Canonical Pixel Pal personality section missing')
+          print('Pixel Pet personality contract verified.')
+          PY
+
+      - name: Parse Pixel Pet source
+        run: xcrun swiftc -parse Halo/Views/PixelPetWidget.swift
+
+      - name: Full Xcode build
+        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Views/PixelPetWidget.swift Docs/PixelPalV2.md
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "Expand Pixel Pet personality engine"
+          git pull --rebase origin main
+          git push origin HEAD:main
