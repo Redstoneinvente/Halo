@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import AppKit
 import IOBluetooth
+import CoreAudio
 import Combine
 
 struct DailyWindow: Codable, Equatable {
@@ -93,11 +94,130 @@ enum PlayerSelection {
 
 // MARK: - Bluetooth context state
 
+/// Captured with the event so disconnects do not depend on a still-present device.
+struct BluetoothDeviceVisual: Codable, Equatable {
+    var symbol: String
+    var imageData: Data? = nil
+
+    static func symbol(name: String, classOfDevice: UInt32) -> String {
+        let name = name.lowercased()
+        if name.contains("airpods max") { return "airpodsmax" }
+        if name.contains("airpods pro") { return "airpodspro" }
+        if name.contains("airpods") { return "airpods" }
+        // The reported class works even when the user renames their accessory.
+        let major = (classOfDevice >> 8) & 0x1f
+        let minor = (classOfDevice >> 2) & 0x3f
+        switch major {
+        case 1: return "laptopcomputer"
+        case 2: return "iphone"
+        case 4:
+            switch minor {
+            case 4: return "mic.fill"
+            case 5: return "hifispeaker.fill"
+            case 6: return "car.fill"
+            case 11, 12, 13: return "video.fill"
+            case 15: return "tv"
+            default: return "headphones"
+            }
+        case 5:
+            if minor & 0x10 != 0 { return "keyboard" }
+            if minor & 0x20 != 0 { return name.contains("trackpad") ? "trackpad" : "computermouse" }
+            if [1, 2].contains(minor & 0x0f) { return "gamecontroller" }
+        case 6:
+            if minor & 0x20 != 0 { return "printer.fill" }
+            if minor & 0x08 != 0 { return "camera.fill" }
+        default: break
+        }
+        if name.contains("trackpad") { return "trackpad" }
+        if name.contains("mouse") { return "computermouse" }
+        if name.contains("keyboard") { return "keyboard" }
+        if name.contains("controller") || name.contains("gamepad") { return "gamecontroller" }
+        if name.contains("headphone") || name.contains("headset") || name.contains("buds") { return "headphones" }
+        if name.contains("speaker") || name.contains("beolit") { return "hifispeaker.fill" }
+        if name.contains("phone") { return "iphone" }
+        return "wave.3.right"
+    }
+}
+
+struct BluetoothDeviceIcon: View {
+    var visual: BluetoothDeviceVisual?
+    var fallbackSymbol: String = "wave.3.right"
+    var size: CGFloat
+
+    var body: some View {
+        Group {
+            if let data = visual?.imageData, let image = NSImage(data: data) {
+                Image(nsImage: image).resizable().renderingMode(.original).scaledToFit()
+            } else {
+                let symbol = visual?.symbol ?? fallbackSymbol
+                Image(systemName: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) == nil ? fallbackSymbol : symbol)
+                    .resizable().scaledToFit()
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Public Core Audio device artwork; Bluetooth itself does not supply a universal photo API.
+private enum BluetoothDeviceArtwork {
+    static func imageData(address: String) -> Data? {
+        let address = normalizedAddress(address)
+        guard address.count == 12 else { return nil }
+        var property = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &property, 0, nil, &size) == noErr,
+              size > 0 else { return nil }
+        var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &property, 0, nil, &size, &ids) == noErr else { return nil }
+        for id in ids {
+            var transport: UInt32 = 0
+            property.mSelector = kAudioDevicePropertyTransportType
+            size = UInt32(MemoryLayout<UInt32>.size)
+            guard AudioObjectGetPropertyData(id, &property, 0, nil, &size, &transport) == noErr,
+                  transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE else { continue }
+            var uid: CFString = "" as CFString
+            property.mSelector = kAudioDevicePropertyDeviceUID
+            size = UInt32(MemoryLayout<CFString>.size)
+            guard AudioObjectGetPropertyData(id, &property, 0, nil, &size, &uid) == noErr,
+                  normalizedAddress(uid as String).hasPrefix(address) else { continue }
+            var icon: CFURL? = nil
+            property.mSelector = kAudioDevicePropertyIcon
+            size = UInt32(MemoryLayout<CFURL?>.size)
+            guard AudioObjectGetPropertyData(id, &property, 0, nil, &size, &icon) == noErr,
+                  let icon else { continue }
+            let url = icon as URL
+            // No remote downloads or manufacturer-name guesses.
+            guard url.isFileURL, let image = NSImage(contentsOf: url),
+                  image.size.width > 0, image.size.height > 0,
+                  let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 96, pixelsHigh: 96,
+                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                    colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+                  let context = NSGraphicsContext(bitmapImageRep: bitmap) else { continue }
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            let scale = min(96 / image.size.width, 96 / image.size.height)
+            let target = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+            image.draw(in: NSRect(x: (96 - target.width) / 2, y: (96 - target.height) / 2,
+                                 width: target.width, height: target.height))
+            NSGraphicsContext.restoreGraphicsState()
+            return bitmap.representation(using: .png, properties: [:])
+        }
+        return nil
+    }
+
+    private static func normalizedAddress(_ value: String) -> String {
+        value.lowercased().replacingOccurrences(of: "-", with: "").replacingOccurrences(of: ":", with: "")
+    }
+}
+
 struct BluetoothDeviceSnapshot: Identifiable, Equatable {
     let id: String
     let name: String
     let address: String
     let connected: Bool
+    var visual: BluetoothDeviceVisual? = nil
 }
 
 enum BluetoothConnectionEventKind: String, Codable, CaseIterable, Equatable {
@@ -150,6 +270,7 @@ struct BluetoothConnectionEvent: Identifiable, Equatable {
     let id = UUID()
     let kind: BluetoothConnectionEventKind
     let deviceName: String?
+    var deviceVisual: BluetoothDeviceVisual? = nil
     let date = Date()
 
     var title: String {
@@ -171,8 +292,8 @@ struct BluetoothConnectionEvent: Identifiable, Equatable {
 
     var symbol: String {
         switch kind {
-        case .connected: return "wave.3.right.circle.fill"
-        case .disconnected: return "wave.3.right.circle"
+        case .connected: return deviceVisual?.symbol ?? "wave.3.right.circle.fill"
+        case .disconnected: return deviceVisual?.symbol ?? "wave.3.right.circle"
         case .poweredOn: return "wave.3.right"
         case .poweredOff: return "wave.3.right.slash"
         }
@@ -194,6 +315,7 @@ final class BluetoothStateService: ObservableObject {
 
     private var timer: Timer?
     private var primed = false
+    private var artworkRetryDates: [String: Date] = [:]
     private var clearEventWork: DispatchWorkItem?
 
     private init() {}
@@ -279,10 +401,18 @@ final class BluetoothStateService: ObservableObject {
             let name = rawName.isEmpty ? (rawAddress.isEmpty ? "Bluetooth device" : rawAddress) : rawName
             let fallbackName = name.lowercased()
             let id = normalizedAddress.isEmpty ? "name:\(fallbackName.isEmpty ? String(index) : fallbackName)" : normalizedAddress
+            let previous = devices.first { $0.id == id }
+            var visual = BluetoothDeviceVisual(symbol: BluetoothDeviceVisual.symbol(name: name, classOfDevice: UInt32(device.classOfDevice)))
+            visual.imageData = previous?.visual?.imageData
+            if device.isConnected(), visual.imageData == nil,
+               previous?.connected != true || (artworkRetryDates[id] ?? .distantPast) <= Date() {
+                visual.imageData = BluetoothDeviceArtwork.imageData(address: rawAddress)
+                artworkRetryDates[id] = Date().addingTimeInterval(15)
+            }
             let snapshot = BluetoothDeviceSnapshot(id: id,
                                                    name: name,
                                                    address: rawAddress,
-                                                   connected: device.isConnected())
+                                                   connected: device.isConnected(), visual: visual)
 
             if let existing = mergedByID[id] {
                 let existingLooksLikeAddress = !existing.address.isEmpty && existing.name.caseInsensitiveCompare(existing.address) == .orderedSame
@@ -290,12 +420,14 @@ final class BluetoothStateService: ObservableObject {
                 mergedByID[id] = BluetoothDeviceSnapshot(id: id,
                                                          name: preferIncomingName ? name : existing.name,
                                                          address: existing.address.isEmpty ? rawAddress : existing.address,
-                                                         connected: existing.connected || snapshot.connected)
+                                                         connected: existing.connected || snapshot.connected,
+                                                         visual: existing.visual?.imageData != nil ? existing.visual : snapshot.visual)
             } else {
                 mergedByID[id] = snapshot
             }
         }
 
+        artworkRetryDates = artworkRetryDates.filter { mergedByID[$0.key] != nil }
         let nextDevices = Array(mergedByID.values).sorted {
             if $0.connected != $1.connected { return $0.connected && !$1.connected }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
@@ -323,9 +455,9 @@ final class BluetoothStateService: ObservableObject {
         }
 
         if let newlyConnected {
-            emit(BluetoothConnectionEvent(kind: .connected, deviceName: newlyConnected.name))
+            emit(BluetoothConnectionEvent(kind: .connected, deviceName: newlyConnected.name, deviceVisual: newlyConnected.visual))
         } else if let newlyDisconnected {
-            emit(BluetoothConnectionEvent(kind: .disconnected, deviceName: newlyDisconnected.name))
+            emit(BluetoothConnectionEvent(kind: .disconnected, deviceName: newlyDisconnected.name, deviceVisual: newlyDisconnected.visual))
         }
 
         poweredOn = nextPoweredOn
@@ -338,7 +470,8 @@ final class BluetoothStateService: ObservableObject {
         return BluetoothDeviceSnapshot(id: current.id,
                                        name: incomingHasBetterName ? incoming.name : current.name,
                                        address: current.address.isEmpty ? incoming.address : current.address,
-                                       connected: current.connected || incoming.connected)
+                                       connected: current.connected || incoming.connected,
+                                       visual: current.visual?.imageData != nil ? current.visual : incoming.visual)
     }
 
     private func emit(_ event: BluetoothConnectionEvent) {

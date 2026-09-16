@@ -1,0 +1,23 @@
+name: Validate Bluetooth device icons
+on:
+  push:
+    branches: [main, codex/bluetooth-device-icons]
+    paths:
+      - 'Halo/Core/PersonalizationModels.swift'
+      - 'Halo/Core/WorkspaceModels.swift'
+      - 'Halo/Core/WorkspaceStore.swift'
+      - 'Halo/Views/ClosedNotchView.swift'
+      - 'Halo/Views/SurfaceView.swift'
+      - 'Tests/HaloCoreTests.swift'
+      - '.github/workflows/validate-bluetooth-icons.yml'
+      - 'Scripts/validate_bluetooth_icons.py'
+permissions:
+  contents: read
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Bluetooth production code and run regression tests
+        run: python3 Scripts/validate_bluetooth_icons.py

@@ -4,6 +4,31 @@ import XCTest
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    func testBluetoothDeviceSymbolsUseReportedClassForRenamedAccessories() {
+        XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0540), "keyboard")
+        XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0580), "computermouse")
+        XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0414), "hifispeaker.fill")
+        XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0508), "gamecontroller")
+        XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "AirPods Pro", classOfDevice: 0x0404), "airpodspro")
+        XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Unknown", classOfDevice: 0), "wave.3.right")
+    }
+
+    func testBluetoothDisconnectActivityRetainsVisualAndDecodesLegacyActivities() throws {
+        let visual = BluetoothDeviceVisual(symbol: "headphones", imageData: Data([1, 2, 3]))
+        let event = BluetoothConnectionEvent(kind: .disconnected, deviceName: "Renamed headset", deviceVisual: visual)
+        let activity = LiveActivity(bluetoothDeviceVisual: event.deviceVisual, title: event.title, detail: event.detail)
+        let restored = try JSONDecoder().decode(LiveActivity.self, from: JSONEncoder().encode(activity))
+        XCTAssertEqual(restored.bluetoothDeviceVisual, visual)
+        XCTAssertEqual(event.symbol, "headphones")
+        let power = BluetoothConnectionEvent(kind: .poweredOff, deviceName: nil)
+        XCTAssertNil(power.deviceVisual)
+        XCTAssertEqual(power.symbol, "wave.3.right.slash")
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(activity)) as? [String: Any])
+        json.removeValue(forKey: "bluetoothDeviceVisual")
+        let legacy = try JSONDecoder().decode(LiveActivity.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(legacy.bluetoothDeviceVisual)
+    }
+
     func testPixelPalSquareSizesSurviveValidationAndPersistence() throws {
         for side in 1...4 {
             var pet = OpenNotchItem.moduleItem(.pet)
