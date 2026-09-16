@@ -1,0 +1,1 @@
+Apply native macOS Bluetooth device artwork lookup.
