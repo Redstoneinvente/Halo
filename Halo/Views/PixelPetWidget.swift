@@ -844,7 +844,7 @@ final class HaloPixelPalStore: ObservableObject {
             self.react(.happy, seconds: 2.4)
         }
         cookieRescueWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.02, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.16, execute: work)
     }
 
     func longPressed() {
@@ -1125,14 +1125,19 @@ private struct HaloPixelPalFace: View {
 
     private let logicalGrid = 24
 
+    private var isEatingFuryCookie: Bool {
+        guard expression == .furious, let rescue = cookieRescueElapsed else { return false }
+        return rescue >= 0.55 && rescue < 1.16
+    }
+
     private var faceColor: Color {
-        expression == .furious ? Color(red: 1.0, green: 0.11, blue: 0.07) : preferences.faceColor
+        expression == .furious && !isEatingFuryCookie ? Color(red: 1.0, green: 0.11, blue: 0.07) : preferences.faceColor
     }
     private var accentColor: Color {
-        expression == .furious ? Color(red: 1.0, green: 0.52, blue: 0.08) : preferences.accentColor.color
+        expression == .furious && !isEatingFuryCookie ? Color(red: 1.0, green: 0.52, blue: 0.08) : preferences.accentColor.color
     }
     private var blushColor: Color {
-        expression == .furious ? Color(red: 0.62, green: 0.02, blue: 0.02) : preferences.blushColor.color
+        expression == .furious && !isEatingFuryCookie ? Color(red: 0.62, green: 0.02, blue: 0.02) : preferences.blushColor.color
     }
 
     var body: some View {
@@ -1181,7 +1186,7 @@ private struct HaloPixelPalFace: View {
                         drawFuryCookie(
                             context: &context,
                             size: size,
-                            consumeProgress: min(1.0, max(0.0, (rescue - 0.55) / 0.40))
+                            consumeProgress: min(1.0, max(0.0, (rescue - 0.55) / 0.52))
                         )
                     }
                     .allowsHitTesting(false)
@@ -1189,7 +1194,7 @@ private struct HaloPixelPalFace: View {
 
                 if cookieRescueElapsed == nil, reactionElapsed >= 1.05, reactionElapsed < 2.15, let onCookieTap {
                     GeometryReader { proxy in
-                        let hitSize = max(24.0, min(proxy.size.width, proxy.size.height) * 0.30)
+                        let hitSize = max(26.0, min(proxy.size.width, proxy.size.height) * 0.34)
                         Button(action: onCookieTap) {
                             Color.clear
                                 .frame(width: hitSize, height: hitSize)
@@ -1273,7 +1278,7 @@ private struct HaloPixelPalFace: View {
             ".bbdbb.",
             "..bbb.."
         ]
-        let pixel = max(1.0, min(size.width, size.height) / 30.0)
+        let pixel = max(1.0, min(size.width, size.height) / 27.0)
         let cookieSide = pixel * 7.0
         let origin = CGPoint(x: (size.width - cookieSide) / 2.0, y: (size.height - cookieSide) / 2.0)
         let visibleColumns = max(0, min(7, Int(ceil(7.0 * (1.0 - consumeProgress)))))
@@ -1422,9 +1427,10 @@ private struct HaloPixelPalFace: View {
         }
     }
 
-    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, furious, smug }
+    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, cookieMunch, furious, smug }
 
     private var eyePose: EyePose {
+        if isEatingFuryCookie { return .cookieMunch }
         switch expression {
         case .blink, .sleepy, .bored: return .closed
         case .happy, .superHappy, .music, .shy: return .happy
@@ -1485,6 +1491,17 @@ private struct HaloPixelPalFace: View {
         case .dizzy:
             render(.init(HaloPixelPalSprites.xEye, x: 3, y: 6), 1, 0, 0)
             render(.init(HaloPixelPalSprites.xEye, x: 16, y: 6, mirrorX: true), 1, 0, 0)
+        case .cookieMunch:
+            let happy = HaloPixelPalSprites.happyEye(preferences.eyeStyle)
+            let closed = HaloPixelPalSprites.closedEye(preferences.eyeStyle)
+            let chewPhase = Int(max(0, cookieRescueElapsed ?? 0) * 14.0) % 2
+            if chewPhase == 0 {
+                render(.init(happy, x: leftX, y: y + 1), 1, 0, 0)
+                render(.init(closed, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)
+            } else {
+                render(.init(closed, x: leftX, y: y + 2), 1, 0, 0)
+                render(.init(happy, x: rightX, y: y + 1, mirrorX: true), 1, 0, 0)
+            }
         case .furious:
             render(.init(HaloPixelPalSprites.furiousEye, x: leftX, y: y + 1), 1, 0, 0)
             render(.init(HaloPixelPalSprites.furiousEye, x: rightX, y: y + 1, mirrorX: true), 1, 0, 0)
@@ -1496,6 +1513,7 @@ private struct HaloPixelPalFace: View {
     }
 
     private func drawBrows(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
+        if isEatingFuryCookie { return }
         let leftX = 3
         let rightX = 16
         let y = 4
@@ -1552,25 +1570,36 @@ private struct HaloPixelPalFace: View {
     }
 
     private func drawMouth(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
-        guard let mouth = selectedMouth() else { return }
-        let x = max(0, (logicalGrid - mouth.width) / 2)
-        let y = expression == .superHappy || expression == .excited ? 15 : 16
-        render(.init(mouth, x: x, y: y), 1, 0, 0)
+    let mouth: HaloPixelPalSprite?
+    if isEatingFuryCookie {
+        let chewPhase = Int(max(0, cookieRescueElapsed ?? 0) * 14.0) % 2
+        mouth = chewPhase == 0 ? HaloPixelPalSprites.mouthOpen : HaloPixelPalSprites.mouthTiny
+    } else {
+        mouth = selectedMouth()
     }
+    guard let mouth else { return }
+    let x = max(0, (logicalGrid - mouth.width) / 2)
+    let y = isEatingFuryCookie ? 15 : (expression == .superHappy || expression == .excited ? 15 : 16)
+    render(.init(mouth, x: x, y: y), 1, 0, 0)
+}
 
     private func drawCheeks(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
-        if expression == .furious { return }
-        let sprite: HaloPixelPalSprite
+    if expression == .furious && !isEatingFuryCookie { return }
+    let sprite: HaloPixelPalSprite
+    if isEatingFuryCookie {
+        sprite = HaloPixelPalSprites.cheekKawaii
+    } else {
         switch preferences.cheekStyle {
         case .none: return
         case .soft: sprite = HaloPixelPalSprites.cheekSoft
         case .kawaii: sprite = HaloPixelPalSprites.cheekKawaii
         case .shy: sprite = HaloPixelPalSprites.cheekShy
         }
-        let opacity: Double = expression == .shy || expression == .love ? 1.0 : 0.90
-        render(.init(sprite, x: 2, y: 13), opacity, 0, 0)
-        render(.init(sprite, x: max(0, 22 - sprite.width), y: 13, mirrorX: true), opacity, 0, 0)
     }
+    let opacity: Double = isEatingFuryCookie || expression == .shy || expression == .love ? 1.0 : 0.90
+    render(.init(sprite, x: 2, y: 13), opacity, 0, 0)
+    render(.init(sprite, x: max(0, 22 - sprite.width), y: 13, mirrorX: true), opacity, 0, 0)
+}
 
     private var resolvedAccessory: HaloPixelPalAccessory {
         switch preferences.accessoryMode {
@@ -1589,7 +1618,9 @@ private struct HaloPixelPalFace: View {
     }
 
     private func drawAccessory(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
-        switch resolvedAccessory {
+        let accessory = resolvedAccessory
+        if isEatingFuryCookie && accessory == .horns { return }
+        switch accessory {
         case .none:
             if preferences.faceStyle == .cat {
                 return
@@ -1623,6 +1654,7 @@ private struct HaloPixelPalFace: View {
     }
 
     private func drawFX(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
+        if isEatingFuryCookie { return }
         let phase = reduceMotion || preferences.animationIntensity == 0 ? 0 : Int(max(0, animationTime) * max(0.35, preferences.animationSpeed) * 4) % 4
         let lift = -(phase / 2)
         switch fx {
@@ -1672,6 +1704,10 @@ private struct HaloPixelPalFace: View {
         let one = intensity > 0.28 ? 1 : 0
         let two = intensity > 0.75 ? 2 : one
         if let reactionElapsed {
+            if isEatingFuryCookie {
+                let chew = Int(max(0, cookieRescueElapsed ?? 0) * 14.0) % 2
+                return (0, chew == 0 ? -one : 0)
+            }
             if expression == .dizzy {
                 return (Int(round(sin(t * 10.5))) * two, Int(round(cos(t * 7.5))) * one)
             }
