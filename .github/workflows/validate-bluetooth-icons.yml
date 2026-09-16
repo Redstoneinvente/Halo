@@ -10,6 +10,7 @@ on:
       - 'Halo/Views/SurfaceView.swift'
       - 'Tests/HaloCoreTests.swift'
       - '.github/workflows/validate-bluetooth-icons.yml'
+      - 'Scripts/validate_bluetooth_icons.py'
 permissions:
   contents: read
 jobs:
@@ -18,5 +19,16 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Compile Bluetooth production code and run regression tests
+        run: python3 Scripts/validate_bluetooth_icons.py
       - name: Build and test Halo
+        id: full
+        if: always()
         run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build test
+      - name: Compare unchanged baseline when full build fails
+        if: failure() && steps.full.outcome == 'failure'
+        run: |
+          git fetch --depth=1 origin 08ea78dfef2a16243689cda979fc26838a45bffb
+          git worktree add /tmp/halo-baseline 08ea78dfef2a16243689cda979fc26838a45bffb
+          cd /tmp/halo-baseline
+          xcodebuild -quiet -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
