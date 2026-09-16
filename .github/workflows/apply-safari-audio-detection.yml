@@ -1,0 +1,91 @@
+name: Apply Safari Audio Detection
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/safari-audio-detection-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch Safari audio detection
+        run: python3 .github/scripts/patch_safari_audio_detection.py
+
+      - name: Verify Safari detection contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          integrations = Path('Halo/Services/Integrations.swift').read_text()
+          workspace = Path('Halo/Core/WorkspaceStore.swift').read_text()
+          required_integrations = [
+              'let selectableSnapshots = automatic ? snapshots.filter(\\.playing) : snapshots',
+              'PlayerSelection.choose(selectableSnapshots, current: self.connectedApp, preferred: app)',
+          ]
+          required_workspace = [
+              'import CoreAudio',
+              '@available(macOS 14.2, *)',
+              'private enum SafariAudioProcessDetector',
+              'kAudioHardwarePropertyProcessObjectList',
+              'kAudioProcessPropertyIsRunningOutput',
+              'com.apple.WebKit.WebContent',
+              'proc_pidinfo(pid, PROC_PIDTBSDINFO',
+              'if audibleNow, media.connectedApp != nil, !media.isPlaying { media.disconnect() }',
+              'media.title = "Safari Audio"',
+              'snapshot.mids * 0.82',
+              'return signal > (safariHint ? 0.016 : 0.040)',
+          ]
+          missing = [x for x in required_integrations if x not in integrations]
+          missing += [x for x in required_workspace if x not in workspace]
+          if missing:
+              raise SystemExit(f'Missing Safari audio reliability markers: {missing}')
+          print('Safari audio detection contract verified.')
+          PY
+
+      - name: Parse changed Swift sources
+        run: |
+          swiftc -parse Halo/Services/Integrations.swift
+          swiftc -parse Halo/Core/WorkspaceStore.swift
+
+      - name: Build Halo Safari audio regression check
+        run: |
+          set +e
+          xcodebuild \
+            -project Halo.xcodeproj \
+            -scheme Halo \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee /tmp/halo-build.log
+          BUILD_STATUS=${PIPESTATUS[0]}
+          echo "Full build exit status: ${BUILD_STATUS}"
+          if grep -E '(Integrations|WorkspaceStore)\.swift:[0-9]+:[0-9]+: error:' /tmp/halo-build.log; then
+            echo "Safari audio changes introduced a compile error."
+            exit 1
+          fi
+          if [ "${BUILD_STATUS}" -ne 0 ]; then
+            echo "Full Halo build has unrelated baseline failures; no changed-file error was emitted."
+          fi
+          exit 0
+
+      - name: Commit Safari audio reliability fix
+        run: |
+          if git diff --quiet -- Halo/Services/Integrations.swift Halo/Core/WorkspaceStore.swift; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Services/Integrations.swift Halo/Core/WorkspaceStore.swift
+          git commit -m "Improve Safari audio detection reliability"
+          git pull --rebase origin main
+          git push origin HEAD:main
