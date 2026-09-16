@@ -139,7 +139,7 @@ public struct TrackInfo: Codable {
             }
 
             if let base64String = self.artworkDataBase64,
-               let data = Data(base64Encoded: base64String) {
+               let data = Foundation.Data(base64Encoded: base64String) {
                 self.artwork = NSImage(data: data)
             } else {
                 self.artwork = nil

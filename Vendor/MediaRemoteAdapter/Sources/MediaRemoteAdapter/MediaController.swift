@@ -12,7 +12,7 @@ public class MediaController {
 
     private var listeningProcess: Process?
     private var listeningInputPipe: Pipe?
-    private var dataBuffer = Data()
+    private var dataBuffer = Foundation.Data()
     private var dataBufferSearchStart = 0
     private var lastTrackInfo: TrackInfo?
     private var eventCount = 0
@@ -25,7 +25,7 @@ public class MediaController {
 
     public var onTrackInfoReceived: ((TrackInfo?) -> Void)?
     public var onListenerTerminated: (() -> Void)?
-    public var onDecodingError: ((Error, Data) -> Void)?
+    public var onDecodingError: ((Error, Foundation.Data) -> Void)?
 
     public init() {
         _ = MediaController.sigpipeIgnored
@@ -59,8 +59,8 @@ public class MediaController {
         let errorPipe = Pipe()
         process.standardError = errorPipe
 
-        var outputBuffer = Data()
-        var errorBuffer = Data()
+        var outputBuffer = Foundation.Data()
+        var errorBuffer = Foundation.Data()
         let lock = NSLock()
 
         outputPipe.fileHandleForReading.readabilityHandler = { handle in
@@ -113,7 +113,7 @@ public class MediaController {
         let getProcess = Process()
         getProcess.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
 
-        var getDataBuffer = Data()
+        var getDataBuffer = Foundation.Data()
         var getDataBufferSearchStart = 0
         var callbackExecuted = false
 
