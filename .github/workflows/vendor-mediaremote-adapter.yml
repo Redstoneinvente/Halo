@@ -1,4 +1,4 @@
-name: Vendor MediaRemote Adapter
+name: Native MediaRemote Bridge
 
 on:
   push:
@@ -10,80 +10,62 @@ permissions:
   contents: write
 
 jobs:
-  vendor:
+  migrate:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Vendor pinned MediaRemoteAdapter source
+      - name: Apply native bridge migration
         run: |
           set -euo pipefail
-          REV=5b6afde3f501a3da567e23bf7f23d562938a1809
-          rm -rf /tmp/mediaremote-adapter Vendor/MediaRemoteAdapter
-          git clone --quiet https://github.com/ejbills/mediaremote-adapter.git /tmp/mediaremote-adapter
-          git -C /tmp/mediaremote-adapter checkout --quiet "$REV"
-          mkdir -p Vendor/MediaRemoteAdapter
-          cp /tmp/mediaremote-adapter/Package.swift Vendor/MediaRemoteAdapter/Package.swift
-          cp -R /tmp/mediaremote-adapter/Sources Vendor/MediaRemoteAdapter/Sources
-          if [ -f /tmp/mediaremote-adapter/LICENSE ]; then cp /tmp/mediaremote-adapter/LICENSE Vendor/MediaRemoteAdapter/LICENSE; fi
+          python3 .github/scripts/remove_mediaremote_spm.py
 
-      - name: Switch Xcode project to local package
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('Halo.xcodeproj/project.pbxproj')
-          s = p.read_text()
-          ident = 'A11C0F1A0000000000000382'
-
-          remote_block = '''\t\tA11C0F1A0000000000000382 /* XCRemoteSwiftPackageReference "mediaremote-adapter" */ = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = "https://github.com/ejbills/mediaremote-adapter.git";\n\t\t\trequirement = {\n\t\t\t\tkind = revision;\n\t\t\t\trevision = 5b6afde3f501a3da567e23bf7f23d562938a1809;\n\t\t\t};\n\t\t};\n'''
-          local_block = '''\t\tA11C0F1A0000000000000382 /* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" */ = {\n\t\t\tisa = XCLocalSwiftPackageReference;\n\t\t\trelativePath = Vendor/MediaRemoteAdapter;\n\t\t};\n'''
-
-          if local_block not in s:
-              if remote_block not in s:
-                  raise SystemExit('Expected MediaRemoteAdapter package reference not found')
-              s = s.replace(remote_block, '')
-              marker = '/* Begin XCSwiftPackageProductDependency section */'
-              local_section = f'''/* Begin XCLocalSwiftPackageReference section */\n{local_block}/* End XCLocalSwiftPackageReference section */\n\n'''
-              if marker not in s:
-                  raise SystemExit('XCSwiftPackageProductDependency section marker missing')
-              s = s.replace(marker, local_section + marker, 1)
-
-          s = s.replace(
-              f'{ident} /* XCRemoteSwiftPackageReference "mediaremote-adapter" */',
-              f'{ident} /* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" */'
-          )
-          p.write_text(s)
-          PY
-
-      - name: Verify local package contract
+      - name: Verify dependency contract
         run: |
           set -euo pipefail
-          test -f Vendor/MediaRemoteAdapter/Package.swift
-          test -f Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift
-          test -f Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/TrackInfo.swift
-          test -f Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/Resources/run.pl
-          test -f Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/MediaRemoteAdapter.m
-          test -f Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/include/MediaRemoteAdapter.h
-          grep -q 'XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter"' Halo.xcodeproj/project.pbxproj
-          grep -q 'relativePath = Vendor/MediaRemoteAdapter;' Halo.xcodeproj/project.pbxproj
-          ! grep -q 'repositoryURL = "https://github.com/ejbills/mediaremote-adapter.git"' Halo.xcodeproj/project.pbxproj
-          grep -q '^import MediaRemoteAdapter$' Halo/Core/WorkspaceStore.swift
+          ! grep -q '^import MediaRemoteAdapter$' Halo/Core/WorkspaceStore.swift
+          ! grep -q 'XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter"' Halo.xcodeproj/project.pbxproj
+          ! grep -q 'MediaRemoteAdapter in Frameworks' Halo.xcodeproj/project.pbxproj
+          grep -q 'Vendor MediaController.swift in Sources' Halo.xcodeproj/project.pbxproj
+          grep -q 'Vendor TrackInfo.swift in Sources' Halo.xcodeproj/project.pbxproj
+          grep -q 'Build native MediaRemote bridge' Halo.xcodeproj/project.pbxproj
+          grep -q 'Bundle.main.path(forResource: "run", ofType: "pl")' Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift
+          grep -q 'libHaloMediaRemoteBridge.dylib' Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift
 
-      - name: Build vendored package directly
+      - name: Type-check direct Swift bridge
         run: |
           set -euo pipefail
-          swift build --package-path Vendor/MediaRemoteAdapter
+          xcrun swiftc -typecheck \
+            Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/TrackInfo.swift \
+            Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift \
+            -framework AppKit
 
-      - name: Resolve packages from clean state
+      - name: Compile Objective-C bridge directly
+        run: |
+          set -euo pipefail
+          SRC="$PWD/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote"
+          SDK=$(xcrun --sdk macosx --show-sdk-path)
+          xcrun clang -arch arm64 -isysroot "$SDK" -mmacosx-version-min=13.0 \
+            -dynamiclib -fobjc-arc -fblocks -I"$SRC/include" \
+            "$SRC/MediaRemote.m" "$SRC/MediaRemoteAdapter.m" "$SRC/MediaRemoteAdapterKeys.m" \
+            -framework Foundation -framework AppKit \
+            -install_name @rpath/libHaloMediaRemoteBridge.dylib \
+            -o /tmp/libHaloMediaRemoteBridge.dylib
+          test -s /tmp/libHaloMediaRemoteBridge.dylib
+          nm -gU /tmp/libHaloMediaRemoteBridge.dylib | grep -q 'bootstrap'
+          nm -gU /tmp/libHaloMediaRemoteBridge.dylib | grep -q ' get$'
+
+      - name: Resolve remaining Swift packages cleanly
         run: |
           set -euo pipefail
           rm -rf ~/Library/Developer/Xcode/DerivedData/Halo-* || true
           xcodebuild -resolvePackageDependencies -project Halo.xcodeproj -scheme Halo | tee /tmp/halo-resolve.log
-          grep -q 'MediaRemoteAdapter: .*Vendor/MediaRemoteAdapter @ local' /tmp/halo-resolve.log
+          ! grep -qi 'MediaRemoteAdapter' /tmp/halo-resolve.log
+          grep -qi 'Sparkle' /tmp/halo-resolve.log
 
-      - name: Validate Halo can import local adapter
+      - name: Build Halo and verify native bridge phase
         run: |
           set +e
           set -o pipefail
@@ -95,54 +77,44 @@ jobs:
             -arch arm64 \
             ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO \
-            build 2>&1 | tee /tmp/halo-local-mediaremote-build.log
+            build 2>&1 | tee /tmp/halo-native-mediaremote-build.log
           BUILD_STATUS=${PIPESTATUS[0]}
           set -e
 
-          # The dependency must resolve and compile, regardless of unrelated giant-SwiftUI
-          # type-check timeouts elsewhere in Halo.
-          grep -q "MediaRemoteAdapter: .*Vendor/MediaRemoteAdapter @ local" /tmp/halo-local-mediaremote-build.log
-          grep -q "Compiling MediaController.swift" /tmp/halo-local-mediaremote-build.log
-          grep -q "Halo/Core/WorkspaceStore.swift" /tmp/halo-local-mediaremote-build.log
-
-          # Never accept a failure caused by this integration.
-          if grep -E "(WorkspaceStore\.swift|Vendor/MediaRemoteAdapter|MediaRemoteAdapter).*error:" /tmp/halo-local-mediaremote-build.log; then
-            echo "MediaRemoteAdapter integration emitted a compiler error"
+          grep -q 'Build native MediaRemote bridge' /tmp/halo-native-mediaremote-build.log
+          if grep -E '(MediaController\.swift|TrackInfo\.swift|WorkspaceStore\.swift|libHaloMediaRemoteBridge).*error:' /tmp/halo-native-mediaremote-build.log; then
+            echo 'Native MediaRemote integration emitted a compiler/build error'
             exit 1
           fi
-          if grep -E "(Unable to resolve module dependency|no such module).*MediaRemoteAdapter" /tmp/halo-local-mediaremote-build.log; then
-            echo "Halo could not import MediaRemoteAdapter"
+          if grep -E '(Unable to resolve module dependency|no such module).*MediaRemoteAdapter' /tmp/halo-native-mediaremote-build.log; then
+            echo 'Stale MediaRemoteAdapter SwiftPM import remains'
             exit 1
+          fi
+
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -path '*/Build/Products/Debug/Halo.app' -print -quit)
+          if [ -n "$APP" ]; then
+            test -s "$APP/Contents/Frameworks/libHaloMediaRemoteBridge.dylib"
+            test -s "$APP/Contents/Resources/run.pl"
           fi
 
           if [ "$BUILD_STATUS" -ne 0 ]; then
-            echo "Halo full build returned $BUILD_STATUS due to unrelated existing source errors; local MediaRemoteAdapter import compiled successfully."
-            grep -E "error:|unable to type-check" /tmp/halo-local-mediaremote-build.log | tail -30 || true
+            echo "Halo full build returned $BUILD_STATUS due to unrelated source errors; native MediaRemote files and build phase passed."
+            grep -E 'error:|unable to type-check' /tmp/halo-native-mediaremote-build.log | tail -30 || true
           fi
 
-      - name: Verify adapter resource bundle was produced
-        run: |
-          set -euo pipefail
-          RUN_PL=$(find ~/Library/Developer/Xcode/DerivedData -path '*MediaRemoteAdapter_MediaRemoteAdapter.bundle/Contents/Resources/run.pl' -print -quit)
-          test -n "$RUN_PL"
-          FRAMEWORK=$(find ~/Library/Developer/Xcode/DerivedData -path '*/PackageFrameworks/MediaRemoteAdapter.framework' -print -quit)
-          test -n "$FRAMEWORK"
-          echo "Built adapter framework: $FRAMEWORK"
-          echo "Built adapter bridge: $RUN_PL"
-
-      - name: Commit vendored dependency
+      - name: Commit native bridge migration
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Vendor/MediaRemoteAdapter Halo.xcodeproj/project.pbxproj
-          if [ -f Halo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved ]; then
-            git add Halo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-          fi
+          git add Halo/Core/WorkspaceStore.swift \
+                  Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift \
+                  Halo.xcodeproj/project.pbxproj \
+                  Halo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
           if git diff --cached --quiet; then
-            echo 'Vendored MediaRemoteAdapter is already committed.'
+            echo 'Native MediaRemote migration is already committed.'
             exit 0
           fi
-          git commit -m 'Vendor MediaRemote adapter for reliable Xcode builds'
+          git commit -m 'Remove MediaRemoteAdapter SwiftPM dependency'
           git pull --rebase origin main
           git push origin main
