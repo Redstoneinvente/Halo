@@ -4035,7 +4035,7 @@ private struct BluetoothContextView: View {
 
     private func eventCard(_ event: BluetoothConnectionEvent) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: event.symbol).font(.system(size: 23, weight: .semibold)).foregroundStyle(.blue)
+            BluetoothDeviceIcon(visual: event.deviceVisual, fallbackSymbol: event.symbol, size: 23).foregroundStyle(.blue)
             VStack(alignment: .leading, spacing: 2) {
                 Text(event.title).font(.headline)
                 Text(event.detail).font(.callout).foregroundStyle(.secondary)
@@ -4054,8 +4054,7 @@ private struct BluetoothContextView: View {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill((device.connected ? Color.blue : Color.secondary).opacity(0.13))
                     .frame(width: 38, height: 38)
-                Image(systemName: deviceSymbol(device.name))
-                    .font(.system(size: 17, weight: .medium))
+                BluetoothDeviceIcon(visual: device.visual, size: 23)
                     .foregroundStyle(device.connected ? Color.blue : Color.secondary)
             }
             VStack(alignment: .leading, spacing: 3) {
@@ -4083,17 +4082,6 @@ private struct BluetoothContextView: View {
         .padding(10)
         .background(Color.white.opacity(device.connected ? 0.065 : 0.035), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.white.opacity(0.07)))
-    }
-
-    private func deviceSymbol(_ name: String) -> String {
-        let value = name.lowercased()
-        if value.contains("airpods") || value.contains("headphone") || value.contains("buds") { return "headphones" }
-        if value.contains("mouse") || value.contains("trackpad") { return "computermouse" }
-        if value.contains("keyboard") { return "keyboard" }
-        if value.contains("controller") || value.contains("gamepad") { return "gamecontroller" }
-        if value.contains("iphone") || value.contains("phone") { return "iphone" }
-        if value.contains("speaker") { return "hifispeaker.fill" }
-        return "wave.3.right"
     }
 
     private func publishPreferredSize() {

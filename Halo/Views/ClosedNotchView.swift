@@ -707,8 +707,8 @@ private struct BluetoothClosedActivityView: View {
     }
 
     private var eventIcon: some View {
-        Image(systemName: BluetoothClosedActivity.symbol(for: kind))
-            .font(.system(size: clampedIconSize, weight: .semibold))
+        BluetoothDeviceIcon(visual: activity.bluetoothDeviceVisual,
+                            fallbackSymbol: BluetoothClosedActivity.symbol(for: kind), size: clampedIconSize)
             .frame(width: max(12, clampedIconSize + 2), alignment: .center)
     }
 

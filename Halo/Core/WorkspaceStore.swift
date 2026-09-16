@@ -353,7 +353,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     }
     private func publishBluetoothClosedNotchEvent(_ event: BluetoothConnectionEvent) {
         guard bluetoothClosedNotchEventEnabled(event.kind) else { return }
-        let activity = LiveActivity(title: event.title, detail: event.detail, progress: nil)
+        let activity = LiveActivity(bluetoothDeviceVisual: event.deviceVisual, title: event.title, detail: event.detail, progress: nil)
         activities = [activity] + Array(activities.prefix(19))
 
         let configured = (defaults.object(forKey: "HaloBluetoothClosedNotchDuration") as? NSNumber)?.doubleValue ?? 10

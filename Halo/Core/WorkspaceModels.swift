@@ -1151,6 +1151,7 @@ struct WorkspaceSettings: Codable {
     var hotkeyModifiers: UInt32 = 2304
 }
 struct LiveActivity: Identifiable, Codable {
+    var bluetoothDeviceVisual: BluetoothDeviceVisual? = nil
     var id = UUID()
     var title: String
     var detail = ""
