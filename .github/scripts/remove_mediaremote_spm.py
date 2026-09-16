@@ -3,16 +3,19 @@ import re
 
 ROOT = Path('.')
 workspace = ROOT / 'Halo/Core/WorkspaceStore.swift'
-controller = ROOT / 'Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift'
+vendor_controller = ROOT / 'Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift'
+vendor_track = ROOT / 'Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/TrackInfo.swift'
+controller_dest = ROOT / 'Halo/Core/MediaRemoteController.swift'
+track_dest = ROOT / 'Halo/Core/MediaRemoteTrackInfo.swift'
 pbx = ROOT / 'Halo.xcodeproj/project.pbxproj'
 
-# 1. WorkspaceStore must use the adapter types compiled directly into Halo.
+# 1. WorkspaceStore uses bridge types compiled directly into the Halo target.
 s = workspace.read_text()
 s = s.replace('import MediaRemoteAdapter\n', '')
 workspace.write_text(s)
 
-# 2. Make the upstream controller work both as a Swift package and when compiled directly into Halo.
-s = controller.read_text()
+# 2. Copy the adapter's Swift surface into Halo/Core and adapt only the package-specific paths.
+s = vendor_controller.read_text()
 old_script = '''    private var perlScriptPath: String? {
         guard let path = Bundle.module.path(forResource: "run", ofType: "pl") else {
             assertionFailure("run.pl script not found in bundle resources.")
@@ -22,45 +25,28 @@ old_script = '''    private var perlScriptPath: String? {
     }
 '''
 new_script = '''    private var perlScriptPath: String? {
-#if SWIFT_PACKAGE
-        guard let path = Bundle.module.path(forResource: "run", ofType: "pl") else {
-            assertionFailure("run.pl script not found in bundle resources.")
-            return nil
-        }
-        return path
-#else
         guard let path = Bundle.main.path(forResource: "run", ofType: "pl") else {
             assertionFailure("run.pl script not found in Halo resources.")
             return nil
         }
         return path
-#endif
     }
 '''
 if old_script not in s:
-    if 'Bundle.main.path(forResource: "run", ofType: "pl")' not in s:
+    # Accept a previously adapted source, but normalize it to Halo's direct-build form.
+    start = s.find('    private var perlScriptPath: String? {')
+    end = s.find('\n    private var libraryPath: String? {', start)
+    if start < 0 or end < 0:
         raise SystemExit('MediaController perlScriptPath block not found')
+    s = s[:start] + new_script.rstrip('\n') + s[end:]
 else:
     s = s.replace(old_script, new_script, 1)
 
-old_library = '''    private var libraryPath: String? {
-        let bundle = Bundle(for: MediaController.self)
-        guard let path = bundle.executablePath else {
-            assertionFailure("Could not locate the executable path for the MediaRemoteAdapter framework.")
-            return nil
-        }
-        return path
-    }
-'''
+old_library_start = s.find('    private var libraryPath: String? {')
+old_library_end = s.find('\n    private var arguments: [String] {', old_library_start)
+if old_library_start < 0 or old_library_end < 0:
+    raise SystemExit('MediaController libraryPath block not found')
 new_library = '''    private var libraryPath: String? {
-#if SWIFT_PACKAGE
-        let bundle = Bundle(for: MediaController.self)
-        guard let path = bundle.executablePath else {
-            assertionFailure("Could not locate the executable path for the MediaRemoteAdapter framework.")
-            return nil
-        }
-        return path
-#else
         guard let frameworksURL = Bundle.main.privateFrameworksURL else {
             assertionFailure("Could not locate Halo's Frameworks directory.")
             return nil
@@ -71,39 +57,79 @@ new_library = '''    private var libraryPath: String? {
             return nil
         }
         return url.path
-#endif
     }
 '''
-if old_library not in s:
-    if 'libHaloMediaRemoteBridge.dylib' not in s:
-        raise SystemExit('MediaController libraryPath block not found')
-else:
-    s = s.replace(old_library, new_library, 1)
-controller.write_text(s)
+s = s[:old_library_start] + new_library.rstrip('\n') + s[old_library_end:]
 
-# 3. Replace the SwiftPM product with direct source membership + a build phase that creates the bridge dylib.
+controller_dest.write_text(s)
+track_dest.write_text(vendor_track.read_text())
+
+# 3. Replace MediaRemoteAdapter SwiftPM with ordinary Halo source membership.
 p = pbx.read_text()
 
-# Remove the package framework build file.
+# Remove package framework build file/reference from target/project.
 p = re.sub(r'\n\t\tA11C0F1A0000000000000380 /\* MediaRemoteAdapter in Frameworks \*/ = \{isa = PBXBuildFile; productRef = A11C0F1A0000000000000381 /\* MediaRemoteAdapter \*/; \};', '', p)
+p = p.replace('\n\t\t\t\tA11C0F1A0000000000000380 /* MediaRemoteAdapter in Frameworks */,', '')
+p = p.replace('\n\t\t\t\tA11C0F1A0000000000000381 /* MediaRemoteAdapter */,', '')
+p = p.replace('\n\t\t\t\tA11C0F1A0000000000000382 /* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" */,', '')
+p = re.sub(r'\n/\* Begin XCLocalSwiftPackageReference section \*/\n.*?/\* End XCLocalSwiftPackageReference section \*/\n', '\n', p, flags=re.S)
+p = re.sub(
+    r'\n\t\tA11C0F1A0000000000000381 /\* MediaRemoteAdapter \*/ = \{\n\t\t\tisa = XCSwiftPackageProductDependency;\n\t\t\tpackage = A11C0F1A0000000000000382 /\* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" \*/;\n\t\t\tproductName = MediaRemoteAdapter;\n\t\t\};',
+    '', p)
 
-# Add direct-source build/file references if needed.
+# Add build-file records.
 build_marker = '/* End PBXBuildFile section */'
-build_entries = '''\t\tA11C0F1A0000000000000390 /* Vendor MediaController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000392 /* Vendor MediaController.swift */; };
-\t\tA11C0F1A0000000000000391 /* Vendor TrackInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000393 /* Vendor TrackInfo.swift */; };
+build_entries = '''\t\tA11C0F1A0000000000000390 /* Core/MediaRemoteController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000392 /* Core/MediaRemoteController.swift */; };
+\t\tA11C0F1A0000000000000391 /* Core/MediaRemoteTrackInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000393 /* Core/MediaRemoteTrackInfo.swift */; };
 '''
-if 'A11C0F1A0000000000000390 /* Vendor MediaController.swift in Sources */' not in p:
+if 'A11C0F1A0000000000000390 /* Core/MediaRemoteController.swift in Sources */' not in p:
+    if build_marker not in p:
+        raise SystemExit('PBXBuildFile marker missing')
     p = p.replace(build_marker, build_entries + build_marker, 1)
 
+# Add file refs with paths relative to the existing Halo group (path = Halo).
 file_marker = '/* End PBXFileReference section */'
-file_entries = '''\t\tA11C0F1A0000000000000392 /* Vendor MediaController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift"; sourceTree = SOURCE_ROOT; };
-\t\tA11C0F1A0000000000000393 /* Vendor TrackInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/TrackInfo.swift"; sourceTree = SOURCE_ROOT; };
+file_entries = '''\t\tA11C0F1A0000000000000392 /* Core/MediaRemoteController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/MediaRemoteController.swift; sourceTree = "<group>"; };
+\t\tA11C0F1A0000000000000393 /* Core/MediaRemoteTrackInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/MediaRemoteTrackInfo.swift; sourceTree = "<group>"; };
 '''
-if 'A11C0F1A0000000000000392 /* Vendor MediaController.swift */' not in p:
+if 'A11C0F1A0000000000000392 /* Core/MediaRemoteController.swift */' not in p:
+    if file_marker not in p:
+        raise SystemExit('PBXFileReference marker missing')
     p = p.replace(file_marker, file_entries + file_marker, 1)
 
-# Remove it from the Frameworks phase.
-p = p.replace('\n\t\t\t\tA11C0F1A0000000000000380 /* MediaRemoteAdapter in Frameworks */,', '')
+# Add file refs to the concrete Halo PBXGroup so Xcode resolves their <group> paths.
+halo_group_pattern = re.compile(
+    r'(\t\t000000000000000000000003 /\* Halo \*/ = \{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = \(\n)(.*?)(\t\t\t\);\n\t\t\tpath = Halo;)',
+    re.S,
+)
+m = halo_group_pattern.search(p)
+if not m:
+    raise SystemExit('Halo PBXGroup not found')
+group_body = m.group(2)
+if 'A11C0F1A0000000000000392 /* Core/MediaRemoteController.swift */' not in group_body:
+    group_body = (
+        '\t\t\t\tA11C0F1A0000000000000392 /* Core/MediaRemoteController.swift */,\n'
+        '\t\t\t\tA11C0F1A0000000000000393 /* Core/MediaRemoteTrackInfo.swift */,\n'
+        + group_body
+    )
+    p = p[:m.start()] + m.group(1) + group_body + m.group(3) + p[m.end():]
+
+# Add build-file records to the actual Halo PBXSourcesBuildPhase, scoped by phase ID.
+sources_pattern = re.compile(
+    r'(\t\t000000000000000000000007 /\* Sources \*/ = \{\n\t\t\tisa = PBXSourcesBuildPhase;\n\t\t\tbuildActionMask = 2147483647;\n\t\t\tfiles = \(\n)(.*?)(\t\t\t\);\n\t\t\trunOnlyForDeploymentPostprocessing = 0;\n\t\t\};)',
+    re.S,
+)
+m = sources_pattern.search(p)
+if not m:
+    raise SystemExit('Halo PBXSourcesBuildPhase not found')
+source_body = m.group(2)
+if 'A11C0F1A0000000000000390 /* Core/MediaRemoteController.swift in Sources */' not in source_body:
+    source_body = (
+        '\t\t\t\tA11C0F1A0000000000000390 /* Core/MediaRemoteController.swift in Sources */,\n'
+        '\t\t\t\tA11C0F1A0000000000000391 /* Core/MediaRemoteTrackInfo.swift in Sources */,\n'
+        + source_body
+    )
+    p = p[:m.start()] + m.group(1) + source_body + m.group(3) + p[m.end():]
 
 # Add the native bridge build phase to the Halo target.
 target_phases = '''\t\t\tbuildPhases = (
@@ -122,32 +148,6 @@ if 'A11C0F1A0000000000000394 /* Build native MediaRemote bridge */' not in p:
         raise SystemExit('Halo buildPhases block not found')
     p = p.replace(target_phases, new_target_phases, 1)
 
-# Remove package product dependency from Halo target.
-p = p.replace('\n\t\t\t\tA11C0F1A0000000000000381 /* MediaRemoteAdapter */,', '')
-
-# Remove local package reference from project packageReferences.
-p = p.replace('\n\t\t\t\tA11C0F1A0000000000000382 /* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" */,', '')
-
-# Add Swift files to the app's Sources phase.
-sources_anchor = '''\t\t\tfiles = (
-\t\t\t\t0000000000000000000002C6 /* NotchEngine/DisplayClock.swift in Sources */,'''
-sources_replacement = '''\t\t\tfiles = (
-\t\t\t\tA11C0F1A0000000000000390 /* Vendor MediaController.swift in Sources */,
-\t\t\t\tA11C0F1A0000000000000391 /* Vendor TrackInfo.swift in Sources */,
-\t\t\t\t0000000000000000000002C6 /* NotchEngine/DisplayClock.swift in Sources */,'''
-if 'A11C0F1A0000000000000390 /* Vendor MediaController.swift in Sources */,' not in p.split('/* Begin PBXSourcesBuildPhase section */',1)[1]:
-    if sources_anchor not in p:
-        raise SystemExit('Halo Sources phase anchor not found')
-    p = p.replace(sources_anchor, sources_replacement, 1)
-
-# Remove local Swift package section entirely.
-p = re.sub(r'\n/\* Begin XCLocalSwiftPackageReference section \*/\n.*?/\* End XCLocalSwiftPackageReference section \*/\n', '\n', p, flags=re.S)
-
-# Remove the MediaRemoteAdapter package product dependency block, leaving Sparkle intact.
-p = re.sub(
-    r'\n\t\tA11C0F1A0000000000000381 /\* MediaRemoteAdapter \*/ = \{\n\t\t\tisa = XCSwiftPackageProductDependency;\n\t\t\tpackage = A11C0F1A0000000000000382 /\* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" \*/;\n\t\t\tproductName = MediaRemoteAdapter;\n\t\t\};',
-    '', p)
-
 # Build the tiny Objective-C dylib and copy run.pl directly into Halo.app.
 if '/* Begin PBXShellScriptBuildPhase section */' not in p:
     shell_section = r'''/* Begin PBXShellScriptBuildPhase section */
@@ -161,6 +161,9 @@ if '/* Begin PBXShellScriptBuildPhase section */' not in p:
 				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/MediaRemote.m",
 				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/MediaRemoteAdapter.m",
 				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/MediaRemoteAdapterKeys.m",
+				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/include/MediaRemote.h",
+				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/include/MediaRemoteAdapter.h",
+				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/include/MediaRemoteAdapterKeys.h",
 				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/Resources/run.pl",
 			);
 			name = "Build native MediaRemote bridge";
@@ -182,7 +185,7 @@ if '/* Begin PBXShellScriptBuildPhase section */' not in p:
 
 pbx.write_text(p)
 
-# Hard contract: MediaRemoteAdapter is no longer an Xcode package dependency.
+# Hard contract: no MediaRemote Swift package dependency, and both direct files truly belong to Halo.
 final = pbx.read_text()
 for forbidden in [
     'XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter"',
@@ -192,11 +195,31 @@ for forbidden in [
     if forbidden in final:
         raise SystemExit(f'Forbidden package reference remains: {forbidden}')
 
+m = sources_pattern.search(final)
+if not m:
+    raise SystemExit('Final Halo Sources phase missing')
+for required in [
+    'A11C0F1A0000000000000390 /* Core/MediaRemoteController.swift in Sources */',
+    'A11C0F1A0000000000000391 /* Core/MediaRemoteTrackInfo.swift in Sources */',
+]:
+    if required not in m.group(2):
+        raise SystemExit(f'Direct bridge source not in Halo Sources phase: {required}')
+
+m = halo_group_pattern.search(final)
+if not m:
+    raise SystemExit('Final Halo group missing')
+for required in [
+    'A11C0F1A0000000000000392 /* Core/MediaRemoteController.swift */',
+    'A11C0F1A0000000000000393 /* Core/MediaRemoteTrackInfo.swift */',
+]:
+    if required not in m.group(2):
+        raise SystemExit(f'Direct bridge file not in Halo group: {required}')
+
 if 'Build native MediaRemote bridge' not in final:
     raise SystemExit('Native bridge build phase missing')
-if 'Vendor MediaController.swift in Sources' not in final or 'Vendor TrackInfo.swift in Sources' not in final:
-    raise SystemExit('Direct adapter Swift sources are not in Halo target')
 if 'import MediaRemoteAdapter' in workspace.read_text():
     raise SystemExit('WorkspaceStore still imports MediaRemoteAdapter')
+if not controller_dest.exists() or not track_dest.exists():
+    raise SystemExit('Halo bridge source files were not created')
 
-print('MediaRemoteAdapter SwiftPM dependency removed; native Halo bridge installed.')
+print('MediaRemoteAdapter SwiftPM dependency removed; native Halo bridge sources are target members.')
