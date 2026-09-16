@@ -36,7 +36,7 @@ jobs:
               'SafariAudioProcessDetector.isProducingOutput()', 'contextNeedsArtwork'
             ],
             'Halo/Views/SurfaceView.swift': [
-              'activeArtwork', 'media.duration', 'media.position', 'Synced Safari lyrics remain fluid'
+              'activeArtwork', 'media.duration', 'media.position', 'synced Safari lyrics remain fluid'
             ]
           }
           for path, markers in checks.items():
