@@ -1,0 +1,61 @@
+name: Apply Pixel Pet Cookie Tease
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/pixel-pet-cookie-tease-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add cookie tease escalation
+        run: python3 .github/scripts/add_pixel_pet_cookie_tease.py
+
+      - name: Verify tease interaction
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('Halo/Views/PixelPetWidget.swift').read_text()
+          required = [
+              '@State private var cookieLingerStartedAt: Date?',
+              'let cookieHotzoneActive = isPointerOnCookie(expression: expression, date: timeline.date)',
+              '.task(id: cookieHotzoneActive)',
+              'Task.sleep(nanoseconds: 2_400_000_000)',
+              'cookieLingerElapsed:',
+              'private var isCookieDrooling: Bool',
+              'private var isCookieReaching: Bool',
+              'HaloPixelPalSprites.tear, x: 13, y: 18',
+              'let reach = Int(round(cookieReachProgress',
+              'pal.feedCookie()',
+          ]
+          missing = [m for m in required if m not in s]
+          if missing:
+              raise SystemExit(f'Missing cookie tease markers: {missing}')
+          print('Cookie tease contract verified.')
+          PY
+
+      - name: Parse Pixel Pet source
+        run: swiftc -parse Halo/Views/PixelPetWidget.swift
+
+      - name: Commit tease behavior
+        run: |
+          if git diff --quiet -- Halo/Views/PixelPetWidget.swift; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Views/PixelPetWidget.swift
+          git commit -m "Make Pixel Pet steal teased cookies"
+          git pull --rebase origin main
+          git push origin HEAD:main
