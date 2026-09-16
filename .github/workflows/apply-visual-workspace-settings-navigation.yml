@@ -19,7 +19,9 @@ jobs:
           fetch-depth: 0
 
       - name: Patch settings navigation and editor layout
-        run: python3 .github/scripts/patch_visual_workspace_settings_navigation.py
+        run: |
+          python3 .github/scripts/patch_visual_workspace_settings_navigation.py
+          python3 .github/scripts/fix_visual_workspace_resize_overlap.py
 
       - name: Verify Visual Workspace navigation contract
         run: |
@@ -44,7 +46,9 @@ jobs:
               'if showsCloseButton {',
               'editorLayout(availableSize: proxy.size)',
               'availableSize.width < 900',
-              'VSplitView {',
+              'let desiredCanvasHeight = min(420, max(180, availableSize.height * 0.55))',
+              '.frame(width: availableSize.width, height: availableSize.height, alignment: .top)',
+              '.fixedSize(horizontal: false, vertical: true)',
               'HStack(spacing: 0) {',
               'private var editorCanvasPane: some View',
               'ViewThatFits(in: .horizontal)',
@@ -55,6 +59,8 @@ jobs:
           forbidden = [
               '.selectionDisabled(isSectionUnavailable(name))',
               '.frame(minWidth: 920, minHeight: 620)',
+              'editorCanvasPane\n                    .frame(minHeight: 350)',
+              'inspector\n                    .frame(minHeight: 250, idealHeight: 320)',
           ]
           missing = [m for m in settings_required if m not in settings]
           missing += [m for m in widget_required if m not in widgets]
@@ -63,7 +69,7 @@ jobs:
               raise SystemExit(f'Missing Visual Workspace polish markers: {missing}')
           if present_forbidden:
               raise SystemExit(f'Forbidden Visual Workspace legacy markers remain: {present_forbidden}')
-          print('Visual Workspace navigation and responsive layout contract verified.')
+          print('Visual Workspace navigation, responsive layout, and resize-overlap contract verified.')
           PY
 
       - name: Parse changed Swift sources
@@ -101,6 +107,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Halo/Views/WorkspaceSettingsView.swift Halo/Views/WidgetSettingsView.swift
-          git commit -m "Fix Visual Workspace sidebar and responsive layout"
+          git commit -m "Prevent Visual Workspace overlap on resize"
           git pull --rebase origin main
           git push origin HEAD:main
