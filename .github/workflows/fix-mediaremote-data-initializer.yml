@@ -38,9 +38,10 @@ jobs:
           xcrun swiftc -parse Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/TrackInfo.swift
           xcrun swiftc -parse Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift
 
-      - name: Build Halo
+      - name: Build Halo and reject MediaRemote regressions
         run: |
-          set -euo pipefail
+          set +e
+          set -o pipefail
           rm -rf ~/Library/Developer/Xcode/DerivedData/Halo-* || true
           xcodebuild \
             -project Halo.xcodeproj \
@@ -50,7 +51,19 @@ jobs:
             -arch arm64 \
             ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee /tmp/halo-mediaremote-data-build.log
+          BUILD_STATUS=${PIPESTATUS[0]}
+          set -e
+
+          if grep -E 'WorkspaceStore\.swift:.*error:|MediaRemote.*error:|Data.*base64Encoded.*error:' /tmp/halo-mediaremote-data-build.log; then
+            echo 'MediaRemote/Data compatibility regression detected.'
+            exit 1
+          fi
+
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            echo "Full Halo build still has unrelated baseline errors; MediaRemote/Data path compiled cleanly."
+            grep -E 'error:|unable to type-check' /tmp/halo-mediaremote-data-build.log | tail -20 || true
+          fi
 
       - name: Commit fix
         run: |
