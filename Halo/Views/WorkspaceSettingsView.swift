@@ -18,7 +18,52 @@ struct SettingsView: View {
     @State private var renamingProfile: UUID?
     @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
-    private let sections = ["General", "Account & License", "Appearance", "Activation Sequence", "Modules", "Widgets", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "Update Animation", "About"]
+    private var visualWorkspaceActive: Bool {
+        workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace
+    }
+
+    private var sections: [String] {
+        var items = ["General", "Account & License", "Appearance", "Activation Sequence"]
+        if visualWorkspaceActive {
+            items.append("Visual Workspace Editor")
+        }
+        items.append(contentsOf: ["Modules", "Widgets", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD", "Media & Files", "Profiles", "Schedules", "Automation", "Displays", "Plugins", "Privacy", "Update Animation", "About"])
+        return items
+    }
+
+    private func isSectionUnavailable(_ name: String) -> Bool {
+        visualWorkspaceActive && (name == "Modules" || name == "Widgets")
+    }
+
+    private func sectionHelp(_ name: String) -> String {
+        guard isSectionUnavailable(name) else { return name }
+        return "Available in the Default layout only. Use Visual Workspace Editor while Visual Workspace is active."
+    }
+
+    @ViewBuilder
+    private func sidebarRow(_ name: String) -> some View {
+        HStack(spacing: 8) {
+            Label(name, systemImage: sectionIcon(name))
+            Spacer(minLength: 4)
+            if isSectionUnavailable(name) {
+                HStack(spacing: 3) {
+                    Text("Default")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                    Image(systemName: "lock.fill")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.secondary.opacity(0.10), in: Capsule())
+            }
+        }
+        .padding(.vertical, 5)
+        .opacity(isSectionUnavailable(name) ? 0.5 : 1)
+        .contentShape(Rectangle())
+        .help(sectionHelp(name))
+    }
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -32,7 +77,11 @@ struct SettingsView: View {
                 }.padding(16)
                 TextField("Find a section", text: $search).textFieldStyle(.roundedBorder).padding(12)
                 List(selection: $section) {
-                    ForEach(sections.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \.self) { Label($0, systemImage: sectionIcon($0)).padding(.vertical, 5).tag($0) }
+                    ForEach(sections.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \.self) { name in
+                        sidebarRow(name)
+                            .tag(name)
+                            .disabled(isSectionUnavailable(name))
+                    }
                 }.listStyle(.sidebar)
                 Divider()
                 VStack(alignment: .leading, spacing: 12) {
@@ -47,13 +96,28 @@ struct SettingsView: View {
                         .frame(width: 40, height: 40).background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
                     VStack(alignment: .leading, spacing: 4) {
                         Text(section ?? "General").font(.title2.bold())
-                        Text("Changes are saved automatically").font(.caption).foregroundStyle(.secondary)
+                        Text(section == "Visual Workspace Editor" ? "Design the active Visual Workspace" : "Changes are saved automatically").font(.caption).foregroundStyle(.secondary)
                     }
                 }.padding(20)
                 Divider()
-                Form { content }.formStyle(.grouped).frame(maxWidth: .infinity, maxHeight: .infinity)
+                if section == "Visual Workspace Editor", visualWorkspaceActive {
+                    OpenedNotchWorkspaceEditor(layout: $workspace.settings.layout)
+                        .frame(minWidth: 920, minHeight: 620)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Form { content }
+                        .formStyle(.grouped)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }.frame(minWidth: 700, minHeight: 560)
+        .onChange(of: visualWorkspaceActive) { active in
+            if active && (section == "Modules" || section == "Widgets") {
+                section = "Visual Workspace Editor"
+            } else if !active && section == "Visual Workspace Editor" {
+                section = "Appearance"
+            }
+        }
         .onDisappear { GeometryPreview.update(expanded: false, editing: false) }
         .alert("Halo", isPresented: Binding(get: { store.error != nil || workspace.error != nil }, set: { if !$0 { store.error = nil; workspace.error = nil } })) {
             Button("OK") { store.error = nil; workspace.error = nil }
@@ -70,6 +134,7 @@ struct SettingsView: View {
         case "Account & License": return "person.crop.circle.badge.checkmark"
         case "Appearance": return "paintpalette"
         case "Activation Sequence": return "power.circle"
+        case "Visual Workspace Editor": return "rectangle.3.group"
         case "Modules": return "square.grid.2x2"
         case "Widgets": return "slider.horizontal.3"
         case "Context Notch Interface": return "rectangle.stack"
