@@ -1,0 +1,52 @@
+name: Separate Drop CI and File Shelf
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Run Drop CI/File Shelf separation'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Apply separation patch
+        run: python3 scripts/separate_drop_ci_from_file_shelf.py
+
+      - name: Verify Drop CI owns only the root surface drop target
+        run: |
+          grep -q 'func refreshDropRegistration()' Halo/NotchEngine/WindowManager.swift
+          grep -q 'unregisterDraggedTypes()' Halo/NotchEngine/WindowManager.swift
+          grep -q 'host.refreshDropCIRegistration?()' Halo/NotchEngine/WindowManager.swift
+          grep -q 'if active && dropCIEnabled' Halo/Views/SurfaceView.swift
+          grep -q 'let dropOverlayActive = dropCIEnabled && state.dropTargeted' Halo/Views/SurfaceView.swift
+
+      - name: Verify File Shelf has independent drop targets
+        run: |
+          test "$(grep -c 'dropDestination(for: URL.self)' Halo/Views/SurfaceView.swift)" -ge 1
+          test "$(grep -c 'dropDestination(for: URL.self)' Halo/Views/VisualWorkspaceAdaptiveWidgets.swift)" -ge 1
+          grep -q 'store.addFiles(files)' Halo/Views/SurfaceView.swift
+          grep -q 'store.addFiles(files)' Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+
+      - name: Parse touched Swift files
+        run: |
+          xcrun swiftc -parse Halo/NotchEngine/WindowManager.swift
+          xcrun swiftc -parse Halo/Views/SurfaceView.swift
+          xcrun swiftc -parse Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+
+      - name: Build Halo arm64
+        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS,arch=arm64' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/NotchEngine/WindowManager.swift Halo/Views/SurfaceView.swift Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+          git commit -m "Separate Drop CI from File Shelf drops"
+          git push origin main
