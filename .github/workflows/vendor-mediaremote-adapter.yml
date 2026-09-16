@@ -1,0 +1,106 @@
+name: Vendor MediaRemote Adapter
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/vendor-mediaremote-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  vendor:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Vendor pinned MediaRemoteAdapter source
+        run: |
+          set -euo pipefail
+          REV=5b6afde3f501a3da567e23bf7f23d562938a1809
+          rm -rf /tmp/mediaremote-adapter Vendor/MediaRemoteAdapter
+          git clone --quiet https://github.com/ejbills/mediaremote-adapter.git /tmp/mediaremote-adapter
+          git -C /tmp/mediaremote-adapter checkout --quiet "$REV"
+          mkdir -p Vendor/MediaRemoteAdapter
+          cp /tmp/mediaremote-adapter/Package.swift Vendor/MediaRemoteAdapter/Package.swift
+          cp -R /tmp/mediaremote-adapter/Sources Vendor/MediaRemoteAdapter/Sources
+          if [ -f /tmp/mediaremote-adapter/LICENSE ]; then cp /tmp/mediaremote-adapter/LICENSE Vendor/MediaRemoteAdapter/LICENSE; fi
+
+      - name: Switch Xcode project to local package
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Halo.xcodeproj/project.pbxproj')
+          s = p.read_text()
+          ident = 'A11C0F1A0000000000000382'
+
+          old_block = '''\t\tA11C0F1A0000000000000382 /* XCRemoteSwiftPackageReference "mediaremote-adapter" */ = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = "https://github.com/ejbills/mediaremote-adapter.git";\n\t\t\trequirement = {\n\t\t\t\tkind = revision;\n\t\t\t\trevision = 5b6afde3f501a3da567e23bf7f23d562938a1809;\n\t\t\t};\n\t\t};\n'''
+          if old_block not in s:
+              raise SystemExit('Expected remote MediaRemoteAdapter package block not found')
+          s = s.replace(old_block, '')
+
+          marker = '/* Begin XCSwiftPackageProductDependency section */'
+          local_section = '''/* Begin XCLocalSwiftPackageReference section */\n\t\tA11C0F1A0000000000000382 /* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" */ = {\n\t\t\tisa = XCLocalSwiftPackageReference;\n\t\t\trelativePath = Vendor/MediaRemoteAdapter;\n\t\t};\n/* End XCLocalSwiftPackageReference section */\n\n'''
+          if marker not in s:
+              raise SystemExit('XCSwiftPackageProductDependency section marker missing')
+          s = s.replace(marker, local_section + marker, 1)
+          s = s.replace(
+              f'{ident} /* XCRemoteSwiftPackageReference "mediaremote-adapter" */',
+              f'{ident} /* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" */'
+          )
+          p.write_text(s)
+          PY
+
+      - name: Verify local package contract
+        run: |
+          set -euo pipefail
+          test -f Vendor/MediaRemoteAdapter/Package.swift
+          test -f Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift
+          test -f Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/TrackInfo.swift
+          test -f Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/Resources/run.pl
+          grep -q 'XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter"' Halo.xcodeproj/project.pbxproj
+          ! grep -q 'repositoryURL = "https://github.com/ejbills/mediaremote-adapter.git"' Halo.xcodeproj/project.pbxproj
+
+      - name: Resolve packages from clean state
+        run: |
+          rm -rf ~/Library/Developer/Xcode/DerivedData/Halo-* || true
+          xcodebuild -resolvePackageDependencies -project Halo.xcodeproj -scheme Halo
+
+      - name: Build Halo with local adapter
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Halo.xcodeproj \
+            -scheme Halo \
+            -configuration Debug \
+            -sdk macosx \
+            -arch arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            build | tee /tmp/halo-local-mediaremote-build.log
+
+      - name: Verify runtime bridge embedding
+        run: |
+          set -euo pipefail
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -path '*/Build/Products/Debug/Halo.app' -print -quit)
+          test -n "$APP"
+          test -d "$APP/Contents/Frameworks/MediaRemoteAdapter.framework"
+          RUN_PL=$(find "$APP" -name run.pl -print -quit)
+          test -n "$RUN_PL"
+          echo "Embedded framework: $APP/Contents/Frameworks/MediaRemoteAdapter.framework"
+          echo "Embedded bridge: $RUN_PL"
+
+      - name: Commit vendored dependency
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Vendor/MediaRemoteAdapter Halo.xcodeproj/project.pbxproj
+          if [ -f Halo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved ]; then
+            git add Halo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          fi
+          git commit -m 'Vendor MediaRemote adapter for reliable Xcode builds'
+          git push origin main
