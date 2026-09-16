@@ -22,24 +22,28 @@ jobs:
           set -euo pipefail
           python3 .github/scripts/remove_mediaremote_spm.py
 
-      - name: Verify dependency contract
+      - name: Verify dependency and target-membership contract
         run: |
           set -euo pipefail
           ! grep -q '^import MediaRemoteAdapter$' Halo/Core/WorkspaceStore.swift
           ! grep -q 'XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter"' Halo.xcodeproj/project.pbxproj
           ! grep -q 'MediaRemoteAdapter in Frameworks' Halo.xcodeproj/project.pbxproj
-          grep -q 'Vendor MediaController.swift in Sources' Halo.xcodeproj/project.pbxproj
-          grep -q 'Vendor TrackInfo.swift in Sources' Halo.xcodeproj/project.pbxproj
+          test -f Halo/Core/MediaRemoteController.swift
+          test -f Halo/Core/MediaRemoteTrackInfo.swift
+          grep -q 'Core/MediaRemoteController.swift in Sources' Halo.xcodeproj/project.pbxproj
+          grep -q 'Core/MediaRemoteTrackInfo.swift in Sources' Halo.xcodeproj/project.pbxproj
+          grep -q 'Core/MediaRemoteController.swift \*/,' Halo.xcodeproj/project.pbxproj
+          grep -q 'Core/MediaRemoteTrackInfo.swift \*/,' Halo.xcodeproj/project.pbxproj
           grep -q 'Build native MediaRemote bridge' Halo.xcodeproj/project.pbxproj
-          grep -q 'Bundle.main.path(forResource: "run", ofType: "pl")' Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift
-          grep -q 'libHaloMediaRemoteBridge.dylib' Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift
+          grep -q 'Bundle.main.path(forResource: "run", ofType: "pl")' Halo/Core/MediaRemoteController.swift
+          grep -q 'libHaloMediaRemoteBridge.dylib' Halo/Core/MediaRemoteController.swift
 
-      - name: Type-check direct Swift bridge
+      - name: Type-check direct Halo Swift bridge
         run: |
           set -euo pipefail
           xcrun swiftc -typecheck \
-            Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/TrackInfo.swift \
-            Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift \
+            Halo/Core/MediaRemoteTrackInfo.swift \
+            Halo/Core/MediaRemoteController.swift \
             -framework AppKit
 
       - name: Compile Objective-C bridge directly
@@ -65,7 +69,7 @@ jobs:
           ! grep -qi 'MediaRemoteAdapter' /tmp/halo-resolve.log
           grep -qi 'Sparkle' /tmp/halo-resolve.log
 
-      - name: Build Halo and verify native bridge phase
+      - name: Build Halo and verify native bridge integration
         run: |
           set +e
           set -o pipefail
@@ -81,8 +85,12 @@ jobs:
           BUILD_STATUS=${PIPESTATUS[0]}
           set -e
 
+          # Prove Xcode actually included both direct bridge files in Halo's compile graph.
+          grep -q 'MediaRemoteController.swift' /tmp/halo-native-mediaremote-build.log
+          grep -q 'MediaRemoteTrackInfo.swift' /tmp/halo-native-mediaremote-build.log
           grep -q 'Build native MediaRemote bridge' /tmp/halo-native-mediaremote-build.log
-          if grep -E '(MediaController\.swift|TrackInfo\.swift|WorkspaceStore\.swift|libHaloMediaRemoteBridge).*error:' /tmp/halo-native-mediaremote-build.log; then
+
+          if grep -E '(MediaRemoteController\.swift|MediaRemoteTrackInfo\.swift|WorkspaceStore\.swift|libHaloMediaRemoteBridge).*error:' /tmp/halo-native-mediaremote-build.log; then
             echo 'Native MediaRemote integration emitted a compiler/build error'
             exit 1
           fi
@@ -90,15 +98,18 @@ jobs:
             echo 'Stale MediaRemoteAdapter SwiftPM import remains'
             exit 1
           fi
-
-          APP=$(find ~/Library/Developer/Xcode/DerivedData -path '*/Build/Products/Debug/Halo.app' -print -quit)
-          if [ -n "$APP" ]; then
-            test -s "$APP/Contents/Frameworks/libHaloMediaRemoteBridge.dylib"
-            test -s "$APP/Contents/Resources/run.pl"
+          if grep -E "cannot find ('MediaController'|type 'TrackInfo') in scope" /tmp/halo-native-mediaremote-build.log; then
+            echo 'Direct MediaRemote source membership failed'
+            exit 1
           fi
 
-          if [ "$BUILD_STATUS" -ne 0 ]; then
-            echo "Halo full build returned $BUILD_STATUS due to unrelated source errors; native MediaRemote files and build phase passed."
+          if [ "$BUILD_STATUS" -eq 0 ]; then
+            APP=$(find ~/Library/Developer/Xcode/DerivedData -path '*/Build/Products/Debug/Halo.app' -print -quit)
+            test -n "$APP"
+            test -s "$APP/Contents/Frameworks/libHaloMediaRemoteBridge.dylib"
+            test -s "$APP/Contents/Resources/run.pl"
+          else
+            echo "Halo full build returned $BUILD_STATUS due to unrelated source errors; MediaRemote integration itself passed."
             grep -E 'error:|unable to type-check' /tmp/halo-native-mediaremote-build.log | tail -30 || true
           fi
 
@@ -108,7 +119,8 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add Halo/Core/WorkspaceStore.swift \
-                  Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift \
+                  Halo/Core/MediaRemoteController.swift \
+                  Halo/Core/MediaRemoteTrackInfo.swift \
                   Halo.xcodeproj/project.pbxproj \
                   Halo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
           if git diff --cached --quiet; then
