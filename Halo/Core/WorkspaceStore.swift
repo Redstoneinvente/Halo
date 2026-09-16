@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import UserNotifications
+import CoreAudio
 import Darwin
 
 @MainActor
@@ -416,6 +417,104 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     }
 }
 
+@available(macOS 14.2, *)
+private enum SafariAudioProcessDetector {
+    private static let safariBundleID = "com.apple.Safari"
+    private static let safariWebContentBundleID = "com.apple.WebKit.WebContent"
+
+    static func isProducingOutput() -> Bool {
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: safariBundleID).isEmpty else { return false }
+
+        var listAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var byteCount: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(system, &listAddress, 0, nil, &byteCount) == noErr, byteCount > 0 else { return false }
+
+        var processObjects = [AudioObjectID](
+            repeating: kAudioObjectUnknown,
+            count: Int(byteCount) / MemoryLayout<AudioObjectID>.size
+        )
+        guard !processObjects.isEmpty,
+              AudioObjectGetPropertyData(system, &listAddress, 0, nil, &byteCount, &processObjects) == noErr else { return false }
+
+        for object in processObjects {
+            guard readUInt32(object, selector: kAudioProcessPropertyIsRunningOutput) != 0 else { continue }
+            let bundleID = readString(object, selector: kAudioProcessPropertyBundleID) ?? ""
+            let pid = readPID(object)
+            if belongsToSafari(pid: pid, bundleID: bundleID) { return true }
+        }
+        return false
+    }
+
+    private static func readUInt32(_ object: AudioObjectID, selector: AudioObjectPropertySelector) -> UInt32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr else { return 0 }
+        return value
+    }
+
+    private static func readPID(_ object: AudioObjectID) -> pid_t {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioProcessPropertyPID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: pid_t = 0
+        var size = UInt32(MemoryLayout<pid_t>.size)
+        guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr else { return 0 }
+        return value
+    }
+
+    private static func readString(_ object: AudioObjectID, selector: AudioObjectPropertySelector) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: CFString = "" as CFString
+        var size = UInt32(MemoryLayout<CFString>.size)
+        guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr else { return nil }
+        let string = value as String
+        return string.isEmpty ? nil : string
+    }
+
+    private static func belongsToSafari(pid: pid_t, bundleID: String) -> Bool {
+        if bundleID == safariBundleID { return true }
+        guard bundleID == safariWebContentBundleID || bundleID.hasPrefix("com.apple.WebKit.") else { return false }
+
+        // Safari hands actual web media output to WebKit helper processes. Walk the normal
+        // parent chain first so we can attribute a helper to Safari without guessing.
+        var current = pid
+        var visited = Set<pid_t>()
+        for _ in 0..<8 {
+            guard current > 0, visited.insert(current).inserted else { break }
+            if NSRunningApplication(processIdentifier: current)?.bundleIdentifier == safariBundleID { return true }
+            guard let parent = parentPID(of: current), parent > 0, parent != current else { break }
+            current = parent
+        }
+
+        // WebKit helpers can be re-parented through launchd/XPC. If Safari itself is running,
+        // an active Apple WebKit WebContent output process is still a strong Safari signal.
+        return !NSRunningApplication.runningApplications(withBundleIdentifier: safariBundleID).isEmpty
+    }
+
+    private static func parentPID(of pid: pid_t) -> pid_t? {
+        var info = proc_bsdinfo()
+        let expected = Int32(MemoryLayout<proc_bsdinfo>.stride)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, expected) == expected else { return nil }
+        return pid_t(info.pbi_ppid)
+    }
+}
+
 private struct MediaRemoteNowPlayingSnapshot {
     let title: String
     let artist: String
@@ -490,6 +589,7 @@ private final class SystemAudioMediaFallback {
     private var enabled = false
     private var ownsFallback = false
     private var lastHeard = Date.distantPast
+    private var lastSafariOutput = Date.distantPast
     private var lastRemoteMetadata = Date.distantPast
     private var remoteRequestInFlight = false
 
@@ -505,27 +605,51 @@ private final class SystemAudioMediaFallback {
     func refresh() {
         guard enabled, let media else { return }
 
-        // Rich Apple Music / Spotify metadata wins in Automatic mode. MediaRemote is used only
-        // when Halo is on the System Audio path (or when no rich provider is actively playing).
+        // A genuinely playing rich provider still wins. Paused/stopped Apple Music or Spotify
+        // must not block Safari/system audio from claiming the surface.
         if media.connectedApp != nil && media.isPlaying {
             ownsFallback = false
             return
         }
 
-        requestMediaRemoteMetadata()
+        let now = Date()
+        let safariRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").isEmpty
+        let safariOutputActive: Bool
+        if #available(macOS 14.2, *) {
+            safariOutputActive = SafariAudioProcessDetector.isProducingOutput()
+        } else {
+            safariOutputActive = false
+        }
+        if safariOutputActive { lastSafariOutput = now }
 
         let audioSnapshot = AudioSpectrumService.shared.snapshot()
-        let audibleNow = audioSnapshot.available && audioSnapshot.overall > 0.045
-        if audibleNow { lastHeard = Date() }
-        let withinReleaseWindow = Date().timeIntervalSince(lastHeard) < 2.75
-        let remoteMetadataFresh = Date().timeIntervalSince(lastRemoteMetadata) < 5.0
+        let pcmAudible = isPCMAudible(audioSnapshot, safariHint: safariRunning || safariOutputActive)
+        let audibleNow = safariOutputActive || pcmAudible
+        if audibleNow { lastHeard = now }
+
+        // If a stale paused rich provider is still attached, release it as soon as real system
+        // output is observed. This is the main failure mode when Safari plays while Music/Spotify
+        // happens to be open in the background.
+        if audibleNow, media.connectedApp != nil, !media.isPlaying { media.disconnect() }
+
+        requestMediaRemoteMetadata()
+
+        let safariRecentlyActive = now.timeIntervalSince(lastSafariOutput) < 2.0
+        let releaseWindow = (safariRunning || safariRecentlyActive) ? 4.0 : 2.75
+        let withinReleaseWindow = now.timeIntervalSince(lastHeard) < releaseWindow
+        let remoteMetadataFresh = now.timeIntervalSince(lastRemoteMetadata) < 5.0
         let systemAudioPlaying = audibleNow || (ownsFallback && withinReleaseWindow)
 
         if systemAudioPlaying {
             if media.connectedApp == nil {
                 if !remoteMetadataFresh {
-                    media.title = "System Audio"
-                    media.artist = "Playing from your Mac"
+                    if safariOutputActive || safariRecentlyActive {
+                        media.title = "Safari Audio"
+                        media.artist = "Playing from Safari"
+                    } else {
+                        media.title = "System Audio"
+                        media.artist = "Playing from your Mac"
+                    }
                 }
                 media.isPlaying = true
                 media.error = nil
@@ -568,11 +692,21 @@ private final class SystemAudioMediaFallback {
                 } else {
                     media.artist = "System Audio"
                 }
-                let audibleNow = AudioSpectrumService.shared.snapshot().available && AudioSpectrumService.shared.snapshot().overall > 0.045
+                let audioSnapshot = AudioSpectrumService.shared.snapshot()
+                let safariRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").isEmpty
+                let audibleNow = self.isPCMAudible(audioSnapshot, safariHint: safariRunning)
                 media.isPlaying = snapshot.playing || audibleNow
                 media.error = nil
             }
         }
+    }
+
+    private func isPCMAudible(_ snapshot: AudioSpectrumSnapshot, safariHint: Bool) -> Bool {
+        guard snapshot.available else { return false }
+        // Browser video, speech, and WebAudio can sit far below music-mastering levels. Mids are
+        // especially useful for quiet speech, so blend the bands instead of relying on RMS alone.
+        let signal = max(snapshot.overall, snapshot.mids * 0.82, snapshot.bass * 0.62, snapshot.treble * 0.68)
+        return signal > (safariHint ? 0.016 : 0.040)
     }
 
     private func clearIfOwned() {

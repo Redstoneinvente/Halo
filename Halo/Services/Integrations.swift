@@ -541,7 +541,8 @@ final class MediaService: ObservableObject {
                 guard self.generation == expectedGeneration else { return }
                 for result in results where result.denied { self.deniedApps.insert(result.app) }
                 let snapshots = results.compactMap(\.snapshot)
-                if let selected = PlayerSelection.choose(snapshots, current: self.connectedApp, preferred: app) {
+                let selectableSnapshots = automatic ? snapshots.filter(\.playing) : snapshots
+                if let selected = PlayerSelection.choose(selectableSnapshots, current: self.connectedApp, preferred: app) {
                     self.accept(selected)
                 } else if self.connectedApp != nil || self.isPlaying { self.disconnect() }
                 if snapshots.isEmpty, let message = results.compactMap(\.error).first, self.error != message { self.error = message }
