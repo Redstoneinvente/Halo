@@ -1,4 +1,4 @@
-name: Polish Pixel Pet Cookie Munch
+name: Expand Pixel Pet Personality Engine
 
 on:
   push:
@@ -18,152 +18,39 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Enlarge cookie and add munch expression
+      - name: Apply personality engine
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
+          printf '%s' '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' | python3 -c 'import sys,base64,gzip; sys.stdout.buffer.write(gzip.decompress(base64.b64decode(sys.stdin.buffer.read())))' > /tmp/pixel_pal_personality.py
+          python3 /tmp/pixel_pal_personality.py
 
-          path = Path('Halo/Views/PixelPetWidget.swift')
-          s = path.read_text()
-
-          def once(old, new, label):
-              global s
-              count = s.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected 1 match, found {count}')
-              s = s.replace(old, new, 1)
-
-          once('deadline: .now() + 1.02', 'deadline: .now() + 1.16', 'happy delay')
-          once('(rescue - 0.55) / 0.40', '(rescue - 0.55) / 0.52', 'consume duration')
-          once('let hitSize = max(24.0, min(proxy.size.width, proxy.size.height) * 0.30)', 'let hitSize = max(26.0, min(proxy.size.width, proxy.size.height) * 0.34)', 'cookie hit size')
-          once('let pixel = max(1.0, min(size.width, size.height) / 30.0)', 'let pixel = max(1.0, min(size.width, size.height) / 27.0)', 'cookie visual size')
-
-          once(
-              '    private let logicalGrid = 24\n\n    private var faceColor: Color {',
-              '    private let logicalGrid = 24\n\n    private var isEatingFuryCookie: Bool {\n        guard expression == .furious, let rescue = cookieRescueElapsed else { return false }\n        return rescue >= 0.55 && rescue < 1.16\n    }\n\n    private var faceColor: Color {',
-              'cookie munch state'
-          )
-          if s.count('expression == .furious ? Color') != 3:
-              raise SystemExit('furious colors: expected 3 matches')
-          s = s.replace('expression == .furious ? Color', 'expression == .furious && !isEatingFuryCookie ? Color')
-
-          once(
-              'private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, furious, smug }',
-              'private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, cookieMunch, furious, smug }',
-              'eye pose enum'
-          )
-          once(
-              '    private var eyePose: EyePose {\n        switch expression {',
-              '    private var eyePose: EyePose {\n        if isEatingFuryCookie { return .cookieMunch }\n        switch expression {',
-              'eye pose override'
-          )
-          once(
-              '        case .furious:\n            render(.init(HaloPixelPalSprites.furiousEye, x: leftX, y: y + 1), 1, 0, 0)',
-              '        case .cookieMunch:\n            let happy = HaloPixelPalSprites.happyEye(preferences.eyeStyle)\n            let closed = HaloPixelPalSprites.closedEye(preferences.eyeStyle)\n            let chewPhase = Int(max(0, cookieRescueElapsed ?? 0) * 14.0) % 2\n            if chewPhase == 0 {\n                render(.init(happy, x: leftX, y: y + 1), 1, 0, 0)\n                render(.init(closed, x: rightX, y: y + 2, mirrorX: true), 1, 0, 0)\n            } else {\n                render(.init(closed, x: leftX, y: y + 2), 1, 0, 0)\n                render(.init(happy, x: rightX, y: y + 1, mirrorX: true), 1, 0, 0)\n            }\n        case .furious:\n            render(.init(HaloPixelPalSprites.furiousEye, x: leftX, y: y + 1), 1, 0, 0)',
-              'munch eyes'
-          )
-          once(
-              '    private func drawBrows(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n        let leftX = 3',
-              '    private func drawBrows(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n        if isEatingFuryCookie { return }\n        let leftX = 3',
-              'munch brows'
-          )
-
-          mouth_pattern = re.compile(r'    private func drawMouth\(render: \(HaloPixelPalPlacedSprite, Double, Int, Int\) -> Void\) \{.*?\n    \}\n\n    private func drawCheeks', re.S)
-          mouth_new = '''    private func drawMouth(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
-              let mouth: HaloPixelPalSprite?
-              if isEatingFuryCookie {
-                  let chewPhase = Int(max(0, cookieRescueElapsed ?? 0) * 14.0) % 2
-                  mouth = chewPhase == 0 ? HaloPixelPalSprites.mouthOpen : HaloPixelPalSprites.mouthTiny
-              } else {
-                  mouth = selectedMouth()
-              }
-              guard let mouth else { return }
-              let x = max(0, (logicalGrid - mouth.width) / 2)
-              let y = isEatingFuryCookie ? 15 : (expression == .superHappy || expression == .excited ? 15 : 16)
-              render(.init(mouth, x: x, y: y), 1, 0, 0)
-          }
-
-              private func drawCheeks'''
-          s, n = mouth_pattern.subn(mouth_new, s, count=1)
-          if n != 1:
-              raise SystemExit(f'munch mouth block: expected 1 match, found {n}')
-
-          cheeks_pattern = re.compile(r'    private func drawCheeks\(render: \(HaloPixelPalPlacedSprite, Double, Int, Int\) -> Void\) \{.*?\n    \}\n\n    private var resolvedAccessory', re.S)
-          cheeks_new = '''    private func drawCheeks(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
-              if expression == .furious && !isEatingFuryCookie { return }
-              let sprite: HaloPixelPalSprite
-              if isEatingFuryCookie {
-                  sprite = HaloPixelPalSprites.cheekKawaii
-              } else {
-                  switch preferences.cheekStyle {
-                  case .none: return
-                  case .soft: sprite = HaloPixelPalSprites.cheekSoft
-                  case .kawaii: sprite = HaloPixelPalSprites.cheekKawaii
-                  case .shy: sprite = HaloPixelPalSprites.cheekShy
-                  }
-              }
-              let opacity: Double = isEatingFuryCookie || expression == .shy || expression == .love ? 1.0 : 0.90
-              render(.init(sprite, x: 2, y: 13), opacity, 0, 0)
-              render(.init(sprite, x: max(0, 22 - sprite.width), y: 13, mirrorX: true), opacity, 0, 0)
-          }
-
-              private var resolvedAccessory'''
-          s, n = cheeks_pattern.subn(cheeks_new, s, count=1)
-          if n != 1:
-              raise SystemExit(f'munch cheeks block: expected 1 match, found {n}')
-
-          once(
-              '    private func drawAccessory(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n        switch resolvedAccessory {',
-              '    private func drawAccessory(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n        let accessory = resolvedAccessory\n        if isEatingFuryCookie && accessory == .horns { return }\n        switch accessory {',
-              'munch accessory'
-          )
-          once(
-              '    private func drawFX(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n        let phase =',
-              '    private func drawFX(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {\n        if isEatingFuryCookie { return }\n        let phase =',
-              'munch fx'
-          )
-          once(
-              '        if let reactionElapsed {\n            if expression == .dizzy {',
-              '        if let reactionElapsed {\n            if isEatingFuryCookie {\n                let chew = Int(max(0, cookieRescueElapsed ?? 0) * 14.0) % 2\n                return (0, chew == 0 ? -one : 0)\n            }\n            if expression == .dizzy {',
-              'munch motion'
-          )
-
-          path.write_text(s)
-          print('Cookie enlarged and munch expression added.')
-          PY
-
-      - name: Verify cookie munch contract
+      - name: Verify personality contract
         run: |
           python3 - <<'PY'
           from pathlib import Path
           s = Path('Halo/Views/PixelPetWidget.swift').read_text()
           required = [
-              'deadline: .now() + 1.16',
-              '(rescue - 0.55) / 0.52',
-              '* 0.34)',
-              '/ 27.0)',
-              'private var isEatingFuryCookie: Bool',
-              'cookieMunch, furious, smug',
-              'if isEatingFuryCookie { return .cookieMunch }',
-              'case .cookieMunch:',
-              'mouth = chewPhase == 0 ? HaloPixelPalSprites.mouthOpen : HaloPixelPalSprites.mouthTiny',
-              'sprite = HaloPixelPalSprites.cheekKawaii',
-              'if isEatingFuryCookie && accessory == .horns { return }',
+              'enum HaloPixelPalPersonality',
+              'struct HaloPixelPalStrokeDetector',
+              'func feedCookie()',
+              'func petted()',
+              'func considerChase',
+              'case sneeze',
+              'case hiccup',
+              'case satisfied',
+              'AudioSpectrumService.shared.snapshot()',
+              '.onDrop(of: [UTType.fileURL.identifier]',
+              'private func drawCookieBadge',
+              'isEatingAnyCookie',
+              'case .dreamCookie:',
+              'Picker("Personality"',
           ]
           missing = [marker for marker in required if marker not in s]
           if missing:
-              raise SystemExit(f'Missing cookie munch markers: {missing}')
-          stale = [
-              'deadline: .now() + 1.02',
-              '(rescue - 0.55) / 0.40',
-              'min(proxy.size.width, proxy.size.height) * 0.30',
-              'min(size.width, size.height) / 30.0',
-          ]
-          leftovers = [marker for marker in stale if marker in s]
-          if leftovers:
-              raise SystemExit(f'Stale cookie markers remain: {leftovers}')
-          print('Cookie munch contract verified.')
+              raise SystemExit(f'Missing Pixel Pet personality markers: {missing}')
+          doc = Path('Docs/PixelPalV2.md').read_text()
+          if '## 21. Personality micro-behaviour engine' not in doc:
+              raise SystemExit('Canonical Pixel Pal personality section missing')
+          print('Pixel Pet personality contract verified.')
           PY
 
       - name: Parse Pixel Pet source
@@ -176,11 +63,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Halo/Views/PixelPetWidget.swift
+          git add Halo/Views/PixelPetWidget.swift Docs/PixelPalV2.md
           if git diff --cached --quiet; then
             echo "No source changes to commit."
             exit 0
           fi
-          git commit -m "Polish Pixel Pet cookie munch"
+          git commit -m "Expand Pixel Pet personality engine"
           git pull --rebase origin main
           git push origin HEAD:main
