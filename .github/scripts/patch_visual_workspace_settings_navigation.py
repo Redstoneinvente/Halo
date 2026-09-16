@@ -33,17 +33,14 @@ settings = replace_once(
         Binding(
             get: { section },
             set: { candidate in
-                guard let candidate else {
-                    section = nil
-                    return
-                }
+                guard let candidate else { return }
                 guard !isSectionUnavailable(candidate) else { return }
                 section = candidate
             }
         )
     }
 ''',
-    "locked-section explanation and guarded selection",
+    "guard locked sidebar selection",
 )
 
 settings = replace_once(
@@ -57,20 +54,7 @@ settings = replace_once(
     settings,
     '                List(selection: $section) {\n',
     '                List(selection: sidebarSelection) {\n',
-    "guard sidebar selection",
-)
-
-settings = replace_once(
-    settings,
-    '''                        sidebarRow(name)
-                            .tag(name)
-                            .disabled(isSectionUnavailable(name))
-''',
-    '''                        sidebarRow(name)
-                            .tag(name)
-                            .selectionDisabled(isSectionUnavailable(name))
-''',
-    "disable list selection without killing hover help",
+    "use guarded sidebar binding",
 )
 
 settings = replace_once(
@@ -80,10 +64,10 @@ settings = replace_once(
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 ''',
     '''                    OpenedNotchWorkspaceEditor(layout: $workspace.settings.layout, showsCloseButton: false)
-                        .frame(minWidth: 980, idealWidth: 1080, minHeight: 660)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .layoutPriority(1)
 ''',
-    "embedded editor sizing",
+    "remove embedded editor hard minimum",
 )
 
 widgets = replace_once(
@@ -102,7 +86,11 @@ widgets = replace_once(
 
 widgets = replace_once(
     widgets,
-    '''            HSplitView {
+    '''    var body: some View {
+        VStack(spacing: 0) {
+            visualWorkspaceHeader
+            Divider()
+            HSplitView {
                 VStack(spacing: 0) {
                     toolbar
                     Divider()
@@ -110,27 +98,65 @@ widgets = replace_once(
                 }.frame(minWidth: 650)
                 inspector.frame(minWidth: 320, idealWidth: 380, maxWidth: 430)
             }
+        }
+        .onAppear { materialize(); calendarSources.refresh() }
+    }
 ''',
-    '''            HSplitView {
-                VStack(spacing: 0) {
-                    toolbar
-                    Divider()
-                    GeometryReader { proxy in
-                        ScrollView([.horizontal, .vertical]) {
-                            preview(canvasSize: previewCanvasSize(for: proxy.size))
-                                .padding(22)
-                                .frame(minWidth: proxy.size.width, minHeight: proxy.size.height, alignment: .top)
-                        }
-                    }
-                }
-                .frame(minWidth: 680, idealWidth: 760)
+    '''    var body: some View {
+        VStack(spacing: 0) {
+            visualWorkspaceHeader
+            Divider()
+            GeometryReader { proxy in
+                editorLayout(availableSize: proxy.size)
+            }
+        }
+        .onAppear { materialize(); calendarSources.refresh() }
+    }
+
+    @ViewBuilder
+    private func editorLayout(availableSize: CGSize) -> some View {
+        if !showsCloseButton && availableSize.width < 900 {
+            VSplitView {
+                editorCanvasPane
+                    .frame(minHeight: 350)
                 inspector
-                    .frame(minWidth: 340, idealWidth: 390, maxWidth: 460)
+                    .frame(minHeight: 250, idealHeight: 320)
+            }
+        } else if !showsCloseButton {
+            let inspectorWidth = min(380, max(310, availableSize.width * 0.31))
+            HStack(spacing: 0) {
+                editorCanvasPane
+                    .frame(width: max(460, availableSize.width - inspectorWidth - 1))
+                Divider()
+                inspector
+                    .frame(width: inspectorWidth)
                     .frame(maxHeight: .infinity)
             }
-            .frame(minWidth: 1020, minHeight: 640)
+        } else {
+            HSplitView {
+                editorCanvasPane
+                    .frame(minWidth: 620, idealWidth: 760)
+                inspector
+                    .frame(minWidth: 320, idealWidth: 380, maxWidth: 430)
+            }
+        }
+    }
+
+    private var editorCanvasPane: some View {
+        VStack(spacing: 0) {
+            toolbar
+            Divider()
+            GeometryReader { proxy in
+                ScrollView([.horizontal, .vertical]) {
+                    preview(canvasSize: previewCanvasSize(for: proxy.size))
+                        .padding(18)
+                        .frame(minWidth: proxy.size.width, minHeight: proxy.size.height, alignment: .top)
+                }
+            }
+        }
+    }
 ''',
-    "responsive editor split layout",
+    "responsive editor container",
 )
 
 widgets = replace_once(
@@ -156,13 +182,120 @@ widgets = replace_once(
 
 widgets = replace_once(
     widgets,
+    '''    private var toolbar: some View {
+        HStack(spacing: 10) {
+            Picker("Workspace", selection: Binding(
+                get: { opened.resolvedContentMode },
+                set: { mode in var value = opened; value.contentMode = mode; layout.openNotch = value }
+            )) {
+                ForEach(OpenNotchContentMode.allCases) { Text($0.rawValue).tag($0) }
+            }.frame(width: 250)
+            Picker("Preset", selection: Binding(get: { opened.preset }, set: { applyPreset($0) })) {
+                ForEach(OpenNotchPreset.allCases) { Text($0.rawValue).tag($0) }
+            }.frame(width: 190)
+            Menu { addMenu } label: { Label("Add", systemImage: "plus") }
+            Menu {
+                Button("4 × 3") { setGrid(columns: 4, rows: 3) }
+                Button("6 × 3") { setGrid(columns: 6, rows: 3) }
+                Button("6 × 4") { setGrid(columns: 6, rows: 4) }
+                Button("8 × 4") { setGrid(columns: 8, rows: 4) }
+                Divider()
+                Button("Auto Pack Widgets") { repackGrid() }
+            } label: { Label("Grid", systemImage: "square.grid.3x3") }
+            Button { duplicateSelected() } label: { Image(systemName: "plus.square.on.square") }.disabled(selectedItem == nil).help("Duplicate selected item")
+            Button { backgroundMode = true; selectedItem = nil; selectedGroup = nil; selectedRegion = nil } label: { Image(systemName: "paintbrush") }.help("Opened surface appearance")
+            Spacer(minLength: 0)
+        }.padding(12)
+    }
+''',
+    '''    private var toolbar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                workspaceModePicker.frame(width: 210)
+                presetPicker.frame(width: 155)
+                Menu { addMenu } label: { Label("Add", systemImage: "plus") }
+                gridMenu
+                Button { duplicateSelected() } label: { Image(systemName: "plus.square.on.square") }
+                    .disabled(selectedItem == nil)
+                    .help("Duplicate selected item")
+                Button { backgroundMode = true; selectedItem = nil; selectedGroup = nil; selectedRegion = nil } label: { Image(systemName: "paintbrush") }
+                    .help("Opened surface appearance")
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
+                workspaceModePicker.frame(minWidth: 150, idealWidth: 180)
+                presetPicker.frame(minWidth: 120, idealWidth: 145)
+                Menu {
+                    Menu("Add Widget") { addMenu }
+                    Divider()
+                    Menu("Grid") {
+                        Button("4 × 3") { setGrid(columns: 4, rows: 3) }
+                        Button("6 × 3") { setGrid(columns: 6, rows: 3) }
+                        Button("6 × 4") { setGrid(columns: 6, rows: 4) }
+                        Button("8 × 4") { setGrid(columns: 8, rows: 4) }
+                        Divider()
+                        Button("Auto Pack Widgets") { repackGrid() }
+                    }
+                    Button("Duplicate Selected") { duplicateSelected() }.disabled(selectedItem == nil)
+                    Button("Surface Appearance") { backgroundMode = true; selectedItem = nil; selectedGroup = nil; selectedRegion = nil }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private var workspaceModePicker: some View {
+        Picker("Workspace", selection: Binding(
+            get: { opened.resolvedContentMode },
+            set: { mode in var value = opened; value.contentMode = mode; layout.openNotch = value }
+        )) {
+            ForEach(OpenNotchContentMode.allCases) { Text($0.rawValue).tag($0) }
+        }
+    }
+
+    private var presetPicker: some View {
+        Picker("Preset", selection: Binding(get: { opened.preset }, set: { applyPreset($0) })) {
+            ForEach(OpenNotchPreset.allCases) { Text($0.rawValue).tag($0) }
+        }
+    }
+
+    private var gridMenu: some View {
+        Menu {
+            Button("4 × 3") { setGrid(columns: 4, rows: 3) }
+            Button("6 × 3") { setGrid(columns: 6, rows: 3) }
+            Button("6 × 4") { setGrid(columns: 6, rows: 4) }
+            Button("8 × 4") { setGrid(columns: 8, rows: 4) }
+            Divider()
+            Button("Auto Pack Widgets") { repackGrid() }
+        } label: {
+            Label("Grid", systemImage: "square.grid.3x3")
+        }
+    }
+''',
+    "responsive editor toolbar",
+)
+
+widgets = replace_once(
+    widgets,
     '''    private var preview: some View {
         VStack(spacing: 10) {
 ''',
     '''    private func previewCanvasSize(for available: CGSize) -> CGSize {
-        let width = min(760, max(610, available.width - 44))
-        let height = min(580, max(470, available.height - 96))
-        return CGSize(width: width, height: height)
+        let aspect: CGFloat = 610.0 / 470.0
+        let maximumWidth = min(760, max(420, available.width - 36))
+        let maximumHeight = min(580, max(325, available.height - 84))
+        var width = maximumWidth
+        var height = width / aspect
+        if height > maximumHeight {
+            height = maximumHeight
+            width = height * aspect
+        }
+        return CGSize(width: max(420, width), height: max(325, height))
     }
 
     private func preview(canvasSize: CGSize) -> some View {
@@ -201,4 +334,4 @@ widgets = replace_once(
 
 settings_path.write_text(settings)
 widgets_path.write_text(widgets)
-print("Visual Workspace navigation and editor layout polish applied.")
+print("Visual Workspace navigation and responsive editor polish applied.")
