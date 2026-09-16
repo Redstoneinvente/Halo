@@ -1,4 +1,4 @@
-name: Fix CI Surface Ownership
+name: Fix Drop CI Disable and Pixel Pet Radius
 
 on:
   push:
@@ -9,18 +9,34 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Run CI surface ownership repair'
-    runs-on: ubuntu-latest
+    if: github.event.head_commit.message == 'Run Drop CI disable and Pixel Pet radius fix'
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
-      - name: Apply CI ownership repair
-        run: python3 scripts/fix_ci_surface_ownership.py
-      - name: Commit
+      - name: Apply fixes
+        run: python3 scripts/fix_drop_ci_disable_and_pixel_radius.py
+      - name: Verify Drop CI hard disable
+        run: |
+          grep -q 'var dropEnabled: (() -> Bool)?' Halo/NotchEngine/WindowManager.swift
+          grep -q 'guard acceptsFileDrop else { rejectFileDrop(); return \[\] }' Halo/NotchEngine/WindowManager.swift
+          grep -q 'guard acceptsFileDrop else { rejectFileDrop(); return false }' Halo/NotchEngine/WindowManager.swift
+          grep -q 'guard ciEnabled else {' Halo/NotchEngine/WindowManager.swift
+      - name: Verify Pixel Pet overlay radius
+        run: |
+          grep -q 'ledUnit \* preferences.pixelCornerRadius' Halo/Views/PixelPetWidget.swift
+          test "$(grep -c 'Path(roundedRect: rect, cornerRadius: radius)' Halo/Views/PixelPetWidget.swift)" -ge 4
+      - name: Parse touched Swift files
+        run: |
+          xcrun swiftc -parse Halo/NotchEngine/WindowManager.swift
+          xcrun swiftc -parse Halo/Views/PixelPetWidget.swift
+      - name: Full Xcode build
+        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build
+      - name: Commit implementation
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Halo/Views/SurfaceView.swift
-          git commit -m "Make Context Interfaces own the notch surface"
+          git add Halo/NotchEngine/WindowManager.swift Halo/Views/PixelPetWidget.swift
+          git commit -m "Fix Drop CI disable and Pixel Pet overlay radius"
           git push origin main
