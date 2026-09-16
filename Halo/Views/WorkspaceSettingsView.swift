@@ -37,7 +37,18 @@ struct SettingsView: View {
 
     private func sectionHelp(_ name: String) -> String {
         guard isSectionUnavailable(name) else { return name }
-        return "Available in the Default layout only. Use Visual Workspace Editor while Visual Workspace is active."
+        return "\(name) is locked while Visual Workspace is active. Configure these controls in Visual Workspace Editor, or switch Appearance → Opened Space → Layout System to Default."
+    }
+
+    private var sidebarSelection: Binding<String?> {
+        Binding(
+            get: { section },
+            set: { candidate in
+                guard let candidate else { return }
+                guard !isSectionUnavailable(candidate) else { return }
+                section = candidate
+            }
+        )
     }
 
     @ViewBuilder
@@ -47,7 +58,7 @@ struct SettingsView: View {
             Spacer(minLength: 4)
             if isSectionUnavailable(name) {
                 HStack(spacing: 3) {
-                    Text("Default")
+                    Text("Default only")
                         .font(.caption2)
                         .fontWeight(.semibold)
                     Image(systemName: "lock.fill")
@@ -76,7 +87,7 @@ struct SettingsView: View {
                     Spacer()
                 }.padding(16)
                 TextField("Find a section", text: $search).textFieldStyle(.roundedBorder).padding(12)
-                List(selection: $section) {
+                List(selection: sidebarSelection) {
                     ForEach(sections.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \.self) { name in
                         sidebarRow(name)
                             .tag(name)
@@ -101,9 +112,9 @@ struct SettingsView: View {
                 }.padding(20)
                 Divider()
                 if section == "Visual Workspace Editor", visualWorkspaceActive {
-                    OpenedNotchWorkspaceEditor(layout: $workspace.settings.layout)
-                        .frame(minWidth: 920, minHeight: 620)
+                    OpenedNotchWorkspaceEditor(layout: $workspace.settings.layout, showsCloseButton: false)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .layoutPriority(1)
                 } else {
                     Form { content }
                         .formStyle(.grouped)
