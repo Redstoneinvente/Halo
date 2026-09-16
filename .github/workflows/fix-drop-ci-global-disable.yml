@@ -1,0 +1,45 @@
+name: Fix Global Drop CI Disable
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Run global Drop CI disable fix'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Apply global Drop CI disable fix
+        run: python3 scripts/fix_drop_ci_global_disable.py
+
+      - name: Verify global Drop CI kill switch
+        run: |
+          grep -q 'private var haloDropCIEnabled: Bool' Halo/NotchEngine/DisplayClock.swift
+          grep -q 'private func deactivateForDisabledState()' Halo/NotchEngine/DisplayClock.swift
+          test "$(grep -c 'guard haloDropCIEnabled else' Halo/NotchEngine/DisplayClock.swift)" -ge 5
+          grep -A8 'func begin(target: any HaloGlobalDropTarget' Halo/NotchEngine/DisplayClock.swift | grep -q 'guard haloDropCIEnabled'
+          grep -A8 'private func activateTarget' Halo/NotchEngine/DisplayClock.swift | grep -q 'guard haloDropCIEnabled'
+          grep -q 'dropDestination(for: URL.self)' Halo/Views/SurfaceView.swift
+          grep -q 'dropDestination(for: URL.self)' Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+
+      - name: Parse Drop CI source
+        run: xcrun swiftc -parse Halo/NotchEngine/DisplayClock.swift
+
+      - name: Build Halo arm64 diagnostic
+        continue-on-error: true
+        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS,arch=arm64' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/NotchEngine/DisplayClock.swift
+          git commit -m "Disable global Drop CI when turned off"
+          git push origin main
