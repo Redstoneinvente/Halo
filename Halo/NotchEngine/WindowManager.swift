@@ -102,6 +102,7 @@ final class HaloPanel: NSPanel {
 final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     var dragStateHandler: ((Bool, Int) -> Void)?
     var dropHandler: (([URL]) -> Void)?
+    var dropEnabled: (() -> Bool)?
 
     required init(rootView: Content) {
         super.init(rootView: rootView)
@@ -110,6 +111,12 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private var acceptsFileDrop: Bool { dropEnabled?() ?? true }
+
+    private func rejectFileDrop() {
+        dragStateHandler?(false, 0)
+    }
 
     private func fileURLCount(_ sender: NSDraggingInfo) -> Int {
         sender.draggingPasteboard.pasteboardItems?.reduce(into: 0) { count, item in
@@ -129,6 +136,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard acceptsFileDrop else { rejectFileDrop(); return [] }
         let count = fileURLCount(sender)
         guard count > 0 else { return [] }
         dragStateHandler?(true, count)
@@ -136,6 +144,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard acceptsFileDrop else { rejectFileDrop(); return [] }
         let count = fileURLCount(sender)
         guard count > 0 else { return [] }
         dragStateHandler?(true, count)
@@ -147,6 +156,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard acceptsFileDrop else { rejectFileDrop(); return false }
         let urls = fileURLs(sender)
         guard !urls.isEmpty else {
             dragStateHandler?(false, 0)
@@ -380,6 +390,15 @@ final class WindowManager {
             .sink { [weak self] _ in
                 guard let self else { return }
                 let defaults = UserDefaults.standard
+                let dropEnabled = defaults.object(forKey: "HaloContextDropEnabled") == nil
+                    ? true : defaults.bool(forKey: "HaloContextDropEnabled")
+                if !dropEnabled {
+                    self.hosts.values.forEach { host in
+                        if host.state.dropTargeted {
+                            host.state.endFileDrop(collapseAfterDelay: true)
+                        }
+                    }
+                }
                 let next = CGSize(width: defaults.double(forKey: "HaloContextOffsetX"),
                                   height: defaults.double(forKey: "HaloContextOffsetY"))
                 guard abs(next.width - self.lastContextOffset.width) >= 0.5 ||
@@ -1437,6 +1456,11 @@ final class WindowManager {
                 .environment(\.haloScreenFrame, screen.frame)
                 let view = HaloDropHostingView(rootView: root)
                 view.sizingOptions = []
+                view.dropEnabled = {
+                    let defaults = UserDefaults.standard
+                    return defaults.object(forKey: "HaloContextDropEnabled") == nil
+                        ? true : defaults.bool(forKey: "HaloContextDropEnabled")
+                }
                 view.dragStateHandler = { [weak host] active, count in
                     guard let host else { return }
                     let defaults = UserDefaults.standard
@@ -1451,6 +1475,13 @@ final class WindowManager {
                 }
                 view.dropHandler = { [weak self, weak host] urls in
                     guard let self, let host else { return }
+                    let defaults = UserDefaults.standard
+                    let ciEnabled = defaults.object(forKey: "HaloContextDropEnabled") == nil
+                        ? true : defaults.bool(forKey: "HaloContextDropEnabled")
+                    guard ciEnabled else {
+                        host.state.endFileDrop(collapseAfterDelay: true)
+                        return
+                    }
                     host.state.completeFileDrop()
                     self.store.addFiles(urls)
                 }

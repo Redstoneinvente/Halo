@@ -1842,10 +1842,13 @@ private struct HaloPixelPalFace: View {
                     width: pixel,
                     height: pixel
                 )
-                var path = Path()
-                path.addRect(rect)
+                let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius
                 let outer = x == 0 || x == 4 || y == 0 || y == 4
-                context.fill(path, with: .color(value == "d" ? chip : (outer ? edge : dough)))
+                context.fill(
+                    Path(roundedRect: rect, cornerRadius: radius),
+                    with: .color(value == "d" ? chip : (outer ? edge : dough)),
+                    style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001)
+                )
             }
         }
     }
@@ -1882,11 +1885,15 @@ private struct HaloPixelPalFace: View {
         let panelColor = Color(red: 0.12, green: 0.015, blue: 0.012).opacity(0.98)
         let edgeColor = Color(red: 0.95, green: 0.08, blue: 0.04).opacity(0.92)
         let seamColor = Color.black.opacity(0.42)
+        let ledUnit = max(1.0, min(size.width, size.height) / CGFloat(logicalGrid))
 
         func paintRect(_ rect: CGRect, _ color: Color) {
-            var path = Path()
-            path.addRect(rect)
-            context.fill(path, with: .color(color))
+            let radius = min(min(rect.width, rect.height) * 0.5, ledUnit * preferences.pixelCornerRadius)
+            context.fill(
+                Path(roundedRect: rect, cornerRadius: radius),
+                with: .color(color),
+                style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001)
+            )
         }
 
         paintRect(CGRect(x: 0, y: 0, width: panelWidth, height: size.height), panelColor)
@@ -1926,9 +1933,12 @@ private struct HaloPixelPalFace: View {
         let chip = Color(red: 0.25, green: 0.09, blue: 0.025)
 
         func paintCookiePixel(_ rect: CGRect, _ color: Color) {
-            var path = Path()
-            path.addRect(rect)
-            context.fill(path, with: .color(color))
+            let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius
+            context.fill(
+                Path(roundedRect: rect, cornerRadius: radius),
+                with: .color(color),
+                style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001)
+            )
         }
 
         for (y, row) in pattern.enumerated() {
