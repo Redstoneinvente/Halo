@@ -84,7 +84,7 @@ jobs:
               render(.init(mouth, x: x, y: y), 1, 0, 0)
           }
 
-          private func drawCheeks'''
+              private func drawCheeks'''
           s, n = mouth_pattern.subn(mouth_new, s, count=1)
           if n != 1:
               raise SystemExit(f'munch mouth block: expected 1 match, found {n}')
@@ -108,7 +108,7 @@ jobs:
               render(.init(sprite, x: max(0, 22 - sprite.width), y: 13, mirrorX: true), opacity, 0, 0)
           }
 
-          private var resolvedAccessory'''
+              private var resolvedAccessory'''
           s, n = cheeks_pattern.subn(cheeks_new, s, count=1)
           if n != 1:
               raise SystemExit(f'munch cheeks block: expected 1 match, found {n}')
