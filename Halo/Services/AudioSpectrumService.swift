@@ -4,6 +4,8 @@ import CoreMedia
 import CoreGraphics
 import Accelerate
 import AudioToolbox
+import AVFoundation
+import ShazamKit
 
 struct AudioSpectrumSnapshot: Equatable {
     var bass: Double = 0
@@ -13,9 +15,16 @@ struct AudioSpectrumSnapshot: Equatable {
     var available = false
 }
 
+struct AudioRecognitionMatch: Equatable {
+    let title: String
+    let artist: String
+    let artworkURL: URL?
+    let isrc: String?
+}
+
 /// System-audio analyser used by the closed-notch reactive background.
 /// ScreenCaptureKit supplies PCM audio and Accelerate converts it into normalized low/mid/high energy bands.
-final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SHSessionDelegate, @unchecked Sendable {
     static let shared = AudioSpectrumService()
 
     private let sampleQueue = DispatchQueue(label: "Halo.AudioSpectrum.Samples", qos: .userInitiated)
@@ -28,6 +37,10 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
     private var permissionRequestedThisRun = false
     private var idleStopTask: Task<Void, Never>?
     private var smoothed = AudioSpectrumSnapshot()
+    private var recognitionSession: SHSession?
+    private var recognitionCompletion: ((AudioRecognitionMatch?) -> Void)?
+    private var recognitionDeadline = Date.distantPast
+    private var recognitionSampleRate = 0.0
 
     func snapshot() -> AudioSpectrumSnapshot {
         stateLock.lock(); defer { stateLock.unlock() }
@@ -61,6 +74,31 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
             idleStopTask = task
             stateLock.unlock()
         }
+    }
+
+    func recognizeCurrentAudio(timeout: TimeInterval = 8, completion: @escaping (AudioRecognitionMatch?) -> Void) {
+        stateLock.lock()
+        guard recognitionSession == nil else {
+            stateLock.unlock()
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+        let session = SHSession()
+        recognitionSession = session
+        recognitionCompletion = completion
+        recognitionDeadline = Date().addingTimeInterval(max(3, min(15, timeout)))
+        recognitionSampleRate = 0
+        stateLock.unlock()
+
+        session.delegate = self
+        sampleQueue.asyncAfter(deadline: .now() + max(3, min(15, timeout))) { [weak self, weak session] in
+            guard let self, let session else { return }
+            self.finishRecognition(nil, session: session)
+        }
+    }
+
+    func cancelRecognition() {
+        finishRecognition(nil, session: nil)
     }
 
     private func screenCaptureAccessAvailable() async -> Bool {
@@ -242,7 +280,9 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
             }
         }
 
-        analyse(mono, sampleRate: max(8_000, Double(asbd.mSampleRate)))
+        let sampleRate = max(8_000, Double(asbd.mSampleRate))
+        feedRecognition(mono, sampleRate: sampleRate)
+        analyse(mono, sampleRate: sampleRate)
     }
 
     private func analyse(_ input: [Float], sampleRate: Double) {
@@ -320,6 +360,68 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, @u
         smoothed.overall = smooth(smoothed.overall, overall)
         smoothed.available = rms > 0.00001
         stateLock.unlock()
+    }
+
+    private func feedRecognition(_ input: [Float], sampleRate: Double) {
+        stateLock.lock()
+        guard let session = recognitionSession, Date() < recognitionDeadline else {
+            let expired = recognitionSession
+            stateLock.unlock()
+            if let expired { finishRecognition(nil, session: expired) }
+            return
+        }
+        if recognitionSampleRate == 0 { recognitionSampleRate = sampleRate }
+        let expectedRate = recognitionSampleRate
+        stateLock.unlock()
+
+        // ShazamKit requires one stable audio format for a streaming session.
+        guard abs(expectedRate - sampleRate) < 1,
+              let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                         sampleRate: sampleRate,
+                                         channels: 1,
+                                         interleaved: false),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(input.count)),
+              let channel = buffer.floatChannelData?[0] else { return }
+        buffer.frameLength = AVAudioFrameCount(input.count)
+        for index in input.indices { channel[index] = input[index] }
+        session.matchStreamingBuffer(buffer, at: nil)
+    }
+
+    func session(_ session: SHSession, didFind match: SHMatch) {
+        guard let item = match.mediaItems.first,
+              let title = item.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else {
+            finishRecognition(nil, session: session)
+            return
+        }
+        let result = AudioRecognitionMatch(
+            title: title,
+            artist: item.artist?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            artworkURL: item.artworkURL,
+            isrc: item.isrc
+        )
+        finishRecognition(result, session: session)
+    }
+
+    func session(_ session: SHSession, didNotFindMatchFor signature: SHSignature, error: Error?) {
+        // A streaming session can report an early no-match and succeed after more audio arrives.
+        // Only abort immediately on an actual catalog/transport error; otherwise let the timeout run.
+        if error != nil { finishRecognition(nil, session: session) }
+    }
+
+    private func finishRecognition(_ result: AudioRecognitionMatch?, session: SHSession?) {
+        stateLock.lock()
+        guard let current = recognitionSession, session == nil || current === session else {
+            stateLock.unlock()
+            return
+        }
+        let completion = recognitionCompletion
+        recognitionSession = nil
+        recognitionCompletion = nil
+        recognitionDeadline = .distantPast
+        recognitionSampleRate = 0
+        current.delegate = nil
+        stateLock.unlock()
+        if let completion { DispatchQueue.main.async { completion(result) } }
     }
 
     private enum SpectrumError: Error { case noDisplay }

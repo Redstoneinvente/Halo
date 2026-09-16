@@ -495,11 +495,14 @@ final class MediaService: ObservableObject {
     private var trackID = ""
     private var artworkKey = ""
     private var artworkTask: Task<Void, Never>?
+    private var externalArtworkData: Data?
+    private var externalArtworkURL: String?
     func setArtworkEnabled(_ enabled: Bool) {
         guard artworkEnabled != enabled else { return }
         artworkEnabled = enabled
         artworkTask?.cancel(); artworkKey = ""; artworkColors = []
         if enabled, let app = connectedApp { requestArtwork(app: app) }
+        else if enabled { requestExternalArtwork() }
     }
     @Published private(set) var connectedApp: String?
     private var detecting = false
@@ -509,6 +512,7 @@ final class MediaService: ObservableObject {
     func disconnect() {
         generation += 1; connectedApp = nil; isPlaying = false
         artworkTask?.cancel(); artworkKey = ""; trackID = ""; artworkColors = []; artworkImage = nil
+        externalArtworkData = nil; externalArtworkURL = nil
         album = ""; duration = 0; position = 0; shuffleSupported = false; shuffleEnabled = false; repeatSupported = false; repeatMode = ""
         title = "Connect a player"; artist = "Apple Music or Spotify"
     }
@@ -528,7 +532,9 @@ final class MediaService: ObservableObject {
         let supported = automatic ? ["com.apple.Music", "com.spotify.client"] : [app]
         let candidates = supported.filter { !deniedApps.contains($0) && !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
         guard !candidates.isEmpty else {
-            if isPlaying || connectedApp != nil { disconnect() }
+            // Automatic system/Safari audio is represented with connectedApp == nil. Do not let
+            // the rich-player poll erase that source just because Music/Spotify are not running.
+            if connectedApp != nil || (!automatic && isPlaying) { disconnect() }
             return
         }
         detecting = true
@@ -544,14 +550,15 @@ final class MediaService: ObservableObject {
                 let selectableSnapshots = automatic ? snapshots.filter(\.playing) : snapshots
                 if let selected = PlayerSelection.choose(selectableSnapshots, current: self.connectedApp, preferred: app) {
                     self.accept(selected)
-                } else if self.connectedApp != nil || self.isPlaying { self.disconnect() }
+                } else if self.connectedApp != nil || (!automatic && self.isPlaying) { self.disconnect() }
                 if snapshots.isEmpty, let message = results.compactMap(\.error).first, self.error != message { self.error = message }
             }
         }
     }
     private func accept(_ snapshot: PlayerSnapshot) {
         if connectedApp != snapshot.app {
-            artworkTask?.cancel(); artworkKey = ""; artworkColors = []
+            artworkTask?.cancel(); artworkKey = ""; artworkColors = []; artworkImage = nil
+            externalArtworkData = nil; externalArtworkURL = nil
             connectedApp = snapshot.app
         }
         if title != snapshot.title { title = snapshot.title }
@@ -562,6 +569,38 @@ final class MediaService: ObservableObject {
         requestArtwork(app: snapshot.app)
         if openedDetailEnabled { refreshPlaybackDetails(app: snapshot.app) }
     }
+    func acceptExternalMedia(title newTitle: String,
+                             artist newArtist: String,
+                             album newAlbum: String? = nil,
+                             duration newDuration: Double? = nil,
+                             position newPosition: Double? = nil,
+                             playing: Bool,
+                             artworkData: Data? = nil,
+                             artworkURL: String? = nil,
+                             sourceKey: String) {
+        guard connectedApp == nil else { return }
+        let canonicalKey = "external:" + sourceKey
+        let trackChanged = trackID != canonicalKey
+        if trackChanged {
+            trackID = canonicalKey
+            album = ""; duration = 0; position = 0
+            artworkTask?.cancel(); artworkKey = ""; artworkColors = []; artworkImage = nil
+            externalArtworkData = nil; externalArtworkURL = nil
+        }
+        if !newTitle.isEmpty, title != newTitle { title = newTitle }
+        if artist != newArtist { artist = newArtist }
+        if let newAlbum, !newAlbum.isEmpty { album = newAlbum }
+        if let newDuration, newDuration.isFinite, newDuration > 0 { duration = newDuration }
+        if let newPosition, newPosition.isFinite, newPosition >= 0 {
+            position = duration > 0 ? min(duration, newPosition) : newPosition
+        }
+        if isPlaying != playing { isPlaying = playing }
+        if let artworkData, !artworkData.isEmpty { externalArtworkData = artworkData }
+        if let artworkURL, URL(string: artworkURL)?.scheme == "https" { externalArtworkURL = artworkURL }
+        if error != nil { error = nil }
+        requestExternalArtwork()
+    }
+
     func perform(_ command: String, app preferred: String) {
         let app = command == "refresh" ? preferred : (connectedApp ?? preferred)
         guard ["com.apple.Music", "com.spotify.client"].contains(app),
@@ -684,6 +723,27 @@ final class MediaService: ObservableObject {
                 self.shuffleSupported = shuffleSupported; self.shuffleEnabled = shuffleEnabled
                 self.repeatSupported = repeatSupported; self.repeatMode = repeatMode
             }
+        }
+    }
+
+    private func requestExternalArtwork() {
+        guard artworkEnabled, connectedApp == nil else { return }
+        let fingerprint = externalArtworkData.map { data in
+            String(data.count) + ":" + data.prefix(18).base64EncodedString()
+        } ?? ""
+        let key = "external-art:" + trackID + ":" + fingerprint + ":" + (externalArtworkURL ?? "")
+        guard (externalArtworkData != nil || externalArtworkURL != nil), key != artworkKey else { return }
+        artworkTask?.cancel(); artworkKey = key
+        let bytes = externalArtworkData
+        let urlString = externalArtworkURL
+        artworkTask = Task { [weak self] in
+            async let colorsValue = ArtworkReader.palette(data: bytes, urlString: urlString)
+            async let imageValue = ArtworkReader.image(data: bytes, urlString: urlString)
+            let (colors, image) = await (colorsValue, imageValue)
+            guard !Task.isCancelled, let self, self.artworkEnabled, self.connectedApp == nil,
+                  self.artworkKey == key else { return }
+            self.artworkColors = colors
+            self.artworkImage = image
         }
     }
 

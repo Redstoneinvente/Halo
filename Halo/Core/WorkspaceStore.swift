@@ -132,6 +132,9 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         let layouts = [effectiveLayout] + displayLayouts
         media.setArtworkEnabled(layouts.contains { layout in
             let context = layout.contextMusic
+            let contextNeedsArtwork = context?.enabled == true && (
+                context?.showArtwork == true || context?.usesArtworkBackground == true
+            )
             let contextNeedsPalette = context?.enabled == true && (
                 context?.usesSongTextColors == true ||
                 context?.usesSongControlColors == true ||
@@ -144,7 +147,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
                 return configuration?.appearance.primary.source == .albumArtwork ||
                        configuration?.appearance.progress.source == .albumArtwork
             }
-            return contextNeedsPalette || hudNeedsPalette ||
+            return contextNeedsArtwork || contextNeedsPalette || hudNeedsPalette ||
                 layout.closedNotch?.visualizer?.dynamicColors == true ||
                 layout.closedNotch?.albumTextColor == true ||
                 layout.closedNotch?.albumBackgroundColor == true
@@ -522,6 +525,8 @@ private struct MediaRemoteNowPlayingSnapshot {
     let playing: Bool
     let duration: Double?
     let elapsed: Double?
+    let artworkData: Data?
+    let artworkURL: String?
 }
 
 private final class MediaRemoteNowPlayingReader {
@@ -565,6 +570,23 @@ private final class MediaRemoteNowPlayingReader {
                 }
                 return nil
             }
+            func firstData(_ keys: [String]) -> Data? {
+                for key in keys {
+                    if let value = info[key] as? Data, !value.isEmpty { return value }
+                    if let value = info[key] as? NSData, value.length > 0 { return value as Data }
+                }
+                return nil
+            }
+            func firstHTTPSURL(_ keys: [String]) -> String? {
+                for key in keys {
+                    let raw: String?
+                    if let value = info[key] as? URL { raw = value.absoluteString }
+                    else if let value = info[key] as? NSURL { raw = value.absoluteString }
+                    else { raw = info[key] as? String }
+                    if let raw, URL(string: raw)?.scheme == "https" { return raw }
+                }
+                return nil
+            }
 
             guard let title = firstString(["kMRMediaRemoteNowPlayingInfoTitle", "title"]) else {
                 completion(nil)
@@ -575,9 +597,13 @@ private final class MediaRemoteNowPlayingReader {
             let duration = firstDouble(["kMRMediaRemoteNowPlayingInfoDuration", "duration"])
             let elapsed = firstDouble(["kMRMediaRemoteNowPlayingInfoElapsedTime", "elapsedTime"])
             let rate = firstDouble(["kMRMediaRemoteNowPlayingInfoPlaybackRate", "playbackRate"])
+            let artworkData = firstData(["kMRMediaRemoteNowPlayingInfoArtworkData", "artworkData"])
+            let artworkURL = firstHTTPSURL(["kMRMediaRemoteNowPlayingInfoArtworkURL", "artworkURL",
+                                            "kMRMediaRemoteNowPlayingInfoArtworkIdentifier", "artworkIdentifier"])
             completion(MediaRemoteNowPlayingSnapshot(title: title, artist: artist, album: album,
                                                      playing: (rate ?? 0) > 0.001,
-                                                     duration: duration, elapsed: elapsed))
+                                                     duration: duration, elapsed: elapsed,
+                                                     artworkData: artworkData, artworkURL: artworkURL))
         }
         getInfo(DispatchQueue.global(qos: .utility), callback)
     }
@@ -592,6 +618,9 @@ private final class SystemAudioMediaFallback {
     private var lastSafariOutput = Date.distantPast
     private var lastRemoteMetadata = Date.distantPast
     private var remoteRequestInFlight = false
+    private var safariAudibleSince: Date?
+    private var recognitionInFlight = false
+    private var lastRecognitionAttempt = Date.distantPast
 
     init(media: MediaService) { self.media = media }
 
@@ -599,7 +628,12 @@ private final class SystemAudioMediaFallback {
         guard self.enabled != enabled else { return }
         self.enabled = enabled
         AudioSpectrumService.shared.setActive(enabled)
-        if !enabled { clearIfOwned() }
+        if !enabled {
+            AudioSpectrumService.shared.cancelRecognition()
+            recognitionInFlight = false
+            safariAudibleSince = nil
+            clearIfOwned()
+        }
     }
 
     func refresh() {
@@ -625,7 +659,13 @@ private final class SystemAudioMediaFallback {
         let audioSnapshot = AudioSpectrumService.shared.snapshot()
         let pcmAudible = isPCMAudible(audioSnapshot, safariHint: safariRunning || safariOutputActive)
         let audibleNow = safariOutputActive || pcmAudible
+        let safariLikely = safariOutputActive || (safariRunning && pcmAudible)
         if audibleNow { lastHeard = now }
+        if safariLikely && audibleNow {
+            if safariAudibleSince == nil { safariAudibleSince = now }
+        } else if now.timeIntervalSince(lastHeard) > 4.5 {
+            safariAudibleSince = nil
+        }
 
         // If a stale paused rich provider is still attached, release it as soon as real system
         // output is observed. This is the main failure mode when Safari plays while Music/Spotify
@@ -655,6 +695,7 @@ private final class SystemAudioMediaFallback {
                 media.error = nil
                 ownsFallback = true
             }
+            requestRecognitionIfNeeded(media: media, safariLikely: safariLikely, audibleNow: audibleNow, now: now)
             return
         }
 
@@ -669,6 +710,9 @@ private final class SystemAudioMediaFallback {
 
     func stop() {
         enabled = false
+        AudioSpectrumService.shared.cancelRecognition()
+        recognitionInFlight = false
+        safariAudibleSince = nil
         AudioSpectrumService.shared.setActive(false)
         clearIfOwned()
     }
@@ -682,23 +726,81 @@ private final class SystemAudioMediaFallback {
                 self.remoteRequestInFlight = false
                 guard self.enabled, let media = self.media, media.connectedApp == nil, let snapshot else { return }
 
-                self.lastRemoteMetadata = Date()
-                self.ownsFallback = true
-                media.title = snapshot.title
-                if !snapshot.artist.isEmpty {
-                    media.artist = snapshot.artist
-                } else if !snapshot.album.isEmpty {
-                    media.artist = snapshot.album
-                } else {
-                    media.artist = "System Audio"
-                }
                 let audioSnapshot = AudioSpectrumService.shared.snapshot()
                 let safariRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").isEmpty
-                let audibleNow = self.isPCMAudible(audioSnapshot, safariHint: safariRunning)
-                media.isPlaying = snapshot.playing || audibleNow
-                media.error = nil
+                let safariOutput: Bool
+                if #available(macOS 14.2, *) { safariOutput = SafariAudioProcessDetector.isProducingOutput() }
+                else { safariOutput = false }
+                let pcmAudible = self.isPCMAudible(audioSnapshot, safariHint: safariRunning || safariOutput)
+                let safariLikely = safariOutput || (safariRunning && pcmAudible)
+                let audibleNow = safariOutput || pcmAudible
+
+                // A paused MediaRemote entry is often stale Music/Spotify metadata. If Safari is
+                // demonstrably making sound, do not paint that stale track over Safari; Shazam gets
+                // a chance to resolve the audible track instead.
+                guard snapshot.playing || !safariLikely else {
+                    media.isPlaying = audibleNow
+                    return
+                }
+
+                self.lastRemoteMetadata = Date()
+                self.ownsFallback = true
+                let displayArtist = !snapshot.artist.isEmpty ? snapshot.artist : (!snapshot.album.isEmpty ? snapshot.album : "System Audio")
+                let sourceKey = [snapshot.title, snapshot.artist, snapshot.album]
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                    .joined(separator: "|")
+                media.acceptExternalMedia(title: snapshot.title,
+                                          artist: displayArtist,
+                                          album: snapshot.album,
+                                          duration: snapshot.duration,
+                                          position: snapshot.elapsed,
+                                          playing: snapshot.playing || audibleNow,
+                                          artworkData: snapshot.artworkData,
+                                          artworkURL: snapshot.artworkURL,
+                                          sourceKey: sourceKey)
             }
         }
+    }
+
+    private func requestRecognitionIfNeeded(media: MediaService, safariLikely: Bool, audibleNow: Bool, now: Date) {
+        guard safariLikely, audibleNow, !recognitionInFlight,
+              let since = safariAudibleSince, now.timeIntervalSince(since) >= 2.4,
+              now.timeIntervalSince(lastRecognitionAttempt) >= 15 else { return }
+
+        let generic = isGenericExternalMetadata(title: media.title, artist: media.artist)
+        guard generic || media.artworkImage == nil else { return }
+
+        recognitionInFlight = true
+        lastRecognitionAttempt = now
+        AudioSpectrumService.shared.recognizeCurrentAudio(timeout: 8) { [weak self] match in
+            Task { @MainActor in
+                guard let self else { return }
+                self.recognitionInFlight = false
+                guard self.enabled, let media = self.media, let match else { return }
+
+                let keepExistingMetadata = !self.isGenericExternalMetadata(title: media.title, artist: media.artist)
+                let title = keepExistingMetadata ? media.title : match.title
+                let artist = keepExistingMetadata ? media.artist : match.artist
+                let sourceKey = [title, artist, media.album]
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                    .joined(separator: "|")
+                media.acceptExternalMedia(title: title,
+                                          artist: artist,
+                                          album: media.album,
+                                          duration: media.duration > 0 ? media.duration : nil,
+                                          position: media.position >= 0 ? media.position : nil,
+                                          playing: media.isPlaying,
+                                          artworkURL: match.artworkURL?.absoluteString,
+                                          sourceKey: sourceKey)
+            }
+        }
+    }
+
+    private func isGenericExternalMetadata(title: String, artist: String) -> Bool {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let artist = artist.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return title.isEmpty || title == "system audio" || title == "safari audio" || title == "connect a player" ||
+            artist.isEmpty || artist == "system audio" || artist == "playing from safari" || artist == "playing from your mac"
     }
 
     private func isPCMAudible(_ snapshot: AudioSpectrumSnapshot, safariHint: Bool) -> Bool {

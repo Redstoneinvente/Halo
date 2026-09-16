@@ -4144,8 +4144,8 @@ private struct ContextMusicView: View {
     private var artworkKey: String {
         "\(media.connectedApp ?? "")|\(media.title)|\(media.artist)|\(options.resolvedForegroundArtwork.rawValue)|\(options.usesArtworkBackground)"
     }
-    private var playbackKey: String { "\(media.connectedApp ?? "")|\(media.title)|\(media.artist)|\(media.isPlaying)" }
-    private var lyricKey: String { playbackKey + "|lyrics|\(options.showsLyrics)|\(options.usesOnlineLyrics)" }
+    private var playbackKey: String { "\(media.connectedApp ?? "")|\(media.title)|\(media.artist)|\(media.isPlaying)|\(Int(media.duration.rounded()))" }
+    private var lyricKey: String { playbackKey + "|lyrics|\(media.album)|\(options.showsLyrics)|\(options.usesOnlineLyrics)" }
     private var sizingKey: String {
         [options.resolvedLayoutMode.rawValue, options.resolvedForegroundArtwork.rawValue,
          String(options.artworkSize), String(options.showTitle), String(options.showArtist), String(options.showControls),
@@ -4155,6 +4155,7 @@ private struct ContextMusicView: View {
          String(options.resolvedHorizontalMargin), String(options.resolvedTopMargin), String(options.resolvedBottomMargin),
          String(usesFullNotchArea), String(keepsClosedNotchContents)].joined(separator: "|")
     }
+    private var activeArtwork: NSImage? { media.artworkImage ?? artwork }
     private var songColors: [Color] { media.artworkColors.map(\.color) }
     private var baseTextColor: Color { options.textColor.color }
     private var primarySongColor: Color { songColors.first ?? baseTextColor }
@@ -4308,8 +4309,8 @@ private struct ContextMusicView: View {
                     .opacity(min(0.62, max(0.12, options.backgroundOpacity * 0.82)))
                     .blendMode(.plusLighter)
             }
-            if options.usesArtworkBackground, let artwork {
-                Image(nsImage: artwork)
+            if options.usesArtworkBackground, let activeArtwork {
+                Image(nsImage: activeArtwork)
                     .resizable()
                     .scaledToFill()
                     .frame(width: size.width, height: size.height)
@@ -4390,7 +4391,7 @@ private struct ContextMusicView: View {
                 EmptyView()
             case .cover:
                 Group {
-                    if let artwork { Image(nsImage: artwork).resizable().scaledToFill() }
+                    if let activeArtwork { Image(nsImage: activeArtwork).resizable().scaledToFill() }
                     else { artworkPlaceholder }
                 }
                 .frame(width: size, height: size)
@@ -4404,7 +4405,7 @@ private struct ContextMusicView: View {
     }
 
     private func vinylArtwork(size: Double) -> some View {
-        VinylRecordView(artwork: artwork,
+        VinylRecordView(artwork: activeArtwork,
                         size: size,
                         palette: media.artworkColors,
                         playing: media.isPlaying,
@@ -4562,11 +4563,25 @@ private struct ContextMusicView: View {
     }
 
     private func playbackLoop() async {
-        playbackPosition = 0; playbackDuration = 0
+        playbackPosition = media.position
+        playbackDuration = media.duration
         while !Task.isCancelled {
-            if !isScrubbing, let sample = await MediaAssetReader.playbackTime(app: media.connectedApp) {
-                playbackPosition = sample.position
-                playbackDuration = sample.duration
+            if !isScrubbing {
+                if let sample = await MediaAssetReader.playbackTime(app: media.connectedApp) {
+                    playbackPosition = sample.position
+                    playbackDuration = sample.duration
+                } else if media.duration > 0 {
+                    playbackDuration = media.duration
+                    // MediaRemote updates roughly on Halo's normal poll. Interpolate between those
+                    // samples so synced Safari lyrics remain fluid rather than stepping every 2 s.
+                    if abs(media.position - playbackPosition) > 1.35 {
+                        playbackPosition = media.position
+                    } else if media.isPlaying {
+                        playbackPosition = min(playbackDuration, playbackPosition + 0.5)
+                    } else {
+                        playbackPosition = min(playbackDuration, max(0, media.position))
+                    }
+                }
             }
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
@@ -4583,8 +4598,11 @@ private struct ContextMusicView: View {
         if playbackDuration <= 0, let initial {
             playbackPosition = initial.position
             playbackDuration = initial.duration
+        } else if playbackDuration <= 0, media.duration > 0 {
+            playbackPosition = media.position
+            playbackDuration = media.duration
         }
-        let duration = playbackDuration > 0 ? playbackDuration : initial?.duration
+        let duration = playbackDuration > 0 ? playbackDuration : (initial?.duration ?? (media.duration > 0 ? media.duration : nil))
         let loaded = await MediaAssetReader.lyrics(app: media.connectedApp,
                                                    key: sharedKey,
                                                    title: media.title,
