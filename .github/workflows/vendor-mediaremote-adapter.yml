@@ -54,8 +54,8 @@ jobs:
             -install_name @rpath/libHaloMediaRemoteBridge.dylib \
             -o /tmp/libHaloMediaRemoteBridge.dylib
           test -s /tmp/libHaloMediaRemoteBridge.dylib
-          nm -gU /tmp/libHaloMediaRemoteBridge.dylib | grep -q 'bootstrap'
-          nm -gU /tmp/libHaloMediaRemoteBridge.dylib | grep -q ' get$'
+          nm -gU /tmp/libHaloMediaRemoteBridge.dylib | grep -q '_bootstrap$'
+          nm -gU /tmp/libHaloMediaRemoteBridge.dylib | grep -q '_get$'
 
       - name: Resolve remaining Swift packages cleanly
         run: |
