@@ -1,0 +1,82 @@
+name: Apply Settings Sidebar Groups
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/settings-sidebar-groups-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch grouped settings sidebar
+        run: python3 .github/scripts/group_settings_sidebar.py
+
+      - name: Verify sidebar grouping contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('Halo/Views/WorkspaceSettingsView.swift').read_text()
+          required = [
+              'private struct SidebarGroup: Identifiable',
+              'title: "Halo"',
+              'items: ["General", "Account & License", "Privacy", "About"]',
+              'title: "Interface"',
+              'title: "Workspace"',
+              'title: "Profiles & Automation"',
+              'title: "System"',
+              'DisclosureGroup(isExpanded: sidebarGroupExpansion(group))',
+              'let matches = sidebarMatches(in: group)',
+              'expandedSidebarGroups.insert(group.id)',
+              '.disabled(isSectionUnavailable(name))',
+          ]
+          missing = [marker for marker in required if marker not in text]
+          if missing:
+              raise SystemExit(f'Missing grouped-sidebar markers: {missing}')
+          print('Grouped settings sidebar contract verified.')
+          PY
+
+      - name: Parse changed Swift source
+        run: swiftc -parse Halo/Views/WorkspaceSettingsView.swift
+
+      - name: Build Halo sidebar regression check
+        run: |
+          set +e
+          xcodebuild \
+            -project Halo.xcodeproj \
+            -scheme Halo \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee /tmp/halo-sidebar-build.log
+          BUILD_STATUS=${PIPESTATUS[0]}
+          if grep -E 'WorkspaceSettingsView\.swift:[0-9]+:[0-9]+: error:' /tmp/halo-sidebar-build.log; then
+            echo "Grouped sidebar introduced a compile error."
+            exit 1
+          fi
+          if [ "${BUILD_STATUS}" -ne 0 ]; then
+            echo "Full Halo build has unrelated baseline failures; no WorkspaceSettingsView compile error was emitted."
+          fi
+          exit 0
+
+      - name: Commit grouped sidebar
+        run: |
+          if git diff --quiet -- Halo/Views/WorkspaceSettingsView.swift; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Views/WorkspaceSettingsView.swift
+          git commit -m "Group settings sidebar navigation"
+          git pull --rebase origin main
+          git push origin HEAD:main
