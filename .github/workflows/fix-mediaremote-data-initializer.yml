@@ -1,0 +1,69 @@
+name: Fix MediaRemote Data Initializer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/mediaremote-data-fix-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply compatibility patch
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/fix_mediaremote_data_initializer.py
+
+      - name: Verify source contract
+        run: |
+          set -euo pipefail
+          grep -Fq 'payload.artworkDataBase64.flatMap { Foundation.Data(base64Encoded: $0) }' Halo/Core/WorkspaceStore.swift
+          ! grep -Fq 'flatMap(Data.init(base64Encoded:))' Halo/Core/WorkspaceStore.swift
+          grep -Fq 'Foundation.Data(base64Encoded: base64String)' Halo/Core/WorkspaceStore.swift
+          grep -Fq 'private var dataBuffer = Foundation.Data()' Halo/Core/WorkspaceStore.swift
+          grep -Fq '((Error, Foundation.Data) -> Void)?' Halo/Core/WorkspaceStore.swift
+
+      - name: Parse patched Swift
+        run: |
+          set -euo pipefail
+          xcrun swiftc -parse Halo/Core/WorkspaceStore.swift
+          xcrun swiftc -parse Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/TrackInfo.swift
+          xcrun swiftc -parse Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift
+
+      - name: Build Halo
+        run: |
+          set -euo pipefail
+          rm -rf ~/Library/Developer/Xcode/DerivedData/Halo-* || true
+          xcodebuild \
+            -project Halo.xcodeproj \
+            -scheme Halo \
+            -configuration Debug \
+            -sdk macosx \
+            -arch arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Commit fix
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Core/WorkspaceStore.swift \
+                  Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/TrackInfo.swift \
+                  Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/MediaController.swift
+          if git diff --cached --quiet; then
+            echo 'MediaRemote Data compatibility fix is already committed.'
+            exit 0
+          fi
+          git commit -m 'Fix MediaRemote Data initializer compatibility'
+          git pull --rebase origin main
+          git push origin main
