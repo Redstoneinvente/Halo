@@ -1,2 +1,2 @@
 Apply Visual Workspace settings navigation ownership update.
-Rerun with guarded locked-row selection, macOS 13 compatibility, and responsive embedded editor layout.
+Rerun with guarded locked-row selection, macOS 13 compatibility, responsive embedded editor layout, and resize-overlap protection.
