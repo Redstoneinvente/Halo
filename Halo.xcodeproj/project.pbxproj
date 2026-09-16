@@ -46,7 +46,6 @@
 		A11C0F1A0000000000000321 /* Views/ActivationSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */; };
 		A11C0F1A0000000000000351 /* Services/SparkleUpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000352 /* Services/SparkleUpdateController.swift */; };
 		A11C0F1A0000000000000353 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000354 /* Sparkle */; };
-		A11C0F1A0000000000000380 /* MediaRemoteAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000381 /* MediaRemoteAdapter */; };
 		F84A0A87305545C500E8B51E /* dog.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A85305545C500E8B51E /* dog.png */; };
 		F84A0A88305545C500E8B51E /* fox.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A86305545C500E8B51E /* fox.png */; };
 		F84A0A89305545C500E8B51E /* cat.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A84305545C500E8B51E /* cat.png */; };
@@ -157,7 +156,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				A11C0F1A0000000000000353 /* Sparkle in Frameworks */,
-				A11C0F1A0000000000000380 /* MediaRemoteAdapter in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -337,6 +335,7 @@
 				000000000000000000000007 /* Sources */,
 				000000000000000000000008 /* Frameworks */,
 				000000000000000000000009 /* Resources */,
+				A11C0F1A0000000000000394 /* Build native MediaRemote bridge */,
 			);
 			buildRules = (
 			);
@@ -345,7 +344,6 @@
 			name = Halo;
 			packageProductDependencies = (
 				A11C0F1A0000000000000354 /* Sparkle */,
-				A11C0F1A0000000000000381 /* MediaRemoteAdapter */,
 			);
 			productName = Halo;
 			productReference = 000000000000000000000006 /* Halo.app */;
@@ -386,7 +384,6 @@
 			mainGroup = 000000000000000000000002;
 			packageReferences = (
 				A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */,
-				A11C0F1A0000000000000382 /* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" */,
 			);
 			productRefGroup = 000000000000000000000004 /* Products */;
 			projectDirPath = "";
@@ -425,6 +422,33 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A11C0F1A0000000000000394 /* Build native MediaRemote bridge */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/MediaRemote.m",
+				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/MediaRemoteAdapter.m",
+				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/MediaRemoteAdapterKeys.m",
+				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/include/MediaRemote.h",
+				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/include/MediaRemoteAdapter.h",
+				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote/include/MediaRemoteAdapterKeys.h",
+				"$(SRCROOT)/Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/Resources/run.pl",
+			);
+			name = "Build native MediaRemote bridge";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/libHaloMediaRemoteBridge.dylib",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/run.pl",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nSRC=\"$SRCROOT/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote\"\nINC=\"$SRC/include\"\nFRAMEWORKS=\"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\nRESOURCES=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH\"\nOUT=\"$FRAMEWORKS/libHaloMediaRemoteBridge.dylib\"\nmkdir -p \"$FRAMEWORKS\" \"$RESOURCES\" \"$DERIVED_FILE_DIR/HaloMediaRemoteBridge\"\nBUILT=\"\"\nfor ARCH in $ARCHS; do\n  PART=\"$DERIVED_FILE_DIR/HaloMediaRemoteBridge/libHaloMediaRemoteBridge-$ARCH.dylib\"\n  \"${CC:-/usr/bin/clang}\" -arch \"$ARCH\" -isysroot \"$SDKROOT\" -mmacosx-version-min=\"$MACOSX_DEPLOYMENT_TARGET\" -dynamiclib -fobjc-arc -fblocks -I\"$INC\" \"$SRC/MediaRemote.m\" \"$SRC/MediaRemoteAdapter.m\" \"$SRC/MediaRemoteAdapterKeys.m\" -framework Foundation -framework AppKit -install_name @rpath/libHaloMediaRemoteBridge.dylib -o \"$PART\"\n  BUILT=\"$BUILT $PART\"\ndone\nset -- $BUILT\nif [ \"$#\" -gt 1 ]; then /usr/bin/lipo -create \"$@\" -output \"$OUT\"; else /bin/cp \"$1\" \"$OUT\"; fi\n/bin/cp \"$SRCROOT/Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/Resources/run.pl\" \"$RESOURCES/run.pl\"\n/bin/chmod 755 \"$RESOURCES/run.pl\"\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ]; then\n  IDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:-}\"\n  if [ -n \"$IDENTITY\" ]; then /usr/bin/codesign --force --sign \"$IDENTITY\" --timestamp=none \"$OUT\"; else /usr/bin/codesign --force --sign - --timestamp=none \"$OUT\"; fi\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		000000000000000000000007 /* Sources */ = {
@@ -643,23 +667,12 @@
 		};
 /* End XCRemoteSwiftPackageReference section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		A11C0F1A0000000000000382 /* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Vendor/MediaRemoteAdapter;
-		};
-/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		A11C0F1A0000000000000354 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
-		};
-		A11C0F1A0000000000000381 /* MediaRemoteAdapter */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A11C0F1A0000000000000382 /* XCLocalSwiftPackageReference "Vendor/MediaRemoteAdapter" */;
-			productName = MediaRemoteAdapter;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

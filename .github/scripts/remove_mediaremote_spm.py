@@ -43,7 +43,7 @@ else:
     s = s.replace(old_script, new_script, 1)
 
 old_library_start = s.find('    private var libraryPath: String? {')
-old_library_end = s.find('\n    private var arguments: [String] {', old_library_start)
+old_library_end = s.find('\n    @discardableResult', old_library_start)
 if old_library_start < 0 or old_library_end < 0:
     raise SystemExit('MediaController libraryPath block not found')
 new_library = '''    private var libraryPath: String? {
