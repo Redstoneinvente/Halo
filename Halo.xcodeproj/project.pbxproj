@@ -46,6 +46,7 @@
 		A11C0F1A0000000000000321 /* Views/ActivationSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */; };
 		A11C0F1A0000000000000351 /* Services/SparkleUpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000352 /* Services/SparkleUpdateController.swift */; };
 		A11C0F1A0000000000000353 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000354 /* Sparkle */; };
+		A11C0F1A0000000000000380 /* MediaRemoteAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000381 /* MediaRemoteAdapter */; };
 		F84A0A87305545C500E8B51E /* dog.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A85305545C500E8B51E /* dog.png */; };
 		F84A0A88305545C500E8B51E /* fox.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A86305545C500E8B51E /* fox.png */; };
 		F84A0A89305545C500E8B51E /* cat.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A84305545C500E8B51E /* cat.png */; };
@@ -156,6 +157,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A11C0F1A0000000000000353 /* Sparkle in Frameworks */,
+				A11C0F1A0000000000000380 /* MediaRemoteAdapter in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -343,6 +345,7 @@
 			name = Halo;
 			packageProductDependencies = (
 				A11C0F1A0000000000000354 /* Sparkle */,
+				A11C0F1A0000000000000381 /* MediaRemoteAdapter */,
 			);
 			productName = Halo;
 			productReference = 000000000000000000000006 /* Halo.app */;
@@ -383,6 +386,7 @@
 			mainGroup = 000000000000000000000002;
 			packageReferences = (
 				A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				A11C0F1A0000000000000382 /* XCRemoteSwiftPackageReference "mediaremote-adapter" */,
 			);
 			productRefGroup = 000000000000000000000004 /* Products */;
 			projectDirPath = "";
@@ -637,6 +641,14 @@
 				version = 2.9.6;
 			};
 		};
+		A11C0F1A0000000000000382 /* XCRemoteSwiftPackageReference "mediaremote-adapter" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ejbills/mediaremote-adapter.git";
+			requirement = {
+				kind = revision;
+				revision = 5b6afde3f501a3da567e23bf7f23d562938a1809;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -644,6 +656,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		A11C0F1A0000000000000381 /* MediaRemoteAdapter */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A11C0F1A0000000000000382 /* XCRemoteSwiftPackageReference "mediaremote-adapter" */;
+			productName = MediaRemoteAdapter;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

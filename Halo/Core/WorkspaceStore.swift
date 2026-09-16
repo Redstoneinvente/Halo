@@ -3,6 +3,7 @@ import Combine
 import UserNotifications
 import CoreAudio
 import Darwin
+import MediaRemoteAdapter
 
 @MainActor
 final class WorkspaceStore: ObservableObject, LiveActivityProvider {
@@ -527,39 +528,130 @@ private struct MediaRemoteNowPlayingSnapshot {
     let elapsed: Double?
     let artworkData: Data?
     let artworkURL: String?
+    let bundleIdentifier: String?
+    let applicationName: String?
 }
 
+/// Reads the actual macOS Now Playing session through MediaRemoteAdapter. Since macOS 15.4,
+/// direct MediaRemote calls from normal third-party processes can be denied by mediaremoted;
+/// the adapter runs the private framework inside Apple's entitled /usr/bin/perl process and
+/// streams the same metadata Control Center sees, including Safari/WebKit title and artwork.
+@MainActor
 private final class MediaRemoteNowPlayingReader {
     static let shared = MediaRemoteNowPlayingReader()
 
     private typealias InfoCallback = @convention(block) (CFDictionary?) -> Void
     private typealias GetInfoFunction = @convention(c) (DispatchQueue, InfoCallback) -> Void
 
-    private let handle: UnsafeMutableRawPointer?
-    private let getInfo: GetInfoFunction?
+    private let controller = MediaController()
+    private var cached: MediaRemoteNowPlayingSnapshot?
+    private var cachedAt = Date.distantPast
+    private var oneShotInFlight = false
+    private var pending: [((MediaRemoteNowPlayingSnapshot?) -> Void)] = []
+
+    // Legacy direct reader remains only as a fallback for older systems or adapter failures.
+    private let legacyHandle: UnsafeMutableRawPointer?
+    private let legacyGetInfo: GetInfoFunction?
 
     private init() {
-        handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW)
+        let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW)
+        legacyHandle = handle
         if let handle, let symbol = dlsym(handle, "MRMediaRemoteGetNowPlayingInfo") {
-            getInfo = unsafeBitCast(symbol, to: GetInfoFunction.self)
+            legacyGetInfo = unsafeBitCast(symbol, to: GetInfoFunction.self)
         } else {
-            getInfo = nil
+            legacyGetInfo = nil
         }
+
+        controller.onTrackInfoReceived = { [weak self] info in
+            guard let self else { return }
+            if let snapshot = self.snapshot(from: info) {
+                self.cached = snapshot
+                self.cachedAt = Date()
+            } else {
+                self.cached = nil
+                self.cachedAt = .distantPast
+            }
+        }
+        controller.onListenerTerminated = { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
+                self?.controller.startListening()
+            }
+        }
+        controller.startListening()
     }
 
     deinit {
-        if let handle { dlclose(handle) }
+        controller.stopListening()
+        if let legacyHandle { dlclose(legacyHandle) }
     }
 
     func fetch(_ completion: @escaping (MediaRemoteNowPlayingSnapshot?) -> Void) {
-        guard let getInfo else { completion(nil); return }
+        // The streaming adapter is the authoritative source. Reuse its latest event so Halo does
+        // not spawn a helper process on every media poll.
+        if let cached, Date().timeIntervalSince(cachedAt) < 15 {
+            completion(cached)
+            return
+        }
+
+        pending.append(completion)
+        guard !oneShotInFlight else { return }
+        oneShotInFlight = true
+        controller.getTrackInfo { [weak self] info in
+            guard let self else { return }
+            self.oneShotInFlight = false
+            let callbacks = self.pending
+            self.pending.removeAll()
+
+            if let snapshot = self.snapshot(from: info) {
+                self.cached = snapshot
+                self.cachedAt = Date()
+                callbacks.forEach { $0(snapshot) }
+            } else {
+                self.fetchLegacy { snapshot in
+                    callbacks.forEach { $0(snapshot) }
+                }
+            }
+        }
+    }
+
+    private func snapshot(from info: TrackInfo?) -> MediaRemoteNowPlayingSnapshot? {
+        guard let payload = info?.payload,
+              let rawTitle = payload.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawTitle.isEmpty else { return nil }
+
+        let artworkData = payload.artworkDataBase64.flatMap(Data.init(base64Encoded:))
+        let duration = payload.durationMicros.flatMap { value -> Double? in
+            let seconds = value / 1_000_000
+            return seconds.isFinite && seconds > 0 ? seconds : nil
+        }
+        let rawElapsed = payload.currentElapsedTime ?? payload.elapsedTimeMicros.map { $0 / 1_000_000 }
+        let elapsed = rawElapsed.flatMap { value in value.isFinite && value >= 0 ? value : nil }
+        let playing = payload.isPlaying ?? ((payload.playbackRate ?? 0) > 0.001)
+
+        return MediaRemoteNowPlayingSnapshot(
+            title: rawTitle,
+            artist: payload.artist?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            album: payload.album?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            playing: playing,
+            duration: duration,
+            elapsed: elapsed,
+            artworkData: artworkData,
+            artworkURL: nil,
+            bundleIdentifier: payload.bundleIdentifier,
+            applicationName: payload.applicationName
+        )
+    }
+
+    private func fetchLegacy(_ completion: @escaping (MediaRemoteNowPlayingSnapshot?) -> Void) {
+        guard let legacyGetInfo else { completion(nil); return }
         let callback: InfoCallback = { dictionary in
             guard let dictionary else { completion(nil); return }
             let info = dictionary as NSDictionary
 
             func firstString(_ keys: [String]) -> String? {
                 for key in keys {
-                    if let value = info[key] as? String, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return value }
+                    if let value = info[key] as? String,
+                       !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return value }
                 }
                 return nil
             }
@@ -603,9 +695,10 @@ private final class MediaRemoteNowPlayingReader {
             completion(MediaRemoteNowPlayingSnapshot(title: title, artist: artist, album: album,
                                                      playing: (rate ?? 0) > 0.001,
                                                      duration: duration, elapsed: elapsed,
-                                                     artworkData: artworkData, artworkURL: artworkURL))
+                                                     artworkData: artworkData, artworkURL: artworkURL,
+                                                     bundleIdentifier: nil, applicationName: nil))
         }
-        getInfo(DispatchQueue.global(qos: .utility), callback)
+        legacyGetInfo(DispatchQueue.global(qos: .utility), callback)
     }
 }
 
@@ -735,18 +828,23 @@ private final class SystemAudioMediaFallback {
                 let safariLikely = safariOutput || (safariRunning && pcmAudible)
                 let audibleNow = safariOutput || pcmAudible
 
-                // A paused MediaRemote entry is often stale Music/Spotify metadata. If Safari is
-                // demonstrably making sound, do not paint that stale track over Safari; Shazam gets
-                // a chance to resolve the audible track instead.
-                guard snapshot.playing || !safariLikely else {
+                let sourceBundle = snapshot.bundleIdentifier?.lowercased() ?? ""
+                let sourceName = snapshot.applicationName?.lowercased() ?? ""
+                let snapshotIsSafari = sourceBundle == "com.apple.safari" || sourceBundle.contains("webkit") || sourceName.contains("safari")
+
+                // The adapter tells us which app actually owns Now Playing. Only reject a paused
+                // non-Safari item when Safari is demonstrably making sound; this prevents stale
+                // Music/Spotify metadata from covering a live browser session.
+                guard snapshot.playing || !safariLikely || snapshotIsSafari else {
                     media.isPlaying = audibleNow
                     return
                 }
 
                 self.lastRemoteMetadata = Date()
                 self.ownsFallback = true
-                let displayArtist = !snapshot.artist.isEmpty ? snapshot.artist : (!snapshot.album.isEmpty ? snapshot.album : "System Audio")
-                let sourceKey = [snapshot.title, snapshot.artist, snapshot.album]
+                let fallbackArtist = snapshotIsSafari ? "Playing from Safari" : (snapshot.applicationName ?? "System Audio")
+                let displayArtist = !snapshot.artist.isEmpty ? snapshot.artist : (!snapshot.album.isEmpty ? snapshot.album : fallbackArtist)
+                let sourceKey = [snapshot.bundleIdentifier ?? "", snapshot.title, snapshot.artist, snapshot.album]
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
                     .joined(separator: "|")
                 media.acceptExternalMedia(title: snapshot.title,
