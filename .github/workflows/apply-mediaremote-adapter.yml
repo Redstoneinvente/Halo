@@ -1,0 +1,74 @@
+name: Apply Reliable MediaRemote Adapter
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/mediaremote-adapter-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply MediaRemote adapter patch
+        run: python3 .github/scripts/apply_mediaremote_adapter.py
+
+      - name: Verify adapter contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          store = Path('Halo/Core/WorkspaceStore.swift').read_text()
+          pbx = Path('Halo.xcodeproj/project.pbxproj').read_text()
+          checks = {
+              'package import': 'import MediaRemoteAdapter' in store,
+              'streaming controller': 'private let controller = MediaController()' in store,
+              'artwork bytes': 'artworkDataBase64.flatMap' in store,
+              'browser owner': 'snapshotIsSafari' in store,
+              'legacy fallback': 'legacyGetInfo' in store,
+              'package product': 'MediaRemoteAdapter in Frameworks' in pbx,
+              'pinned adapter': '5b6afde3f501a3da567e23bf7f23d562938a1809' in pbx,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('contract failed: ' + ', '.join(failed))
+          print('adapter contract passed')
+          PY
+
+      - name: Resolve Swift packages
+        run: xcodebuild -resolvePackageDependencies -project Halo.xcodeproj -scheme Halo
+
+      - name: Build Halo MediaRemote regression check
+        run: |
+          set -o pipefail
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build | tee /tmp/halo-mediaremote-build.log
+
+      - name: Verify dynamic adapter is embedded in build
+        run: |
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -path '*/Build/Products/Debug/Halo.app' -print -quit)
+          test -n "$APP"
+          test -d "$APP/Contents/Frameworks/MediaRemoteAdapter.framework"
+          test -f "$APP/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A/Resources/MediaRemoteAdapter_MediaRemoteAdapter.bundle/run.pl" || \
+          find "$APP/Contents/Frameworks/MediaRemoteAdapter.framework" -name run.pl -print -quit | grep -q .
+          echo "MediaRemoteAdapter and run.pl embedded in Halo.app"
+
+      - name: Commit reliable Now Playing integration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Core/WorkspaceStore.swift Halo.xcodeproj/project.pbxproj
+          if [ -f Halo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved ]; then
+            git add Halo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          fi
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit'
+            exit 0
+          fi
+          git commit -m 'Use reliable system Now Playing metadata'
+          git push origin main
