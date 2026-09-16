@@ -529,6 +529,16 @@ private struct MediaRemoteNowPlayingSnapshot {
     let artworkURL: String?
     let bundleIdentifier: String?
     let applicationName: String?
+    let playbackRate: Double
+    let sampledAt: Date
+
+    var currentElapsed: Double? {
+        guard let elapsed else { return nil }
+        guard playing, playbackRate > 0 else { return elapsed }
+        let advanced = elapsed + max(0, Date().timeIntervalSince(sampledAt)) * playbackRate
+        if let duration, duration > 0 { return min(duration, advanced) }
+        return advanced
+    }
 }
 
 /// Reads the actual macOS Now Playing session through MediaRemoteAdapter. Since macOS 15.4,
@@ -547,6 +557,9 @@ private final class MediaRemoteNowPlayingReader {
     private var cachedAt = Date.distantPast
     private var oneShotInFlight = false
     private var pending: [((MediaRemoteNowPlayingSnapshot?) -> Void)] = []
+    private var artworkEnrichmentInFlight = false
+    private var lastArtworkEnrichmentKey = ""
+    private var lastArtworkEnrichmentAt = Date.distantPast
 
     // Legacy direct reader remains only as a fallback for older systems or adapter failures.
     private let legacyHandle: UnsafeMutableRawPointer?
@@ -564,8 +577,10 @@ private final class MediaRemoteNowPlayingReader {
         controller.onTrackInfoReceived = { [weak self] info in
             guard let self else { return }
             if let snapshot = self.snapshot(from: info) {
-                self.cached = snapshot
+                let merged = self.mergingArtwork(into: snapshot, from: self.cached)
+                self.cached = merged
                 self.cachedAt = Date()
+                self.enrichArtworkIfNeeded(merged)
             } else {
                 self.cached = nil
                 self.cachedAt = .distantPast
@@ -588,6 +603,7 @@ private final class MediaRemoteNowPlayingReader {
         // The streaming adapter is the authoritative source. Reuse its latest event so Halo does
         // not spawn a helper process on every media poll.
         if let cached, Date().timeIntervalSince(cachedAt) < 15 {
+            enrichArtworkIfNeeded(cached)
             completion(cached)
             return
         }
@@ -602,9 +618,11 @@ private final class MediaRemoteNowPlayingReader {
             self.pending.removeAll()
 
             if let snapshot = self.snapshot(from: info) {
-                self.cached = snapshot
+                let merged = self.mergingArtwork(into: snapshot, from: self.cached)
+                self.cached = merged
                 self.cachedAt = Date()
-                callbacks.forEach { $0(snapshot) }
+                self.enrichArtworkIfNeeded(merged)
+                callbacks.forEach { $0(merged) }
             } else {
                 self.fetchLegacy { snapshot in
                     callbacks.forEach { $0(snapshot) }
@@ -625,7 +643,9 @@ private final class MediaRemoteNowPlayingReader {
         }
         let rawElapsed = payload.currentElapsedTime ?? payload.elapsedTimeMicros.map { $0 / 1_000_000 }
         let elapsed = rawElapsed.flatMap { value in value.isFinite && value >= 0 ? value : nil }
-        let playing = payload.isPlaying ?? ((payload.playbackRate ?? 0) > 0.001)
+        let rawRate = payload.playbackRate
+        let playing = payload.isPlaying ?? ((rawRate ?? 0) > 0.001)
+        let playbackRate = rawRate.flatMap { $0.isFinite ? max(0, $0) : nil } ?? (playing ? 1.0 : 0.0)
 
         return MediaRemoteNowPlayingSnapshot(
             title: rawTitle,
@@ -637,8 +657,60 @@ private final class MediaRemoteNowPlayingReader {
             artworkData: artworkData,
             artworkURL: nil,
             bundleIdentifier: payload.bundleIdentifier,
-            applicationName: payload.applicationName
+            applicationName: payload.applicationName,
+            playbackRate: playbackRate,
+            sampledAt: Date()
         )
+    }
+
+    private func normalizedTrackIdentity(_ snapshot: MediaRemoteNowPlayingSnapshot) -> String {
+        [snapshot.title, snapshot.artist, snapshot.album]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .joined(separator: "|")
+    }
+
+    private func sameTrack(_ lhs: MediaRemoteNowPlayingSnapshot, _ rhs: MediaRemoteNowPlayingSnapshot) -> Bool {
+        normalizedTrackIdentity(lhs) == normalizedTrackIdentity(rhs)
+    }
+
+    private func mergingArtwork(into snapshot: MediaRemoteNowPlayingSnapshot,
+                                from fallback: MediaRemoteNowPlayingSnapshot?) -> MediaRemoteNowPlayingSnapshot {
+        guard let fallback, sameTrack(snapshot, fallback) else { return snapshot }
+        return MediaRemoteNowPlayingSnapshot(
+            title: snapshot.title,
+            artist: snapshot.artist,
+            album: snapshot.album,
+            playing: snapshot.playing,
+            duration: snapshot.duration,
+            elapsed: snapshot.elapsed,
+            artworkData: snapshot.artworkData ?? fallback.artworkData,
+            artworkURL: snapshot.artworkURL ?? fallback.artworkURL,
+            bundleIdentifier: snapshot.bundleIdentifier,
+            applicationName: snapshot.applicationName,
+            playbackRate: snapshot.playbackRate,
+            sampledAt: snapshot.sampledAt
+        )
+    }
+
+    private func enrichArtworkIfNeeded(_ snapshot: MediaRemoteNowPlayingSnapshot) {
+        guard snapshot.artworkData == nil, snapshot.artworkURL == nil, legacyGetInfo != nil else { return }
+        let key = normalizedTrackIdentity(snapshot)
+        guard !key.isEmpty else { return }
+        let now = Date()
+        if artworkEnrichmentInFlight { return }
+        if key == lastArtworkEnrichmentKey, now.timeIntervalSince(lastArtworkEnrichmentAt) < 4 { return }
+
+        artworkEnrichmentInFlight = true
+        lastArtworkEnrichmentKey = key
+        lastArtworkEnrichmentAt = now
+        fetchLegacy { [weak self] legacy in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.artworkEnrichmentInFlight = false
+                guard let legacy, let current = self.cached, self.sameTrack(current, legacy) else { return }
+                self.cached = self.mergingArtwork(into: current, from: legacy)
+            }
+        }
     }
 
     private func fetchLegacy(_ completion: @escaping (MediaRemoteNowPlayingSnapshot?) -> Void) {
@@ -688,14 +760,17 @@ private final class MediaRemoteNowPlayingReader {
             let duration = firstDouble(["kMRMediaRemoteNowPlayingInfoDuration", "duration"])
             let elapsed = firstDouble(["kMRMediaRemoteNowPlayingInfoElapsedTime", "elapsedTime"])
             let rate = firstDouble(["kMRMediaRemoteNowPlayingInfoPlaybackRate", "playbackRate"])
+            let playbackRate = rate.flatMap { $0.isFinite ? max(0, $0) : nil } ?? 0
+            let playing = playbackRate > 0.001
             let artworkData = firstData(["kMRMediaRemoteNowPlayingInfoArtworkData", "artworkData"])
             let artworkURL = firstHTTPSURL(["kMRMediaRemoteNowPlayingInfoArtworkURL", "artworkURL",
                                             "kMRMediaRemoteNowPlayingInfoArtworkIdentifier", "artworkIdentifier"])
             completion(MediaRemoteNowPlayingSnapshot(title: title, artist: artist, album: album,
-                                                     playing: (rate ?? 0) > 0.001,
+                                                     playing: playing,
                                                      duration: duration, elapsed: elapsed,
                                                      artworkData: artworkData, artworkURL: artworkURL,
-                                                     bundleIdentifier: nil, applicationName: nil))
+                                                     bundleIdentifier: nil, applicationName: nil,
+                                                     playbackRate: playbackRate, sampledAt: Date()))
         }
         legacyGetInfo(DispatchQueue.global(qos: .utility), callback)
     }
@@ -826,6 +901,13 @@ private final class SystemAudioMediaFallback {
                 let pcmAudible = self.isPCMAudible(audioSnapshot, safariHint: safariRunning || safariOutput)
                 let safariLikely = safariOutput || (safariRunning && pcmAudible)
                 let audibleNow = safariOutput || pcmAudible
+                let now = Date()
+                if safariOutput { self.lastSafariOutput = now }
+                if audibleNow || snapshot.playing { self.lastHeard = now }
+                let safariRecentlyActive = now.timeIntervalSince(self.lastSafariOutput) < 2.0
+                let releaseWindow = (safariRunning || safariRecentlyActive) ? 4.0 : 2.75
+                let withinReleaseWindow = now.timeIntervalSince(self.lastHeard) < releaseWindow
+                let shouldPresentPlaying = snapshot.playing || audibleNow || (self.ownsFallback && withinReleaseWindow)
 
                 let sourceBundle = snapshot.bundleIdentifier?.lowercased() ?? ""
                 let sourceName = snapshot.applicationName?.lowercased() ?? ""
@@ -835,11 +917,13 @@ private final class SystemAudioMediaFallback {
                 // non-Safari item when Safari is demonstrably making sound; this prevents stale
                 // Music/Spotify metadata from covering a live browser session.
                 guard snapshot.playing || !safariLikely || snapshotIsSafari else {
-                    media.isPlaying = audibleNow
+                    // Do not retract Audio CI from one detector dip. The normal refresh loop owns
+                    // the transition to stopped after its release window has genuinely expired.
+                    if shouldPresentPlaying { media.isPlaying = true }
                     return
                 }
 
-                self.lastRemoteMetadata = Date()
+                self.lastRemoteMetadata = now
                 self.ownsFallback = true
                 let fallbackArtist = snapshotIsSafari ? "Playing from Safari" : (snapshot.applicationName ?? "System Audio")
                 let displayArtist = !snapshot.artist.isEmpty ? snapshot.artist : (!snapshot.album.isEmpty ? snapshot.album : fallbackArtist)
@@ -850,8 +934,8 @@ private final class SystemAudioMediaFallback {
                                           artist: displayArtist,
                                           album: snapshot.album,
                                           duration: snapshot.duration,
-                                          position: snapshot.elapsed,
-                                          playing: snapshot.playing || audibleNow,
+                                          position: snapshot.currentElapsed,
+                                          playing: shouldPresentPlaying,
                                           artworkData: snapshot.artworkData,
                                           artworkURL: snapshot.artworkURL,
                                           sourceKey: sourceKey)
