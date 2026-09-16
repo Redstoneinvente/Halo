@@ -1141,6 +1141,7 @@ struct OpenedNotchWorkspaceEditor: View {
             GeometryReader { proxy in
                 editorLayout(availableSize: proxy.size)
             }
+            .clipped()
         }
         .onAppear { materialize(); calendarSources.refresh() }
     }
@@ -1148,12 +1149,19 @@ struct OpenedNotchWorkspaceEditor: View {
     @ViewBuilder
     private func editorLayout(availableSize: CGSize) -> some View {
         if !showsCloseButton && availableSize.width < 900 {
-            VSplitView {
+            let desiredCanvasHeight = min(420, max(180, availableSize.height * 0.55))
+            let canvasHeight = min(desiredCanvasHeight, max(120, availableSize.height - 140))
+            VStack(spacing: 0) {
                 editorCanvasPane
-                    .frame(minHeight: 350)
+                    .frame(height: canvasHeight)
+                    .clipped()
+                Divider()
                 inspector
-                    .frame(minHeight: 250, idealHeight: 320)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
             }
+            .frame(width: availableSize.width, height: availableSize.height, alignment: .top)
+            .clipped()
         } else if !showsCloseButton {
             let inspectorWidth = min(380, max(310, availableSize.width * 0.31))
             HStack(spacing: 0) {
@@ -1177,6 +1185,7 @@ struct OpenedNotchWorkspaceEditor: View {
     private var editorCanvasPane: some View {
         VStack(spacing: 0) {
             toolbar
+                .fixedSize(horizontal: false, vertical: true)
             Divider()
             GeometryReader { proxy in
                 ScrollView([.horizontal, .vertical]) {
