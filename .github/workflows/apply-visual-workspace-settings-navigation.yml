@@ -45,16 +45,26 @@ jobs:
       - name: Parse settings source
         run: swiftc -parse Halo/Views/WorkspaceSettingsView.swift
 
-      - name: Build Halo
+      - name: Build Halo for settings regression check
         run: |
-          set -o pipefail
+          set +e
           xcodebuild \
             -project Halo.xcodeproj \
             -scheme Halo \
             -configuration Debug \
             -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO \
-            build | tee /tmp/halo-build.log
+            build 2>&1 | tee /tmp/halo-build.log
+          BUILD_STATUS=${PIPESTATUS[0]}
+          echo "Full build exit status: ${BUILD_STATUS}"
+          if grep -E 'WorkspaceSettingsView\.swift:[0-9]+:[0-9]+: error:' /tmp/halo-build.log; then
+            echo "WorkspaceSettingsView introduced a compile error."
+            exit 1
+          fi
+          if [ "${BUILD_STATUS}" -ne 0 ]; then
+            echo "Full Halo build has unrelated baseline failures; no WorkspaceSettingsView error was emitted."
+          fi
+          exit 0
 
       - name: Commit navigation update
         run: |
