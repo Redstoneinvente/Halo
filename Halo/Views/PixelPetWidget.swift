@@ -1471,6 +1471,7 @@ struct HaloPixelPetWidget: View {
 
     @State private var hovering = false
     @State private var pointer = CGPoint.zero
+    @State private var precisePointer = CGPoint.zero
     @State private var animationEpoch = Date()
     @State private var orbitDetector = HaloPixelPalCursorOrbitDetector()
     @State private var strokeDetector = HaloPixelPalStrokeDetector()
@@ -1525,6 +1526,7 @@ struct HaloPixelPetWidget: View {
                     cookieFeedOrdinal: pal.cookieFeedOrdinal,
                     audioEnergy: audioSnapshot.available ? max(audioSnapshot.overall, audioSnapshot.bass * 0.9) : 0,
                     pointer: pal.preferences.hoverReaction && hovering ? pointer : .zero,
+                    cookiePointer: hovering ? precisePointer : nil,
                     showAlwaysCookie: pal.preferences.alwaysCookie,
                     onCookieTap: { pal.feedCookie() }
                 )
@@ -1565,15 +1567,18 @@ struct HaloPixelPetWidget: View {
 
                         pal.considerChase(at: now)
 
-                        let next = CGPoint(
-                            x: ((location.x / max(1, side) - 0.5) * 2).rounded(),
-                            y: ((location.y / max(1, side) - 0.5) * 2).rounded()
+                        let precise = CGPoint(
+                            x: (location.x / max(1, side) - 0.5) * 2,
+                            y: (location.y / max(1, side) - 0.5) * 2
                         )
+                        if precisePointer != precise { precisePointer = precise }
+                        let next = CGPoint(x: precise.x.rounded(), y: precise.y.rounded())
                         if pointer != next { pointer = next }
 
                     case .ended:
                         hovering = false
                         pointer = .zero
+                        precisePointer = .zero
                         orbitDetector.resetPath()
                         strokeDetector.resetPath()
                     }
@@ -1603,6 +1608,7 @@ struct HaloPixelPetWidget: View {
         .onDisappear {
             hovering = false
             pointer = .zero
+            precisePointer = .zero
             orbitDetector.resetPath()
             strokeDetector.resetPath()
             AudioSpectrumService.shared.setActive(false, owner: "pixel-pal")
@@ -1671,6 +1677,7 @@ private struct HaloPixelPalFace: View {
     var cookieFeedOrdinal: Int = 0
     var audioEnergy: Double = 0
     var pointer: CGPoint = .zero
+    var cookiePointer: CGPoint? = nil
     var showAlwaysCookie = true
     var onCookieTap: (() -> Void)? = nil
     @Environment(\.displayScale) private var displayScale
@@ -1696,6 +1703,45 @@ private struct HaloPixelPalFace: View {
 
     private var isCookieSatisfied: Bool {
         expression == .satisfied || cookieSatisfactionElapsed != nil
+    }
+
+    /// Cookie positions use the same -1...1 normalized coordinate space as the
+    /// pointer. The normal snack lives at 82%/82% of the face; the fury rescue
+    /// cookie is centered behind the shutter.
+    private var cookieTargetCenter: CGPoint? {
+        if expression == .furious,
+           cookieRescueElapsed == nil,
+           let reactionElapsed,
+           reactionElapsed >= 1.05,
+           reactionElapsed < 2.15,
+           onCookieTap != nil {
+            return .zero
+        }
+        if showAlwaysCookie,
+           expression != .furious,
+           !isEatingSnackCookie,
+           !isCookieSatisfied,
+           onCookieTap != nil {
+            return CGPoint(x: 0.64, y: 0.64)
+        }
+        return nil
+    }
+
+    /// Smooth 0...1 anticipation value. It begins before the cursor reaches the
+    /// cookie hit target, so the pet visibly notices food approaching.
+    private var cookieApproachIntensity: Double {
+        guard let cursor = cookiePointer, let target = cookieTargetCenter else { return 0 }
+        let dx = Double(cursor.x - target.x)
+        let dy = Double(cursor.y - target.y)
+        let distance = hypot(dx, dy)
+        let outerRadius = expression == .furious ? 0.78 : 0.72
+        let innerRadius = 0.10
+        let linear = min(1.0, max(0.0, (outerRadius - distance) / (outerRadius - innerRadius)))
+        return linear * linear * (3.0 - 2.0 * linear)
+    }
+
+    private var isCookieAnticipating: Bool {
+        !isEatingAnyCookie && cookieApproachIntensity > 0.035
     }
 
     private var faceColor: Color {
@@ -2076,10 +2122,11 @@ private struct HaloPixelPalFace: View {
         }
     }
 
-    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, cookieMunch, furious, smug }
+    private enum EyePose { case open, happy, closed, heart, star, winkLeft, winkRight, confused, dizzy, cookieAnticipation, cookieMunch, furious, smug }
 
     private var eyePose: EyePose {
         if isEatingAnyCookie { return .cookieMunch }
+        if isCookieAnticipating { return .cookieAnticipation }
         switch expression {
         case .blink, .sleepy, .bored: return .closed
         case .happy, .superHappy, .music, .shy, .petting, .satisfied, .proud: return .happy
@@ -2144,6 +2191,16 @@ private struct HaloPixelPalFace: View {
         case .dizzy:
             render(.init(HaloPixelPalSprites.xEye, x: 3, y: 6), 1, 0, 0)
             render(.init(HaloPixelPalSprites.xEye, x: 16, y: 6, mirrorX: true), 1, 0, 0)
+        case .cookieAnticipation:
+            let happy = HaloPixelPalSprites.happyEye(preferences.eyeStyle)
+            if cookieApproachIntensity >= 0.62 {
+                let star = HaloPixelPalSprites.starEye
+                render(.init(star, x: leftX, y: y), 1, 0, 0)
+                render(.init(star, x: rightX, y: y, mirrorX: true), 1, 0, 0)
+            } else {
+                render(.init(happy, x: leftX, y: y + 1), 1, 0, 0)
+                render(.init(happy, x: rightX, y: y + 1, mirrorX: true), 1, 0, 0)
+            }
         case .cookieMunch:
             let happy = HaloPixelPalSprites.happyEye(preferences.eyeStyle)
             let closed = HaloPixelPalSprites.closedEye(preferences.eyeStyle)
@@ -2177,6 +2234,13 @@ private struct HaloPixelPalFace: View {
     private func drawBrows(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
         if isEatingAnyCookie || isCookieSatisfied { return }
         let leftX = 3
+        if isCookieAnticipating {
+            if cookieApproachIntensity < 0.62 {
+                render(.init(HaloPixelPalSprites.raisedBrow, x: leftX, y: 3), 0.94, 0, 0)
+                render(.init(HaloPixelPalSprites.raisedBrow, x: 16, y: 3, mirrorX: true), 0.94, 0, 0)
+            }
+            return
+        }
         let rightX = 16
         let y = 4
         switch expression {
@@ -2237,19 +2301,21 @@ private struct HaloPixelPalFace: View {
     if isEatingAnyCookie {
         let chewPhase = Int(cookieChewElapsed * (cookieFeedOrdinal == 2 ? 18.0 : 14.0)) % 2
         mouth = chewPhase == 0 ? HaloPixelPalSprites.mouthOpen : HaloPixelPalSprites.mouthTiny
+    } else if isCookieAnticipating {
+        mouth = cookieApproachIntensity >= 0.62 ? HaloPixelPalSprites.mouthOpen : HaloPixelPalSprites.mouthBigSmile
     } else {
         mouth = selectedMouth()
     }
     guard let mouth else { return }
     let x = max(0, (logicalGrid - mouth.width) / 2)
-    let y = isEatingAnyCookie ? 15 : (expression == .superHappy || expression == .excited ? 15 : 16)
+    let y = (isEatingAnyCookie || isCookieAnticipating) ? 15 : (expression == .superHappy || expression == .excited ? 15 : 16)
     render(.init(mouth, x: x, y: y), 1, 0, 0)
 }
 
     private func drawCheeks(render: (HaloPixelPalPlacedSprite, Double, Int, Int) -> Void) {
     if expression == .furious && !isEatingFuryCookie { return }
     let sprite: HaloPixelPalSprite
-    if isEatingAnyCookie || isCookieSatisfied {
+    if isEatingAnyCookie || isCookieSatisfied || isCookieAnticipating {
         sprite = HaloPixelPalSprites.cheekKawaii
     } else {
         switch preferences.cheekStyle {
@@ -2259,7 +2325,7 @@ private struct HaloPixelPalFace: View {
         case .shy: sprite = HaloPixelPalSprites.cheekShy
         }
     }
-    let opacity: Double = isEatingAnyCookie || isCookieSatisfied || expression == .shy || expression == .love || expression == .petting ? 1.0 : 0.90
+    let opacity: Double = isEatingAnyCookie || isCookieSatisfied || isCookieAnticipating || expression == .shy || expression == .love || expression == .petting ? 1.0 : 0.90
     render(.init(sprite, x: 2, y: 13), opacity, 0, 0)
     render(.init(sprite, x: max(0, 22 - sprite.width), y: 13, mirrorX: true), opacity, 0, 0)
 }
@@ -2320,6 +2386,11 @@ private struct HaloPixelPalFace: View {
         if isEatingAnyCookie { return }
         let phase = reduceMotion || preferences.animationIntensity == 0 ? 0 : Int(max(0, animationTime) * max(0.35, preferences.animationSpeed) * 4) % 4
         let lift = -(phase / 2)
+        if isCookieAnticipating && cookieApproachIntensity >= 0.72 {
+            render(.init(HaloPixelPalSprites.sparkle, x: 1, y: 3), 0.82, 0, lift)
+            render(.init(HaloPixelPalSprites.sparkle, x: 20, y: 2), 0.72, 0, -lift)
+            return
+        }
         switch fx {
         case .none:
             break
@@ -2379,6 +2450,13 @@ private struct HaloPixelPalFace: View {
         let t = max(0, animationTime) * speed
         let one = intensity > 0.28 ? 1 : 0
         let two = intensity > 0.75 ? 2 : one
+        if isCookieAnticipating {
+            let eagerness = cookieApproachIntensity
+            let hopRate = 5.0 + eagerness * 4.5
+            let hop = Int(round(sin(t * hopRate))) < 0 ? -one : 0
+            let wiggle = eagerness >= 0.70 ? Int(round(sin(t * 8.5))) * one : 0
+            return (wiggle, hop)
+        }
         if let reactionElapsed {
             if isEatingAnyCookie {
                 let chew = Int(cookieChewElapsed * (cookieFeedOrdinal == 2 ? 18.0 : 14.0)) % 2
