@@ -30,7 +30,6 @@ jobs:
               raise SystemExit('Could not locate embedded personality patch payload')
 
           patcher = gzip.decompress(base64.b64decode(match.group(1))).decode()
-
           helper = re.compile(
               r"def once\(old, new, label\):\n"
               r"    global s\n"
@@ -39,18 +38,8 @@ jobs:
               r"        raise SystemExit\(f'\{label\}: expected 1 match, found \{count\}'\)\n"
               r"    s = s\.replace\(old, new, 1\)"
           )
-          replacement = '''def once(old, new, label):
-    global s
-    count = s.count(old)
-    # drawBrows and drawFX intentionally share this guard in the current renderer.
-    # The brows block appears first, so only this named patch may consume the first match.
-    if label == 'brow suppression' and count >= 1:
-        s = s.replace(old, new, 1)
-        return
-    if count != 1:
-        raise SystemExit(f'{label}: expected 1 match, found {count}')
-    s = s.replace(old, new, 1)'''
-          patcher, changed = helper.subn(replacement, patcher, count=1)
+          replacement = "def once(old, new, label):\n    global s\n    count = s.count(old)\n    # drawBrows and drawFX intentionally share this guard in the current renderer.\n    # The brows block appears first, so only this named patch may consume the first match.\n    if label == 'brow suppression' and count >= 1:\n        s = s.replace(old, new, 1)\n        return\n    if count != 1:\n        raise SystemExit(f'{label}: expected 1 match, found {count}')\n    s = s.replace(old, new, 1)"
+          patcher, changed = helper.subn(lambda _: replacement, patcher, count=1)
           if changed != 1:
               raise SystemExit(f'Could not safely patch once() helper; replacements={changed}')
 
