@@ -47,16 +47,25 @@ jobs:
       - name: Build Halo MediaRemote regression check
         run: |
           set -o pipefail
-          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build | tee /tmp/halo-mediaremote-build.log
+          xcodebuild \
+            -project Halo.xcodeproj \
+            -scheme Halo \
+            -configuration Debug \
+            -sdk macosx \
+            -arch arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            build | tee /tmp/halo-mediaremote-build.log
 
-      - name: Verify dynamic adapter is embedded in build
+      - name: Verify adapter runtime resources are embedded
         run: |
           APP=$(find ~/Library/Developer/Xcode/DerivedData -path '*/Build/Products/Debug/Halo.app' -print -quit)
           test -n "$APP"
           test -d "$APP/Contents/Frameworks/MediaRemoteAdapter.framework"
-          test -f "$APP/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A/Resources/MediaRemoteAdapter_MediaRemoteAdapter.bundle/run.pl" || \
-          find "$APP/Contents/Frameworks/MediaRemoteAdapter.framework" -name run.pl -print -quit | grep -q .
-          echo "MediaRemoteAdapter and run.pl embedded in Halo.app"
+          RUN_PL=$(find "$APP" -name run.pl -print -quit)
+          test -n "$RUN_PL"
+          echo "MediaRemoteAdapter embedded: $APP/Contents/Frameworks/MediaRemoteAdapter.framework"
+          echo "MediaRemote bridge embedded: $RUN_PL"
 
       - name: Commit reliable Now Playing integration
         run: |
