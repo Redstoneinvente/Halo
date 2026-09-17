@@ -53,11 +53,11 @@ elif live_parent not in text:
     raise SystemExit("ClosedNotchView parent layout contract changed; refusing blind rollback")
 
 old_width = '        v.width = min(v.width, max(1, innerWidth - mediaSiblingFootprint))'
-new_width = '        v.width = max(1, innerWidth - mediaSiblingFootprint)'
+new_width = '        v.width = Double.greatestFiniteMagnitude'
 if old_width in text:
     text = text.replace(old_width, new_width, 1)
 elif new_width not in text:
     raise SystemExit("Visualizer width contract changed; refusing blind patch")
 
 path.write_text(text)
-print("Restored live parent geometry and made closed visualizer consume the full available slot width")
+print("Restored live parent geometry and removed the closed visualizer width cap")
