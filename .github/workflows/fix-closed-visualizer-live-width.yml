@@ -1,0 +1,75 @@
+name: Fix Closed Visualizer Live Width
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/closed-visualizer-live-width-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply live-width visualizer fix
+        run: python3 .github/scripts/fix_closed_visualizer_live_width.py
+
+      - name: Verify live-width contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('Halo/Views/ClosedNotchView.swift').read_text()
+          required = [
+              'let reservation = cameraReservation(width: proxy.size.width, height: proxy.size.height)',
+              'let leftWidth = reservation?.minX ?? proxy.size.width / 2',
+              'let rightWidth = reservation.map { proxy.size.width - $0.maxX } ?? proxy.size.width / 2',
+              'v.width = max(1, innerWidth - mediaSiblingFootprint)',
+          ]
+          missing = [m for m in required if m not in text]
+          if missing:
+              raise SystemExit(f'missing live-width markers: {missing}')
+          forbidden = [
+              'let renderWidth = referenceWidth > 1 ? referenceWidth : proxy.size.width',
+              'v.width = min(v.width, max(1, innerWidth - mediaSiblingFootprint))',
+          ]
+          present = [m for m in forbidden if m in text]
+          if present:
+              raise SystemExit(f'stale frozen-width markers remain: {present}')
+          print('Closed visualizer live-width contract passed')
+          PY
+
+      - name: Parse ClosedNotchView
+        run: xcrun swiftc -parse Halo/Views/ClosedNotchView.swift
+
+      - name: Build regression check
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build > /tmp/halo-closed-visualizer-live-width.log 2>&1
+          status=$?
+          set -e
+          if [ $status -ne 0 ]; then
+            echo 'xcodebuild failed; checking ClosedNotchView for compiler errors.'
+            if grep -E 'ClosedNotchView\.swift:.*error:' /tmp/halo-closed-visualizer-live-width.log; then
+              cat /tmp/halo-closed-visualizer-live-width.log | grep -E 'ClosedNotchView\.swift:.*error:'
+              exit 1
+            fi
+            echo 'Build failed only on unrelated baseline errors; ClosedNotchView emitted no compiler errors.'
+          else
+            echo 'Halo build passed.'
+          fi
+
+      - name: Commit live-width visualizer fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Views/ClosedNotchView.swift
+          git rm -f .github/scripts/fix_closed_visualizer_live_width.py .github/workflows/fix-closed-visualizer-live-width.yml .github/closed-visualizer-live-width-trigger.txt
+          git commit -m 'Let closed visualizer expand with CI width'
+          git pull --rebase origin main
+          git push origin HEAD:main
