@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# Triggered integration patch.
 pbx = Path('Halo.xcodeproj/project.pbxproj')
 text = pbx.read_text()
 
@@ -52,14 +53,12 @@ if 'SentrySPM in Frameworks' not in text:
     )
     text = text.replace(marker2, block2 + marker2)
 
-# Add a user-defined build setting for the DSN in both app configurations only.
 if 'HALO_SENTRY_DSN' not in text:
     needle = '\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;'
     text = text.replace(needle, needle + '\n\t\t\t\tHALO_SENTRY_DSN = "";', 2)
 
 pbx.write_text(text)
 
-# Info.plist key whose value comes from the build setting. Empty means Sentry stays disabled.
 plist = Path('Halo/Info.plist')
 ptext = plist.read_text()
 if '<key>HaloSentryDSN</key>' not in ptext:
@@ -108,7 +107,6 @@ if 'configureSentry()\n        NSApp.setActivationPolicy' not in atext:
         '    func applicationDidFinishLaunching(_ notification: Notification) {\n        configureSentry()\n        NSApp.setActivationPolicy(.accessory)'
     )
 
-# Add low-risk breadcrumbs around the exact startup boundary that previously hid the press-key crash.
 if 'commercial_access.granted' not in atext:
     atext = atext.replace(
         '        if commercialAccessGranted {\n            startLicensedServices()',
@@ -123,7 +121,6 @@ if 'workspace.start' not in atext:
 
 app.write_text(atext)
 
-# Focused contract checks.
 assert 'SentrySPM in Frameworks' in text
 assert 'https://github.com/getsentry/sentry-cocoa.git' in text
 assert 'minimumVersion = 9.24.0;' in text
