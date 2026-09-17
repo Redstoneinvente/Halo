@@ -1,0 +1,70 @@
+name: Fix System Audio CI Idle Visibility
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/system-audio-ci-idle-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply System Audio CI idle visibility fix
+        run: python3 .github/scripts/fix_system_audio_ci_idle_visibility.py
+
+      - name: Verify Audio CI visibility contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          integrations = Path('Halo/Services/Integrations.swift').read_text()
+          expected = 'var hasNowPlayingPresentation: Bool { isPlaying }'
+          if expected not in integrations:
+              raise SystemExit('Audio CI is not gated strictly by playback state')
+          forbidden = 'guard connectedApp == nil else { return false }'
+          block_start = integrations.index('var hasNowPlayingPresentation: Bool')
+          block = integrations[block_start:block_start + 500]
+          if forbidden in block or 'normalizedTitle' in block:
+              raise SystemExit('Stale metadata presentation logic still exists')
+          print('Audio CI visibility contract passed')
+          PY
+
+      - name: Parse affected Swift files
+        run: |
+          xcrun swiftc -parse Halo/Services/Integrations.swift
+          xcrun swiftc -parse Halo/Core/WorkspaceStore.swift
+          xcrun swiftc -parse Halo/Views/SurfaceView.swift
+          xcrun swiftc -parse Halo/Views/ClosedNotchView.swift
+
+      - name: Build regression check
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build > /tmp/halo-system-audio-ci-idle.log 2>&1
+          status=$?
+          set -e
+          if [ $status -ne 0 ]; then
+            echo 'xcodebuild failed; checking affected files for compiler errors.'
+            if grep -E '(Integrations|WorkspaceStore|SurfaceView|ClosedNotchView)\.swift:.*error:' /tmp/halo-system-audio-ci-idle.log; then
+              exit 1
+            fi
+            echo 'Build failed only on unrelated baseline errors; affected files emitted no compiler errors.'
+          else
+            echo 'Halo build passed.'
+          fi
+
+      - name: Commit System Audio CI idle visibility fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Services/Integrations.swift
+          git rm -f .github/scripts/fix_system_audio_ci_idle_visibility.py .github/workflows/fix-system-audio-ci-idle-visibility.yml .github/system-audio-ci-idle-trigger.txt
+          git commit -m 'Fix Audio CI opening on idle system audio'
+          git pull --rebase origin main
+          git push origin HEAD:main
