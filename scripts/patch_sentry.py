@@ -1,10 +1,8 @@
 from pathlib import Path
 
-# Triggered integration patch.
 pbx = Path('Halo.xcodeproj/project.pbxproj')
 text = pbx.read_text()
 
-# IDs reserved for Sentry package integration.
 build_file = 'A11C0F1A0000000000000401'
 product_ref = 'A11C0F1A0000000000000402'
 package_ref = 'A11C0F1A0000000000000403'
@@ -31,27 +29,24 @@ if 'SentrySPM in Frameworks' not in text:
         f'\t\t\t\t{package_ref} /* XCRemoteSwiftPackageReference "sentry-cocoa" */,'
     )
     marker = '/* End XCRemoteSwiftPackageReference section */'
-    block = (
+    text = text.replace(marker, (
         f'\t\t{package_ref} /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {{\n'
         '\t\t\tisa = XCRemoteSwiftPackageReference;\n'
         '\t\t\trepositoryURL = "https://github.com/getsentry/sentry-cocoa.git";\n'
         '\t\t\trequirement = {\n'
         '\t\t\t\tkind = upToNextMajorVersion;\n'
-        '\t\t\t\tminimumVersion = 9.24.0;\n'
+        '\t\t\t\tminimumVersion = 9.23.0;\n'
         '\t\t\t};\n'
-        '\t\t};\n'
-    )
-    text = text.replace(marker, block + marker)
-
+        '\t\t};\n' + marker
+    ))
     marker2 = '/* End XCSwiftPackageProductDependency section */'
-    block2 = (
+    text = text.replace(marker2, (
         f'\t\t{product_ref} /* SentrySPM */ = {{\n'
         '\t\t\tisa = XCSwiftPackageProductDependency;\n'
         f'\t\t\tpackage = {package_ref} /* XCRemoteSwiftPackageReference "sentry-cocoa" */;\n'
         '\t\t\tproductName = SentrySPM;\n'
-        '\t\t};\n'
-    )
-    text = text.replace(marker2, block2 + marker2)
+        '\t\t};\n' + marker2
+    ))
 
 if 'HALO_SENTRY_DSN' not in text:
     needle = '\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;'
@@ -86,7 +81,6 @@ if 'private func configureSentry()' not in atext:
         SentrySDK.start { options in
             options.dsn = dsn
             options.sendDefaultPii = false
-            options.tracesSampleRate = 0.10
             #if DEBUG
             options.environment = "development"
             options.debug = true
@@ -107,29 +101,14 @@ if 'configureSentry()\n        NSApp.setActivationPolicy' not in atext:
         '    func applicationDidFinishLaunching(_ notification: Notification) {\n        configureSentry()\n        NSApp.setActivationPolicy(.accessory)'
     )
 
-if 'commercial_access.granted' not in atext:
-    atext = atext.replace(
-        '        if commercialAccessGranted {\n            startLicensedServices()',
-        '        if commercialAccessGranted {\n            let breadcrumb = Breadcrumb(level: .info, category: "license")\n            breadcrumb.message = "commercial_access.granted"\n            SentrySDK.addBreadcrumb(breadcrumb)\n            startLicensedServices()'
-    )
-
-if 'workspace.start' not in atext:
-    atext = atext.replace(
-        '        licensedServicesStarted = true\n        store.workspace.start()',
-        '        licensedServicesStarted = true\n        let breadcrumb = Breadcrumb(level: .info, category: "startup")\n        breadcrumb.message = "workspace.start"\n        SentrySDK.addBreadcrumb(breadcrumb)\n        store.workspace.start()'
-    )
-
 app.write_text(atext)
 
 assert 'SentrySPM in Frameworks' in text
 assert 'https://github.com/getsentry/sentry-cocoa.git' in text
-assert 'minimumVersion = 9.24.0;' in text
+assert 'minimumVersion = 9.23.0;' in text
 assert 'productName = SentrySPM;' in text
 assert 'HALO_SENTRY_DSN = "";' in text
 assert 'import Sentry' in atext
 assert 'configureSentry()' in atext
 assert 'sendDefaultPii = false' in atext
-assert 'tracesSampleRate = 0.10' in atext
-assert 'commercial_access.granted' in atext
-assert 'workspace.start' in atext
 print('Sentry integration patch applied')
