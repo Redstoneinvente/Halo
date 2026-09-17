@@ -30,7 +30,7 @@ jobs:
               '.frame(width: renderWidth, height: proxy.size.height)',
               '.position(x: proxy.size.width / 2, y: proxy.size.height / 2)',
               '.frame(width: options.width, height: options.height)',
-              '.fixedSize(horizontal: true, vertical: true)',
+              'private var colors: [Color] {',
           ]
           missing = [m for m in required if m not in text]
           if missing:
