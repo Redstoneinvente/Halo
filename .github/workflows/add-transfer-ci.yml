@@ -16,7 +16,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply Notch Skins feature
-        run: python3 .github/scripts/add-notch-skins.py
+        run: |
+          python3 .github/scripts/add-notch-skins.py
+          python3 .github/scripts/fix-notch-skins-build.py
 
       - name: Verify feature contract
         run: |
@@ -25,7 +27,7 @@ jobs:
           models = Path('Halo/Core/WorkspaceModels.swift').read_text()
           surface = Path('Halo/Views/SurfaceView.swift').read_text()
           settings = Path('Halo/Views/WorkspaceSettingsView.swift').read_text()
-          for token in ['enum NotchSkinPreset:', 'struct NotchSkinOptions:', 'var skin = NotchSkinOptions()']:
+          for token in ['enum NotchSkinPreset:', 'struct NotchSkinOptions:', 'var skin = NotchSkinOptions()', 'let values: [Double] = [', 'let numericValues: [Double] = [']:
               if token not in models: raise SystemExit(f'Missing model token: {token}')
           for token in ['NotchSkinLayer(options: layout.appearance.skin, theme: theme, expanded: state.expanded)', 'struct NotchSkinLayer: View', 'case .carbonWeave:', 'case .neonCircuit:', 'case .pixelMatrix:', 'case .custom:']:
               if token not in surface: raise SystemExit(f'Missing renderer token: {token}')
@@ -59,14 +61,11 @@ jobs:
             echo 'Halo build passed.'
           fi
 
-      - name: Commit feature and restore workflows
+      - name: Commit feature
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git show "$GITHUB_SHA^:.github/workflows/add-transfer-ci.yml" > .github/workflows/add-transfer-ci.yml
-          git show "$GITHUB_SHA^:.github/workflows/fix-pixel-pet-cookie-rescue-workflow.yml" > .github/workflows/fix-pixel-pet-cookie-rescue-workflow.yml
-          git rm -f .github/scripts/add-notch-skins.py .github/workflows/add-notch-skins.yml .github/notch-skins-trigger.txt
-          git add Halo/Core/WorkspaceModels.swift Halo/Views/SurfaceView.swift Halo/Views/WorkspaceSettingsView.swift .github/workflows/add-transfer-ci.yml .github/workflows/fix-pixel-pet-cookie-rescue-workflow.yml
+          git add Halo/Core/WorkspaceModels.swift Halo/Views/SurfaceView.swift Halo/Views/WorkspaceSettingsView.swift
           git commit -m 'Add customizable notch skins'
           git pull --rebase origin main
           git push origin HEAD:main
