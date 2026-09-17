@@ -52,14 +52,32 @@ if old_layout not in text:
     raise SystemExit("ClosedNotchView body contract changed; refusing blind patch")
 text = text.replace(old_layout, new_layout, 1)
 
+old_colors = '''    private var animated: Bool { playing && enabled && !reduceMotion }; private var colors: [Color] { let extracted = options.dynamicColors ? palette.map(\\.color) : []; return extracted.isEmpty ? [fallback, fallback] : extracted.count == 1 ? [extracted[0], extracted[0]] : extracted }
+'''
+new_colors = '''    private var animated: Bool { playing && enabled && !reduceMotion }
+    private var colors: [Color] {
+        let extracted: [Color]
+        if options.dynamicColors {
+            extracted = palette.map(\\.color)
+        } else {
+            extracted = []
+        }
+        if extracted.isEmpty { return [fallback, fallback] }
+        if extracted.count == 1 { return [extracted[0], extracted[0]] }
+        return extracted
+    }
+'''
+if old_colors not in text:
+    raise SystemExit("PlaybackVisualizer color contract changed; refusing blind patch")
+text = text.replace(old_colors, new_colors, 1)
+
 old_visualizer = '''            }.frame(maxWidth: options.width).frame(height: options.height)
 '''
 new_visualizer = '''            }
-            // A max-width frame accepts the host's animated width proposal and deforms the
-            // visualizer during notch/CI morphs. Give the Canvas a fixed render surface instead;
-            // parent clipping is visually stable and preserves bar spacing/aspect.
+            // Keep the Canvas at its configured width while the host surface animates. A fixed
+            // width may be clipped by the morphing parent, but it is never re-proposed at a
+            // narrower width, so bar spacing and aspect remain stable.
             .frame(width: options.width, height: options.height)
-            .fixedSize(horizontal: true, vertical: true)
 '''
 
 if old_visualizer not in text:
