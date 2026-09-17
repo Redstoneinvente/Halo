@@ -2043,8 +2043,8 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
                 Toggle("Running applications", isOn: adaptive.launcherShowRunningApps)
                 Toggle("Downloads action", isOn: adaptive.launcherShowDownloads)
                 Toggle("Timer action", isOn: adaptive.launcherShowTimerActions)
-                TextField("Favorite app bundle IDs", text: adaptiveFavoriteBundles(adaptive))
-                Text("Comma-separated bundle IDs. Halo opens installed apps directly; it does not pretend to provide Spotlight indexing.").font(.caption2).foregroundStyle(.secondary)
+                LauncherFavoriteApplicationsPicker(bundleIDs: adaptive.launcherFavoriteBundleIDs)
+                Text("Choose installed apps to pin in Launcher. Halo keeps their bundle identifiers internally so existing profiles remain compatible.").font(.caption2).foregroundStyle(.secondary)
             }
         case .activities:
             Section("Activities") {
@@ -2096,12 +2096,6 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
         guard order.indices.contains(target), !module.visualAdaptiveAlwaysInformation.contains(order[target]) else { return }
         order.swapAt(index, target)
         adaptive.wrappedValue.informationPriority = order
-    }
-
-    private func adaptiveFavoriteBundles(_ adaptive: Binding<VisualAdaptiveWidgetOptions>) -> Binding<String> {
-        Binding(get: { adaptive.wrappedValue.launcherFavoriteBundleIDs.joined(separator: ", ") }, set: { text in
-            adaptive.wrappedValue.launcherFavoriteBundleIDs = text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-        })
     }
 
     @ViewBuilder private func visualAdaptiveSizeOverrideInspector(itemID: UUID, style: Binding<WidgetStyle>, module: ModuleID) -> some View {
