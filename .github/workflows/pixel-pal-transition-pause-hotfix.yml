@@ -1,0 +1,107 @@
+name: Pixel Pal Transition Pause Hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pixel-pal-transition-pause-hotfix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch Pixel Pal transition pause
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('Halo/Views/PixelPetWidget.swift')
+          s = path.read_text()
+
+          marker = '// MARK: - Widget\n\nstruct HaloPixelPetWidget: View {'
+          helper = '''// MARK: - Widget\n\n@MainActor\nprivate final class HaloPixelPalSurfaceTransitionPause: ObservableObject {\n    @Published private(set) var isPaused = false\n    private var resumeWork: DispatchWorkItem?\n\n    func noteGeometryChange() {\n        if !isPaused { isPaused = true }\n        resumeWork?.cancel()\n        let work = DispatchWorkItem { [weak self] in\n            self?.isPaused = false\n        }\n        resumeWork = work\n        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)\n    }\n\n    deinit { resumeWork?.cancel() }\n}\n\nstruct HaloPixelPetWidget: View {'''
+          if marker not in s:
+              raise SystemExit('Widget marker not found; refusing to patch')
+          s = s.replace(marker, helper, 1)
+
+          state_marker = '    @Environment(\\.accessibilityReduceMotion) private var reduceMotion\n\n    @State private var hovering = false'
+          state_replacement = '    @Environment(\\.accessibilityReduceMotion) private var reduceMotion\n\n    @StateObject private var surfaceTransitionPause = HaloPixelPalSurfaceTransitionPause()\n    @State private var hovering = false'
+          if state_marker not in s:
+              raise SystemExit('Pixel Pal state marker not found; refusing to patch')
+          s = s.replace(state_marker, state_replacement, 1)
+
+          timeline_old = '        TimelineView(.animation(minimumInterval: reduceMotion ? 0.45 : 1.0 / 24.0, paused: false)) { timeline in'
+          timeline_new = '        TimelineView(.animation(minimumInterval: reduceMotion ? 0.45 : 1.0 / 24.0, paused: surfaceTransitionPause.isPaused)) { timeline in'
+          if timeline_old not in s:
+              raise SystemExit('Pixel Pal timeline marker not found; refusing to patch')
+          s = s.replace(timeline_old, timeline_new, 1)
+
+          receive_marker = '''        }\n        .contentShape(Rectangle())\n        .gesture(\n            LongPressGesture(minimumDuration: 0.55)'''
+          receive_replacement = '''        }\n        .onReceive(NotificationCenter.default.publisher(for: .init("HaloPanelGeometryChanged"))) { _ in\n            surfaceTransitionPause.noteGeometryChange()\n        }\n        .contentShape(Rectangle())\n        .gesture(\n            LongPressGesture(minimumDuration: 0.55)'''
+          if receive_marker not in s:
+              raise SystemExit('Pixel Pal modifier marker not found; refusing to patch')
+          s = s.replace(receive_marker, receive_replacement, 1)
+
+          path.write_text(s)
+          PY
+
+      - name: Verify focused patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('Halo/Views/PixelPetWidget.swift').read_text()
+          required = [
+              'private final class HaloPixelPalSurfaceTransitionPause: ObservableObject',
+              '@StateObject private var surfaceTransitionPause = HaloPixelPalSurfaceTransitionPause()',
+              'paused: surfaceTransitionPause.isPaused',
+              'NotificationCenter.default.publisher(for: .init("HaloPanelGeometryChanged"))',
+              'surfaceTransitionPause.noteGeometryChange()',
+          ]
+          missing = [x for x in required if x not in s]
+          if missing:
+              raise SystemExit(f'Missing transition pause markers: {missing}')
+          if 'TimelineView(.animation(minimumInterval: reduceMotion ? 0.45 : 1.0 / 24.0, paused: false)) { timeline in' in s:
+              raise SystemExit('Original unpaused Pixel Pal timeline still present')
+          print('Focused transition-pause patch verified.')
+          PY
+
+      - name: Parse Pixel Pal source
+        run: swiftc -parse Halo/Views/PixelPetWidget.swift
+
+      - name: Build Halo
+        id: build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build | tail -n 120
+
+      - name: Commit verified hotfix
+        if: steps.build.outcome == 'success'
+        run: |
+          rm .github/workflows/pixel-pal-transition-pause-hotfix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Views/PixelPetWidget.swift .github/workflows/pixel-pal-transition-pause-hotfix.yml
+          git commit -m "Pause Pixel Pal during surface transitions"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Clean up failed hotfix
+        if: steps.build.outcome != 'success'
+        run: |
+          git restore Halo/Views/PixelPetWidget.swift
+          rm .github/workflows/pixel-pal-transition-pause-hotfix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Views/PixelPetWidget.swift .github/workflows/pixel-pal-transition-pause-hotfix.yml
+          git commit -m "Remove failed Pixel Pal hotfix workflow"
+          git pull --rebase origin main
+          git push origin HEAD:main
+          exit 1
