@@ -601,6 +601,14 @@ final class MediaService: ObservableObject {
         requestExternalArtwork()
     }
 
+    func performSystem(_ command: String) {
+        guard connectedApp == nil,
+              ["playpause", "next track", "previous track"].contains(command),
+              !busy else { return }
+        guard SystemMediaTransport.perform(command) else { return }
+        if error != nil { error = nil }
+    }
+
     func perform(_ command: String, app preferred: String) {
         let app = command == "refresh" ? preferred : (connectedApp ?? preferred)
         guard ["com.apple.Music", "com.spotify.client"].contains(app),
@@ -628,8 +636,21 @@ final class MediaService: ObservableObject {
         }
     }
     func seek(to seconds: Double) {
-        guard openedDetailEnabled, let app = connectedApp, duration > 0 else { return }
+        guard duration > 0, seconds.isFinite else { return }
         let target = min(duration, max(0, seconds))
+
+        // System/Safari media has no AppleScript-connected app. Send the seek to the same
+        // MediaRemote session that supplied the Audio CI metadata. Optimistically anchor the
+        // local position so the 500 ms playback loop cannot snap the scrubber straight back.
+        if connectedApp == nil {
+            guard SystemMediaTransport.seek(to: target) else { return }
+            position = target
+            if error != nil { error = nil }
+            return
+        }
+
+        guard let app = connectedApp else { return }
+        position = target
         queue.async { [weak self] in
             let source = """
             if application id "\(app)" is running then
@@ -638,7 +659,11 @@ final class MediaService: ObservableObject {
             """
             var failure: NSDictionary?
             _ = NSAppleScript(source: source)?.executeAndReturnError(&failure)
-            Task { @MainActor in if failure == nil { self?.position = target } }
+            Task { @MainActor in
+                guard let self else { return }
+                if failure == nil { self.position = target }
+                else { self.error = failure?[NSAppleScript.errorMessage] as? String ?? "Unable to seek the current player." }
+            }
         }
     }
 

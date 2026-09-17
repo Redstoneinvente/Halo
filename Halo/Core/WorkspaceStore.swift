@@ -631,6 +631,53 @@ private final class MediaRemoteNowPlayingReader {
         }
     }
 
+    @discardableResult
+    fileprivate func performTransportCommand(_ command: String) -> Bool {
+        switch command {
+        case "playpause":
+            controller.togglePlayPause()
+            if let current = cached {
+                let nextPlaying = !current.playing
+                cached = MediaRemoteNowPlayingSnapshot(
+                    title: current.title, artist: current.artist, album: current.album,
+                    playing: nextPlaying, duration: current.duration,
+                    elapsed: current.currentElapsed ?? current.elapsed,
+                    artworkData: current.artworkData, artworkURL: current.artworkURL,
+                    bundleIdentifier: current.bundleIdentifier, applicationName: current.applicationName,
+                    playbackRate: nextPlaying ? max(1, current.playbackRate) : 0, sampledAt: Date()
+                )
+                cachedAt = Date()
+            }
+        case "next track":
+            controller.nextTrack()
+        case "previous track":
+            controller.previousTrack()
+        default:
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    fileprivate func seekTransport(to seconds: Double) -> Bool {
+        guard seconds.isFinite, seconds >= 0 else { return false }
+        let target: Double
+        if let duration = cached?.duration, duration > 0 { target = min(duration, seconds) }
+        else { target = seconds }
+        controller.setTime(seconds: target)
+        if let current = cached {
+            cached = MediaRemoteNowPlayingSnapshot(
+                title: current.title, artist: current.artist, album: current.album,
+                playing: current.playing, duration: current.duration, elapsed: target,
+                artworkData: current.artworkData, artworkURL: current.artworkURL,
+                bundleIdentifier: current.bundleIdentifier, applicationName: current.applicationName,
+                playbackRate: current.playbackRate, sampledAt: Date()
+            )
+            cachedAt = Date()
+        }
+        return true
+    }
+
     private func snapshot(from info: TrackInfo?) -> MediaRemoteNowPlayingSnapshot? {
         guard let payload = info?.payload,
               let rawTitle = payload.title?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -773,6 +820,21 @@ private final class MediaRemoteNowPlayingReader {
                                                      playbackRate: playbackRate, sampledAt: Date()))
         }
         legacyGetInfo(DispatchQueue.global(qos: .utility), callback)
+    }
+}
+
+/// Shared command path for browser/system Now Playing sessions. Metadata and commands deliberately
+/// use the same MediaController so Safari/WebKit controls target the session shown by Control Center.
+@MainActor
+enum SystemMediaTransport {
+    @discardableResult
+    static func perform(_ command: String) -> Bool {
+        MediaRemoteNowPlayingReader.shared.performTransportCommand(command)
+    }
+
+    @discardableResult
+    static func seek(to seconds: Double) -> Bool {
+        MediaRemoteNowPlayingReader.shared.seekTransport(to: seconds)
     }
 }
 

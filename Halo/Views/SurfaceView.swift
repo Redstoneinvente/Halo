@@ -4514,11 +4514,7 @@ private struct ContextMusicView: View {
                         scrubValue = min(playbackDuration, max(0, playbackPosition)); isScrubbing = true
                     } else {
                         let target = min(playbackDuration, max(0, scrubValue)); playbackPosition = target; isScrubbing = false
-                        Task {
-                            let result = await ContextMusicArtworkReader.seek(app: media.connectedApp, position: target)
-                            guard !Task.isCancelled, let result else { return }
-                            playbackPosition = result.position; playbackDuration = result.duration
-                        }
+                        media.seek(to: target)
                     }
                 }).controlSize(.small).tint(effectiveControlColor)
                 HStack {
@@ -4583,7 +4579,10 @@ private struct ContextMusicView: View {
     }
 
     private func control(_ symbol: String, action: String, label: String) -> some View {
-        Button { if let app = media.connectedApp { media.perform(action, app: app) } } label: { Image(systemName: symbol) }
+        Button {
+            if let app = media.connectedApp { media.perform(action, app: app) }
+            else { media.performSystem(action) }
+        } label: { Image(systemName: symbol) }
             .buttonStyle(.plain).accessibilityLabel(label)
     }
 
