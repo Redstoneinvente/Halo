@@ -2522,7 +2522,12 @@ struct SurfaceView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background { surfaceBackgroundLayer }
+        .background {
+            ZStack {
+                surfaceBackgroundLayer
+                NotchSkinLayer(options: layout.appearance.skin, theme: theme, expanded: state.expanded)
+            }
+        }
         .clipShape(contour)
         .contentShape(contour)
         .overlay { surfaceOverlayLayer }
@@ -2785,6 +2790,215 @@ struct SurfaceView: View {
     }
 }
 
+
+
+// MARK: - Notch skins
+
+private extension NotchSkinBlend {
+    var swiftUIBlendMode: BlendMode {
+        switch self {
+        case .normal: return .normal
+        case .overlay: return .overlay
+        case .softLight: return .softLight
+        case .screen: return .screen
+        case .multiply: return .multiply
+        }
+    }
+}
+
+/// Decorative middle layer for the notch surface. It intentionally lives above the selected
+/// background and below every widget / Context Interface element so skins never steal hierarchy
+/// from useful content.
+struct NotchSkinLayer: View {
+    let options: NotchSkinOptions
+    let theme: Theme
+    let expanded: Bool
+
+    private var normalized: NotchSkinOptions { options.normalized() }
+    private var shouldRender: Bool {
+        guard normalized.enabled else { return false }
+        switch normalized.visibility {
+        case .always: return true
+        case .opened: return expanded
+        case .closed: return !expanded
+        }
+    }
+    private var tint: Color {
+        if normalized.usesThemeTint {
+            return Color(hue: theme.tint, saturation: 0.72, brightness: 1.0)
+        }
+        return normalized.tint.color
+    }
+
+    var body: some View {
+        Group {
+            if shouldRender {
+                GeometryReader { proxy in
+                    skin(in: proxy.size)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                }
+                .opacity(normalized.opacity)
+                .blendMode(normalized.blend.swiftUIBlendMode)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func skin(in size: CGSize) -> some View {
+        switch normalized.preset {
+        case .haloGlow:
+            ZStack {
+                RadialGradient(
+                    colors: [tint.opacity(0.72), tint.opacity(0.22), .clear],
+                    center: .top,
+                    startRadius: 0,
+                    endRadius: max(70, min(size.width, size.height * 5) * 0.68)
+                )
+                LinearGradient(
+                    colors: [.clear, tint.opacity(0.34), .clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(height: max(1, 1.4 * normalized.scale))
+                .frame(maxHeight: .infinity, alignment: .bottom)
+            }
+
+        case .carbonWeave:
+            Canvas { context, canvas in
+                let spacing = max(6, 10 * normalized.scale)
+                let lineWidth = max(0.45, 0.7 * normalized.scale)
+                var x = -canvas.height
+                while x < canvas.width + canvas.height {
+                    var forward = Path()
+                    forward.move(to: CGPoint(x: x, y: 0))
+                    forward.addLine(to: CGPoint(x: x + canvas.height, y: canvas.height))
+                    context.stroke(forward, with: .color(tint.opacity(0.42)), lineWidth: lineWidth)
+                    var backward = Path()
+                    backward.move(to: CGPoint(x: x + spacing * 0.5, y: canvas.height))
+                    backward.addLine(to: CGPoint(x: x + canvas.height + spacing * 0.5, y: 0))
+                    context.stroke(backward, with: .color(Color.white.opacity(0.20)), lineWidth: lineWidth * 0.72)
+                    x += spacing
+                }
+            }
+
+        case .neonCircuit:
+            Canvas { context, canvas in
+                let cell = max(18, 30 * normalized.scale)
+                let cols = Int(canvas.width / cell) + 2
+                let rows = Int(canvas.height / cell) + 2
+                for row in 0..<rows {
+                    for column in 0..<cols where (row + column).isMultiple(of: 2) {
+                        let x = CGFloat(column) * cell
+                        let y = CGFloat(row) * cell
+                        var path = Path()
+                        path.move(to: CGPoint(x: x, y: y + cell * 0.25))
+                        path.addLine(to: CGPoint(x: x + cell * 0.42, y: y + cell * 0.25))
+                        path.addLine(to: CGPoint(x: x + cell * 0.42, y: y + cell * 0.72))
+                        path.addLine(to: CGPoint(x: x + cell * 0.88, y: y + cell * 0.72))
+                        context.stroke(path, with: .color(tint.opacity(0.65)), style: StrokeStyle(lineWidth: 1.0, lineCap: .round, lineJoin: .round))
+                        let node = CGRect(x: x + cell * 0.39, y: y + cell * 0.69, width: 3, height: 3)
+                        context.fill(Path(ellipseIn: node), with: .color(Color.white.opacity(0.78)))
+                    }
+                }
+            }
+
+        case .retroScanlines:
+            Canvas { context, canvas in
+                let spacing = max(3, 5 * normalized.scale)
+                var y: CGFloat = 0
+                while y <= canvas.height {
+                    var line = Path()
+                    line.move(to: CGPoint(x: 0, y: y))
+                    line.addLine(to: CGPoint(x: canvas.width, y: y))
+                    context.stroke(line, with: .color(tint.opacity(0.55)), lineWidth: max(0.45, spacing * 0.18))
+                    y += spacing
+                }
+                let vertical = max(32, 58 * normalized.scale)
+                var x: CGFloat = vertical * 0.5
+                while x < canvas.width {
+                    var line = Path()
+                    line.move(to: CGPoint(x: x, y: 0))
+                    line.addLine(to: CGPoint(x: x, y: canvas.height))
+                    context.stroke(line, with: .color(Color.white.opacity(0.08)), lineWidth: 0.5)
+                    x += vertical
+                }
+            }
+
+        case .pixelMatrix:
+            Canvas { context, canvas in
+                let step = max(7, 11 * normalized.scale)
+                let columns = Int(canvas.width / step) + 1
+                let rows = Int(canvas.height / step) + 1
+                let dot = max(1.1, step * 0.18)
+                for row in 0..<rows {
+                    for column in 0..<columns {
+                        let seed = (column * 37 + row * 61 + column * row * 7) % 13
+                        guard seed == 0 || seed == 3 || seed == 8 else { continue }
+                        let alpha: Double = seed == 0 ? 0.72 : (seed == 3 ? 0.42 : 0.24)
+                        let rect = CGRect(x: CGFloat(column) * step, y: CGFloat(row) * step, width: dot, height: dot)
+                        context.fill(Path(rect), with: .color(tint.opacity(alpha)))
+                    }
+                }
+            }
+
+        case .constellation:
+            Canvas { context, canvas in
+                let count = max(12, min(54, Int((canvas.width * canvas.height) / max(2800, 5200 * normalized.scale))))
+                var points: [CGPoint] = []
+                for index in 0..<count {
+                    let xSeed = (index * 47 + index * index * 11 + 19) % 997
+                    let ySeed = (index * 83 + index * index * 5 + 41) % 991
+                    let point = CGPoint(
+                        x: CGFloat(xSeed) / 996 * canvas.width,
+                        y: CGFloat(ySeed) / 990 * canvas.height
+                    )
+                    points.append(point)
+                    let radius: CGFloat = index.isMultiple(of: 5) ? 1.7 : 1.0
+                    context.fill(Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)),
+                                 with: .color((index.isMultiple(of: 5) ? Color.white : tint).opacity(index.isMultiple(of: 5) ? 0.86 : 0.62)))
+                }
+                for index in 1..<points.count where index.isMultiple(of: 3) {
+                    let a = points[index - 1]
+                    let b = points[index]
+                    let distance = hypot(a.x - b.x, a.y - b.y)
+                    guard distance < max(90, canvas.width * 0.23) else { continue }
+                    var line = Path(); line.move(to: a); line.addLine(to: b)
+                    context.stroke(line, with: .color(tint.opacity(0.18)), lineWidth: 0.65)
+                }
+            }
+
+        case .custom:
+            if let image = NSImage(contentsOfFile: normalized.assetPath) {
+                customImage(image, size: size)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func customImage(_ image: NSImage, size: CGSize) -> some View {
+        switch normalized.imageMode {
+        case .fill:
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+                .scaleEffect(normalized.scale)
+                .frame(width: size.width, height: size.height)
+                .clipped()
+        case .fit:
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .scaleEffect(normalized.scale)
+                .frame(width: size.width, height: size.height)
+        case .stretch:
+            Image(nsImage: image)
+                .resizable()
+                .frame(width: size.width, height: size.height)
+        }
+    }
+}
 
 private struct OpenNotchBackgroundView: View {
     let options: OpenNotchAppearance

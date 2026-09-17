@@ -45,7 +45,7 @@ struct SettingsView: View {
             SidebarGroup(
                 title: "Interface",
                 icon: "paintpalette",
-                items: ["Appearance", "Activation Sequence", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD"]
+                items: ["Appearance", "Notch Skins", "Activation Sequence", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD"]
             ),
             SidebarGroup(
                 title: "Workspace",
@@ -235,6 +235,7 @@ struct SettingsView: View {
         case "General": return "gearshape"
         case "Account & License": return "person.crop.circle.badge.checkmark"
         case "Appearance": return "paintpalette"
+        case "Notch Skins": return "square.3.layers.3d"
         case "Activation Sequence": return "power.circle"
         case "Visual Workspace Editor": return "rectangle.3.group"
         case "Modules": return "square.grid.2x2"
@@ -283,6 +284,7 @@ struct SettingsView: View {
         case "Account & License": HaloAccountLicenseSettingsView()
         case "Schedules": ScheduleSettingsView(workspace: workspace)
         case "Appearance": AppearanceSettingsPane(store: store, workspace: workspace)
+        case "Notch Skins": NotchSkinSettingsPane(appearance: $workspace.settings.layout.appearance, theme: store.configuration.theme)
         case "Activation Sequence": ActivationSequenceSettingsPane()
         case "Widgets": WidgetSettingsView(layout: $workspace.settings.layout)
         case "Closed notch": ClosedNotchSettingsView(layout: $workspace.settings.layout, media: workspace.media, app: workspace.settings.mediaApp)
@@ -402,6 +404,198 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     case background = "Background"
     case motion = "Motion"
     var id: String { rawValue }
+}
+
+
+@MainActor private struct NotchSkinSettingsPane: View {
+    @Binding var appearance: Appearance
+    let theme: Theme
+
+    private let columns = [GridItem(.adaptive(minimum: 132), spacing: 10)]
+
+    var body: some View {
+        Section("Notch skins") {
+            Toggle("Enable notch skin", isOn: $appearance.skin.enabled)
+            Text("Skins are rendered above Halo's background but below widgets, controls and Context Interface content. They decorate the surface without covering useful UI.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Skin library") {
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(NotchSkinPreset.allCases) { preset in
+                    skinCard(preset)
+                }
+            }
+        }
+
+        Section("Preview") {
+            ZStack {
+                LinearGradient(
+                    colors: [Color(red: 0.025, green: 0.03, blue: 0.055), Color(red: 0.07, green: 0.025, blue: 0.11)],
+                    startPoint: .bottomLeading,
+                    endPoint: .topTrailing
+                )
+                NotchSkinLayer(options: previewOptions, theme: theme, expanded: true)
+                HStack(spacing: 18) {
+                    Label("Halo", systemImage: "sparkles")
+                        .font(.headline)
+                    Spacer()
+                    Image(systemName: "waveform")
+                    Image(systemName: "timer")
+                    Image(systemName: "battery.100percent")
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 22)
+            }
+            .frame(height: 116)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color.white.opacity(0.12)))
+        }
+
+        Section("Behavior") {
+            Picker("Show skin", selection: $appearance.skin.visibility) {
+                ForEach(NotchSkinVisibility.allCases) { Text($0.rawValue).tag($0) }
+            }
+            Picker("Blend mode", selection: $appearance.skin.blend) {
+                ForEach(NotchSkinBlend.allCases) { Text($0.rawValue).tag($0) }
+            }
+            PreciseSlider(title: "Intensity", value: $appearance.skin.opacity, range: 0...1, step: 0.05, decimals: 2)
+            PreciseSlider(title: "Pattern scale", value: $appearance.skin.scale, range: 0.4...3, step: 0.05, decimals: 2)
+        }
+
+        if appearance.skin.preset != .custom {
+            Section("Procedural color") {
+                Toggle("Use Halo accent", isOn: $appearance.skin.usesThemeTint)
+                if !appearance.skin.usesThemeTint {
+                    ColorPicker("Skin tint", selection: tintBinding, supportsOpacity: false)
+                }
+                Text("Procedural skins stay resolution-independent and automatically adapt to the current notch size.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        if appearance.skin.preset == .custom {
+            Section("Custom skin") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(appearance.skin.assetPath.isEmpty ? "No image selected" : URL(fileURLWithPath: appearance.skin.assetPath).lastPathComponent)
+                            .lineLimit(1)
+                        Text("Transparent PNGs work especially well because the selected Halo background remains visible underneath.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Choose Image…") { chooseCustomSkin() }
+                }
+                Picker("Image layout", selection: $appearance.skin.imageMode) {
+                    ForEach(NotchSkinImageMode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                if !appearance.skin.assetPath.isEmpty {
+                    Button("Remove custom image", role: .destructive) { appearance.skin.assetPath = "" }
+                }
+            }
+        }
+
+        Section {
+            Button("Reset skin settings") { appearance.skin = NotchSkinOptions() }
+        }
+    }
+
+    private var previewOptions: NotchSkinOptions {
+        var value = appearance.skin
+        value.enabled = true
+        return value
+    }
+
+    @ViewBuilder
+    private func skinCard(_ preset: NotchSkinPreset) -> some View {
+        let selected = appearance.skin.preset == preset
+        Button {
+            applyPreset(preset)
+        } label: {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    Image(systemName: preset.symbol)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                    Spacer()
+                    if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor) }
+                }
+                Text(preset.rawValue).font(.callout.weight(.semibold)).foregroundStyle(.primary)
+                Text(presetDescription(preset))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(11)
+            .frame(maxWidth: .infinity, minHeight: 90, alignment: .leading)
+            .background(selected ? Color.accentColor.opacity(0.10) : Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(selected ? Color.accentColor.opacity(0.72) : Color.white.opacity(0.08), lineWidth: selected ? 1.4 : 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func applyPreset(_ preset: NotchSkinPreset) {
+        appearance.skin.enabled = true
+        appearance.skin.preset = preset
+        switch preset {
+        case .haloGlow:
+            appearance.skin.opacity = 0.34; appearance.skin.blend = .screen; appearance.skin.scale = 1.0
+        case .carbonWeave:
+            appearance.skin.opacity = 0.25; appearance.skin.blend = .softLight; appearance.skin.scale = 1.0
+        case .neonCircuit:
+            appearance.skin.opacity = 0.28; appearance.skin.blend = .screen; appearance.skin.scale = 1.0
+        case .retroScanlines:
+            appearance.skin.opacity = 0.20; appearance.skin.blend = .overlay; appearance.skin.scale = 1.0
+        case .pixelMatrix:
+            appearance.skin.opacity = 0.24; appearance.skin.blend = .screen; appearance.skin.scale = 1.0
+        case .constellation:
+            appearance.skin.opacity = 0.30; appearance.skin.blend = .screen; appearance.skin.scale = 1.0
+        case .custom:
+            appearance.skin.opacity = 0.55; appearance.skin.blend = .overlay; appearance.skin.scale = 1.0
+            if appearance.skin.assetPath.isEmpty { chooseCustomSkin() }
+        }
+    }
+
+    private func presetDescription(_ preset: NotchSkinPreset) -> String {
+        switch preset {
+        case .haloGlow: return "Soft accent bloom and edge light"
+        case .carbonWeave: return "Subtle technical diagonal weave"
+        case .neonCircuit: return "Futuristic traces and light nodes"
+        case .retroScanlines: return "CRT-inspired horizontal texture"
+        case .pixelMatrix: return "Sparse 8-bit LED-style pixels"
+        case .constellation: return "Quiet stars with faint connections"
+        case .custom: return "Import your own transparent artwork"
+        }
+    }
+
+    private var tintBinding: Binding<Color> {
+        Binding(
+            get: { appearance.skin.tint.color },
+            set: { color in appearance.skin.tint = widgetColor(from: color) }
+        )
+    }
+
+    private func widgetColor(from color: Color) -> WidgetColor {
+        let ns = NSColor(color)
+        let rgb = ns.usingColorSpace(.deviceRGB) ?? ns
+        return WidgetColor(red: Double(rgb.redComponent), green: Double(rgb.greenComponent), blue: Double(rgb.blueComponent))
+    }
+
+    private func chooseCustomSkin() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.image]
+        panel.message = "Choose an image to layer above Halo's background and below its content."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        appearance.skin.assetPath = url.path
+        appearance.skin.preset = .custom
+        appearance.skin.enabled = true
+    }
 }
 
 @MainActor private struct AppearanceSettingsPane: View {

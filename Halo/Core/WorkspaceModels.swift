@@ -27,6 +27,72 @@ enum ModuleID: String, Codable, CaseIterable, Identifiable {
 }
 
 enum BackgroundKind: String, Codable, CaseIterable { case gradient, solid, glass, image, video }
+
+enum NotchSkinPreset: String, Codable, CaseIterable, Identifiable {
+    case haloGlow = "Halo Glow"
+    case carbonWeave = "Carbon Weave"
+    case neonCircuit = "Neon Circuit"
+    case retroScanlines = "Retro Scanlines"
+    case pixelMatrix = "Pixel Matrix"
+    case constellation = "Constellation"
+    case custom = "Custom Image"
+    var id: String { rawValue }
+    var symbol: String {
+        switch self {
+        case .haloGlow: return "sparkles"
+        case .carbonWeave: return "square.grid.3x3.fill"
+        case .neonCircuit: return "point.3.connected.trianglepath.dotted"
+        case .retroScanlines: return "line.3.horizontal"
+        case .pixelMatrix: return "circle.grid.3x3.fill"
+        case .constellation: return "sparkle"
+        case .custom: return "photo.on.rectangle.angled"
+        }
+    }
+}
+
+enum NotchSkinVisibility: String, Codable, CaseIterable, Identifiable {
+    case always = "Opened + Closed"
+    case opened = "Opened only"
+    case closed = "Closed only"
+    var id: String { rawValue }
+}
+
+enum NotchSkinBlend: String, Codable, CaseIterable, Identifiable {
+    case normal = "Normal"
+    case overlay = "Overlay"
+    case softLight = "Soft Light"
+    case screen = "Screen"
+    case multiply = "Multiply"
+    var id: String { rawValue }
+}
+
+enum NotchSkinImageMode: String, Codable, CaseIterable, Identifiable {
+    case fill = "Fill"
+    case fit = "Fit"
+    case stretch = "Stretch"
+    var id: String { rawValue }
+}
+
+struct NotchSkinOptions: Codable, Equatable {
+    var enabled = false
+    var preset: NotchSkinPreset = .haloGlow
+    var visibility: NotchSkinVisibility = .always
+    var opacity = 0.30
+    var blend: NotchSkinBlend = .screen
+    var usesThemeTint = true
+    var tint = WidgetColor(red: 0.34, green: 0.72, blue: 1.0)
+    var scale = 1.0
+    var assetPath = ""
+    var imageMode: NotchSkinImageMode = .fill
+
+    func normalized() -> NotchSkinOptions {
+        var value = self
+        value.opacity = min(1, max(0, opacity.isFinite ? opacity : 0.30))
+        value.scale = min(3, max(0.4, scale.isFinite ? scale : 1.0))
+        value.tint = (try? tint.validated()) ?? WidgetColor(red: 0.34, green: 0.72, blue: 1.0)
+        return value
+    }
+}
 enum AnimationPreset: String, Codable, CaseIterable {
     case macOS, dynamic, smooth, snappy, elastic, minimal, none
     var duration: Double {
@@ -38,6 +104,7 @@ struct Appearance: Codable, Equatable {
     var backgroundSchedule: [TimedBackground]?
     var surface = SurfaceOptions()
     var background: BackgroundKind = .gradient
+    var skin = NotchSkinOptions()
     var solidColor: WidgetColor?
     var gradientStartColor: WidgetColor?
     var gradientEndColor: WidgetColor?
@@ -52,7 +119,7 @@ struct Appearance: Codable, Equatable {
     var pauseVideoOnBattery = true
     init() {}
     private enum CodingKeys: String, CodingKey {
-        case grain, backgroundSchedule, surface, background, solidColor, gradientStartColor, gradientEndColor, assetPath, blur, saturation, brightness, expandedHeight, compactWidth, spacing, animation, pauseVideoOnBattery
+        case grain, backgroundSchedule, surface, background, skin, solidColor, gradientStartColor, gradientEndColor, assetPath, blur, saturation, brightness, expandedHeight, compactWidth, spacing, animation, pauseVideoOnBattery
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -60,6 +127,7 @@ struct Appearance: Codable, Equatable {
         backgroundSchedule = try c.decodeIfPresent([TimedBackground].self, forKey: .backgroundSchedule)
         surface = try c.decodeIfPresent(SurfaceOptions.self, forKey: .surface) ?? SurfaceOptions()
         background = try c.decodeIfPresent(BackgroundKind.self, forKey: .background) ?? .gradient
+        skin = (try c.decodeIfPresent(NotchSkinOptions.self, forKey: .skin) ?? NotchSkinOptions()).normalized()
         solidColor = try c.decodeIfPresent(WidgetColor.self, forKey: .solidColor)
         gradientStartColor = try c.decodeIfPresent(WidgetColor.self, forKey: .gradientStartColor)
         gradientEndColor = try c.decodeIfPresent(WidgetColor.self, forKey: .gradientEndColor)
@@ -668,10 +736,22 @@ struct OpenNotchAppearance: Codable, Equatable {
         return value
     }
     func validated() throws -> OpenNotchAppearance {
-        let values = [blur ?? 0, saturation ?? 1, brightness ?? 0, contrast ?? 1, tintOpacity ?? 0,
-                      grain ?? 0, warmth ?? 0, borderWidth ?? 0, borderOpacity ?? 0,
-                      innerHighlight ?? 0, shadowBlur ?? 0, shadowOpacity ?? 0, glow ?? 0]
-        guard values.allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        let values: [Double] = [
+            blur ?? 0,
+            saturation ?? 1,
+            brightness ?? 0,
+            contrast ?? 1,
+            tintOpacity ?? 0,
+            grain ?? 0,
+            warmth ?? 0,
+            borderWidth ?? 0,
+            borderOpacity ?? 0,
+            innerHighlight ?? 0,
+            shadowBlur ?? 0,
+            shadowOpacity ?? 0,
+            glow ?? 0
+        ]
+        guard values.allSatisfy({ $0.isFinite }) else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
         if let blur { v.blur = min(30, max(0, blur)) }
         if let saturation { v.saturation = min(2.5, max(0, saturation)) }
@@ -1277,9 +1357,23 @@ struct ContextMusicOptions: Codable, Equatable {
     var resolvedTopMargin: Double { min(160, max(0, topMargin ?? 0)) }
     var resolvedBottomMargin: Double { min(120, max(0, bottomMargin ?? max(10, resolvedSpacing * 0.55))) }
     func validated() throws -> ContextMusicOptions {
-        guard [artworkSize, fontSize, backgroundOpacity, artworkBackgroundBlur ?? 12, artworkBackgroundDim ?? 0.38,
-               spacing ?? 12, cornerRadius ?? 18, controlSize ?? 24, vinylRPM ?? 8,
-               lyricSyncOffset ?? 0, lyricFontSize ?? 16, horizontalMargin ?? 18, topMargin ?? 0, bottomMargin ?? 10].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        let numericValues: [Double] = [
+            artworkSize,
+            fontSize,
+            backgroundOpacity,
+            artworkBackgroundBlur ?? 12,
+            artworkBackgroundDim ?? 0.38,
+            spacing ?? 12,
+            cornerRadius ?? 18,
+            controlSize ?? 24,
+            vinylRPM ?? 8,
+            lyricSyncOffset ?? 0,
+            lyricFontSize ?? 16,
+            horizontalMargin ?? 18,
+            topMargin ?? 0,
+            bottomMargin ?? 10
+        ]
+        guard numericValues.allSatisfy({ $0.isFinite }) else { throw CocoaError(.fileReadCorruptFile) }
         var result = self
         result.artworkSize = min(240, max(32, artworkSize))
         result.fontSize = min(48, max(12, fontSize))
