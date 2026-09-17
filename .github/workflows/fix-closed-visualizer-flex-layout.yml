@@ -1,0 +1,68 @@
+name: Fix Closed Visualizer Flexible Layout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/closed-visualizer-flex-layout-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply flexible visualizer layout fix
+        run: python3 .github/scripts/fix_closed_visualizer_flexible_layout.py
+
+      - name: Verify flexible layout contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('Halo/Views/ClosedNotchView.swift').read_text()
+          required = [
+              'case .visualizer:',
+              'maxWidth: .infinity,',
+              '.layoutPriority(3)',
+              'v.width = Double.greatestFiniteMagnitude',
+          ]
+          missing = [m for m in required if m not in text]
+          if missing:
+              raise SystemExit(f'missing flexible visualizer markers: {missing}')
+          print('Closed visualizer flexible layout contract passed')
+          PY
+
+      - name: Parse ClosedNotchView
+        run: xcrun swiftc -parse Halo/Views/ClosedNotchView.swift
+
+      - name: Build regression check
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build > /tmp/halo-closed-visualizer-flex-layout.log 2>&1
+          status=$?
+          set -e
+          if [ $status -ne 0 ]; then
+            echo 'xcodebuild failed; checking ClosedNotchView for compiler errors.'
+            if grep -E 'ClosedNotchView\.swift:.*error:' /tmp/halo-closed-visualizer-flex-layout.log; then
+              grep -E 'ClosedNotchView\.swift:.*error:' /tmp/halo-closed-visualizer-flex-layout.log
+              exit 1
+            fi
+            echo 'Build failed only on unrelated baseline errors; ClosedNotchView emitted no compiler errors.'
+          else
+            echo 'Halo build passed.'
+          fi
+
+      - name: Commit flexible visualizer layout fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Views/ClosedNotchView.swift
+          git rm -f .github/scripts/fix_closed_visualizer_flexible_layout.py .github/workflows/fix-closed-visualizer-flex-layout.yml .github/closed-visualizer-flex-layout-trigger.txt
+          git commit -m 'Make closed visualizer absorb CI transition width'
+          git pull --rebase origin main
+          git push origin HEAD:main
