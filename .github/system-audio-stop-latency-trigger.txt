@@ -1,3 +1,0 @@
-2026-09-17T16:58:00+04:00
-fix=system-audio-stop-latency
-retrigger=1

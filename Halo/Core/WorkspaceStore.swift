@@ -850,6 +850,7 @@ private final class SystemAudioMediaFallback {
     private var safariAudibleSince: Date?
     private var recognitionInFlight = false
     private var lastRecognitionAttempt = Date.distantPast
+    private var fastRefreshTask: Task<Void, Never>?
 
     init(media: MediaService) { self.media = media }
 
@@ -858,6 +859,8 @@ private final class SystemAudioMediaFallback {
         self.enabled = enabled
         AudioSpectrumService.shared.setActive(enabled)
         if !enabled {
+            fastRefreshTask?.cancel()
+            fastRefreshTask = nil
             AudioSpectrumService.shared.cancelRecognition()
             recognitionInFlight = false
             safariAudibleSince = nil
@@ -903,8 +906,8 @@ private final class SystemAudioMediaFallback {
 
         requestMediaRemoteMetadata()
 
-        let safariRecentlyActive = now.timeIntervalSince(lastSafariOutput) < 2.0
-        let releaseWindow = (safariRunning || safariRecentlyActive) ? 4.0 : 2.75
+        let safariRecentlyActive = now.timeIntervalSince(lastSafariOutput) < 0.9
+        let releaseWindow = (safariRunning || safariRecentlyActive) ? 1.25 : 0.85
         let withinReleaseWindow = now.timeIntervalSince(lastHeard) < releaseWindow
         let remoteMetadataFresh = now.timeIntervalSince(lastRemoteMetadata) < 5.0
         let systemAudioPlaying = audibleNow || (ownsFallback && withinReleaseWindow)
@@ -925,6 +928,7 @@ private final class SystemAudioMediaFallback {
                 ownsFallback = true
             }
             requestRecognitionIfNeeded(media: media, safariLikely: safariLikely, audibleNow: audibleNow, now: now)
+            scheduleFastRefresh()
             return
         }
 
@@ -939,11 +943,26 @@ private final class SystemAudioMediaFallback {
 
     func stop() {
         enabled = false
+        fastRefreshTask?.cancel()
+        fastRefreshTask = nil
         AudioSpectrumService.shared.cancelRecognition()
         recognitionInFlight = false
         safariAudibleSince = nil
         AudioSpectrumService.shared.setActive(false)
         clearIfOwned()
+    }
+
+    private func scheduleFastRefresh() {
+        guard enabled, ownsFallback else { return }
+        fastRefreshTask?.cancel()
+        fastRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self, self.enabled, self.ownsFallback else { return }
+                self.refresh()
+            }
+        }
     }
 
     private func requestMediaRemoteMetadata() {
@@ -966,8 +985,8 @@ private final class SystemAudioMediaFallback {
                 let now = Date()
                 if safariOutput { self.lastSafariOutput = now }
                 if audibleNow || snapshot.playing { self.lastHeard = now }
-                let safariRecentlyActive = now.timeIntervalSince(self.lastSafariOutput) < 2.0
-                let releaseWindow = (safariRunning || safariRecentlyActive) ? 4.0 : 2.75
+                let safariRecentlyActive = now.timeIntervalSince(self.lastSafariOutput) < 0.9
+                let releaseWindow = (safariRunning || safariRecentlyActive) ? 1.25 : 0.85
                 let withinReleaseWindow = now.timeIntervalSince(self.lastHeard) < releaseWindow
                 let shouldPresentPlaying = snapshot.playing || audibleNow || (self.ownsFallback && withinReleaseWindow)
 
