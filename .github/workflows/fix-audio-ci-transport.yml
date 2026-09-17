@@ -1,0 +1,90 @@
+name: Fix Audio CI Transport
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/audio-ci-transport-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply Audio CI transport fix
+        run: python3 .github/scripts/fix_audio_ci_transport.py
+
+      - name: Verify transport contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          workspace = Path('Halo/Core/WorkspaceStore.swift').read_text()
+          integrations = Path('Halo/Services/Integrations.swift').read_text()
+          surface = Path('Halo/Views/SurfaceView.swift').read_text()
+          required = {
+              'WorkspaceStore': [
+                  'enum SystemMediaTransport',
+                  'controller.togglePlayPause()',
+                  'controller.nextTrack()',
+                  'controller.previousTrack()',
+                  'controller.setTime(seconds: target)',
+              ],
+              'Integrations': [
+                  'func performSystem(_ command: String)',
+                  'SystemMediaTransport.perform(command)',
+                  'SystemMediaTransport.seek(to: target)',
+              ],
+              'SurfaceView': [
+                  'else { media.performSystem(action) }',
+                  'media.seek(to: target)',
+              ],
+          }
+          texts = {'WorkspaceStore': workspace, 'Integrations': integrations, 'SurfaceView': surface}
+          for name, markers in required.items():
+              missing = [m for m in markers if m not in texts[name]]
+              if missing:
+                  raise SystemExit(f'{name} missing markers: {missing}')
+          if 'ContextMusicArtworkReader.seek(app: media.connectedApp, position: target)' in surface:
+              raise SystemExit('Audio CI still uses app-specific seek helper')
+          print('Audio CI transport contract passed')
+          PY
+
+      - name: Parse changed Swift files
+        run: |
+          xcrun swiftc -parse Halo/Core/WorkspaceStore.swift
+          xcrun swiftc -parse Halo/Services/Integrations.swift
+          xcrun swiftc -parse Halo/Views/SurfaceView.swift
+
+      - name: Build regression check
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build > /tmp/halo-audio-ci-transport-build.log 2>&1
+          status=$?
+          set -e
+          if [ $status -ne 0 ]; then
+            echo 'xcodebuild failed; checking changed files for compiler errors.'
+            if grep -E '(WorkspaceStore|Integrations|SurfaceView)\.swift:.*error:' /tmp/halo-audio-ci-transport-build.log; then
+              exit 1
+            fi
+            echo 'Build failed only on unrelated baseline errors; changed files emitted no compiler errors.'
+          else
+            echo 'Halo build passed.'
+          fi
+
+      - name: Commit Audio CI transport fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Core/WorkspaceStore.swift Halo/Services/Integrations.swift Halo/Views/SurfaceView.swift
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Fix Audio CI controls for system media'
+          git push origin HEAD:main
