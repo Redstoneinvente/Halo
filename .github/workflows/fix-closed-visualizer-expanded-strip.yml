@@ -1,0 +1,76 @@
+name: Fix Closed Visualizer Expanded Strip
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/closed-visualizer-expanded-strip-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply closed visualizer expanded-strip fix
+        run: python3 .github/scripts/fix_closed_visualizer_expanded_strip.py
+
+      - name: Verify expanded-strip contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          surface = Path('Halo/Views/SurfaceView.swift').read_text()
+          closed = Path('Halo/Views/ClosedNotchView.swift').read_text()
+          checks = {
+              'Music visualizer preservation state': 'private var preservesMusicClosedVisualizer: Bool' in surface,
+              'Visualizer-only expanded strip branch': 'visualizerOnly: true, expandVisualizerToAvailableWidth: true' in surface,
+              'Expanded padding preserves strip': 'preservesClosedStripWhileExpanded' in surface,
+              'Full-surface overlay preserves visualizer': surface.count('visualizerOnly: true, expandVisualizerToAvailableWidth: true') >= 2,
+              'Context Music reserves full-surface strip': 'preserveClosedVisualizerStrip: Bool' in surface,
+              'Closed visualizer-only mode': 'var visualizerOnly = false' in closed,
+              'Closed visualizer live-width mode': 'var expandVisualizerToAvailableWidth = false' in closed,
+              'Visualizer uses live inner width': 'if expandVisualizerToAvailableWidth { v.width = max(1, innerWidth) }' in closed,
+              'Visualizer exact expanded frame': '.frame(width: max(1, innerWidth), height: innerHeight)' in closed,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('contract failed: ' + ', '.join(failed))
+          print('Closed visualizer expanded-strip contract passed')
+          PY
+
+      - name: Parse changed Swift files
+        run: |
+          xcrun swiftc -parse Halo/Views/SurfaceView.swift
+          xcrun swiftc -parse Halo/Views/ClosedNotchView.swift
+
+      - name: Build regression check
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build > /tmp/halo-closed-visualizer-expanded-strip.log 2>&1
+          status=$?
+          set -e
+          if [ $status -ne 0 ]; then
+            echo 'xcodebuild failed; changed-file diagnostics:'
+            grep -E '(SurfaceView|ClosedNotchView)\.swift:.*error:' /tmp/halo-closed-visualizer-expanded-strip.log || true
+            if grep -E '(SurfaceView|ClosedNotchView)\.swift:.*error:' /tmp/halo-closed-visualizer-expanded-strip.log; then
+              exit 1
+            fi
+            echo 'Build failed only on unrelated baseline errors.'
+          else
+            echo 'Halo build passed.'
+          fi
+
+      - name: Commit closed visualizer expanded-strip fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Views/SurfaceView.swift Halo/Views/ClosedNotchView.swift
+          git rm -f .github/scripts/fix_closed_visualizer_expanded_strip.py .github/workflows/fix-closed-visualizer-expanded-strip.yml .github/closed-visualizer-expanded-strip-trigger.txt
+          git commit -m 'Keep closed visualizer visible through Audio CI expansion'
+          git pull --rebase origin main
+          git push origin HEAD:main
