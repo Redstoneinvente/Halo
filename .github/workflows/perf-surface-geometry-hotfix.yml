@@ -1,0 +1,58 @@
+name: Surface Geometry Performance Hotfix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/perf-surface-geometry-hotfix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-push:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Remove synchronous geometry work from SwiftUI body
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('Halo/Views/SurfaceAppearanceView.swift')
+          text = path.read_text()
+          old = '''                if let screen {
+                      let geometry = WindowManager.geometry(screen: screen, theme: theme, appearance: appearance)
+                      Text("Effective closed size: \\(Int(geometry.compactWidth)) × \\(Int(geometry.compactHeight)) pt.").font(.caption)
+                      if geometry.attachedToNotch {
+                          Text("16 × 16 pt is allowed. The physical camera cutout stays unchanged; a positive vertical offset moves Halo below it.").font(.caption).foregroundStyle(.secondary)
+                      }
+                  }
+          '''
+          new = '''                if screen != nil {
+                      Text("Configured closed size: \\(Int(appearance.compactWidth)) × \\(Int(appearance.surface.compactHeight)) pt.")
+                          .font(.caption)
+                      Text("The physical camera cutout stays unchanged; a positive vertical offset moves Halo below it.")
+                          .font(.caption)
+                          .foregroundStyle(.secondary)
+                  }
+          '''
+          if old not in text:
+              raise SystemExit('Expected SurfaceAppearanceControls geometry block not found; refusing to patch.')
+          path.write_text(text.replace(old, new, 1))
+
+      - name: Build Halo
+        run: |
+          set -o pipefail
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build | xcpretty
+
+      - name: Commit hotfix and remove one-shot workflow
+        run: |
+          rm .github/workflows/perf-surface-geometry-hotfix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Views/SurfaceAppearanceView.swift .github/workflows/perf-surface-geometry-hotfix.yml
+          git commit -m "Avoid synchronous geometry work in Surface settings"
+          git push origin HEAD:main
