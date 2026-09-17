@@ -4263,7 +4263,11 @@ private struct ContextMusicView: View {
         let spacing = options.resolvedSpacing
         let metadataHeight = (options.showTitle ? options.fontSize * 1.35 : 0) + (options.showArtist ? max(12, options.fontSize * 0.72) : 0)
         let lyricsHeight = options.showsLyrics ? options.resolvedLyricFontSize * (options.resolvedLyricDisplay == .word ? 1.25 : 2.05) : 0
-        let scrubHeight = playbackDuration > 0.5 ? 30.0 : 0
+        // Keep the Audio CI geometry stable for the lifetime of the music surface.
+        // MediaRemote can briefly omit duration while metadata refreshes; tying preferred size
+        // to that transient value makes the notch randomly grow/shrink when the scrubber appears.
+        // Reserve the progress-row footprint even while duration is temporarily unavailable.
+        let scrubHeight = 30.0
         let controlsHeight = options.showControls ? options.resolvedControlSize * 1.35 : 0
         let visualizerHeight = options.showVisualizer ? max(18, min(64, visualizer.height)) : 0
         let artworkSize = options.resolvedForegroundArtwork == .none ? 0 : options.artworkSize
