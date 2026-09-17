@@ -27,15 +27,20 @@ jobs:
           text = Path('Halo/Views/SurfaceView.swift').read_text()
           required = [
             'let scrubHeight = 30.0',
-            'Reserve the progress-row footprint even while duration is temporarily unavailable.',
-            '.task(id: sizingKey) { publishPreferredSize() }'
+            'private var metadataReservedHeight: Double',
+            'let metadataHeight = metadataReservedHeight',
+            '.onChange(of: surfaceState.contextPreferredSize) { requested in',
+            'if !contextMusicActive { state.contextPreferredSize = nil }',
+            'if activeContext != nil && !contextMusicActive { state.contextPreferredSize = nil }'
           ]
           missing = [item for item in required if item not in text]
           if missing:
-              raise SystemExit(f'Missing stable Audio CI sizing markers: {missing}')
-          if 'let scrubHeight = playbackDuration > 0.5 ? 30.0 : 0' in text:
-              raise SystemExit('Duration-dependent Audio CI preferred size still present')
-          print('Audio CI stable sizing contract passed')
+              raise SystemExit(f'Missing Audio CI geometry-stability markers: {missing}')
+          if 'let metadataHeight = (options.showTitle ? options.fontSize * 1.35 : 0)' in text:
+              raise SystemExit('Old one-line metadata height estimate still present')
+          if '.onChange(of: playbackDuration) { _ in publishPreferredSize() }' in text:
+              raise SystemExit('Duration is still driving Audio CI sizing publication')
+          print('Audio CI geometry ownership contract passed')
           PY
 
       - name: Parse SurfaceView
@@ -64,5 +69,5 @@ jobs:
             echo 'No source changes to commit.'
             exit 0
           fi
-          git commit -m 'Stabilize Audio CI size across metadata refreshes'
+          git commit -m 'Lock Audio CI geometry to music content'
           git push origin HEAD:main
