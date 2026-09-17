@@ -26,15 +26,16 @@ jobs:
           from pathlib import Path
           text = Path('Halo/Views/ClosedNotchView.swift').read_text()
           required = [
-              'case .visualizer:',
-              'maxWidth: .infinity,',
+              'private var visualizerContentWidth: Double',
+              '.frame(width: visualizerContentWidth, height: innerHeight)',
               '.layoutPriority(3)',
-              'v.width = Double.greatestFiniteMagnitude',
+              'private func visualizerCanvas(at timestamp: Double) -> some View',
+              'private func drawVisualizer(in graphics: inout GraphicsContext, size: CGSize, time: Double)',
           ]
           missing = [m for m in required if m not in text]
           if missing:
-              raise SystemExit(f'missing flexible visualizer markers: {missing}')
-          print('Closed visualizer flexible layout contract passed')
+              raise SystemExit(f'missing deterministic visualizer markers: {missing}')
+          print('Closed visualizer deterministic layout contract passed')
           PY
 
       - name: Parse ClosedNotchView
