@@ -8,64 +8,29 @@ permissions:
   contents: write
 
 jobs:
-  patch:
-    runs-on: macos-15
+  cleanup:
+    if: github.event.head_commit.message == 'Finalize Notch Skins cleanup'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Apply Notch Skins feature
+      - name: Restore maintenance workflows and remove helpers
         run: |
-          python3 .github/scripts/add-notch-skins.py
-          python3 .github/scripts/fix-notch-skins-build.py
-
-      - name: Verify feature contract
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          models = Path('Halo/Core/WorkspaceModels.swift').read_text()
-          surface = Path('Halo/Views/SurfaceView.swift').read_text()
-          settings = Path('Halo/Views/WorkspaceSettingsView.swift').read_text()
-          for token in ['enum NotchSkinPreset:', 'struct NotchSkinOptions:', 'var skin = NotchSkinOptions()', 'let values: [Double] = [', 'let numericValues: [Double] = [']:
-              if token not in models: raise SystemExit(f'Missing model token: {token}')
-          for token in ['NotchSkinLayer(options: layout.appearance.skin, theme: theme, expanded: state.expanded)', 'struct NotchSkinLayer: View', 'case .carbonWeave:', 'case .neonCircuit:', 'case .pixelMatrix:', 'case .custom:']:
-              if token not in surface: raise SystemExit(f'Missing renderer token: {token}')
-          for token in ['items: ["Appearance", "Notch Skins",', 'case "Notch Skins": NotchSkinSettingsPane(', 'private struct NotchSkinSettingsPane: View', 'Button("Choose Image…")']:
-              if token not in settings: raise SystemExit(f'Missing settings token: {token}')
-          if 'surfaceBackgroundLayer\n                NotchSkinLayer' not in surface:
-              raise SystemExit('Skin layer is not above the base surface background')
-          print('Notch Skins contract passed')
-          PY
-
-      - name: Parse changed Swift files
-        run: |
-          xcrun swiftc -parse Halo/Core/WorkspaceModels.swift
-          xcrun swiftc -parse Halo/Views/SurfaceView.swift
-          xcrun swiftc -parse Halo/Views/WorkspaceSettingsView.swift
-
-      - name: Build regression check
-        run: |
-          set +e
-          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build > /tmp/halo-notch-skins.log 2>&1
-          status=$?
           set -e
-          if [ $status -ne 0 ]; then
-            echo 'xcodebuild failed; checking changed files for compiler errors.'
-            grep -E '(WorkspaceModels|SurfaceView|WorkspaceSettingsView)\.swift:.*error:' /tmp/halo-notch-skins.log || true
-            if grep -qE '(WorkspaceModels|SurfaceView|WorkspaceSettingsView)\.swift:.*error:' /tmp/halo-notch-skins.log; then
-              exit 1
-            fi
-            echo 'Build failed only on unrelated baseline errors; changed files emitted no compiler errors.'
-          else
-            echo 'Halo build passed.'
-          fi
+          git show d78495b975654d09a2a700ec81d1886b4a420680:.github/workflows/add-transfer-ci.yml > .github/workflows/add-transfer-ci.yml
+          git show 11abf796823d5c1497aebcb49a070d33d68eac1e:.github/workflows/fix-pixel-pet-cookie-rescue-workflow.yml > .github/workflows/fix-pixel-pet-cookie-rescue-workflow.yml
+          rm -f .github/scripts/add-notch-skins.py
+          rm -f .github/scripts/fix-notch-skins-build.py
+          rm -f .github/workflows/add-notch-skins.yml
+          rm -f .github/notch-skins-trigger.txt
 
-      - name: Commit feature
+      - name: Commit cleanup
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Halo/Core/WorkspaceModels.swift Halo/Views/SurfaceView.swift Halo/Views/WorkspaceSettingsView.swift
-          git commit -m 'Add customizable notch skins'
+          git add -A .github
+          git commit -m 'Clean up Notch Skins maintenance files'
           git pull --rebase origin main
           git push origin HEAD:main
