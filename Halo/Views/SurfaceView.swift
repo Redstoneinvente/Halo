@@ -2612,7 +2612,11 @@ struct SurfaceView: View {
                 if !state.pinned { state.expanded = false }
             } else {
                 let clipboardHover = clipboardContextActive && clipboardCI.triggerMode == "Hover to Open"
-                state.hover(hovering, enabled: store.configuration.hoverToExpand || clipboardHover)
+                state.hover(
+                    hovering,
+                    enabled: store.configuration.hoverToExpand || clipboardHover,
+                    openDelay: store.configuration.hoverToExpand ? store.configuration.resolvedHoverOpenDelay : 0
+                )
             }
         }
         .onChange(of: state.dropTargeted) { active in

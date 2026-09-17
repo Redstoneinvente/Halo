@@ -1645,10 +1645,6 @@ struct NotchAmbientSettingsView: View {
             labeledSlider("Horizontal canvas", binding(\.horizontalExtent), 80...280, suffix: " pt")
             labeledSlider("Vertical canvas", binding(\.verticalExtent), 72...260, suffix: " pt")
             Text("The runtime canvas is a separate transparent, click-through layer. It follows the real/simulated notch and closed-notch offsets without increasing Halo's interactive hit area. Reduce Motion automatically substitutes static treatments and Low Power Mode lowers particle/update cost.").font(.caption).foregroundStyle(.secondary)
-            DisclosureGroup("Decoration Studio architecture") {
-                Text("Built-in decorations already resolve through reusable Shape, Image, Animated Image, Video, Particle Emitter, Glow, Line, Gradient, Shader and Procedural layer roles with explicit depth. The manifest contract is versioned so a future Decoration Studio and importable packs can add assets, layers, animations, reactions and previews without replacing the runtime ownership system.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
         }
         .onAppear { updateWallpaper() }
         .onChange(of: ambient.settings.colorSource) { _ in updateWallpaper() }

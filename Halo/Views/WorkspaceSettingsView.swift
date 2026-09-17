@@ -269,6 +269,30 @@ struct SettingsView: View {
                 if !onboarded { Button("Finish setup and show Halo") { onboarded = true; NotificationCenter.default.post(name: .init("HaloToggle"), object: nil) } }
             }
             Toggle("Expand on hover", isOn: $store.configuration.hoverToExpand)
+            if store.configuration.hoverToExpand {
+                LabeledContent("Hover delay") {
+                    HStack(spacing: 10) {
+                        SwiftUI.Slider(
+                            value: Binding(
+                                get: { store.configuration.resolvedHoverOpenDelay },
+                                set: { store.configuration.hoverOpenDelay = min(10, max(0, $0)) }
+                            ),
+                            in: 0...10,
+                            step: 0.1
+                        )
+                        .frame(width: 220)
+                        Group {
+                            if store.configuration.resolvedHoverOpenDelay == 0 {
+                                Text("Instant")
+                            } else {
+                                Text("\(store.configuration.resolvedHoverOpenDelay, specifier: "%.1f") s")
+                            }
+                        }
+                        .monospacedDigit()
+                        .frame(width: 58, alignment: .trailing)
+                    }
+                }
+            }
             Toggle("Show on all displays", isOn: $store.configuration.allDisplays)
             Toggle("Launch at login", isOn: $loginEnabled).onChange(of: loginEnabled) { value in
                 do { if value { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
@@ -387,8 +411,6 @@ struct SettingsView: View {
             Section("Optional permissions") {
                 Button("Allow Calendar (today's events)") { workspace.calendar.requestAccess() }
                 Button("Allow Notifications (timer completion)") { workspace.enableNotifications() }
-                Text("Automation is requested when detecting or controlling Apple Music or Spotify. System Audio uses Screen Recording permission to analyse the Mac's output audio. Screen Recording is also requested when you capture a region. Microphone access is not requested. Accessibility/Post Event access is requested only if you use Clipboard CI direct Paste, so Halo can send Command–V to the app you were using. Bluetooth state is read only when the Bluetooth CI/connection-state features are used. No analytics. Enabling artwork colors downloads Spotify artwork; Apple Music artwork is read from the player. Plugin URLs open only after confirmation.")
-                Text("This direct-distribution build is not sandboxed. Files and notes are stored locally.")
             }
         case "Update Animation":
             UpdateAnimationSettingsView()
@@ -821,8 +843,6 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
                     Text("Affects the surface background only")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("This is Halo's existing persisted Surface blur; the renderer already applies it to Solid, Gradient, Image, Video, and timed backgrounds.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -2793,11 +2813,7 @@ private struct HaloAboutView: View {
                     HaloWhatsNewCoordinator.shared.present()
                 }
             }
-            if updates.isConfigured {
-                Text("Halo uses Sparkle 2 to securely check, verify, download, and install signed updates.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
+            if !updates.isConfigured {
                 Label("Update configuration is unavailable in this build.", systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -2931,10 +2947,7 @@ private struct HaloAccountLicenseSettingsView: View {
             if let error = license.errorMessage { Text(error).font(.caption).foregroundStyle(.red) }
         }
 
-        Section("How access works") {
-            Text("Your Halo account and your software license are separate credentials. Firebase handles identity and session recovery; LicenseSeat handles the purchased license and device seat. Halo stores the Firebase refresh token, the activated license key, and its stable installation fingerprint in macOS Keychain.")
-                .font(.caption).foregroundStyle(.secondary)
-            Link("Manage LicenseSeat account", destination: URL(string: "https://licenseseat.com")!)
+        Section("Support") {
             Link("Contact Halo support · r.support@redstoneinvente.com", destination: URL(string: "mailto:r.support@redstoneinvente.com")!)
         }
     }

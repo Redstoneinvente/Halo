@@ -12,7 +12,13 @@ final class SurfaceViewport: ObservableObject {
 final class SurfaceState: ObservableObject {
     @Published var expanded = false
     @Published var pinned = false {
-        didSet { if pinned { collapseTask?.cancel(); expanded = true } }
+        didSet {
+            if pinned {
+                hoverExpandTask?.cancel()
+                collapseTask?.cancel()
+                expanded = true
+            }
+        }
     }
     let viewport = SurfaceViewport()
     @Published var dashboardWidth: CGFloat = 420
@@ -33,11 +39,13 @@ final class SurfaceState: ObservableObject {
     @Published var dropTargeted = false
     @Published var dropItemCount = 0
     var collapseTask: Task<Void, Never>?
+    var hoverExpandTask: Task<Void, Never>?
     var dropExitTask: Task<Void, Never>?
     var editingGeometry = false
 
     func beginFileDrop(count: Int) {
         dropExitTask?.cancel()
+        hoverExpandTask?.cancel()
         collapseTask?.cancel()
         let nextCount = max(1, count)
         if dropItemCount != nextCount { dropItemCount = nextCount }
@@ -75,15 +83,46 @@ final class SurfaceState: ObservableObject {
         }
     }
 
-    func hover(_ inside: Bool, enabled: Bool) {
+    func hover(_ inside: Bool, enabled: Bool, openDelay: Double = 0) {
         collapseTask?.cancel()
-        guard enabled, !editingGeometry else { return }
+        if !inside {
+            hoverExpandTask?.cancel()
+            hoverExpandTask = nil
+        }
+        guard enabled, !editingGeometry else {
+            hoverExpandTask?.cancel()
+            hoverExpandTask = nil
+            return
+        }
         if dropTargeted {
+            hoverExpandTask?.cancel()
+            hoverExpandTask = nil
             if inside && !expanded { expanded = true }
             return
         }
-        if inside { expanded = true }
-        else if !pinned {
+        if inside {
+            guard !expanded else {
+                hoverExpandTask?.cancel()
+                hoverExpandTask = nil
+                return
+            }
+            let delay = min(10, max(0, openDelay))
+            hoverExpandTask?.cancel()
+            guard delay > 0.001 else {
+                hoverExpandTask = nil
+                expanded = true
+                return
+            }
+            hoverExpandTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard !Task.isCancelled,
+                      let self,
+                      !self.editingGeometry,
+                      !self.dropTargeted else { return }
+                self.hoverExpandTask = nil
+                self.expanded = true
+            }
+        } else if !pinned {
             collapseTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 450_000_000)
                 guard !Task.isCancelled, let self, !self.pinned, !self.editingGeometry, !self.dropTargeted else { return }
@@ -343,7 +382,7 @@ final class WindowManager {
             ambientPanel.animationBehavior = .none
         }
         func stop() {
-            animator.cancel(); state.collapseTask?.cancel(); state.dropExitTask?.cancel()
+            animator.cancel(); state.hoverExpandTask?.cancel(); state.collapseTask?.cancel(); state.dropExitTask?.cancel()
             subscription?.cancel(); contextSizeSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); contextCompactHeightSubscription?.cancel(); panel.close(); ambientPanel.close()
         }
     }

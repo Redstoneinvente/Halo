@@ -1172,8 +1172,6 @@ struct ActivationSequenceSettingsPane: View {
             Toggle("Respect System Volume", isOn: binding(\.respectSystemVolume))
             Button("Preview Sound") { ActivationSequenceCoordinator.shared.previewSound() }
                 .disabled(settings.sound == .off || (settings.sound == .custom && settings.customSoundPath.isEmpty))
-            Text("Sound is off by default. Built-in sounds are short synthesized cues with soft envelopes rather than long startup jingles.")
-                .font(.caption).foregroundStyle(.secondary)
         }
 
         Section("Displays") {
@@ -1184,10 +1182,6 @@ struct ActivationSequenceSettingsPane: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
 
-        Section("Accessibility & performance") {
-            Text("Halo automatically substitutes a simple fade/glow when macOS Reduce Motion is enabled. Low Power Mode lowers the activation renderer to 30 fps and halves particle counts. The effect never receives mouse events, and immediate notch interaction cancels it gracefully.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
     }
 
     @ViewBuilder
