@@ -886,12 +886,14 @@ private final class SystemAudioMediaFallback {
         } else {
             safariOutputActive = false
         }
-        if safariOutputActive { lastSafariOutput = now }
-
         let audioSnapshot = AudioSpectrumService.shared.snapshot()
         let pcmAudible = isPCMAudible(audioSnapshot, safariHint: safariRunning || safariOutputActive)
-        let audibleNow = safariOutputActive || pcmAudible
+        // CoreAudio's process-output flag means Safari/WebKit owns a running output stream; it
+        // does NOT guarantee non-silent samples. Use it only to attribute PCM to Safari. Actual
+        // liveness comes from captured PCM so a paused/silent WebKit stream cannot pin Audio CI.
+        let audibleNow = pcmAudible
         let safariLikely = safariOutputActive || (safariRunning && pcmAudible)
+        if safariOutputActive && pcmAudible { lastSafariOutput = now }
         if audibleNow { lastHeard = now }
         if safariLikely && audibleNow {
             if safariAudibleSince == nil { safariAudibleSince = now }
@@ -981,9 +983,9 @@ private final class SystemAudioMediaFallback {
                 else { safariOutput = false }
                 let pcmAudible = self.isPCMAudible(audioSnapshot, safariHint: safariRunning || safariOutput)
                 let safariLikely = safariOutput || (safariRunning && pcmAudible)
-                let audibleNow = safariOutput || pcmAudible
+                let audibleNow = pcmAudible
                 let now = Date()
-                if safariOutput { self.lastSafariOutput = now }
+                if safariOutput && pcmAudible { self.lastSafariOutput = now }
                 // MediaRemote snapshots may be cached for many seconds. Never let a stale
                 // `playing = true` sample keep pushing lastHeard forward after output stopped.
                 // Actual PCM/process output owns the release timer; MediaRemote can only seed
@@ -1072,10 +1074,9 @@ private final class SystemAudioMediaFallback {
 
     private func isPCMAudible(_ snapshot: AudioSpectrumSnapshot, safariHint: Bool) -> Bool {
         guard snapshot.available else { return false }
-        // Browser video, speech, and WebAudio can sit far below music-mastering levels. Mids are
-        // especially useful for quiet speech, so blend the bands instead of relying on RMS alone.
-        let signal = max(snapshot.overall, snapshot.mids * 0.82, snapshot.bass * 0.62, snapshot.treble * 0.68)
-        return signal > (safariHint ? 0.016 : 0.040)
+        // Use instantaneous (unsmoothed) energy for liveness. The displayed spectrum keeps its
+        // smooth release, but Audio CI must disappear as soon as real PCM falls silent.
+        return snapshot.liveness > (safariHint ? 0.016 : 0.040)
     }
 
     private func clearIfOwned() {

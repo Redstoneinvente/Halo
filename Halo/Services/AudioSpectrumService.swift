@@ -12,6 +12,9 @@ struct AudioSpectrumSnapshot: Equatable {
     var mids: Double = 0
     var treble: Double = 0
     var overall: Double = 0
+    // Unsmoothed instantaneous energy used for playback liveness. Visual bands deliberately
+    // retain release smoothing, but stop detection must not inherit that decay tail.
+    var liveness: Double = 0
     var available = false
 }
 
@@ -358,6 +361,9 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SH
         smoothed.mids = smooth(smoothed.mids, mids)
         smoothed.treble = smooth(smoothed.treble, treble)
         smoothed.overall = smooth(smoothed.overall, overall)
+        // Keep liveness raw. A smoothed release here can take several seconds to decay and is
+        // appropriate for animation, not for deciding whether Audio CI should still exist.
+        smoothed.liveness = max(overall, mids * 0.82, bass * 0.62, treble * 0.68)
         smoothed.available = rms > 0.00001
         stateLock.unlock()
     }
