@@ -2241,7 +2241,7 @@ struct SurfaceView: View {
         if teleprompterCIEnabled && teleprompterActive { candidates.append((.teleprompter, teleprompterPriority, 3)) }
         if transferCIEnabled && transfer.isActive { candidates.append((.transfer, transferPriority, 3)) }
         if clipboardCIEnabled && clipboardCI.isActive { candidates.append((.clipboard, clipboardCI.manualPresentation ? 1000 : clipboardPriority, 3)) }
-        if contextOptions.enabled && workspace.media.isPlaying { candidates.append((.music, contextMusicPriority, 2)) }
+        if contextOptions.enabled && workspace.media.hasNowPlayingPresentation { candidates.append((.music, contextMusicPriority, 2)) }
         if bluetoothEligible { candidates.append((.bluetooth, bluetoothPriority, 1)) }
         return candidates
     }
@@ -4541,7 +4541,7 @@ private struct ContextMusicView: View {
     @ViewBuilder private var visualizerView: some View {
         if options.showVisualizer {
             let configured = contextVisualizerOptions
-            PlaybackVisualizer(kind: options.resolvedVisualizerStyle, playing: media.isPlaying, enabled: true,
+            PlaybackVisualizer(kind: options.resolvedVisualizerStyle, playing: media.hasNowPlayingPresentation, enabled: true,
                                options: configured, palette: visualizerPalette, fallback: effectiveVisualizerColor)
                 .frame(maxWidth: visualizerFullWidth ? .infinity : CGFloat(configured.width), alignment: .center)
                 .frame(height: max(18, min(64, configured.height)))

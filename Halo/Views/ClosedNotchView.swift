@@ -200,8 +200,8 @@ struct ClosedNotchView: View {
             }
         }
 
-        let rightAvailable = right == .none || ((right == .media || right == .visualizer) && !workspace.media.isPlaying)
-        let leftAvailable = left == .none || ((left == .media || left == .visualizer) && !workspace.media.isPlaying)
+        let rightAvailable = right == .none || ((right == .media || right == .visualizer) && !workspace.media.hasNowPlayingPresentation)
+        let leftAvailable = left == .none || ((left == .media || left == .visualizer) && !workspace.media.hasNowPlayingPresentation)
         if rightAvailable { right = .activity }
         else if leftAvailable { left = .activity }
         else { right = .activity }
@@ -294,13 +294,13 @@ struct ClosedNotchSlot: View {
     private var innerWidth: Double { max(1, availableWidth - slotCameraInset - slotOuterInset) }
     private var isMusicItem: Bool { item == .media || item == .visualizer }
     private var itemIsVisible: Bool {
-        if isMusicItem { return media.isPlaying }
+        if isMusicItem { return media.hasNowPlayingPresentation }
         if item == .activity { return activeActivity != nil }
         return item != .none
     }
     private var artwork: ClosedArtworkOptions { options.resolvedArtwork }
     private var artworkTargetSide: ClosedNotchSide? {
-        guard media.isPlaying, artwork.enabled, artwork.mode != .none, artwork.mode != .background else { return nil }
+        guard media.hasNowPlayingPresentation, artwork.enabled, artwork.mode != .none, artwork.mode != .background else { return nil }
         switch artwork.side {
         case .left: return .left
         case .right: return .right
@@ -331,8 +331,8 @@ struct ClosedNotchSlot: View {
         case .left: return .left
         case .right: return .right
         case .automatic:
-            let rightFree = options.right == .none || ((options.right == .media || options.right == .visualizer) && !media.isPlaying)
-            let leftFree = options.left == .none || ((options.left == .media || options.left == .visualizer) && !media.isPlaying)
+            let rightFree = options.right == .none || ((options.right == .media || options.right == .visualizer) && !media.hasNowPlayingPresentation)
+            let leftFree = options.left == .none || ((options.left == .media || options.left == .visualizer) && !media.hasNowPlayingPresentation)
             if rightFree { return .right }
             if leftFree { return .left }
             return .right
@@ -399,12 +399,8 @@ struct ClosedNotchSlot: View {
     }
     private var visualizerOptions: VisualizerOptions {
         var v = options.visualizer ?? VisualizerOptions()
-        v.width = Double.greatestFiniteMagnitude
         v.height = min(v.height, innerHeight)
         return v
-    }
-    private var visualizerContentWidth: Double {
-        max(1, innerWidth - mediaSiblingFootprint)
     }
     private var closedMediaOptions: ClosedMediaOptions { options.mediaOptions ?? ClosedMediaOptions() }
     private var renderedArtworkSize: Double {
@@ -582,13 +578,13 @@ struct ClosedNotchSlot: View {
             if let battery = system.battery { compactLabel(symbol: system.charging ? "battery.100.bolt" : "battery.100", text: "\(battery)%") }
             else { Image(systemName: "powerplug").frame(width: max(12, textSize + 2), alignment: .center) }
         case .media:
-            if media.isPlaying {
+            if media.hasNowPlayingPresentation {
                 ClosedMediaView(media: media, options: closedMediaOptions, fontSize: textSize, availableWidth: closedMediaWidth, lowPower: system.lowPower)
                     .frame(width: closedMediaWidth)
                     .layoutPriority(1)
             }
         case .visualizer:
-            if media.isPlaying {
+            if media.hasNowPlayingPresentation {
                 PlaybackVisualizer(
                     kind: options.animation,
                     playing: true,
@@ -597,8 +593,6 @@ struct ClosedNotchSlot: View {
                     palette: media.artworkColors,
                     fallback: effectiveTextColor
                 )
-                .frame(width: visualizerContentWidth, height: innerHeight)
-                .layoutPriority(3)
             }
         case .mirror:
             MirrorWidgetView()

@@ -505,6 +505,24 @@ final class MediaService: ObservableObject {
         else if enabled { requestExternalArtwork() }
     }
     @Published private(set) var connectedApp: String?
+
+    /// UI presentation lifetime is deliberately a little less brittle than raw playback state.
+    /// System/Safari playback can momentarily report `isPlaying == false` while MediaRemote still
+    /// owns a meaningful Now Playing session. Keeping that session present prevents Context Music
+    /// and the closed-notch visualizer from disappearing and forcing a surface resize. Native
+    /// Music/Spotify pauses remain immediate because they have a connected app.
+    var hasNowPlayingPresentation: Bool {
+        if isPlaying { return true }
+        guard connectedApp == nil else { return false }
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedTitle.isEmpty,
+              normalizedTitle != "connect a player",
+              normalizedTitle != "nothing playing" else { return false }
+        if normalizedTitle == "system audio" && normalizedArtist.contains("waiting for audio") { return false }
+        return true
+    }
+
     private var detecting = false
     private var automaticMode = true
     private var deniedApps = Set<String>()
