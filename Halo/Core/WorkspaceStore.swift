@@ -984,11 +984,16 @@ private final class SystemAudioMediaFallback {
                 let audibleNow = safariOutput || pcmAudible
                 let now = Date()
                 if safariOutput { self.lastSafariOutput = now }
-                if audibleNow || snapshot.playing { self.lastHeard = now }
+                // MediaRemote snapshots may be cached for many seconds. Never let a stale
+                // `playing = true` sample keep pushing lastHeard forward after output stopped.
+                // Actual PCM/process output owns the release timer; MediaRemote can only seed
+                // presentation briefly when its playback sample itself is fresh.
+                if audibleNow { self.lastHeard = now }
+                let remotePlaybackFresh = snapshot.playing && now.timeIntervalSince(snapshot.sampledAt) < 1.0
                 let safariRecentlyActive = now.timeIntervalSince(self.lastSafariOutput) < 0.9
                 let releaseWindow = (safariRunning || safariRecentlyActive) ? 1.25 : 0.85
                 let withinReleaseWindow = now.timeIntervalSince(self.lastHeard) < releaseWindow
-                let shouldPresentPlaying = snapshot.playing || audibleNow || (self.ownsFallback && withinReleaseWindow)
+                let shouldPresentPlaying = remotePlaybackFresh || audibleNow || (self.ownsFallback && withinReleaseWindow)
 
                 let sourceBundle = snapshot.bundleIdentifier?.lowercased() ?? ""
                 let sourceName = snapshot.applicationName?.lowercased() ?? ""
