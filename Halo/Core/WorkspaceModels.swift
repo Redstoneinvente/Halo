@@ -28,15 +28,24 @@ enum ModuleID: String, Codable, CaseIterable, Identifiable {
 
 enum BackgroundKind: String, Codable, CaseIterable { case gradient, solid, glass, image, video }
 
-enum NotchSkinPreset: String, Codable, CaseIterable, Identifiable {
+enum NotchSkinPreset: String, CaseIterable, Identifiable, Codable {
     case haloGlow = "Halo Glow"
     case carbonWeave = "Carbon Weave"
     case neonCircuit = "Neon Circuit"
     case retroScanlines = "Retro Scanlines"
     case pixelMatrix = "Pixel Matrix"
     case constellation = "Constellation"
-    case custom = "Custom Image"
+    case aurora = "Aurora"
+    case synthwave = "Synthwave Sunset"
+    case sakuraNight = "Sakura Night"
+    case oceanCurrent = "Ocean Current"
+    case emberCore = "Ember Core"
+    case blueprint = "Blueprint"
+    case matrixRain = "Matrix Rain"
+    case nebula = "Nebula"
+
     var id: String { rawValue }
+
     var symbol: String {
         switch self {
         case .haloGlow: return "sparkles"
@@ -45,8 +54,28 @@ enum NotchSkinPreset: String, Codable, CaseIterable, Identifiable {
         case .retroScanlines: return "line.3.horizontal"
         case .pixelMatrix: return "circle.grid.3x3.fill"
         case .constellation: return "sparkle"
-        case .custom: return "photo.on.rectangle.angled"
+        case .aurora: return "wave.3.right"
+        case .synthwave: return "sun.horizon.fill"
+        case .sakuraNight: return "leaf.fill"
+        case .oceanCurrent: return "water.waves"
+        case .emberCore: return "flame.fill"
+        case .blueprint: return "ruler.fill"
+        case .matrixRain: return "textformat.abc"
+        case .nebula: return "cloud.moon.fill"
         }
+    }
+
+    // Custom Image existed in early Notch Skins builds. Decode it as Halo Glow so saved
+    // profiles continue loading even though image-backed skins are no longer exposed.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = (try? container.decode(String.self)) ?? Self.haloGlow.rawValue
+        self = raw == "Custom Image" ? .haloGlow : (Self(rawValue: raw) ?? .haloGlow)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
     }
 }
 
@@ -66,12 +95,7 @@ enum NotchSkinBlend: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-enum NotchSkinImageMode: String, Codable, CaseIterable, Identifiable {
-    case fill = "Fill"
-    case fit = "Fit"
-    case stretch = "Stretch"
-    var id: String { rawValue }
-}
+
 
 struct NotchSkinOptions: Codable, Equatable {
     var enabled = false
@@ -82,8 +106,6 @@ struct NotchSkinOptions: Codable, Equatable {
     var usesThemeTint = true
     var tint = WidgetColor(red: 0.34, green: 0.72, blue: 1.0)
     var scale = 1.0
-    var assetPath = ""
-    var imageMode: NotchSkinImageMode = .fill
 
     func normalized() -> NotchSkinOptions {
         var value = self

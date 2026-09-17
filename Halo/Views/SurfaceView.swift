@@ -2815,6 +2815,7 @@ struct NotchSkinLayer: View {
     let expanded: Bool
 
     private var normalized: NotchSkinOptions { options.normalized() }
+    private var scale: CGFloat { CGFloat(normalized.scale) }
     private var shouldRender: Bool {
         guard normalized.enabled else { return false }
         switch normalized.visibility {
@@ -2829,6 +2830,15 @@ struct NotchSkinLayer: View {
         }
         return normalized.tint.color
     }
+    private var blendMode: BlendMode {
+        switch normalized.blend {
+        case .normal: return .normal
+        case .overlay: return .overlay
+        case .softLight: return .softLight
+        case .screen: return .screen
+        case .multiply: return .multiply
+        }
+    }
 
     var body: some View {
         Group {
@@ -2836,9 +2846,10 @@ struct NotchSkinLayer: View {
                 GeometryReader { proxy in
                     skin(in: proxy.size)
                         .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
                 }
                 .opacity(normalized.opacity)
-                .blendMode(normalized.blend.swiftUIBlendMode)
+                .blendMode(blendMode)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             }
@@ -2850,152 +2861,270 @@ struct NotchSkinLayer: View {
         switch normalized.preset {
         case .haloGlow:
             ZStack {
-                RadialGradient(
-                    colors: [tint.opacity(0.72), tint.opacity(0.22), .clear],
-                    center: .top,
-                    startRadius: 0,
-                    endRadius: max(70, min(size.width, size.height * 5) * 0.68)
-                )
-                LinearGradient(
-                    colors: [.clear, tint.opacity(0.34), .clear],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .frame(height: max(1, 1.4 * normalized.scale))
-                .frame(maxHeight: .infinity, alignment: .bottom)
+                RadialGradient(colors: [tint.opacity(0.82), tint.opacity(0.28), .clear], center: .top, startRadius: 0, endRadius: max(size.width, size.height) * 0.72)
+                LinearGradient(colors: [tint.opacity(0.28), .clear, tint.opacity(0.18)], startPoint: .leading, endPoint: .trailing)
             }
 
         case .carbonWeave:
+            // Filled ribbons stay visible after the surface opacity/blend pass. The old
+            // sub-pixel strokes could disappear almost completely on a dark background.
             Canvas { context, canvas in
-                let spacing = max(6, 10 * normalized.scale)
-                let lineWidth = max(0.45, 0.7 * normalized.scale)
-                var x = -canvas.height
-                while x < canvas.width + canvas.height {
-                    var forward = Path()
-                    forward.move(to: CGPoint(x: x, y: 0))
-                    forward.addLine(to: CGPoint(x: x + canvas.height, y: canvas.height))
-                    context.stroke(forward, with: .color(tint.opacity(0.42)), lineWidth: lineWidth)
-                    var backward = Path()
-                    backward.move(to: CGPoint(x: x + spacing * 0.5, y: canvas.height))
-                    backward.addLine(to: CGPoint(x: x + canvas.height + spacing * 0.5, y: 0))
-                    context.stroke(backward, with: .color(Color.white.opacity(0.20)), lineWidth: lineWidth * 0.72)
-                    x += spacing
+                let tile = max(CGFloat(8), 12 * scale)
+                var row = -1
+                var y = -tile
+                while y < canvas.height + tile {
+                    var col = -1
+                    var x = -tile
+                    while x < canvas.width + tile {
+                        let offset = row.isMultiple(of: 2) ? CGFloat.zero : tile * 0.5
+                        let ox = x + offset
+                        let bright = (row + col).isMultiple(of: 2)
+                        var forward = Path()
+                        forward.move(to: CGPoint(x: ox, y: y + tile * 0.08))
+                        forward.addLine(to: CGPoint(x: ox + tile * 0.82, y: y + tile * 0.08))
+                        forward.addLine(to: CGPoint(x: ox + tile, y: y + tile * 0.42))
+                        forward.addLine(to: CGPoint(x: ox + tile * 0.18, y: y + tile * 0.42))
+                        forward.closeSubpath()
+                        context.fill(forward, with: .color((bright ? tint : Color.white).opacity(bright ? 0.62 : 0.30)))
+
+                        var reverse = Path()
+                        reverse.move(to: CGPoint(x: ox + tile * 0.18, y: y + tile * 0.54))
+                        reverse.addLine(to: CGPoint(x: ox + tile, y: y + tile * 0.54))
+                        reverse.addLine(to: CGPoint(x: ox + tile * 0.82, y: y + tile * 0.88))
+                        reverse.addLine(to: CGPoint(x: ox, y: y + tile * 0.88))
+                        reverse.closeSubpath()
+                        context.fill(reverse, with: .color(Color.black.opacity(bright ? 0.48 : 0.66)))
+                        x += tile
+                        col += 1
+                    }
+                    y += tile
+                    row += 1
                 }
             }
 
         case .neonCircuit:
             Canvas { context, canvas in
-                let cell = max(18, 30 * normalized.scale)
-                let cols = Int(canvas.width / cell) + 2
-                let rows = Int(canvas.height / cell) + 2
-                for row in 0..<rows {
-                    for column in 0..<cols where (row + column).isMultiple(of: 2) {
-                        let x = CGFloat(column) * cell
-                        let y = CGFloat(row) * cell
-                        var path = Path()
-                        path.move(to: CGPoint(x: x, y: y + cell * 0.25))
-                        path.addLine(to: CGPoint(x: x + cell * 0.42, y: y + cell * 0.25))
-                        path.addLine(to: CGPoint(x: x + cell * 0.42, y: y + cell * 0.72))
-                        path.addLine(to: CGPoint(x: x + cell * 0.88, y: y + cell * 0.72))
-                        context.stroke(path, with: .color(tint.opacity(0.65)), style: StrokeStyle(lineWidth: 1.0, lineCap: .round, lineJoin: .round))
-                        let node = CGRect(x: x + cell * 0.39, y: y + cell * 0.69, width: 3, height: 3)
-                        context.fill(Path(ellipseIn: node), with: .color(Color.white.opacity(0.78)))
-                    }
+                let spacing = max(CGFloat(18), 30 * scale)
+                var x: CGFloat = spacing * 0.5
+                var index = 0
+                while x < canvas.width + spacing {
+                    let y = CGFloat((index * 37) % max(1, Int(canvas.height)))
+                    var path = Path()
+                    path.move(to: CGPoint(x: x - spacing, y: y))
+                    path.addLine(to: CGPoint(x: x, y: y))
+                    path.addLine(to: CGPoint(x: x, y: min(canvas.height, y + spacing * 0.7)))
+                    path.addLine(to: CGPoint(x: min(canvas.width, x + spacing * 0.72), y: min(canvas.height, y + spacing * 0.7)))
+                    context.stroke(path, with: .color(tint.opacity(0.78)), lineWidth: max(1.1, 1.7 * scale))
+                    let node = CGRect(x: x - 2.8 * scale, y: y - 2.8 * scale, width: 5.6 * scale, height: 5.6 * scale)
+                    context.fill(Path(ellipseIn: node), with: .color(Color.white.opacity(0.82)))
+                    x += spacing
+                    index += 1
                 }
             }
 
         case .retroScanlines:
-            Canvas { context, canvas in
-                let spacing = max(3, 5 * normalized.scale)
-                var y: CGFloat = 0
-                while y <= canvas.height {
-                    var line = Path()
-                    line.move(to: CGPoint(x: 0, y: y))
-                    line.addLine(to: CGPoint(x: canvas.width, y: y))
-                    context.stroke(line, with: .color(tint.opacity(0.55)), lineWidth: max(0.45, spacing * 0.18))
-                    y += spacing
-                }
-                let vertical = max(32, 58 * normalized.scale)
-                var x: CGFloat = vertical * 0.5
-                while x < canvas.width {
-                    var line = Path()
-                    line.move(to: CGPoint(x: x, y: 0))
-                    line.addLine(to: CGPoint(x: x, y: canvas.height))
-                    context.stroke(line, with: .color(Color.white.opacity(0.08)), lineWidth: 0.5)
-                    x += vertical
+            ZStack {
+                LinearGradient(colors: [.clear, tint.opacity(0.18), .clear], startPoint: .leading, endPoint: .trailing)
+                Canvas { context, canvas in
+                    let spacing = max(CGFloat(4), 6.5 * scale)
+                    let thickness = max(CGFloat(1.5), 2.15 * scale)
+                    var y: CGFloat = 0
+                    var index = 0
+                    while y <= canvas.height {
+                        let alpha = index.isMultiple(of: 4) ? 0.68 : 0.38
+                        let bar = CGRect(x: 0, y: y, width: canvas.width, height: thickness)
+                        context.fill(Path(bar), with: .color((index.isMultiple(of: 4) ? tint : Color.white).opacity(alpha)))
+                        if index.isMultiple(of: 8) {
+                            let shadow = CGRect(x: 0, y: y + thickness, width: canvas.width, height: max(1, thickness * 0.55))
+                            context.fill(Path(shadow), with: .color(Color.black.opacity(0.45)))
+                        }
+                        y += spacing
+                        index += 1
+                    }
                 }
             }
 
         case .pixelMatrix:
             Canvas { context, canvas in
-                let step = max(7, 11 * normalized.scale)
-                let columns = Int(canvas.width / step) + 1
-                let rows = Int(canvas.height / step) + 1
-                let dot = max(1.1, step * 0.18)
-                for row in 0..<rows {
-                    for column in 0..<columns {
-                        let seed = (column * 37 + row * 61 + column * row * 7) % 13
-                        guard seed == 0 || seed == 3 || seed == 8 else { continue }
-                        let alpha: Double = seed == 0 ? 0.72 : (seed == 3 ? 0.42 : 0.24)
-                        let rect = CGRect(x: CGFloat(column) * step, y: CGFloat(row) * step, width: dot, height: dot)
-                        context.fill(Path(rect), with: .color(tint.opacity(alpha)))
+                let spacing = max(CGFloat(8), 13 * scale)
+                let dot = max(CGFloat(1.5), 2.4 * scale)
+                var row = 0
+                var y: CGFloat = spacing * 0.5
+                while y < canvas.height {
+                    var col = 0
+                    var x: CGFloat = spacing * 0.5
+                    while x < canvas.width {
+                        if ((row * 5 + col * 3) % 7) < 3 {
+                            let rect = CGRect(x: x - dot * 0.5, y: y - dot * 0.5, width: dot, height: dot)
+                            context.fill(Path(rect), with: .color(tint.opacity(((row + col) % 3 == 0) ? 0.95 : 0.52)))
+                        }
+                        x += spacing; col += 1
                     }
+                    y += spacing; row += 1
                 }
             }
 
         case .constellation:
             Canvas { context, canvas in
-                let count = max(12, min(54, Int((canvas.width * canvas.height) / max(2800, 5200 * normalized.scale))))
+                let count = 22
                 var points: [CGPoint] = []
-                for index in 0..<count {
-                    let xSeed = (index * 47 + index * index * 11 + 19) % 997
-                    let ySeed = (index * 83 + index * index * 5 + 41) % 991
-                    let point = CGPoint(
-                        x: CGFloat(xSeed) / 996 * canvas.width,
-                        y: CGFloat(ySeed) / 990 * canvas.height
-                    )
-                    points.append(point)
-                    let radius: CGFloat = index.isMultiple(of: 5) ? 1.7 : 1.0
-                    context.fill(Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)),
-                                 with: .color((index.isMultiple(of: 5) ? Color.white : tint).opacity(index.isMultiple(of: 5) ? 0.86 : 0.62)))
+                for i in 0..<count {
+                    let x = canvas.width * CGFloat((i * 47 + 13) % 101) / 100
+                    let y = canvas.height * CGFloat((i * 31 + 17) % 97) / 96
+                    points.append(CGPoint(x: x, y: y))
                 }
-                for index in 1..<points.count where index.isMultiple(of: 3) {
-                    let a = points[index - 1]
-                    let b = points[index]
-                    let distance = hypot(a.x - b.x, a.y - b.y)
-                    guard distance < max(90, canvas.width * 0.23) else { continue }
-                    var line = Path(); line.move(to: a); line.addLine(to: b)
-                    context.stroke(line, with: .color(tint.opacity(0.18)), lineWidth: 0.65)
+                for i in 1..<points.count where i % 3 != 0 {
+                    var line = Path(); line.move(to: points[i - 1]); line.addLine(to: points[i])
+                    context.stroke(line, with: .color(tint.opacity(0.24)), lineWidth: max(0.7, 0.9 * scale))
+                }
+                for (i, point) in points.enumerated() {
+                    let r = max(CGFloat(1.2), CGFloat((i % 3) + 1) * 0.75 * scale)
+                    context.fill(Path(ellipseIn: CGRect(x: point.x - r, y: point.y - r, width: r * 2, height: r * 2)), with: .color((i % 5 == 0 ? Color.white : tint).opacity(0.82)))
                 }
             }
 
-        case .custom:
-            if let image = NSImage(contentsOfFile: normalized.assetPath) {
-                customImage(image, size: size)
+        case .aurora:
+            ZStack {
+                LinearGradient(colors: [Color.cyan.opacity(0.13), Color.purple.opacity(0.12), .clear], startPoint: .topLeading, endPoint: .bottomTrailing)
+                Canvas { context, canvas in
+                    let colors: [Color] = [tint, .cyan, .purple, .green]
+                    for i in 0..<4 {
+                        let base = canvas.height * (0.20 + CGFloat(i) * 0.18)
+                        var path = Path()
+                        path.move(to: CGPoint(x: -20, y: base))
+                        path.addCurve(to: CGPoint(x: canvas.width * 0.52, y: base + canvas.height * 0.12), control1: CGPoint(x: canvas.width * 0.14, y: base - canvas.height * 0.22), control2: CGPoint(x: canvas.width * 0.36, y: base + canvas.height * 0.25))
+                        path.addCurve(to: CGPoint(x: canvas.width + 20, y: base - canvas.height * 0.05), control1: CGPoint(x: canvas.width * 0.70, y: base - canvas.height * 0.16), control2: CGPoint(x: canvas.width * 0.88, y: base + canvas.height * 0.12))
+                        context.stroke(path, with: .color(colors[i].opacity(0.54)), lineWidth: max(8, 18 * scale))
+                    }
+                }
+                .blur(radius: max(2, 4 * scale))
             }
-        }
-    }
 
-    @ViewBuilder
-    private func customImage(_ image: NSImage, size: CGSize) -> some View {
-        switch normalized.imageMode {
-        case .fill:
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFill()
-                .scaleEffect(normalized.scale)
-                .frame(width: size.width, height: size.height)
-                .clipped()
-        case .fit:
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-                .scaleEffect(normalized.scale)
-                .frame(width: size.width, height: size.height)
-        case .stretch:
-            Image(nsImage: image)
-                .resizable()
-                .frame(width: size.width, height: size.height)
+        case .synthwave:
+            Canvas { context, canvas in
+                let horizon = canvas.height * 0.48
+                let centerX = canvas.width * 0.50
+                let sunSize = min(canvas.width, canvas.height) * 0.42
+                let sunRect = CGRect(x: centerX - sunSize * 0.5, y: horizon - sunSize * 0.78, width: sunSize, height: sunSize)
+                context.fill(Path(ellipseIn: sunRect), with: .color(Color.orange.opacity(0.74)))
+                var stripeY = sunRect.minY + sunSize * 0.48
+                while stripeY < sunRect.maxY {
+                    context.fill(Path(CGRect(x: sunRect.minX, y: stripeY, width: sunSize, height: max(1, 2.0 * scale))), with: .color(Color.pink.opacity(0.76)))
+                    stripeY += max(4, 6 * scale)
+                }
+                for i in -7...7 {
+                    var ray = Path(); ray.move(to: CGPoint(x: centerX, y: horizon)); ray.addLine(to: CGPoint(x: centerX + CGFloat(i) * canvas.width / 7, y: canvas.height))
+                    context.stroke(ray, with: .color(tint.opacity(0.56)), lineWidth: max(0.8, 1.1 * scale))
+                }
+                for i in 0..<8 {
+                    let t = CGFloat(i) / 7
+                    let y = horizon + (canvas.height - horizon) * t * t
+                    var line = Path(); line.move(to: CGPoint(x: 0, y: y)); line.addLine(to: CGPoint(x: canvas.width, y: y))
+                    context.stroke(line, with: .color(Color.purple.opacity(0.62)), lineWidth: max(0.8, 1.1 * scale))
+                }
+            }
+
+        case .sakuraNight:
+            ZStack {
+                RadialGradient(colors: [Color.pink.opacity(0.22), Color.purple.opacity(0.10), .clear], center: .topTrailing, startRadius: 0, endRadius: max(size.width, size.height) * 0.8)
+                Canvas { context, canvas in
+                    var branch = Path(); branch.move(to: CGPoint(x: -10, y: canvas.height * 0.78)); branch.addCurve(to: CGPoint(x: canvas.width * 0.72, y: -10), control1: CGPoint(x: canvas.width * 0.22, y: canvas.height * 0.70), control2: CGPoint(x: canvas.width * 0.42, y: canvas.height * 0.22))
+                    context.stroke(branch, with: .color(Color(red: 0.40, green: 0.20, blue: 0.30).opacity(0.76)), lineWidth: max(2.2, 4.2 * scale))
+                    for i in 0..<34 {
+                        let x = canvas.width * CGFloat((i * 43 + 11) % 101) / 100
+                        let y = canvas.height * CGFloat((i * 29 + 7) % 97) / 96
+                        let w = max(CGFloat(2.5), CGFloat(3 + i % 4) * scale)
+                        let rect = CGRect(x: x - w * 0.5, y: y - w * 0.32, width: w, height: w * 0.64)
+                        context.fill(Path(ellipseIn: rect), with: .color((i % 4 == 0 ? Color.white : Color.pink).opacity(0.72)))
+                    }
+                }
+            }
+
+        case .oceanCurrent:
+            ZStack {
+                LinearGradient(colors: [Color.blue.opacity(0.15), Color.cyan.opacity(0.08), .clear], startPoint: .bottomLeading, endPoint: .topTrailing)
+                Canvas { context, canvas in
+                    for i in 0..<7 {
+                        let y = canvas.height * (0.12 + CGFloat(i) * 0.13)
+                        var wave = Path(); wave.move(to: CGPoint(x: -20, y: y))
+                        wave.addCurve(to: CGPoint(x: canvas.width * 0.52, y: y), control1: CGPoint(x: canvas.width * 0.14, y: y - 18 * scale), control2: CGPoint(x: canvas.width * 0.34, y: y + 18 * scale))
+                        wave.addCurve(to: CGPoint(x: canvas.width + 20, y: y), control1: CGPoint(x: canvas.width * 0.68, y: y - 18 * scale), control2: CGPoint(x: canvas.width * 0.88, y: y + 18 * scale))
+                        context.stroke(wave, with: .color((i.isMultiple(of: 2) ? Color.cyan : tint).opacity(0.56)), lineWidth: max(1.3, 2.3 * scale))
+                    }
+                }
+            }
+
+        case .emberCore:
+            ZStack {
+                RadialGradient(colors: [Color.orange.opacity(0.48), Color.red.opacity(0.20), .clear], center: .bottom, startRadius: 0, endRadius: max(size.width, size.height) * 0.72)
+                Canvas { context, canvas in
+                    for i in 0..<30 {
+                        let x = canvas.width * CGFloat((i * 53 + 9) % 101) / 100
+                        let y = canvas.height * CGFloat((i * 67 + 21) % 97) / 96
+                        let r = max(CGFloat(1.2), CGFloat(1 + i % 3) * scale)
+                        context.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)), with: .color((i % 3 == 0 ? Color.yellow : Color.orange).opacity(0.78)))
+                        if i % 4 == 0 {
+                            var streak = Path(); streak.move(to: CGPoint(x: x, y: y)); streak.addLine(to: CGPoint(x: x + 2 * scale, y: y - 10 * scale))
+                            context.stroke(streak, with: .color(Color.red.opacity(0.52)), lineWidth: max(0.9, 1.2 * scale))
+                        }
+                    }
+                }
+            }
+
+        case .blueprint:
+            Canvas { context, canvas in
+                let minor = max(CGFloat(8), 12 * scale)
+                let major = minor * 4
+                var x: CGFloat = 0
+                while x <= canvas.width {
+                    var line = Path(); line.move(to: CGPoint(x: x, y: 0)); line.addLine(to: CGPoint(x: x, y: canvas.height))
+                    let isMajor = Int((x / minor).rounded()).isMultiple(of: 4)
+                    context.stroke(line, with: .color((isMajor ? Color.cyan : tint).opacity(isMajor ? 0.60 : 0.24)), lineWidth: isMajor ? 1.2 : 0.7)
+                    x += minor
+                }
+                var y: CGFloat = 0
+                while y <= canvas.height {
+                    var line = Path(); line.move(to: CGPoint(x: 0, y: y)); line.addLine(to: CGPoint(x: canvas.width, y: y))
+                    let isMajor = Int((y / minor).rounded()).isMultiple(of: 4)
+                    context.stroke(line, with: .color((isMajor ? Color.cyan : tint).opacity(isMajor ? 0.60 : 0.24)), lineWidth: isMajor ? 1.2 : 0.7)
+                    y += minor
+                }
+                let guide = CGRect(x: canvas.width * 0.62, y: canvas.height * 0.16, width: min(major * 1.35, canvas.width * 0.30), height: min(major * 1.35, canvas.height * 0.62))
+                context.stroke(Path(ellipseIn: guide), with: .color(Color.white.opacity(0.34)), lineWidth: 1)
+            }
+
+        case .matrixRain:
+            Canvas { context, canvas in
+                let column = max(CGFloat(8), 13 * scale)
+                let cell = max(CGFloat(2), 3.4 * scale)
+                var x: CGFloat = column * 0.5
+                var col = 0
+                while x < canvas.width {
+                    let head = CGFloat((col * 41 + 17) % max(1, Int(canvas.height + 80))) - 20
+                    for segment in 0..<10 {
+                        let y = head - CGFloat(segment) * cell * 1.9
+                        guard y >= -cell && y <= canvas.height + cell else { continue }
+                        let alpha = max(0.10, 0.90 - Double(segment) * 0.085)
+                        let rect = CGRect(x: x - cell * 0.36, y: y, width: cell * 0.72, height: cell * 1.25)
+                        context.fill(Path(rect), with: .color((segment == 0 ? Color.white : Color.green).opacity(alpha)))
+                    }
+                    x += column; col += 1
+                }
+            }
+
+        case .nebula:
+            ZStack {
+                RadialGradient(colors: [Color.purple.opacity(0.48), Color.blue.opacity(0.18), .clear], center: UnitPoint(x: 0.28, y: 0.36), startRadius: 0, endRadius: max(size.width, size.height) * 0.72)
+                RadialGradient(colors: [Color.pink.opacity(0.34), tint.opacity(0.15), .clear], center: UnitPoint(x: 0.76, y: 0.68), startRadius: 0, endRadius: max(size.width, size.height) * 0.62)
+                Canvas { context, canvas in
+                    for i in 0..<38 {
+                        let x = canvas.width * CGFloat((i * 59 + 5) % 101) / 100
+                        let y = canvas.height * CGFloat((i * 37 + 23) % 97) / 96
+                        let r = max(CGFloat(0.8), CGFloat((i % 3) + 1) * 0.65 * scale)
+                        context.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)), with: .color(Color.white.opacity(i % 6 == 0 ? 0.90 : 0.52)))
+                    }
+                }
+            }
         }
     }
 }

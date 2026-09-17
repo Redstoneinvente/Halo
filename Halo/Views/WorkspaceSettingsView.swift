@@ -427,6 +427,9 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
                     skinCard(preset)
                 }
             }
+            Text("Texture skins stay subtle; themed skins bring their own visual identity while remaining below Halo's content.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
 
         Section("Preview") {
@@ -438,8 +441,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
                 )
                 NotchSkinLayer(options: previewOptions, theme: theme, expanded: true)
                 HStack(spacing: 18) {
-                    Label("Halo", systemImage: "sparkles")
-                        .font(.headline)
+                    Label("Halo", systemImage: "sparkles").font(.headline)
                     Spacer()
                     Image(systemName: "waveform")
                     Image(systemName: "timer")
@@ -464,38 +466,14 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             PreciseSlider(title: "Pattern scale", value: $appearance.skin.scale, range: 0.4...3, step: 0.05, decimals: 2)
         }
 
-        if appearance.skin.preset != .custom {
-            Section("Procedural color") {
-                Toggle("Use Halo accent", isOn: $appearance.skin.usesThemeTint)
-                if !appearance.skin.usesThemeTint {
-                    ColorPicker("Skin tint", selection: tintBinding, supportsOpacity: false)
-                }
-                Text("Procedural skins stay resolution-independent and automatically adapt to the current notch size.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        Section("Procedural color") {
+            Toggle("Use Halo accent", isOn: $appearance.skin.usesThemeTint)
+            if !appearance.skin.usesThemeTint {
+                ColorPicker("Skin tint", selection: tintBinding, supportsOpacity: false)
             }
-        }
-
-        if appearance.skin.preset == .custom {
-            Section("Custom skin") {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(appearance.skin.assetPath.isEmpty ? "No image selected" : URL(fileURLWithPath: appearance.skin.assetPath).lastPathComponent)
-                            .lineLimit(1)
-                        Text("Transparent PNGs work especially well because the selected Halo background remains visible underneath.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Choose Image…") { chooseCustomSkin() }
-                }
-                Picker("Image layout", selection: $appearance.skin.imageMode) {
-                    ForEach(NotchSkinImageMode.allCases) { Text($0.rawValue).tag($0) }
-                }
-                if !appearance.skin.assetPath.isEmpty {
-                    Button("Remove custom image", role: .destructive) { appearance.skin.assetPath = "" }
-                }
-            }
+            Text("Every skin is generated procedurally, stays sharp at any notch size, and can be recolored. The themed presets also use complementary palette colors where appropriate.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
 
         Section {
@@ -512,9 +490,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     @ViewBuilder
     private func skinCard(_ preset: NotchSkinPreset) -> some View {
         let selected = appearance.skin.preset == preset
-        Button {
-            applyPreset(preset)
-        } label: {
+        Button { applyPreset(preset) } label: {
             VStack(alignment: .leading, spacing: 9) {
                 HStack {
                     Image(systemName: preset.symbol)
@@ -538,37 +514,62 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         .buttonStyle(.plain)
     }
 
+    private func setTint(_ red: Double, _ green: Double, _ blue: Double, useTheme: Bool = false) {
+        appearance.skin.usesThemeTint = useTheme
+        appearance.skin.tint = WidgetColor(red: red, green: green, blue: blue)
+    }
+
     private func applyPreset(_ preset: NotchSkinPreset) {
         appearance.skin.enabled = true
         appearance.skin.preset = preset
         switch preset {
         case .haloGlow:
-            appearance.skin.opacity = 0.34; appearance.skin.blend = .screen; appearance.skin.scale = 1.0
+            appearance.skin.opacity = 0.34; appearance.skin.blend = .screen; appearance.skin.scale = 1.0; appearance.skin.usesThemeTint = true
         case .carbonWeave:
-            appearance.skin.opacity = 0.25; appearance.skin.blend = .softLight; appearance.skin.scale = 1.0
+            appearance.skin.opacity = 0.44; appearance.skin.blend = .normal; appearance.skin.scale = 1.0; appearance.skin.usesThemeTint = true
         case .neonCircuit:
-            appearance.skin.opacity = 0.28; appearance.skin.blend = .screen; appearance.skin.scale = 1.0
+            appearance.skin.opacity = 0.30; appearance.skin.blend = .screen; appearance.skin.scale = 1.0; appearance.skin.usesThemeTint = true
         case .retroScanlines:
-            appearance.skin.opacity = 0.20; appearance.skin.blend = .overlay; appearance.skin.scale = 1.0
+            appearance.skin.opacity = 0.40; appearance.skin.blend = .normal; appearance.skin.scale = 1.0; setTint(0.28, 0.95, 0.62)
         case .pixelMatrix:
-            appearance.skin.opacity = 0.24; appearance.skin.blend = .screen; appearance.skin.scale = 1.0
+            appearance.skin.opacity = 0.28; appearance.skin.blend = .screen; appearance.skin.scale = 1.0; appearance.skin.usesThemeTint = true
         case .constellation:
-            appearance.skin.opacity = 0.30; appearance.skin.blend = .screen; appearance.skin.scale = 1.0
-        case .custom:
-            appearance.skin.opacity = 0.55; appearance.skin.blend = .overlay; appearance.skin.scale = 1.0
-            if appearance.skin.assetPath.isEmpty { chooseCustomSkin() }
+            appearance.skin.opacity = 0.32; appearance.skin.blend = .screen; appearance.skin.scale = 1.0; appearance.skin.usesThemeTint = true
+        case .aurora:
+            appearance.skin.opacity = 0.52; appearance.skin.blend = .screen; appearance.skin.scale = 1.0; setTint(0.25, 0.95, 0.83)
+        case .synthwave:
+            appearance.skin.opacity = 0.58; appearance.skin.blend = .screen; appearance.skin.scale = 1.0; setTint(1.0, 0.18, 0.78)
+        case .sakuraNight:
+            appearance.skin.opacity = 0.52; appearance.skin.blend = .screen; appearance.skin.scale = 1.0; setTint(1.0, 0.46, 0.72)
+        case .oceanCurrent:
+            appearance.skin.opacity = 0.48; appearance.skin.blend = .screen; appearance.skin.scale = 1.0; setTint(0.16, 0.75, 1.0)
+        case .emberCore:
+            appearance.skin.opacity = 0.58; appearance.skin.blend = .screen; appearance.skin.scale = 1.0; setTint(1.0, 0.34, 0.08)
+        case .blueprint:
+            appearance.skin.opacity = 0.44; appearance.skin.blend = .screen; appearance.skin.scale = 1.0; setTint(0.12, 0.68, 1.0)
+        case .matrixRain:
+            appearance.skin.opacity = 0.52; appearance.skin.blend = .screen; appearance.skin.scale = 1.0; setTint(0.18, 1.0, 0.32)
+        case .nebula:
+            appearance.skin.opacity = 0.54; appearance.skin.blend = .screen; appearance.skin.scale = 1.0; setTint(0.58, 0.32, 1.0)
         }
     }
 
     private func presetDescription(_ preset: NotchSkinPreset) -> String {
         switch preset {
         case .haloGlow: return "Soft accent bloom and edge light"
-        case .carbonWeave: return "Subtle technical diagonal weave"
+        case .carbonWeave: return "Visible layered carbon-fiber weave"
         case .neonCircuit: return "Futuristic traces and light nodes"
-        case .retroScanlines: return "CRT-inspired horizontal texture"
+        case .retroScanlines: return "Bold CRT scan bars with phosphor tint"
         case .pixelMatrix: return "Sparse 8-bit LED-style pixels"
         case .constellation: return "Quiet stars with faint connections"
-        case .custom: return "Import your own transparent artwork"
+        case .aurora: return "Flowing northern-light ribbons"
+        case .synthwave: return "Neon sunset and perspective grid"
+        case .sakuraNight: return "Night branch with drifting blossom petals"
+        case .oceanCurrent: return "Layered cyan wave currents"
+        case .emberCore: return "Warm core glow with rising sparks"
+        case .blueprint: return "Technical drafting grid and guides"
+        case .matrixRain: return "Falling green digital-code columns"
+        case .nebula: return "Purple-blue cosmic clouds and stars"
         }
     }
 
@@ -583,18 +584,6 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         let ns = NSColor(color)
         let rgb = ns.usingColorSpace(.deviceRGB) ?? ns
         return WidgetColor(red: Double(rgb.redComponent), green: Double(rgb.greenComponent), blue: Double(rgb.blueComponent))
-    }
-
-    private func chooseCustomSkin() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.image]
-        panel.message = "Choose an image to layer above Halo's background and below its content."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        appearance.skin.assetPath = url.path
-        appearance.skin.preset = .custom
-        appearance.skin.enabled = true
     }
 }
 
