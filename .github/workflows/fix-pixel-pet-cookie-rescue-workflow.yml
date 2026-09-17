@@ -12,80 +12,48 @@ permissions:
 
 jobs:
   fix:
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Apply Notch Skins feature
-        run: python3 .github/scripts/add-notch-skins.py
-
-      - name: Verify feature contract
+      - name: Fix duplicate furious-duration matcher
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          models = Path('Halo/Core/WorkspaceModels.swift').read_text()
-          surface = Path('Halo/Views/SurfaceView.swift').read_text()
-          settings = Path('Halo/Views/WorkspaceSettingsView.swift').read_text()
-          tokens = {
-              'models': [
-                  'enum NotchSkinPreset:', 'struct NotchSkinOptions:',
-                  'var skin = NotchSkinOptions()',
-                  'case grain, backgroundSchedule, surface, background, skin,'
-              ],
-              'surface': [
-                  'NotchSkinLayer(options: layout.appearance.skin, theme: theme, expanded: state.expanded)',
-                  'struct NotchSkinLayer: View', 'case .carbonWeave:',
-                  'case .neonCircuit:', 'case .pixelMatrix:', 'case .custom:'
-              ],
-              'settings': [
-                  'items: ["Appearance", "Notch Skins",',
-                  'case "Notch Skins": return "square.3.layers.3d"',
-                  'case "Notch Skins": NotchSkinSettingsPane(',
-                  'private struct NotchSkinSettingsPane: View',
-                  'Button("Choose Image…")', 'Picker("Blend mode"', 'Picker("Show skin"'
-              ],
-          }
-          sources = {'models': models, 'surface': surface, 'settings': settings}
-          for group, required in tokens.items():
-              for token in required:
-                  if token not in sources[group]: raise SystemExit(f'Missing {group} token: {token}')
-          anchor = 'surfaceBackgroundLayer\n                NotchSkinLayer'
-          if anchor not in surface: raise SystemExit('Skin is not directly above the surface background')
-          print('Notch Skins contract passed')
+
+          path = Path('.github/workflows/pixel-pet-cookie-rescue.yml')
+          s = path.read_text()
+          old = """          replace_once(
+              '            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)\\n',
+              '            react(escalation, seconds: escalation == .furious ? 2.22 : 3.4)\\n',
+              'single tap furious duration',
+          )
+          replace_once(
+              '            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)\\n',
+              '            react(escalation, seconds: escalation == .furious ? 2.22 : 3.4)\\n',
+              'double tap furious duration',
+          )
+"""
+          new = """          duration_old = '            react(escalation, seconds: escalation == .furious ? 4.6 : 3.4)\\n'
+          duration_new = '            react(escalation, seconds: escalation == .furious ? 2.22 : 3.4)\\n'
+          if s.count(duration_old) != 2:
+              raise SystemExit(f'furious duration: expected two matches, found {s.count(duration_old)}')
+          s = s.replace(duration_old, duration_new)
+"""
+          if old not in s:
+              raise SystemExit('Expected duplicate furious-duration matcher block was not found.')
+          path.write_text(s.replace(old, new, 1))
           PY
 
-      - name: Parse changed Swift files
+      - name: Commit workflow fix
         run: |
-          xcrun swiftc -parse Halo/Core/WorkspaceModels.swift
-          xcrun swiftc -parse Halo/Views/SurfaceView.swift
-          xcrun swiftc -parse Halo/Views/WorkspaceSettingsView.swift
-
-      - name: Build regression check
-        run: |
-          set +e
-          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build > /tmp/halo-notch-skins.log 2>&1
-          status=$?
-          set -e
-          if [ $status -ne 0 ]; then
-            echo 'xcodebuild failed; checking changed files for compiler errors.'
-            grep -E '(WorkspaceModels|SurfaceView|WorkspaceSettingsView)\.swift:.*error:' /tmp/halo-notch-skins.log || true
-            if grep -qE '(WorkspaceModels|SurfaceView|WorkspaceSettingsView)\.swift:.*error:' /tmp/halo-notch-skins.log; then
-              exit 1
-            fi
-            echo 'Build failed only on unrelated baseline errors; changed files emitted no compiler errors.'
-          else
-            echo 'Halo build passed.'
-          fi
-
-      - name: Commit feature and restore maintenance workflow
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git show "$GITHUB_SHA^:.github/workflows/fix-pixel-pet-cookie-rescue-workflow.yml" > .github/workflows/fix-pixel-pet-cookie-rescue-workflow.yml
-          git rm -f .github/scripts/add-notch-skins.py .github/workflows/add-notch-skins.yml .github/notch-skins-trigger.txt
-          git add Halo/Core/WorkspaceModels.swift Halo/Views/SurfaceView.swift Halo/Views/WorkspaceSettingsView.swift .github/workflows/fix-pixel-pet-cookie-rescue-workflow.yml
-          git commit -m 'Add customizable notch skins'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/pixel-pet-cookie-rescue.yml
+          git commit -m "Fix Pixel Pet cookie rescue matcher"
           git pull --rebase origin main
           git push origin HEAD:main
+
+# rerun
