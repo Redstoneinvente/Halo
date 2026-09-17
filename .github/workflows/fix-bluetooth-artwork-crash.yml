@@ -1,0 +1,92 @@
+name: Fix Bluetooth artwork crash
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/fix-bluetooth-artwork-crash-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Remove unsafe private Bluetooth artwork path
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("Halo/Core/PersonalizationModels.swift")
+          text = path.read_text()
+
+          start_marker = "    /// Prefer the artwork macOS itself associates with the paired Bluetooth device."
+          next_public_marker = "    static func imageData(address: String) -> Data? {"
+          if start_marker not in text:
+              raise SystemExit("private Bluetooth artwork block start not found")
+          start = text.index(start_marker)
+          end = text.index(next_public_marker, start)
+          text = text[:start] + text[end:]
+
+          png_start_marker = "    private static func pngData(_ image: NSImage) -> Data? {"
+          normalized_marker = "    private static func normalizedAddress(_ value: String) -> String {"
+          if png_start_marker not in text:
+              raise SystemExit("private Bluetooth png helper start not found")
+          png_start = text.index(png_start_marker)
+          png_end = text.index(normalized_marker, png_start)
+          text = text[:png_start] + text[png_end:]
+
+          old_call = "BluetoothDeviceArtwork.imageData(device: device, address: rawAddress)"
+          new_call = "BluetoothDeviceArtwork.imageData(address: rawAddress)"
+          if text.count(old_call) != 1:
+              raise SystemExit(f"expected one unsafe artwork call, found {text.count(old_call)}")
+          text = text.replace(old_call, new_call, 1)
+
+          forbidden = [
+              "IOBluetoothUI.framework",
+              'NSSelectorFromString("image")',
+              "device.perform(selector)",
+              "imageData(device: IOBluetoothDevice"
+          ]
+          leftovers = [item for item in forbidden if item in text]
+          if leftovers:
+              raise SystemExit(f"unsafe Bluetooth artwork references remain: {leftovers}")
+
+          path.write_text(text)
+          PY
+
+      - name: Verify focused regression contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -q 'IOBluetoothUI.framework' Halo/Core/PersonalizationModels.swift
+          ! grep -q 'NSSelectorFromString("image")' Halo/Core/PersonalizationModels.swift
+          grep -q 'BluetoothDeviceArtwork.imageData(address: rawAddress)' Halo/Core/PersonalizationModels.swift
+          grep -q 'kAudioDevicePropertyIcon' Halo/Core/PersonalizationModels.swift
+
+      - name: Parse affected Swift source
+        shell: bash
+        run: xcrun swiftc -frontend -parse Halo/Core/PersonalizationModels.swift
+
+      - name: Full Xcode build regression check
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -derivedDataPath /tmp/HaloDerivedData CODE_SIGNING_ALLOWED=NO build | tail -n 120
+
+      - name: Commit fix and clean helper files
+        shell: bash
+        run: |
+          rm -f .github/workflows/fix-bluetooth-artwork-crash.yml
+          rm -f .github/fix-bluetooth-artwork-crash-trigger.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/Core/PersonalizationModels.swift .github/workflows/fix-bluetooth-artwork-crash.yml .github/fix-bluetooth-artwork-crash-trigger.txt
+          git commit -m "Avoid private Bluetooth artwork crash"
+          git push origin HEAD:main
