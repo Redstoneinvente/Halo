@@ -2554,7 +2554,7 @@ struct SurfaceView: View {
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }
         .onReceive(transfer.$isActive.removeDuplicates()) { active in
             if !active {
-                state.contextPreferredSize = nil
+                if !contextMusicActive { state.contextPreferredSize = nil }
                 state.contextPreferredCompactWidth = nil
                 state.contextMinimumExpandedWidth = nil
             }
@@ -2667,7 +2667,7 @@ struct SurfaceView: View {
                 state.contextPreferredCompactWidth = nil
                 state.contextPreferredCompactHeight = nil
                 state.contextMinimumExpandedWidth = nil
-                if activeContext != nil { state.contextPreferredSize = nil }
+                if activeContext != nil && !contextMusicActive { state.contextPreferredSize = nil }
             }
             workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive), token: openVisibilityToken)
         }
@@ -4155,6 +4155,14 @@ private struct ContextMusicView: View {
          String(options.resolvedHorizontalMargin), String(options.resolvedTopMargin), String(options.resolvedBottomMargin),
          String(usesFullNotchArea), String(keepsClosedNotchContents)].joined(separator: "|")
     }
+    private var metadataReservedHeight: Double {
+        let titleLineHeight = options.fontSize * 1.22
+        let titleHeight = options.showTitle ? titleLineHeight * 2 : 0
+        let artistFontSize = max(10, options.fontSize * 0.68)
+        let artistHeight = options.showArtist ? artistFontSize * 1.22 : 0
+        let gap = options.showTitle && options.showArtist ? max(2, options.resolvedSpacing * 0.28) : 0
+        return titleHeight + artistHeight + gap
+    }
     private var activeArtwork: NSImage? { media.artworkImage ?? artwork }
     private var songColors: [Color] { media.artworkColors.map(\.color) }
     private var baseTextColor: Color { options.textColor.color }
@@ -4246,8 +4254,18 @@ private struct ContextMusicView: View {
         .task(id: playbackKey) { await playbackLoop() }
         .task(id: lyricKey) { await loadLyrics() }
         .task(id: sizingKey) { publishPreferredSize() }
-        .onChange(of: playbackDuration) { _ in publishPreferredSize() }
-        .onDisappear { surfaceState.contextPreferredSize = nil }
+        .onChange(of: surfaceState.contextPreferredSize) { requested in
+            guard surfaceState.expanded, requested == nil else { return }
+            publishPreferredSize()
+        }
+        .onDisappear {
+            let owned = preferredSurfaceSize
+            if let current = surfaceState.contextPreferredSize,
+               abs(current.width - owned.width) < 1,
+               abs(current.height - owned.height) < 1 {
+                surfaceState.contextPreferredSize = nil
+            }
+        }
     }
 
     private func publishPreferredSize() {
@@ -4261,7 +4279,7 @@ private struct ContextMusicView: View {
 
     private var preferredSurfaceSize: CGSize {
         let spacing = options.resolvedSpacing
-        let metadataHeight = (options.showTitle ? options.fontSize * 1.35 : 0) + (options.showArtist ? max(12, options.fontSize * 0.72) : 0)
+        let metadataHeight = metadataReservedHeight
         let lyricsHeight = options.showsLyrics ? options.resolvedLyricFontSize * (options.resolvedLyricDisplay == .word ? 1.25 : 2.05) : 0
         // Keep the Audio CI geometry stable for the lifetime of the music surface.
         // MediaRemote can briefly omit duration while metadata refreshes; tying preferred size
@@ -4430,7 +4448,10 @@ private struct ContextMusicView: View {
             }
         }
         .foregroundStyle(effectiveTextColor)
-        .frame(maxWidth: .infinity, alignment: frameAlignment)
+        .frame(maxWidth: .infinity,
+               minHeight: CGFloat(metadataReservedHeight),
+               maxHeight: CGFloat(metadataReservedHeight),
+               alignment: frameAlignment)
     }
 
     @ViewBuilder private var lyricsView: some View {
