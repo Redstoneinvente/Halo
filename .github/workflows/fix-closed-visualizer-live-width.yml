@@ -29,7 +29,7 @@ jobs:
               'let reservation = cameraReservation(width: proxy.size.width, height: proxy.size.height)',
               'let leftWidth = reservation?.minX ?? proxy.size.width / 2',
               'let rightWidth = reservation.map { proxy.size.width - $0.maxX } ?? proxy.size.width / 2',
-              'v.width = max(1, innerWidth - mediaSiblingFootprint)',
+              'v.width = Double.greatestFiniteMagnitude',
           ]
           missing = [m for m in required if m not in text]
           if missing:
@@ -37,10 +37,11 @@ jobs:
           forbidden = [
               'let renderWidth = referenceWidth > 1 ? referenceWidth : proxy.size.width',
               'v.width = min(v.width, max(1, innerWidth - mediaSiblingFootprint))',
+              'v.width = max(1, innerWidth - mediaSiblingFootprint)',
           ]
           present = [m for m in forbidden if m in text]
           if present:
-              raise SystemExit(f'stale frozen-width markers remain: {present}')
+              raise SystemExit(f'stale width markers remain: {present}')
           print('Closed visualizer live-width contract passed')
           PY
 
