@@ -2296,6 +2296,19 @@ struct SurfaceView: View {
             return usesDefaultWorkspace && keepClosedContentsWhenOpen
         }
     }
+    private var hasClosedNotchVisualizer: Bool {
+        let closed = layout.closedNotch ?? ClosedNotchOptions()
+        return closed.left == .visualizer || closed.right == .visualizer
+    }
+    /// The closed visualizer is part of the notch strip, not the expanded Music CI body.
+    /// Keep only that element alive while Music CI opens even when the general
+    /// "keep closed contents" option is disabled.
+    private var preservesMusicClosedVisualizer: Bool {
+        state.expanded && contextMusicActive && hasClosedNotchVisualizer && workspace.media.hasNowPlayingPresentation
+    }
+    private var preservesClosedStripWhileExpanded: Bool {
+        keepsClosedContentsWhileExpanded || preservesMusicClosedVisualizer
+    }
     private var closedBackgroundOptions: ClosedNotchOptions {
         var value = layout.closedNotch ?? ClosedNotchOptions()
         if var artwork = value.artworkOptions, artwork.usesBackgroundArtwork, artwork.mode != .background {
@@ -2348,13 +2361,17 @@ struct SurfaceView: View {
                         }
                       } else if keepsClosedContentsWhileExpanded {
                         ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
+                      } else if preservesMusicClosedVisualizer {
+                        ClosedNotchView(store: store, workspace: workspace, layout: layout,
+                                        occlusion: state.closedOcclusion, referenceWidth: state.compactWidth,
+                                        visualizerOnly: true, expandVisualizerToAvailableWidth: true)
                       } else { HStack {
                         Circle().fill(store.deadline == nil ? accent : .green).frame(width: 7, height: 7)
                         Spacer()
                         Image(systemName: state.pinned ? "pin.fill" : "chevron.up").font(.system(size: 9, weight: .bold))
                       } }
                     }
-                    .padding(.horizontal, (!state.expanded || keepsClosedContentsWhileExpanded) ? 0 : max(16, layout.appearance.surface.shoulder + 8))
+                    .padding(.horizontal, (!state.expanded || preservesClosedStripWhileExpanded) ? 0 : max(16, layout.appearance.surface.shoulder + 8))
                     .frame(height: state.expanded ? max(40, state.compactHeight) : state.compactHeight)
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -2387,7 +2404,8 @@ struct SurfaceView: View {
                     } else if contextMusicActive {
                         if !contextMusicUsesFullNotchArea {
                             ContextMusicView(media: workspace.media, options: contextOptions,
-                                             visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
+                                             visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state,
+                                             preserveClosedVisualizerStrip: preservesMusicClosedVisualizer)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
                         }
@@ -2477,7 +2495,8 @@ struct SurfaceView: View {
                         DropContextView(itemCount: state.dropItemCount, surfaceState: state)
                     } else if contextMusicActive {
                         ContextMusicView(media: workspace.media, options: contextOptions,
-                                         visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state)
+                                         visualizer: layout.closedNotch?.visualizer ?? VisualizerOptions(), surfaceState: state,
+                                             preserveClosedVisualizerStrip: preservesMusicClosedVisualizer)
                     } else if bluetoothContextActive {
                         BluetoothContextView(bluetooth: bluetooth, surfaceState: state)
                     } else if retroContextActive {
@@ -2491,6 +2510,12 @@ struct SurfaceView: View {
                 if keepsClosedContentsWhileExpanded {
                     ClosedNotchView(store: store, workspace: workspace, layout: layout,
                                     occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
+                        .frame(height: max(40, state.compactHeight))
+                        .zIndex(3)
+                } else if preservesMusicClosedVisualizer {
+                    ClosedNotchView(store: store, workspace: workspace, layout: layout,
+                                    occlusion: state.closedOcclusion, referenceWidth: state.compactWidth,
+                                    visualizerOnly: true, expandVisualizerToAvailableWidth: true)
                         .frame(height: max(40, state.compactHeight))
                         .zIndex(3)
                 }
@@ -4109,6 +4134,7 @@ private struct ContextMusicView: View {
     let options: ContextMusicOptions
     let visualizer: VisualizerOptions
     @ObservedObject var surfaceState: SurfaceState
+    let preserveClosedVisualizerStrip: Bool
     @AppStorage("HaloContextVisualizerFullWidth") private var visualizerFullWidth = false
     @AppStorage("HaloContextMusicUseFullNotchArea") private var usesFullNotchArea = false
     @AppStorage("HaloContextMusicKeepClosedNotchContents") private var keepsClosedNotchContents = false
@@ -4128,7 +4154,7 @@ private struct ContextMusicView: View {
         let base: Double
         if !usesFullNotchArea {
             base = max(16, max(18, options.resolvedSpacing * 1.25) * 0.75)
-        } else if keepsClosedNotchContents {
+        } else if keepsClosedNotchContents || preserveClosedVisualizerStrip {
             base = max(16, surfaceState.compactHeight + max(6, options.resolvedSpacing * 0.5))
         } else {
             base = max(16, surfaceState.compactHeight * 0.68)
@@ -4136,7 +4162,7 @@ private struct ContextMusicView: View {
         return base + options.resolvedTopMargin
     }
     private var controlsTopInset: Double {
-        let base = usesFullNotchArea && keepsClosedNotchContents
+        let base = usesFullNotchArea && (keepsClosedNotchContents || preserveClosedVisualizerStrip)
             ? max(12, surfaceState.compactHeight + 6)
             : max(12, max(18, options.resolvedSpacing * 1.25) * 0.65)
         return base + options.resolvedTopMargin
@@ -4153,7 +4179,7 @@ private struct ContextMusicView: View {
          String(options.resolvedLyricFontSize), options.resolvedVisualizerStyle.rawValue,
          String(options.resolvedSpacing), String(options.resolvedControlSize), String(visualizerFullWidth),
          String(options.resolvedHorizontalMargin), String(options.resolvedTopMargin), String(options.resolvedBottomMargin),
-         String(usesFullNotchArea), String(keepsClosedNotchContents)].joined(separator: "|")
+         String(usesFullNotchArea), String(keepsClosedNotchContents), String(preserveClosedVisualizerStrip)].joined(separator: "|")
     }
     private var metadataReservedHeight: Double {
         let titleLineHeight = options.fontSize * 1.22

@@ -155,13 +155,15 @@ struct ClosedNotchView: View {
     let layout: WorkspaceLayout
     let occlusion: CGRect?
     let referenceWidth: CGFloat
+    var visualizerOnly = false
+    var expandVisualizerToAvailableWidth = false
     private var options: ClosedNotchOptions { layout.closedNotch ?? ClosedNotchOptions() }
     private var activeHUD: HaloHUDNotchPresentation? {
         guard let hud = hudBridge.presentation, hud.screenFrame.equalTo(haloScreenFrame) else { return nil }
         return hud
     }
     private var verticalHUD: HaloHUDNotchPresentation? {
-        guard let hud = activeHUD,
+        guard !visualizerOnly, let hud = activeHUD,
               hud.configuration.presentation.resolvedNotch.usesVerticalExpansion else { return nil }
         return hud
     }
@@ -183,6 +185,10 @@ struct ClosedNotchView: View {
         }
     }
     private var resolvedItems: (left: ClosedNotchItem, right: ClosedNotchItem) {
+        if visualizerOnly {
+            return (options.left == .visualizer ? .visualizer : .none,
+                    options.right == .visualizer ? .visualizer : .none)
+        }
         var left = options.left
         var right = options.right
         guard let activity = activeActivity, left != .activity, right != .activity else { return (left, right) }
@@ -254,7 +260,7 @@ struct ClosedNotchView: View {
         return intersection.isNull || intersection.isEmpty ? nil : intersection
     }
     private func hud(for side: ClosedNotchSide) -> HaloHUDNotchPresentation? {
-        guard let hud = activeHUD else { return nil }
+        guard !visualizerOnly, let hud = activeHUD else { return nil }
         switch hud.side {
         case .left: return side == .left ? hud : nil
         case .right: return side == .right ? hud : nil
@@ -265,9 +271,12 @@ struct ClosedNotchView: View {
     private func slot(_ item: ClosedNotchItem, decoration: SideDecoration?, side: ClosedNotchSide, width: CGFloat, height: CGFloat) -> some View {
         Group {
             if width > 1 {
-                ClosedNotchSlot(item: item, decoration: decoration, side: side, availableHeight: height, availableWidth: width,
+                ClosedNotchSlot(item: item, decoration: visualizerOnly ? nil : decoration, side: side,
+                                availableHeight: height, availableWidth: width,
                                 options: options, clock: layout.widgetStyle(for: .clock), store: store, workspace: workspace,
-                                media: workspace.media, system: workspace.system, activity: activeActivity, hud: hud(for: side))
+                                media: workspace.media, system: workspace.system, activity: activeActivity, hud: hud(for: side),
+                                visualizerOnly: visualizerOnly,
+                                expandVisualizerToAvailableWidth: expandVisualizerToAvailableWidth)
             }
         }.frame(width: max(0, width)).clipped()
     }
@@ -287,6 +296,8 @@ struct ClosedNotchSlot: View {
     @ObservedObject var system: SystemService
     let activity: LiveActivity?
     let hud: HaloHUDNotchPresentation?
+    var visualizerOnly = false
+    var expandVisualizerToAvailableWidth = false
     private var layoutMetrics: ClosedNotchLayoutMetrics { ClosedNotchLayoutMetrics(options: options, height: availableHeight) }
     private var elementSpacing: Double { layoutMetrics.elementSpacing }
     private var activeActivity: LiveActivity? { activity }
@@ -300,7 +311,7 @@ struct ClosedNotchSlot: View {
     }
     private var artwork: ClosedArtworkOptions { options.resolvedArtwork }
     private var artworkTargetSide: ClosedNotchSide? {
-        guard media.hasNowPlayingPresentation, artwork.enabled, artwork.mode != .none, artwork.mode != .background else { return nil }
+        guard !visualizerOnly, media.hasNowPlayingPresentation, artwork.enabled, artwork.mode != .none, artwork.mode != .background else { return nil }
         switch artwork.side {
         case .left: return .left
         case .right: return .right
@@ -313,6 +324,7 @@ struct ClosedNotchSlot: View {
     private var showArtwork: Bool { artworkTargetSide == side }
     private var hideMusicContentForArtworkOnly: Bool { showArtwork && artwork.isArtworkOnly && isMusicItem }
     private var powerEvent: PowerEventInfo? {
+        guard !visualizerOnly else { return nil }
         let settings = options.powerReaction ?? PowerReactionOptions()
         guard settings.isEnabled, let battery = system.battery else { return nil }
         let kind: PowerEventKind
@@ -349,7 +361,7 @@ struct ClosedNotchSlot: View {
     }
     private var slotOuterInset: Double { layoutMetrics.outerInset }
     private var decorationSize: Double {
-        guard let decoration, decoration.isVisible(playing: media.isPlaying) else { return 0 }
+        guard !visualizerOnly, let decoration, decoration.isVisible(playing: media.isPlaying) else { return 0 }
         return min(decoration.size, min(innerHeight, itemIsVisible ? innerWidth / 3 : innerWidth))
     }
     private var textSize: Double { min(options.fontSize, innerHeight / 1.25) }
@@ -399,6 +411,7 @@ struct ClosedNotchSlot: View {
     }
     private var visualizerOptions: VisualizerOptions {
         var v = options.visualizer ?? VisualizerOptions()
+        if expandVisualizerToAvailableWidth { v.width = max(1, innerWidth) }
         v.height = min(v.height, innerHeight)
         return v
     }
@@ -585,14 +598,27 @@ struct ClosedNotchSlot: View {
             }
         case .visualizer:
             if media.hasNowPlayingPresentation {
-                PlaybackVisualizer(
-                    kind: options.animation,
-                    playing: true,
-                    enabled: options.animate && !system.lowPower,
-                    options: visualizerOptions,
-                    palette: media.artworkColors,
-                    fallback: effectiveTextColor
-                )
+                if expandVisualizerToAvailableWidth {
+                    PlaybackVisualizer(
+                        kind: options.animation,
+                        playing: true,
+                        enabled: options.animate && !system.lowPower,
+                        options: visualizerOptions,
+                        palette: media.artworkColors,
+                        fallback: effectiveTextColor
+                    )
+                    .frame(width: max(1, innerWidth), height: innerHeight)
+                    .layoutPriority(3)
+                } else {
+                    PlaybackVisualizer(
+                        kind: options.animation,
+                        playing: true,
+                        enabled: options.animate && !system.lowPower,
+                        options: visualizerOptions,
+                        palette: media.artworkColors,
+                        fallback: effectiveTextColor
+                    )
+                }
             }
         case .mirror:
             MirrorWidgetView()
