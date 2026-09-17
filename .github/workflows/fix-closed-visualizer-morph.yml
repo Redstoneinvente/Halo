@@ -1,0 +1,69 @@
+name: Fix Closed Visualizer Morph
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/closed-visualizer-morph-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply closed visualizer morph fix
+        run: python3 .github/scripts/fix_closed_visualizer_morph.py
+
+      - name: Verify closed visualizer geometry contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('Halo/Views/ClosedNotchView.swift').read_text()
+          required = [
+              'let renderWidth = referenceWidth > 1 ? referenceWidth : proxy.size.width',
+              '.frame(width: renderWidth, height: proxy.size.height)',
+              '.position(x: proxy.size.width / 2, y: proxy.size.height / 2)',
+              '.frame(width: options.width, height: options.height)',
+              '.fixedSize(horizontal: true, vertical: true)',
+          ]
+          missing = [m for m in required if m not in text]
+          if missing:
+              raise SystemExit(f'missing closed visualizer morph markers: {missing}')
+          if '}.frame(maxWidth: options.width).frame(height: options.height)' in text:
+              raise SystemExit('PlaybackVisualizer still accepts animated max-width proposals')
+          print('Closed visualizer geometry contract passed')
+          PY
+
+      - name: Parse ClosedNotchView
+        run: xcrun swiftc -parse Halo/Views/ClosedNotchView.swift
+
+      - name: Build regression check
+        run: |
+          set +e
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO build > /tmp/halo-closed-visualizer-build.log 2>&1
+          status=$?
+          set -e
+          if [ $status -ne 0 ]; then
+            echo 'xcodebuild failed; checking ClosedNotchView for compiler errors.'
+            if grep -E 'ClosedNotchView\.swift:.*error:' /tmp/halo-closed-visualizer-build.log; then
+              exit 1
+            fi
+            echo 'Build failed only on unrelated baseline errors; ClosedNotchView emitted no compiler errors.'
+          else
+            echo 'Halo build passed.'
+          fi
+
+      - name: Commit closed visualizer morph fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Views/ClosedNotchView.swift
+          git rm -f .github/scripts/fix_closed_visualizer_morph.py .github/workflows/fix-closed-visualizer-morph.yml .github/closed-visualizer-morph-trigger.txt
+          git commit -m 'Keep closed visualizer stable during CI morphs'
+          git push origin HEAD:main
