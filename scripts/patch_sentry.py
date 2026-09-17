@@ -66,8 +66,8 @@ plist.write_text(ptext)
 
 app = Path('Halo/App/HaloApp.swift')
 atext = app.read_text()
-if 'import Sentry' not in atext:
-    atext = atext.replace('import Combine\n', 'import Combine\nimport Sentry\n')
+if 'import SentrySwift' not in atext:
+    atext = atext.replace('import Combine\n', 'import Combine\nimport SentrySwift\n')
 
 if 'private func configureSentry()' not in atext:
     insert_after = '''    private var commercialAccessGranted: Bool {\n        let account = HaloAccountManager.shared\n        return account.isSignedIn && HaloLicenseManager.shared.accessValid(for: account.userID)\n    }\n'''
@@ -108,7 +108,7 @@ assert 'https://github.com/getsentry/sentry-cocoa.git' in text
 assert 'minimumVersion = 9.23.0;' in text
 assert 'productName = SentrySPM;' in text
 assert 'HALO_SENTRY_DSN = "";' in text
-assert 'import Sentry' in atext
+assert 'import SentrySwift' in atext
 assert 'configureSentry()' in atext
 assert 'sendDefaultPii = false' in atext
 print('Sentry integration patch applied')
