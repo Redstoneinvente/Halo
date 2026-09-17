@@ -27,17 +27,20 @@ jobs:
           text = Path('Halo/Views/ClosedNotchView.swift').read_text()
           required = [
               'let renderWidth = referenceWidth > 1 ? referenceWidth : proxy.size.width',
+              'cameraReservation(width: renderWidth, height: proxy.size.height)',
+              'let leftWidth = reservation?.minX ?? renderWidth / 2',
+              'let rightWidth = reservation.map { renderWidth - $0.maxX } ?? renderWidth / 2',
               '.frame(width: renderWidth, height: proxy.size.height)',
               '.position(x: proxy.size.width / 2, y: proxy.size.height / 2)',
-              '.frame(width: options.width, height: options.height)',
-              'private var colors: [Color] {',
           ]
           missing = [m for m in required if m not in text]
           if missing:
               raise SystemExit(f'missing closed visualizer morph markers: {missing}')
-          if '}.frame(maxWidth: options.width).frame(height: options.height)' in text:
-              raise SystemExit('PlaybackVisualizer still accepts animated max-width proposals')
-          print('Closed visualizer geometry contract passed')
+          # This fix intentionally leaves PlaybackVisualizer itself untouched. The bug is the
+          # animated parent width changing availableWidth/visualizerOptions during the CI morph.
+          if '.frame(maxWidth: options.width).frame(height: options.height)' not in text:
+              raise SystemExit('PlaybackVisualizer changed unexpectedly; parent-only fix contract violated')
+          print('Closed visualizer parent geometry contract passed')
           PY
 
       - name: Parse ClosedNotchView
@@ -66,4 +69,5 @@ jobs:
           git add Halo/Views/ClosedNotchView.swift
           git rm -f .github/scripts/fix_closed_visualizer_morph.py .github/workflows/fix-closed-visualizer-morph.yml .github/closed-visualizer-morph-trigger.txt
           git commit -m 'Keep closed visualizer stable during CI morphs'
+          git pull --rebase origin main
           git push origin HEAD:main
