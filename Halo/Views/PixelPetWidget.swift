@@ -1464,11 +1464,30 @@ private struct HaloPixelPalContext {
 
 // MARK: - Widget
 
+@MainActor
+private final class HaloPixelPalSurfaceTransitionPause: ObservableObject {
+    @Published private(set) var isPaused = false
+    private var resumeWork: DispatchWorkItem?
+
+    func noteGeometryChange() {
+        if !isPaused { isPaused = true }
+        resumeWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.isPaused = false
+        }
+        resumeWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+    }
+
+    deinit { resumeWork?.cancel() }
+}
+
 struct HaloPixelPetWidget: View {
     @Environment(\.openNotchGridColumnSpan) private var gridColumnSpan
     @Environment(\.openNotchGridRowSpan) private var gridRowSpan
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    @StateObject private var surfaceTransitionPause = HaloPixelPalSurfaceTransitionPause()
     @State private var hovering = false
     @State private var pointer = CGPoint.zero
     @State private var precisePointer = CGPoint.zero
@@ -1492,7 +1511,7 @@ struct HaloPixelPetWidget: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: reduceMotion ? 0.45 : 1.0 / 24.0, paused: false)) { timeline in
+        TimelineView(.animation(minimumInterval: reduceMotion ? 0.45 : 1.0 / 24.0, paused: surfaceTransitionPause.isPaused)) { timeline in
             GeometryReader { proxy in
                 let columns = min(4, max(1, gridColumnSpan ?? 1))
                 let rows = min(4, max(1, gridRowSpan ?? columns))
@@ -1604,6 +1623,9 @@ struct HaloPixelPetWidget: View {
                     }
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloPanelGeometryChanged"))) { _ in
+            surfaceTransitionPause.noteGeometryChange()
         }
         .contentShape(Rectangle())
         .gesture(
