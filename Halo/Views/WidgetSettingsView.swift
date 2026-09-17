@@ -191,15 +191,39 @@ struct PreciseSlider: View {
                     .onChange(of: fieldFocused) { focused in if !focused { commitText() } }
                 if !suffix.isEmpty { Text(suffix).foregroundStyle(.secondary) }
             }
-            SwiftUI.Slider(value: Binding(get: { value }, set: { newValue in
-                value = quantized(newValue)
-                if dragging { tickIfNeeded(value) }
-            }), in: range, step: step, onEditingChanged: { editing in
-                dragging = editing
-                lastTick = editing ? tickIndex(value) : nil
-                onEditingChanged?(editing)
-                if !editing { syncText() }
-            })
+//            SwiftUI.Slider(value: Binding(get: { value }, set: { newValue in
+//                value = quantized(newValue)
+//                if dragging { tickIfNeeded(value) }
+//            }), in: range, step: step, onEditingChanged: { editing in
+//                dragging = editing
+//                lastTick = editing ? tickIndex(value) : nil
+//                onEditingChanged?(editing)
+//                if !editing { syncText() }
+//            })
+//            .accessibilityLabel(title)
+            
+            SwiftUI.Slider(
+                value: Binding(
+                    get: { value },
+                    set: { newValue in
+                        value = quantized(newValue)
+
+                        if dragging {
+                            tickIfNeeded(value)
+                        }
+                    }
+                ),
+                in: range,
+                onEditingChanged: { editing in
+                    dragging = editing
+                    lastTick = editing ? tickIndex(value) : nil
+                    onEditingChanged?(editing)
+
+                    if !editing {
+                        syncText()
+                    }
+                }
+            )
             .accessibilityLabel(title)
         }
         .onAppear { syncText() }
