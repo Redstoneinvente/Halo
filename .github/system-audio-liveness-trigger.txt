@@ -1,3 +1,3 @@
-2026-09-17T17:16:00+04:00
+2026-09-17T17:18:00+04:00
 fix=system-audio-liveness
-retrigger=1
+retrigger=2
