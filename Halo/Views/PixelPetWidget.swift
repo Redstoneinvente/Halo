@@ -1938,6 +1938,7 @@ struct HaloPixelPetWidget: View {
             syncAudioSpectrum()
         }
         .onChange(of: media.isPlaying) { _ in syncAudioSpectrum() }
+        .onChange(of: surfacePower.phase) { _ in syncAudioSpectrum() }
         .onChange(of: pal.preferences.musicReaction) { _ in syncAudioSpectrum() }
         .onChange(of: pal.preferences.contextReactions) { _ in syncAudioSpectrum() }
         .onDisappear {
@@ -1993,7 +1994,10 @@ struct HaloPixelPetWidget: View {
 
     private func syncAudioSpectrum() {
         AudioSpectrumService.shared.setActive(
-            pal.preferences.contextReactions && pal.preferences.musicReaction && media.isPlaying,
+            surfacePower.phase.isPoweredOn &&
+                pal.preferences.contextReactions &&
+                pal.preferences.musicReaction &&
+                media.isPlaying,
             owner: "pixel-pal"
         )
     }

@@ -2386,7 +2386,7 @@ struct SurfaceView: View {
                     .accessibilityLabel("Toggle Halo dashboard")
                     .accessibilityAddTraits(.isButton)
                 }
-                if state.expanded {
+                if state.expanded || presentsVisualWorkspaceSurface {
                     if customContextActive, let candidate = activeCustomCandidate {
                         HaloCustomCISurfaceView(package: candidate.package, surfaceState: state, workspace: workspace)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -2430,9 +2430,13 @@ struct SurfaceView: View {
                         // expanded surface proposed by the notch window. Region percentages are
                         // resolved only against this rectangle, never against intrinsic content.
                         GeometryReader { surfaceProxy in
-                            OpenNotchWorkspaceView(layout: layout, store: store,
-                                                   mode: layout.resolvedOpenNotchLayout.resolvedContentMode,
-                                                   page: $page)
+                            OpenNotchWorkspaceView(
+                                layout: layout,
+                                store: store,
+                                mode: layout.resolvedOpenNotchLayout.resolvedContentMode,
+                                page: $page,
+                                closingPowerOnly: !state.expanded && presentsVisualWorkspaceSurface
+                            )
                                 .frame(width: surfaceProxy.size.width,
                                        height: surfaceProxy.size.height,
                                        alignment: .topLeading)
@@ -2455,6 +2459,8 @@ struct SurfaceView: View {
                                 .padding(.horizontal, 7).padding(.vertical, 5)
                                 .background(.ultraThinMaterial, in: Capsule())
                                 .padding(10)
+                                .opacity(state.expanded ? 1 : 0)
+                                .allowsHitTesting(state.expanded)
                             }
                             .overlay(alignment: .top) {
                                 if keepsClosedContentsWhileExpanded {
@@ -3300,6 +3306,7 @@ private struct OpenNotchWorkspaceView: View {
     @ObservedObject var store: AppStore
     let mode: OpenNotchContentMode
     @Binding var page: Int
+    let closingPowerOnly: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var opened: OpenNotchLayout { layout.resolvedOpenNotchLayout }
     private var regions: [OpenNotchRegion] { opened.regions.sorted { $0.placement.sortIndex < $1.placement.sortIndex } }
@@ -3320,7 +3327,8 @@ private struct OpenNotchWorkspaceView: View {
 
     private var directItems: [OpenNotchItem] {
         let runtime = OpenNotchRuntimeContext(store: store)
-        return opened.resolvedGridItems.filter(runtime.isVisible)
+        let visible = opened.resolvedGridItems.filter(runtime.isVisible)
+        return closingPowerOnly ? visible.filter { $0.module == .pet } : visible
     }
 
     private var directColumns: Int { opened.resolvedGridColumns }
