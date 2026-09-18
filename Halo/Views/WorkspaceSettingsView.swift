@@ -807,20 +807,26 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             Text("Width is still limited by the display. Lower padding gives widgets more breathing room without changing the outer notch shape.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+        SurfaceAppearanceControls(
+            appearance: $workspace.settings.layout.appearance,
+            theme: store.configuration.theme,
+            screen: NSScreen.main ?? NSScreen.screens.first,
+            scope: .closedGeometry
+        )
+    }
+
+    @ViewBuilder private var surface: some View {
         Section("Surface basics") {
             Picker("Surface", selection: $store.configuration.theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
             Slider(value: $store.configuration.theme.cornerRadius, in: 0...48) { Text("Corner radius") }
             Slider(value: $store.configuration.theme.tint, in: 0...1) { Text("Accent hue") }
             Slider(value: $store.configuration.theme.opacity, in: 0.5...1) { Text("Opacity") }
         }
-    }
-
-    @ViewBuilder private var surface: some View {
         SurfaceAppearanceControls(
             appearance: $workspace.settings.layout.appearance,
             theme: store.configuration.theme,
             screen: NSScreen.main ?? NSScreen.screens.first,
-            scope: .geometry
+            scope: .surfaceGeometry
         )
         Section("Surface background effects") {
             if workspace.settings.layout.appearance.background == .glass {

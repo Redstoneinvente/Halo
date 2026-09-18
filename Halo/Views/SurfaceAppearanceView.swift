@@ -70,7 +70,7 @@ struct HaloContour: Shape {
 }
 
 enum SurfaceAppearanceScope {
-    case all, background, geometry, motion
+    case all, background, geometry, closedGeometry, surfaceGeometry, motion
 }
 
 @MainActor struct SurfaceAppearanceControls: View {
@@ -105,8 +105,8 @@ enum SurfaceAppearanceScope {
             backgroundColorControls
         }
 
-        if scope == .all || scope == .geometry {
-            Section("Closed size") {
+        if scope == .all || scope == .geometry || scope == .closedGeometry {
+            Section("Closed notch size & offsets") {
                 PreciseSlider(title: "Width", value: $appearance.compactWidth, range: 16...640, step: 1, suffix: "pt", onEditingChanged: {
                     GeometryPreview.update(expanded: false, editing: $0, display: screen)
                 })
@@ -120,14 +120,30 @@ enum SurfaceAppearanceScope {
                         Text("16 × 16 pt is allowed. The physical camera cutout stays unchanged; a positive vertical offset moves Halo below it.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-            }
-            Section("Position offsets") {
-                Text("Positive X moves right; positive Y moves down. Each state has independent offsets.").font(.caption)
-                offsetControl("Opened X", key: \.openedX, expanded: true)
-                offsetControl("Opened Y", key: \.openedY, expanded: true)
+
+                Text("Positive X moves the closed notch right; positive Y moves it down.").font(.caption)
                 offsetControl("Closed X", key: \.closedX, expanded: false)
                 offsetControl("Closed Y", key: \.closedY, expanded: false)
-                Button("Reset offsets") { appearance.surface.offsets = SurfaceOffsets() }
+                Button("Reset closed offsets") {
+                    var offsets = appearance.surface.offsets ?? SurfaceOffsets()
+                    offsets.closedX = 0
+                    offsets.closedY = 0
+                    appearance.surface.offsets = offsets
+                }
+            }
+        }
+
+        if scope == .all || scope == .geometry || scope == .surfaceGeometry {
+            Section("Opened surface position") {
+                Text("Positive X moves the opened surface right; positive Y moves it down.").font(.caption)
+                offsetControl("Opened X", key: \.openedX, expanded: true)
+                offsetControl("Opened Y", key: \.openedY, expanded: true)
+                Button("Reset opened offsets") {
+                    var offsets = appearance.surface.offsets ?? SurfaceOffsets()
+                    offsets.openedX = 0
+                    offsets.openedY = 0
+                    appearance.surface.offsets = offsets
+                }
             }
             Section("Context interface position") {
                 Text("These offsets apply only to Context Interfaces. They do not move the normal opened dashboard. Positive X moves right; positive Y moves down.").font(.caption).foregroundStyle(.secondary)
