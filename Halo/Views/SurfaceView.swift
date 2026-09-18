@@ -2962,10 +2962,26 @@ struct SurfaceView: View {
             }
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }
-        .onReceive(transfer.$isActive.removeDuplicates()) { active in
-            if !active {
-                if !contextMusicActive { state.contextPreferredSize = nil }
+//        .onReceive(transfer.$isActive.removeDuplicates()) { active in
+//            if !active {
+//                if !contextMusicActive { state.contextPreferredSize = nil }
+//                state.contextPreferredCompactWidth = nil
+//                state.contextMinimumExpandedWidth = nil
+//            }
+//        }
+        .onChange(of: transfer.isActive) { active in
+            guard !active else { return }
+
+            if !contextMusicActive,
+               state.contextPreferredSize != nil {
+                state.contextPreferredSize = nil
+            }
+
+            if state.contextPreferredCompactWidth != nil {
                 state.contextPreferredCompactWidth = nil
+            }
+
+            if state.contextMinimumExpandedWidth != nil {
                 state.contextMinimumExpandedWidth = nil
             }
         }
