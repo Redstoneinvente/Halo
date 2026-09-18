@@ -1756,6 +1756,15 @@ private struct HaloPixelPalPowerTransitionView: View {
         )
         let primary = preferences.faceColor
         let accent = preferences.accentColor.color
+        let powerLEDShape: HaloPixelPalLEDShape
+        switch phase {
+        case .bootingUp:
+            powerLEDShape = preferences.bootUpLEDShape
+        case .bootingDown:
+            powerLEDShape = preferences.bootDownLEDShape
+        case .on, .off:
+            powerLEDShape = preferences.ledShape
+        }
 
         func paint(_ x: Int, _ y: Int, color: Color, opacity: Double = 1) {
             guard x >= 0, y >= 0,
@@ -1770,17 +1779,6 @@ private struct HaloPixelPalPowerTransitionView: View {
                 shape: powerLEDShape,
                 cornerRadiusFraction: preferences.pixelCornerRadius
             )
-        }
-
-        var powerLEDShape: HaloPixelPalLEDShape {
-            switch phase {
-            case .bootingUp:
-                return preferences.bootUpLEDShape
-            case .bootingDown:
-                return preferences.bootDownLEDShape
-            case .on, .off:
-                return preferences.ledShape
-            }
         }
 
         func drawEyes(opacity: Double) {
