@@ -1360,7 +1360,18 @@ final class HaloLicenseManager: ObservableObject {
 
         do {
             let token = try await account.validIDToken()
-            let document = try await fetchPressLicense(key: key, token: token)
+            var document = try await fetchPressLicense(key: key, token: token)
+            _ = try validatePressLicenseDocument(document, key: key, requireBound: false)
+
+            if pressBool(document, "bound") != true {
+                try await bindUnboundPressLicense(
+                    key: key,
+                    document: document,
+                    token: token
+                )
+                document = try await fetchPressLicense(key: key, token: token)
+            }
+
             let expiresAt = try validatePressLicenseDocument(document, key: key, requireBound: true)
             guard HaloKeychain.set(account.userID, for: pressLicenseOwnerKey) else {
                 throw HaloCommercialError.message("Halo could not save the press license owner securely on this Mac.")
@@ -1390,12 +1401,11 @@ final class HaloLicenseManager: ObservableObject {
         _ = try validatePressLicenseDocument(document, key: key, requireBound: false)
 
         if pressBool(document, "bound") != true {
-            do {
-                try await bindPressLicense(key: key, document: document, token: token)
-            } catch {
-                // A concurrent activation may have won the one-way bind. Re-fetch below and
-                // validate the canonical owner/device instead of trusting the failed write.
-            }
+            try await bindUnboundPressLicense(
+                key: key,
+                document: document,
+                token: token
+            )
             document = try await fetchPressLicense(key: key, token: token)
         }
 
@@ -1405,6 +1415,34 @@ final class HaloLicenseManager: ObservableObject {
             throw HaloCommercialError.message("Halo could not save the press license securely on this Mac.")
         }
         applyPressLicense(key, expiresAt: expiresAt)
+    }
+
+    private func bindUnboundPressLicense(
+        key: String,
+        document: [String: Any],
+        token: String
+    ) async throws {
+        do {
+            try await bindPressLicense(key: key, document: document, token: token)
+        } catch {
+            // A concurrent activation may have completed the one-way bind after our read.
+            // Re-fetch once and accept it only if it now belongs to this account + Mac.
+            let refreshed: [String: Any]
+            do {
+                refreshed = try await fetchPressLicense(key: key, token: token)
+            } catch {
+                throw error
+            }
+
+            if pressBool(refreshed, "bound") == true {
+                _ = try validatePressLicenseDocument(refreshed, key: key, requireBound: true)
+                return
+            }
+
+            // The write genuinely failed and the key is still unbound. Preserve the
+            // original Firestore error instead of replacing it with "not activated yet".
+            throw error
+        }
     }
 
     private func validatePressLicenseDocument(
