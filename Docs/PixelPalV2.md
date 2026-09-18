@@ -709,6 +709,7 @@ Controls:
 - background color where relevant
 - glow
 - face scale
+- LED shape (Square, Circle, Triangle, Diamond, Star, Hexagon, Cross)
 - pixel spacing
 
 ### 16.3 Eye / mouth / face selectors
@@ -1025,6 +1026,10 @@ When an implementation shortcut conflicts with this document, prefer this docume
   largest square inside its actual cell, preserving the user's optional Face fill setting.
   Each LED edge is snapped independently to backing pixels, so fractional scaling cannot
   shrink the entire display to the previous integer multiple.
+- LED geometry is user-selectable. Initial shapes are Square, Circle, Triangle, Diamond,
+  Star, Hexagon and Cross. The same LED primitive must be used by active face pixels,
+  inactive LEDs, power animations, and Pixel Pal's cookie pixels/crumbs so the display
+  reads as one coherent piece of hardware.
 - A stationary, dim palette-tinted LED matrix sits beneath the lit sprite. Lit LEDs share
   the exact same grid, with crisp edges and a one-backing-pixel gap where space permits.
 - Direct reactions use a trigger-relative bounce that settles; hover tracks locally per

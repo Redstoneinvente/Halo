@@ -124,6 +124,13 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(HaloPixelPalAnimationTiming.bounce(elapsed: 1.1, intensity: 1, reduceMotion: false), 0)
     }
 
+    func testPixelPalLEDShapeRawValuesStayStableForPersistence() {
+        XCTAssertEqual(
+            HaloPixelPalLEDShape.allCases.map(\.rawValue),
+            ["Square", "Circle", "Triangle", "Diamond", "Star", "Hexagon", "Cross"]
+        )
+    }
+
     func testPixelPalPowerTransitionTiming() {
         XCTAssertEqual(
             HaloPixelPalPowerAnimationTiming.duration(style: .scanline, direction: .up, speed: 1),

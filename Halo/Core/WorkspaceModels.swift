@@ -2574,6 +2574,18 @@ enum HaloPixelPalAnimationTiming {
     }
 }
 
+enum HaloPixelPalLEDShape: String, Codable, CaseIterable, Identifiable {
+    case square = "Square"
+    case circle = "Circle"
+    case triangle = "Triangle"
+    case diamond = "Diamond"
+    case star = "Star"
+    case hexagon = "Hexagon"
+    case cross = "Cross"
+
+    var id: String { rawValue }
+}
+
 enum HaloPixelPalPowerAnimationStyle: String, Codable, CaseIterable, Identifiable {
     case scanline = "Scanline"
     case cascade = "Pixel Cascade"

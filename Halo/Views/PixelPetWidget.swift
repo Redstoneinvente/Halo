@@ -194,7 +194,7 @@ enum HaloPixelPalPersonality: String, Codable, CaseIterable, Identifiable {
 struct HaloPixelPalPreferences: Codable, Equatable {
     // Legacy persisted field retained so Codable stays backward-compatible.
     var showCheeks: Bool = true
-    var version = 10
+    var version = 11
 
     // Appearance
     var faceStyle: HaloPixelPalFaceStyle = .soft
@@ -210,6 +210,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     var backgroundOpacity = 1.0
     var backgroundCornerRadius = 0.0
     var pixelCornerRadius = 0.0
+    var ledShape: HaloPixelPalLEDShape = .square
     var pixelSpacing = 1.0
     var inactiveLEDIntensity = 0.075
     var inactiveLEDUsesFaceColor = true
@@ -265,7 +266,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case version
         case faceStyle, eyeStyle, mouthStyle, cheekStyle, palette, customColor, accentColor, blushColor
-        case backgroundStyle, backgroundColor, backgroundOpacity, backgroundCornerRadius, pixelCornerRadius, pixelSpacing, inactiveLEDIntensity, inactiveLEDUsesFaceColor, inactiveLEDColor, faceScale, glowIntensity
+        case backgroundStyle, backgroundColor, backgroundOpacity, backgroundCornerRadius, pixelCornerRadius, ledShape, pixelSpacing, inactiveLEDIntensity, inactiveLEDUsesFaceColor, inactiveLEDColor, faceScale, glowIntensity
         case accessoryMode, selectedAccessory, allowedAccessories
         case automaticBlinking, animationSpeed, animationIntensity, dizzyRotationThresholdTurns, personality
         case bootUpAnimation, bootDownAnimation, powerAnimationSpeed
@@ -280,7 +281,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        version = 10
+        version = 11
         faceStyle = try c.decodeIfPresent(HaloPixelPalFaceStyle.self, forKey: .faceStyle) ?? .soft
         eyeStyle = try c.decodeIfPresent(HaloPixelPalEyeStyle.self, forKey: .eyeStyle) ?? .glossy
         mouthStyle = try c.decodeIfPresent(HaloPixelPalMouthStyle.self, forKey: .mouthStyle) ?? .automatic
@@ -298,6 +299,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
         backgroundOpacity = try c.decodeIfPresent(Double.self, forKey: .backgroundOpacity) ?? 1.0
         backgroundCornerRadius = try c.decodeIfPresent(Double.self, forKey: .backgroundCornerRadius) ?? 0.0
         pixelCornerRadius = try c.decodeIfPresent(Double.self, forKey: .pixelCornerRadius) ?? 0.0
+        ledShape = try c.decodeIfPresent(HaloPixelPalLEDShape.self, forKey: .ledShape) ?? .square
         pixelSpacing = try c.decodeIfPresent(Double.self, forKey: .pixelSpacing) ?? 1.0
         inactiveLEDIntensity = try c.decodeIfPresent(Double.self, forKey: .inactiveLEDIntensity) ?? 0.075
         inactiveLEDUsesFaceColor = try c.decodeIfPresent(Bool.self, forKey: .inactiveLEDUsesFaceColor) ?? true
@@ -346,7 +348,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     func normalized() -> Self {
         var value = self
-        value.version = 10
+        value.version = 11
         value.animationSpeed = min(2.0, max(0.35, animationSpeed))
         value.animationIntensity = min(1.0, max(0.0, animationIntensity))
         value.powerAnimationSpeed = min(1.75, max(0.5, powerAnimationSpeed))
@@ -1745,11 +1747,13 @@ private struct HaloPixelPalPowerTransitionView: View {
                   x < HaloPixelPalDisplayGeometry.grid,
                   y < HaloPixelPalDisplayGeometry.grid else { return }
             let rect = geometry.led(x: x, y: y)
-            let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius
-            context.fill(
-                Path(roundedRect: rect, cornerRadius: radius),
-                with: .color(color.opacity(min(1, max(0, opacity)))),
-                style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001)
+            HaloPixelPalLEDDrawing.fill(
+                context: &context,
+                rect: rect,
+                color: color,
+                opacity: opacity,
+                shape: preferences.ledShape,
+                cornerRadiusFraction: preferences.pixelCornerRadius
             )
         }
 
@@ -2227,6 +2231,103 @@ struct HaloPixelPetWidget: View {
 
 // MARK: - Face renderer
 
+private enum HaloPixelPalLEDDrawing {
+    static func path(
+        in rect: CGRect,
+        shape: HaloPixelPalLEDShape,
+        cornerRadiusFraction: Double
+    ) -> Path {
+        guard rect.width > 0, rect.height > 0 else { return Path() }
+
+        switch shape {
+        case .square:
+            let radius = min(rect.width, rect.height) * min(0.5, max(0, cornerRadiusFraction))
+            return Path(roundedRect: rect, cornerRadius: radius)
+        case .circle:
+            return Path(ellipseIn: rect)
+        case .triangle:
+            var path = Path()
+            path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            path.closeSubpath()
+            return path
+        case .diamond:
+            var path = Path()
+            path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
+            path.closeSubpath()
+            return path
+        case .star:
+            let center = CGPoint(x: rect.midX, y: rect.midY)
+            let outer = min(rect.width, rect.height) * 0.5
+            let inner = outer * 0.45
+            var path = Path()
+            for index in 0..<10 {
+                let angle = -Double.pi / 2 + Double(index) * Double.pi / 5
+                let radius = index.isMultiple(of: 2) ? outer : inner
+                let point = CGPoint(
+                    x: center.x + CGFloat(cos(angle)) * radius,
+                    y: center.y + CGFloat(sin(angle)) * radius
+                )
+                if index == 0 { path.move(to: point) }
+                else { path.addLine(to: point) }
+            }
+            path.closeSubpath()
+            return path
+        case .hexagon:
+            var path = Path()
+            let points = [
+                CGPoint(x: rect.minX + rect.width * 0.25, y: rect.minY),
+                CGPoint(x: rect.minX + rect.width * 0.75, y: rect.minY),
+                CGPoint(x: rect.maxX, y: rect.midY),
+                CGPoint(x: rect.minX + rect.width * 0.75, y: rect.maxY),
+                CGPoint(x: rect.minX + rect.width * 0.25, y: rect.maxY),
+                CGPoint(x: rect.minX, y: rect.midY)
+            ]
+            path.move(to: points[0])
+            for point in points.dropFirst() { path.addLine(to: point) }
+            path.closeSubpath()
+            return path
+        case .cross:
+            let x1 = rect.minX + rect.width * 0.34
+            let x2 = rect.minX + rect.width * 0.66
+            let y1 = rect.minY + rect.height * 0.34
+            let y2 = rect.minY + rect.height * 0.66
+            let points = [
+                CGPoint(x: x1, y: rect.minY), CGPoint(x: x2, y: rect.minY),
+                CGPoint(x: x2, y: y1), CGPoint(x: rect.maxX, y: y1),
+                CGPoint(x: rect.maxX, y: y2), CGPoint(x: x2, y: y2),
+                CGPoint(x: x2, y: rect.maxY), CGPoint(x: x1, y: rect.maxY),
+                CGPoint(x: x1, y: y2), CGPoint(x: rect.minX, y: y2),
+                CGPoint(x: rect.minX, y: y1), CGPoint(x: x1, y: y1)
+            ]
+            path.move(to: points[0])
+            for point in points.dropFirst() { path.addLine(to: point) }
+            path.closeSubpath()
+            return path
+        }
+    }
+
+    static func fill(
+        context: inout GraphicsContext,
+        rect: CGRect,
+        color: Color,
+        opacity: Double = 1,
+        shape: HaloPixelPalLEDShape,
+        cornerRadiusFraction: Double
+    ) {
+        let antialias = shape != .square || cornerRadiusFraction > 0.001
+        context.fill(
+            path(in: rect, shape: shape, cornerRadiusFraction: cornerRadiusFraction),
+            with: .color(color.opacity(min(1, max(0, opacity)))),
+            style: FillStyle(antialiased: antialias)
+        )
+    }
+}
+
 private struct HaloPixelPalRelativeRoundedRectangle: Shape {
     let radiusFraction: Double
 
@@ -2358,10 +2459,14 @@ private struct HaloPixelPalFace: View {
                         for y in 0..<logicalGrid {
                             for x in 0..<logicalGrid {
                                 let rect = geometry.led(x: x, y: y)
-                                let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius
-                                context.fill(Path(roundedRect: rect, cornerRadius: radius),
-                                             with: .color(inactiveColor.opacity(preferences.inactiveLEDIntensity)),
-                                             style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001))
+                                HaloPixelPalLEDDrawing.fill(
+                                    context: &context,
+                                    rect: rect,
+                                    color: inactiveColor,
+                                    opacity: preferences.inactiveLEDIntensity,
+                                    shape: preferences.ledShape,
+                                    cornerRadiusFraction: preferences.pixelCornerRadius
+                                )
                             }
                         }
                     }
@@ -2481,15 +2586,26 @@ private struct HaloPixelPalFace: View {
                     width: pixel,
                     height: pixel
                 )
-                let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius
                 let outer = x == 0 || x == 4 || y == 0 || y == 4
-                context.fill(
-                    Path(roundedRect: rect, cornerRadius: radius),
-                    with: .color(value == "d" ? chip : (outer ? edge : dough)),
-                    style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001)
+                HaloPixelPalLEDDrawing.fill(
+                    context: &context,
+                    rect: cookieLEDRect(rect),
+                    color: value == "d" ? chip : (outer ? edge : dough),
+                    shape: preferences.ledShape,
+                    cornerRadiusFraction: preferences.pixelCornerRadius
                 )
             }
         }
+    }
+
+    private func cookieLEDRect(_ rect: CGRect) -> CGRect {
+        let backing = max(1, displayScale)
+        let requestedGap = CGFloat(min(3.0, max(0.0, preferences.pixelSpacing.rounded()))) / backing
+        let inset = min(
+            requestedGap * 0.5,
+            max(0, min(rect.width, rect.height) * 0.5 - 0.5 / backing)
+        )
+        return rect.insetBy(dx: inset, dy: inset)
     }
 
     private func furyDoorClosure(elapsed: TimeInterval, cookieRescueElapsed: TimeInterval?) -> Double {
@@ -2572,11 +2688,12 @@ private struct HaloPixelPalFace: View {
         let chip = Color(red: 0.25, green: 0.09, blue: 0.025)
 
         func paintCookiePixel(_ rect: CGRect, _ color: Color) {
-            let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius
-            context.fill(
-                Path(roundedRect: rect, cornerRadius: radius),
-                with: .color(color),
-                style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001)
+            HaloPixelPalLEDDrawing.fill(
+                context: &context,
+                rect: cookieLEDRect(rect),
+                color: color,
+                shape: preferences.ledShape,
+                cornerRadiusFraction: preferences.pixelCornerRadius
             )
         }
 
@@ -2681,10 +2798,14 @@ private struct HaloPixelPalFace: View {
                     let logicalY = placed.y + rowIndex + motion.y + extraY
                     guard logicalX >= 0, logicalY >= 0, logicalX < logicalGrid, logicalY < logicalGrid else { continue }
                     let rect = geometry.led(x: logicalX, y: logicalY)
-                    let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius
-                    context.fill(Path(roundedRect: rect, cornerRadius: radius),
-                                 with: .color(color(for: role).opacity(opacity)),
-                                 style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001))
+                    HaloPixelPalLEDDrawing.fill(
+                        context: &context,
+                        rect: rect,
+                        color: color(for: role),
+                        opacity: opacity,
+                        shape: preferences.ledShape,
+                        cornerRadiusFraction: preferences.pixelCornerRadius
+                    )
                 }
             }
         }
@@ -3311,12 +3432,16 @@ private struct HaloPixelPalSettingsView: View {
                         .font(.caption.monospacedDigit())
                         .frame(width: 38, alignment: .trailing)
                 }
-                HStack {
-                    Text("Pixel corner radius")
-                    Slider(value: bind(\.pixelCornerRadius), in: 0...0.5)
-                    Text("\(Int(pal.preferences.pixelCornerRadius * 100))%")
-                        .font(.caption.monospacedDigit())
-                        .frame(width: 38, alignment: .trailing)
+                Text("LED shape").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                ledShapeGrid
+                if pal.preferences.ledShape == .square {
+                    HStack {
+                        Text("Pixel corner radius")
+                        Slider(value: bind(\.pixelCornerRadius), in: 0...0.5)
+                        Text("\(Int(pal.preferences.pixelCornerRadius * 100))%")
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 38, alignment: .trailing)
+                    }
                 }
                 HStack {
                     Text("Pixel spacing")
@@ -3342,6 +3467,45 @@ private struct HaloPixelPalSettingsView: View {
                 }
             }
             .padding(.top, 5)
+        }
+    }
+
+    private var ledShapeGrid: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+            ForEach(HaloPixelPalLEDShape.allCases) { shape in
+                previewTile(title: shape.rawValue, selected: shape == pal.preferences.ledShape) {
+                    pal.update(\.ledShape, shape)
+                } preview: {
+                    Canvas { context, size in
+                        let columns = 3
+                        let spacing: CGFloat = 5
+                        let cell = min(
+                            (size.width - spacing * CGFloat(columns - 1)) / CGFloat(columns),
+                            (size.height - spacing * CGFloat(columns - 1)) / CGFloat(columns)
+                        )
+                        let total = cell * CGFloat(columns) + spacing * CGFloat(columns - 1)
+                        let origin = CGPoint(x: (size.width - total) / 2, y: (size.height - total) / 2)
+
+                        for y in 0..<columns {
+                            for x in 0..<columns {
+                                let rect = CGRect(
+                                    x: origin.x + CGFloat(x) * (cell + spacing),
+                                    y: origin.y + CGFloat(y) * (cell + spacing),
+                                    width: cell,
+                                    height: cell
+                                )
+                                HaloPixelPalLEDDrawing.fill(
+                                    context: &context,
+                                    rect: rect,
+                                    color: pal.preferences.faceColor,
+                                    shape: shape,
+                                    cornerRadiusFraction: pal.preferences.pixelCornerRadius
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
