@@ -220,7 +220,12 @@ struct SettingsView: View {
                   let group = sidebarGroups.first(where: { $0.items.contains(selectedSection) }) else { return }
             expandedSidebarGroups.insert(group.id)
         }
-        .onDisappear { GeometryPreview.update(expanded: false, editing: false) }
+        .onDisappear {
+            GeometryPreview.update(expanded: false, editing: false)
+            SurfaceGeometryEditingSession.shared.cancelTransaction()
+            SurfaceGeometryEditingSession.shared.isEnabled = false
+            SurfaceGeometryEditingSession.shared.displayID = nil
+        }
         .alert("Halo", isPresented: Binding(get: { store.error != nil || workspace.error != nil }, set: { if !$0 { store.error = nil; workspace.error = nil } })) {
             Button("OK") { store.error = nil; workspace.error = nil }
         } message: { Text(store.error ?? workspace.error ?? "") }
@@ -615,6 +620,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
     @State private var page: HaloAppearancePage = .openedSpace
     @State private var showingOpenWorkspaceEditor = false
+    @ObservedObject private var geometryEditor = SurfaceGeometryEditingSession.shared
 
     var body: some View {
         Picker("Appearance area", selection: $page) {
@@ -792,6 +798,59 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     }
 
     @ViewBuilder private var sizeAndPosition: some View {
+        Section("Direct manipulation") {
+            Toggle("Edit notch directly", isOn: Binding(
+                get: { geometryEditor.isEnabled },
+                set: { setDirectGeometryEditing($0) }
+            ))
+
+            if geometryEditor.isEnabled {
+                Picker("Editing", selection: Binding(
+                    get: { geometryEditor.target },
+                    set: { target in
+                        geometryEditor.target = target
+                        GeometryPreview.update(expanded: target.expanded, editing: true, display: directEditScreen)
+                    }
+                )) {
+                    ForEach(SurfaceGeometryEditingTarget.allCases) { target in
+                        Text(target.rawValue).tag(target)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("Drag Halo itself to move it. Drag the edge or corner handles to resize it, and drag the curved handle near the top-right corner to change corner radius.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Button {
+                        undoDirectGeometry()
+                    } label: {
+                        Label("Undo", systemImage: "arrow.uturn.backward")
+                    }
+                    .disabled(!geometryEditor.canUndo)
+                    .keyboardShortcut("z", modifiers: .command)
+
+                    Button {
+                        redoDirectGeometry()
+                    } label: {
+                        Label("Redo", systemImage: "arrow.uturn.forward")
+                    }
+                    .disabled(!geometryEditor.canRedo)
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+
+                    Spacer()
+
+                    Button {
+                        resetDirectGeometry()
+                    } label: {
+                        Label("Reset", systemImage: "arrow.counterclockwise")
+                    }
+                    .help("Reset the selected notch geometry")
+                }
+            }
+        }
+
         Section("Opened notch size & spacing") {
             Slider(value: $store.configuration.theme.width, in: 340...1200, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Opened width") }
             Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 280...1100, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Opened height") }
@@ -810,15 +869,102 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         SurfaceAppearanceControls(
             appearance: $workspace.settings.layout.appearance,
             theme: store.configuration.theme,
-            screen: NSScreen.main ?? NSScreen.screens.first,
+            screen: directEditScreen,
             scope: .openedPosition
         )
         SurfaceAppearanceControls(
             appearance: $workspace.settings.layout.appearance,
             theme: store.configuration.theme,
-            screen: NSScreen.main ?? NSScreen.screens.first,
+            screen: directEditScreen,
             scope: .closedGeometry
         )
+    }
+
+    private var directEditScreen: NSScreen? {
+        if let id = geometryEditor.displayID,
+           let selected = NSScreen.screens.first(where: { WindowManager.displayID($0) == id }) {
+            return selected
+        }
+        return NSApp.keyWindow?.screen ?? NSScreen.main ?? NSScreen.screens.first
+    }
+
+    private var directGeometrySnapshot: SurfaceGeometryEditSnapshot {
+        SurfaceGeometryEditSnapshot.capture(
+            theme: store.configuration.theme,
+            appearance: workspace.settings.layout.appearance
+        )
+    }
+
+    private func applyDirectGeometrySnapshot(_ snapshot: SurfaceGeometryEditSnapshot) {
+        var theme = store.configuration.theme
+        var appearance = workspace.settings.layout.appearance
+
+        theme.width = min(1200, max(340, snapshot.expandedWidth))
+        theme.cornerRadius = min(48, max(0, snapshot.cornerRadius))
+        appearance.compactWidth = min(640, max(16, snapshot.compactWidth))
+        appearance.surface.compactHeight = min(100, max(16, snapshot.compactHeight))
+        appearance.expandedHeight = min(1100, max(280, snapshot.expandedHeight))
+        appearance.surface.offsets = snapshot.offsets
+
+        store.configuration.theme = theme
+        workspace.settings.layout.appearance = appearance
+    }
+
+    private func setDirectGeometryEditing(_ enabled: Bool) {
+        if enabled {
+            let screen = NSApp.keyWindow?.screen ?? NSScreen.main ?? NSScreen.screens.first
+            geometryEditor.displayID = screen.map(WindowManager.displayID)
+            geometryEditor.clearHistory()
+            geometryEditor.isEnabled = true
+            GeometryPreview.update(expanded: geometryEditor.target.expanded, editing: true, display: screen)
+        } else {
+            geometryEditor.cancelTransaction()
+            let screen = directEditScreen
+            geometryEditor.isEnabled = false
+            GeometryPreview.update(expanded: geometryEditor.target.expanded, editing: false, display: screen)
+            geometryEditor.displayID = nil
+        }
+    }
+
+    private func undoDirectGeometry() {
+        let current = directGeometrySnapshot
+        guard let previous = geometryEditor.undo(current: current) else { return }
+        applyDirectGeometrySnapshot(previous)
+        GeometryPreview.update(expanded: geometryEditor.target.expanded, editing: true, display: directEditScreen)
+    }
+
+    private func redoDirectGeometry() {
+        let current = directGeometrySnapshot
+        guard let next = geometryEditor.redo(current: current) else { return }
+        applyDirectGeometrySnapshot(next)
+        GeometryPreview.update(expanded: geometryEditor.target.expanded, editing: true, display: directEditScreen)
+    }
+
+    private func resetDirectGeometry() {
+        let before = directGeometrySnapshot
+        var after = before
+        let defaultTheme = Theme()
+        let defaultAppearance = Appearance()
+        var offsets = after.offsets
+
+        switch geometryEditor.target {
+        case .closed:
+            after.compactWidth = defaultAppearance.compactWidth
+            after.compactHeight = defaultAppearance.surface.compactHeight
+            offsets.closedX = 0
+            offsets.closedY = 0
+        case .opened:
+            after.expandedWidth = defaultTheme.width
+            after.expandedHeight = defaultAppearance.expandedHeight
+            offsets.openedX = 0
+            offsets.openedY = 0
+        }
+        after.offsets = offsets
+        after.cornerRadius = defaultTheme.cornerRadius
+
+        geometryEditor.recordChange(from: before, to: after)
+        applyDirectGeometrySnapshot(after)
+        GeometryPreview.update(expanded: geometryEditor.target.expanded, editing: true, display: directEditScreen)
     }
 
     @ViewBuilder private var surface: some View {

@@ -1379,7 +1379,10 @@ final class WindowManager {
     }
 
     private func targetFrame(host: Host, expanded: Bool) -> CGRect {
-        guard host.geometry != nil else { return .zero }
+        guard let geometry = host.geometry else { return .zero }
+        if host.state.editingGeometry {
+            return geometry.frame(expanded: expanded)
+        }
         return expanded
             ? adjustedExpandedFrame(host: host, requested: host.state.contextPreferredSize)
             : adjustedClosedFrame(host: host, requestedWidth: host.state.contextPreferredCompactWidth,

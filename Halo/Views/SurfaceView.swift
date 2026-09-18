@@ -2188,6 +2188,342 @@ private enum ActiveContextInterface: String {
     case drop, teleprompter, transfer, clipboard, custom, music, bluetooth, retro
 }
 
+
+private enum SurfaceDirectGeometryHandle {
+    case move
+    case topLeft, top, topRight
+    case left, right
+    case bottomLeft, bottom, bottomRight
+    case cornerRadius
+
+    var movesLeft: Bool { self == .left || self == .topLeft || self == .bottomLeft }
+    var movesRight: Bool { self == .right || self == .topRight || self == .bottomRight }
+    var movesTop: Bool { self == .top || self == .topLeft || self == .topRight }
+    var movesBottom: Bool { self == .bottom || self == .bottomLeft || self == .bottomRight }
+}
+
+@MainActor
+private struct SurfaceDirectGeometryEditorOverlay: View {
+    @ObservedObject var store: AppStore
+    @ObservedObject var workspace: WorkspaceStore
+    @ObservedObject var state: SurfaceState
+    @ObservedObject var session: SurfaceGeometryEditingSession
+
+    @State private var activeHandle: SurfaceDirectGeometryHandle?
+    @State private var dragStartMouse: CGPoint?
+    @State private var dragStartFrame: CGRect?
+    @State private var dragStartSnapshot: SurfaceGeometryEditSnapshot?
+
+    private var currentSnapshot: SurfaceGeometryEditSnapshot {
+        SurfaceGeometryEditSnapshot.capture(
+            theme: store.configuration.theme,
+            appearance: workspace.settings.layout.appearance
+        )
+    }
+
+    private var editingScreen: NSScreen? {
+        if let displayID = session.displayID,
+           let screen = NSScreen.screens.first(where: { WindowManager.displayID($0) == displayID }) {
+            return screen
+        }
+        return NSScreen.screens.first(where: { $0.frame.equalTo(state.screenFrame) })
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = max(1, proxy.size.width)
+            let height = max(1, proxy.size.height)
+
+            ZStack {
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .gesture(dragGesture(.move))
+
+                Rectangle()
+                    .strokeBorder(
+                        Color.accentColor.opacity(0.95),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
+                    )
+                    .allowsHitTesting(false)
+
+                resizeHandle(.topLeft).position(x: 10, y: 10)
+                resizeHandle(.top).position(x: width / 2, y: 10)
+                resizeHandle(.topRight).position(x: width - 10, y: 10)
+                resizeHandle(.left).position(x: 10, y: height / 2)
+                resizeHandle(.right).position(x: width - 10, y: height / 2)
+                resizeHandle(.bottomLeft).position(x: 10, y: height - 10)
+                resizeHandle(.bottom).position(x: width / 2, y: height - 10)
+                resizeHandle(.bottomRight).position(x: width - 10, y: height - 10)
+
+                radiusHandle
+                    .position(
+                        x: max(22, width - 30),
+                        y: min(max(22, height * 0.28), max(22, height - 22))
+                    )
+
+                VStack(spacing: 4) {
+                    Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(session.target == .closed ? "Closed" : "Opened")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(.white.opacity(0.74))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(.black.opacity(0.40), in: Capsule())
+                .allowsHitTesting(false)
+
+                VStack {
+                    Spacer()
+                    Text(sizeLabel)
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.78))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.black.opacity(0.46), in: Capsule())
+                        .padding(.bottom, 14)
+                }
+                .allowsHitTesting(false)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Direct notch geometry editor")
+    }
+
+    private var sizeLabel: String {
+        let snapshot = currentSnapshot
+        if session.target == .closed {
+            return "\(Int(snapshot.compactWidth.rounded())) × \(Int(snapshot.compactHeight.rounded())) · r\(Int(snapshot.cornerRadius.rounded()))"
+        }
+        let totalHeight = snapshot.expandedHeight + max(40, snapshot.compactHeight)
+        return "\(Int(snapshot.expandedWidth.rounded())) × \(Int(totalHeight.rounded())) · r\(Int(snapshot.cornerRadius.rounded()))"
+    }
+
+    private func resizeHandle(_ handle: SurfaceDirectGeometryHandle) -> some View {
+        ZStack {
+            Rectangle().fill(Color.clear)
+            Circle()
+                .fill(.white)
+                .frame(width: 9, height: 9)
+                .overlay(Circle().stroke(Color.accentColor, lineWidth: 2))
+        }
+        .frame(width: 24, height: 24)
+        .contentShape(Rectangle())
+        .gesture(dragGesture(handle))
+        .accessibilityLabel("Resize notch")
+    }
+
+    private var radiusHandle: some View {
+        ZStack {
+            Circle().fill(.black.opacity(0.58))
+            Image(systemName: "circle.dotted")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(Color.accentColor)
+        }
+        .frame(width: 24, height: 24)
+        .overlay(Circle().stroke(.white.opacity(0.72), lineWidth: 1))
+        .contentShape(Circle())
+        .gesture(dragGesture(.cornerRadius))
+        .accessibilityLabel("Adjust corner radius")
+    }
+
+    private func dragGesture(_ handle: SurfaceDirectGeometryHandle) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { _ in
+                updateDrag(handle)
+            }
+            .onEnded { _ in
+                finishDrag()
+            }
+    }
+
+    private func beginDrag(_ handle: SurfaceDirectGeometryHandle) {
+        guard activeHandle == nil,
+              let screen = editingScreen else { return }
+
+        let snapshot = currentSnapshot
+        activeHandle = handle
+        dragStartMouse = NSEvent.mouseLocation
+        dragStartSnapshot = snapshot
+        dragStartFrame = geometryFrame(for: snapshot, on: screen)
+        session.beginTransaction(snapshot)
+    }
+
+    private func updateDrag(_ handle: SurfaceDirectGeometryHandle) {
+        if activeHandle == nil { beginDrag(handle) }
+        guard activeHandle == handle,
+              let startMouse = dragStartMouse,
+              let startFrame = dragStartFrame,
+              let startSnapshot = dragStartSnapshot,
+              let screen = editingScreen else { return }
+
+        let mouse = NSEvent.mouseLocation
+        let delta = CGSize(width: mouse.x - startMouse.x, height: mouse.y - startMouse.y)
+
+        if handle == .cornerRadius {
+            var next = startSnapshot
+            next.cornerRadius = min(48, max(0, startSnapshot.cornerRadius - Double(delta.width + delta.height) * 0.5))
+            apply(next)
+            return
+        }
+
+        var desired = startFrame
+        if handle == .move {
+            desired.origin.x += delta.width
+            desired.origin.y += delta.height
+        } else {
+            desired = resizedFrame(startFrame, handle: handle, delta: delta, snapshot: startSnapshot, screen: screen)
+        }
+
+        desired = constrainedToScreen(desired, screen: screen)
+        let next = snapshot(startingFrom: startSnapshot, matching: desired, on: screen)
+        apply(next)
+    }
+
+    private func finishDrag() {
+        guard activeHandle != nil else { return }
+        session.commitTransaction(currentSnapshot)
+        activeHandle = nil
+        dragStartMouse = nil
+        dragStartFrame = nil
+        dragStartSnapshot = nil
+    }
+
+    private func geometryFrame(for snapshot: SurfaceGeometryEditSnapshot, on screen: NSScreen) -> CGRect {
+        var theme = store.configuration.theme
+        var appearance = workspace.settings.layout.appearance
+        theme.width = snapshot.expandedWidth
+        theme.cornerRadius = snapshot.cornerRadius
+        appearance.compactWidth = snapshot.compactWidth
+        appearance.surface.compactHeight = snapshot.compactHeight
+        appearance.expandedHeight = snapshot.expandedHeight
+        appearance.surface.offsets = snapshot.offsets
+        if store.configuration.simulateNotch && theme.style == .notch {
+            theme.style = .simulated
+        }
+        return WindowManager.geometry(screen: screen, theme: theme, appearance: appearance)
+            .frame(expanded: session.target.expanded)
+    }
+
+    private func snapshot(
+        startingFrom start: SurfaceGeometryEditSnapshot,
+        matching desired: CGRect,
+        on screen: NSScreen
+    ) -> SurfaceGeometryEditSnapshot {
+        var next = start
+
+        if session.target == .closed {
+            next.compactWidth = min(640, max(16, Double(desired.width)))
+            next.compactHeight = min(100, max(16, Double(desired.height)))
+        } else {
+            next.expandedWidth = min(1200, max(340, Double(desired.width)))
+            let closedStrip = max(40, next.compactHeight)
+            next.expandedHeight = min(1100, max(280, Double(desired.height) - closedStrip))
+        }
+
+        var zeroed = next
+        if session.target == .closed {
+            zeroed.offsets.closedX = 0
+            zeroed.offsets.closedY = 0
+        } else {
+            zeroed.offsets.openedX = 0
+            zeroed.offsets.openedY = 0
+        }
+
+        let base = geometryFrame(for: zeroed, on: screen)
+        let offsetX = min(1000, max(-1000, Double(desired.minX - base.minX)))
+        let offsetY = min(1000, max(-1000, Double(base.minY - desired.minY)))
+
+        if session.target == .closed {
+            next.offsets.closedX = offsetX
+            next.offsets.closedY = offsetY
+        } else {
+            next.offsets.openedX = offsetX
+            next.offsets.openedY = offsetY
+        }
+        return next
+    }
+
+    private func resizedFrame(
+        _ start: CGRect,
+        handle: SurfaceDirectGeometryHandle,
+        delta: CGSize,
+        snapshot: SurfaceGeometryEditSnapshot,
+        screen: NSScreen
+    ) -> CGRect {
+        var minX = start.minX
+        var maxX = start.maxX
+        var minY = start.minY
+        var maxY = start.maxY
+
+        if handle.movesLeft { minX += delta.width }
+        if handle.movesRight { maxX += delta.width }
+        if handle.movesTop { maxY += delta.height }
+        if handle.movesBottom { minY += delta.height }
+
+        let screenWidth = max(16, screen.frame.width - 8)
+        let screenHeight = max(16, screen.frame.height - 8)
+        let minWidth: CGFloat = session.target == .closed ? 16 : 340
+        let maxWidth: CGFloat = min(session.target == .closed ? 640 : 1200, screenWidth)
+        let closedStrip = max(40, snapshot.compactHeight)
+        let minHeight: CGFloat = session.target == .closed ? 16 : CGFloat(280 + closedStrip)
+        let maxHeight: CGFloat = min(
+            session.target == .closed ? 100 : CGFloat(1100 + closedStrip),
+            screenHeight
+        )
+
+        var width = maxX - minX
+        if width < minWidth {
+            if handle.movesLeft { minX = maxX - minWidth } else { maxX = minX + minWidth }
+        } else if width > maxWidth {
+            if handle.movesLeft { minX = maxX - maxWidth } else { maxX = minX + maxWidth }
+        }
+
+        var height = maxY - minY
+        if height < minHeight {
+            if handle.movesBottom { minY = maxY - minHeight } else { maxY = minY + minHeight }
+        } else if height > maxHeight {
+            if handle.movesBottom { minY = maxY - maxHeight } else { maxY = minY + maxHeight }
+        }
+
+        width = maxX - minX
+        height = maxY - minY
+        return CGRect(x: minX, y: minY, width: width, height: height)
+    }
+
+    private func constrainedToScreen(_ frame: CGRect, screen: NSScreen) -> CGRect {
+        let bounds = screen.frame.insetBy(dx: 4, dy: 4)
+        var result = frame
+        if result.width > bounds.width {
+            result.size.width = bounds.width
+        }
+        if result.height > bounds.height {
+            result.size.height = bounds.height
+        }
+        if result.minX < bounds.minX { result.origin.x = bounds.minX }
+        if result.maxX > bounds.maxX { result.origin.x = bounds.maxX - result.width }
+        if result.minY < bounds.minY { result.origin.y = bounds.minY }
+        if result.maxY > bounds.maxY { result.origin.y = bounds.maxY - result.height }
+        return result
+    }
+
+    private func apply(_ snapshot: SurfaceGeometryEditSnapshot) {
+        var theme = store.configuration.theme
+        var appearance = workspace.settings.layout.appearance
+        theme.width = snapshot.expandedWidth
+        theme.cornerRadius = snapshot.cornerRadius
+        appearance.compactWidth = snapshot.compactWidth
+        appearance.surface.compactHeight = snapshot.compactHeight
+        appearance.expandedHeight = snapshot.expandedHeight
+        appearance.surface.offsets = snapshot.offsets
+        store.configuration.theme = theme
+        workspace.settings.layout.appearance = appearance
+    }
+}
+
 struct SurfaceView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var state: SurfaceState
@@ -2196,6 +2532,7 @@ struct SurfaceView: View {
     @ObservedObject private var transfer = TransferActivityMonitor.shared
     @ObservedObject private var clipboardCI = ClipboardContextMonitor.shared
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
+    @ObservedObject private var geometryEditor = SurfaceGeometryEditingSession.shared
     @State private var clipboardOpenedNotch = false
     @State private var teleprompterActive = false
     @State private var visualWorkspaceSurfacePresented = false
@@ -2771,6 +3108,23 @@ struct SurfaceView: View {
         contour.stroke(dropOverlayActive ? accent : .white.opacity(0.12), lineWidth: dropOverlayActive ? 1.6 : 1)
         if presentsVisualWorkspaceSurface {
             OpenNotchSurfaceChrome(contour: contour, options: layout.resolvedOpenNotchLayout.appearance)
+        }
+        if geometryEditorTargetsThisSurface {
+            SurfaceDirectGeometryEditorOverlay(
+                store: store,
+                workspace: workspace,
+                state: state,
+                session: geometryEditor
+            )
+            .zIndex(100)
+        }
+    }
+
+    private var geometryEditorTargetsThisSurface: Bool {
+        guard geometryEditor.isEnabled else { return false }
+        guard let displayID = geometryEditor.displayID else { return true }
+        return NSScreen.screens.contains { screen in
+            WindowManager.displayID(screen) == displayID && screen.frame.equalTo(state.screenFrame)
         }
     }
 

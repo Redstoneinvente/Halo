@@ -10,6 +10,104 @@ import UniformTypeIdentifiers
     }
 }
 
+
+enum SurfaceGeometryEditingTarget: String, CaseIterable, Identifiable {
+    case closed = "Closed notch"
+    case opened = "Opened notch"
+
+    var id: String { rawValue }
+    var expanded: Bool { self == .opened }
+}
+
+struct SurfaceGeometryEditSnapshot: Equatable {
+    var compactWidth: Double
+    var compactHeight: Double
+    var expandedWidth: Double
+    var expandedHeight: Double
+    var offsets: SurfaceOffsets
+    var cornerRadius: Double
+
+    static func capture(theme: Theme, appearance: Appearance) -> SurfaceGeometryEditSnapshot {
+        SurfaceGeometryEditSnapshot(
+            compactWidth: appearance.compactWidth,
+            compactHeight: appearance.surface.compactHeight,
+            expandedWidth: theme.width,
+            expandedHeight: appearance.expandedHeight,
+            offsets: appearance.surface.offsets ?? SurfaceOffsets(),
+            cornerRadius: theme.cornerRadius
+        )
+    }
+}
+
+final class SurfaceGeometryEditingSession: ObservableObject {
+    static let shared = SurfaceGeometryEditingSession()
+
+    @Published var isEnabled = false
+    @Published var target: SurfaceGeometryEditingTarget = .closed
+    @Published var displayID: String?
+    @Published private(set) var canUndo = false
+    @Published private(set) var canRedo = false
+
+    private var undoStack: [SurfaceGeometryEditSnapshot] = []
+    private var redoStack: [SurfaceGeometryEditSnapshot] = []
+    private var transactionStart: SurfaceGeometryEditSnapshot?
+
+    private init() {}
+
+    func beginTransaction(_ snapshot: SurfaceGeometryEditSnapshot) {
+        if transactionStart == nil { transactionStart = snapshot }
+    }
+
+    func commitTransaction(_ snapshot: SurfaceGeometryEditSnapshot) {
+        guard let start = transactionStart else { return }
+        transactionStart = nil
+        recordChange(from: start, to: snapshot)
+    }
+
+    func cancelTransaction() {
+        transactionStart = nil
+    }
+
+    func recordChange(from before: SurfaceGeometryEditSnapshot, to after: SurfaceGeometryEditSnapshot) {
+        guard before != after else { return }
+        transactionStart = nil
+        undoStack.append(before)
+        if undoStack.count > 80 {
+            undoStack.removeFirst(undoStack.count - 80)
+        }
+        redoStack.removeAll()
+        syncAvailability()
+    }
+
+    func undo(current: SurfaceGeometryEditSnapshot) -> SurfaceGeometryEditSnapshot? {
+        cancelTransaction()
+        guard let previous = undoStack.popLast() else { return nil }
+        redoStack.append(current)
+        syncAvailability()
+        return previous
+    }
+
+    func redo(current: SurfaceGeometryEditSnapshot) -> SurfaceGeometryEditSnapshot? {
+        cancelTransaction()
+        guard let next = redoStack.popLast() else { return nil }
+        undoStack.append(current)
+        syncAvailability()
+        return next
+    }
+
+    func clearHistory() {
+        transactionStart = nil
+        undoStack.removeAll()
+        redoStack.removeAll()
+        syncAvailability()
+    }
+
+    private func syncAvailability() {
+        canUndo = !undoStack.isEmpty
+        canRedo = !redoStack.isEmpty
+    }
+}
+
 struct HaloContour: Shape {
     var kind: SurfaceShapeKind
     var radius: CGFloat
