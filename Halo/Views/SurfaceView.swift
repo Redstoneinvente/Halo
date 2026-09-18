@@ -2260,8 +2260,8 @@ private struct SurfaceDirectGeometryEditorOverlay: View {
 
                 radiusHandle
                     .position(
-                        x: max(22, width - 30),
-                        y: min(max(22, height * 0.28), max(22, height - 22))
+                        x: min(max(8, width - 30), max(8, width - 8)),
+                        y: min(max(8, height * 0.35), max(8, height - 8))
                     )
 
                 VStack(spacing: 4) {

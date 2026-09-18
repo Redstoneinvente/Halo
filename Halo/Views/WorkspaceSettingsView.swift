@@ -627,6 +627,16 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             ForEach(HaloAppearancePage.allCases) { Text($0.rawValue).tag($0) }
         }
         .pickerStyle(.segmented)
+        .onChange(of: page) { selectedPage in
+            if selectedPage != .sizeAndPosition && geometryEditor.isEnabled {
+                setDirectGeometryEditing(false)
+            }
+        }
+        .onDisappear {
+            if geometryEditor.isEnabled {
+                setDirectGeometryEditing(false)
+            }
+        }
 
         switch page {
         case .openedSpace: openedSpace
