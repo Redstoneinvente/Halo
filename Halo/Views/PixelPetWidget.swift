@@ -1638,9 +1638,6 @@ private final class HaloPixelPalSurfacePowerController: ObservableObject {
         phaseWork = nil
     }
 
-    deinit {
-        cancelScheduledWork()
-    }
 }
 
 private struct HaloPixelPalPowerTransitionView: View {
@@ -1832,9 +1829,23 @@ struct HaloPixelPetWidget: View {
         _system = ObservedObject(wrappedValue: workspace.system)
     }
 
-    var body: some View {
+    private var timelineMinimumInterval: TimeInterval {
+        if surfacePower.phase.isPoweredOn {
+            return reduceMotion ? 0.45 : 1.0 / 24.0
+        }
+        return reduceMotion ? 1.0 / 24.0 : 1.0 / 60.0
+    }
+
+    private var timelineMinimumInterval: TimeInterval {
+        if surfacePower.phase.isPoweredOn {
+            return reduceMotion ? 0.45 : 1.0 / 24.0
+        }
+        return reduceMotion ? 1.0 / 24.0 : 1.0 / 60.0
+    }
+
+    private var pixelPalTimeline: some View {
         TimelineView(.animation(
-            minimumInterval: surfacePower.phase.isPoweredOn ? (reduceMotion ? 0.45 : 1.0 / 24.0) : (reduceMotion ? 1.0 / 24.0 : 1.0 / 60.0),
+            minimumInterval: timelineMinimumInterval,
             paused: surfacePower.phase.pausesTimeline
         )) { timeline in
             GeometryReader { proxy in
@@ -1962,6 +1973,10 @@ struct HaloPixelPetWidget: View {
             }
         }
         .id(surfacePower.phase.timelineIdentity)
+    }
+
+    var body: some View {
+        pixelPalTimeline
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloPanelGeometryChanged"))) { _ in
             surfacePower.noteGeometryChange()
         }
