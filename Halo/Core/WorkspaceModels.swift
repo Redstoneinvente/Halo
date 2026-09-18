@@ -2574,10 +2574,53 @@ enum HaloPixelPalAnimationTiming {
     }
 }
 
+enum HaloPixelPalPowerAnimationStyle: String, Codable, CaseIterable, Identifiable {
+    case scanline = "Scanline"
+    case cascade = "Pixel Cascade"
+    case corePulse = "Core Pulse"
+    case sparkle = "Sparkle Burst"
+    case none = "None"
+
+    var id: String { rawValue }
+}
+
+enum HaloPixelPalPowerAnimationDirection {
+    case up
+    case down
+}
+
 enum HaloPixelPalPowerAnimationTiming {
-    static let bootUpDuration: TimeInterval = 0.46
-    static let bootDownDuration: TimeInterval = 0.22
     static let geometrySettleDelay: TimeInterval = 0.09
+
+    static func duration(
+        style: HaloPixelPalPowerAnimationStyle,
+        direction: HaloPixelPalPowerAnimationDirection,
+        speed: Double
+    ) -> TimeInterval {
+        guard style != .none else { return 0 }
+        let base: TimeInterval
+        switch (style, direction) {
+        case (.scanline, .up): base = 0.48
+        case (.scanline, .down): base = 0.30
+        case (.cascade, .up): base = 0.58
+        case (.cascade, .down): base = 0.44
+        case (.corePulse, .up): base = 0.52
+        case (.corePulse, .down): base = 0.36
+        case (.sparkle, .up): base = 0.56
+        case (.sparkle, .down): base = 0.42
+        case (.none, _): return 0
+        }
+        let safeSpeed = min(1.75, max(0.5, speed.isFinite ? speed : 1))
+        return base / safeSpeed
+    }
+
+    static func closeGateDelay(
+        style: HaloPixelPalPowerAnimationStyle,
+        speed: Double
+    ) -> TimeInterval {
+        let animation = duration(style: style, direction: .down, speed: speed)
+        return animation > 0 ? animation + 0.04 : 0
+    }
 
     static func fallbackBootDelay(surfaceDuration: TimeInterval) -> TimeInterval {
         let duration = surfaceDuration.isFinite ? surfaceDuration : 0.3

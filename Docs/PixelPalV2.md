@@ -548,6 +548,11 @@ When the host Halo surface opens or closes, Pixel Pal should behave like a tiny 
 - closing: run a brief lightweight shutdown sequence that collapses the face toward a center scanline, then leave every LED dark for the rest of the retraction
 - the normal 24 Hz face/context renderer must not run while the display is powered off or performing the lightweight power transition
 - boot effects should be crisp, pixel-aligned, and visually subordinate to the face
+- users can independently choose boot-up and boot-down styles; initial styles are Scanline, Pixel Cascade, Core Pulse, Sparkle Burst, and None
+- users can adjust power-animation speed without changing normal idle/reaction animation speed
+- boot-up must complete before the live Pixel Pal face is shown
+- boot-down must complete before the Halo panel begins its physical closing/retraction animation
+- opening and closing are interruptible: reopening during shutdown cancels the delayed collapse and starts a fresh boot-up sequence
 - Reduce Motion should replace scanline/sweep motion with a simple eye fade
 
 ## 13. Animation choreography and timing

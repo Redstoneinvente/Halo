@@ -125,6 +125,26 @@ final class HaloCoreTests: XCTestCase {
     }
 
     func testPixelPalPowerTransitionTiming() {
+        XCTAssertEqual(
+            HaloPixelPalPowerAnimationTiming.duration(style: .scanline, direction: .up, speed: 1),
+            0.48,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            HaloPixelPalPowerAnimationTiming.duration(style: .cascade, direction: .down, speed: 2),
+            0.44 / 1.75,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            HaloPixelPalPowerAnimationTiming.duration(style: .none, direction: .up, speed: 1),
+            0,
+            accuracy: 0.0001
+        )
+        XCTAssertGreaterThan(
+            HaloPixelPalPowerAnimationTiming.closeGateDelay(style: .sparkle, speed: 1),
+            HaloPixelPalPowerAnimationTiming.duration(style: .sparkle, direction: .down, speed: 1)
+        )
+
         XCTAssertEqual(HaloPixelPalPowerAnimationTiming.fallbackBootDelay(surfaceDuration: 0.3), 0.4, accuracy: 0.0001)
         XCTAssertEqual(HaloPixelPalPowerAnimationTiming.fallbackBootDelay(surfaceDuration: 0), 0.18, accuracy: 0.0001)
         XCTAssertEqual(HaloPixelPalPowerAnimationTiming.fallbackBootDelay(surfaceDuration: 5), 1.35, accuracy: 0.0001)

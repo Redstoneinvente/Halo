@@ -365,6 +365,7 @@ final class WindowManager {
         var contextCompactSizeSubscription: AnyCancellable?
         var contextCompactHeightSubscription: AnyCancellable?
         var refreshDropCIRegistration: (() -> Void)?
+        var pixelPalCollapseWork: DispatchWorkItem?
         init() {
             panel = HaloPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             panel.isReleasedWhenClosed = false
@@ -383,6 +384,7 @@ final class WindowManager {
         }
         func stop() {
             animator.cancel(); state.hoverExpandTask?.cancel(); state.collapseTask?.cancel(); state.dropExitTask?.cancel()
+            pixelPalCollapseWork?.cancel()
             subscription?.cancel(); contextSizeSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); contextCompactHeightSubscription?.cancel(); panel.close(); ambientPanel.close()
         }
     }
@@ -1436,6 +1438,63 @@ final class WindowManager {
         ActivationSequenceCoordinator.shared.preview(displays: displays, systemVolume: currentActivationSystemVolume())
     }
 
+    private func layoutContainsVisualWorkspacePixelPal(_ host: Host) -> Bool {
+        let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
+        guard layout.resolvedUsesCustomOpenNotchWorkspace else { return false }
+        return layout.resolvedOpenNotchLayout.resolvedGridItems.contains {
+            $0.module == .pet && !$0.hidden
+        }
+    }
+
+    private func applyExpandedState(_ expanded: Bool, to host: Host) {
+        guard let geometry = host.geometry else { return }
+        if !expanded { host.state.contextPreferredSize = nil }
+
+        var target = targetFrame(host: host, expanded: expanded)
+        if geometry.style == .detached {
+            let oldOffset = geometry.offset(expanded: !expanded)
+            let newOffset = geometry.offset(expanded: expanded)
+            target.origin.x = host.panel.frame.midX - target.width / 2 + newOffset.width - oldOffset.width
+            target.origin.y = host.panel.frame.maxY - target.height + newOffset.height - oldOffset.height
+        }
+
+        let baseWidth = geometry.frame(expanded: true).width
+        let contentWidth = expanded && host.state.contextPreferredSize != nil ? target.width : baseWidth
+        if host.state.dashboardWidth != contentWidth { host.state.dashboardWidth = contentWidth }
+        host.targetFrame = target
+        host.animator.move(
+            panel: host.panel,
+            state: host.state,
+            target: target,
+            options: geometry.appearance.surface,
+            preset: geometry.appearance.animation,
+            animations: host.state.theme.animations && !host.state.editingGeometry,
+            opening: expanded,
+            style: geometry.style
+        )
+    }
+
+    private func schedulePixelPalGatedCollapse(for host: Host) -> Bool {
+        guard layoutContainsVisualWorkspacePixelPal(host) else { return false }
+
+        let preferences = HaloPixelPalStore.shared.preferences
+        let delay = HaloPixelPalPowerAnimationTiming.closeGateDelay(
+            style: preferences.bootDownAnimation,
+            speed: preferences.powerAnimationSpeed
+        )
+        guard delay > 0.001 else { return false }
+
+        host.pixelPalCollapseWork?.cancel()
+        let work = DispatchWorkItem { [weak self, weak host] in
+            guard let self, let host, !host.state.expanded else { return }
+            host.pixelPalCollapseWork = nil
+            self.applyExpandedState(false, to: host)
+        }
+        host.pixelPalCollapseWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        return true
+    }
+
     private func reconcile() {
         let screens = store.configuration.allDisplays ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
         var active = Set<String>()
@@ -1547,21 +1606,16 @@ final class WindowManager {
                 host.panel.contentView = view
                 if initialActivationPending { host.panel.alphaValue = 0 }
                 host.subscription = host.state.$expanded.dropFirst().removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self, weak host] expanded in
-                    guard let self, let host, let geometry = host.geometry else { return }
-                    if expanded { ActivationSequenceCoordinator.shared.cancelForInteraction() }
-                    if !expanded { host.state.contextPreferredSize = nil }
-                    var target = self.targetFrame(host: host, expanded: expanded)
-                    if geometry.style == .detached {
-                        let oldOffset = geometry.offset(expanded: !expanded), newOffset = geometry.offset(expanded: expanded)
-                        target.origin.x = host.panel.frame.midX - target.width / 2 + newOffset.width - oldOffset.width
-                        target.origin.y = host.panel.frame.maxY - target.height + newOffset.height - oldOffset.height
+                    guard let self, let host else { return }
+                    host.pixelPalCollapseWork?.cancel()
+                    host.pixelPalCollapseWork = nil
+
+                    if expanded {
+                        ActivationSequenceCoordinator.shared.cancelForInteraction()
+                        self.applyExpandedState(true, to: host)
+                    } else if !self.schedulePixelPalGatedCollapse(for: host) {
+                        self.applyExpandedState(false, to: host)
                     }
-                    let baseWidth = geometry.frame(expanded: true).width
-                    let contentWidth = expanded && host.state.contextPreferredSize != nil ? target.width : baseWidth
-                    if host.state.dashboardWidth != contentWidth { host.state.dashboardWidth = contentWidth }
-                    host.targetFrame = target
-                    host.animator.move(panel: host.panel, state: host.state, target: target, options: geometry.appearance.surface,
-                                       preset: geometry.appearance.animation, animations: host.state.theme.animations && !host.state.editingGeometry, opening: expanded, style: geometry.style)
                 }
                 host.contextSizeSubscription = host.state.$contextPreferredSize.dropFirst().removeDuplicates(by: { lhs, rhs in
                     switch (lhs, rhs) {
