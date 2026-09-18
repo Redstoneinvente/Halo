@@ -2198,6 +2198,7 @@ struct SurfaceView: View {
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
     @State private var clipboardOpenedNotch = false
     @State private var teleprompterActive = false
+    @State private var visualWorkspaceSurfacePresented = false
     @AppStorage("HaloContextTeleprompterEnabled") private var teleprompterCIEnabled = true
     @AppStorage("HaloContextTeleprompterPriority") private var teleprompterPriority = 70.0
     @AppStorage("HaloContextTransferEnabled") private var transferCIEnabled = true
@@ -2339,12 +2340,15 @@ struct SurfaceView: View {
     private var modules: [ModuleID] { layout.normalizedOrder().filter { layout.enabled.contains($0) } }
     private var usesVisualWorkspace: Bool { layout.resolvedUsesCustomOpenNotchWorkspace }
     private var usesDefaultWorkspace: Bool { !usesVisualWorkspace }
+    private var presentsVisualWorkspaceSurface: Bool {
+        usesVisualWorkspace && activeContext == nil && (state.expanded || visualWorkspaceSurfacePresented)
+    }
     private var accent: Color { Color(hue: theme.tint, saturation: 0.65, brightness: 1) }
     var body: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
                 if !contextOwnsFullSurface &&
-                    !(state.expanded && activeContext == nil && usesVisualWorkspace) {
+                    !presentsVisualWorkspaceSurface {
                     Group {
                       if !state.expanded && customContextActive, let candidate = activeCustomCandidate {
                         HaloCustomCISurfaceView(package: candidate.package, surfaceState: state, workspace: workspace)
@@ -2625,9 +2629,31 @@ struct SurfaceView: View {
                 state.expanded = true
             }
         }
-        .onAppear { workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive), token: openVisibilityToken) }
+        .onAppear {
+            workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive), token: openVisibilityToken)
+            visualWorkspaceSurfacePresented = state.expanded && usesVisualWorkspace && activeContext == nil
+        }
         .onDisappear { workspace.setOpenedNotchVisible(false, token: openVisibilityToken) }
+        .onReceive(state.viewport.$size) { size in
+            guard visualWorkspaceSurfacePresented, !state.expanded else { return }
+            let atCompactSize =
+                abs(size.width - state.compactWidth) <= 1 &&
+                abs(size.height - state.compactHeight) <= 1
+            if atCompactSize {
+                visualWorkspaceSurfacePresented = false
+            }
+        }
+        .onChange(of: usesVisualWorkspace) { active in
+            if !active {
+                visualWorkspaceSurfacePresented = false
+            } else if state.expanded && activeContext == nil {
+                visualWorkspaceSurfacePresented = true
+            }
+        }
         .onChange(of: state.expanded) { expanded in
+            if expanded && usesVisualWorkspace && activeContext == nil {
+                visualWorkspaceSurfacePresented = true
+            }
             if teleprompterContextActive && expanded {
                 state.expanded = false
                 workspace.setOpenedNotchVisible(false, token: openVisibilityToken)
@@ -2678,6 +2704,11 @@ struct SurfaceView: View {
             if !expanded { clipboardOpenedNotch = false }
         }
         .onChange(of: activeContext) { _ in
+            if activeContext == nil, state.expanded, usesVisualWorkspace {
+                visualWorkspaceSurfacePresented = true
+            } else if activeContext != nil {
+                visualWorkspaceSurfacePresented = false
+            }
             let owns = teleprompterCIEnabled && teleprompterActive && activeContext == .teleprompter
             NotificationCenter.default.post(name: .init("HaloTeleprompterCIOwnershipChanged"), object: nil, userInfo: ["owns": owns])
             if owns {
@@ -2715,12 +2746,13 @@ struct SurfaceView: View {
                 ClipboardSurfaceBackground(monitor: clipboardCI)
             } else if customContextActive, let candidate = activeCustomCandidate {
                 HaloCustomCIBackgroundView(contract: candidate.package.manifest.surface.background, expanded: state.expanded)
-            } else if state.expanded && activeContext == nil && usesVisualWorkspace {
+            } else if presentsVisualWorkspaceSurface {
                 OpenNotchBackgroundView(options: layout.resolvedOpenNotchLayout.appearance, fallback: layout.appearance, theme: theme, system: workspace.system)
             } else {
                 SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
             }
-            if !transferContextActive && !clipboardContextActive && !customContextActive && (!state.expanded || layout.closedNotch?.applyBackgroundWhenOpened == true) {
+            if !transferContextActive && !clipboardContextActive && !customContextActive &&
+                ((!state.expanded && !presentsVisualWorkspaceSurface) || layout.closedNotch?.applyBackgroundWhenOpened == true) {
                 AlbumNotchBackground(options: closedBackgroundOptions, media: workspace.media, system: workspace.system)
             }
         }
@@ -2729,7 +2761,7 @@ struct SurfaceView: View {
     @ViewBuilder private var surfaceOverlayLayer: some View {
         let dropOverlayActive = dropCIEnabled && state.dropTargeted
         contour.stroke(dropOverlayActive ? accent : .white.opacity(0.12), lineWidth: dropOverlayActive ? 1.6 : 1)
-        if state.expanded && activeContext == nil && usesVisualWorkspace {
+        if presentsVisualWorkspaceSurface {
             OpenNotchSurfaceChrome(contour: contour, options: layout.resolvedOpenNotchLayout.appearance)
         }
     }
