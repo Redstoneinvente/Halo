@@ -421,7 +421,7 @@ struct SettingsView: View {
 
 private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     case openedSpace = "Opened Space"
-    case basics = "Basics"
+    case sizeAndPosition = "Size & Position"
     case surface = "Surface"
     case background = "Background"
     case motion = "Motion"
@@ -624,7 +624,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 
         switch page {
         case .openedSpace: openedSpace
-        case .basics: basics
+        case .sizeAndPosition: sizeAndPosition
         case .surface: surface
         case .background: background
         case .motion: motion
@@ -791,7 +791,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         if panel.runModal() == .OK, let url = panel.url { visualAssetPath.wrappedValue = url.path }
     }
 
-    @ViewBuilder private var basics: some View {
+    @ViewBuilder private var sizeAndPosition: some View {
         Section("Opened notch size & spacing") {
             Slider(value: $store.configuration.theme.width, in: 340...1200, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Opened width") }
             Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 280...1100, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Opened height") }
