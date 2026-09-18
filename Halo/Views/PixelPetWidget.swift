@@ -1836,13 +1836,6 @@ struct HaloPixelPetWidget: View {
         return reduceMotion ? 1.0 / 24.0 : 1.0 / 60.0
     }
 
-    private var timelineMinimumInterval: TimeInterval {
-        if surfacePower.phase.isPoweredOn {
-            return reduceMotion ? 0.45 : 1.0 / 24.0
-        }
-        return reduceMotion ? 1.0 / 24.0 : 1.0 / 60.0
-    }
-
     private var pixelPalTimeline: some View {
         TimelineView(.animation(
             minimumInterval: timelineMinimumInterval,
