@@ -747,8 +747,32 @@ struct HaloCommercialConfiguration {
 
 enum HaloKeychain {
     private static let service = "com.redstoneinvente.Halo.commercial"
+    // Security.framework item APIs are synchronous. On macOS 26 they can spend a long
+    // time inside securityd/legacy keychain IPC, so never execute them on MainActor.
+    private static let queue = DispatchQueue(label: "com.redstoneinvente.Halo.keychain", qos: .userInitiated)
 
-    static func string(for key: String) -> String? {
+    private static func perform<T: Sendable>(_ operation: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: operation())
+            }
+        }
+    }
+
+    static func string(for key: String) async -> String? {
+        await perform { stringSynchronously(for: key) }
+    }
+
+    @discardableResult
+    static func set(_ value: String, for key: String) async -> Bool {
+        await perform { setSynchronously(value, for: key) }
+    }
+
+    static func remove(_ key: String) async {
+        await perform { removeSynchronously(key) }
+    }
+
+    private static func stringSynchronously(for key: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -762,8 +786,7 @@ enum HaloKeychain {
         return String(data: data, encoding: .utf8)
     }
 
-    @discardableResult
-    static func set(_ value: String, for key: String) -> Bool {
+    private static func setSynchronously(_ value: String, for key: String) -> Bool {
         guard let data = value.data(using: .utf8) else { return false }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -783,7 +806,7 @@ enum HaloKeychain {
         return status == errSecSuccess
     }
 
-    static func remove(_ key: String) {
+    private static func removeSynchronously(_ key: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -846,18 +869,18 @@ final class HaloAccountManager: ObservableObject {
 
     func restore() async {
         guard isConfigured else {
-            clearLocalSession()
+            await clearLocalSession()
             return
         }
-        guard let refresh = HaloKeychain.string(for: refreshKey), !refresh.isEmpty else {
-            clearLocalSession()
+        guard let refresh = await HaloKeychain.string(for: refreshKey), !refresh.isEmpty else {
+            await clearLocalSession()
             return
         }
         do {
             try await refreshSession(using: refresh)
             try await loadProfile()
         } catch {
-            clearLocalSession()
+            await clearLocalSession()
             errorMessage = readable(error)
         }
     }
@@ -914,7 +937,8 @@ final class HaloAccountManager: ObservableObject {
     }
 
     func signOut() {
-        clearLocalSession()
+        resetLocalSessionState()
+        Task { await HaloKeychain.remove(refreshKey) }
         notice = "Signed out."
         errorMessage = nil
     }
@@ -922,7 +946,7 @@ final class HaloAccountManager: ObservableObject {
     func validIDToken() async throws -> String {
         guard isSignedIn else { throw HaloCommercialError.message("Sign in to your Halo account first.") }
         if Date().addingTimeInterval(60) < tokenExpiry, !idToken.isEmpty { return idToken }
-        guard let refresh = HaloKeychain.string(for: refreshKey) else {
+        guard let refresh = await HaloKeychain.string(for: refreshKey) else {
             throw HaloCommercialError.message("Your Halo session has expired. Please sign in again.")
         }
         try await refreshSession(using: refresh)
@@ -942,9 +966,9 @@ final class HaloAccountManager: ObservableObject {
                 body: ["email": cleaned, "password": password, "returnSecureToken": true]
             )
             let result = try JSONDecoder().decode(FirebaseAuthResponse.self, from: data)
-            adopt(idToken: result.idToken, refreshToken: result.refreshToken,
-                  userID: result.localId, email: result.email ?? cleaned,
-                  expiresIn: result.expiresIn)
+            await adopt(idToken: result.idToken, refreshToken: result.refreshToken,
+                        userID: result.localId, email: result.email ?? cleaned,
+                        expiresIn: result.expiresIn)
             try await loadProfile()
             notice = endpoint.contains("signUp") ? "Halo account created." : "Signed in."
         } catch { errorMessage = readable(error) }
@@ -961,9 +985,9 @@ final class HaloAccountManager: ObservableObject {
         request.httpBody = encoded
         let data = try await send(request)
         let result = try JSONDecoder().decode(FirebaseRefreshResponse.self, from: data)
-        adopt(idToken: result.idToken, refreshToken: result.refreshToken,
-              userID: result.userId, email: defaults.string(forKey: "HaloAccountEmail") ?? "",
-              expiresIn: result.expiresIn)
+        await adopt(idToken: result.idToken, refreshToken: result.refreshToken,
+                    userID: result.userId, email: defaults.string(forKey: "HaloAccountEmail") ?? "",
+                    expiresIn: result.expiresIn)
     }
 
     private func loadProfile() async throws {
@@ -977,18 +1001,22 @@ final class HaloAccountManager: ObservableObject {
         isSignedIn = true
     }
 
-    private func adopt(idToken: String, refreshToken: String, userID: String, email: String, expiresIn: String) {
+    private func adopt(idToken: String, refreshToken: String, userID: String, email: String, expiresIn: String) async {
         self.idToken = idToken
         self.userID = userID
         self.email = email
         tokenExpiry = Date().addingTimeInterval(TimeInterval(expiresIn) ?? 3600)
         isSignedIn = true
-        HaloKeychain.set(refreshToken, for: refreshKey)
+        _ = await HaloKeychain.set(refreshToken, for: refreshKey)
         defaults.set(email, forKey: "HaloAccountEmail")
     }
 
-    private func clearLocalSession() {
-        HaloKeychain.remove(refreshKey)
+    private func clearLocalSession() async {
+        await HaloKeychain.remove(refreshKey)
+        resetLocalSessionState()
+    }
+
+    private func resetLocalSessionState() {
         defaults.removeObject(forKey: "HaloAccountEmail")
         idToken = ""
         tokenExpiry = .distantPast
@@ -1118,28 +1146,36 @@ final class HaloLicenseManager: ObservableObject {
     private let localTrialExpiresKey = "trial.local.expiresAt"
     private let localTrialLastCheckKey = "trial.local.lastCheck"
     private var trialExpiryTask: Task<Void, Never>?
+    // SwiftUI/AppKit access checks must be memory-only. These mirrors are populated while
+    // restoring/activating entitlements, never by view-body reads.
+    private var cachedPressOwner = ""
+    private var cachedTrialOwner = ""
+    private var cachedTrialExpiresAt: Date?
+    private var cachedFingerprint: String?
 
     var isConfigured: Bool { HaloCommercialConfiguration.licenseSeatConfigured }
     // Client-side trial mode is intentionally always available for now.
     var trialConfigured: Bool { true }
 
     func restoreAndValidate() async {
+        await prepareFingerprint()
         // Press licenses are a separate Halo entitlement and must never be sent to LicenseSeat.
         if await restorePressLicense() { return }
 
         // Prefer a paid LicenseSeat entitlement whenever one is stored and valid.
-        if isConfigured, let key = HaloKeychain.string(for: licenseKeyKey), !key.isEmpty {
+        if isConfigured, let key = await HaloKeychain.string(for: licenseKeyKey), !key.isEmpty {
             licenseHint = Self.hint(key)
             await validate()
             if state.isValid { return }
         }
 
-        if restoreLocalTrial() { return }
+        if await restoreLocalTrial() { return }
         state = isConfigured ? .inactive : .unconfigured
         details = .empty
     }
 
     func startTrial() async {
+        await prepareFingerprint()
         guard HaloAccountManager.shared.isSignedIn else {
             errorMessage = "Sign in to your Halo account before starting a trial."
             return
@@ -1161,8 +1197,8 @@ final class HaloLicenseManager: ObservableObject {
 
         // One local trial per Mac. The owner binding also prevents another signed-in account
         // from inheriting an active trial on this installation.
-        if HaloKeychain.string(for: localTrialUsedKey) == "1" {
-            if restoreLocalTrial() {
+        if await HaloKeychain.string(for: localTrialUsedKey) == "1" {
+            if await restoreLocalTrial() {
                 if state.isValid {
                     notice = "Your Halo trial is already active on this Mac."
                 } else if errorMessage == nil {
@@ -1194,11 +1230,11 @@ final class HaloLicenseManager: ObservableObject {
             return
         }
 
-        guard HaloKeychain.set("1", for: localTrialUsedKey),
-              HaloKeychain.set(accountID, for: localTrialOwnerKey),
-              HaloKeychain.set(String(startedAt.timeIntervalSince1970), for: localTrialStartedKey),
-              HaloKeychain.set(String(expiresAt.timeIntervalSince1970), for: localTrialExpiresKey),
-              HaloKeychain.set(String(startedAt.timeIntervalSince1970), for: localTrialLastCheckKey) else {
+        guard await HaloKeychain.set("1", for: localTrialUsedKey),
+              await HaloKeychain.set(accountID, for: localTrialOwnerKey),
+              await HaloKeychain.set(String(startedAt.timeIntervalSince1970), for: localTrialStartedKey),
+              await HaloKeychain.set(String(expiresAt.timeIntervalSince1970), for: localTrialExpiresKey),
+              await HaloKeychain.set(String(startedAt.timeIntervalSince1970), for: localTrialLastCheckKey) else {
             errorMessage = "Your trial was reserved, but Halo could not save it securely in Keychain. Contact r.support@redstoneinvente.com."
             return
         }
@@ -1210,6 +1246,7 @@ final class HaloLicenseManager: ObservableObject {
     func activate(_ key: String) async {
         let cleaned = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard cleaned.count >= 6 else { errorMessage = "Enter your Halo license key."; return }
+        await prepareFingerprint()
 
         // PK_ keys are Halo press licenses. Keep this branch before every LicenseSeat guard/request.
         if Self.isPressLicenseKey(cleaned) {
@@ -1239,7 +1276,7 @@ final class HaloLicenseManager: ObservableObject {
             let json = try await request(endpoint: "activate", body: payload)
             let parsed = parseValidation(json)
             guard parsed.valid else { throw HaloCommercialError.message(parsed.message ?? "License activation was rejected.") }
-            guard HaloKeychain.set(cleaned, for: licenseKeyKey) else {
+            guard await HaloKeychain.set(cleaned, for: licenseKeyKey) else {
                 throw HaloCommercialError.message("Halo activated the license, but could not save it securely in Keychain. Please allow Keychain access and try again.")
             }
             licenseHint = Self.hint(cleaned)
@@ -1254,9 +1291,10 @@ final class HaloLicenseManager: ObservableObject {
     }
 
     func validate() async {
+        await prepareFingerprint()
         if await restorePressLicense() { return }
         guard isConfigured else { state = .unconfigured; return }
-        guard let key = HaloKeychain.string(for: licenseKeyKey), !key.isEmpty else { state = .inactive; return }
+        guard let key = await HaloKeychain.string(for: licenseKeyKey), !key.isEmpty else { state = .inactive; return }
         isBusy = true; state = .checking; errorMessage = nil
         defer { isBusy = false }
         do {
@@ -1270,11 +1308,11 @@ final class HaloLicenseManager: ObservableObject {
                 trialExpiryTask?.cancel()
                 state = .valid(plan: parsed.details.plan.isEmpty ? nil : parsed.details.plan)
                 licenseHint = Self.hint(key)
-            } else if !restoreLocalTrial() {
+            } else if !(await restoreLocalTrial()) {
                 state = .invalid(parsed.message ?? "This license is not valid for this Mac.")
             }
         } catch {
-            if !restoreLocalTrial() {
+            if !(await restoreLocalTrial()) {
                 details = .empty
                 state = .invalid(readable(error))
                 errorMessage = readable(error)
@@ -1283,16 +1321,19 @@ final class HaloLicenseManager: ObservableObject {
     }
 
     func deactivate() async {
-        if let key = HaloKeychain.string(for: pressLicenseKey), Self.isPressLicenseKey(key) {
-            HaloKeychain.remove(pressLicenseKey)
-            HaloKeychain.remove(pressLicenseOwnerKey)
+        await prepareFingerprint()
+        if let key = await HaloKeychain.string(for: pressLicenseKey), Self.isPressLicenseKey(key) {
+            await HaloKeychain.remove(pressLicenseKey)
+            await HaloKeychain.remove(pressLicenseOwnerKey)
+            cachedPressOwner = ""
             licenseHint = ""
             details = .empty
             errorMessage = nil
-            if restoreLocalTrial() {
+            if await restoreLocalTrial() {
                 notice = "Press license removed. Your local trial is still active."
             } else if isConfigured,
-                      !(HaloKeychain.string(for: licenseKeyKey) ?? "").isEmpty {
+                      let paidKey = await HaloKeychain.string(for: licenseKeyKey),
+                      !paidKey.isEmpty {
                 await validate()
                 notice = "Press license removed. Your paid license is active."
             } else {
@@ -1302,7 +1343,7 @@ final class HaloLicenseManager: ObservableObject {
             return
         }
         guard isConfigured else { return }
-        guard let key = HaloKeychain.string(for: licenseKeyKey), !key.isEmpty else { state = .inactive; return }
+        guard let key = await HaloKeychain.string(for: licenseKeyKey), !key.isEmpty else { state = .inactive; return }
         isBusy = true; errorMessage = nil; notice = nil
         defer { isBusy = false }
         do {
@@ -1310,32 +1351,41 @@ final class HaloLicenseManager: ObservableObject {
                 "license_key": key,
                 "fingerprint": fingerprint()
             ])
-            HaloKeychain.remove(licenseKeyKey)
+            await HaloKeychain.remove(licenseKeyKey)
             licenseHint = ""
             details = .empty
-            if !restoreLocalTrial() { state = .inactive }
+            if !(await restoreLocalTrial()) { state = .inactive }
             notice = state.isValid ? "Paid license deactivated. Your local trial is still active." : "This Mac has been deactivated."
         } catch { errorMessage = readable(error) }
     }
 
     func clearLocalLicense() {
-        HaloKeychain.remove(licenseKeyKey)
-        HaloKeychain.remove(pressLicenseKey)
-        HaloKeychain.remove(pressLicenseOwnerKey)
-        licenseHint = ""
-        details = .empty
-        if !restoreLocalTrial() { state = isConfigured ? .inactive : .unconfigured }
-        notice = state.isValid ? "Paid license cleared. Your local trial is still active." : "Local license data cleared."
+        guard !isBusy else { return }
+        isBusy = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.isBusy = false }
+            await HaloKeychain.remove(self.licenseKeyKey)
+            await HaloKeychain.remove(self.pressLicenseKey)
+            await HaloKeychain.remove(self.pressLicenseOwnerKey)
+            self.cachedPressOwner = ""
+            self.licenseHint = ""
+            self.details = .empty
+            let restoredTrial = await self.restoreLocalTrial()
+            if !restoredTrial { self.state = self.isConfigured ? .inactive : .unconfigured }
+            self.notice = self.state.isValid ? "Paid license cleared. Your local trial is still active." : "Local license data cleared."
+        }
     }
 
     func accessValid(for accountID: String) -> Bool {
         guard state.isValid else { return false }
         if details.plan == "Press" {
-            return HaloKeychain.string(for: pressLicenseOwnerKey) == accountID
+            return !cachedPressOwner.isEmpty && cachedPressOwner == accountID
         }
         guard details.isTrial && details.plan == "Local Trial" else { return true }
-        guard let owner = HaloKeychain.string(for: localTrialOwnerKey), owner == accountID,
-              let expiresAt = localTrialDate(for: localTrialExpiresKey) else { return false }
+        guard !cachedTrialOwner.isEmpty,
+              cachedTrialOwner == accountID,
+              let expiresAt = cachedTrialExpiresAt else { return false }
         return Date() < expiresAt
     }
 
@@ -1347,7 +1397,7 @@ final class HaloLicenseManager: ObservableObject {
 
     @discardableResult
     private func restorePressLicense() async -> Bool {
-        guard let key = HaloKeychain.string(for: pressLicenseKey),
+        guard let key = await HaloKeychain.string(for: pressLicenseKey),
               Self.isPressLicenseKey(key) else { return false }
 
         let account = HaloAccountManager.shared
@@ -1373,7 +1423,7 @@ final class HaloLicenseManager: ObservableObject {
             }
 
             let expiresAt = try validatePressLicenseDocument(document, key: key, requireBound: true)
-            guard HaloKeychain.set(account.userID, for: pressLicenseOwnerKey) else {
+            guard await HaloKeychain.set(account.userID, for: pressLicenseOwnerKey) else {
                 throw HaloCommercialError.message("Halo could not save the press license owner securely on this Mac.")
             }
             applyPressLicense(key, expiresAt: expiresAt)
@@ -1410,8 +1460,8 @@ final class HaloLicenseManager: ObservableObject {
         }
 
         let expiresAt = try validatePressLicenseDocument(document, key: key, requireBound: true)
-        guard HaloKeychain.set(key, for: pressLicenseKey),
-              HaloKeychain.set(account.userID, for: pressLicenseOwnerKey) else {
+        guard await HaloKeychain.set(key, for: pressLicenseKey),
+              await HaloKeychain.set(account.userID, for: pressLicenseOwnerKey) else {
             throw HaloCommercialError.message("Halo could not save the press license securely on this Mac.")
         }
         applyPressLicense(key, expiresAt: expiresAt)
@@ -1612,6 +1662,7 @@ final class HaloLicenseManager: ObservableObject {
 
     private func applyPressLicense(_ key: String, expiresAt: Date?) {
         trialExpiryTask?.cancel()
+        cachedPressOwner = HaloAccountManager.shared.userID
         licenseHint = Self.hint(key)
         details = HaloLicenseDetails(status: "active", plan: "Press", expiresAt: expiresAt, activeSeats: 1, seatLimit: 1)
         state = .valid(plan: "Press")
@@ -1619,15 +1670,23 @@ final class HaloLicenseManager: ObservableObject {
     }
 
     @discardableResult
-    private func restoreLocalTrial() -> Bool {
-        guard HaloKeychain.string(for: localTrialUsedKey) == "1" else { return false }
-        guard let expiresAt = localTrialDate(for: localTrialExpiresKey),
-              let owner = HaloKeychain.string(for: localTrialOwnerKey), !owner.isEmpty else {
+    private func restoreLocalTrial() async -> Bool {
+        guard await HaloKeychain.string(for: localTrialUsedKey) == "1" else {
+            cachedTrialOwner = ""
+            cachedTrialExpiresAt = nil
+            return false
+        }
+        guard let expiresAt = await localTrialDate(for: localTrialExpiresKey),
+              let owner = await HaloKeychain.string(for: localTrialOwnerKey), !owner.isEmpty else {
+            cachedTrialOwner = ""
+            cachedTrialExpiresAt = nil
             state = .invalid("The local trial record is incomplete.")
             details = .empty
             return true
         }
 
+        cachedTrialOwner = owner
+        cachedTrialExpiresAt = expiresAt
         let account = HaloAccountManager.shared
         guard account.isSignedIn, !account.userID.isEmpty else { return false }
         guard owner == account.userID else {
@@ -1638,13 +1697,13 @@ final class HaloLicenseManager: ObservableObject {
         }
 
         let now = Date()
-        if let lastCheck = localTrialDate(for: localTrialLastCheckKey), now.timeIntervalSince(lastCheck) < -300 {
+        if let lastCheck = await localTrialDate(for: localTrialLastCheckKey), now.timeIntervalSince(lastCheck) < -300 {
             trialExpiryTask?.cancel()
             details = HaloLicenseDetails(status: "clock_changed", plan: "Local Trial", expiresAt: expiresAt, activeSeats: 1, seatLimit: 1)
             state = .invalid("The system clock moved backwards. Restore the correct date and restart Halo.")
             return true
         }
-        HaloKeychain.set(String(now.timeIntervalSince1970), for: localTrialLastCheckKey)
+        _ = await HaloKeychain.set(String(now.timeIntervalSince1970), for: localTrialLastCheckKey)
 
         if now >= expiresAt {
             trialExpiryTask?.cancel()
@@ -1658,6 +1717,8 @@ final class HaloLicenseManager: ObservableObject {
     }
 
     private func applyLocalTrial(expiresAt: Date) {
+        cachedTrialOwner = HaloAccountManager.shared.userID
+        cachedTrialExpiresAt = expiresAt
         licenseHint = ""
         details = HaloLicenseDetails(status: "active", plan: "Local Trial", expiresAt: expiresAt, activeSeats: 1, seatLimit: 1)
         state = .valid(plan: "Local Trial")
@@ -1672,12 +1733,12 @@ final class HaloLicenseManager: ObservableObject {
             do { try await Task.sleep(nanoseconds: nanoseconds) }
             catch { return }
             guard let self, !Task.isCancelled else { return }
-            _ = self.restoreLocalTrial()
+            _ = await self.restoreLocalTrial()
         }
     }
 
-    private func localTrialDate(for key: String) -> Date? {
-        guard let raw = HaloKeychain.string(for: key), let timestamp = TimeInterval(raw) else { return nil }
+    private func localTrialDate(for key: String) async -> Date? {
+        guard let raw = await HaloKeychain.string(for: key), let timestamp = TimeInterval(raw) else { return nil }
         return Date(timeIntervalSince1970: timestamp)
     }
 
@@ -1749,20 +1810,34 @@ final class HaloLicenseManager: ObservableObject {
         return audience
     }
 
-    private func fingerprint() -> String {
-        if let existing = HaloKeychain.string(for: fingerprintKey), !existing.isEmpty { return existing }
-
-        // A device fingerprint is not a secret. Keep a UserDefaults mirror so a temporary
-        // Keychain write/read failure cannot make this Mac look like a new device at every launch.
+    private func prepareFingerprint() async {
+        if cachedFingerprint != nil { return }
         let fallbackKey = "HaloLicenseSeatDeviceFingerprintV1"
         if let fallback = UserDefaults.standard.string(forKey: fallbackKey), !fallback.isEmpty {
-            _ = HaloKeychain.set(fallback, for: fingerprintKey)
+            cachedFingerprint = fallback
+            return
+        }
+        if let existing = await HaloKeychain.string(for: fingerprintKey), !existing.isEmpty {
+            cachedFingerprint = existing
+            UserDefaults.standard.set(existing, forKey: fallbackKey)
+            return
+        }
+        let value = "halo-\(UUID().uuidString.lowercased())"
+        cachedFingerprint = value
+        UserDefaults.standard.set(value, forKey: fallbackKey)
+        _ = await HaloKeychain.set(value, for: fingerprintKey)
+    }
+
+    private func fingerprint() -> String {
+        if let cachedFingerprint, !cachedFingerprint.isEmpty { return cachedFingerprint }
+        let fallbackKey = "HaloLicenseSeatDeviceFingerprintV1"
+        if let fallback = UserDefaults.standard.string(forKey: fallbackKey), !fallback.isEmpty {
+            cachedFingerprint = fallback
             return fallback
         }
-
         let value = "halo-\(UUID().uuidString.lowercased())"
+        cachedFingerprint = value
         UserDefaults.standard.set(value, forKey: fallbackKey)
-        _ = HaloKeychain.set(value, for: fingerprintKey)
         return value
     }
 
