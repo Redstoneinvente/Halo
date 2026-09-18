@@ -2561,3 +2561,32 @@ enum HaloPixelPalAnimationTiming {
         return -Int((abs(sin(elapsed * .pi * 2 / 0.55)) * envelope * 3 * min(1, max(0, intensity))).rounded())
     }
 }
+
+enum HaloPixelPalSurfaceMotionDirection: Equatable {
+    case opening
+    case closing
+}
+
+enum HaloPixelPalPowerAnimationTiming {
+    static let bootUpDuration: TimeInterval = 0.46
+    static let bootDownDuration: TimeInterval = 0.22
+
+    static func direction(previous: CGSize, current: CGSize) -> HaloPixelPalSurfaceMotionDirection? {
+        let previousArea = max(1, previous.width * previous.height)
+        let currentArea = max(1, current.width * current.height)
+        let delta = currentArea - previousArea
+        let tolerance = max(8, previousArea * 0.001)
+        guard abs(delta) > tolerance else { return nil }
+        return delta > 0 ? .opening : .closing
+    }
+
+    static func progress(elapsed: TimeInterval, duration: TimeInterval) -> Double {
+        guard duration > 0 else { return 1 }
+        return min(1, max(0, elapsed / duration))
+    }
+
+    static func smoothstep(_ raw: Double) -> Double {
+        let value = min(1, max(0, raw))
+        return value * value * (3 - 2 * value)
+    }
+}

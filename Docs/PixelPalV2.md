@@ -540,6 +540,16 @@ Do not fake a notification signal if Halo does not have one.
 - optional shades
 - slightly more energetic bounce
 
+### 12.4 Surface power transitions
+
+When the host Halo surface opens or closes, Pixel Pal should behave like a tiny LED display rather than continuing its full idle renderer through the geometry animation.
+
+- opening: all Pixel Pal LEDs, including inactive/background LEDs, remain dark while the notch is resizing; once the surface settles, run a short boot-up sequence before restoring the live face
+- closing: run a brief lightweight shutdown sequence that collapses the face toward a center scanline, then leave every LED dark for the rest of the retraction
+- the normal 24 Hz face/context renderer must not run while the display is powered off or performing the lightweight power transition
+- boot effects should be crisp, pixel-aligned, and visually subordinate to the face
+- Reduce Motion should replace scanline/sweep motion with a simple eye fade
+
 ## 13. Animation choreography and timing
 
 Animation should be authored as named behaviors instead of scattered `Date()` modulo calculations.

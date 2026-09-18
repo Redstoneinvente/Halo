@@ -1464,22 +1464,295 @@ private struct HaloPixelPalContext {
 
 // MARK: - Widget
 
-@MainActor
-private final class HaloPixelPalSurfaceTransitionPause: ObservableObject {
-    @Published private(set) var isPaused = false
-    private var resumeWork: DispatchWorkItem?
+private enum HaloPixelPalPowerPhase: Equatable {
+    case on
+    case off
+    case bootingUp(Date)
+    case bootingDown(Date)
 
-    func noteGeometryChange() {
-        if !isPaused { isPaused = true }
-        resumeWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            self?.isPaused = false
-        }
-        resumeWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+    var pausesTimeline: Bool {
+        if case .off = self { return true }
+        return false
     }
 
-    deinit { resumeWork?.cancel() }
+    var isPoweredOn: Bool { self == .on }
+}
+
+@MainActor
+private final class HaloPixelPalSurfacePowerController: ObservableObject {
+    @Published private(set) var phase: HaloPixelPalPowerPhase = .off
+
+    private var lastFrame: CGRect?
+    private var direction: HaloPixelPalSurfaceMotionDirection?
+    private var settleWork: DispatchWorkItem?
+    private var phaseWork: DispatchWorkItem?
+
+    func prepareForAppearance() {
+        settleWork?.cancel()
+        phaseWork?.cancel()
+        direction = nil
+        lastFrame = nil
+        phase = .off
+        scheduleQuietBoot()
+    }
+
+    func noteGeometryChange(frame: CGRect) {
+        guard frame.width.isFinite, frame.height.isFinite, frame.width > 0, frame.height > 0 else { return }
+
+        settleWork?.cancel()
+        defer { lastFrame = frame }
+
+        guard let previous = lastFrame else {
+            scheduleQuietBoot()
+            return
+        }
+
+        if let nextDirection = HaloPixelPalPowerAnimationTiming.direction(previous: previous.size, current: frame.size) {
+            if direction != nextDirection {
+                direction = nextDirection
+                phaseWork?.cancel()
+
+                switch nextDirection {
+                case .opening:
+                    phase = .off
+                case .closing:
+                    beginBootDown()
+                }
+            }
+            scheduleSettle()
+        } else if direction == nil, !phase.isPoweredOn {
+            scheduleQuietBoot()
+        }
+    }
+
+    private func scheduleQuietBoot() {
+        settleWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.direction == nil else { return }
+            if self.phase == .off {
+                self.beginBootUp()
+            }
+        }
+        settleWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.11, execute: work)
+    }
+
+    private func scheduleSettle() {
+        settleWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let settledDirection = self.direction
+            self.direction = nil
+
+            switch settledDirection {
+            case .opening:
+                self.beginBootUp()
+            case .closing:
+                self.phaseWork?.cancel()
+                self.phase = .off
+            case .none:
+                break
+            }
+        }
+        settleWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.09, execute: work)
+    }
+
+    private func beginBootUp() {
+        phaseWork?.cancel()
+        let started = Date()
+        phase = .bootingUp(started)
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.phase == .bootingUp(started) else { return }
+            self.phase = .on
+        }
+        phaseWork = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + HaloPixelPalPowerAnimationTiming.bootUpDuration,
+            execute: work
+        )
+    }
+
+    private func beginBootDown() {
+        phaseWork?.cancel()
+        let started = Date()
+        phase = .bootingDown(started)
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.phase == .bootingDown(started) else { return }
+            self.phase = .off
+        }
+        phaseWork = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + HaloPixelPalPowerAnimationTiming.bootDownDuration,
+            execute: work
+        )
+    }
+
+    deinit {
+        settleWork?.cancel()
+        phaseWork?.cancel()
+    }
+}
+
+private struct HaloPixelPalPowerTransitionView: View {
+    let phase: HaloPixelPalPowerPhase
+    let preferences: HaloPixelPalPreferences
+    let date: Date
+    let reduceMotion: Bool
+
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        ZStack {
+            background
+            Canvas { context, size in
+                drawPowerAnimation(context: &context, size: size)
+            }
+        }
+        .clipShape(HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius))
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private var background: some View {
+        switch preferences.backgroundStyle {
+        case .transparent:
+            Color.clear
+        case .black:
+            Color.black.opacity(preferences.backgroundOpacity)
+        case .custom:
+            preferences.backgroundColor.color.opacity(preferences.backgroundOpacity)
+        case .glow:
+            ZStack {
+                Color.black.opacity(0.74 * preferences.backgroundOpacity)
+                RadialGradient(
+                    colors: [preferences.faceColor.opacity(0.12 + 0.18 * preferences.glowIntensity), .clear],
+                    center: .center,
+                    startRadius: 0,
+                    endRadius: 180
+                )
+                .opacity(preferences.backgroundOpacity)
+            }
+        }
+    }
+
+    private func drawPowerAnimation(context: inout GraphicsContext, size: CGSize) {
+        let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale)
+        let primary = preferences.faceColor
+        let accent = preferences.accentColor.color
+
+        func paint(_ x: Int, _ y: Int, color: Color, opacity: Double = 1) {
+            guard x >= 0, y >= 0, x < HaloPixelPalDisplayGeometry.grid, y < HaloPixelPalDisplayGeometry.grid else { return }
+            let rect = geometry.led(x: x, y: y)
+            let radius = min(rect.width, rect.height) * preferences.pixelCornerRadius
+            context.fill(
+                Path(roundedRect: rect, cornerRadius: radius),
+                with: .color(color.opacity(min(1, max(0, opacity)))),
+                style: FillStyle(antialiased: preferences.pixelCornerRadius > 0.001)
+            )
+        }
+
+        func drawEyes(opacity: Double) {
+            for baseX in [6, 15] {
+                for dy in 0...2 {
+                    for dx in 0...2 {
+                        paint(baseX + dx, 8 + dy, color: primary, opacity: opacity)
+                    }
+                }
+                paint(baseX + 1, 8, color: .white, opacity: opacity * 0.92)
+            }
+        }
+
+        switch phase {
+        case .on, .off:
+            return
+
+        case .bootingUp(let started):
+            let progress = HaloPixelPalPowerAnimationTiming.progress(
+                elapsed: date.timeIntervalSince(started),
+                duration: HaloPixelPalPowerAnimationTiming.bootUpDuration
+            )
+
+            if reduceMotion {
+                drawEyes(opacity: HaloPixelPalPowerAnimationTiming.smoothstep(progress))
+                return
+            }
+
+            let lineProgress = HaloPixelPalPowerAnimationTiming.smoothstep(progress / 0.34)
+            let halfWidth = min(11, max(0, Int((11 * lineProgress).rounded())))
+            let lineOpacity = 0.98 - 0.30 * HaloPixelPalPowerAnimationTiming.smoothstep((progress - 0.45) / 0.35)
+            for x in max(0, 11 - halfWidth)...min(23, 12 + halfWidth) {
+                paint(x, 11, color: primary, opacity: lineOpacity)
+                paint(x, 12, color: primary, opacity: lineOpacity * 0.72)
+            }
+
+            if progress > 0.34 {
+                let eyeOpacity = HaloPixelPalPowerAnimationTiming.smoothstep((progress - 0.34) / 0.34)
+                drawEyes(opacity: eyeOpacity)
+            }
+
+            if progress > 0.64 {
+                let sparkle = HaloPixelPalPowerAnimationTiming.smoothstep((progress - 0.64) / 0.22)
+                for point in [(3, 5), (20, 4), (4, 18), (19, 19)] {
+                    paint(point.0, point.1, color: accent, opacity: sparkle * 0.88)
+                }
+            }
+
+            if progress > 0.76 {
+                let smile = HaloPixelPalPowerAnimationTiming.smoothstep((progress - 0.76) / 0.20)
+                for x in 9...14 {
+                    let y = (x == 9 || x == 14) ? 16 : 17
+                    paint(x, y, color: primary, opacity: smile)
+                }
+            }
+
+        case .bootingDown(let started):
+            let progress = HaloPixelPalPowerAnimationTiming.progress(
+                elapsed: date.timeIntervalSince(started),
+                duration: HaloPixelPalPowerAnimationTiming.bootDownDuration
+            )
+
+            if reduceMotion {
+                drawEyes(opacity: 1 - HaloPixelPalPowerAnimationTiming.smoothstep(progress))
+                return
+            }
+
+            let shellOpacity = 0.44 * (1 - HaloPixelPalPowerAnimationTiming.smoothstep(progress / 0.24))
+            if shellOpacity > 0.001 {
+                for x in stride(from: 4, through: 19, by: 2) {
+                    paint(x, 4, color: primary, opacity: shellOpacity)
+                    paint(x, 19, color: primary, opacity: shellOpacity)
+                }
+                for y in stride(from: 6, through: 17, by: 2) {
+                    paint(4, y, color: primary, opacity: shellOpacity)
+                    paint(19, y, color: primary, opacity: shellOpacity)
+                }
+            }
+
+            let eyeOpacity = 1 - HaloPixelPalPowerAnimationTiming.smoothstep((progress - 0.05) / 0.40)
+            if eyeOpacity > 0.001 {
+                drawEyes(opacity: eyeOpacity)
+            }
+
+            let lineOpacity = HaloPixelPalPowerAnimationTiming.smoothstep((progress - 0.12) / 0.22)
+            let shrink = HaloPixelPalPowerAnimationTiming.smoothstep((progress - 0.30) / 0.68)
+            let halfWidth = min(11, max(0, Int((11 * (1 - shrink)).rounded())))
+            if lineOpacity > 0.001 {
+                for x in max(0, 11 - halfWidth)...min(23, 12 + halfWidth) {
+                    paint(x, 11, color: primary, opacity: lineOpacity)
+                    paint(x, 12, color: primary, opacity: lineOpacity * 0.72)
+                }
+            }
+
+            if progress > 0.78 {
+                let dotOpacity = 1 - HaloPixelPalPowerAnimationTiming.smoothstep((progress - 0.78) / 0.22)
+                paint(11, 11, color: accent, opacity: dotOpacity)
+                paint(12, 11, color: accent, opacity: dotOpacity)
+            }
+        }
+    }
 }
 
 struct HaloPixelPetWidget: View {
@@ -1487,7 +1760,7 @@ struct HaloPixelPetWidget: View {
     @Environment(\.openNotchGridRowSpan) private var gridRowSpan
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @StateObject private var surfaceTransitionPause = HaloPixelPalSurfaceTransitionPause()
+    @StateObject private var surfacePower = HaloPixelPalSurfacePowerController()
     @State private var hovering = false
     @State private var pointer = CGPoint.zero
     @State private var precisePointer = CGPoint.zero
@@ -1511,12 +1784,18 @@ struct HaloPixelPetWidget: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: reduceMotion ? 0.45 : 1.0 / 24.0, paused: surfaceTransitionPause.isPaused)) { timeline in
+        TimelineView(.animation(
+            minimumInterval: surfacePower.phase.isPoweredOn ? (reduceMotion ? 0.45 : 1.0 / 24.0) : 1.0 / 30.0,
+            paused: surfacePower.phase.pausesTimeline
+        )) { timeline in
             GeometryReader { proxy in
                 let columns = min(4, max(1, gridColumnSpan ?? 1))
                 let rows = min(4, max(1, gridRowSpan ?? columns))
                 let squareSize = min(columns, rows)
-                let audioSnapshot = AudioSpectrumService.shared.snapshot()
+                let side = max(1, min(proxy.size.width, proxy.size.height))
+
+                if surfacePower.phase.isPoweredOn {
+                    let audioSnapshot = AudioSpectrumService.shared.snapshot()
                 let state = HaloPixelPalContext.resolve(
                     store: store,
                     media: media,
@@ -1527,9 +1806,8 @@ struct HaloPixelPetWidget: View {
                     audio: audioSnapshot,
                     date: timeline.date
                 )
-                let expression = resolvedExpression(base: state.expression, date: timeline.date)
-                let side = max(1, min(proxy.size.width, proxy.size.height))
-                let cookieHotzoneActive = isPointerOnCookie(expression: expression, date: timeline.date)
+                    let expression = resolvedExpression(base: state.expression, date: timeline.date)
+                    let cookieHotzoneActive = isPointerOnCookie(expression: expression, date: timeline.date)
 
                 HaloPixelPalFace(
                     expression: expression,
@@ -1622,12 +1900,24 @@ struct HaloPixelPetWidget: View {
                         strokeDetector.resetPath()
                     }
                 }
+                } else {
+                    HaloPixelPalPowerTransitionView(
+                        phase: surfacePower.phase,
+                        preferences: pal.preferences,
+                        date: timeline.date,
+                        reduceMotion: reduceMotion
+                    )
+                    .frame(width: side, height: side)
+                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .init("HaloPanelGeometryChanged"))) { _ in
-            surfaceTransitionPause.noteGeometryChange()
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloPanelGeometryChanged"))) { note in
+            guard let frame = note.userInfo?["frame"] as? CGRect else { return }
+            surfacePower.noteGeometryChange(frame: frame)
         }
         .contentShape(Rectangle())
+        .allowsHitTesting(surfacePower.phase.isPoweredOn)
         .gesture(
             LongPressGesture(minimumDuration: 0.55)
                 .onEnded { _ in pal.longPressed() }
@@ -1643,7 +1933,10 @@ struct HaloPixelPetWidget: View {
         .onChange(of: fileDragTargeted) { targeted in
             if targeted { pal.fileCuriosity(dropped: false) }
         }
-        .onAppear { syncAudioSpectrum() }
+        .onAppear {
+            surfacePower.prepareForAppearance()
+            syncAudioSpectrum()
+        }
         .onChange(of: media.isPlaying) { _ in syncAudioSpectrum() }
         .onChange(of: pal.preferences.musicReaction) { _ in syncAudioSpectrum() }
         .onChange(of: pal.preferences.contextReactions) { _ in syncAudioSpectrum() }
