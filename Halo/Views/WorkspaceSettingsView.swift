@@ -834,6 +834,32 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 
                 HStack(spacing: 10) {
                     Button {
+                        resetDirectGeometryPositionToNotch()
+                    } label: {
+                        Label("Snap to Notch", systemImage: "scope")
+                    }
+                    .disabled(!directEditHasPhysicalNotch)
+                    .help(directEditHasPhysicalNotch
+                        ? "Snap the selected surface back to the physical notch position"
+                        : "This display does not report a physical notch")
+
+                    Button {
+                        resetDirectGeometryScaleToNotch()
+                    } label: {
+                        Label("Match Notch Size", systemImage: "aspectratio")
+                    }
+                    .disabled(!directEditHasPhysicalNotch || geometryEditor.target != .closed)
+                    .help(!directEditHasPhysicalNotch
+                        ? "This display does not report a physical notch"
+                        : geometryEditor.target == .closed
+                            ? "Match the closed Halo surface to the physical notch width and height"
+                            : "Physical notch size matching applies to Closed notch")
+
+                    Spacer()
+                }
+
+                HStack(spacing: 10) {
+                    Button {
                         undoDirectGeometry()
                     } label: {
                         Label("Undo", systemImage: "arrow.uturn.backward")
@@ -909,6 +935,39 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         )
     }
 
+    private var directEditPhysicalGeometry: SurfaceGeometry? {
+        guard let screen = directEditScreen else { return nil }
+        return WindowManager.geometry(
+            screen: screen,
+            theme: store.configuration.theme,
+            appearance: workspace.settings.layout.appearance
+        )
+    }
+
+    private var directEditHasPhysicalNotch: Bool {
+        guard let geometry = directEditPhysicalGeometry else { return false }
+        return geometry.physicalNotchWidth > 0 && geometry.safeAreaTop > 0
+    }
+
+    private func directGeometryFrame(
+        for snapshot: SurfaceGeometryEditSnapshot,
+        on screen: NSScreen
+    ) -> CGRect {
+        var theme = store.configuration.theme
+        var appearance = workspace.settings.layout.appearance
+        theme.width = snapshot.expandedWidth
+        theme.cornerRadius = snapshot.cornerRadius
+        appearance.compactWidth = snapshot.compactWidth
+        appearance.surface.compactHeight = snapshot.compactHeight
+        appearance.expandedHeight = snapshot.expandedHeight
+        appearance.surface.offsets = snapshot.offsets
+        if store.configuration.simulateNotch && theme.style == .notch {
+            theme.style = .simulated
+        }
+        return WindowManager.geometry(screen: screen, theme: theme, appearance: appearance)
+            .frame(expanded: geometryEditor.target.expanded)
+    }
+
     private func applyDirectGeometrySnapshot(_ snapshot: SurfaceGeometryEditSnapshot) {
         var theme = store.configuration.theme
         var appearance = workspace.settings.layout.appearance
@@ -954,6 +1013,58 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         guard let next = geometryEditor.redo(current: current) else { return }
         applyDirectGeometrySnapshot(next)
         GeometryPreview.update(expanded: geometryEditor.target.expanded, editing: true, display: directEditScreen)
+    }
+
+    private func resetDirectGeometryPositionToNotch() {
+        guard let screen = directEditScreen, directEditHasPhysicalNotch else { return }
+
+        let before = directGeometrySnapshot
+        var zeroed = before
+        if geometryEditor.target == .closed {
+            zeroed.offsets.closedX = 0
+            zeroed.offsets.closedY = 0
+        } else {
+            zeroed.offsets.openedX = 0
+            zeroed.offsets.openedY = 0
+        }
+
+        let base = directGeometryFrame(for: zeroed, on: screen)
+        let desired = CGRect(
+            x: screen.frame.midX - base.width / 2,
+            y: screen.frame.maxY - base.height,
+            width: base.width,
+            height: base.height
+        )
+
+        var after = zeroed
+        let offsetX = min(1000, max(-1000, Double(desired.minX - base.minX)))
+        let offsetY = min(1000, max(-1000, Double(base.minY - desired.minY)))
+        if geometryEditor.target == .closed {
+            after.offsets.closedX = offsetX
+            after.offsets.closedY = offsetY
+        } else {
+            after.offsets.openedX = offsetX
+            after.offsets.openedY = offsetY
+        }
+
+        geometryEditor.recordChange(from: before, to: after)
+        applyDirectGeometrySnapshot(after)
+        GeometryPreview.update(expanded: geometryEditor.target.expanded, editing: true, display: screen)
+    }
+
+    private func resetDirectGeometryScaleToNotch() {
+        guard geometryEditor.target == .closed,
+              let geometry = directEditPhysicalGeometry,
+              directEditHasPhysicalNotch else { return }
+
+        let before = directGeometrySnapshot
+        var after = before
+        after.compactWidth = min(640, max(16, geometry.physicalNotchWidth))
+        after.compactHeight = min(100, max(16, geometry.safeAreaTop))
+
+        geometryEditor.recordChange(from: before, to: after)
+        applyDirectGeometrySnapshot(after)
+        GeometryPreview.update(expanded: false, editing: true, display: directEditScreen)
     }
 
     private func resetDirectGeometry() {
