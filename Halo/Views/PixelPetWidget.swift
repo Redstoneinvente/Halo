@@ -194,7 +194,7 @@ enum HaloPixelPalPersonality: String, Codable, CaseIterable, Identifiable {
 struct HaloPixelPalPreferences: Codable, Equatable {
     // Legacy persisted field retained so Codable stays backward-compatible.
     var showCheeks: Bool = true
-    var version = 11
+    var version = 12
 
     // Appearance
     var faceStyle: HaloPixelPalFaceStyle = .soft
@@ -208,6 +208,11 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     var backgroundStyle: HaloPixelPalBackgroundStyle = .transparent
     var backgroundColor = HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)
     var backgroundOpacity = 1.0
+    // Optional fully opaque contrast layer behind the pixel matrix.
+    // Kept separate from the legacy Background display modes so users can
+    // preserve those looks while forcing Pixel Pal to stay readable.
+    var pixelBackdropEnabled = false
+    var pixelBackdropColor = HaloPixelPalRGB(red: 0.0, green: 0.0, blue: 0.0)
     var backgroundCornerRadius = 0.0
     var pixelCornerRadius = 0.0
     var ledShape: HaloPixelPalLEDShape = .square
@@ -231,6 +236,8 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     var personality: HaloPixelPalPersonality = .cute
     var bootUpAnimation: HaloPixelPalPowerAnimationStyle = .scanline
     var bootDownAnimation: HaloPixelPalPowerAnimationStyle = .scanline
+    var bootUpLEDShape: HaloPixelPalLEDShape = .square
+    var bootDownLEDShape: HaloPixelPalLEDShape = .square
     var powerAnimationSpeed = 1.0
 
     // Personality micro-behaviours
@@ -266,10 +273,10 @@ struct HaloPixelPalPreferences: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case version
         case faceStyle, eyeStyle, mouthStyle, cheekStyle, palette, customColor, accentColor, blushColor
-        case backgroundStyle, backgroundColor, backgroundOpacity, backgroundCornerRadius, pixelCornerRadius, ledShape, pixelSpacing, inactiveLEDIntensity, inactiveLEDUsesFaceColor, inactiveLEDColor, faceScale, glowIntensity
+        case backgroundStyle, backgroundColor, backgroundOpacity, pixelBackdropEnabled, pixelBackdropColor, backgroundCornerRadius, pixelCornerRadius, ledShape, pixelSpacing, inactiveLEDIntensity, inactiveLEDUsesFaceColor, inactiveLEDColor, faceScale, glowIntensity
         case accessoryMode, selectedAccessory, allowedAccessories
         case automaticBlinking, animationSpeed, animationIntensity, dizzyRotationThresholdTurns, personality
-        case bootUpAnimation, bootDownAnimation, powerAnimationSpeed
+        case bootUpAnimation, bootDownAnimation, bootUpLEDShape, bootDownLEDShape, powerAnimationSpeed
         case alwaysCookie, pettingReaction, pokeReaction, chaseReaction, peekReaction
         case fileCuriosityReaction, ambientReaction, rareReaction, seasonalReaction, shortTermMoodReaction
         case hoverReaction, tapReaction, doubleTapReaction, longPressReaction
@@ -281,7 +288,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        version = 11
+        version = 12
         faceStyle = try c.decodeIfPresent(HaloPixelPalFaceStyle.self, forKey: .faceStyle) ?? .soft
         eyeStyle = try c.decodeIfPresent(HaloPixelPalEyeStyle.self, forKey: .eyeStyle) ?? .glossy
         mouthStyle = try c.decodeIfPresent(HaloPixelPalMouthStyle.self, forKey: .mouthStyle) ?? .automatic
@@ -297,6 +304,8 @@ struct HaloPixelPalPreferences: Codable, Equatable {
         backgroundStyle = try c.decodeIfPresent(HaloPixelPalBackgroundStyle.self, forKey: .backgroundStyle) ?? .transparent
         backgroundColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .backgroundColor) ?? HaloPixelPalRGB(red: 0.025, green: 0.025, blue: 0.035)
         backgroundOpacity = try c.decodeIfPresent(Double.self, forKey: .backgroundOpacity) ?? 1.0
+        pixelBackdropEnabled = try c.decodeIfPresent(Bool.self, forKey: .pixelBackdropEnabled) ?? false
+        pixelBackdropColor = try c.decodeIfPresent(HaloPixelPalRGB.self, forKey: .pixelBackdropColor) ?? HaloPixelPalRGB(red: 0.0, green: 0.0, blue: 0.0)
         backgroundCornerRadius = try c.decodeIfPresent(Double.self, forKey: .backgroundCornerRadius) ?? 0.0
         pixelCornerRadius = try c.decodeIfPresent(Double.self, forKey: .pixelCornerRadius) ?? 0.0
         ledShape = try c.decodeIfPresent(HaloPixelPalLEDShape.self, forKey: .ledShape) ?? .square
@@ -319,6 +328,8 @@ struct HaloPixelPalPreferences: Codable, Equatable {
         personality = try c.decodeIfPresent(HaloPixelPalPersonality.self, forKey: .personality) ?? .cute
         bootUpAnimation = try c.decodeIfPresent(HaloPixelPalPowerAnimationStyle.self, forKey: .bootUpAnimation) ?? .scanline
         bootDownAnimation = try c.decodeIfPresent(HaloPixelPalPowerAnimationStyle.self, forKey: .bootDownAnimation) ?? .scanline
+        bootUpLEDShape = try c.decodeIfPresent(HaloPixelPalLEDShape.self, forKey: .bootUpLEDShape) ?? ledShape
+        bootDownLEDShape = try c.decodeIfPresent(HaloPixelPalLEDShape.self, forKey: .bootDownLEDShape) ?? ledShape
         powerAnimationSpeed = try c.decodeIfPresent(Double.self, forKey: .powerAnimationSpeed) ?? 1.0
         alwaysCookie = try c.decodeIfPresent(Bool.self, forKey: .alwaysCookie) ?? true
         pettingReaction = try c.decodeIfPresent(Bool.self, forKey: .pettingReaction) ?? true
@@ -348,7 +359,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
 
     func normalized() -> Self {
         var value = self
-        value.version = 11
+        value.version = 12
         value.animationSpeed = min(2.0, max(0.35, animationSpeed))
         value.animationIntensity = min(1.0, max(0.0, animationIntensity))
         value.powerAnimationSpeed = min(1.75, max(0.5, powerAnimationSpeed))
@@ -364,6 +375,7 @@ struct HaloPixelPalPreferences: Codable, Equatable {
         value.accentColor = Self.clamped(accentColor)
         value.blushColor = Self.clamped(blushColor)
         value.backgroundColor = Self.clamped(backgroundColor)
+        value.pixelBackdropColor = Self.clamped(pixelBackdropColor)
         value.inactiveLEDColor = Self.clamped(inactiveLEDColor)
         value.allowedAccessories = Array(Set(allowedAccessories.filter { $0 != .none }))
             .sorted { $0.rawValue < $1.rawValue }
@@ -1701,6 +1713,9 @@ private struct HaloPixelPalPowerTransitionView: View {
     var body: some View {
         ZStack {
             background
+            if preferences.pixelBackdropEnabled {
+                preferences.pixelBackdropColor.color
+            }
             Canvas { context, size in
                 drawPowerAnimation(context: &context, size: size)
             }
@@ -1752,9 +1767,20 @@ private struct HaloPixelPalPowerTransitionView: View {
                 rect: rect,
                 color: color,
                 opacity: opacity,
-                shape: preferences.ledShape,
+                shape: powerLEDShape,
                 cornerRadiusFraction: preferences.pixelCornerRadius
             )
+        }
+
+        var powerLEDShape: HaloPixelPalLEDShape {
+            switch phase {
+            case .bootingUp:
+                return preferences.bootUpLEDShape
+            case .bootingDown:
+                return preferences.bootDownLEDShape
+            case .on, .off:
+                return preferences.ledShape
+            }
         }
 
         func drawEyes(opacity: Double) {
@@ -2453,6 +2479,9 @@ private struct HaloPixelPalFace: View {
         ZStack {
             ZStack {
                 background
+                if preferences.pixelBackdropEnabled {
+                    preferences.pixelBackdropColor.color
+                }
                 if preferences.inactiveLEDIntensity > 0.001 {
                     Canvas { context, size in
                         let geometry = HaloPixelPalDisplayGeometry(size: size, scale: displayScale, fill: preferences.faceScale, spacing: preferences.pixelSpacing)
@@ -3412,6 +3441,17 @@ private struct HaloPixelPalSettingsView: View {
                             .frame(width: 38, alignment: .trailing)
                     }
                 }
+
+                Divider()
+
+                Toggle("Solid pixel backdrop", isOn: bind(\.pixelBackdropEnabled))
+                if pal.preferences.pixelBackdropEnabled {
+                    ColorPicker("Backdrop color", selection: rgbBinding(\.pixelBackdropColor), supportsOpacity: false)
+                }
+                Text("Adds a solid color behind Pixel Pal so it always remains visible, no matter the background color. You can turn this off at any time.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
                 HStack {
                     Text("Background corner radius")
                     Slider(value: bind(\.backgroundCornerRadius), in: 0...0.5)
@@ -3621,6 +3661,20 @@ private struct HaloPixelPalSettingsView: View {
                     Picker("Boot down", selection: bind(\.bootDownAnimation)) {
                         ForEach(HaloPixelPalPowerAnimationStyle.allCases) { style in
                             Text(style.rawValue).tag(style)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Picker("Boot up LED shape", selection: bind(\.bootUpLEDShape)) {
+                        ForEach(HaloPixelPalLEDShape.allCases) { shape in
+                            Text(shape.rawValue).tag(shape)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Picker("Boot down LED shape", selection: bind(\.bootDownLEDShape)) {
+                        ForEach(HaloPixelPalLEDShape.allCases) { shape in
+                            Text(shape.rawValue).tag(shape)
                         }
                     }
                     .pickerStyle(.menu)
