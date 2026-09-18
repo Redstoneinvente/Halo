@@ -356,6 +356,7 @@ final class WindowManager {
     @MainActor private final class Host {
         let panel: HaloPanel
         let ambientPanel: NSPanel
+        let geometryEditorPanel: NSPanel
         let state = SurfaceState()
         let animator = SurfaceAnimator()
         var geometry: SurfaceGeometry?
@@ -381,11 +382,24 @@ final class WindowManager {
             ambientPanel.ignoresMouseEvents = true
             ambientPanel.acceptsMouseMovedEvents = false
             ambientPanel.animationBehavior = .none
+
+            geometryEditorPanel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            geometryEditorPanel.isReleasedWhenClosed = false
+            geometryEditorPanel.backgroundColor = .clear
+            geometryEditorPanel.isOpaque = false
+            geometryEditorPanel.hasShadow = false
+            geometryEditorPanel.hidesOnDeactivate = false
+            geometryEditorPanel.level = .statusBar
+            geometryEditorPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            geometryEditorPanel.ignoresMouseEvents = false
+            geometryEditorPanel.acceptsMouseMovedEvents = true
+            geometryEditorPanel.animationBehavior = .none
         }
         func stop() {
             animator.cancel(); state.hoverExpandTask?.cancel(); state.collapseTask?.cancel(); state.dropExitTask?.cancel()
             pixelPalCollapseWork?.cancel()
-            subscription?.cancel(); contextSizeSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); contextCompactHeightSubscription?.cancel(); panel.close(); ambientPanel.close()
+            subscription?.cancel(); contextSizeSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); contextCompactHeightSubscription?.cancel()
+            panel.close(); ambientPanel.close(); geometryEditorPanel.close()
         }
     }
 
@@ -507,7 +521,14 @@ final class WindowManager {
                     if editing { host.state.collapseTask?.cancel(); host.state.expanded = expanded }
                 }
                 self?.refreshDynamicWidths()
+                DispatchQueue.main.async { self?.refreshGeometryEditorPanels() }
             }.store(in: &subscriptions)
+        SurfaceGeometryEditingSession.shared.$previewSnapshot
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] snapshot in
+                self?.applyGeometryEditorPreview(snapshot)
+            }
+            .store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloClosedMediaWidthHint"))
             .receive(on: DispatchQueue.main).sink { [weak self] note in
                 guard let self,
@@ -1408,6 +1429,98 @@ final class WindowManager {
         if host.ambientPanel.frame != frame { host.ambientPanel.setFrame(frame, display: false) }
     }
 
+    private func geometryEditorPanelFrame(around target: CGRect) -> CGRect {
+        CGRect(
+            x: target.minX - SurfaceGeometryEditorChromeMetrics.horizontal,
+            y: target.minY - SurfaceGeometryEditorChromeMetrics.bottom,
+            width: target.width + SurfaceGeometryEditorChromeMetrics.horizontal * 2,
+            height: target.height + SurfaceGeometryEditorChromeMetrics.top + SurfaceGeometryEditorChromeMetrics.bottom
+        )
+    }
+
+    private func refreshGeometryEditorPanels() {
+        let session = SurfaceGeometryEditingSession.shared
+        for (id, host) in hosts {
+            let selected = session.isEnabled && (session.displayID == nil || session.displayID == id)
+            guard selected else {
+                if host.geometryEditorPanel.isVisible { host.geometryEditorPanel.orderOut(nil) }
+                continue
+            }
+            let target = host.targetFrame ?? host.panel.frame
+            let editorFrame = geometryEditorPanelFrame(around: target)
+            if host.geometryEditorPanel.frame != editorFrame {
+                host.geometryEditorPanel.setFrame(editorFrame, display: false)
+            }
+            if host.geometryEditorPanel.contentView != nil {
+                host.geometryEditorPanel.order(.above, relativeTo: host.panel.windowNumber)
+            }
+        }
+    }
+
+    private func applyGeometryEditorPreview(_ snapshot: SurfaceGeometryEditSnapshot?) {
+        let session = SurfaceGeometryEditingSession.shared
+        guard session.isEnabled else {
+            refreshGeometryEditorPanels()
+            return
+        }
+
+        guard let snapshot else {
+            reconcile()
+            refreshGeometryEditorPanels()
+            return
+        }
+
+        for (id, host) in hosts {
+            guard session.displayID == nil || session.displayID == id,
+                  let screen = NSScreen.screens.first(where: { Self.displayID($0) == id }),
+                  let currentGeometry = host.geometry else { continue }
+
+            var theme = host.state.theme
+            theme.width = snapshot.expandedWidth
+            theme.cornerRadius = snapshot.cornerRadius
+
+            var appearance = currentGeometry.appearance
+            appearance.compactWidth = snapshot.compactWidth
+            appearance.surface.compactHeight = snapshot.compactHeight
+            appearance.expandedHeight = snapshot.expandedHeight
+            appearance.surface.offsets = snapshot.offsets
+            appearance.surface = (try? appearance.surface.validated()) ?? appearance.surface
+
+            let previewGeometry = Self.geometry(screen: screen, theme: theme, appearance: appearance)
+            host.geometry = previewGeometry
+            if host.state.theme != theme { host.state.theme = theme }
+
+            configureDynamicWidth(host)
+            let target = previewGeometry.frame(expanded: session.target.expanded)
+            host.targetFrame = target
+            host.animator.cancel()
+            if host.state.viewport.size != target.size { host.state.viewport.size = target.size }
+
+            if session.target == .closed {
+                if host.state.compactWidth != target.width { host.state.compactWidth = target.width }
+                if host.state.compactHeight != target.height { host.state.compactHeight = target.height }
+                if host.state.closedOcclusion != previewGeometry.closedCameraOcclusion {
+                    host.state.closedOcclusion = previewGeometry.closedCameraOcclusion
+                }
+            } else if host.state.dashboardWidth != target.width {
+                host.state.dashboardWidth = target.width
+            }
+
+            if host.panel.frame != target { host.panel.setFrame(target, display: false) }
+            NotificationCenter.default.post(
+                name: .init("HaloPanelGeometryChanged"),
+                object: host.panel,
+                userInfo: ["frame": target, "screen": id]
+            )
+
+            let editorFrame = geometryEditorPanelFrame(around: target)
+            if host.geometryEditorPanel.frame != editorFrame {
+                host.geometryEditorPanel.setFrame(editorFrame, display: false)
+            }
+            host.geometryEditorPanel.order(.above, relativeTo: host.panel.windowNumber)
+        }
+    }
+
     private func activationDisplays() -> [ActivationDisplayDescriptor] {
         let mainID = NSScreen.main.map(Self.displayID)
         return hosts.compactMap { id, host in
@@ -1607,6 +1720,18 @@ final class WindowManager {
                     self.store.addFiles(urls)
                 }
                 host.panel.contentView = view
+
+                let geometryEditorRoot = SurfaceGeometryEditorPanelView(
+                    store: store,
+                    workspace: store.workspace,
+                    state: host.state,
+                    session: SurfaceGeometryEditingSession.shared
+                )
+                let geometryEditorView = NSHostingView(rootView: geometryEditorRoot)
+                geometryEditorView.sizingOptions = []
+                host.geometryEditorPanel.contentView = geometryEditorView
+                host.geometryEditorPanel.orderOut(nil)
+
                 if initialActivationPending { host.panel.alphaValue = 0 }
                 host.subscription = host.state.$expanded.dropFirst().removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self, weak host] expanded in
                     guard let self, let host else { return }
@@ -1688,8 +1813,12 @@ final class WindowManager {
                 host.panel.orderFrontRegardless()
                 host.ambientPanel.order(.below, relativeTo: host.panel.windowNumber)
                 hosts[id] = host
+                if SurfaceGeometryEditingSession.shared.isEnabled {
+                    refreshGeometryEditorPanels()
+                }
             }
         }
         for id in Array(hosts.keys) where !active.contains(id) { hosts.removeValue(forKey: id)?.stop() }
+        refreshGeometryEditorPanels()
     }
 }

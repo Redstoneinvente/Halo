@@ -828,7 +828,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
                 }
                 .pickerStyle(.segmented)
 
-                Text("Drag Halo itself to move it. Drag the edge or corner handles to resize it, and drag the curved handle near the top-right corner to change corner radius.")
+                Text("Use the floating Move control below Halo to reposition it. Resize and corner-radius handles sit outside the surface so editing never covers your notch content.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -920,6 +920,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         appearance.expandedHeight = min(1100, max(280, snapshot.expandedHeight))
         appearance.surface.offsets = snapshot.offsets
 
+        geometryEditor.previewSnapshot = nil
         store.configuration.theme = theme
         workspace.settings.layout.appearance = appearance
     }
@@ -933,6 +934,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             GeometryPreview.update(expanded: geometryEditor.target.expanded, editing: true, display: screen)
         } else {
             geometryEditor.cancelTransaction()
+            geometryEditor.previewSnapshot = nil
             let screen = directEditScreen
             geometryEditor.isEnabled = false
             GeometryPreview.update(expanded: geometryEditor.target.expanded, editing: false, display: screen)

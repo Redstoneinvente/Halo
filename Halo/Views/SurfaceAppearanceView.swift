@@ -11,6 +11,13 @@ import UniformTypeIdentifiers
 }
 
 
+enum SurfaceGeometryEditorChromeMetrics {
+    static let horizontal: CGFloat = 30
+    static let top: CGFloat = 24
+    static let bottom: CGFloat = 58
+    static let handleOffset: CGFloat = 10
+}
+
 enum SurfaceGeometryEditingTarget: String, CaseIterable, Identifiable {
     case closed = "Closed notch"
     case opened = "Opened notch"
@@ -45,6 +52,7 @@ final class SurfaceGeometryEditingSession: ObservableObject {
     @Published var isEnabled = false
     @Published var target: SurfaceGeometryEditingTarget = .closed
     @Published var displayID: String?
+    @Published var previewSnapshot: SurfaceGeometryEditSnapshot?
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
 
@@ -66,6 +74,7 @@ final class SurfaceGeometryEditingSession: ObservableObject {
 
     func cancelTransaction() {
         transactionStart = nil
+        previewSnapshot = nil
     }
 
     func recordChange(from before: SurfaceGeometryEditSnapshot, to after: SurfaceGeometryEditSnapshot) {
@@ -97,6 +106,7 @@ final class SurfaceGeometryEditingSession: ObservableObject {
 
     func clearHistory() {
         transactionStart = nil
+        previewSnapshot = nil
         undoStack.removeAll()
         redoStack.removeAll()
         syncAvailability()

@@ -2200,25 +2200,43 @@ private enum SurfaceDirectGeometryHandle {
     var movesRight: Bool { self == .right || self == .topRight || self == .bottomRight }
     var movesTop: Bool { self == .top || self == .topLeft || self == .topRight }
     var movesBottom: Bool { self == .bottom || self == .bottomLeft || self == .bottomRight }
+
+    var cursor: NSCursor {
+        switch self {
+        case .move: return .openHand
+        case .left, .right: return .resizeLeftRight
+        case .top, .bottom: return .resizeUpDown
+        case .topLeft, .bottomRight: return .crosshair
+        case .topRight, .bottomLeft: return .crosshair
+        case .cornerRadius: return .crosshair
+        }
+    }
 }
 
 @MainActor
-private struct SurfaceDirectGeometryEditorOverlay: View {
+struct SurfaceGeometryEditorPanelView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject var state: SurfaceState
     @ObservedObject var session: SurfaceGeometryEditingSession
 
     @State private var activeHandle: SurfaceDirectGeometryHandle?
+    @State private var hoveredHandle: SurfaceDirectGeometryHandle?
     @State private var dragStartMouse: CGPoint?
     @State private var dragStartFrame: CGRect?
     @State private var dragStartSnapshot: SurfaceGeometryEditSnapshot?
 
-    private var currentSnapshot: SurfaceGeometryEditSnapshot {
+    private let metrics = SurfaceGeometryEditorChromeMetrics.self
+
+    private var persistedSnapshot: SurfaceGeometryEditSnapshot {
         SurfaceGeometryEditSnapshot.capture(
             theme: store.configuration.theme,
             appearance: workspace.settings.layout.appearance
         )
+    }
+
+    private var displayedSnapshot: SurfaceGeometryEditSnapshot {
+        session.previewSnapshot ?? persistedSnapshot
     }
 
     private var editingScreen: NSScreen? {
@@ -2233,60 +2251,47 @@ private struct SurfaceDirectGeometryEditorOverlay: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let width = max(1, proxy.size.width)
-            let height = max(1, proxy.size.height)
+            let minX = metrics.horizontal
+            let maxX = max(minX, proxy.size.width - metrics.horizontal)
+            let minY = metrics.top
+            let maxY = max(minY, proxy.size.height - metrics.bottom)
+            let midX = (minX + maxX) / 2
+            let midY = (minY + maxY) / 2
+            let o = metrics.handleOffset
 
             ZStack {
-                Rectangle()
-                    .fill(Color.clear)
-                    .contentShape(Rectangle())
-                    .gesture(dragGesture(.move))
-
-                Rectangle()
-                    .strokeBorder(
-                        Color.accentColor.opacity(0.95),
-                        style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(
+                        Color.accentColor.opacity(activeHandle == nil ? 0.62 : 0.92),
+                        style: StrokeStyle(lineWidth: 1.2, dash: [5, 4])
                     )
+                    .frame(width: max(1, maxX - minX + 8), height: max(1, maxY - minY + 8))
+                    .position(x: midX, y: midY)
                     .allowsHitTesting(false)
 
-                resizeHandle(.topLeft).position(x: 10, y: 10)
-                resizeHandle(.top).position(x: width / 2, y: 10)
-                resizeHandle(.topRight).position(x: width - 10, y: 10)
-                resizeHandle(.left).position(x: 10, y: height / 2)
-                resizeHandle(.right).position(x: width - 10, y: height / 2)
-                resizeHandle(.bottomLeft).position(x: 10, y: height - 10)
-                resizeHandle(.bottom).position(x: width / 2, y: height - 10)
-                resizeHandle(.bottomRight).position(x: width - 10, y: height - 10)
+                resizeHandle(.topLeft).position(x: minX - o, y: minY - o)
+                resizeHandle(.top).position(x: midX, y: minY - o)
+                resizeHandle(.topRight).position(x: maxX + o, y: minY - o)
+                resizeHandle(.left).position(x: minX - o, y: midY)
+                resizeHandle(.right).position(x: maxX + o, y: midY)
+                resizeHandle(.bottomLeft).position(x: minX - o, y: maxY + o)
+                resizeHandle(.bottom).position(x: midX, y: maxY + o)
+                resizeHandle(.bottomRight).position(x: maxX + o, y: maxY + o)
 
                 radiusHandle
-                    .position(
-                        x: min(max(8, width - 30), max(8, width - 8)),
-                        y: min(max(8, height * 0.35), max(8, height - 8))
-                    )
+                    .position(x: maxX + 15, y: minY + 18)
 
-                VStack(spacing: 4) {
-                    Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(session.target == .closed ? "Closed" : "Opened")
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
-                }
-                .foregroundStyle(.white.opacity(0.74))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(.black.opacity(0.40), in: Capsule())
-                .allowsHitTesting(false)
+                moveBar
+                    .position(x: midX, y: maxY + 34)
 
-                VStack {
-                    Spacer()
-                    Text(sizeLabel)
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.78))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.black.opacity(0.46), in: Capsule())
-                        .padding(.bottom, 14)
-                }
-                .allowsHitTesting(false)
+                Text(sizeLabel)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.black.opacity(0.52), in: Capsule())
+                    .position(x: minX + 54, y: maxY + 34)
+                    .allowsHitTesting(false)
             }
         }
         .accessibilityElement(children: .contain)
@@ -2294,7 +2299,7 @@ private struct SurfaceDirectGeometryEditorOverlay: View {
     }
 
     private var sizeLabel: String {
-        let snapshot = currentSnapshot
+        let snapshot = displayedSnapshot
         if session.target == .closed {
             return "\(Int(snapshot.compactWidth.rounded())) × \(Int(snapshot.compactHeight.rounded())) · r\(Int(snapshot.cornerRadius.rounded()))"
         }
@@ -2302,54 +2307,91 @@ private struct SurfaceDirectGeometryEditorOverlay: View {
         return "\(Int(snapshot.expandedWidth.rounded())) × \(Int(totalHeight.rounded())) · r\(Int(snapshot.cornerRadius.rounded()))"
     }
 
+    private var moveBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                .font(.system(size: 10, weight: .bold))
+            Text(session.target == .closed ? "Move closed notch" : "Move opened notch")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+        }
+        .foregroundStyle(.white.opacity(0.92))
+        .padding(.horizontal, 11)
+        .frame(height: 26)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(Color.accentColor.opacity(activeHandle == .move ? 0.95 : 0.45), lineWidth: 1))
+        .shadow(radius: activeHandle == .move ? 8 : 4, y: 2)
+        .scaleEffect(activeHandle == .move ? 1.03 : hoveredHandle == .move ? 1.02 : 1)
+        .contentShape(Capsule())
+        .onHover { hovering in
+            hoveredHandle = hovering ? .move : (hoveredHandle == .move ? nil : hoveredHandle)
+            if hovering { NSCursor.openHand.set() } else if activeHandle == nil { NSCursor.arrow.set() }
+        }
+        .gesture(dragGesture(.move))
+        .animation(.interactiveSpring(response: 0.16, dampingFraction: 0.84), value: activeHandle)
+        .animation(.easeOut(duration: 0.10), value: hoveredHandle)
+        .accessibilityLabel("Move notch")
+    }
+
     private func resizeHandle(_ handle: SurfaceDirectGeometryHandle) -> some View {
         ZStack {
-            Rectangle().fill(Color.clear)
+            Circle()
+                .fill(.black.opacity(0.58))
+                .frame(width: 18, height: 18)
             Circle()
                 .fill(.white)
-                .frame(width: 9, height: 9)
-                .overlay(Circle().stroke(Color.accentColor, lineWidth: 2))
+                .frame(width: activeHandle == handle ? 9 : 8, height: activeHandle == handle ? 9 : 8)
+                .overlay(Circle().stroke(Color.accentColor, lineWidth: activeHandle == handle ? 2.5 : 2))
         }
-        .frame(width: 24, height: 24)
-        .contentShape(Rectangle())
+        .frame(width: 28, height: 28)
+        .contentShape(Circle())
+        .scaleEffect(activeHandle == handle ? 1.14 : hoveredHandle == handle ? 1.08 : 1)
+        .shadow(radius: activeHandle == handle ? 6 : 3)
+        .onHover { hovering in
+            hoveredHandle = hovering ? handle : (hoveredHandle == handle ? nil : hoveredHandle)
+            if hovering { handle.cursor.set() } else if activeHandle == nil { NSCursor.arrow.set() }
+        }
         .gesture(dragGesture(handle))
+        .animation(.interactiveSpring(response: 0.14, dampingFraction: 0.82), value: activeHandle)
+        .animation(.easeOut(duration: 0.10), value: hoveredHandle)
         .accessibilityLabel("Resize notch")
     }
 
     private var radiusHandle: some View {
         ZStack {
-            Circle().fill(.black.opacity(0.58))
+            Circle().fill(.black.opacity(0.62))
             Image(systemName: "circle.dotted")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(Color.accentColor)
         }
         .frame(width: 24, height: 24)
-        .overlay(Circle().stroke(.white.opacity(0.72), lineWidth: 1))
+        .overlay(Circle().stroke(.white.opacity(0.76), lineWidth: 1))
+        .shadow(radius: activeHandle == .cornerRadius ? 7 : 3)
+        .scaleEffect(activeHandle == .cornerRadius ? 1.12 : hoveredHandle == .cornerRadius ? 1.07 : 1)
         .contentShape(Circle())
+        .onHover { hovering in
+            hoveredHandle = hovering ? .cornerRadius : (hoveredHandle == .cornerRadius ? nil : hoveredHandle)
+            if hovering { NSCursor.crosshair.set() } else if activeHandle == nil { NSCursor.arrow.set() }
+        }
         .gesture(dragGesture(.cornerRadius))
+        .animation(.interactiveSpring(response: 0.14, dampingFraction: 0.82), value: activeHandle)
         .accessibilityLabel("Adjust corner radius")
     }
 
     private func dragGesture(_ handle: SurfaceDirectGeometryHandle) -> some Gesture {
         DragGesture(minimumDistance: 0)
-            .onChanged { _ in
-                updateDrag(handle)
-            }
-            .onEnded { _ in
-                finishDrag()
-            }
+            .onChanged { _ in updateDrag(handle) }
+            .onEnded { _ in finishDrag() }
     }
 
     private func beginDrag(_ handle: SurfaceDirectGeometryHandle) {
-        guard activeHandle == nil,
-              let screen = editingScreen else { return }
-
-        let snapshot = currentSnapshot
+        guard activeHandle == nil, let screen = editingScreen else { return }
+        let snapshot = displayedSnapshot
         activeHandle = handle
         dragStartMouse = NSEvent.mouseLocation
         dragStartSnapshot = snapshot
         dragStartFrame = geometryFrame(for: snapshot, on: screen)
         session.beginTransaction(snapshot)
+        handle.cursor.set()
     }
 
     private func updateDrag(_ handle: SurfaceDirectGeometryHandle) {
@@ -2366,7 +2408,7 @@ private struct SurfaceDirectGeometryEditorOverlay: View {
         if handle == .cornerRadius {
             var next = startSnapshot
             next.cornerRadius = min(48, max(0, startSnapshot.cornerRadius - Double(delta.width + delta.height) * 0.5))
-            apply(next)
+            session.previewSnapshot = next
             return
         }
 
@@ -2379,17 +2421,33 @@ private struct SurfaceDirectGeometryEditorOverlay: View {
         }
 
         desired = constrainedToScreen(desired, screen: screen)
-        let next = snapshot(startingFrom: startSnapshot, matching: desired, on: screen)
-        apply(next)
+        session.previewSnapshot = snapshot(startingFrom: startSnapshot, matching: desired, on: screen)
     }
 
     private func finishDrag() {
         guard activeHandle != nil else { return }
-        session.commitTransaction(currentSnapshot)
+        let finalSnapshot = session.previewSnapshot ?? displayedSnapshot
+        session.commitTransaction(finalSnapshot)
+        applyPersisted(finalSnapshot)
+        session.previewSnapshot = nil
         activeHandle = nil
         dragStartMouse = nil
         dragStartFrame = nil
         dragStartSnapshot = nil
+        NSCursor.arrow.set()
+    }
+
+    private func applyPersisted(_ snapshot: SurfaceGeometryEditSnapshot) {
+        var theme = store.configuration.theme
+        var appearance = workspace.settings.layout.appearance
+        theme.width = snapshot.expandedWidth
+        theme.cornerRadius = snapshot.cornerRadius
+        appearance.compactWidth = snapshot.compactWidth
+        appearance.surface.compactHeight = snapshot.compactHeight
+        appearance.expandedHeight = snapshot.expandedHeight
+        appearance.surface.offsets = snapshot.offsets
+        store.configuration.theme = theme
+        workspace.settings.layout.appearance = appearance
     }
 
     private func geometryFrame(for snapshot: SurfaceGeometryEditSnapshot, on screen: NSScreen) -> CGRect {
@@ -2401,9 +2459,7 @@ private struct SurfaceDirectGeometryEditorOverlay: View {
         appearance.surface.compactHeight = snapshot.compactHeight
         appearance.expandedHeight = snapshot.expandedHeight
         appearance.surface.offsets = snapshot.offsets
-        if store.configuration.simulateNotch && theme.style == .notch {
-            theme.style = .simulated
-        }
+        if store.configuration.simulateNotch && theme.style == .notch { theme.style = .simulated }
         return WindowManager.geometry(screen: screen, theme: theme, appearance: appearance)
             .frame(expanded: session.target.expanded)
     }
@@ -2414,7 +2470,6 @@ private struct SurfaceDirectGeometryEditorOverlay: View {
         on screen: NSScreen
     ) -> SurfaceGeometryEditSnapshot {
         var next = start
-
         if session.target == .closed {
             next.compactWidth = min(640, max(16, Double(desired.width)))
             next.compactHeight = min(100, max(16, Double(desired.height)))
@@ -2436,7 +2491,6 @@ private struct SurfaceDirectGeometryEditorOverlay: View {
         let base = geometryFrame(for: zeroed, on: screen)
         let offsetX = min(1000, max(-1000, Double(desired.minX - base.minX)))
         let offsetY = min(1000, max(-1000, Double(base.minY - desired.minY)))
-
         if session.target == .closed {
             next.offsets.closedX = offsetX
             next.offsets.closedY = offsetY
@@ -2454,11 +2508,7 @@ private struct SurfaceDirectGeometryEditorOverlay: View {
         snapshot: SurfaceGeometryEditSnapshot,
         screen: NSScreen
     ) -> CGRect {
-        var minX = start.minX
-        var maxX = start.maxX
-        var minY = start.minY
-        var maxY = start.maxY
-
+        var minX = start.minX, maxX = start.maxX, minY = start.minY, maxY = start.maxY
         if handle.movesLeft { minX += delta.width }
         if handle.movesRight { maxX += delta.width }
         if handle.movesTop { maxY += delta.height }
@@ -2470,57 +2520,35 @@ private struct SurfaceDirectGeometryEditorOverlay: View {
         let maxWidth: CGFloat = min(session.target == .closed ? 640 : 1200, screenWidth)
         let closedStrip = max(40, snapshot.compactHeight)
         let minHeight: CGFloat = session.target == .closed ? 16 : CGFloat(280 + closedStrip)
-        let maxHeight: CGFloat = min(
-            session.target == .closed ? 100 : CGFloat(1100 + closedStrip),
-            screenHeight
-        )
+        let maxHeight: CGFloat = min(session.target == .closed ? 100 : CGFloat(1100 + closedStrip), screenHeight)
 
-        var width = maxX - minX
+        let width = maxX - minX
         if width < minWidth {
             if handle.movesLeft { minX = maxX - minWidth } else { maxX = minX + minWidth }
         } else if width > maxWidth {
             if handle.movesLeft { minX = maxX - maxWidth } else { maxX = minX + maxWidth }
         }
 
-        var height = maxY - minY
+        let height = maxY - minY
         if height < minHeight {
             if handle.movesBottom { minY = maxY - minHeight } else { maxY = minY + minHeight }
         } else if height > maxHeight {
             if handle.movesBottom { minY = maxY - maxHeight } else { maxY = minY + maxHeight }
         }
 
-        width = maxX - minX
-        height = maxY - minY
-        return CGRect(x: minX, y: minY, width: width, height: height)
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
     private func constrainedToScreen(_ frame: CGRect, screen: NSScreen) -> CGRect {
         let bounds = screen.frame.insetBy(dx: 4, dy: 4)
         var result = frame
-        if result.width > bounds.width {
-            result.size.width = bounds.width
-        }
-        if result.height > bounds.height {
-            result.size.height = bounds.height
-        }
+        if result.width > bounds.width { result.size.width = bounds.width }
+        if result.height > bounds.height { result.size.height = bounds.height }
         if result.minX < bounds.minX { result.origin.x = bounds.minX }
         if result.maxX > bounds.maxX { result.origin.x = bounds.maxX - result.width }
         if result.minY < bounds.minY { result.origin.y = bounds.minY }
         if result.maxY > bounds.maxY { result.origin.y = bounds.maxY - result.height }
         return result
-    }
-
-    private func apply(_ snapshot: SurfaceGeometryEditSnapshot) {
-        var theme = store.configuration.theme
-        var appearance = workspace.settings.layout.appearance
-        theme.width = snapshot.expandedWidth
-        theme.cornerRadius = snapshot.cornerRadius
-        appearance.compactWidth = snapshot.compactWidth
-        appearance.surface.compactHeight = snapshot.compactHeight
-        appearance.expandedHeight = snapshot.expandedHeight
-        appearance.surface.offsets = snapshot.offsets
-        store.configuration.theme = theme
-        workspace.settings.layout.appearance = appearance
     }
 }
 
@@ -2532,7 +2560,6 @@ struct SurfaceView: View {
     @ObservedObject private var transfer = TransferActivityMonitor.shared
     @ObservedObject private var clipboardCI = ClipboardContextMonitor.shared
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
-    @ObservedObject private var geometryEditor = SurfaceGeometryEditingSession.shared
     @State private var clipboardOpenedNotch = false
     @State private var teleprompterActive = false
     @State private var visualWorkspaceSurfacePresented = false
@@ -3108,23 +3135,6 @@ struct SurfaceView: View {
         contour.stroke(dropOverlayActive ? accent : .white.opacity(0.12), lineWidth: dropOverlayActive ? 1.6 : 1)
         if presentsVisualWorkspaceSurface {
             OpenNotchSurfaceChrome(contour: contour, options: layout.resolvedOpenNotchLayout.appearance)
-        }
-        if geometryEditorTargetsThisSurface {
-            SurfaceDirectGeometryEditorOverlay(
-                store: store,
-                workspace: workspace,
-                state: state,
-                session: geometryEditor
-            )
-            .zIndex(100)
-        }
-    }
-
-    private var geometryEditorTargetsThisSurface: Bool {
-        guard geometryEditor.isEnabled else { return false }
-        guard let displayID = geometryEditor.displayID else { return true }
-        return NSScreen.screens.contains { screen in
-            WindowManager.displayID(screen) == displayID && screen.frame.equalTo(state.screenFrame)
         }
     }
 
