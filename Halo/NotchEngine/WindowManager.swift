@@ -1430,10 +1430,12 @@ final class WindowManager {
     }
 
     private func geometryEditorPanelFrame(around target: CGRect) -> CGRect {
-        CGRect(
-            x: target.minX - SurfaceGeometryEditorChromeMetrics.horizontal,
+        let naturalWidth = target.width + SurfaceGeometryEditorChromeMetrics.horizontal * 2
+        let width = max(250, naturalWidth)
+        return CGRect(
+            x: target.midX - width / 2,
             y: target.minY - SurfaceGeometryEditorChromeMetrics.bottom,
-            width: target.width + SurfaceGeometryEditorChromeMetrics.horizontal * 2,
+            width: width,
             height: target.height + SurfaceGeometryEditorChromeMetrics.top + SurfaceGeometryEditorChromeMetrics.bottom
         )
     }

@@ -2251,10 +2251,12 @@ struct SurfaceGeometryEditorPanelView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let minX = metrics.horizontal
-            let maxX = max(minX, proxy.size.width - metrics.horizontal)
+            let notchWidth = min(max(1, state.viewport.size.width), max(1, proxy.size.width))
+            let notchHeight = min(max(1, state.viewport.size.height), max(1, proxy.size.height - metrics.top - metrics.bottom))
+            let minX = (proxy.size.width - notchWidth) / 2
+            let maxX = minX + notchWidth
             let minY = metrics.top
-            let maxY = max(minY, proxy.size.height - metrics.bottom)
+            let maxY = minY + notchHeight
             let midX = (minX + maxX) / 2
             let midY = (minY + maxY) / 2
             let o = metrics.handleOffset
@@ -2269,9 +2271,11 @@ struct SurfaceGeometryEditorPanelView: View {
                     .position(x: midX, y: midY)
                     .allowsHitTesting(false)
 
-                resizeHandle(.topLeft).position(x: minX - o, y: minY - o)
-                resizeHandle(.top).position(x: midX, y: minY - o)
-                resizeHandle(.topRight).position(x: maxX + o, y: minY - o)
+                resizeHandle(.topLeft).position(x: minX - o, y: editorTouchesTop ? minY + 12 : minY - o)
+                if !editorTouchesTop {
+                    resizeHandle(.top).position(x: midX, y: minY - o)
+                }
+                resizeHandle(.topRight).position(x: maxX + o, y: editorTouchesTop ? minY + 12 : minY - o)
                 resizeHandle(.left).position(x: minX - o, y: midY)
                 resizeHandle(.right).position(x: maxX + o, y: midY)
                 resizeHandle(.bottomLeft).position(x: minX - o, y: maxY + o)
@@ -2284,18 +2288,15 @@ struct SurfaceGeometryEditorPanelView: View {
                 moveBar
                     .position(x: midX, y: maxY + 34)
 
-                Text(sizeLabel)
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.black.opacity(0.52), in: Capsule())
-                    .position(x: minX + 54, y: maxY + 34)
-                    .allowsHitTesting(false)
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Direct notch geometry editor")
+    }
+
+    private var editorTouchesTop: Bool {
+        guard let screen = editingScreen else { return false }
+        return geometryFrame(for: displayedSnapshot, on: screen).maxY >= screen.frame.maxY - 4
     }
 
     private var sizeLabel: String {
@@ -2308,11 +2309,14 @@ struct SurfaceGeometryEditorPanelView: View {
     }
 
     private var moveBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
                 .font(.system(size: 10, weight: .bold))
-            Text(session.target == .closed ? "Move closed notch" : "Move opened notch")
+            Text("Move")
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
+            Text(sizeLabel)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.62))
         }
         .foregroundStyle(.white.opacity(0.92))
         .padding(.horizontal, 11)
