@@ -14,7 +14,7 @@ struct HaloApp: App {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let store = AppStore()
     private var engine: WindowManager?
     private var hudController: HaloHUDController?
@@ -191,11 +191,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.contentMinSize = NSSize(width: 700, height: 560)
             window.contentView = NSHostingView(rootView: SettingsView(store: store))
             window.isReleasedWhenClosed = false
+            window.delegate = self
             window.center()
             settings = window
         }
         NSApp.activate(ignoringOtherApps: true)
         settings?.makeKeyAndOrderFront(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              window === settings else { return }
+        endDirectGeometryEditing()
+    }
+
+    private func endDirectGeometryEditing() {
+        let session = SurfaceGeometryEditingSession.shared
+        guard session.isEnabled else { return }
+
+        let expanded = session.target.expanded
+        let display = session.displayID.flatMap { id in
+            NSScreen.screens.first(where: { WindowManager.displayID($0) == id })
+        }
+
+        session.cancelTransaction()
+        session.previewSnapshot = nil
+        session.isEnabled = false
+        GeometryPreview.update(expanded: expanded, editing: false, display: display)
+        session.displayID = nil
     }
 
     @objc func openHUDSettings() {

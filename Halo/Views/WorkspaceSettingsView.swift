@@ -216,15 +216,15 @@ struct SettingsView: View {
             }
         }
         .onChange(of: section) { selectedSection in
+            if selectedSection != "Appearance" {
+                endDirectGeometryEditingIfNeeded()
+            }
             guard let selectedSection,
                   let group = sidebarGroups.first(where: { $0.items.contains(selectedSection) }) else { return }
             expandedSidebarGroups.insert(group.id)
         }
         .onDisappear {
-            GeometryPreview.update(expanded: false, editing: false)
-            SurfaceGeometryEditingSession.shared.cancelTransaction()
-            SurfaceGeometryEditingSession.shared.isEnabled = false
-            SurfaceGeometryEditingSession.shared.displayID = nil
+            endDirectGeometryEditingIfNeeded()
         }
         .alert("Halo", isPresented: Binding(get: { store.error != nil || workspace.error != nil }, set: { if !$0 { store.error = nil; workspace.error = nil } })) {
             Button("OK") { store.error = nil; workspace.error = nil }
@@ -235,6 +235,22 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) { renamingProfile = nil }
         }
     }
+    private func endDirectGeometryEditingIfNeeded() {
+        let session = SurfaceGeometryEditingSession.shared
+        guard session.isEnabled else { return }
+
+        let expanded = session.target.expanded
+        let display = session.displayID.flatMap { id in
+            NSScreen.screens.first(where: { WindowManager.displayID($0) == id })
+        }
+
+        session.cancelTransaction()
+        session.previewSnapshot = nil
+        session.isEnabled = false
+        GeometryPreview.update(expanded: expanded, editing: false, display: display)
+        session.displayID = nil
+    }
+
     private func sectionIcon(_ name: String) -> String {
         switch name {
         case "General": return "gearshape"
