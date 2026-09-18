@@ -2437,6 +2437,8 @@ struct SurfaceView: View {
                                 page: $page,
                                 closingPowerOnly: !state.expanded && presentsVisualWorkspaceSurface
                             )
+                                .environment(\.haloPixelPalHostExpanded, state.expanded)
+                                .environment(\.haloPixelPalHostTransitionDuration, layout.appearance.surface.duration)
                                 .frame(width: surfaceProxy.size.width,
                                        height: surfaceProxy.size.height,
                                        alignment: .topLeading)

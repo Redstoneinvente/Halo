@@ -2562,22 +2562,14 @@ enum HaloPixelPalAnimationTiming {
     }
 }
 
-enum HaloPixelPalSurfaceMotionDirection: Equatable {
-    case opening
-    case closing
-}
-
 enum HaloPixelPalPowerAnimationTiming {
     static let bootUpDuration: TimeInterval = 0.46
     static let bootDownDuration: TimeInterval = 0.22
+    static let geometrySettleDelay: TimeInterval = 0.09
 
-    static func direction(previous: CGSize, current: CGSize) -> HaloPixelPalSurfaceMotionDirection? {
-        let previousArea = max(1, previous.width * previous.height)
-        let currentArea = max(1, current.width * current.height)
-        let delta = currentArea - previousArea
-        let tolerance = max(8, previousArea * 0.001)
-        guard abs(delta) > tolerance else { return nil }
-        return delta > 0 ? .opening : .closing
+    static func fallbackBootDelay(surfaceDuration: TimeInterval) -> TimeInterval {
+        let duration = surfaceDuration.isFinite ? surfaceDuration : 0.3
+        return min(1.35, max(0.18, duration + 0.10))
     }
 
     static func progress(elapsed: TimeInterval, duration: TimeInterval) -> Double {

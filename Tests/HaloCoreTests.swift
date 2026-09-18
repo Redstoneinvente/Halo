@@ -97,27 +97,10 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(HaloPixelPalAnimationTiming.bounce(elapsed: 1.1, intensity: 1, reduceMotion: false), 0)
     }
 
-    func testPixelPalPowerTransitionDirectionAndTiming() {
-        XCTAssertEqual(
-            HaloPixelPalPowerAnimationTiming.direction(
-                previous: CGSize(width: 190, height: 40),
-                current: CGSize(width: 420, height: 300)
-            ),
-            .opening
-        )
-        XCTAssertEqual(
-            HaloPixelPalPowerAnimationTiming.direction(
-                previous: CGSize(width: 420, height: 300),
-                current: CGSize(width: 190, height: 40)
-            ),
-            .closing
-        )
-        XCTAssertNil(
-            HaloPixelPalPowerAnimationTiming.direction(
-                previous: CGSize(width: 420, height: 300),
-                current: CGSize(width: 420.1, height: 300)
-            )
-        )
+    func testPixelPalPowerTransitionTiming() {
+        XCTAssertEqual(HaloPixelPalPowerAnimationTiming.fallbackBootDelay(surfaceDuration: 0.3), 0.4, accuracy: 0.0001)
+        XCTAssertEqual(HaloPixelPalPowerAnimationTiming.fallbackBootDelay(surfaceDuration: 0), 0.18, accuracy: 0.0001)
+        XCTAssertEqual(HaloPixelPalPowerAnimationTiming.fallbackBootDelay(surfaceDuration: 5), 1.35, accuracy: 0.0001)
 
         XCTAssertEqual(HaloPixelPalPowerAnimationTiming.progress(elapsed: -1, duration: 0.4), 0)
         XCTAssertEqual(HaloPixelPalPowerAnimationTiming.progress(elapsed: 0.2, duration: 0.4), 0.5, accuracy: 0.0001)

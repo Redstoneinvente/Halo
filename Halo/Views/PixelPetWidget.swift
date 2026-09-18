@@ -1464,6 +1464,26 @@ private struct HaloPixelPalContext {
 
 // MARK: - Widget
 
+private struct HaloPixelPalHostExpandedKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+private struct HaloPixelPalHostTransitionDurationKey: EnvironmentKey {
+    static let defaultValue = 0.3
+}
+
+extension EnvironmentValues {
+    var haloPixelPalHostExpanded: Bool {
+        get { self[HaloPixelPalHostExpandedKey.self] }
+        set { self[HaloPixelPalHostExpandedKey.self] = newValue }
+    }
+
+    var haloPixelPalHostTransitionDuration: Double {
+        get { self[HaloPixelPalHostTransitionDurationKey.self] }
+        set { self[HaloPixelPalHostTransitionDurationKey.self] = newValue }
+    }
+}
+
 private enum HaloPixelPalPowerPhase: Equatable {
     case on
     case off
@@ -1476,95 +1496,115 @@ private enum HaloPixelPalPowerPhase: Equatable {
     }
 
     var isPoweredOn: Bool { self == .on }
+
+    var timelineIdentity: Int {
+        switch self {
+        case .off: return 0
+        case .on: return 1
+        case .bootingUp: return 2
+        case .bootingDown: return 3
+        }
+    }
 }
 
 @MainActor
 private final class HaloPixelPalSurfacePowerController: ObservableObject {
     @Published private(set) var phase: HaloPixelPalPowerPhase = .off
 
-    private var lastFrame: CGRect?
-    private var direction: HaloPixelPalSurfaceMotionDirection?
+    private var hostExpanded = false
+    private var openingPending = false
     private var settleWork: DispatchWorkItem?
+    private var fallbackWork: DispatchWorkItem?
     private var phaseWork: DispatchWorkItem?
 
-    func prepareForAppearance() {
-        settleWork?.cancel()
-        phaseWork?.cancel()
-        direction = nil
-        lastFrame = nil
+    func prepareForAppearance(expanded: Bool, transitionDuration: Double) {
+        cancelScheduledWork()
+        hostExpanded = expanded
+        openingPending = false
         phase = .off
-        scheduleQuietBoot()
+
+        if expanded {
+            beginOpening(transitionDuration: transitionDuration)
+        }
     }
 
-    func noteGeometryChange(frame: CGRect) {
-        guard frame.width.isFinite, frame.height.isFinite, frame.width > 0, frame.height > 0 else { return }
-
-        settleWork?.cancel()
-        defer { lastFrame = frame }
-
-        guard let previous = lastFrame else {
-            scheduleQuietBoot()
+    func setHostExpanded(_ expanded: Bool, transitionDuration: Double) {
+        if expanded == hostExpanded {
+            // A recreated subtree can arrive already expanded. If it is still dark,
+            // make sure a boot is scheduled instead of waiting for a geometry event
+            // that may never be delivered to this new view instance.
+            if expanded, phase == .off, !openingPending {
+                beginOpening(transitionDuration: transitionDuration)
+            }
             return
         }
 
-        if let nextDirection = HaloPixelPalPowerAnimationTiming.direction(previous: previous.size, current: frame.size) {
-            if direction != nextDirection {
-                direction = nextDirection
-                phaseWork?.cancel()
-
-                switch nextDirection {
-                case .opening:
-                    phase = .off
-                case .closing:
-                    beginBootDown()
-                }
-            }
-            scheduleSettle()
-        } else if direction == nil, !phase.isPoweredOn {
-            scheduleQuietBoot()
+        hostExpanded = expanded
+        if expanded {
+            beginOpening(transitionDuration: transitionDuration)
+        } else {
+            beginClosing()
         }
     }
 
-    private func scheduleQuietBoot() {
+    func noteGeometryChange() {
+        guard hostExpanded, openingPending else { return }
+
         settleWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self, self.direction == nil else { return }
-            if self.phase == .off {
-                self.beginBootUp()
-            }
+            self?.beginBootUpIfReady()
         }
         settleWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.11, execute: work)
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + HaloPixelPalPowerAnimationTiming.geometrySettleDelay,
+            execute: work
+        )
     }
 
-    private func scheduleSettle() {
+    private func beginOpening(transitionDuration: Double) {
         settleWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            let settledDirection = self.direction
-            self.direction = nil
-
-            switch settledDirection {
-            case .opening:
-                self.beginBootUp()
-            case .closing:
-                self.phaseWork?.cancel()
-                self.phase = .off
-            case .none:
-                break
-            }
-        }
-        settleWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.09, execute: work)
-    }
-
-    private func beginBootUp() {
+        fallbackWork?.cancel()
         phaseWork?.cancel()
+
+        openingPending = true
+        phase = .off
+
+        // Geometry notifications are the preferred completion signal, but the
+        // fallback guarantees Pixel Pal boots even if the widget is inserted
+        // after the window's geometry notifications have already fired.
+        let fallback = DispatchWorkItem { [weak self] in
+            self?.beginBootUpIfReady()
+        }
+        fallbackWork = fallback
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + HaloPixelPalPowerAnimationTiming.fallbackBootDelay(surfaceDuration: transitionDuration),
+            execute: fallback
+        )
+    }
+
+    private func beginClosing() {
+        openingPending = false
+        settleWork?.cancel()
+        fallbackWork?.cancel()
+        phaseWork?.cancel()
+
+        guard phase != .off else { return }
+        beginBootDown()
+    }
+
+    private func beginBootUpIfReady() {
+        guard hostExpanded, openingPending else { return }
+
+        openingPending = false
+        settleWork?.cancel()
+        fallbackWork?.cancel()
+        phaseWork?.cancel()
+
         let started = Date()
         phase = .bootingUp(started)
 
         let work = DispatchWorkItem { [weak self] in
-            guard let self, self.phase == .bootingUp(started) else { return }
+            guard let self, self.hostExpanded, self.phase == .bootingUp(started) else { return }
             self.phase = .on
         }
         phaseWork = work
@@ -1575,12 +1615,11 @@ private final class HaloPixelPalSurfacePowerController: ObservableObject {
     }
 
     private func beginBootDown() {
-        phaseWork?.cancel()
         let started = Date()
         phase = .bootingDown(started)
 
         let work = DispatchWorkItem { [weak self] in
-            guard let self, self.phase == .bootingDown(started) else { return }
+            guard let self, !self.hostExpanded, self.phase == .bootingDown(started) else { return }
             self.phase = .off
         }
         phaseWork = work
@@ -1590,9 +1629,17 @@ private final class HaloPixelPalSurfacePowerController: ObservableObject {
         )
     }
 
-    deinit {
+    private func cancelScheduledWork() {
         settleWork?.cancel()
+        fallbackWork?.cancel()
         phaseWork?.cancel()
+        settleWork = nil
+        fallbackWork = nil
+        phaseWork = nil
+    }
+
+    deinit {
+        cancelScheduledWork()
     }
 }
 
@@ -1759,6 +1806,8 @@ struct HaloPixelPetWidget: View {
     @Environment(\.openNotchGridColumnSpan) private var gridColumnSpan
     @Environment(\.openNotchGridRowSpan) private var gridRowSpan
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.haloPixelPalHostExpanded) private var hostSurfaceExpanded
+    @Environment(\.haloPixelPalHostTransitionDuration) private var hostSurfaceTransitionDuration
 
     @StateObject private var surfacePower = HaloPixelPalSurfacePowerController()
     @State private var hovering = false
@@ -1785,7 +1834,7 @@ struct HaloPixelPetWidget: View {
 
     var body: some View {
         TimelineView(.animation(
-            minimumInterval: surfacePower.phase.isPoweredOn ? (reduceMotion ? 0.45 : 1.0 / 24.0) : 1.0 / 30.0,
+            minimumInterval: surfacePower.phase.isPoweredOn ? (reduceMotion ? 0.45 : 1.0 / 24.0) : (reduceMotion ? 1.0 / 24.0 : 1.0 / 60.0),
             paused: surfacePower.phase.pausesTimeline
         )) { timeline in
             GeometryReader { proxy in
@@ -1912,9 +1961,9 @@ struct HaloPixelPetWidget: View {
                 }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .init("HaloPanelGeometryChanged"))) { note in
-            guard let frame = note.userInfo?["frame"] as? CGRect else { return }
-            surfacePower.noteGeometryChange(frame: frame)
+        .id(surfacePower.phase.timelineIdentity)
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloPanelGeometryChanged"))) { _ in
+            surfacePower.noteGeometryChange()
         }
         .contentShape(Rectangle())
         .allowsHitTesting(surfacePower.phase.isPoweredOn)
@@ -1934,8 +1983,17 @@ struct HaloPixelPetWidget: View {
             if targeted { pal.fileCuriosity(dropped: false) }
         }
         .onAppear {
-            surfacePower.prepareForAppearance()
+            surfacePower.prepareForAppearance(
+                expanded: hostSurfaceExpanded,
+                transitionDuration: hostSurfaceTransitionDuration
+            )
             syncAudioSpectrum()
+        }
+        .onChange(of: hostSurfaceExpanded) { expanded in
+            surfacePower.setHostExpanded(
+                expanded,
+                transitionDuration: hostSurfaceTransitionDuration
+            )
         }
         .onChange(of: media.isPlaying) { _ in syncAudioSpectrum() }
         .onChange(of: surfacePower.phase) { _ in syncAudioSpectrum() }
