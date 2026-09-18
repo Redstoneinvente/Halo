@@ -811,6 +811,12 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             appearance: $workspace.settings.layout.appearance,
             theme: store.configuration.theme,
             screen: NSScreen.main ?? NSScreen.screens.first,
+            scope: .openedPosition
+        )
+        SurfaceAppearanceControls(
+            appearance: $workspace.settings.layout.appearance,
+            theme: store.configuration.theme,
+            screen: NSScreen.main ?? NSScreen.screens.first,
             scope: .closedGeometry
         )
     }

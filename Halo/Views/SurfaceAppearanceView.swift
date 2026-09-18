@@ -70,7 +70,7 @@ struct HaloContour: Shape {
 }
 
 enum SurfaceAppearanceScope {
-    case all, background, geometry, closedGeometry, surfaceGeometry, motion
+    case all, background, geometry, closedGeometry, openedPosition, surfaceGeometry, motion
 }
 
 @MainActor struct SurfaceAppearanceControls: View {
@@ -133,7 +133,7 @@ enum SurfaceAppearanceScope {
             }
         }
 
-        if scope == .all || scope == .geometry || scope == .surfaceGeometry {
+        if scope == .all || scope == .geometry || scope == .openedPosition {
             Section("Opened surface position") {
                 Text("Positive X moves the opened surface right; positive Y moves it down.").font(.caption)
                 offsetControl("Opened X", key: \.openedX, expanded: true)
@@ -151,6 +151,9 @@ enum SurfaceAppearanceScope {
                 PreciseSlider(title: "Context Y", value: $contextOffsetY, range: -1000...1000, step: 1, suffix: "pt")
                 Button("Reset context position") { contextOffsetX = 0; contextOffsetY = 0 }
             }
+        }
+
+        if scope == .all || scope == .geometry || scope == .surfaceGeometry {
             Section("Shape") {
                 Toggle("Use surface style contour", isOn: Binding(get: { appearance.surface.useStyleContour ?? true }, set: { appearance.surface.useStyleContour = $0 }))
                 Text("Turn off to use a custom contour below.").font(.caption)
