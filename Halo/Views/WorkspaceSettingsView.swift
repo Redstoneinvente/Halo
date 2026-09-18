@@ -863,7 +863,9 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 
         Section("Opened notch size & spacing") {
             Slider(value: $store.configuration.theme.width, in: 340...1200, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Opened width") }
+                .disabled(geometryEditor.isEnabled)
             Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 280...1100, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Opened height") }
+                .disabled(geometryEditor.isEnabled)
             Slider(value: Binding(
                 get: { workspace.settings.layout.resolvedOpenHorizontalPadding },
                 set: { workspace.settings.layout.openHorizontalPadding = $0 }
@@ -882,12 +884,14 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             screen: directEditScreen,
             scope: .openedPosition
         )
+        .disabled(geometryEditor.isEnabled)
         SurfaceAppearanceControls(
             appearance: $workspace.settings.layout.appearance,
             theme: store.configuration.theme,
             screen: directEditScreen,
             scope: .closedGeometry
         )
+        .disabled(geometryEditor.isEnabled)
     }
 
     private var directEditScreen: NSScreen? {
