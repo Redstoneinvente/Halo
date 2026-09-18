@@ -2292,6 +2292,7 @@ private enum HaloPixelPalLEDDrawing {
             path.closeSubpath()
             return path
         case .cross:
+            var path = Path()
             let x1 = rect.minX + rect.width * 0.34
             let x2 = rect.minX + rect.width * 0.66
             let y1 = rect.minY + rect.height * 0.34
