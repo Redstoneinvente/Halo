@@ -60,6 +60,10 @@ extension EnvironmentValues {
         precondition(HaloPixelPalAnimationTiming.bounce(elapsed: 1.1, intensity: 1, reduceMotion: false) == 0)
         let legacy = try JSONDecoder().decode(HaloPixelPalPreferences.self, from: Data(#"{"showCheeks":false,"faceScale":0.91}"#.utf8))
         precondition(legacy.cheekStyle == .none && legacy.faceScale == 0.91)
+        precondition(legacy.pixelSpacing == 1.0, "Legacy preferences must preserve the previous 1 px LED gap")
+        let packed = HaloPixelPalDisplayGeometry(size: CGSize(width: 240, height: 240), scale: 2, fill: 1, spacing: 0)
+        let spaced = HaloPixelPalDisplayGeometry(size: CGSize(width: 240, height: 240), scale: 2, fill: 1, spacing: 3)
+        precondition(packed.led(x: 12, y: 12).width > spaced.led(x: 12, y: 12).width)
         let suite = "PixelPalSmoke.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }

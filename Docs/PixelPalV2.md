@@ -640,6 +640,7 @@ struct PixelPalPreferences: Codable, Equatable {
 
     // Layout
     var faceScale: Double
+    var pixelSpacing: Double
 
     // Motion
     var animationSpeed: Double
@@ -703,6 +704,7 @@ Controls:
 - background color where relevant
 - glow
 - face scale
+- pixel spacing
 
 ### 16.3 Eye / mouth / face selectors
 
@@ -761,6 +763,7 @@ Allow manual preview of every built-in expression and key animation without perm
 
 Recommended default configuration:
 
+- Pixel spacing: `1 px`
 - Face style: `Soft`
 - Eye style: `Glossy`
 - Mouth style: `Automatic`

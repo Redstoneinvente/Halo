@@ -2534,16 +2534,28 @@ struct HaloPixelPalDisplayGeometry {
     let size: CGSize
     let scale: CGFloat
     let fill: Double
+    let spacing: Double
     static let grid = 24
+
+    init(size: CGSize, scale: CGFloat, fill: Double, spacing: Double = 1.0) {
+        self.size = size
+        self.scale = scale
+        self.fill = fill
+        self.spacing = spacing
+    }
 
     var side: CGFloat { max(0, min(size.width, size.height)) * min(1, max(0.76, fill)) }
     var origin: CGPoint { CGPoint(x: (size.width - side) / 2, y: (size.height - side) / 2) }
 
-    // Snap each boundary, rather than rounding the entire scale down and wasting space.
+    // Snap every LED edge and gap to backing pixels so adjustable spacing stays crisp.
     func led(x: Int, y: Int) -> CGRect {
         let backing = max(1, scale)
         let pitch = side / CGFloat(Self.grid)
-        let gap = pitch * backing >= 3 ? 1 / backing : 0
+        let pitchPixels = pitch * backing
+        let requestedGapPixels = CGFloat(min(3.0, max(0.0, spacing.rounded())))
+        // Always leave at least one physical pixel for the LED itself.
+        let maximumGapPixels = max(0, floor(pitchPixels) - 1)
+        let gap = min(requestedGapPixels, maximumGapPixels) / backing
         func snap(_ value: CGFloat) -> CGFloat { (value * backing).rounded() / backing }
         let left = snap(origin.x + CGFloat(x) * pitch)
         let top = snap(origin.y + CGFloat(y) * pitch)

@@ -87,6 +87,33 @@ final class HaloCoreTests: XCTestCase {
         }
     }
 
+    func testPixelPalPixelSpacingStaysCrispAndShrinksLEDs() {
+        for scale in [1.0, 2.0] {
+            let packed = HaloPixelPalDisplayGeometry(size: CGSize(width: 240, height: 240), scale: scale, fill: 1, spacing: 0)
+            let defaultGap = HaloPixelPalDisplayGeometry(size: CGSize(width: 240, height: 240), scale: scale, fill: 1, spacing: 1)
+            let wideGap = HaloPixelPalDisplayGeometry(size: CGSize(width: 240, height: 240), scale: scale, fill: 1, spacing: 3)
+
+            let packedLED = packed.led(x: 12, y: 12)
+            let defaultLED = defaultGap.led(x: 12, y: 12)
+            let wideLED = wideGap.led(x: 12, y: 12)
+
+            XCTAssertGreaterThan(packedLED.width, defaultLED.width)
+            XCTAssertGreaterThan(defaultLED.width, wideLED.width)
+            XCTAssertEqual(packedLED.minX, defaultLED.minX)
+            XCTAssertEqual(defaultLED.minX, wideLED.minX)
+
+            for rect in [packedLED, defaultLED, wideLED] {
+                for edge in [rect.minX, rect.minY, rect.maxX, rect.maxY] {
+                    XCTAssertEqual(edge * scale, (edge * scale).rounded(), accuracy: 0.00001)
+                }
+            }
+        }
+
+        let tiny = HaloPixelPalDisplayGeometry(size: CGSize(width: 18, height: 18), scale: 2, fill: 1, spacing: 3)
+        XCTAssertGreaterThan(tiny.led(x: 12, y: 12).width, 0)
+        XCTAssertGreaterThan(tiny.led(x: 12, y: 12).height, 0)
+    }
+
     func testPixelPalReactionSettlesAndRespectsReducedMotion() {
         for t in stride(from: 0.0, through: 3, by: 0.05) {
             XCTAssertEqual(HaloPixelPalAnimationTiming.bounce(elapsed: t, intensity: 1, reduceMotion: true), 0)
