@@ -64,7 +64,8 @@ final class HaloDismissCoordinator {
 
     func requestDismissal(
         reason: HaloDismissReason,
-        destination: HaloDismissDestination = .compact
+        destination: HaloDismissDestination = .compact,
+        delayOverride: TimeInterval? = nil
     ) {
         let explicit = reason == .escapeKey || reason == .explicit || reason == .ciCompleted
 
@@ -94,16 +95,18 @@ final class HaloDismissCoordinator {
             guard canDismiss() else { return }
         }
 
-        guard var delay = HaloDismissTimingPolicy.delay(
+        let policyDelay = HaloDismissTimingPolicy.delay(
             behavior: behaviorProvider(),
             customMilliseconds: customDelayProvider(),
             ciBehavior: ciBehavior,
             reason: reason
-        ) else {
+        )
+        guard var delay = delayOverride ?? policyDelay else {
             cancelPendingDismissal()
             debugLog("Dismiss ignored: \(reason.rawValue)")
             return
         }
+        delay = max(0, delay)
 
         if reason == .pointerExit, pointerInsideForgivenessRegion() {
             // The cursor only just crossed Halo's visible edge. Give it a little extra time
