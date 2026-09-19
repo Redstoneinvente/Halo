@@ -1735,6 +1735,11 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
                 errorMessage = "The app integration action is missing its bundle identifier or action ID."
                 return
             }
+            if isGeneratedIntegrationPackage(id),
+               !isIntegrationActionEnabled(packageID: id, actionID: actionID) {
+                errorMessage = "This integration function is disabled in the Custom CI settings."
+                return
+            }
 
             do {
                 let catalog = HaloIntegrationCatalog.shared
@@ -1742,10 +1747,29 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
                     bundleIdentifier: bundleIdentifier,
                     actionID: actionID
                 )
-                guard let files = HaloIntegrationFilePrompt.collect(
-                    for: invocation,
-                    parentWindow: NSApp.keyWindow ?? NSApp.mainWindow
-                ) else { return }
+
+                let draggedFiles = HaloIntegrationDragSession.shared.committedFiles(
+                    packageID: id,
+                    actionID: actionID
+                )
+                let files: [URL]
+                if let draggedFiles {
+                    guard HaloIntegrationCatalog.actionSupports(
+                        invocation.action,
+                        files: draggedFiles
+                    ) else {
+                        errorMessage = "The dropped files are no longer compatible with this function."
+                        return
+                    }
+                    files = draggedFiles
+                } else {
+                    guard let selected = HaloIntegrationFilePrompt.collect(
+                        for: invocation,
+                        parentWindow: NSApp.keyWindow ?? NSApp.mainWindow
+                    ) else { return }
+                    files = selected
+                }
+
                 guard let options = HaloIntegrationOptionPrompt.collect(
                     for: invocation,
                     parentWindow: NSApp.keyWindow ?? NSApp.mainWindow
@@ -1769,6 +1793,9 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
                     actionID: actionID
                 )
                 try catalog.invoke(freshInvocation, files: files, options: options)
+                if draggedFiles != nil {
+                    HaloIntegrationDragSession.shared.clear(packageID: id)
+                }
                 notice = "Sent \(freshInvocation.action.name) to \(freshInvocation.integration.name)."
             } catch {
                 errorMessage = error.localizedDescription
