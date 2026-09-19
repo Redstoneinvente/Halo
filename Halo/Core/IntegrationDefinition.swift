@@ -376,11 +376,20 @@ enum IntegrationManifestCodec {
                 }
             )
         }
+        let dismissBehavior: CIDismissBehavior?
+        if let rawDismissBehavior = manifest.dismissBehavior {
+            guard let parsed = CIDismissBehavior(rawValue: rawDismissBehavior) else {
+                throw IntegrationManifestError.invalidPresentation("dismissBehavior must be transient, standard, interactive, or persistent.")
+            }
+            dismissBehavior = parsed
+        } else {
+            dismissBehavior = nil
+        }
         return IntegrationDefinition(
             protocolVersion: 2,
             app: IntegrationAppIdentity(name: manifest.app.name, bundleIdentifier: manifest.app.bundleIdentifier),
             presentation: presentation,
-            dismissBehavior: manifest.dismissBehavior.flatMap(CIDismissBehavior.init(rawValue:)),
+            dismissBehavior: dismissBehavior,
             actions: actions,
             triggers: triggers,
             delivery: IntegrationDeliveryDefinition(type: manifest.delivery?.type ?? "openRequest")
