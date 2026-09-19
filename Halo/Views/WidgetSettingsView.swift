@@ -885,12 +885,17 @@ struct ClosedNotchSettingsView: View {
             ColorPicker("Color", selection: Binding(get: { options.wrappedValue.color.color }, set: { options.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
             Text("Choose Activity in either slot to reserve that side for Live Activities. The Activity widget uses the same horizontal/vertical padding, camera margin, outer margin and element spacing as every other Closed Notch item.").font(.caption)
         }
-        Section("Live activities") {
+        Section("Live Activity widget") {
             Toggle("Automatically use a free side", isOn: Binding(
                 get: { UserDefaults.standard.object(forKey: "HaloLiveActivitiesClosedAutoPresent") as? Bool ?? true },
                 set: { UserDefaults.standard.set($0, forKey: "HaloLiveActivitiesClosedAutoPresent") }
             ))
-            Text("When enabled, a new Live Activity can temporarily use an empty/inactive side even if Activity is not permanently selected. Turn it off to show Live Activities only in a slot explicitly set to Activity.").font(.caption).foregroundStyle(.secondary)
+            Text("This controls the Closed Notch Activity widget only. Select Activity for the left or right slot above to reserve a side, or enable automatic placement to temporarily use an available side when an activity arrives.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("The widget inherits the Closed Notch padding, camera margin, outer-edge margin and element spacing configured on this page.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         Section("Bluetooth events") {
             Toggle("Show Bluetooth connection states", isOn: $bluetoothEvents)
