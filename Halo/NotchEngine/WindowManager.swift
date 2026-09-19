@@ -355,7 +355,9 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             return
         }
 
-        _ = fileDragHandler?(.exited, [])
+        if fileDragHandler?(.exited, []) == true {
+            return
+        }
         dragStateHandler?(false, 0)
     }
 
@@ -387,6 +389,9 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
         }
         guard acceptsFileDrop else {
             super.concludeDragOperation(sender)
+            return
+        }
+        if fileDragHandler?(.exited, []) == true {
             return
         }
         dragStateHandler?(false, 0)
@@ -2008,9 +2013,10 @@ final class WindowManager {
                         return true
 
                     case .exited:
-                        let handled = session.isActive && !session.dropCommitted
-                        session.cancelUncommittedDrag()
-                        return handled
+                        // Resizing the notch during CI takeover can generate a
+                        // transient drag exit. Keep ownership until the global
+                        // mouse-up path decides whether the drag was committed.
+                        return session.isActive
 
                     case .dropped:
                         let actions = HaloIntegrationCatalog.shared.compatibleInvocations(
