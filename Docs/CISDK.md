@@ -412,6 +412,7 @@ clipboard.copy
 media.playPause
 media.next
 media.previous
+app.integration.invoke
 audio.volume.set
 shortcut.run
 file.openSelected
@@ -466,6 +467,7 @@ Media.Control
 Audio.ReadState
 Audio.Control
 Applications.Observe
+AppIntegration.Execute
 Bluetooth.Observe
 ScreenRecording.Observe
 Network.HTTP
@@ -1179,9 +1181,9 @@ Each package also has its own enable toggle, priority, permission grants, and is
 }
 ```
 
-Supported permissions: `Media.ReadState`, `Media.Control`, `Applications.Observe`, `Clipboard.Write`, `URL.Open`.
+Supported permissions: `Media.ReadState`, `Media.Control`, `Applications.Observe`, `Clipboard.Write`, `URL.Open`; SDK 0.2 additionally implements `Audio.ReadState` and `AppIntegration.Execute`.
 
-Supported capability labels: `LocalAssets`, `LocalState`, `AutomaticTriggers`, `MediaControls`. Capabilities are descriptive; they never grant authority. Permissions remain explicit and revocable.
+Supported capability labels: `LocalAssets`, `LocalState`, `AutomaticTriggers`, `MediaControls`; SDK 0.2 additionally implements `AppIntegrations`. Capabilities are descriptive; they never grant authority. Permissions remain explicit and revocable.
 
 ### Interface document
 
@@ -1246,9 +1248,15 @@ SDK 0.1 button actions are inline descriptors. Supported actions are:
 - `media.playPause` — `Media.Control`
 - `media.next` — `Media.Control`
 - `media.previous` — `Media.Control`
+- SDK 0.2: `app.integration.invoke` — `AppIntegration.Execute`; requires `bundleIdentifier` and `actionID`, and resolves only against a currently validated installed `HaloIntegration.json`
 
-No action can launch a process, shell, script, dylib, arbitrary selector, or arbitrary AppKit/Swift call.
+`app.integration.invoke` is a manifest-backed broker, not a generic process launcher. No action can launch a shell, script, dylib, arbitrary selector, or arbitrary AppKit/Swift call.
 
+### Automatic app-integration CIs
+
+Halo may generate managed SDK 0.2 `.haloCI` packages from validated installed-app integration manifests. Generation must use the normal package validator, normal per-package preferences, normal priority arbitration, and the same action authorization boundary. Generated packages are identified by Halo-owned marker metadata and must never overwrite an unmarked user package.
+
+The authoritative implementation/partner guide is `Docs/AutoIntegrationCI.md`.
 ### Triggers
 
 `triggers.json` is optional. Without automatic triggers a package can still be opened manually.
