@@ -173,8 +173,15 @@ private struct HaloLockedAccessSurface: View {
     @State private var password = ""
     @State private var licenseKey = ""
     @State private var creatingAccount = false
+    @State private var clipboardLicenseDetected = false
 
-    private var preferredSize: CGSize { CGSize(width: 540, height: account.isSignedIn ? 470 : 390) }
+    private var preferredSize: CGSize {
+        let baseHeight: CGFloat = account.isSignedIn ? 470 : 390
+        return CGSize(
+            width: 540,
+            height: baseHeight + (clipboardLicenseDetected ? 48 : 0)
+        )
+    }
 
     var body: some View {
         ZStack {
@@ -194,9 +201,25 @@ private struct HaloLockedAccessSurface: View {
             if !surfaceState.expanded { surfaceState.expanded = true }
         }
         .onAppear { publishPreferredSize() }
-        .onChange(of: surfaceState.expanded) { _ in publishPreferredSize() }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloLicenseClipboardDetected"))) { _ in
+            clipboardLicenseDetected = true
+            publishPreferredSize()
+        }
+        .onChange(of: surfaceState.expanded) { expanded in
+            if !expanded {
+                clipboardLicenseDetected = false
+            }
+            publishPreferredSize()
+        }
         .onChange(of: account.isSignedIn) { _ in publishPreferredSize() }
+        .onChange(of: license.state.isValid) { valid in
+            if valid {
+                clipboardLicenseDetected = false
+                publishPreferredSize()
+            }
+        }
         .onDisappear {
+            clipboardLicenseDetected = false
             surfaceState.contextPreferredSize = nil
         }
     }
@@ -204,6 +227,11 @@ private struct HaloLockedAccessSurface: View {
     private var setupContent: some View {
         VStack(spacing: 18) {
             header
+
+            if clipboardLicenseDetected {
+                licenseClipboardBanner
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             if !account.isSignedIn {
                 accountStep
@@ -239,6 +267,38 @@ private struct HaloLockedAccessSurface: View {
                 .foregroundStyle(.white.opacity(0.62))
                 .multilineTextAlignment(.center)
         }
+    }
+
+    private var licenseClipboardBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "key.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("License key detected in your clipboard")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+
+                Text(account.isSignedIn
+                     ? "Halo opened so you can activate it below."
+                     : "Halo opened so you can sign in and activate it.")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.56))
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+        )
+        .frame(maxWidth: 450)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("License key detected in your clipboard. Halo opened so you can activate it.")
     }
 
     private var accountStep: some View {
