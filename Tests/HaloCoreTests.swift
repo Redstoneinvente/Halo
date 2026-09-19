@@ -510,9 +510,13 @@ final class HaloCoreTests: XCTestCase {
         var configuration = Configuration()
         configuration.allDisplays = true
         configuration.showShelf = false
+        configuration.hoverOpenDelay = 0.4
+        configuration.hoverCloseDelay = 0.8
         let decoded = try JSONDecoder().decode(Configuration.self, from: JSONEncoder().encode(configuration))
         XCTAssertTrue(decoded.allDisplays)
         XCTAssertFalse(decoded.showShelf)
+        XCTAssertEqual(decoded.resolvedHoverOpenDelay, 0.4)
+        XCTAssertEqual(decoded.resolvedHoverCloseDelay, 0.8)
     }
     func testModuleOrderDeduplicatesAndRestoresMissingModules() {
         var layout = WorkspaceLayout(); layout.order = [.timer, .timer, .clock]
