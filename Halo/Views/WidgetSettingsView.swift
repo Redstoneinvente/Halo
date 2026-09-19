@@ -883,7 +883,14 @@ struct ClosedNotchSettingsView: View {
             itemPicker("Right slot", options.right)
             PreciseSlider(title: "Text size", value: options.fontSize, range: 8...24, step: 1, suffix: "pt")
             ColorPicker("Color", selection: Binding(get: { options.wrappedValue.color.color }, set: { options.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
-            Text("Active Halo activities have priority: they use an Activity slot, an inactive side, or temporarily replace the right slot if both sides are occupied.").font(.caption)
+            Text("Choose Activity in either slot to reserve that side for Live Activities. The Activity widget uses the same horizontal/vertical padding, camera margin, outer margin and element spacing as every other Closed Notch item.").font(.caption)
+        }
+        Section("Live activities") {
+            Toggle("Automatically use a free side", isOn: Binding(
+                get: { UserDefaults.standard.object(forKey: "HaloLiveActivitiesClosedAutoPresent") as? Bool ?? true },
+                set: { UserDefaults.standard.set($0, forKey: "HaloLiveActivitiesClosedAutoPresent") }
+            ))
+            Text("When enabled, a new Live Activity can temporarily use an empty/inactive side even if Activity is not permanently selected. Turn it off to show Live Activities only in a slot explicitly set to Activity.").font(.caption).foregroundStyle(.secondary)
         }
         Section("Bluetooth events") {
             Toggle("Show Bluetooth connection states", isOn: $bluetoothEvents)
