@@ -152,6 +152,7 @@ private struct HaloCIDragSummary: Equatable, Sendable {
     var itemCount = 0
     var fileCount = 0
     var folderCount = 0
+    var extensionlessFileCount = 0
     var extensions: [String] = []
 
     var kind: String {
@@ -348,6 +349,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
             fileDragActive: dragActive && dragClassificationReady,
             fileDragFileCount: dragSummary.fileCount,
             fileDragFolderCount: dragSummary.folderCount,
+            fileDragExtensionlessFileCount: dragSummary.extensionlessFileCount,
             fileDragExtensions: Set(dragSummary.extensions)
         )
     }
@@ -541,6 +543,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
     nonisolated private static func quickSummary(_ urls: [URL]) -> HaloCIDragSummary {
         var files = 0
         var folders = 0
+        var extensionless = 0
         var extensions = Set<String>()
 
         for url in urls {
@@ -549,7 +552,9 @@ final class HaloCIContextProviderEngine: ObservableObject {
             } else {
                 files += 1
                 let ext = url.pathExtension.lowercased()
-                if !ext.isEmpty, extensions.count < 24 {
+                if ext.isEmpty {
+                    extensionless += 1
+                } else if extensions.count < 24 {
                     extensions.insert(ext)
                 }
             }
@@ -559,6 +564,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
             itemCount: urls.count,
             fileCount: files,
             folderCount: folders,
+            extensionlessFileCount: extensionless,
             extensions: extensions.sorted()
         )
     }
@@ -566,6 +572,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
     nonisolated private static func classifiedSummary(_ urls: [URL]) -> HaloCIDragSummary {
         var files = 0
         var folders = 0
+        var extensionless = 0
         var extensions = Set<String>()
 
         for url in urls.prefix(256) {
@@ -575,7 +582,9 @@ final class HaloCIContextProviderEngine: ObservableObject {
             } else {
                 files += 1
                 let ext = url.pathExtension.lowercased()
-                if !ext.isEmpty, extensions.count < 24 {
+                if ext.isEmpty {
+                    extensionless += 1
+                } else if extensions.count < 24 {
                     extensions.insert(ext)
                 }
             }
@@ -590,6 +599,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
             itemCount: urls.count,
             fileCount: files,
             folderCount: folders,
+            extensionlessFileCount: extensionless,
             extensions: extensions.sorted()
         )
     }
