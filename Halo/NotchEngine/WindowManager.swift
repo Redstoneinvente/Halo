@@ -56,6 +56,7 @@ final class SurfaceState: ObservableObject {
     private var hoverExpansionRequested = false
     private var hoverOpeningGuardActive = false
     private var hoverExitPendingDuringOpening = false
+    private var hoverCloseDelay: Double = 0
 
     func cancelFileDrop() {
         dropExitTask?.cancel()
@@ -132,7 +133,32 @@ final class SurfaceState: ObservableObject {
 
         hoverExitPendingDuringOpening = false
         if shouldCollapse && expanded {
-            expanded = false
+            scheduleHoverCollapse(after: hoverCloseDelay)
+        }
+    }
+
+    private func scheduleHoverCollapse(after delay: Double) {
+        collapseTask?.cancel()
+        let delay = min(10, max(0, delay))
+
+        guard delay > 0.001 else {
+            collapseTask = nil
+            if !hoverInside && !pinned && !editingGeometry && !dropTargeted {
+                expanded = false
+            }
+            return
+        }
+
+        collapseTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled,
+                  let self,
+                  !self.hoverInside,
+                  !self.pinned,
+                  !self.editingGeometry,
+                  !self.dropTargeted else { return }
+            self.collapseTask = nil
+            self.expanded = false
         }
     }
 
@@ -142,8 +168,9 @@ final class SurfaceState: ObservableObject {
         hoverExpansionRequested = false
     }
 
-    func hover(_ inside: Bool, enabled: Bool, openDelay: Double = 0) {
+    func hover(_ inside: Bool, enabled: Bool, openDelay: Double = 0, closeDelay: Double = 0) {
         hoverInside = inside
+        hoverCloseDelay = min(10, max(0, closeDelay))
         if inside {
             hoverExitPendingDuringOpening = false
         }
@@ -197,9 +224,10 @@ final class SurfaceState: ObservableObject {
                 return
             }
 
-            // Once the opening transition is complete, hover exit is truly immediate.
+            // Once the opening transition is complete, honor the user's hover-close grace
+            // period. Re-entering Halo cancels this task at the top of hover(_:enabled:...).
             // Pixel Pal's optional boot-down gate is applied later by WindowManager.
-            expanded = false
+            scheduleHoverCollapse(after: hoverCloseDelay)
         }
     }
 }
