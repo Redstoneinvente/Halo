@@ -556,6 +556,9 @@ final class WindowManager {
         var refreshDropCIRegistration: (() -> Void)?
         var pixelPalCollapseWork: DispatchWorkItem?
         var hoverOpeningCompletionWork: DispatchWorkItem?
+        var mouseDownDismissHold: UUID?
+        var menuDismissHolds: [UUID] = []
+        var popoverDismissHolds: [UUID] = []
         init() {
             panel = HaloPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             panel.isReleasedWhenClosed = false
@@ -586,6 +589,7 @@ final class WindowManager {
         }
         func stop() {
             animator.cancel(); state.hoverExpandTask?.cancel(); state.collapseTask?.cancel(); state.dropExitTask?.cancel()
+            state.dismissCoordinator.reset()
             pixelPalCollapseWork?.cancel()
             subscription?.cancel(); contextSizeSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); contextCompactHeightSubscription?.cancel()
             panel.close(); ambientPanel.close(); geometryEditorPanel.close()
@@ -609,6 +613,7 @@ final class WindowManager {
     private var hudNotchExpansion: HUDNotchExpansion?
     private var hudNotchHideWork: DispatchWorkItem?
     private var hudMonitor: Any?
+    private var dismissInteractionMonitor: Any?
     private var lastHUDCapsLock = false
     private let store: AppStore
     private let startupActivationContext: ActivationLaunchContext
