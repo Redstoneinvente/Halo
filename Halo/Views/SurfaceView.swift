@@ -4170,7 +4170,11 @@ private struct OpenNotchItemView: View {
         Group {
             switch item.kind {
             case .module:
-                if let module = item.module, layout.enabled.contains(module) {
+                if let module = item.module {
+                    // Visual Workspace items own their own presence and visibility.
+                    // Do not also gate them through layout.enabled, which belongs to
+                    // the legacy Modules/dashboard system and can become out of sync
+                    // with saved Visual Workspace items across profiles.
                     WidgetCard(style: style, availableHeight: slotSize.height, availableWidth: slotSize.width, fillsCell: module == .pet) {
                         BuiltinOrIntegrationWidget(module: module, store: store)
                     }
