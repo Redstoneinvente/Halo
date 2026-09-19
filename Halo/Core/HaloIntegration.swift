@@ -1356,7 +1356,7 @@ enum HaloAutoIntegrationCIGenerator {
                     ["type": "Spacer"],
                     [
                         "type": "Badge",
-                        "text": "\(integration.manifest.actions.count) actions"
+                        "text": "Functions"
                     ]
                 ]
             ],
@@ -1405,7 +1405,7 @@ enum HaloAutoIntegrationCIGenerator {
                     ],
                     [
                         "type": "Badge",
-                        "text": "\(integration.manifest.actions.count)"
+                        "text": "APP"
                     ]
                 ]
             ],
