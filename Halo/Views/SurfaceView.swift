@@ -5763,6 +5763,304 @@ private enum ContextMusicArtworkReader {
     }
 }
 
+// MARK: - Installed app integration CI renderer
+
+private struct IntegrationCICompactView: View {
+    let candidate: CIEligibleCandidate?
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "app.connected.to.app.below.fill")
+                .font(.system(size: 10, weight: .semibold))
+            Text(candidate?.registration.metadata.name ?? "Integration")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private enum IntegrationOptionDraftError: LocalizedError {
+    case invalid(name: String, type: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalid(let name, let type):
+            return "\(name) must be a valid \(type) value."
+        }
+    }
+}
+
+@MainActor
+private struct IntegrationCIView: View {
+    let candidate: CIEligibleCandidate
+    let session: CIActivationSession
+    @ObservedObject var surfaceState: SurfaceState
+    @ObservedObject var runtime: IntegrationCIRuntime
+
+    @State private var textDrafts: [String: String] = [:]
+    @State private var boolDrafts: [String: Bool] = [:]
+    @State private var isExecuting = false
+    @State private var actionError: String?
+
+    private var registration: CIRegistration { candidate.registration }
+    private var configuration: CIConfiguration { runtime.configuration(for: registration) }
+    private var payloadCommitted: Bool { runtime.isPayloadCommitted(session: session) }
+    private var actions: [CIActionDefinition] {
+        registration.supportedActions.filter {
+            session.eligibleActionIDs.contains($0.id) && configuration.actionEnabled($0.id)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "app.connected.to.app.below.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 34, height: 34)
+                    .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(registration.metadata.name)
+                        .font(.headline)
+                    Text("Third-party integration · \(registration.metadata.version)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    let shouldCollapse = runtime.dismiss(displayID: session.displayID, pinned: surfaceState.pinned)
+                    if shouldCollapse && !surfaceState.pinned {
+                        surfaceState.expanded = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Close \(registration.metadata.name)")
+            }
+
+            if session.payloadHandle != nil && !payloadCommitted {
+                Label(
+                    candidate.event.fileDrag.map { "Drop \($0.itemCount) item\($0.itemCount == 1 ? "" : "s") to commit this payload." }
+                        ?? "Drop the files to commit this payload.",
+                    systemImage: "arrow.down.doc.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+
+            if let actionError {
+                Label(actionError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            if actions.isEmpty {
+                ContentUnavailableView(
+                    "No enabled actions",
+                    systemImage: "switch.2",
+                    description: Text("Enable an advertised action in Context Interface Settings.")
+                )
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(actions) { action in
+                            actionCard(action)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear { publishSizingIfCurrent() }
+        .onChange(of: runtime.revision) { _ in publishSizingIfCurrent() }
+    }
+
+    @ViewBuilder
+    private func actionCard(_ action: CIActionDefinition) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(action.name).font(.subheadline.weight(.semibold))
+                    switch action.input.type {
+                    case .none:
+                        Text("No file input required")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    case .files:
+                        Text(fileInputSummary(action.input))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Button("Run") { run(action) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(isExecuting || (action.input.type == .files && session.payloadHandle != nil && !payloadCommitted))
+            }
+
+            if !action.options.isEmpty {
+                Divider().opacity(0.35)
+                ForEach(action.options) { option in
+                    optionEditor(option, actionID: action.id)
+                }
+            }
+        }
+        .padding(11)
+        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        }
+    }
+
+    @ViewBuilder
+    private func optionEditor(_ option: CIActionOptionDefinition, actionID: String) -> some View {
+        let key = actionID + "::" + option.key
+        if option.type == "boolean" {
+            Toggle(option.name, isOn: Binding(
+                get: { boolDrafts[key] ?? defaultBool(option, actionID: actionID) },
+                set: { boolDrafts[key] = $0 }
+            ))
+            .toggleStyle(.switch)
+            .font(.caption)
+        } else {
+            LabeledContent(option.name + (option.required ? " *" : "")) {
+                TextField(option.key, text: Binding(
+                    get: { textDrafts[key] ?? defaultText(option, actionID: actionID) },
+                    set: { textDrafts[key] = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 160, idealWidth: 220)
+            }
+            .font(.caption)
+        }
+    }
+
+    private func run(_ action: CIActionDefinition) {
+        guard !isExecuting else { return }
+        do {
+            let options = try typedOverrides(for: action)
+            actionError = nil
+            isExecuting = true
+            Task { @MainActor in
+                defer { isExecuting = false }
+                do {
+                    let shouldCollapse = try await runtime.executeAction(
+                        ciID: registration.id,
+                        actionID: action.id,
+                        activationSessionID: session.id,
+                        options: options,
+                        parentWindow: nil,
+                        pinned: surfaceState.pinned
+                    )
+                    if shouldCollapse && !surfaceState.pinned {
+                        surfaceState.expanded = false
+                    }
+                } catch {
+                    actionError = error.localizedDescription
+                }
+            }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func typedOverrides(for action: CIActionDefinition) throws -> [String: CIValue] {
+        var result: [String: CIValue] = [:]
+        for option in action.options {
+            let key = action.id + "::" + option.key
+            if option.type == "boolean" {
+                if let value = boolDrafts[key] { result[option.key] = .boolean(value) }
+                continue
+            }
+            guard let raw = textDrafts[key] else { continue }
+            guard let value = parse(raw, type: option.type) else {
+                throw IntegrationOptionDraftError.invalid(name: option.name, type: option.type)
+            }
+            result[option.key] = value
+        }
+        return result
+    }
+
+    private func parse(_ raw: String, type: String) -> CIValue? {
+        switch type {
+        case "string": return .string(raw)
+        case "integer": return Int(raw).map(CIValue.integer)
+        case "double": return Double(raw).map(CIValue.double)
+        case "stringArray":
+            return .stringArray(csv(raw))
+        case "integerArray":
+            let parts = csv(raw)
+            let parsed = parts.compactMap(Int.init)
+            return parsed.count == parts.count ? .integerArray(parsed) : nil
+        case "doubleArray":
+            let parts = csv(raw)
+            let parsed = parts.compactMap(Double.init)
+            return parsed.count == parts.count ? .doubleArray(parsed) : nil
+        default:
+            return nil
+        }
+    }
+
+    private func csv(_ raw: String) -> [String] {
+        raw.split(separator: ",", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func defaultValue(_ option: CIActionOptionDefinition, actionID: String) -> CIValue? {
+        configuration.actions[actionID]?.optionDefaults[option.key] ?? option.defaultValue
+    }
+
+    private func defaultBool(_ option: CIActionOptionDefinition, actionID: String) -> Bool {
+        guard case .boolean(let value)? = defaultValue(option, actionID: actionID) else { return false }
+        return value
+    }
+
+    private func defaultText(_ option: CIActionOptionDefinition, actionID: String) -> String {
+        guard let value = defaultValue(option, actionID: actionID) else { return "" }
+        switch value {
+        case .string(let value): return value
+        case .integer(let value): return String(value)
+        case .double(let value): return String(value)
+        case .boolean(let value): return value ? "true" : "false"
+        case .stringArray(let value): return value.joined(separator: ", ")
+        case .integerArray(let value): return value.map(String.init).joined(separator: ", ")
+        case .doubleArray(let value): return value.map(String.init).joined(separator: ", ")
+        }
+    }
+
+    private func fileInputSummary(_ input: CIActionInputDefinition) -> String {
+        if input.extensions.contains("*") {
+            return input.multiple ? "Accepts multiple files" : "Accepts one file"
+        }
+        let formats = input.extensions.map { "." + $0 }.joined(separator: ", ")
+        return (input.multiple ? "Files: " : "One file: ") + formats
+    }
+
+    private func publishSizingIfCurrent() {
+        guard runtime.isCurrent(sessionID: session.id, ciID: registration.id, displayID: session.displayID) else {
+            return
+        }
+        let presentation = registration.presentation
+        surfaceState.contextMinimumExpandedWidth = presentation.preferredExpandedWidth
+        surfaceState.contextPreferredSize = CGSize(
+            width: presentation.preferredExpandedWidth,
+            height: presentation.preferredExpandedHeight
+        )
+        surfaceState.contextPreferredCompactWidth = presentation.preferredCompactWidth
+        surfaceState.contextPreferredCompactHeight = presentation.preferredCompactHeight
+    }
+}
+
 // MARK: - Declarative Custom CI renderer
 
 private struct HaloCustomCIContentSizePreferenceKey: PreferenceKey {
