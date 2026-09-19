@@ -937,8 +937,8 @@ enum HaloAutoIntegrationCIGenerator {
         for integration: HaloIntegration,
         packageID: String
     ) -> HaloCIManifest {
-        let actionCount = integration.manifest.actions.count
-        let preferredHeight = min(680.0, max(220.0, 150.0 + Double(actionCount) * 58.0))
+        let visibleRows = min(6, max(1, integration.manifest.actions.count))
+        let expandedHeight = min(620.0, max(260.0, 210.0 + Double(visibleRows) * 54.0))
         return HaloCIManifest(
             schemaVersion: 1,
             sdkVersion: "0.2",
@@ -955,15 +955,9 @@ enum HaloAutoIntegrationCIGenerator {
             supportedStates: ["closed", "expanded"],
             surface: HaloCISurfaceContract(
                 sizing: HaloCISurfaceSizing(
-                    mode: "dynamic",
-                    closed: HaloCISizeRule(
-                        minWidth: 180, preferredWidth: 260, maxWidth: 520,
-                        minHeight: 32, preferredHeight: 42, maxHeight: 72
-                    ),
-                    expanded: HaloCISizeRule(
-                        minWidth: 360, preferredWidth: 560, maxWidth: 760,
-                        minHeight: 160, preferredHeight: preferredHeight, maxHeight: 720
-                    )
+                    mode: "static",
+                    closed: HaloCISizeRule(width: 280, height: 42),
+                    expanded: HaloCISizeRule(width: 580, height: expandedHeight)
                 ),
                 background: HaloCIBackgroundContract(
                     closed: HaloCIBackgroundStyle(
@@ -986,7 +980,36 @@ enum HaloAutoIntegrationCIGenerator {
     }
 
     private static func generatedInterface(for integration: HaloIntegration) -> [String: Any] {
-        var expandedChildren: [[String: Any]] = [
+        var actionChildren: [[String: Any]] = []
+
+        for action in integration.manifest.actions {
+            actionChildren.append([
+                "type": "Button",
+                "text": action.name,
+                "systemName": "bolt.fill",
+                "accessibilityLabel": "Run \(action.name) in \(integration.name)",
+                "action": [
+                    "id": "app.integration.invoke",
+                    "arguments": [
+                        "bundleIdentifier": integration.bundleIdentifier,
+                        "actionID": action.id
+                    ]
+                ]
+            ])
+
+            let detail = actionDetail(action)
+            if !detail.isEmpty {
+                actionChildren.append([
+                    "type": "Text",
+                    "text": detail,
+                    "style": "caption",
+                    "foreground": "secondary",
+                    "lineLimit": 2
+                ])
+            }
+        }
+
+        let expandedChildren: [[String: Any]] = [
             [
                 "type": "HStack",
                 "spacing": 8,
@@ -1004,9 +1027,7 @@ enum HaloAutoIntegrationCIGenerator {
                         "style": "headline",
                         "lineLimit": 1
                     ],
-                    [
-                        "type": "Spacer"
-                    ],
+                    ["type": "Spacer"],
                     [
                         "type": "Badge",
                         "text": "\(integration.manifest.actions.count) actions"
@@ -1020,39 +1041,13 @@ enum HaloAutoIntegrationCIGenerator {
                 "foreground": "secondary",
                 "lineLimit": 3
             ],
+            ["type": "Divider"],
             [
-                "type": "Divider"
-            ]
-        ]
-
-        for action in integration.manifest.actions {
-            expandedChildren.append([
-                "type": "Button",
-                "text": action.name,
-                "systemName": "bolt.fill",
-                "accessibilityLabel": "Run \(action.name) in \(integration.name)",
-                "action": [
-                    "id": "app.integration.invoke",
-                    "arguments": [
-                        "bundleIdentifier": integration.bundleIdentifier,
-                        "actionID": action.id
-                    ]
-                ]
-            ])
-
-            let detail = actionDetail(action)
-            if !detail.isEmpty {
-                expandedChildren.append([
-                    "type": "Text",
-                    "text": detail,
-                    "style": "caption",
-                    "foreground": "secondary",
-                    "lineLimit": 2
-                ])
-            }
-        }
-
-        expandedChildren.append(contentsOf: [
+                "type": "ScrollView",
+                "axis": "vertical",
+                "spacing": 8,
+                "children": actionChildren
+            ],
             ["type": "Divider"],
             [
                 "type": "Button",
@@ -1061,7 +1056,7 @@ enum HaloAutoIntegrationCIGenerator {
                 "accessibilityLabel": "Close \(integration.name) interface",
                 "action": ["id": "halo.ci.close"]
             ]
-        ])
+        ]
 
         return [
             "closed": [
