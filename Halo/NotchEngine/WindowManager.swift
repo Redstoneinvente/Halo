@@ -212,37 +212,49 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard acceptsFileDrop else { rejectFileDrop(); return [] }
+        // When the surface-wide Drop CI is unavailable (disabled or commercially
+        // locked), this subclass must not become the drag owner. SwiftUI may still
+        // have legitimate descendant drop destinations such as File Shelf, so defer
+        // completely to NSHostingView instead of swallowing the drag with [].
+        guard acceptsFileDrop else { return super.draggingEntered(sender) }
         let count = fileURLCount(sender)
-        guard count > 0 else { return [] }
+        guard count > 0 else { return super.draggingEntered(sender) }
         dragStateHandler?(true, count)
         return .copy
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard acceptsFileDrop else { rejectFileDrop(); return [] }
+        guard acceptsFileDrop else { return super.draggingUpdated(sender) }
         let count = fileURLCount(sender)
-        guard count > 0 else { return [] }
+        guard count > 0 else { return super.draggingUpdated(sender) }
         dragStateHandler?(true, count)
         return .copy
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
+        guard acceptsFileDrop else {
+            super.draggingExited(sender)
+            return
+        }
         dragStateHandler?(false, 0)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard acceptsFileDrop else { rejectFileDrop(); return false }
+        guard acceptsFileDrop else { return super.performDragOperation(sender) }
         let urls = fileURLs(sender)
         guard !urls.isEmpty else {
             dragStateHandler?(false, 0)
-            return false
+            return super.performDragOperation(sender)
         }
         dropHandler?(urls)
         return true
     }
 
     override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+        guard acceptsFileDrop else {
+            super.concludeDragOperation(sender)
+            return
+        }
         dragStateHandler?(false, 0)
     }
 }
