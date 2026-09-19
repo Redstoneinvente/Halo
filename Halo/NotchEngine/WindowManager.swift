@@ -405,8 +405,6 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
 
                 if self.acceptsFileDrop && !ownedBeforeExit {
                     self.dragStateHandler?(false, 0)
-                } else if !self.acceptsFileDrop {
-                    super.draggingExited(sender)
                 }
             }
             return
