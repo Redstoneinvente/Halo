@@ -222,6 +222,15 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
         didSet { refreshDropRegistration() }
     }
 
+    /// Drop Zone Studio is a presentation owned by Drop CI, not by the shared drag source.
+    /// This closure is evaluated after the normal SurfaceView arbiter has selected a winner.
+    var dropZoneOverlayAllowed: (() -> Bool)?
+
+    var permitsGlobalFileDrag: Bool { hasCommercialAccess }
+    var permitsDropZoneOverlay: Bool {
+        hasCommercialAccess && (dropZoneOverlayAllowed?() ?? false)
+    }
+
     private var fileDragRegistered = false
     private var surfaceDragActive = false
 
@@ -1876,6 +1885,10 @@ final class WindowManager {
                 view.sizingOptions = []
                 view.commercialAccessAllowed = { [weak self] in
                     self?.commercialAccessGranted ?? false
+                }
+                view.dropZoneOverlayAllowed = { [weak self, weak host] in
+                    guard let self, let host else { return false }
+                    return self.dropCISettingEnabled && host.state.activeCIIdentifier == "builtin.drop"
                 }
                 host.refreshDropCIRegistration = { [weak view] in
                     view?.refreshDropRegistration()
