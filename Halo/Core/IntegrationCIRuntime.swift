@@ -119,11 +119,17 @@ final class IntegrationCIRuntime: ObservableObject {
         }
 
         let candidate = resources.appendingPathComponent(filename, isDirectory: false)
-        guard candidate.deletingLastPathComponent().standardizedFileURL == resources.standardizedFileURL,
-              FileManager.default.fileExists(atPath: candidate.path) else {
+        let resolvedResources = resources.resolvingSymlinksInPath().standardizedFileURL
+        let resolvedCandidate = candidate.resolvingSymlinksInPath().standardizedFileURL
+
+        guard resolvedCandidate.deletingLastPathComponent() == resolvedResources,
+              FileManager.default.fileExists(atPath: resolvedCandidate.path),
+              let values = try? resolvedCandidate.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              values.isRegularFile == true,
+              (values.fileSize ?? 0) <= 20_000_000 else {
             return nil
         }
-        return candidate
+        return resolvedCandidate
     }
 
     func eligibleCandidates(displayID: String) -> [CIEligibleCandidate] {
