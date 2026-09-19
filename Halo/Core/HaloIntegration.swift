@@ -508,6 +508,7 @@ final class HaloIntegrationExecutionSession: ObservableObject {
     @Published private(set) var candidates: [HaloIntegrationInvocation] = []
     @Published private(set) var invocation: HaloIntegrationInvocation?
     @Published private(set) var files: [URL] = []
+    @Published private(set) var dropCommitted = false
     @Published var statusMessage: String?
     @Published var errorMessage: String?
 
@@ -557,6 +558,7 @@ final class HaloIntegrationExecutionSession: ObservableObject {
         self.candidates = uniqueCandidates
         invocation = nil
         self.files = cleanFiles
+        dropCommitted = false
         statusMessage = nil
         errorMessage = nil
     }
@@ -569,6 +571,7 @@ final class HaloIntegrationExecutionSession: ObservableObject {
         candidates = [invocation]
         self.invocation = invocation
         self.files = files.filter(\.isFileURL)
+        dropCommitted = true
         statusMessage = nil
         errorMessage = nil
     }
@@ -589,10 +592,22 @@ final class HaloIntegrationExecutionSession: ObservableObject {
         errorMessage = nil
     }
 
+    func commitDrop(files: [URL]) {
+        let cleanFiles = files.filter(\.isFileURL)
+        guard !cleanFiles.isEmpty else { return }
+        self.files = cleanFiles
+        dropCommitted = true
+    }
+
     func updateFiles(_ files: [URL]) {
         let cleanFiles = files.filter(\.isFileURL)
         guard !cleanFiles.isEmpty else { return }
         self.files = cleanFiles
+    }
+
+    func cancelUncommittedDrag() {
+        guard !dropCommitted else { return }
+        cancel()
     }
 
     func cancel() {
@@ -600,6 +615,7 @@ final class HaloIntegrationExecutionSession: ObservableObject {
         candidates = []
         invocation = nil
         files = []
+        dropCommitted = false
         statusMessage = nil
         errorMessage = nil
     }
