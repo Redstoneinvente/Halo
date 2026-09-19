@@ -9,7 +9,7 @@ import AppKit
 import Combine
 import Foundation
 
-struct HaloIntegrationOption: Codable, Hashable, Identifiable {
+struct HaloIntegrationOption: Codable, Hashable, Identifiable, Sendable {
     let key: String
     let name: String
     let type: String
@@ -19,21 +19,21 @@ struct HaloIntegrationOption: Codable, Hashable, Identifiable {
     var id: String { key }
 }
 
-struct HaloIntegrationAction: Codable, Hashable, Identifiable {
+struct HaloIntegrationAction: Codable, Hashable, Identifiable, Sendable {
     let id: String
     let name: String
     let supportedExtensions: [String]
     let options: [HaloIntegrationOption]
 }
 
-struct HaloIntegrationManifest: Codable, Hashable {
+struct HaloIntegrationManifest: Codable, Hashable, Sendable {
     let protocolVersion: Int
     let name: String
     let bundleIdentifier: String
     let actions: [HaloIntegrationAction]
 }
 
-struct HaloIntegration: Hashable, Identifiable {
+struct HaloIntegration: Hashable, Identifiable, Sendable {
     let appURL: URL
     let manifest: HaloIntegrationManifest
 
@@ -172,7 +172,7 @@ final class HaloIntegrationCatalog: ObservableObject {
 }
 
 
-struct HaloIntegrationInvocation: Identifiable, Hashable {
+struct HaloIntegrationInvocation: Identifiable, Hashable, Sendable {
     let integration: HaloIntegration
     let action: HaloIntegrationAction
 
@@ -367,7 +367,7 @@ enum HaloIntegrationOptionPrompt {
             } else {
                 let field = NSTextField(string: "")
                 field.placeholderString = placeholder(for: option)
-                field.frame.size.width = 420
+                field.widthAnchor.constraint(equalToConstant: 420).isActive = true
                 row.addArrangedSubview(field)
                 textField = field
             }
