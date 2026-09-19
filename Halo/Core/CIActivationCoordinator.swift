@@ -10,6 +10,9 @@ struct CIActivationSession: Identifiable, Hashable, Sendable {
     var payloadHandle: TriggerPayloadHandle?
     var activatedAt: Date
     var committed: Bool
+    /// For drag activations, the action card that accepted the committed payload.
+    /// Once set, the payload cannot be retargeted to a different partner action.
+    var committedActionID: String?
     var dismissed: Bool
     var openedSurfaceAutomatically: Bool
     var userOverrodeSurface: Bool
@@ -52,6 +55,7 @@ final class CIActivationCoordinator {
             payloadHandle: candidate.event.payloadHandle,
             activatedAt: now,
             committed: false,
+            committedActionID: nil,
             dismissed: false,
             openedSurfaceAutomatically: shouldOpen,
             userOverrodeSurface: false
@@ -77,11 +81,17 @@ final class CIActivationCoordinator {
     }
 
     @discardableResult
-    func markCommitted(sessionID: UUID) -> CIActivationSession? {
+    func markCommitted(sessionID: UUID, actionID: String) -> CIActivationSession? {
         lock.lock(); defer { lock.unlock() }
-        guard let entry = sessionsByDisplay.first(where: { $0.value.id == sessionID }) else { return nil }
+        guard let entry = sessionsByDisplay.first(where: { $0.value.id == sessionID }),
+              entry.value.eligibleActionIDs.contains(actionID) else { return nil }
         var session = entry.value
+        if let committedActionID = session.committedActionID,
+           committedActionID != actionID {
+            return nil
+        }
         session.committed = true
+        session.committedActionID = actionID
         sessionsByDisplay[entry.key] = session
         return session
     }
