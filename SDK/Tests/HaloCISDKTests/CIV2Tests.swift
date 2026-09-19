@@ -52,16 +52,15 @@ final class CIV2Tests: XCTestCase {
         XCTAssertFalse(keys.contains("input.drag.paths"))
         XCTAssertFalse(keys.contains("notification.last.body"))
 
-        let values = [
+        let publicValues = [
             "context.event.kind": "drag.entered",
             "input.drag.active": "true",
-            "input.drag.folderCount": "1",
-            "clipboard.lastEvent": "copy"
+            "input.drag.folderCount": "1"
         ]
 
         XCTAssertTrue(
             HaloCIContextCatalog.filter(
-                values,
+                publicValues,
                 sdkVersion: "0.1",
                 declaredPermissions: [],
                 grantedPermissions: []
@@ -70,13 +69,56 @@ final class CIV2Tests: XCTestCase {
 
         XCTAssertEqual(
             HaloCIContextCatalog.filter(
-                values,
+                publicValues,
                 sdkVersion: "0.2",
                 declaredPermissions: [],
                 grantedPermissions: []
             ),
-            values
+            publicValues
         )
+
+        let privateValues = [
+            "clipboard.lastEvent": "copy",
+            "notification.last.kind": "received",
+            "bluetooth.connectedCount": "2"
+        ]
+        let permissions: Set<String> = [
+            "Clipboard.Observe", "Notifications.Observe", "Bluetooth.Observe"
+        ]
+
+        XCTAssertTrue(
+            HaloCIContextCatalog.filter(
+                privateValues,
+                sdkVersion: "0.2",
+                declaredPermissions: permissions,
+                grantedPermissions: []
+            ).isEmpty
+        )
+        XCTAssertEqual(
+            HaloCIContextCatalog.filter(
+                privateValues,
+                sdkVersion: "0.2",
+                declaredPermissions: permissions,
+                grantedPermissions: permissions
+            ),
+            privateValues
+        )
+    }
+
+    func testContextObservationPermissionsRequireSDK02() throws {
+        for permission in ["Clipboard.Observe", "Notifications.Observe", "Bluetooth.Observe"] {
+            let root = try starter()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            try edit(root, "manifest.json") {
+                $0["permissions"] = [permission]
+                $0["sdkVersion"] = "0.1"
+            }
+            XCTAssertFalse(
+                HaloCIPackageValidator.validatePackage(at: root).isValid,
+                permission
+            )
+        }
     }
 
     func testContextRequiresBothDeclaredAndGrantedPermission() {
