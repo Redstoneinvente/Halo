@@ -9,11 +9,23 @@ struct IntegrationDeliveryDefinition: Codable, Hashable, Sendable {
     var type: String
 }
 
+struct IntegrationCardPresentationDefinition: Codable, Hashable, Sendable {
+    var bannerImage: String?
+    var category: String?
+    var description: String?
+    var accentColor: String?
+}
+
+struct IntegrationPresentationDefinition: Codable, Hashable, Sendable {
+    var card: IntegrationCardPresentationDefinition?
+}
+
 /// Immutable, normalized representation of a partner manifest.
 /// Protocol-specific fields are erased here so the runtime never branches on v1/v2 semantics.
 struct IntegrationDefinition: Codable, Hashable, Identifiable, Sendable {
     var protocolVersion: Int
     var app: IntegrationAppIdentity
+    var presentation: IntegrationPresentationDefinition? = nil
     var actions: [CIActionDefinition]
     var triggers: [CITriggerDefinition]
     var delivery: IntegrationDeliveryDefinition
@@ -44,6 +56,7 @@ enum IntegrationManifestError: LocalizedError, Equatable {
     case unknownActionReference(triggerID: String, actionID: String)
     case incompatibleTriggerAction(triggerID: String, actionID: String)
     case invalidEventName(String)
+    case invalidPresentation(String)
     case unsupportedDelivery(String)
 
     var errorDescription: String? {
@@ -70,6 +83,7 @@ enum IntegrationManifestError: LocalizedError, Equatable {
         case .unknownActionReference(let trigger, let action): return "trigger \(trigger) references unknown action \(action)."
         case .incompatibleTriggerAction(let trigger, let action): return "trigger \(trigger) cannot supply the input required by action \(action)."
         case .invalidEventName(let name): return "partner event name \(name) is invalid."
+        case .invalidPresentation(let detail): return "integration presentation is invalid: \(detail)"
         case .unsupportedDelivery(let value): return "unsupported integration delivery type \(value)."
         }
     }
@@ -133,9 +147,19 @@ enum IntegrationManifestCodec {
             var eventName: String?
         }
         struct Delivery: Decodable { var type: String }
+        struct Presentation: Decodable {
+            struct Card: Decodable {
+                var bannerImage: String?
+                var category: String?
+                var description: String?
+                var accentColor: String?
+            }
+            var card: Card?
+        }
 
         var protocolVersion: Int
         var app: App
+        var presentation: Presentation?
         var actions: [Action]
         var triggers: [Trigger]?
         var delivery: Delivery?
@@ -178,6 +202,7 @@ enum IntegrationManifestCodec {
         guard definition.actions.count <= 64 else { throw IntegrationManifestError.tooManyActions(definition.actions.count) }
         guard definition.triggers.count <= 32 else { throw IntegrationManifestError.tooManyTriggers(definition.triggers.count) }
         guard definition.delivery.type == "openRequest" else { throw IntegrationManifestError.unsupportedDelivery(definition.delivery.type) }
+        try validate(presentation: definition.presentation)
 
         var actionIDs = Set<String>()
         for action in definition.actions {
@@ -333,13 +358,59 @@ enum IntegrationManifestCodec {
                 requiredPermissions: permissions
             )
         }
+        let presentation = manifest.presentation.map {
+            IntegrationPresentationDefinition(
+                card: $0.card.map {
+                    IntegrationCardPresentationDefinition(
+                        bannerImage: $0.bannerImage,
+                        category: $0.category,
+                        description: $0.description,
+                        accentColor: $0.accentColor
+                    )
+                }
+            )
+        }
         return IntegrationDefinition(
             protocolVersion: 2,
             app: IntegrationAppIdentity(name: manifest.app.name, bundleIdentifier: manifest.app.bundleIdentifier),
+            presentation: presentation,
             actions: actions,
             triggers: triggers,
             delivery: IntegrationDeliveryDefinition(type: manifest.delivery?.type ?? "openRequest")
         )
+    }
+
+    private static func validate(presentation: IntegrationPresentationDefinition?) throws {
+        guard let card = presentation?.card else { return }
+
+        if let category = card.category?.trimmingCharacters(in: .whitespacesAndNewlines),
+           category.count > 40 {
+            throw IntegrationManifestError.invalidPresentation("card category exceeds 40 characters.")
+        }
+
+        if let description = card.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+           description.count > 160 {
+            throw IntegrationManifestError.invalidPresentation("card description exceeds 160 characters.")
+        }
+
+        if let accentColor = card.accentColor?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !accentColor.isEmpty,
+           accentColor.range(of: #"^#[0-9A-Fa-f]{6}$"#, options: .regularExpression) == nil {
+            throw IntegrationManifestError.invalidPresentation("card accentColor must use #RRGGBB.")
+        }
+
+        if let bannerImage = card.bannerImage?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !bannerImage.isEmpty {
+            guard bannerImage == URL(fileURLWithPath: bannerImage).lastPathComponent,
+                  !bannerImage.contains("/"),
+                  !bannerImage.contains("\\") else {
+                throw IntegrationManifestError.invalidPresentation("card bannerImage must be a bundle-resource filename.")
+            }
+            let ext = URL(fileURLWithPath: bannerImage).pathExtension.lowercased()
+            guard ["png", "jpg", "jpeg", "webp"].contains(ext) else {
+                throw IntegrationManifestError.invalidPresentation("card bannerImage must be PNG, JPG, JPEG, or WebP.")
+            }
+        }
     }
 
     private static func validate(input: CIActionInputDefinition, actionID: String) throws {
