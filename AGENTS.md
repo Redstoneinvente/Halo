@@ -12,6 +12,7 @@ Any task involving Halo **CI (Custom Interfaces)**, CI packages, CI SDK, CI Stud
 4. `Docs/Plugins.md`
 5. `Docs/Templates/BaseCI.md` — required base integration template for every new CI
 6. `CI_IMPLEMENTATION_GUIDE.md` — required for native/built-in CI changes
+7. `Docs/AutoIntegrationCI.md` — required for compatible-app discovery, generated app CIs, or `app.integration.invoke`
 
 Read them **before modifying code**.
 
