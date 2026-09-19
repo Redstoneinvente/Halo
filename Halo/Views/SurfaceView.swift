@@ -2773,13 +2773,38 @@ struct SurfaceView: View {
         usesVisualWorkspace && activeContext == nil && (state.expanded || visualWorkspaceSurfacePresented)
     }
     private var accent: Color { Color(hue: theme.tint, saturation: 0.65, brightness: 1) }
+
+    @ViewBuilder
+    private var integrationSurfaceContent: some View {
+        if let candidate = activeIntegrationCandidate,
+           let session = integrationCI.currentSession(displayID: state.displayID),
+           session.ciID == candidate.registration.id {
+            IntegrationCIView(
+                candidate: candidate,
+                session: session,
+                surfaceState: state,
+                runtime: integrationCI
+            )
+        } else if let candidate = activeIntegrationCandidate {
+            VStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(candidate.registration.metadata.name)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityLabel("Preparing \(candidate.registration.metadata.name)")
+        }
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
                 if !contextOwnsFullSurface &&
                     !presentsVisualWorkspaceSurface {
                     Group {
-                      if !state.expanded && customContextActive, let candidate = activeCustomCandidate {
+                      if !state.expanded && integrationContextActive {
+                        IntegrationCICompactView(candidate: activeIntegrationCandidate)
+                      } else if !state.expanded && customContextActive, let candidate = activeCustomCandidate {
                         HaloCustomCISurfaceView(package: candidate.package, surfaceState: state, workspace: workspace)
                       } else if !state.expanded && (state.compactWidth < 48 || state.compactHeight < 16) {
                         Circle().fill(store.deadline == nil ? accent : .green).frame(width: 6, height: 6)
@@ -2816,7 +2841,11 @@ struct SurfaceView: View {
                     .accessibilityAddTraits(.isButton)
                 }
                 if state.expanded || presentsVisualWorkspaceSurface {
-                    if customContextActive, let candidate = activeCustomCandidate {
+                    if integrationContextActive {
+                        integrationSurfaceContent
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                    } else if customContextActive, let candidate = activeCustomCandidate {
                         HaloCustomCISurfaceView(package: candidate.package, surfaceState: state, workspace: workspace)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                             .transition(.opacity.combined(with: .scale(scale: 0.985)))
@@ -2932,7 +2961,9 @@ struct SurfaceView: View {
 
             if contextOwnsFullSurface {
                 Group {
-                    if dropContextActive {
+                    if integrationContextActive {
+                        integrationSurfaceContent
+                    } else if dropContextActive {
                         DropContextView(itemCount: state.dropItemCount, surfaceState: state)
                     } else if contextMusicActive {
                         ContextMusicView(media: workspace.media, options: contextOptions,
@@ -3155,6 +3186,19 @@ struct SurfaceView: View {
         }
         .onChange(of: state.expanded) { expanded in
             if !expanded { clipboardOpenedNotch = false }
+            if integrationCI.currentSession(displayID: state.displayID) != nil,
+               !integrationAutoOpeningSurface {
+                integrationCI.noteUserSurfaceOverride(displayID: state.displayID)
+            }
+        }
+        .onAppear {
+            synchronizeSurfaceCIOwnership()
+        }
+        .onChange(of: activeContextCandidate?.arbitration.ciID) { _ in
+            synchronizeSurfaceCIOwnership()
+        }
+        .onChange(of: state.displayID) { _ in
+            synchronizeSurfaceCIOwnership()
         }
         .onChange(of: activeContext) { _ in
             if activeContext == nil, state.expanded, usesVisualWorkspace {
@@ -3181,13 +3225,49 @@ struct SurfaceView: View {
                 clipboardCI.setInteractionActive(false)
                 if activeContext != nil { clipboardOpenedNotch = false }
             }
-            if !transferContextActive && !clipboardContextActive && !customContextActive {
+            if !transferContextActive && !clipboardContextActive && !customContextActive && !integrationContextActive {
                 state.contextPreferredCompactWidth = nil
                 state.contextPreferredCompactHeight = nil
                 state.contextMinimumExpandedWidth = nil
                 if activeContext != nil && !contextMusicActive { state.contextPreferredSize = nil }
             }
-            workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive), token: openVisibilityToken)
+            workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive || integrationContextActive), token: openVisibilityToken)
+        }
+    }
+
+    private func synchronizeSurfaceCIOwnership() {
+        let winnerID = activeContextCandidate?.arbitration.ciID
+        if state.activeCIIdentifier != winnerID {
+            state.activeCIIdentifier = winnerID
+        }
+
+        let integrationWinnerID = integrationContextActive ? winnerID : nil
+        let decision = integrationCI.surfaceWinnerDidChange(
+            ciID: integrationWinnerID,
+            displayID: state.displayID,
+            surfaceExpanded: state.expanded,
+            pinned: state.pinned
+        )
+
+        if decision.shouldOpenSurface, !state.expanded {
+            integrationAutoOpeningSurface = true
+            state.collapseTask?.cancel()
+            state.expanded = true
+            DispatchQueue.main.async {
+                integrationAutoOpeningSurface = false
+            }
+        } else {
+            integrationAutoOpeningSurface = false
+        }
+
+        if dropContextActive && state.dropTargeted {
+            // Drop CI is a normal consumer of the same drag event. It may expand only after
+            // winning the central arbitration above.
+            state.activateDropOwnership()
+        } else if decision.shouldCollapseSurface,
+                  activeContext == nil,
+                  !state.pinned {
+            state.expanded = false
         }
     }
 
@@ -3204,7 +3284,7 @@ struct SurfaceView: View {
             } else {
                 SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
             }
-            if !transferContextActive && !clipboardContextActive && !customContextActive &&
+            if !transferContextActive && !clipboardContextActive && !customContextActive && !integrationContextActive &&
                 ((!state.expanded && !presentsVisualWorkspaceSurface) || layout.closedNotch?.applyBackgroundWhenOpened == true) {
                 AlbumNotchBackground(options: closedBackgroundOptions, media: workspace.media, system: workspace.system)
             }
