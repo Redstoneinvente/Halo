@@ -14,12 +14,14 @@ Any task involving Halo **CI (Custom Interfaces)**, CI packages, CI SDK, CI Stud
 6. `CI_IMPLEMENTATION_GUIDE.md` — required for native/built-in CI changes
 7. `Docs/AutoIntegrationCI.md` — required for compatible-app discovery, generated app CIs, or `app.integration.invoke`
 8. `Docs/ContextProviderEngine.md` — required for Custom CI context providers, bindings, transient context, or context performance changes
+9. `Docs/AppIntegrationCIArchitecture.md` — authoritative target architecture for installed-app integrations; it supersedes the older physical generated-package design where they conflict
 
 Read them **before modifying code**.
 
 ### Hard rules
 
 - Do not invent a second CI/plugin architecture.
+- App integrations must use the shared CI registration/arbitration path defined in `Docs/AppIntegrationCIArchitecture.md`; triggers, rendering, discovery, payload ownership, and action delivery must remain separate responsibilities.
 - Do not expose arbitrary Halo Swift/SwiftUI/AppKit internals as a public SDK.
 - Do not execute third-party JavaScript, Swift, dylibs, shell commands, or downloaded native code inside the Halo app process.
 - Do not use `Bundle.load`, generic `eval`, shell interpolation, or unrestricted process execution as an SDK shortcut.
