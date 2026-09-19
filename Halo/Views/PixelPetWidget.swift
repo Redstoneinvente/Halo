@@ -3774,7 +3774,7 @@ private struct HaloPixelPalSettingsView: View {
                         .font(.caption.monospacedDigit())
                         .frame(width: 76, alignment: .trailing)
                 }
-                Text("How much fast circular cursor movement is required before Pixel Pet becomes dizzy. Lower values trigger sooner.")
+                Text("How much fast circular cursor movement is required before Pixel Pal becomes dizzy. Lower values trigger sooner.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
