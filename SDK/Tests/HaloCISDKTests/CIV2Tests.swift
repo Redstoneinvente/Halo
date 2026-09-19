@@ -32,6 +32,53 @@ final class CIV2Tests: XCTestCase {
         XCTAssertEqual(Set(fields.map(\.key)).count, fields.count)
         XCTAssertTrue(fields.allSatisfy { ["boolean", "number", "string"].contains($0.type) })
     }
+    func testContextProviderEngineFieldsAreCataloguedAndVersionGated() {
+        let keys = Set(HaloCIContextCatalog.fields.map(\.key))
+        for key in [
+            "context.event.kind",
+            "input.drag.active",
+            "input.drag.folderCount",
+            "input.drop.kind",
+            "clipboard.lastEvent",
+            "notification.last.kind",
+            "system.battery.onBattery",
+            "system.power.source",
+            "bluetooth.connectedCount"
+        ] {
+            XCTAssertTrue(keys.contains(key), key)
+        }
+
+        XCTAssertFalse(keys.contains("clipboard.text"))
+        XCTAssertFalse(keys.contains("input.drag.paths"))
+        XCTAssertFalse(keys.contains("notification.last.body"))
+
+        let values = [
+            "context.event.kind": "drag.entered",
+            "input.drag.active": "true",
+            "input.drag.folderCount": "1",
+            "clipboard.lastEvent": "copy"
+        ]
+
+        XCTAssertTrue(
+            HaloCIContextCatalog.filter(
+                values,
+                sdkVersion: "0.1",
+                declaredPermissions: [],
+                grantedPermissions: []
+            ).isEmpty
+        )
+
+        XCTAssertEqual(
+            HaloCIContextCatalog.filter(
+                values,
+                sdkVersion: "0.2",
+                declaredPermissions: [],
+                grantedPermissions: []
+            ),
+            values
+        )
+    }
+
     func testContextRequiresBothDeclaredAndGrantedPermission() {
         let values = ["audio.volume": "0.5", "media.title": "Private", "displays.count": "2", "private.key": "secret"]
         let declared: Set<String> = ["Media.ReadState", "Audio.ReadState"]
