@@ -899,6 +899,22 @@ final class HaloIntegrationDragSession: ObservableObject {
         return true
     }
 
+    func revalidate(candidates: [String: Set<String>]) {
+        guard targetDisplayID != nil else { return }
+        let filtered = candidates.filter { !$0.value.isEmpty }
+        if filtered.isEmpty {
+            clear()
+            return
+        }
+
+        candidateActionIDsByPackage = filtered
+        if let owningPackageID, filtered[owningPackageID] == nil {
+            self.owningPackageID = nil
+            owningDisplayID = nil
+        }
+        revision &+= 1
+    }
+
     func committedFiles(packageID: String, actionID: String) -> [URL]? {
         guard dropCommitted,
               candidateActionIDsByPackage[packageID]?.contains(actionID) == true,
