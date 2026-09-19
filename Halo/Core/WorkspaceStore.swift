@@ -810,7 +810,7 @@ final class SystemLiveActivitySource {
                 let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !normalized.isEmpty, normalized.count <= 600 else { continue }
                 if !result.strings.contains(normalized) { result.strings.append(normalized) }
-                if role == (kAXButtonRole as String), !result.buttons.contains(normalized) {
+                if role == "AXButton", !result.buttons.contains(normalized) {
                     result.buttons.append(normalized)
                 }
             }
