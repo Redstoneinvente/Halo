@@ -49,8 +49,11 @@ enum HaloIntegrationManifestError: LocalizedError {
     case missingBundleIdentifier
     case bundleIdentifierMismatch(manifest: String, actual: String)
     case missingActions
+    case tooManyActions(Int)
     case emptyActionID
+    case emptyActionName(String)
     case duplicateActionID(String)
+    case tooManyOptions(actionID: String, count: Int)
     case emptyOptionKey(actionID: String)
     case duplicateOptionKey(actionID: String, key: String)
     case unsupportedOptionType(actionID: String, type: String)
@@ -69,10 +72,16 @@ enum HaloIntegrationManifestError: LocalizedError {
             return "manifest bundle identifier \(manifest) does not match \(actual)."
         case .missingActions:
             return "manifest must expose at least one action."
+        case .tooManyActions(let count):
+            return "manifest exposes \(count) actions; protocol v1 supports at most 64."
         case .emptyActionID:
             return "actions must have non-empty IDs."
+        case .emptyActionName(let id):
+            return "action \(id) is missing its display name."
         case .duplicateActionID(let id):
             return "action ID \(id) is declared more than once."
+        case .tooManyOptions(let actionID, let count):
+            return "action \(actionID) exposes \(count) options; protocol v1 supports at most 32."
         case .emptyOptionKey(let actionID):
             return "action \(actionID) has an empty option key."
         case .duplicateOptionKey(let actionID, let key):
@@ -131,6 +140,9 @@ enum HaloIntegrationManifestCodec {
         guard !manifest.actions.isEmpty else {
             throw HaloIntegrationManifestError.missingActions
         }
+        guard manifest.actions.count <= 64 else {
+            throw HaloIntegrationManifestError.tooManyActions(manifest.actions.count)
+        }
 
         var actionIDs = Set<String>()
         for action in manifest.actions {
@@ -140,6 +152,15 @@ enum HaloIntegrationManifestCodec {
             }
             guard actionIDs.insert(actionID).inserted else {
                 throw HaloIntegrationManifestError.duplicateActionID(actionID)
+            }
+            guard !action.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw HaloIntegrationManifestError.emptyActionName(actionID)
+            }
+            guard action.options.count <= 32 else {
+                throw HaloIntegrationManifestError.tooManyOptions(
+                    actionID: actionID,
+                    count: action.options.count
+                )
             }
 
             var optionKeys = Set<String>()
