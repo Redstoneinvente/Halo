@@ -201,6 +201,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
 
     private var lastEvent: HaloCIContextEvent?
     private var dragActive = false
+    private var dragClassificationReady = false
     private var dragSummary = HaloCIDragSummary()
     private var dragClassificationGeneration: UInt64 = 0
     private var lastDrop = HaloCIDropRecord()
@@ -326,6 +327,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
         workspace = nil
         dragClassificationGeneration &+= 1
         dragActive = false
+        dragClassificationReady = false
         dragSummary = HaloCIDragSummary()
         lastDrop = HaloCIDropRecord()
         clipboard = HaloCIClipboardRecord()
@@ -343,7 +345,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
             minuteOfDay: (components.hour ?? 0) * 60 + (components.minute ?? 0),
             lowPowerMode: workspace.system.lowPower,
             displayCount: NSScreen.screens.count,
-            fileDragActive: dragActive,
+            fileDragActive: dragActive && dragClassificationReady,
             fileDragFileCount: dragSummary.fileCount,
             fileDragFolderCount: dragSummary.folderCount,
             fileDragExtensions: Set(dragSummary.extensions)
@@ -387,6 +389,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
     func reportDragStarted(urls: [URL]) {
         let clean = urls.filter(\.isFileURL)
         dragActive = !clean.isEmpty
+        dragClassificationReady = false
         dragSummary = Self.quickSummary(clean)
         recordEvent(kind: "drag.entered", source: "input.drag")
         classify(urls: clean, target: .drag)
@@ -396,6 +399,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
         guard dragActive || dragSummary.itemCount > 0 else { return }
         dragClassificationGeneration &+= 1
         dragActive = false
+        dragClassificationReady = false
         dragSummary = HaloCIDragSummary()
         recordEvent(kind: "drag.exited", source: "input.drag")
     }
@@ -405,6 +409,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
         guard !clean.isEmpty else { return }
         dragClassificationGeneration &+= 1
         dragActive = false
+        dragClassificationReady = false
         dragSummary = HaloCIDragSummary()
         lastDrop = HaloCIDropRecord(summary: Self.quickSummary(clean), date: Date())
         recordEvent(kind: "drop.received", source: "input.drop")
@@ -524,6 +529,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
             case .drag:
                 guard self.dragActive else { return }
                 self.dragSummary = summary
+                self.dragClassificationReady = true
             case .drop:
                 self.lastDrop.summary = summary
                 self.lastDrop.date = Date()
