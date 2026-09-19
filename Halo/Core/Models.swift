@@ -30,7 +30,7 @@ struct Theme: Codable, Equatable {
     }
 }
 
-enum HaloCloseBehavior: String, Codable, CaseIterable, Identifiable {
+enum HaloCloseBehavior: String, Codable, CaseIterable, Identifiable, Sendable {
     case instant = "Instant"
     case smart = "Smart"
     case relaxed = "Relaxed"
@@ -40,7 +40,7 @@ enum HaloCloseBehavior: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-enum CIDismissBehavior: String, Codable, CaseIterable, Identifiable {
+enum CIDismissBehavior: String, Codable, CaseIterable, Identifiable, Sendable {
     case transient
     case standard
     case interactive
