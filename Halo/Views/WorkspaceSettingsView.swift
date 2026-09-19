@@ -291,7 +291,7 @@ struct SettingsView: View {
             }
             Toggle("Expand on hover", isOn: $store.configuration.hoverToExpand)
             if store.configuration.hoverToExpand {
-                LabeledContent("Hover delay") {
+                LabeledContent("Open delay") {
                     HStack(spacing: 10) {
                         SwiftUI.Slider(
                             value: Binding(
@@ -307,6 +307,28 @@ struct SettingsView: View {
                                 Text("Instant")
                             } else {
                                 Text("\(store.configuration.resolvedHoverOpenDelay, specifier: "%.1f") s")
+                            }
+                        }
+                        .monospacedDigit()
+                        .frame(width: 58, alignment: .trailing)
+                    }
+                }
+                LabeledContent("Close delay") {
+                    HStack(spacing: 10) {
+                        SwiftUI.Slider(
+                            value: Binding(
+                                get: { store.configuration.resolvedHoverCloseDelay },
+                                set: { store.configuration.hoverCloseDelay = min(10, max(0, $0)) }
+                            ),
+                            in: 0...10,
+                            step: 0.1
+                        )
+                        .frame(width: 220)
+                        Group {
+                            if store.configuration.resolvedHoverCloseDelay == 0 {
+                                Text("Instant")
+                            } else {
+                                Text("\(store.configuration.resolvedHoverCloseDelay, specifier: "%.1f") s")
                             }
                         }
                         .monospacedDigit()
