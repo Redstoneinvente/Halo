@@ -1271,6 +1271,34 @@ enum LiveActivityState: String, Codable, CaseIterable {
     case ended
 }
 
+enum LiveActivityClassifier {
+    private static let messageSources = [
+        "messages", "whatsapp", "telegram", "signal", "discord",
+        "slack", "microsoft teams", "messenger"
+    ]
+
+    static func kind(sourceName: String?, title: String, detail: String) -> LiveActivityKind {
+        let combined = [sourceName, title, detail]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+
+        if combined.contains("incoming call") ||
+            combined.contains("video call") ||
+            combined.contains("audio call") ||
+            sourceName?.caseInsensitiveCompare("FaceTime") == .orderedSame {
+            return .call
+        }
+
+        if let sourceName,
+           messageSources.contains(where: { sourceName.localizedCaseInsensitiveContains($0) }) {
+            return .message
+        }
+
+        return .notification
+    }
+}
+
 struct LiveActivity: Identifiable, Codable {
     var bluetoothDeviceVisual: BluetoothDeviceVisual? = nil
     var id = UUID()
