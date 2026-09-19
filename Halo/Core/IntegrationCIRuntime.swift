@@ -111,6 +111,11 @@ final class IntegrationCIRuntime: ObservableObject {
         activationCoordinator.isCurrent(sessionID: sessionID, ciID: ciID, displayID: displayID)
     }
 
+    func isPayloadCommitted(session: CIActivationSession) -> Bool {
+        guard let handle = session.payloadHandle else { return true }
+        return payloadStore.isCommitted(handle, activationSessionID: session.id, ciID: session.ciID)
+    }
+
     func currentWinnerCIID(displayID: String) -> String? { winnerCIByDisplay[displayID] }
 
     @discardableResult
