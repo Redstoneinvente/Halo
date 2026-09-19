@@ -26,11 +26,26 @@ struct HaloIntegrationAction: Codable, Hashable, Identifiable, Sendable {
     let options: [HaloIntegrationOption]
 }
 
+struct HaloIntegrationTrigger: Codable, Hashable, Sendable {
+    let type: String
+    let supportedExtensions: [String]?
+}
+
 struct HaloIntegrationManifest: Codable, Hashable, Sendable {
     let protocolVersion: Int
     let name: String
     let bundleIdentifier: String
     let actions: [HaloIntegrationAction]
+    let triggers: [HaloIntegrationTrigger]?
+
+    init(protocolVersion: Int, name: String, bundleIdentifier: String,
+         actions: [HaloIntegrationAction], triggers: [HaloIntegrationTrigger]? = nil) {
+        self.protocolVersion = protocolVersion
+        self.name = name
+        self.bundleIdentifier = bundleIdentifier
+        self.actions = actions
+        self.triggers = triggers
+    }
 }
 
 struct HaloIntegration: Hashable, Identifiable, Sendable {
@@ -57,6 +72,10 @@ enum HaloIntegrationManifestError: LocalizedError {
     case emptyOptionKey(actionID: String)
     case duplicateOptionKey(actionID: String, key: String)
     case unsupportedOptionType(actionID: String, type: String)
+    case tooManyTriggers(Int)
+    case unsupportedTriggerType(String)
+    case invalidTriggerExtension(String)
+    case triggerExtensionHasNoAction(String)
 
     var errorDescription: String? {
         switch self {
@@ -88,6 +107,14 @@ enum HaloIntegrationManifestError: LocalizedError {
             return "action \(actionID) declares option key \(key) more than once."
         case .unsupportedOptionType(let actionID, let type):
             return "action \(actionID) declares unsupported option type \(type)."
+        case .tooManyTriggers(let count):
+            return "manifest exposes \(count) triggers; protocol v1 supports at most 16."
+        case .unsupportedTriggerType(let type):
+            return "unsupported integration trigger type \(type)."
+        case .invalidTriggerExtension(let ext):
+            return "integration trigger has invalid file extension \(ext)."
+        case .triggerExtensionHasNoAction(let ext):
+            return "integration trigger extension \(ext) is not supported by any advertised action."
         }
     }
 }
@@ -142,6 +169,45 @@ enum HaloIntegrationManifestCodec {
         }
         guard manifest.actions.count <= 64 else {
             throw HaloIntegrationManifestError.tooManyActions(manifest.actions.count)
+        }
+
+        let triggers = manifest.triggers ?? []
+        guard triggers.count <= 16 else {
+            throw HaloIntegrationManifestError.tooManyTriggers(triggers.count)
+        }
+
+        let actionExtensions = Set(manifest.actions.flatMap { action in
+            action.supportedExtensions.map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            }
+        }.filter { !$0.isEmpty })
+
+        for trigger in triggers {
+            guard trigger.type == "fileDrag" else {
+                throw HaloIntegrationManifestError.unsupportedTriggerType(trigger.type)
+            }
+
+            for raw in trigger.supportedExtensions ?? [] {
+                let ext = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                guard !ext.isEmpty,
+                      ext.count <= 32,
+                      ext == "*" || ext.range(
+                        of: #"^[a-z0-9][a-z0-9+_-]*$"#,
+                        options: .regularExpression
+                      ) != nil else {
+                    throw HaloIntegrationManifestError.invalidTriggerExtension(raw)
+                }
+
+                guard ext == "*" ||
+                      actionExtensions.contains("*") ||
+                      actionExtensions.contains(ext) else {
+                    throw HaloIntegrationManifestError.triggerExtensionHasNoAction(ext)
+                }
+            }
         }
 
         var actionIDs = Set<String>()
@@ -917,6 +983,13 @@ enum HaloAutoIntegrationCIGenerator {
             options: .atomic
         )
 
+        if let triggers = generatedTriggers(for: integration), !triggers.triggers.isEmpty {
+            try encoder.encode(triggers).write(
+                to: staging.appendingPathComponent("triggers.json"),
+                options: .atomic
+            )
+        }
+
         let marker = HaloGeneratedIntegrationCIMetadata(
             generatorVersion: generatorVersion,
             bundleIdentifier: integration.bundleIdentifier,
@@ -954,6 +1027,39 @@ enum HaloAutoIntegrationCIGenerator {
             }
             throw error
         }
+    }
+
+    private static func generatedTriggers(
+        for integration: HaloIntegration
+    ) -> HaloCITriggerDocument? {
+        guard let integrationTriggers = integration.manifest.triggers,
+              !integrationTriggers.isEmpty else {
+            return nil
+        }
+
+        let actionExtensions = integration.manifest.actions.flatMap(\.supportedExtensions)
+
+        let triggers = integrationTriggers.compactMap { trigger -> HaloCITrigger? in
+            guard trigger.type == "fileDrag" else { return nil }
+            let extensions = (trigger.supportedExtensions?.isEmpty == false
+                ? trigger.supportedExtensions!
+                : actionExtensions)
+                .map {
+                    $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                        .lowercased()
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                }
+                .filter { !$0.isEmpty }
+
+            return HaloCITrigger(
+                type: "fileDrag",
+                extensions: Array(Set(extensions)).sorted()
+            )
+        }
+
+        return triggers.isEmpty
+            ? nil
+            : HaloCITriggerDocument(match: "any", triggers: triggers)
     }
 
     private static func generatedManifest(
