@@ -33,12 +33,17 @@ struct Theme: Codable, Equatable {
 struct Configuration: Codable {
     var theme = Theme()
     var hoverToExpand = true
-    // Optional keeps existing saved Configuration payloads backward-compatible.
+    // Optional delay values keep existing saved Configuration payloads backward-compatible.
     var hoverOpenDelay: Double? = nil
+    var hoverCloseDelay: Double? = nil
     var allDisplays = false
 
     var resolvedHoverOpenDelay: Double {
         min(10, max(0, hoverOpenDelay ?? 0))
+    }
+
+    var resolvedHoverCloseDelay: Double {
+        min(10, max(0, hoverCloseDelay ?? 0))
     }
     var simulateNotch = false
     var showClock = true
