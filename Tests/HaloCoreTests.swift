@@ -720,6 +720,41 @@ final class HaloCoreTests: XCTestCase {
         )
         XCTAssertEqual(
             HaloDismissTimingPolicy.delay(
+                behavior: .instant,
+                customMilliseconds: 0,
+                ciBehavior: .standard,
+                reason: .pointerExit
+            ),
+            0.06
+        )
+        XCTAssertEqual(
+            HaloDismissTimingPolicy.delay(
+                behavior: .custom,
+                customMilliseconds: -200,
+                ciBehavior: .standard,
+                reason: .pointerExit
+            ),
+            0
+        )
+        XCTAssertEqual(
+            HaloDismissTimingPolicy.delay(
+                behavior: .custom,
+                customMilliseconds: 4_000,
+                ciBehavior: .standard,
+                reason: .pointerExit
+            ),
+            2
+        )
+        XCTAssertNil(
+            HaloDismissTimingPolicy.delay(
+                behavior: .manual,
+                customMilliseconds: 0,
+                ciBehavior: .standard,
+                reason: .clickOutside
+            )
+        )
+        XCTAssertEqual(
+            HaloDismissTimingPolicy.delay(
                 behavior: .smart,
                 customMilliseconds: 450,
                 ciBehavior: .interactive,
