@@ -44,6 +44,10 @@ SignedLicense verifies Ed25519 signatures through CryptoKit, product identity, s
 
 No executable-plugin isolation, universal media transport, shader editor, network monitoring, comprehensive gestures, unattended task execution, updater, or production performance guarantees. See ImplementationStatus.md for the complete handoff.
 
+## Custom CI context authority
+
+`HaloCIContextProviderEngine` is the only runtime authority for declarative Custom CI context snapshots. It reuses existing service/event sources, coalesces invalidations, performs file/folder classification off-main at drag/drop boundaries, and filters every snapshot through `HaloCIContextCatalog`. Renderers and action brokers do not assemble private context dictionaries. See `ContextProviderEngine.md`.
+
 ## Custom CI runtime path
 
 Third-party Context Interfaces use the declarative SDK in `Docs/CISDK.md`. `HaloCIPackageValidator` owns schema/security validation; `HaloCustomCIRuntimeStore` owns installed package preferences, permission grants, isolated local state and trigger eligibility; and `SurfaceView` feeds the winning package into a Halo-owned declarative renderer. Custom CI is a candidate in the existing Context Interface arbitration rather than a parallel window/surface architecture. The global `HaloDisableCustomCI` preference gates only third-party packages; built-in CIs are not routed through it.
