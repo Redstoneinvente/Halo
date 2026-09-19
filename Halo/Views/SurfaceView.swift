@@ -2688,8 +2688,11 @@ struct SurfaceView: View {
     private var clipboardContextActive: Bool { activeContext == .clipboard }
     private var customContextActive: Bool { activeContext == .custom }
     private var integrationContextActive: Bool { activeContext == .integration }
+    /// Logical expansion flips as soon as close is requested. Presentation expansion
+    /// remains true until WindowManager reports that the physical retract animation ended.
+    private var visuallyExpanded: Bool { state.expanded || state.presentationExpanded }
     private var contextOwnsFullSurface: Bool {
-        guard state.expanded else { return false }
+        guard visuallyExpanded else { return false }
         switch activeContext {
         case .drop: return dropUsesFullNotchArea
         case .music: return contextMusicUsesFullNotchArea
@@ -2734,7 +2737,7 @@ struct SurfaceView: View {
     /// Keep only that element alive while Music CI opens even when the general
     /// "keep closed contents" option is disabled.
     private var preservesMusicClosedVisualizer: Bool {
-        state.expanded && contextMusicActive && hasClosedNotchVisualizer && workspace.media.hasNowPlayingPresentation
+        visuallyExpanded && contextMusicActive && hasClosedNotchVisualizer && workspace.media.hasNowPlayingPresentation
     }
     private var preservesClosedStripWhileExpanded: Bool {
         keepsClosedContentsWhileExpanded || preservesMusicClosedVisualizer
@@ -2755,8 +2758,8 @@ struct SurfaceView: View {
     private var effectiveShape: SurfaceShapeKind {
         guard layout.appearance.surface.useStyleContour ?? true else { return layout.appearance.surface.shape }
         switch theme.style {
-        case .pill: return state.expanded ? .rounded : .capsule
-        case .island: return state.expanded ? .rounded : .capsule
+        case .pill: return visuallyExpanded ? .rounded : .capsule
+        case .island: return visuallyExpanded ? .rounded : .capsule
         case .simulated, .notch: return .scoop
         case .shelf: return .chamfer
         case .detached: return .rounded
@@ -2770,7 +2773,7 @@ struct SurfaceView: View {
     private var usesVisualWorkspace: Bool { layout.resolvedUsesCustomOpenNotchWorkspace }
     private var usesDefaultWorkspace: Bool { !usesVisualWorkspace }
     private var presentsVisualWorkspaceSurface: Bool {
-        usesVisualWorkspace && activeContext == nil && (state.expanded || visualWorkspaceSurfacePresented)
+        usesVisualWorkspace && activeContext == nil && (visuallyExpanded || visualWorkspaceSurfacePresented)
     }
     private var accent: Color { Color(hue: theme.tint, saturation: 0.65, brightness: 1) }
 
@@ -2802,14 +2805,14 @@ struct SurfaceView: View {
                 if !contextOwnsFullSurface &&
                     !presentsVisualWorkspaceSurface {
                     Group {
-                      if !state.expanded && integrationContextActive {
+                      if !visuallyExpanded && integrationContextActive {
                         IntegrationCICompactView(candidate: activeIntegrationCandidate)
-                      } else if !state.expanded && customContextActive, let candidate = activeCustomCandidate {
+                      } else if !visuallyExpanded && customContextActive, let candidate = activeCustomCandidate {
                         HaloCustomCISurfaceView(package: candidate.package, surfaceState: state, workspace: workspace)
-                      } else if !state.expanded && (state.compactWidth < 48 || state.compactHeight < 16) {
+                      } else if !visuallyExpanded && (state.compactWidth < 48 || state.compactHeight < 16) {
                         Circle().fill(store.deadline == nil ? accent : .green).frame(width: 6, height: 6)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                      } else if !state.expanded {
+                      } else if !visuallyExpanded {
                         if transferContextActive {
                             TransferClosedContextView(monitor: transfer, surfaceState: state)
                         } else if clipboardContextActive {
@@ -2829,8 +2832,8 @@ struct SurfaceView: View {
                         Image(systemName: state.pinned ? "pin.fill" : "chevron.up").font(.system(size: 9, weight: .bold))
                       } }
                     }
-                    .padding(.horizontal, (!state.expanded || preservesClosedStripWhileExpanded) ? 0 : max(16, layout.appearance.surface.shoulder + 8))
-                    .frame(height: state.expanded ? max(40, state.compactHeight) : state.compactHeight)
+                    .padding(.horizontal, (!visuallyExpanded || preservesClosedStripWhileExpanded) ? 0 : max(16, layout.appearance.surface.shoulder + 8))
+                    .frame(height: visuallyExpanded ? max(40, state.compactHeight) : state.compactHeight)
                     .contentShape(Rectangle())
                     .onTapGesture {
                         guard !teleprompterActive else { return }
@@ -2840,7 +2843,7 @@ struct SurfaceView: View {
                     .accessibilityLabel("Toggle Halo dashboard")
                     .accessibilityAddTraits(.isButton)
                 }
-                if state.expanded || presentsVisualWorkspaceSurface {
+                if visuallyExpanded || presentsVisualWorkspaceSurface {
                     if integrationContextActive {
                         integrationSurfaceContent
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -2997,7 +3000,7 @@ struct SurfaceView: View {
         .background {
             ZStack {
                 surfaceBackgroundLayer
-                NotchSkinLayer(options: layout.appearance.skin, theme: theme, expanded: state.expanded)
+                NotchSkinLayer(options: layout.appearance.skin, theme: theme, expanded: visuallyExpanded)
             }
         }
         .clipShape(contour)
@@ -3279,14 +3282,14 @@ struct SurfaceView: View {
             } else if clipboardContextActive {
                 ClipboardSurfaceBackground(monitor: clipboardCI)
             } else if customContextActive, let candidate = activeCustomCandidate {
-                HaloCustomCIBackgroundView(contract: candidate.package.manifest.surface.background, expanded: state.expanded)
+                HaloCustomCIBackgroundView(contract: candidate.package.manifest.surface.background, expanded: visuallyExpanded)
             } else if presentsVisualWorkspaceSurface {
                 OpenNotchBackgroundView(options: layout.resolvedOpenNotchLayout.appearance, fallback: layout.appearance, theme: theme, system: workspace.system)
             } else {
-                SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: state.expanded, system: workspace.system)
+                SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: visuallyExpanded, system: workspace.system)
             }
             if !transferContextActive && !clipboardContextActive && !customContextActive && !integrationContextActive &&
-                ((!state.expanded && !presentsVisualWorkspaceSurface) || layout.closedNotch?.applyBackgroundWhenOpened == true) {
+                ((!visuallyExpanded && !presentsVisualWorkspaceSurface) || layout.closedNotch?.applyBackgroundWhenOpened == true) {
                 AlbumNotchBackground(options: closedBackgroundOptions, media: workspace.media, system: workspace.system)
             }
         }
