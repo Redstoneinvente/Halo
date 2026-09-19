@@ -175,6 +175,11 @@ struct CIPresentationDescriptor: Codable, Hashable, Sendable {
     var cardCategory: String? = nil
     var cardDescription: String? = nil
     var cardAccentHex: String? = nil
+    var dismissBehavior: CIDismissBehavior? = nil
+
+    var resolvedDismissBehavior: CIDismissBehavior {
+        dismissBehavior ?? .standard
+    }
 
     static let integrationDefault = CIPresentationDescriptor(
         preferredExpandedWidth: 560,
@@ -262,7 +267,9 @@ enum IntegrationCIFactory {
                 cardBannerImageName: definition.presentation?.card?.bannerImage,
                 cardCategory: definition.presentation?.card?.category,
                 cardDescription: definition.presentation?.card?.description,
-                cardAccentHex: definition.presentation?.card?.accentColor
+                cardAccentHex: definition.presentation?.card?.accentColor,
+                dismissBehavior: definition.dismissBehavior
+                    ?? (definition.triggers.contains(where: { $0.type == .fileDrag }) ? .interactive : .standard)
             )
         )
     }
@@ -302,7 +309,9 @@ enum CustomCIFactory {
                 preferredCompactWidth: closed?.width ?? closed?.preferredWidth,
                 preferredCompactHeight: closed?.height ?? closed?.preferredHeight,
                 usesFullSurface: true,
-                keepsClosedContents: false
+                keepsClosedContents: false,
+                dismissBehavior: package.manifest.dismissBehavior
+                    ?? (triggers.contains(where: { $0.type == .fileDrag }) ? .interactive : .standard)
             )
         )
     }
