@@ -238,7 +238,13 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
         didSet { refreshDropRegistration() }
     }
 
-    private var dropCIRegistered = false
+    /// App Integration CI is an independent file-drag consumer. It must remain
+    /// available when the user disables Drop CI.
+    var integrationEnabled: (() -> Bool)? {
+        didSet { refreshDropRegistration() }
+    }
+
+    private var surfaceFileDragRegistered = false
 
     required init(rootView: Content) {
         super.init(rootView: rootView)
@@ -248,14 +254,21 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    // Both providers fail closed until WindowManager installs them.
+    // All providers fail closed until WindowManager installs them.
     private var hasCommercialAccess: Bool { commercialAccessAllowed?() ?? false }
-    private var acceptsFileDrop: Bool { hasCommercialAccess && (dropEnabled?() ?? false) }
+    private var acceptsDropCIFileDrag: Bool {
+        hasCommercialAccess && (dropEnabled?() ?? false)
+    }
+    private var acceptsIntegrationFileDrag: Bool {
+        hasCommercialAccess && (integrationEnabled?() ?? false)
+    }
+    private var acceptsSurfaceFileDrag: Bool {
+        acceptsDropCIFileDrag || acceptsIntegrationFileDrag
+    }
 
-    /// The global file-drag monitor lives outside the normal NSDraggingDestination path.
-    /// Expose the same authoritative, in-memory permission so it cannot create a second
-    /// unlicensed Drop CI path.
-    var permitsGlobalDropCI: Bool { acceptsFileDrop }
+    /// Global monitors use independent authority for Drop CI vs App Integration CI.
+    var permitsGlobalDropCI: Bool { acceptsDropCIFileDrag }
+    var permitsGlobalIntegrationCI: Bool { acceptsIntegrationFileDrag }
 
     /// Prevent SwiftUI or any descendant from re-registering the locked Halo surface
     /// as a drag destination. Once commercially unlocked, normal NSHostingView
@@ -265,19 +278,18 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
         super.registerForDraggedTypes(newTypes)
     }
 
-    /// Drop CI owns only the surface-wide drag destination. Commercial lock is stronger
-    /// than the Drop CI setting: while locked, remove every drag registration from this
-    /// hosting view and reject any stale in-flight Drop CI state synchronously.
+    /// The surface registers for file drags when either Drop CI or App Integration CI
+    /// needs them. Disabling one feature must not disable the other.
     func refreshDropRegistration() {
         guard hasCommercialAccess else {
             unregisterDraggedTypes()
-            dropCIRegistered = false
+            surfaceFileDragRegistered = false
             rejectFileDrop()
             return
         }
 
-        let shouldRegister = dropEnabled?() ?? false
-        guard shouldRegister != dropCIRegistered else { return }
+        let shouldRegister = acceptsSurfaceFileDrag
+        guard shouldRegister != surfaceFileDragRegistered else { return }
 
         if shouldRegister {
             registerForDraggedTypes([.fileURL])
@@ -285,7 +297,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             unregisterDraggedTypes()
         }
 
-        dropCIRegistered = shouldRegister
+        surfaceFileDragRegistered = shouldRegister
         if !shouldRegister { rejectFileDrop() }
     }
 
@@ -311,18 +323,21 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        // Locked means drag-dead: do not involve the Drop CI and do not hand the drag
-        // to SwiftUI/NSHostingView. Licensed + Drop-disabled is different: descendants
-        // such as File Shelf may still own their own drop destinations.
         guard hasCommercialAccess else { rejectFileDrop(); return [] }
-        guard acceptsFileDrop else { return super.draggingEntered(sender) }
+        guard acceptsSurfaceFileDrag else { return super.draggingEntered(sender) }
 
         let urls = fileURLs(sender)
         let count = urls.isEmpty ? fileURLCount(sender) : urls.count
         guard count > 0 else { return super.draggingEntered(sender) }
 
-        if !urls.isEmpty, fileDragHandler?(.entered, urls) == true {
+        if acceptsIntegrationFileDrag,
+           !urls.isEmpty,
+           fileDragHandler?(.entered, urls) == true {
             return .copy
+        }
+
+        guard acceptsDropCIFileDrag else {
+            return super.draggingEntered(sender)
         }
 
         dragStateHandler?(true, count)
@@ -331,14 +346,20 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard hasCommercialAccess else { rejectFileDrop(); return [] }
-        guard acceptsFileDrop else { return super.draggingUpdated(sender) }
+        guard acceptsSurfaceFileDrag else { return super.draggingUpdated(sender) }
 
         let urls = fileURLs(sender)
         let count = urls.isEmpty ? fileURLCount(sender) : urls.count
         guard count > 0 else { return super.draggingUpdated(sender) }
 
-        if !urls.isEmpty, fileDragHandler?(.updated, urls) == true {
+        if acceptsIntegrationFileDrag,
+           !urls.isEmpty,
+           fileDragHandler?(.updated, urls) == true {
             return .copy
+        }
+
+        guard acceptsDropCIFileDrag else {
+            return super.draggingUpdated(sender)
         }
 
         dragStateHandler?(true, count)
@@ -350,14 +371,17 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             rejectFileDrop()
             return
         }
-        guard acceptsFileDrop else {
+
+        if acceptsIntegrationFileDrag,
+           fileDragHandler?(.exited, []) == true {
+            return
+        }
+
+        guard acceptsDropCIFileDrag else {
             super.draggingExited(sender)
             return
         }
 
-        if fileDragHandler?(.exited, []) == true {
-            return
-        }
         dragStateHandler?(false, 0)
     }
 
@@ -366,16 +390,23 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             rejectFileDrop()
             return false
         }
-        guard acceptsFileDrop else { return super.performDragOperation(sender) }
-
-        let urls = fileURLs(sender)
-        guard !urls.isEmpty else {
-            dragStateHandler?(false, 0)
+        guard acceptsSurfaceFileDrag else {
             return super.performDragOperation(sender)
         }
 
-        if fileDragHandler?(.dropped, urls) == true {
+        let urls = fileURLs(sender)
+        guard !urls.isEmpty else {
+            if acceptsDropCIFileDrag { dragStateHandler?(false, 0) }
+            return super.performDragOperation(sender)
+        }
+
+        if acceptsIntegrationFileDrag,
+           fileDragHandler?(.dropped, urls) == true {
             return true
+        }
+
+        guard acceptsDropCIFileDrag else {
+            return super.performDragOperation(sender)
         }
 
         dropHandler?(urls)
@@ -387,13 +418,17 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             rejectFileDrop()
             return
         }
-        guard acceptsFileDrop else {
+
+        if acceptsIntegrationFileDrag,
+           fileDragHandler?(.exited, []) == true {
+            return
+        }
+
+        guard acceptsDropCIFileDrag else {
             super.concludeDragOperation(sender)
             return
         }
-        if fileDragHandler?(.exited, []) == true {
-            return
-        }
+
         dragStateHandler?(false, 0)
     }
 }
@@ -631,6 +666,17 @@ final class WindowManager {
 
     private var dropCIAllowed: Bool {
         commercialAccessGranted && dropCISettingEnabled
+    }
+
+    private var appIntegrationCISettingEnabled: Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: "HaloContextAppIntegrationEnabled") == nil
+            ? true
+            : defaults.bool(forKey: "HaloContextAppIntegrationEnabled")
+    }
+
+    private var appIntegrationCIAllowed: Bool {
+        commercialAccessGranted && appIntegrationCISettingEnabled
     }
 
     func setCommercialAccessGranted(_ granted: Bool) {
@@ -1966,6 +2012,9 @@ final class WindowManager {
                 view.dropEnabled = { [weak self] in
                     self?.dropCISettingEnabled ?? false
                 }
+                view.integrationEnabled = { [weak self] in
+                    self?.appIntegrationCISettingEnabled ?? false
+                }
                 host.refreshDropCIRegistration = { [weak view] in
                     view?.refreshDropRegistration()
                 }
@@ -1984,8 +2033,8 @@ final class WindowManager {
                 }
                 view.fileDragHandler = { [weak self, weak host] phase, urls in
                     guard let self, let host else { return false }
-                    guard self.dropCIAllowed else {
-                        HaloIntegrationExecutionSession.shared.cancelUncommittedDrag()
+                    guard self.appIntegrationCIAllowed else {
+                        HaloIntegrationExecutionSession.shared.cancelUncommittedDrag(on: id)
                         return false
                     }
 
@@ -2006,10 +2055,7 @@ final class WindowManager {
                         host.state.cancelFileDrop()
                         host.state.dropExitTask?.cancel()
                         host.state.collapseTask?.cancel()
-                        session.presentChoices(actions, files: urls)
-                        if !host.state.expanded {
-                            host.state.expanded = true
-                        }
+                        session.presentChoices(actions, files: urls, displayID: id)
                         return true
 
                     case .exited:
@@ -2030,7 +2076,7 @@ final class WindowManager {
                         haloDismissEmbeddedDropCIForIntegration()
 
                         if !session.isActive {
-                            session.presentChoices(actions, files: urls)
+                            session.presentChoices(actions, files: urls, displayID: id)
                         } else {
                             session.updateFiles(urls)
                         }
@@ -2039,9 +2085,6 @@ final class WindowManager {
                         host.state.cancelFileDrop()
                         host.state.dropExitTask?.cancel()
                         host.state.collapseTask?.cancel()
-                        if !host.state.expanded {
-                            host.state.expanded = true
-                        }
                         return true
                     }
                 }
@@ -2049,14 +2092,6 @@ final class WindowManager {
                     guard let self, let host else { return }
                     guard self.dropCIAllowed else {
                         host.state.cancelFileDrop()
-                        return
-                    }
-
-                    if HaloIntegrationExecutionSession.shared.isActive {
-                        HaloIntegrationExecutionSession.shared.updateFiles(urls)
-                        host.state.cancelFileDrop()
-                        host.state.collapseTask?.cancel()
-                        host.state.expanded = true
                         return
                     }
 
