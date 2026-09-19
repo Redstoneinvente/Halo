@@ -3561,6 +3561,11 @@ private struct HaloCustomCIPackageCard: View {
     private var id: String { package.manifest.id }
     private var requested: [String] { runtime.requestedPermissions(package) }
     private var integration: HaloIntegration? { runtime.integration(forPackageID: id) }
+    private var enabledIntegrationActionCount: Int {
+        integration?.manifest.actions.filter {
+            runtime.isIntegrationActionEnabled(packageID: id, actionID: $0.id)
+        }.count ?? 0
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -3611,10 +3616,7 @@ private struct HaloCustomCIPackageCard: View {
                     Text("Functions")
                         .font(.caption.weight(.semibold))
                     Spacer()
-                    let enabledCount = integration.manifest.actions.filter {
-                        runtime.isIntegrationActionEnabled(packageID: id, actionID: $0.id)
-                    }.count
-                    Text("\(enabledCount)/\(integration.manifest.actions.count) enabled")
+                    Text("\(enabledIntegrationActionCount)/\(integration.manifest.actions.count) enabled")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
