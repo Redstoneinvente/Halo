@@ -118,3 +118,55 @@ Open:
 Halo lists each discovered app, bundle identifier, application path, supported file extensions, actions, and typed options. **Scan Again** refreshes the catalogue.
 
 The catalogue is independent of Drop CI. Future file-drag or other Context Interface experiences may consume this catalogue, but ownership still has to go through Halo's normal CI arbitration.
+
+## Base CI design record
+
+This feature is **not itself a Context Interface**. It is an app-capability discovery service intended to feed Halo-owned CI experiences, so it deliberately does not register an `ActiveContextInterface`, render a surface, publish geometry, or participate in priority arbitration.
+
+```text
+CI name / stable identity: App Integration Discovery Catalog (service, not a CI owner)
+Implementation path and reason: Native app-owned discovery service; filesystem/app-bundle discovery cannot be expressed by a .haloCI package, and no new render path is introduced.
+Purpose: Find installed partner apps that explicitly advertise Halo-compatible actions.
+Real context source / existing service: NSWorkspace running applications plus standard macOS application folders and static app Resources.
+Enable setting and default: not needed — discovery is passive metadata lookup when the catalogue is created/refreshed.
+Priority setting and default (normal range 0...100): not needed — catalogue does not compete for the surface.
+Tie behavior / reason: not needed — no arbitration candidate is registered.
+Side-effect-free eligibility rule: not needed — discovery produces metadata, not eligibility.
+Manual activation behavior: not needed — Scan Again only refreshes the catalogue.
+Automatic expansion policy (default: no auto-open): no auto-open.
+Dismissal / retrigger policy: not needed.
+Closed presentation (default: normal Closed Notch): unchanged.
+Expanded presentation: unchanged; CI Settings only lists discovered capabilities.
+Full-surface ownership (default: false for native opened-only CI): false / not applicable.
+Keep Closed Notch contents while expanded (default: false): unchanged / not applicable.
+Background owner / layer: none — discovery does not render a notch background.
+Expanded size rule and sizing inputs: none.
+Compact width / height / minimum expanded width (only if needed): none.
+Geometry publication and handoff/cleanup owner: none.
+Global versus profile settings: global read-only catalogue; no profile state.
+Context bindings, units, unavailable-data behavior: none.
+Permissions / revocation / commercial-access boundaries: no sensitive Halo data is granted; malformed/unsupported manifests are ignored with diagnostics.
+Actions and their broker: discovery only — no partner action is executed by this implementation.
+Subscriptions / refresh cadence / cancellation: initial refresh on catalogue creation plus explicit Scan Again; running app URLs are snapshotted before detached scanning.
+Per-display versus shared state: shared global catalogue; it has no per-display surface state.
+Settings card / controls / accessibility: Context Notch Interfaces → App integrations, with Scan Again and readable action/option metadata.
+Compatibility and persistence migration: protocol v1 matches the existing Halo-Integration-Test-App manifest; no persisted migration.
+Tests and manual checks: protocol-v1 decode, bundle-ID mismatch, duplicate actions and unsupported option types covered by HaloCoreTests; macOS build/test workflow added.
+```
+
+### Verification matrix
+
+| Check | Result | Reason |
+| --- | --- | --- |
+| Disabled at launch / disabled while active | Not applicable | Discovery is not a CI owner and has no enable lifecycle. |
+| Eligible closed vs expanded / auto-open | Pass by construction | No eligibility registration and no expansion mutation. |
+| Higher/equal-priority arbitration | Not applicable | No arbitration candidate is added. |
+| Replaced by another CI / geometry cleanup | Pass by construction | No SurfaceState geometry is written. |
+| Full-surface/background ownership | Not applicable | Catalogue renders only in Settings. |
+| Close/dismiss/pinning | Not applicable | No surface activation. |
+| Permission denial/revocation / stale UI action | Not applicable for discovery | No protected data or partner action execution is introduced. |
+| Unavailable/malformed context | Covered by tests/diagnostics | Invalid manifests fail validation and are omitted. |
+| Two displays / host removal / sleep-wake | Not applicable | Catalogue is global metadata and owns no display host. |
+| Settings/accessibility | Implemented; manual runtime check not run here | Settings uses standard SwiftUI controls/text. |
+| Existing SDK 0.1 compatibility | Unchanged | No `.haloCI` schema/component/action/permission field changed. |
+| Full Halo Xcode build/test | Workflow added; result not claimed here | `validate-app-integration-discovery.yml` runs macOS build + tests on this branch. |
