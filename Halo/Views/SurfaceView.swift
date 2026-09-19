@@ -5830,6 +5830,7 @@ private struct IntegrationActionDropTargetProbe: NSViewRepresentable {
     let ciID: String
     let sessionID: UUID
     let actionID: String
+    let enabled: Bool
 
     func makeNSView(context: Context) -> IntegrationActionDropTargetProbeNSView {
         let view = IntegrationActionDropTargetProbeNSView(frame: .zero)
@@ -5851,6 +5852,20 @@ private struct IntegrationActionDropTargetProbe: NSViewRepresentable {
     }
 
     private func configure(_ view: IntegrationActionDropTargetProbeNSView) {
+        let unregister = {
+            IntegrationActionDropTargetRegistry.shared.unregister(
+                sessionID: sessionID,
+                actionID: actionID
+            )
+        }
+        view.onRemoval = unregister
+
+        guard enabled else {
+            unregister()
+            view.onFrameChange = nil
+            return
+        }
+
         view.onFrameChange = { frame in
             IntegrationActionDropTargetRegistry.shared.register(
                 displayID: displayID,
@@ -5858,12 +5873,6 @@ private struct IntegrationActionDropTargetProbe: NSViewRepresentable {
                 sessionID: sessionID,
                 actionID: actionID,
                 screenFrame: frame
-            )
-        }
-        view.onRemoval = {
-            IntegrationActionDropTargetRegistry.shared.unregister(
-                sessionID: sessionID,
-                actionID: actionID
             )
         }
     }
@@ -6071,7 +6080,8 @@ private struct IntegrationCIView: View {
                 displayID: liveSession.displayID,
                 ciID: registration.id,
                 sessionID: liveSession.id,
-                actionID: action.id
+                actionID: action.id,
+                enabled: liveSession.payloadHandle != nil && !payloadCommitted
             )
             .allowsHitTesting(false)
         )
