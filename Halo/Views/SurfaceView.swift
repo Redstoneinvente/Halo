@@ -2185,7 +2185,7 @@ private struct ClipboardContextView: View {
 }
 
 private enum ActiveContextInterface: String {
-    case drop, teleprompter, transfer, clipboard, custom, integration, music, bluetooth, retro
+    case drop, teleprompter, transfer, clipboard, custom, integration, music, bluetooth, retro, liveActivity
 }
 
 private struct SurfaceContextCandidate {
@@ -2601,6 +2601,10 @@ struct SurfaceView: View {
     @AppStorage("HaloContextRetroUseFullNotchArea") private var retroUsesFullNotchArea = false
     @AppStorage("HaloContextRetroKeepClosedNotchContents") private var retroKeepsClosedContents = false
     @AppStorage("HaloContextRetroPriority") private var retroPriority = 80.0
+    @AppStorage("HaloLiveActivitiesEnabled") private var liveActivitiesEnabled = true
+    @AppStorage("HaloLiveActivitiesPriority") private var liveActivitiesPriority = 82.0
+    @AppStorage("HaloLiveActivitiesUseFullNotchArea") private var liveActivitiesUseFullNotchArea = false
+    @AppStorage("HaloLiveActivitiesKeepClosedNotchContents") private var liveActivitiesKeepClosedContents = false
     @State private var retroGameRequested = false
     private var theme: Theme { state.theme }
     private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.effectiveLayout }
@@ -2610,6 +2614,12 @@ struct SurfaceView: View {
         return (bluetoothShowOnChanges && bluetooth.lastEvent != nil) ||
             (bluetoothShowWhileConnected && !bluetooth.connectedDevices.isEmpty)
     }
+    private var liveActivityCandidate: LiveActivity? {
+        guard liveActivitiesEnabled,
+              let activity = workspace.primaryLiveActivity,
+              activity.resolvedKind != .bluetooth else { return nil }
+        return activity
+    }
     private var builtInContextCandidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] {
         var candidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] = []
         if dropCIEnabled && state.dropTargeted { candidates.append((.drop, dropPriority, 4)) }
@@ -2617,6 +2627,7 @@ struct SurfaceView: View {
         if teleprompterCIEnabled && teleprompterActive { candidates.append((.teleprompter, teleprompterPriority, 3)) }
         if transferCIEnabled && transfer.isActive { candidates.append((.transfer, transferPriority, 3)) }
         if clipboardCIEnabled && clipboardCI.isActive { candidates.append((.clipboard, clipboardCI.manualPresentation ? 1000 : clipboardPriority, 3)) }
+        if liveActivityCandidate != nil { candidates.append((.liveActivity, liveActivitiesPriority, 3)) }
         if contextOptions.enabled && workspace.media.hasNowPlayingPresentation { candidates.append((.music, contextMusicPriority, 2)) }
         if bluetoothEligible { candidates.append((.bluetooth, bluetoothPriority, 1)) }
         return candidates
@@ -2688,12 +2699,13 @@ struct SurfaceView: View {
     private var clipboardContextActive: Bool { activeContext == .clipboard }
     private var customContextActive: Bool { activeContext == .custom }
     private var integrationContextActive: Bool { activeContext == .integration }
+    private var liveActivityContextActive: Bool { activeContext == .liveActivity }
     /// Logical expansion flips as soon as close is requested. Presentation expansion
     /// remains true until WindowManager reports that the physical retract animation ended.
     private var visuallyExpanded: Bool { state.expanded || state.presentationExpanded }
     private var reportsOpenedNotchVisible: Bool {
         visuallyExpanded &&
-        (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive || integrationContextActive)
+        (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive || integrationContextActive || liveActivityContextActive)
     }
     private var contextOwnsFullSurface: Bool {
         guard visuallyExpanded else { return false }
@@ -2702,6 +2714,7 @@ struct SurfaceView: View {
         case .music: return contextMusicUsesFullNotchArea
         case .bluetooth: return bluetoothUsesFullNotchArea
         case .retro: return retroUsesFullNotchArea
+        case .liveActivity: return liveActivitiesUseFullNotchArea
         case .teleprompter: return true
         case .transfer: return false
         case .clipboard: return false
@@ -2719,6 +2732,7 @@ struct SurfaceView: View {
         case .music: return contextMusicKeepsClosedContents
         case .bluetooth: return bluetoothKeepsClosedContents
         case .retro: return retroKeepsClosedContents
+        case .liveActivity: return liveActivitiesKeepClosedContents
         case .teleprompter: return false
         case .transfer: return false
         case .clipboard: return false
@@ -2856,6 +2870,12 @@ struct SurfaceView: View {
                         HaloCustomCISurfaceView(package: candidate.package, surfaceState: state, workspace: workspace)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                             .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                    } else if liveActivityContextActive, let activity = liveActivityCandidate {
+                        if !liveActivitiesUseFullNotchArea {
+                            LiveActivityContextView(activity: activity, workspace: workspace, surfaceState: state)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                        }
                     } else if transferContextActive {
                         TransferContextView(monitor: transfer, surfaceState: state)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -2978,6 +2998,8 @@ struct SurfaceView: View {
                                              preserveClosedVisualizerStrip: preservesMusicClosedVisualizer)
                     } else if bluetoothContextActive {
                         BluetoothContextView(bluetooth: bluetooth, surfaceState: state)
+                    } else if liveActivityContextActive, let activity = liveActivityCandidate {
+                        LiveActivityContextView(activity: activity, workspace: workspace, surfaceState: state)
                     } else if retroContextActive {
                         RetroGameContextView(surfaceState: state)
                     }
@@ -6608,5 +6630,209 @@ private struct HaloCustomCIComponentRenderer {
         if bytes >= 1_000_000 { return String(format: "%.1f MB/s", bytes / 1_000_000) }
         if bytes >= 1_000 { return String(format: "%.0f KB/s", bytes / 1_000) }
         return String(format: "%.0f B/s", bytes)
+    }
+}
+
+
+private struct LiveActivityContextView: View {
+    let activity: LiveActivity
+    @ObservedObject var workspace: WorkspaceStore
+    @ObservedObject var surfaceState: SurfaceState
+
+    @AppStorage("HaloLiveActivitiesHorizontalMargin") private var horizontalMargin = 24.0
+    @AppStorage("HaloLiveActivitiesVerticalMargin") private var verticalMargin = 18.0
+    @AppStorage("HaloLiveActivitiesSpacing") private var spacing = 12.0
+    @AppStorage("HaloLiveActivitiesCornerRadius") private var cornerRadius = 18.0
+
+    private var preferredSize: CGSize {
+        let detailRows = activity.detail.isEmpty ? 0.0 : 24.0
+        let callRows = activity.resolvedKind == .call ? 28.0 : 0.0
+        let progressRows = activity.progress == nil ? 0.0 : 24.0
+        return CGSize(
+            width: min(760, max(420, 500 + horizontalMargin * 2)),
+            height: min(520, max(180, 168 + verticalMargin * 2 + detailRows + callRows + progressRows))
+        )
+    }
+
+    private var sourceIcon: NSImage? {
+        guard let bundleID = activity.sourceBundleIdentifier else { return nil }
+        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first,
+           let icon = running.icon {
+            return icon
+        }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: max(4, spacing)) {
+            HStack(alignment: .top, spacing: max(8, spacing)) {
+                activityIcon
+                VStack(alignment: .leading, spacing: max(3, spacing * 0.35)) {
+                    if let source = activity.sourceName, !source.isEmpty {
+                        Text(source.uppercased())
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(activity.title)
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .lineLimit(2)
+                    if !activity.detail.isEmpty {
+                        Text(activity.detail)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                    }
+                }
+                Spacer(minLength: 8)
+                stateBadge
+            }
+
+            if activity.resolvedKind == .call,
+               activity.resolvedState == .active,
+               let startedAt = activity.startedAt {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    HStack(spacing: 7) {
+                        Image(systemName: "phone.fill")
+                        Text(Self.durationString(context.date.timeIntervalSince(startedAt)))
+                            .monospacedDigit()
+                    }
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                }
+            }
+
+            if let progress = activity.progress {
+                VStack(alignment: .leading, spacing: 5) {
+                    ProgressView(value: progress)
+                    Text("\(Int((progress * 100).rounded()))%")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: max(8, spacing * 0.75)) {
+                if activity.sourceBundleIdentifier != nil {
+                    Button {
+                        openSourceApplication()
+                    } label: {
+                        Label("Open", systemImage: "arrow.up.forward.app")
+                    }
+                }
+                Spacer()
+                Button {
+                    workspace.dismissLiveActivity(id: activity.id)
+                } label: {
+                    Label("Dismiss", systemImage: "xmark")
+                }
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, max(0, horizontalMargin))
+        .padding(.vertical, max(0, verticalMargin))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background {
+            if activity.resolvedKind == .call {
+                LinearGradient(
+                    colors: [Color.accentColor.opacity(0.18), Color.black.opacity(0.15)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            } else {
+                Color.clear
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: max(0, cornerRadius), style: .continuous))
+        .task(id: sizingKey) { publishPreferredSize() }
+        .onChange(of: surfaceState.contextPreferredSize) { requested in
+            guard surfaceState.expanded, requested == nil else { return }
+            publishPreferredSize()
+        }
+        .onDisappear { releasePreferredSizeIfOwned() }
+    }
+
+    @ViewBuilder
+    private var activityIcon: some View {
+        if let sourceIcon {
+            Image(nsImage: sourceIcon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 42, height: 42)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        } else {
+            Image(systemName: activity.resolvedSymbolName)
+                .font(.system(size: 22, weight: .semibold))
+                .frame(width: 42, height: 42)
+                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+
+    @ViewBuilder
+    private var stateBadge: some View {
+        let text: String = {
+            switch activity.resolvedState {
+            case .incoming: return "Incoming"
+            case .active: return activity.resolvedKind == .call ? "Live" : "Active"
+            case .ended: return "Ended"
+            }
+        }()
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.primary.opacity(0.08), in: Capsule())
+            .foregroundStyle(.secondary)
+    }
+
+    private var sizingKey: String {
+        [
+            activity.id.uuidString,
+            activity.detail,
+            String(activity.progress ?? -1),
+            activity.resolvedState.rawValue,
+            String(horizontalMargin),
+            String(verticalMargin),
+            String(spacing)
+        ].joined(separator: "|")
+    }
+
+    private func publishPreferredSize() {
+        let next = preferredSize
+        if let current = surfaceState.contextPreferredSize,
+           abs(current.width - next.width) < 1,
+           abs(current.height - next.height) < 1 {
+            return
+        }
+        surfaceState.contextPreferredSize = next
+    }
+
+    private func releasePreferredSizeIfOwned() {
+        guard let current = surfaceState.contextPreferredSize else { return }
+        let owned = preferredSize
+        guard abs(current.width - owned.width) < 1,
+              abs(current.height - owned.height) < 1 else { return }
+        surfaceState.contextPreferredSize = nil
+    }
+
+    private func openSourceApplication() {
+        guard let bundleID = activity.sourceBundleIdentifier else { return }
+        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
+            running.activate(options: [.activateAllWindows])
+            return
+        }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in }
+    }
+
+    private static func durationString(_ interval: TimeInterval) -> String {
+        let total = max(0, Int(interval.rounded(.down)))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 { return String(format: "%d:%02d:%02d", hours, minutes, seconds) }
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }
