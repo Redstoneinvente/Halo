@@ -3305,13 +3305,17 @@ private struct HaloPartnerIntegrationSettingsSection: View {
         }
 
         if !catalog.integrations.isEmpty {
-            Section("Discovered actions") {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(catalog.integrations) { integration in
-                        HaloPartnerIntegrationCard(integration: integration)
-                    }
-                }
-                .padding(.vertical, 4)
+            Section("Compatible apps") {
+                Label(
+                    "\(catalog.integrations.count) compatible app\(catalog.integrations.count == 1 ? "" : "s") found",
+                    systemImage: "checkmark.circle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.green)
+
+                Text("Each compatible app is represented by a managed Custom CI card below. Configure its functions, trigger behavior, priority and permissions from that card.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
 
@@ -3556,6 +3560,7 @@ private struct HaloCustomCIPackageCard: View {
 
     private var id: String { package.manifest.id }
     private var requested: [String] { runtime.requestedPermissions(package) }
+    private var integration: HaloIntegration? { runtime.integration(forPackageID: id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -3598,6 +3603,86 @@ private struct HaloCustomCIPackageCard: View {
                 .frame(maxWidth: 120)
                 Text("\(Int(runtime.priority(id)))").font(.caption.monospacedDigit()).frame(width: 28)
             }.font(.caption)
+
+            if let integration {
+                Divider()
+
+                HStack {
+                    Text("Functions")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    let enabledCount = integration.manifest.actions.filter {
+                        runtime.isIntegrationActionEnabled(packageID: id, actionID: $0.id)
+                    }.count
+                    Text("\(enabledCount)/\(integration.manifest.actions.count) enabled")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(integration.manifest.actions) { action in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle(isOn: Binding(
+                                get: {
+                                    runtime.isIntegrationActionEnabled(
+                                        packageID: id,
+                                        actionID: action.id
+                                    )
+                                },
+                                set: {
+                                    runtime.setIntegrationActionEnabled(
+                                        $0,
+                                        packageID: id,
+                                        actionID: action.id
+                                    )
+                                }
+                            )) {
+                                HStack {
+                                    Text(action.name)
+                                        .font(.caption.weight(.semibold))
+                                    Spacer()
+                                    Text(action.id)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            HStack(spacing: 7) {
+                                Text(action.supportedExtensions.isEmpty
+                                     ? "No file input"
+                                     : action.supportedExtensions.map {
+                                         $0 == "*" ? "Any file" : ".\($0)"
+                                     }.joined(separator: ", "))
+                                if !action.options.isEmpty {
+                                    Text("·")
+                                    Text(action.options.map {
+                                        "\($0.name): \($0.type)\($0.required ? "*" : "")"
+                                    }.joined(separator: ", "))
+                                }
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 22)
+                        }
+                    }
+                }
+
+                if integration.manifest.triggers?.contains(where: { $0.type == "fileDrag" }) == true {
+                    Divider()
+                    Toggle(
+                        "Open when compatible files are dragged",
+                        isOn: Binding(
+                            get: { runtime.integrationAutomaticTriggersEnabled(id) },
+                            set: { runtime.setIntegrationAutomaticTriggersEnabled($0, packageID: id) }
+                        )
+                    )
+                    .font(.caption)
+
+                    Text("Halo opens this CI only when at least one enabled function accepts the dragged files. Disabled functions do not participate in trigger matching.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             if !requested.isEmpty {
                 Divider()
