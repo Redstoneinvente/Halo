@@ -38,11 +38,13 @@ All existing 0.1 bindings retain their meaning. Set `sdkVersion` to `"0.2"` to u
 | `ci.id`, `ci.name` | String, current package only | None |
 | `ci.activation.kind` | `manual` or `automatic` | None |
 
-The catalog is the discoverable source of truth. Values come from Halo's existing services and are sampled, not promised to update every frame. Media/system/audio notifications are coalesced over 100 ms; time updates every minute; display changes use macOS notifications. The existing service lifecycle controls collection. Network rates describe aggregate traffic, not Internet reachability. Audio volume is absent when the output does not support volume control.
+The catalog is the discoverable schema source of truth, and `HaloCIContextProviderEngine` is the runtime authority that assembles snapshots for Custom CIs. Values come from Halo's existing services and event providers and are sampled, not promised to update every frame. See [ContextProviderEngine.md](ContextProviderEngine.md). Media/system/audio notifications are coalesced over 100 ms; time updates every minute; display changes use macOS notifications. The existing service lifecycle controls collection. Network rates describe aggregate traffic, not Internet reachability. Audio volume is absent when the output does not support volume control.
 
 Permissions must be both declared and currently granted. Unknown keys, values from a newer SDK, nonfinite numbers and wrong boolean representations are removed by the broker. Missing or denied values resolve to an empty string, not a fabricated measurement. Strings are bounded to 8,192 characters. No raw service objects, file paths, clipboard contents, calendar events or secrets are added by this version.
 
 `ci.activation.kind` describes the current manual request versus automatic eligibility; it does not grant surface ownership. All existing priority and sizing rules still apply.
+
+SDK 0.2 also exposes bounded transient context metadata for drag/drop, clipboard events, power transitions, notification-provider events and Bluetooth state. File paths, clipboard bodies and arbitrary notification text are intentionally not part of this context contract.
 
 ## App integration bridge
 
