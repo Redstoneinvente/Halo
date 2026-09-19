@@ -284,6 +284,7 @@ struct HaloCITriggerSnapshot: Equatable {
     var fileDragActive = false
     var fileDragFileCount = 0
     var fileDragFolderCount = 0
+    var fileDragExtensionlessFileCount = 0
     var fileDragExtensions: Set<String> = []
 }
 
@@ -339,7 +340,8 @@ enum HaloCITriggerEvaluator {
                     .trimmingCharacters(in: CharacterSet(charactersIn: "."))
             }.filter { !$0.isEmpty })
             if allowed.isEmpty || allowed.contains("*") { return true }
-            guard !snapshot.fileDragExtensions.isEmpty else { return false }
+            guard snapshot.fileDragExtensionlessFileCount == 0,
+                  !snapshot.fileDragExtensions.isEmpty else { return false }
             return snapshot.fileDragExtensions.isSubset(of: allowed)
         default:
             return false
