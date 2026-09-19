@@ -76,6 +76,7 @@
 		C1A300000000000000000009 /* Core/IntegrationCIRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000109 /* Core/IntegrationCIRuntime.swift */; };
 		C1A30000000000000000000A /* Core/CIKeyboardShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A30000000000000000010A /* Core/CIKeyboardShortcut.swift */; };
 		C1A30000000000000000000B /* Services/IntegrationShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A30000000000000000010B /* Services/IntegrationShortcuts.swift */; };
+		C1A30000000000000000000C /* Core/IntegrationActionDropTargetRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A30000000000000000010C /* Core/IntegrationActionDropTargetRegistry.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -168,6 +169,7 @@
 		C1A300000000000000000109 /* Core/IntegrationCIRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/IntegrationCIRuntime.swift; sourceTree = "<group>"; };
 		C1A30000000000000000010A /* Core/CIKeyboardShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/CIKeyboardShortcut.swift; sourceTree = "<group>"; };
 		C1A30000000000000000010B /* Services/IntegrationShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/IntegrationShortcuts.swift; sourceTree = "<group>"; };
+		C1A30000000000000000010C /* Core/IntegrationActionDropTargetRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/IntegrationActionDropTargetRegistry.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -259,6 +261,7 @@
 				C1A300000000000000000109 /* Core/IntegrationCIRuntime.swift */,
 				C1A30000000000000000010A /* Core/CIKeyboardShortcut.swift */,
 				C1A30000000000000000010B /* Services/IntegrationShortcuts.swift */,
+				C1A30000000000000000010C /* Core/IntegrationActionDropTargetRegistry.swift */,
 				F8614B60305322E600D4943C /* AppIcon 2.icns */,
 			);
 			path = Halo;
@@ -531,6 +534,7 @@
 				C1A300000000000000000009 /* Core/IntegrationCIRuntime.swift in Sources */,
 				C1A30000000000000000000A /* Core/CIKeyboardShortcut.swift in Sources */,
 				C1A30000000000000000000B /* Services/IntegrationShortcuts.swift in Sources */,
+				C1A30000000000000000000C /* Core/IntegrationActionDropTargetRegistry.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
