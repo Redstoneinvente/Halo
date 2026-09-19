@@ -3,6 +3,8 @@ import AppKit
 import AVKit
 import ImageIO
 import EventKit
+import CoreImage
+import QuartzCore
 
 @MainActor
 protocol HaloModule {
@@ -2303,7 +2305,62 @@ struct DesktopGlass: NSViewRepresentable {
     let options: GlassOptions
 
     final class EffectView: NSVisualEffectView {
+        var glassOptions = GlassOptions()
+        private var lastFilterSignature = ""
+
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func layout() {
+            super.layout()
+            updateRefractionIfNeeded()
+        }
+
+        func apply(_ options: GlassOptions) {
+            glassOptions = options.normalized()
+            wantsLayer = true
+            layerUsesCoreImageFilters = true
+            updateRefractionIfNeeded(force: true)
+        }
+
+        private func updateRefractionIfNeeded(force: Bool = false) {
+            let options = glassOptions
+            let size = bounds.size
+            let signature = [
+                String(format: "%.4f", options.refraction),
+                String(format: "%.4f", options.refractionSpread),
+                String(format: "%.2f", size.width),
+                String(format: "%.2f", size.height)
+            ].joined(separator: ":")
+
+            guard force || signature != lastFilterSignature else { return }
+            lastFilterSignature = signature
+
+            guard options.refraction > 0.001,
+                  size.width > 2,
+                  size.height > 2,
+                  let filter = CIFilter(name: "CIBumpDistortion") else {
+                backgroundFilters = []
+                return
+            }
+
+            filter.setDefaults()
+            filter.setValue(
+                CIVector(x: bounds.midX, y: bounds.midY),
+                forKey: kCIInputCenterKey
+            )
+            let minimumDimension = min(size.width, size.height)
+            let maximumDimension = max(size.width, size.height)
+            let radius = minimumDimension * 0.55
+                + (maximumDimension * 1.05 - minimumDimension * 0.55) * options.refractionSpread
+            filter.setValue(max(1, radius), forKey: kCIInputRadiusKey)
+
+            // CIBumpDistortion is a true coordinate warp. Keep the useful range below
+            // the extreme values where text/icons behind Halo fold over themselves.
+            let scale = options.refraction * 0.82
+            filter.setValue(scale, forKey: kCIInputScaleKey)
+            filter.name = "haloGlassRefraction"
+            backgroundFilters = [filter]
+        }
     }
 
     func makeNSView(context: Context) -> EffectView {
@@ -2322,6 +2379,7 @@ struct DesktopGlass: NSViewRepresentable {
     private func apply(_ options: GlassOptions, to view: EffectView) {
         view.material = nativeMaterial(for: options.frost)
         view.alphaValue = CGFloat(GlassRendering.materialOpacity(clarity: options.clarity))
+        view.apply(options)
     }
 
     private func nativeMaterial(for frost: Double) -> NSVisualEffectView.Material {
