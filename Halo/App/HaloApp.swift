@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var hudSettings: NSWindow?
     private var setupWindow: NSWindow?
     private var commercialBag = Set<AnyCancellable>()
+    private var licenseClipboardTimer: Timer?
+    private var licenseClipboardChangeCount = NSPasteboard.general.changeCount
     private var licensedServicesStarted = false
     private var setupShownThisLaunch = false
     private let updater = HaloUpdateController.shared
@@ -90,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let manager = WindowManager(store: store, startupActivationContext: activationContext)
         engine = manager
         manager.start()
+        startLicenseClipboardWatcher()
 
         Publishers.CombineLatest3(
             HaloAccountManager.shared.$isSignedIn.removeDuplicates(),
@@ -112,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         engine?.setCommercialAccessGranted(granted)
 
         if granted {
+            stopLicenseClipboardWatcher()
             startLicensedServices()
 
             let defaults = UserDefaults.standard
@@ -122,11 +126,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 presentSetupIfNeeded()
             }
         } else {
+            startLicenseClipboardWatcher()
             setupWindow?.orderOut(nil)
             setupWindow = nil
             setupShownThisLaunch = false
             stopLicensedServices()
         }
+    }
+
+    private func startLicenseClipboardWatcher() {
+        guard licenseClipboardTimer == nil else { return }
+
+        // Start from the current change count so a key that happened to already be on the
+        // clipboard before Halo became locked does not unexpectedly open the notch.
+        licenseClipboardChangeCount = NSPasteboard.general.changeCount
+
+        let timer = Timer(timeInterval: 0.30, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.pollClipboardForLicenseKey()
+            }
+        }
+        timer.tolerance = 0.06
+        licenseClipboardTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopLicenseClipboardWatcher() {
+        licenseClipboardTimer?.invalidate()
+        licenseClipboardTimer = nil
+        licenseClipboardChangeCount = NSPasteboard.general.changeCount
+    }
+
+    private func pollClipboardForLicenseKey() {
+        guard !commercialAccessGranted else {
+            stopLicenseClipboardWatcher()
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        guard pasteboard.changeCount != licenseClipboardChangeCount else { return }
+        licenseClipboardChangeCount = pasteboard.changeCount
+
+        guard let raw = pasteboard.string(forType: .string) else { return }
+        let candidate = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+
+        guard Self.looksLikeHaloLicenseKey(candidate) else { return }
+        engine?.expandAll()
+    }
+
+    private static func looksLikeHaloLicenseKey(_ value: String) -> Bool {
+        // LicenseSeat-style paid key, e.g. NYFDB-S5FFL-R4CFZ-4VH7U
+        let paidPattern = #"^[A-Z0-9]{5}(?:-[A-Z0-9]{5}){3}$"#
+
+        // Halo press key, e.g. PK_HALO_4XW2_S9TQ_64SK
+        let pressPattern = #"^PK_HALO_[A-Z0-9]{4}_[A-Z0-9]{4}_[A-Z0-9]{4}$"#
+
+        return value.range(of: paidPattern, options: .regularExpression) != nil ||
+            value.range(of: pressPattern, options: .regularExpression) != nil
     }
 
     private func presentSetupIfNeeded() {
