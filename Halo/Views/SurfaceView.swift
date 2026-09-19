@@ -2185,7 +2185,12 @@ private struct ClipboardContextView: View {
 }
 
 private enum ActiveContextInterface: String {
-    case drop, teleprompter, transfer, clipboard, custom, music, bluetooth, retro
+    case drop, teleprompter, transfer, clipboard, custom, integration, music, bluetooth, retro
+}
+
+private struct SurfaceContextCandidate {
+    let interface: ActiveContextInterface
+    let arbitration: CIArbitrationCandidate
 }
 
 
@@ -2564,7 +2569,9 @@ struct SurfaceView: View {
     @ObservedObject private var transfer = TransferActivityMonitor.shared
     @ObservedObject private var clipboardCI = ClipboardContextMonitor.shared
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
+    @ObservedObject private var integrationCI = IntegrationCIRuntime.shared
     @State private var clipboardOpenedNotch = false
+    @State private var integrationAutoOpeningSurface = false
     @State private var teleprompterActive = false
     @State private var visualWorkspaceSurfacePresented = false
     @AppStorage("HaloContextTeleprompterEnabled") private var teleprompterCIEnabled = true
@@ -2614,18 +2621,63 @@ struct SurfaceView: View {
         if bluetoothEligible { candidates.append((.bluetooth, bluetoothPriority, 1)) }
         return candidates
     }
-    private var highestBuiltInContextPriority: Double? { builtInContextCandidates.map { $0.priority }.max() }
     private var activeCustomCandidate: HaloCustomCICandidate? {
-        customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI,
-                                 blockingPriority: highestBuiltInContextPriority)
+        customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI, blockingPriority: nil)
     }
-    private var activeContext: ActiveContextInterface? {
-        var candidates = builtInContextCandidates
-        if let custom = activeCustomCandidate { candidates.append((.custom, custom.priority, custom.manual ? 100 : 3)) }
-        return candidates.max { lhs, rhs in
-            if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
-            return lhs.tieRank < rhs.tieRank
-        }?.interface
+    private var surfaceContextCandidates: [SurfaceContextCandidate] {
+        var result = builtInContextCandidates.map { item in
+            SurfaceContextCandidate(
+                interface: item.interface,
+                arbitration: CIArbitrationCandidate(
+                    owner: .builtIn(item.interface.rawValue),
+                    ciID: "builtin." + item.interface.rawValue,
+                    priority: item.priority,
+                    tieRank: item.tieRank
+                )
+            )
+        }
+        if let custom = activeCustomCandidate {
+            result.append(
+                SurfaceContextCandidate(
+                    interface: .custom,
+                    arbitration: CIArbitrationCandidate(
+                        owner: .custom(custom.registration.id),
+                        ciID: custom.registration.id,
+                        priority: custom.priority,
+                        tieRank: custom.manual ? 100 : 3
+                    )
+                )
+            )
+        }
+        for candidate in integrationCI.eligibleCandidates(displayID: state.displayID) {
+            result.append(
+                SurfaceContextCandidate(
+                    interface: .integration,
+                    arbitration: CIArbitrationCandidate(
+                        owner: .integration(candidate.registration.id),
+                        ciID: candidate.registration.id,
+                        priority: candidate.priority,
+                        tieRank: 3
+                    )
+                )
+            )
+        }
+        return result
+    }
+    private var activeContextCandidate: SurfaceContextCandidate? {
+        guard let winner = CIArbitrationEngine.winner(in: surfaceContextCandidates.map(\.arbitration)) else { return nil }
+        return surfaceContextCandidates.first(where: { $0.arbitration == winner })
+    }
+    private var activeContext: ActiveContextInterface? { activeContextCandidate?.interface }
+    private var activeIntegrationCandidate: CIEligibleCandidate? {
+        guard activeContext == .integration,
+              let ciID = activeContextCandidate?.arbitration.ciID else { return nil }
+        return integrationCI.candidate(ciID: ciID, displayID: state.displayID)
+    }
+    private var activeIntegrationRegistration: CIRegistration? { activeIntegrationCandidate?.registration }
+    private var activeIntegrationConfiguration: CIConfiguration? {
+        guard let registration = activeIntegrationRegistration else { return nil }
+        return integrationCI.configuration(for: registration)
     }
     private var dropContextActive: Bool { activeContext == .drop }
     private var contextMusicActive: Bool { activeContext == .music }
@@ -2635,6 +2687,7 @@ struct SurfaceView: View {
     private var transferContextActive: Bool { activeContext == .transfer }
     private var clipboardContextActive: Bool { activeContext == .clipboard }
     private var customContextActive: Bool { activeContext == .custom }
+    private var integrationContextActive: Bool { activeContext == .integration }
     private var contextOwnsFullSurface: Bool {
         guard state.expanded else { return false }
         switch activeContext {
@@ -2646,6 +2699,10 @@ struct SurfaceView: View {
         case .transfer: return false
         case .clipboard: return false
         case .custom: return true
+        case .integration:
+            guard let registration = activeIntegrationRegistration else { return false }
+            return activeIntegrationConfiguration?.presentation.usesFullSurface
+                ?? registration.presentation.usesFullSurface
         case .none: return false
         }
     }
@@ -2659,6 +2716,10 @@ struct SurfaceView: View {
         case .transfer: return false
         case .clipboard: return false
         case .custom: return false
+        case .integration:
+            guard let registration = activeIntegrationRegistration else { return false }
+            return activeIntegrationConfiguration?.presentation.keepsClosedContents
+                ?? registration.presentation.keepsClosedContents
         case .none:
             // The two opened-layout systems are mutually exclusive. The Default
             // layout is the only system allowed to keep its closed-notch strip.
