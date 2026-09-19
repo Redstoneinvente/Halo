@@ -179,8 +179,9 @@ enum CIEligibilityEngine {
             let compatible = referenced.compactMap { actionID -> String? in
                 guard let action = actionsByID[actionID],
                       configuration.actionEnabled(actionID),
-                      action.requiredPermissions.isSubset(of: configuration.grantedPermissions),
                       inputCompatible(action.input, event: event) else { return nil }
+                if event.kind == .fileDrag,
+                   !action.requiredPermissions.isSubset(of: configuration.grantedPermissions) { return nil }
                 return actionID
             }
             guard !compatible.isEmpty || trigger.type == .manual else { continue }
@@ -203,7 +204,8 @@ enum CIEligibilityEngine {
         case .none:
             return event.kind != .fileDrag
         case .files:
-            guard event.kind == .fileDrag, let metadata = event.fileDrag, !metadata.containsDirectory else { return false }
+            guard event.kind == .fileDrag else { return true }
+            guard let metadata = event.fileDrag, !metadata.containsDirectory else { return false }
             guard input.multiple || metadata.itemCount == 1 else { return false }
             let supported = Set(input.extensions.map(normalizeExtension))
             if supported.isEmpty { return false }
