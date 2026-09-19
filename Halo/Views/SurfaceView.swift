@@ -2677,16 +2677,17 @@ struct SurfaceView: View {
             width: expandedRule.width ?? 560,
             height: expandedRule.height ?? 260
         )
-        state.contextMinimumExpandedWidth = expandedSize.width
-        state.contextPreferredSize = expandedSize
-
-        if let closedRule = sizing.closed {
-            state.contextPreferredCompactWidth = closedRule.width ?? 190
-            state.contextPreferredCompactHeight = closedRule.height ?? 40
-        } else {
-            state.contextPreferredCompactWidth = nil
-            state.contextPreferredCompactHeight = nil
+        let closedSize = sizing.closed.map {
+            CGSize(width: $0.width ?? 190, height: $0.height ?? 40)
         }
+
+        state.publishContextSizing(
+            owner: "custom:\(package.manifest.id)",
+            preferredSize: expandedSize,
+            compactWidth: closedSize?.width,
+            compactHeight: closedSize?.height,
+            minimumExpandedWidth: expandedSize.width
+        )
     }
     private var contextOwnsFullSurface: Bool {
         guard state.expanded else { return false }
@@ -3035,10 +3036,7 @@ struct SurfaceView: View {
             state.expanded = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCICloseRequested"))) { _ in
-            state.contextPreferredSize = nil
-            state.contextPreferredCompactWidth = nil
-            state.contextPreferredCompactHeight = nil
-            state.contextMinimumExpandedWidth = nil
+            state.clearAllContextSizing()
             if !state.pinned { state.expanded = false }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloClipboardCIToggle"))) { _ in
@@ -4608,7 +4606,7 @@ private struct DropContextView: View {
             .task { publishPreferredSize() }
             .onChange(of: itemCount) { _ in publishPreferredSize() }
             .onChange(of: dropZones.configuration) { _ in publishPreferredSize() }
-            .onDisappear { surfaceState.contextPreferredSize = nil }
+            .onDisappear { surfaceState.clearContextSizing(owner: "drop") }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Drop CI background for \(count) item\(count == 1 ? "" : "s")")
     }
@@ -4616,9 +4614,13 @@ private struct DropContextView: View {
     private func publishPreferredSize() {
         let next = preferredSize
         DispatchQueue.main.async { [surfaceState] in
-            if let current = surfaceState.contextPreferredSize,
-               abs(current.width - next.width) < 1, abs(current.height - next.height) < 1 { return }
-            surfaceState.contextPreferredSize = next
+            surfaceState.publishContextSizing(
+                owner: "drop",
+                preferredSize: next,
+                compactWidth: surfaceState.contextPreferredCompactWidth,
+                compactHeight: surfaceState.contextPreferredCompactHeight,
+                minimumExpandedWidth: surfaceState.contextMinimumExpandedWidth
+            )
         }
     }
 }
@@ -5785,6 +5787,9 @@ private struct HaloCustomCISurfaceView: View {
         .onAppear { publishSizing() }
         .onChange(of: expanded) { _ in publishSizing() }
         .onChange(of: runtime.contextRevision) { _ in publishSizing() }
+        .onDisappear {
+            surfaceState.clearContextSizing(owner: "custom:\(package.manifest.id)")
+        }
     }
 
     private func resolved(_ rule: HaloCISizeRule, measured: CGSize, closed: Bool) -> CGSize {
@@ -5802,18 +5807,19 @@ private struct HaloCustomCISurfaceView: View {
     private func publishSizing() {
         let sizing = package.manifest.surface.sizing
         let expandedSize = resolved(sizing.expanded, measured: measuredExpanded, closed: false)
-        surfaceState.contextMinimumExpandedWidth = sizing.mode == "dynamic"
+        let minimumExpandedWidth = sizing.mode == "dynamic"
             ? (sizing.expanded.minWidth ?? expandedSize.width)
             : expandedSize.width
-        surfaceState.contextPreferredSize = expandedSize
-        if let closed = sizing.closed {
-            let closedSize = resolved(closed, measured: measuredClosed, closed: true)
-            surfaceState.contextPreferredCompactWidth = closedSize.width
-            surfaceState.contextPreferredCompactHeight = closedSize.height
-        } else {
-            surfaceState.contextPreferredCompactWidth = nil
-            surfaceState.contextPreferredCompactHeight = nil
+        let closedSize = sizing.closed.map {
+            resolved($0, measured: measuredClosed, closed: true)
         }
+        surfaceState.publishContextSizing(
+            owner: "custom:\(package.manifest.id)",
+            preferredSize: expandedSize,
+            compactWidth: closedSize?.width,
+            compactHeight: closedSize?.height,
+            minimumExpandedWidth: minimumExpandedWidth
+        )
     }
 }
 
