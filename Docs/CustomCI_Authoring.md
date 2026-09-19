@@ -663,7 +663,14 @@ Clipboard.Write
 URL.Open
 ```
 
-Declare only what you use.
+SDK 0.2 additionally supports:
+
+```text
+Audio.ReadState
+AppIntegration.Execute
+```
+
+`AppIntegration.Execute` allows only the manifest-backed `app.integration.invoke` broker; it is not generic process execution. Declare only what you use.
 
 Examples:
 
@@ -689,7 +696,9 @@ AutomaticTriggers
 MediaControls
 ```
 
-Use them to describe what the package intends to use. Do not invent capability strings: unknown values are rejected.
+SDK 0.2 additionally supports `AppIntegrations` for packages that use the app-integration broker.
+
+Use capability labels to describe what the package intends to use. Do not invent capability strings: unknown values are rejected.
 
 ---
 
@@ -731,6 +740,33 @@ Permission requirements:
 | `media.previous` | `Media.Control` |
 
 Action `value` and string `arguments` can contain supported bindings.
+
+### SDK 0.2 app integration action
+
+SDK 0.2 adds:
+
+```text
+app.integration.invoke
+```
+
+It requires `AppIntegration.Execute` and the `bundleIdentifier` + `actionID` string arguments:
+
+```json
+{
+  "type": "Button",
+  "text": "Convert file",
+  "accessibilityLabel": "Convert file with Example Converter",
+  "action": {
+    "id": "app.integration.invoke",
+    "arguments": {
+      "bundleIdentifier": "com.example.converter",
+      "actionID": "convert.file"
+    }
+  }
+}
+```
+
+Halo revalidates the installed app's current `HaloIntegration.json` before execution. This action cannot target an arbitrary application command. See [Automatic App Integration Custom CIs](AutoIntegrationCI.md).
 
 ---
 
