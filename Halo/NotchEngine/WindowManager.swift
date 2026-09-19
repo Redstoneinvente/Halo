@@ -199,24 +199,19 @@ final class HaloPanel: NSPanel {
 
 @MainActor
 final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
-    var dragStateHandler: ((Bool, Int) -> Void)?
-    var dropHandler: (([URL]) -> Void)?
+    /// Returns true when the surface-wide CI system has at least one eligible drag consumer.
+    /// The callback receives URLs only at the privileged AppKit boundary; URLs are immediately
+    /// moved into TriggerPayloadStore before any Custom CI/public context can observe them.
+    var dragStateHandler: ((Bool, [URL]) -> Bool)?
+    var dropHandler: (([URL]) -> Bool)?
 
-    /// Commercial access is a hard outer boundary. When false, this hosting view
-    /// must not register as a drag destination at all — including registrations
-    /// requested internally by SwiftUI descendant .dropDestination views.
+    /// Commercial access remains the hard outer boundary for Halo's surface-wide drag source.
     var commercialAccessAllowed: (() -> Bool)? {
         didSet { refreshDropRegistration() }
     }
 
-    /// This controls only the surface-wide Drop CI feature. It is deliberately
-    /// separate from commercial access so licensed users can disable Drop CI while
-    /// retaining legitimate descendant drop targets such as File Shelf.
-    var dropEnabled: (() -> Bool)? {
-        didSet { refreshDropRegistration() }
-    }
-
-    private var dropCIRegistered = false
+    private var fileDragRegistered = false
+    private var surfaceDragActive = false
 
     required init(rootView: Content) {
         super.init(rootView: rootView)
@@ -226,55 +221,34 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    // Both providers fail closed until WindowManager installs them.
     private var hasCommercialAccess: Bool { commercialAccessAllowed?() ?? false }
-    private var acceptsFileDrop: Bool { hasCommercialAccess && (dropEnabled?() ?? false) }
 
-    /// The global file-drag monitor lives outside the normal NSDraggingDestination path.
-    /// Expose the same authoritative, in-memory permission so it cannot create a second
-    /// unlicensed Drop CI path.
-    var permitsGlobalDropCI: Bool { acceptsFileDrop }
-
-    /// Prevent SwiftUI or any descendant from re-registering the locked Halo surface
-    /// as a drag destination. Once commercially unlocked, normal NSHostingView
-    /// registration is allowed again so File Shelf and other descendant targets work.
+    /// Prevent SwiftUI descendants from creating an unlicensed drag path. Once unlocked,
+    /// descendants (File Shelf, etc.) may register normally alongside Halo's shared source.
     override func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {
         guard hasCommercialAccess else { return }
         super.registerForDraggedTypes(newTypes)
     }
 
-    /// Drop CI owns only the surface-wide drag destination. Commercial lock is stronger
-    /// than the Drop CI setting: while locked, remove every drag registration from this
-    /// hosting view and reject any stale in-flight Drop CI state synchronously.
+    /// Halo owns one surface-wide file-drag source. Registration is intentionally independent of
+    /// the Drop CI preference: Drop CI and partner CIs are consumers of the same source.
     func refreshDropRegistration() {
         guard hasCommercialAccess else {
             unregisterDraggedTypes()
-            dropCIRegistered = false
-            rejectFileDrop()
+            fileDragRegistered = false
+            rejectSurfaceDrag()
             return
         }
+        guard !fileDragRegistered else { return }
+        super.registerForDraggedTypes([.fileURL])
+        fileDragRegistered = true
+    }
 
-        let shouldRegister = dropEnabled?() ?? false
-        guard shouldRegister != dropCIRegistered else { return }
-
-        if shouldRegister {
-            registerForDraggedTypes([.fileURL])
-        } else {
-            unregisterDraggedTypes()
+    private func rejectSurfaceDrag() {
+        if surfaceDragActive {
+            _ = dragStateHandler?(false, [])
+            surfaceDragActive = false
         }
-
-        dropCIRegistered = shouldRegister
-        if !shouldRegister { rejectFileDrop() }
-    }
-
-    private func rejectFileDrop() {
-        dragStateHandler?(false, 0)
-    }
-
-    private func fileURLCount(_ sender: NSDraggingInfo) -> Int {
-        sender.draggingPasteboard.pasteboardItems?.reduce(into: 0) { count, item in
-            if item.availableType(from: [.fileURL]) != nil { count += 1 }
-        } ?? 0
     }
 
     private func fileURLs(_ sender: NSDraggingInfo) -> [URL] {
@@ -289,66 +263,50 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        // Locked means drag-dead: do not involve the Drop CI and do not hand the drag
-        // to SwiftUI/NSHostingView. Licensed + Drop-disabled is different: descendants
-        // such as File Shelf may still own their own drop destinations.
-        guard hasCommercialAccess else { rejectFileDrop(); return [] }
-        guard acceptsFileDrop else { return super.draggingEntered(sender) }
+        guard hasCommercialAccess else { rejectSurfaceDrag(); return [] }
+        let urls = fileURLs(sender)
+        guard !urls.isEmpty else { return super.draggingEntered(sender) }
 
-        let count = fileURLCount(sender)
-        guard count > 0 else { return super.draggingEntered(sender) }
-        dragStateHandler?(true, count)
-        return .copy
+        // Classification/payload capture happens once on enter. draggingUpdated never rebuilds it.
+        let claimed = dragStateHandler?(true, urls) ?? false
+        surfaceDragActive = claimed
+        return claimed ? .copy : super.draggingEntered(sender)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard hasCommercialAccess else { rejectFileDrop(); return [] }
-        guard acceptsFileDrop else { return super.draggingUpdated(sender) }
-
-        let count = fileURLCount(sender)
-        guard count > 0 else { return super.draggingUpdated(sender) }
-        dragStateHandler?(true, count)
-        return .copy
+        guard hasCommercialAccess else { rejectSurfaceDrag(); return [] }
+        return surfaceDragActive ? .copy : super.draggingUpdated(sender)
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        guard hasCommercialAccess else {
-            rejectFileDrop()
-            return
-        }
-        guard acceptsFileDrop else {
+        guard hasCommercialAccess else { rejectSurfaceDrag(); return }
+        if surfaceDragActive {
+            _ = dragStateHandler?(false, [])
+            surfaceDragActive = false
+        } else {
             super.draggingExited(sender)
-            return
         }
-        dragStateHandler?(false, 0)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard hasCommercialAccess else {
-            rejectFileDrop()
-            return false
-        }
-        guard acceptsFileDrop else { return super.performDragOperation(sender) }
-
+        guard hasCommercialAccess else { rejectSurfaceDrag(); return false }
+        guard surfaceDragActive else { return super.performDragOperation(sender) }
         let urls = fileURLs(sender)
         guard !urls.isEmpty else {
-            dragStateHandler?(false, 0)
-            return super.performDragOperation(sender)
+            rejectSurfaceDrag()
+            return false
         }
-        dropHandler?(urls)
-        return true
+        return dropHandler?(urls) ?? false
     }
 
     override func concludeDragOperation(_ sender: NSDraggingInfo?) {
-        guard hasCommercialAccess else {
-            rejectFileDrop()
-            return
-        }
-        guard acceptsFileDrop else {
+        guard hasCommercialAccess else { rejectSurfaceDrag(); return }
+        if surfaceDragActive {
+            _ = dragStateHandler?(false, [])
+            surfaceDragActive = false
+        } else {
             super.concludeDragOperation(sender)
-            return
         }
-        dragStateHandler?(false, 0)
     }
 }
 
