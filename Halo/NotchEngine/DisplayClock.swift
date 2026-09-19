@@ -2355,19 +2355,20 @@ private final class HaloGlobalFileDragMonitor {
             )
 
             if !actions.isEmpty {
-                HaloEmbeddedDropZoneController.shared.dismiss()
-                target.dragStateHandler?(false, 0)
                 HaloIntegrationExecutionSession.shared.presentChoices(
                     actions,
                     files: files,
                     displayID: displayID
                 )
-                return
+            } else {
+                HaloIntegrationExecutionSession.shared.cancelUncommittedDrag(
+                    on: displayID
+                )
             }
         }
 
         if let displayID,
-           HaloIntegrationExecutionSession.shared.isActive(on: displayID) {
+           HaloIntegrationExecutionSession.shared.ownsSurface(on: displayID) {
             target.dragStateHandler?(false, 0)
             HaloEmbeddedDropZoneController.shared.dismiss()
             return
