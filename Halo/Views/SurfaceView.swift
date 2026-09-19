@@ -2900,7 +2900,7 @@ struct SurfaceView: View {
                                 store: store,
                                 mode: layout.resolvedOpenNotchLayout.resolvedContentMode,
                                 page: $page,
-                                closingPowerOnly: !state.expanded && presentsVisualWorkspaceSurface
+                                closingPowerOnly: state.pixelPalCloseGateActive && presentsVisualWorkspaceSurface
                             )
                                 .environment(\.haloPixelPalHostExpanded, state.expanded)
                                 .environment(\.haloPixelPalHostTransitionDuration, layout.appearance.surface.duration)
