@@ -984,7 +984,7 @@ struct HaloAutoIntegrationCISyncResult: Sendable {
 }
 
 enum HaloAutoIntegrationCIGenerator {
-    static let generatorVersion = 1
+    static let generatorVersion = 2
     static let markerFileName = ".halo-generated-integration.json"
     private static let packagePrefix = "com.redstoneinvente.halo.integration."
 
