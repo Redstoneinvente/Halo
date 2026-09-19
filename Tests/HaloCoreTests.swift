@@ -75,7 +75,8 @@ final class HaloCoreTests: XCTestCase {
                 actualBundleIdentifier: "com.example.actual"
             )
         ) { error in
-            guard case HaloIntegrationManifestError.bundleIdentifierMismatch = error else {
+            guard let integrationError = error as? HaloIntegrationManifestError,
+                  case .bundleIdentifierMismatch = integrationError else {
                 return XCTFail("Expected bundleIdentifierMismatch, got \(error)")
             }
         }
@@ -95,7 +96,8 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertThrowsError(
             try HaloIntegrationManifestCodec.validate(duplicateActions)
         ) { error in
-            guard case HaloIntegrationManifestError.duplicateActionID = error else {
+            guard let integrationError = error as? HaloIntegrationManifestError,
+                  case .duplicateActionID = integrationError else {
                 return XCTFail("Expected duplicateActionID, got \(error)")
             }
         }
@@ -125,7 +127,8 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertThrowsError(
             try HaloIntegrationManifestCodec.validate(unknownType)
         ) { error in
-            guard case HaloIntegrationManifestError.unsupportedOptionType = error else {
+            guard let integrationError = error as? HaloIntegrationManifestError,
+                  case .unsupportedOptionType = integrationError else {
                 return XCTFail("Expected unsupportedOptionType, got \(error)")
             }
         }
