@@ -2242,7 +2242,7 @@ struct ResolvedSurfaceBackground: View {
                         endPoint: .trailing
                     )
                     LinearGradient(
-                        colors: [.clear, Color.magenta.opacity(GlassRendering.chromaticOpacity(glass.chromaticShift))],
+                        colors: [.clear, Color(red: 1.0, green: 0.0, blue: 1.0).opacity(GlassRendering.chromaticOpacity(glass.chromaticShift))],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
