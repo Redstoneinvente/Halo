@@ -566,9 +566,9 @@ final class SystemLiveActivitySource {
     func stop() {
         timer?.invalidate()
         timer = nil
+        finishFaceTimeIfNeeded()
         notificationFingerprints.removeAll()
         didSeedNotificationFingerprints = false
-        activeFaceTimeExternalID = nil
     }
 
     func refreshNow() { scan() }
@@ -587,7 +587,12 @@ final class SystemLiveActivitySource {
     }
 
     private func scan() {
-        guard captureEnabled, AXIsProcessTrusted() else { return }
+        guard captureEnabled, AXIsProcessTrusted() else {
+            finishFaceTimeIfNeeded()
+            notificationFingerprints.removeAll()
+            didSeedNotificationFingerprints = false
+            return
+        }
         scanNotificationCenter()
         scanFaceTime()
     }
