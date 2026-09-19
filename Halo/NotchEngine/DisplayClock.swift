@@ -476,6 +476,7 @@ private protocol HaloGlobalDropTarget: AnyObject {
     var dragStateHandler: ((Bool, Int) -> Void)? { get }
     var dropHandler: (([URL]) -> Void)? { get set }
     var permitsGlobalDropCI: Bool { get }
+    var permitsGlobalIntegrationCI: Bool { get }
 }
 
 extension HaloDropHostingView: HaloGlobalDropTarget {}
@@ -1229,13 +1230,17 @@ private final class HaloDropZoneHostView: NSView {
         let urls = fileURLs(sender)
         guard !urls.isEmpty else { return false }
 
+        guard haloAppIntegrationCIEnabled else { return false }
+
         let actions = HaloIntegrationCatalog.shared.compatibleInvocations(
             for: urls
         )
-        guard !actions.isEmpty else { return false }
+        guard !actions.isEmpty,
+              let screen = window?.screen else { return false }
 
+        let displayID = WindowManager.displayID(screen)
         let session = HaloIntegrationExecutionSession.shared
-        session.presentChoices(actions, files: urls)
+        session.presentChoices(actions, files: urls, displayID: displayID)
         if commitDrop {
             session.commitDrop(files: urls)
         }
@@ -1302,6 +1307,17 @@ private var haloDropCIEnabled: Bool {
     return defaults.object(forKey: "HaloContextDropEnabled") == nil
         ? true
         : defaults.bool(forKey: "HaloContextDropEnabled")
+}
+
+private var haloAppIntegrationCIEnabled: Bool {
+    let defaults = UserDefaults.standard
+    return defaults.object(forKey: "HaloContextAppIntegrationEnabled") == nil
+        ? true
+        : defaults.bool(forKey: "HaloContextAppIntegrationEnabled")
+}
+
+private var haloAnyFileDragCIEnabled: Bool {
+    haloDropCIEnabled || haloAppIntegrationCIEnabled
 }
 
 @MainActor
@@ -1481,9 +1497,16 @@ private final class HaloEmbeddedDropZoneController {
         model.hoveredIntegrationID = invocation.id
         model.result = "Opening \(invocation.action.name)…"
 
+        guard let view = target as? NSView,
+              let screen = view.window?.screen else {
+            completeDrop(result: "Could not resolve the target display")
+            return
+        }
+
         HaloIntegrationExecutionSession.shared.present(
             invocation,
-            files: urls
+            files: urls,
+            displayID: WindowManager.displayID(screen)
         )
 
         target.dragStateHandler?(false, 0)
@@ -2414,10 +2437,11 @@ private final class HaloGlobalFileDragMonitor {
     }
 
     private func handleMouseEvent(_ type: NSEvent.EventType) {
-        guard haloDropCIEnabled else {
+        guard haloAnyFileDragCIEnabled else {
             deactivateForDisabledState()
             return
         }
+
         switch type {
         case .leftMouseDown:
             beginPointerSession()
@@ -2439,17 +2463,23 @@ private final class HaloGlobalFileDragMonitor {
     }
 
     private func pollDragSession() {
-        guard haloDropCIEnabled else {
+        guard haloAnyFileDragCIEnabled else {
             deactivateForDisabledState()
             return
         }
-        if let activeTarget, !activeTarget.permitsGlobalDropCI {
+
+        if let activeTarget,
+           !activeTarget.permitsGlobalDropCI,
+           !activeTarget.permitsGlobalIntegrationCI {
             deactivateForDisabledState()
             return
         }
+
         let leftButtonDown = (NSEvent.pressedMouseButtons & 1) != 0
         guard leftButtonDown else {
-            if activeTarget != nil || sawMouseDrag { finishAfterDropOpportunity() }
+            if activeTarget != nil || sawMouseDrag {
+                finishAfterDropOpportunity()
+            }
             return
         }
 
@@ -2457,63 +2487,132 @@ private final class HaloGlobalFileDragMonitor {
         if dragSessionBaselineChangeCount == nil {
             dragSessionBaselineChangeCount = NSPasteboard(name: .drag).changeCount
         }
+
         inspectDragPasteboard()
 
         if activeTarget != nil {
-            activateTarget(at: NSEvent.mouseLocation, count: max(1, activeItemCount))
+            let pasteboard = NSPasteboard(name: .drag)
+            activateTarget(
+                at: NSEvent.mouseLocation,
+                count: max(1, activeItemCount),
+                files: dragPasteboardFileURLs(pasteboard)
+            )
         }
     }
 
     private func inspectDragPasteboard() {
-        guard haloDropCIEnabled else {
+        guard haloAnyFileDragCIEnabled else {
             deactivateForDisabledState()
             return
         }
+
         let pasteboard = NSPasteboard(name: .drag)
         let count = dragPasteboardFileCount(pasteboard)
         guard count > 0 else { return }
 
         if activeTarget == nil {
             if let baseline = dragSessionBaselineChangeCount,
-               pasteboard.changeCount == baseline { return }
+               pasteboard.changeCount == baseline {
+                return
+            }
             if dragSessionBaselineChangeCount == nil,
                let lastCompletedPasteboardChangeCount,
-               pasteboard.changeCount == lastCompletedPasteboardChangeCount { return }
+               pasteboard.changeCount == lastCompletedPasteboardChangeCount {
+                return
+            }
         }
 
         activeItemCount = count
-        activateTarget(at: NSEvent.mouseLocation, count: count)
+        activateTarget(
+            at: NSEvent.mouseLocation,
+            count: count,
+            files: dragPasteboardFileURLs(pasteboard)
+        )
     }
 
-    private func dragPasteboardFileCount(_ pasteboard: NSPasteboard = NSPasteboard(name: .drag)) -> Int {
+    private func dragPasteboardFileCount(
+        _ pasteboard: NSPasteboard = NSPasteboard(name: .drag)
+    ) -> Int {
         pasteboard.pasteboardItems?.reduce(into: 0) { result, item in
-            if item.availableType(from: [.fileURL]) != nil { result += 1 }
+            if item.availableType(from: [.fileURL]) != nil {
+                result += 1
+            }
         } ?? 0
     }
 
-    private func activateTarget(at point: NSPoint, count: Int) {
-        guard haloDropCIEnabled else {
-            deactivateForDisabledState()
-            return
-        }
-        guard let target = targetForDrag(at: point), target.permitsGlobalDropCI else {
+    private func dragPasteboardFileURLs(
+        _ pasteboard: NSPasteboard = NSPasteboard(name: .drag)
+    ) -> [URL] {
+        let objects = pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) ?? []
+        return objects.compactMap { ($0 as? NSURL).map { $0 as URL } }
+    }
+
+    private func activateTarget(
+        at point: NSPoint,
+        count: Int,
+        files: [URL]
+    ) {
+        guard haloAnyFileDragCIEnabled else {
             deactivateForDisabledState()
             return
         }
 
-        if HaloIntegrationExecutionSession.shared.isActive {
-            activeTarget = target
+        guard let target = targetForDrag(at: point) else {
+            activeTarget?.dragStateHandler?(false, 0)
+            HaloEmbeddedDropZoneController.shared.dismiss()
+            activeTarget = nil
+            return
+        }
+
+        if let previous = activeTarget, previous !== target {
+            previous.dragStateHandler?(false, 0)
+            HaloEmbeddedDropZoneController.shared.dismiss()
+        }
+        activeTarget = target
+
+        let displayID = targetDisplayID(target)
+
+        if haloAppIntegrationCIEnabled,
+           target.permitsGlobalIntegrationCI,
+           !files.isEmpty,
+           let displayID {
+            let actions = HaloIntegrationCatalog.shared.compatibleInvocations(
+                for: files
+            )
+
+            if !actions.isEmpty {
+                HaloEmbeddedDropZoneController.shared.dismiss()
+                target.dragStateHandler?(false, 0)
+                HaloIntegrationExecutionSession.shared.presentChoices(
+                    actions,
+                    files: files,
+                    displayID: displayID
+                )
+                return
+            }
+        }
+
+        if let displayID,
+           HaloIntegrationExecutionSession.shared.isActive(on: displayID) {
             target.dragStateHandler?(false, 0)
             HaloEmbeddedDropZoneController.shared.dismiss()
             return
         }
-        if let activeTarget, activeTarget !== target {
-            activeTarget.dragStateHandler?(false, 0)
+
+        guard haloDropCIEnabled, target.permitsGlobalDropCI else {
+            target.dragStateHandler?(false, 0)
             HaloEmbeddedDropZoneController.shared.dismiss()
+            return
         }
-        activeTarget = target
+
         target.dragStateHandler?(true, max(1, count))
-        HaloEmbeddedDropZoneController.shared.begin(target: target, itemCount: max(1, count))
+        HaloEmbeddedDropZoneController.shared.begin(
+            target: target,
+            itemCount: max(1, count)
+        )
     }
 
     private func targetForDrag(at point: NSPoint) -> (any HaloGlobalDropTarget)? {
@@ -2524,18 +2623,31 @@ private final class HaloGlobalFileDragMonitor {
             return screen.frame.contains(point)
         }),
            let target = panel.contentView as? any HaloGlobalDropTarget,
-           target.permitsGlobalDropCI {
+           target.permitsGlobalDropCI || target.permitsGlobalIntegrationCI {
             return target
         }
 
         return panels
             .compactMap { $0.contentView as? any HaloGlobalDropTarget }
-            .first(where: { $0.permitsGlobalDropCI })
+            .first(where: {
+                $0.permitsGlobalDropCI || $0.permitsGlobalIntegrationCI
+            })
+    }
+
+    private func targetDisplayID(
+        _ target: any HaloGlobalDropTarget
+    ) -> String? {
+        guard let view = target as? NSView,
+              let screen = view.window?.screen else { return nil }
+        return WindowManager.displayID(screen)
     }
 
     private func finishAfterDropOpportunity() {
         guard !deferredFinishPending else { return }
-        if HaloEmbeddedDropZoneController.shared.containsScreenPoint(NSEvent.mouseLocation) {
+
+        if HaloEmbeddedDropZoneController.shared.containsScreenPoint(
+            NSEvent.mouseLocation
+        ) {
             deferredFinishPending = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) { [weak self] in
                 guard let self else { return }
@@ -2552,22 +2664,32 @@ private final class HaloGlobalFileDragMonitor {
     }
 
     private func finishDrag() {
+        let displayID = activeTarget.flatMap(targetDisplayID)
+
         guard activeTarget != nil || sawMouseDrag else {
-            HaloIntegrationExecutionSession.shared.cancelUncommittedDrag()
+            HaloIntegrationExecutionSession.shared.cancelUncommittedDrag(
+                on: displayID
+            )
             resetSessionState()
             return
         }
+
         activeTarget?.dragStateHandler?(false, 0)
         HaloEmbeddedDropZoneController.shared.cancelIfNeeded()
-        HaloIntegrationExecutionSession.shared.cancelUncommittedDrag()
+        HaloIntegrationExecutionSession.shared.cancelUncommittedDrag(
+            on: displayID
+        )
         resetSessionState()
     }
 
     private func deactivateForDisabledState() {
+        let displayID = activeTarget.flatMap(targetDisplayID)
         deferredFinishPending = false
         activeTarget?.dragStateHandler?(false, 0)
         HaloEmbeddedDropZoneController.shared.dismiss()
-        HaloIntegrationExecutionSession.shared.cancelUncommittedDrag()
+        HaloIntegrationExecutionSession.shared.cancelUncommittedDrag(
+            on: displayID
+        )
         resetSessionState()
     }
 
