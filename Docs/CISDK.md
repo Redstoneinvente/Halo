@@ -1261,6 +1261,8 @@ Halo may generate managed SDK 0.2 `.haloCI` packages from validated installed-ap
 The authoritative implementation/partner guide is `Docs/AutoIntegrationCI.md`.
 ### Triggers
 
+SDK 0.2 includes `fileDrag`, backed by the Context Provider Engine. Its optional `extensions` array is normalized without leading dots. Matching requires an active classified file-only drag; folders do not match. Trigger evaluation never performs filesystem I/O.
+
 `triggers.json` is optional. Without automatic triggers a package can still be opened manually.
 
 ```json
