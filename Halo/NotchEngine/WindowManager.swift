@@ -214,6 +214,7 @@ final class HaloPanel: NSPanel {
 @MainActor
 final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     var dragStateHandler: ((Bool, Int) -> Void)?
+    var dragContextHandler: ((Bool, [URL]) -> Void)?
     var dropHandler: (([URL]) -> Void)?
 
     /// Commercial access is a hard outer boundary. When false, this hosting view
@@ -283,6 +284,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
 
     private func rejectFileDrop() {
         dragStateHandler?(false, 0)
+        dragContextHandler?(false, [])
     }
 
     private func fileURLCount(_ sender: NSDraggingInfo) -> Int {
@@ -309,9 +311,10 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
         guard hasCommercialAccess else { rejectFileDrop(); return [] }
         guard acceptsFileDrop else { return super.draggingEntered(sender) }
 
-        let count = fileURLCount(sender)
-        guard count > 0 else { return super.draggingEntered(sender) }
-        dragStateHandler?(true, count)
+        let urls = fileURLs(sender)
+        guard !urls.isEmpty else { return super.draggingEntered(sender) }
+        dragStateHandler?(true, urls.count)
+        dragContextHandler?(true, urls)
         return .copy
     }
 
@@ -335,6 +338,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             return
         }
         dragStateHandler?(false, 0)
+        dragContextHandler?(false, [])
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -363,6 +367,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             return
         }
         dragStateHandler?(false, 0)
+        dragContextHandler?(false, [])
     }
 }
 
@@ -1950,12 +1955,20 @@ final class WindowManager {
                         host.state.endFileDrop(collapseAfterDelay: true)
                     }
                 }
+                view.dragContextHandler = { active, urls in
+                    if active {
+                        HaloCIContextProviderEngine.shared.reportDragStarted(urls: urls)
+                    } else {
+                        HaloCIContextProviderEngine.shared.reportDragEnded()
+                    }
+                }
                 view.dropHandler = { [weak self, weak host] urls in
                     guard let self, let host else { return }
                     guard self.dropCIAllowed else {
                         host.state.cancelFileDrop()
                         return
                     }
+                    HaloCIContextProviderEngine.shared.reportDrop(urls: urls)
                     host.state.completeFileDrop()
                     self.store.addFiles(urls)
                 }
