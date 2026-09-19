@@ -1641,6 +1641,8 @@ private struct ContextInterfaceLibraryView: View {
                 .padding(.vertical, 6)
             }
 
+            HaloPartnerIntegrationSettingsSection()
+
             HaloCustomCISettingsSection()
 
             Section {
@@ -3253,6 +3255,195 @@ private struct HaloAccountLicenseSettingsView: View {
         }
     }
 }
+
+private struct HaloPartnerIntegrationSettingsSection: View {
+    @ObservedObject private var catalog = HaloIntegrationCatalog.shared
+
+    var body: some View {
+        Section("App integrations") {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Halo-enabled apps", systemImage: "app.connected.to.app.below.fill")
+                        .font(.headline)
+                    Text("Halo scans installed apps for Contents/Resources/HaloIntegration.json and reads the actions they expose.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if catalog.isRefreshing {
+                    ProgressView().controlSize(.small)
+                }
+                Button("Scan Again") { catalog.refresh() }
+                    .disabled(catalog.isRefreshing)
+            }
+
+            if !catalog.isRefreshing && catalog.integrations.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("No Halo app integrations found", systemImage: "shippingbox")
+                        .font(.headline)
+                    Text("An integrated app must include HaloIntegration.json in its Copy Bundle Resources build phase so the built app contains Contents/Resources/HaloIntegration.json.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 5)
+            }
+        }
+
+        if !catalog.integrations.isEmpty {
+            Section("Discovered actions") {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(catalog.integrations) { integration in
+                        HaloPartnerIntegrationCard(integration: integration)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+
+        if !catalog.diagnostics.isEmpty {
+            Section("App integration diagnostics") {
+                ForEach(Array(catalog.diagnostics.prefix(8)), id: \.self) { diagnostic in
+                    Label(diagnostic, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                if catalog.diagnostics.count > 8 {
+                    Text("+ \(catalog.diagnostics.count - 8) more")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+private struct HaloPartnerIntegrationCard: View {
+    let integration: HaloIntegration
+    @State private var hovered = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "app.badge.checkmark")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 38, height: 38)
+                    .background(
+                        Color.accentColor.opacity(0.11),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(integration.manifest.name)
+                        .font(.headline)
+                    Text(integration.manifest.bundleIdentifier)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+
+                Spacer()
+
+                Text("\(integration.manifest.actions.count) action\(integration.manifest.actions.count == 1 ? "" : "s")")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(integration.appURL.path)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+
+            Divider()
+
+            ForEach(integration.manifest.actions) { action in
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(action.name)
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Text(action.id)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+
+                    HStack(spacing: 6) {
+                        Text("Files")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(action.supportedExtensions.isEmpty
+                             ? "none"
+                             : action.supportedExtensions.map { $0 == "*" ? "*" : ".\($0)" }.joined(separator: ", "))
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if action.options.isEmpty {
+                        Text("No request options")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(action.options) { option in
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(option.name)
+                                        .font(.caption)
+                                    Text(option.key)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                    Spacer(minLength: 8)
+                                    Text(option.type)
+                                        .font(.caption2.monospaced().weight(.semibold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(
+                                            Color.accentColor.opacity(0.10),
+                                            in: Capsule()
+                                        )
+                                    Text(option.required ? "required" : "optional")
+                                        .font(.caption2)
+                                        .foregroundStyle(option.required ? .primary : .secondary)
+                                }
+
+                                if let description = option.description,
+                                   !description.isEmpty {
+                                    Text(description)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.leading, 2)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(10)
+                .background(
+                    Color.primary.opacity(0.035),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+            }
+        }
+        .padding(13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color.primary.opacity(hovered ? 0.075 : 0.045),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(
+                    hovered ? Color.accentColor.opacity(0.38) : Color.primary.opacity(0.08),
+                    lineWidth: 1
+                )
+        )
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovered)
+    }
+}
+
 
 private struct HaloCustomCISettingsSection: View {
     @ObservedObject private var runtime = HaloCustomCIRuntimeStore.shared
