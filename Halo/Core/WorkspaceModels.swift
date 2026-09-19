@@ -4,7 +4,7 @@ enum ModuleID: String, Codable, CaseIterable, Identifiable {
     case clock, timer, shelf, media, audio, calendar, clipboard, system, launcher, activities, pet, developer, notes, capture, stopwatch
     static var allCases: [ModuleID] { [.clock, .timer, .shelf, .media, .audio, .calendar, .clipboard, .system, .launcher, .activities, .pet, .notes, .capture, .stopwatch] }
     var id: String { rawValue }
-    var title: String { rawValue == "shelf" ? "File shelf" : (self == .pet ? "Halo Pet" : rawValue.capitalized) }
+    var title: String { rawValue == "shelf" ? "File shelf" : (self == .pet ? "Pixel Pal" : rawValue.capitalized) }
     var symbol: String {
         switch self {
         case .clock: return "clock"
