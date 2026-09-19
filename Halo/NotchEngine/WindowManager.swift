@@ -43,6 +43,7 @@ final class SurfaceState: ObservableObject {
     /// consumer of this state; partner integrations receive the same event independently.
     @Published var dropTargeted = false
     @Published var dropItemCount = 0
+    private(set) var dropOpenedSurfaceAutomatically = false
     var collapseTask: Task<Void, Never>?
     var hoverExpandTask: Task<Void, Never>?
     var dropExitTask: Task<Void, Never>?
@@ -61,6 +62,7 @@ final class SurfaceState: ObservableObject {
         dropExitTask = nil
         if dropTargeted { dropTargeted = false }
         if dropItemCount != 0 { dropItemCount = 0 }
+        dropOpenedSurfaceAutomatically = false
     }
 
     /// Records a Halo-owned drag event for the surface. This intentionally does not expand Halo:
@@ -72,6 +74,13 @@ final class SurfaceState: ObservableObject {
         if !dropTargeted { dropTargeted = true }
     }
 
+    func activateDropOwnership() {
+        guard dropTargeted, !expanded, !pinned else { return }
+        dropOpenedSurfaceAutomatically = true
+        collapseTask?.cancel()
+        expanded = true
+    }
+
     func endFileDrop() {
         dropExitTask?.cancel()
         dropExitTask = Task { [weak self] in
@@ -79,6 +88,7 @@ final class SurfaceState: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             self.dropTargeted = false
             self.dropItemCount = 0
+            self.dropOpenedSurfaceAutomatically = false
         }
     }
 
@@ -86,7 +96,9 @@ final class SurfaceState: ObservableObject {
         dropExitTask?.cancel()
         dropTargeted = false
         dropItemCount = 0
-        guard collapseSurface, !pinned, !editingGeometry else { return }
+        let shouldCollapse = collapseSurface && dropOpenedSurfaceAutomatically
+        dropOpenedSurfaceAutomatically = false
+        guard shouldCollapse, !pinned, !editingGeometry else { return }
         collapseTask?.cancel()
         collapseTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 650_000_000)
