@@ -1969,23 +1969,24 @@ struct HaloCIManifest: Codable, Equatable {
     var supportedSurfaces: [String]
     var supportedStates: [String]
     var surface: HaloCISurfaceContract
+    var dismissBehavior: CIDismissBehavior?
 
     init(schemaVersion: Int = 1, sdkVersion: String = "0.1", id: String, name: String,
          author: String, version: String, minimumHaloVersion: String = "1.0.0",
          entryInterface: String = "interface.json", description: String = "",
          permissions: [String] = [], capabilities: [String] = [],
          supportedSurfaces: [String] = ["notch"], supportedStates: [String] = ["closed", "expanded"],
-         surface: HaloCISurfaceContract = .safeDefault) {
+         surface: HaloCISurfaceContract = .safeDefault, dismissBehavior: CIDismissBehavior? = nil) {
         self.schemaVersion = schemaVersion; self.sdkVersion = sdkVersion; self.id = id; self.name = name
         self.author = author; self.version = version; self.minimumHaloVersion = minimumHaloVersion
         self.entryInterface = entryInterface; self.description = description; self.permissions = permissions
         self.capabilities = capabilities; self.supportedSurfaces = supportedSurfaces; self.supportedStates = supportedStates
-        self.surface = surface
+        self.surface = surface; self.dismissBehavior = dismissBehavior
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, sdkVersion, id, name, author, version, minimumHaloVersion, entryInterface,
-             description, permissions, capabilities, supportedSurfaces, supportedStates, surface
+             description, permissions, capabilities, supportedSurfaces, supportedStates, surface, dismissBehavior
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -2003,6 +2004,7 @@ struct HaloCIManifest: Codable, Equatable {
         supportedSurfaces = try c.decodeIfPresent([String].self, forKey: .supportedSurfaces) ?? ["notch"]
         supportedStates = try c.decodeIfPresent([String].self, forKey: .supportedStates) ?? ["expanded"]
         surface = try c.decodeIfPresent(HaloCISurfaceContract.self, forKey: .surface) ?? .safeDefault
+        dismissBehavior = try c.decodeIfPresent(CIDismissBehavior.self, forKey: .dismissBehavior)
     }
 }
 
