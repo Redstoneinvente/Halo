@@ -21,7 +21,6 @@ final class SurfaceState: ObservableObject {
         didSet {
             if pinned {
                 hoverExpandTask?.cancel()
-                collapseTask?.cancel()
                 dismissCoordinator.cancelPendingDismissal()
                 expanded = true
             }
@@ -51,7 +50,6 @@ final class SurfaceState: ObservableObject {
     @Published var dropTargeted = false
     @Published var dropItemCount = 0
     private(set) var dropOpenedSurfaceAutomatically = false
-    var collapseTask: Task<Void, Never>?
     var hoverExpandTask: Task<Void, Never>?
     var dropExitTask: Task<Void, Never>?
     var editingGeometry = false {
@@ -117,7 +115,6 @@ final class SurfaceState: ObservableObject {
     func activateDropOwnership() {
         guard dropTargeted, !expanded, !pinned else { return }
         dropOpenedSurfaceAutomatically = true
-        collapseTask?.cancel()
         expanded = true
     }
 
@@ -187,8 +184,6 @@ final class SurfaceState: ObservableObject {
             hoverExitPendingDuringOpening = false
             dismissCoordinator.pointerEntered()
         }
-
-        collapseTask?.cancel()
         if !inside {
             hoverExpandTask?.cancel()
             hoverExpandTask = nil
@@ -616,7 +611,7 @@ final class WindowManager {
             geometryEditorPanel.animationBehavior = .none
         }
         func stop() {
-            animator.cancel(); state.hoverExpandTask?.cancel(); state.collapseTask?.cancel(); state.dropExitTask?.cancel()
+            animator.cancel(); state.hoverExpandTask?.cancel(); state. state.dropExitTask?.cancel()
             state.dismissCoordinator.reset()
             pixelPalCollapseWork?.cancel()
             subscription?.cancel(); contextSizeSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); contextCompactHeightSubscription?.cancel()
@@ -773,7 +768,7 @@ final class WindowManager {
                 self?.hosts.forEach { id, host in
                     guard display == nil || display == id else { return }
                     host.state.editingGeometry = editing
-                    if editing { host.state.collapseTask?.cancel(); host.state.expanded = expanded }
+                    if editing { host.state. host.state.expanded = expanded }
                 }
                 self?.refreshDynamicWidths()
                 DispatchQueue.main.async { self?.refreshGeometryEditorPanels() }
@@ -1736,7 +1731,7 @@ final class WindowManager {
     func toggleAll() {
         let expand = !hosts.values.contains { $0.state.expanded }
         hosts.values.forEach { host in
-            host.state.collapseTask?.cancel()
+            host.state.
             if expand {
                 host.state.dismissCoordinator.cancelPendingDismissal()
                 host.state.expanded = true
@@ -1750,7 +1745,7 @@ final class WindowManager {
     /// Used by activation affordances such as copying a license key while Halo is locked.
     func expandAll() {
         hosts.values.forEach { host in
-            host.state.collapseTask?.cancel()
+            host.state.
             if !host.state.expanded {
                 host.state.expanded = true
             }
