@@ -30,7 +30,8 @@ enum HaloCISDK {
         "app.integration.invoke"
     ]
     static let supportedTriggers: Set<String> = [
-        "manual", "mediaPlaying", "activeApplication", "batteryBelow", "batteryAbove", "charging", "timeWindow", "lowPowerMode", "displayCount"
+        "manual", "mediaPlaying", "activeApplication", "batteryBelow", "batteryAbove", "charging", "timeWindow",
+        "lowPowerMode", "displayCount", "fileDrag"
     ]
     static let supportedDataKeys = Set(HaloCIContextCatalog.fields.map(\.key))
 
@@ -220,6 +221,18 @@ struct HaloCITrigger: Codable, Equatable {
     var bool: Bool?
     var startMinute: Int?
     var endMinute: Int?
+    var extensions: [String]?
+
+    init(type: String, value: String? = nil, number: Double? = nil, bool: Bool? = nil,
+         startMinute: Int? = nil, endMinute: Int? = nil, extensions: [String]? = nil) {
+        self.type = type
+        self.value = value
+        self.number = number
+        self.bool = bool
+        self.startMinute = startMinute
+        self.endMinute = endMinute
+        self.extensions = extensions
+    }
 }
 
 struct HaloCITriggerDocument: Codable, Equatable {
@@ -268,6 +281,10 @@ struct HaloCITriggerSnapshot: Equatable {
     var minuteOfDay = 0
     var lowPowerMode = false
     var displayCount = 1
+    var fileDragActive = false
+    var fileDragFileCount = 0
+    var fileDragFolderCount = 0
+    var fileDragExtensions: Set<String> = []
 }
 
 enum HaloCITriggerEvaluator {
@@ -275,25 +292,58 @@ enum HaloCITriggerEvaluator {
                         grantedPermissions: Set<String>) -> Bool {
         let automatic = document.triggers.filter { $0.type != "manual" }
         guard !automatic.isEmpty else { return false }
-        let values = automatic.map { trigger -> Bool in
-            if let permission = HaloCISDK.permissionForTrigger(trigger.type), !grantedPermissions.contains(permission) { return false }
-            switch trigger.type {
-            case "lowPowerMode": return snapshot.lowPowerMode == (trigger.bool ?? true)
-            case "displayCount": return Double(snapshot.displayCount) == trigger.number
-            case "mediaPlaying": return snapshot.mediaIsPlaying == (trigger.bool ?? true)
-            case "activeApplication": return snapshot.activeApplicationBundleID == (trigger.value ?? "")
-            case "batteryBelow": guard let level = snapshot.batteryLevel, let threshold = trigger.number else { return false }; return level < threshold
-            case "batteryAbove": guard let level = snapshot.batteryLevel, let threshold = trigger.number else { return false }; return level > threshold
-            case "charging": return snapshot.charging == (trigger.bool ?? true)
-            case "timeWindow":
-                guard let start = trigger.startMinute, let end = trigger.endMinute else { return false }
-                let minute = min(1439, max(0, snapshot.minuteOfDay))
-                if start == end { return true }
-                return start < end ? (minute >= start && minute < end) : (minute >= start || minute < end)
-            default: return false
-            }
+        let values = automatic.map {
+            matches($0, snapshot: snapshot, grantedPermissions: grantedPermissions)
         }
         return document.match == "all" ? values.allSatisfy { $0 } : values.contains(true)
+    }
+
+    static func matches(_ trigger: HaloCITrigger, snapshot: HaloCITriggerSnapshot,
+                        grantedPermissions: Set<String>) -> Bool {
+        if let permission = HaloCISDK.permissionForTrigger(trigger.type),
+           !grantedPermissions.contains(permission) {
+            return false
+        }
+
+        switch trigger.type {
+        case "lowPowerMode":
+            return snapshot.lowPowerMode == (trigger.bool ?? true)
+        case "displayCount":
+            return Double(snapshot.displayCount) == trigger.number
+        case "mediaPlaying":
+            return snapshot.mediaIsPlaying == (trigger.bool ?? true)
+        case "activeApplication":
+            return snapshot.activeApplicationBundleID == (trigger.value ?? "")
+        case "batteryBelow":
+            guard let level = snapshot.batteryLevel, let threshold = trigger.number else { return false }
+            return level < threshold
+        case "batteryAbove":
+            guard let level = snapshot.batteryLevel, let threshold = trigger.number else { return false }
+            return level > threshold
+        case "charging":
+            return snapshot.charging == (trigger.bool ?? true)
+        case "timeWindow":
+            guard let start = trigger.startMinute, let end = trigger.endMinute else { return false }
+            let minute = min(1439, max(0, snapshot.minuteOfDay))
+            if start == end { return true }
+            return start < end ? (minute >= start && minute < end) : (minute >= start || minute < end)
+        case "fileDrag":
+            guard snapshot.fileDragActive,
+                  snapshot.fileDragFileCount > 0,
+                  snapshot.fileDragFolderCount == 0 else {
+                return false
+            }
+            let allowed = Set((trigger.extensions ?? []).map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            }.filter { !$0.isEmpty })
+            if allowed.isEmpty || allowed.contains("*") { return true }
+            guard !snapshot.fileDragExtensions.isEmpty else { return false }
+            return snapshot.fileDragExtensions.isSubset(of: allowed)
+        default:
+            return false
+        }
     }
 }
 
@@ -349,7 +399,7 @@ enum HaloCIPackageValidator {
     ]
     private static let actionKeys: Set<String> = ["id", "value", "arguments"]
     private static let triggerDocumentKeys: Set<String> = ["match", "triggers"]
-    private static let triggerKeys: Set<String> = ["type", "value", "number", "bool", "startMinute", "endMinute"]
+    private static let triggerKeys: Set<String> = ["type", "value", "number", "bool", "startMinute", "endMinute", "extensions"]
     private static let executableExtensions: Set<String> = ["js", "mjs", "cjs", "swift", "dylib", "so", "sh", "command", "scpt", "py", "rb"]
     private static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "webp", "gif", "heic", "tiff", "bmp"]
 
@@ -674,13 +724,29 @@ enum HaloCIPackageValidator {
             rejectUnknownKeys(in: trigger, allowed: triggerKeys, path: path, issues: &issues)
             guard let type = trigger["type"] as? String, HaloCISDK.supportedTriggers.contains(type) else { issues.append(.init(.error, path + ".type", "Unsupported trigger.")); continue }
             if let permission = HaloCISDK.permissionForTrigger(type) { requirePermission(permission, manifest: manifest, path: path, issues: &issues) }
-            if ["lowPowerMode", "displayCount"].contains(type), manifest.sdkVersion != "0.2" {
+            if ["lowPowerMode", "displayCount", "fileDrag"].contains(type), manifest.sdkVersion != "0.2" {
                 issues.append(.init(.error, path + ".type", "This trigger requires SDK 0.2."))
             }
             switch type {
             case "displayCount":
                 if let count = integer(trigger["number"]), (1...64).contains(count) {} else {
                     issues.append(.init(.error, path + ".number", "displayCount requires an integer in 1...64."))
+                }
+            case "fileDrag":
+                if let extensions = trigger["extensions"] as? [String] {
+                    if extensions.count > 64 {
+                        issues.append(.init(.error, path + ".extensions", "fileDrag supports at most 64 extensions."))
+                    }
+                    for ext in extensions {
+                        let clean = ext.trimmingCharacters(in: .whitespacesAndNewlines)
+                            .lowercased()
+                            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                        if clean.isEmpty || clean.count > 32 ||
+                           (clean != "*" && clean.range(of: #"^[a-z0-9][a-z0-9+_-]*$"#, options: .regularExpression) == nil) {
+                            issues.append(.init(.error, path + ".extensions", "fileDrag extensions must be *, or simple extension names without a leading dot."))
+                            break
+                        }
+                    }
                 }
             case "activeApplication": if (trigger["value"] as? String)?.isEmpty != false { issues.append(.init(.error, path + ".value", "activeApplication requires a bundle identifier.")) }
             case "batteryBelow", "batteryAbove": if number(trigger["number"]) == nil { issues.append(.init(.error, path + ".number", "Battery trigger requires a numeric threshold.")) }
