@@ -20,11 +20,13 @@ enum HaloCISDK {
         "NotchContainer", "MediaArtwork", "AppIcon", "DeviceBattery", "SystemMetric", "ActivityIndicator"
     ]
     static let supportedPermissions: Set<String> = [
-        "Media.ReadState", "Media.Control", "Applications.Observe", "Clipboard.Write", "URL.Open", "Audio.ReadState"
+        "Media.ReadState", "Media.Control", "Applications.Observe", "Clipboard.Write", "URL.Open", "Audio.ReadState",
+        "AppIntegration.Execute"
     ]
-    static let supportedCapabilities: Set<String> = ["LocalAssets", "LocalState", "AutomaticTriggers", "MediaControls"]
+    static let supportedCapabilities: Set<String> = ["LocalAssets", "LocalState", "AutomaticTriggers", "MediaControls", "AppIntegrations"]
     static let supportedActions: Set<String> = [
-        "halo.ci.close", "clipboard.copy", "url.open", "media.playPause", "media.next", "media.previous"
+        "halo.ci.close", "clipboard.copy", "url.open", "media.playPause", "media.next", "media.previous",
+        "app.integration.invoke"
     ]
     static let supportedTriggers: Set<String> = [
         "manual", "mediaPlaying", "activeApplication", "batteryBelow", "batteryAbove", "charging", "timeWindow", "lowPowerMode", "displayCount"
@@ -39,6 +41,7 @@ enum HaloCISDK {
         case "media.playPause", "media.next", "media.previous": return "Media.Control"
         case "clipboard.copy": return "Clipboard.Write"
         case "url.open": return "URL.Open"
+        case "app.integration.invoke": return "AppIntegration.Execute"
         default: return nil
         }
     }
@@ -562,7 +565,13 @@ enum HaloCIPackageValidator {
         if manifest.permissions.contains("Audio.ReadState"), manifest.sdkVersion != "0.2" {
             issues.append(.init(.error, "manifest.json.permissions", "Audio.ReadState requires SDK 0.2."))
         }
+        if manifest.permissions.contains("AppIntegration.Execute"), manifest.sdkVersion != "0.2" {
+            issues.append(.init(.error, "manifest.json.permissions", "AppIntegration.Execute requires SDK 0.2."))
+        }
         for capability in Set(manifest.capabilities) where !HaloCISDK.supportedCapabilities.contains(capability) { issues.append(.init(.error, "manifest.json.capabilities", "Unsupported capability \(capability).")) }
+        if manifest.capabilities.contains("AppIntegrations"), manifest.sdkVersion != "0.2" {
+            issues.append(.init(.error, "manifest.json.capabilities", "AppIntegrations requires SDK 0.2."))
+        }
         if Set(manifest.permissions).count != manifest.permissions.count { issues.append(.init(.warning, "manifest.json.permissions", "Duplicate permissions were declared.")) }
     }
 
@@ -625,12 +634,30 @@ enum HaloCIPackageValidator {
         rejectUnknownKeys(in: object, allowed: actionKeys, path: path, issues: &issues)
         guard let id = object["id"] as? String, HaloCISDK.supportedActions.contains(id) else { issues.append(.init(.error, path + ".id", "Unsupported action.")); return }
         if let permission = HaloCISDK.permissionForAction(id) { requirePermission(permission, manifest: manifest, path: path, issues: &issues) }
+        if id == "app.integration.invoke", manifest.sdkVersion != "0.2" {
+            issues.append(.init(.error, path + ".id", "app.integration.invoke requires SDK 0.2."))
+        }
         if let value = object["value"] as? String { validateBindings(in: value, manifest: manifest, path: path + ".value", issues: &issues) }
         if let args = object["arguments"] as? [String: Any] {
+            if id == "app.integration.invoke" {
+                let allowed = Set(["bundleIdentifier", "actionID"])
+                for key in args.keys where !allowed.contains(key) {
+                    issues.append(.init(.error, path + ".arguments." + key, "Unsupported app integration action argument."))
+                }
+                for key in ["bundleIdentifier", "actionID"] {
+                    guard let string = args[key] as? String,
+                          !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        issues.append(.init(.error, path + ".arguments." + key, "app.integration.invoke requires a non-empty \(key)."))
+                        continue
+                    }
+                }
+            }
             for (key, value) in args {
                 guard let string = value as? String else { issues.append(.init(.error, path + ".arguments." + key, "Action arguments must be strings or bindings.")); continue }
                 validateBindings(in: string, manifest: manifest, path: path + ".arguments." + key, issues: &issues)
             }
+        } else if id == "app.integration.invoke" {
+            issues.append(.init(.error, path + ".arguments", "app.integration.invoke requires bundleIdentifier and actionID arguments."))
         }
     }
 
