@@ -1135,6 +1135,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     private var preferences: [String: HaloCustomCIPackagePreferences] = [:]
     private var suppressedPackageIDs = Set<String>()
     private var subscriptions = Set<AnyCancellable>()
+    private var integrationSyncTask: Task<Void, Never>?
     private weak var workspace: WorkspaceStore?
 
     private init() {
@@ -1193,6 +1194,8 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
 
     func detach() {
         subscriptions.removeAll()
+        integrationSyncTask?.cancel()
+        integrationSyncTask = nil
         workspace = nil
         manualActivationID = nil
         suppressedPackageIDs.removeAll()
@@ -1301,6 +1304,8 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     var autoIntegrationCIEnabled: Bool { defaults.bool(forKey: autoIntegrationCIKey) }
 
     func setAutoIntegrationCIEnabled(_ enabled: Bool) {
+        integrationSyncTask?.cancel()
+        integrationSyncTask = nil
         defaults.set(enabled, forKey: autoIntegrationCIKey)
         if enabled {
             let catalog = HaloIntegrationCatalog.shared
@@ -1558,15 +1563,23 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
 
     private func synchronizeGeneratedIntegrationCIs(_ integrations: [HaloIntegration]) {
         guard autoIntegrationCIEnabled else { return }
-        let result = HaloAutoIntegrationCIGenerator.synchronize(
-            integrations: integrations,
-            installRoot: installRoot
-        )
-        if result.changed {
-            reload()
-        }
-        if !result.diagnostics.isEmpty {
-            errorMessage = result.diagnostics.joined(separator: "\n")
+        integrationSyncTask?.cancel()
+        let root = installRoot
+        integrationSyncTask = Task { [weak self] in
+            let result = await Task.detached(priority: .utility) {
+                HaloAutoIntegrationCIGenerator.synchronize(
+                    integrations: integrations,
+                    installRoot: root
+                )
+            }.value
+
+            guard !Task.isCancelled, let self, self.autoIntegrationCIEnabled else { return }
+            if result.changed {
+                self.reload()
+            }
+            if !result.diagnostics.isEmpty {
+                self.errorMessage = result.diagnostics.joined(separator: "\n")
+            }
         }
     }
 
