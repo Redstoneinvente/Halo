@@ -29,7 +29,7 @@ final class HaloCoreTests: XCTestCase {
         for key in [
             "bluetoothDeviceVisual", "externalID", "sourceBundleIdentifier", "sourceName",
             "kind", "state", "symbolName", "startedAt", "updatedAt", "expiresAt",
-            "priority", "persistent"
+            "priority", "persistent", "actions"
         ] {
             json.removeValue(forKey: key)
         }
@@ -58,6 +58,55 @@ final class HaloCoreTests: XCTestCase {
             LiveActivityClassifier.kind(sourceName: "Mail", title: "Build finished", detail: "New mail"),
             .notification
         )
+    }
+
+    func testLiveActivityActionFactoryDerivesContextActionsFromAXButtons() {
+        let messageActions = LiveActivityActionFactory.actions(
+            fromButtonLabels: ["Options", "Reply", "Mark as Read", "Close", "Reply"],
+            kind: .message
+        )
+
+        XCTAssertEqual(messageActions.map(\.title), ["Reply", "Mark as Read", "Close"])
+        XCTAssertEqual(messageActions[0].kind, .textReply)
+        XCTAssertEqual(messageActions[0].role, .primary)
+        XCTAssertEqual(messageActions[0].inputPlaceholder, "Reply…")
+        XCTAssertEqual(messageActions[1].kind, .press)
+        XCTAssertEqual(messageActions[1].role, .primary)
+        XCTAssertEqual(messageActions[2].role, .destructive)
+
+        let callActions = LiveActivityActionFactory.actions(
+            fromButtonLabels: ["Accept", "Decline", "Mute"],
+            kind: .call
+        )
+        XCTAssertEqual(callActions.map(\.role), [.primary, .destructive, .normal])
+        XCTAssertEqual(callActions.map(\.symbolName), ["phone.fill", "phone.down.fill", "mic.slash.fill"])
+    }
+
+    func testLiveActivityActionsRoundTripWithoutBreakingLegacyPayloads() throws {
+        let activity = LiveActivity(
+            externalID: "system.notification.123",
+            sourceName: "Messages",
+            kind: .message,
+            state: .active,
+            title: "Alex",
+            detail: "Hello",
+            actions: [
+                LiveActivityAction(
+                    id: "system.ax.reply",
+                    title: "Reply",
+                    symbolName: "arrowshape.turn.up.left.fill",
+                    kind: .textReply,
+                    role: .primary,
+                    targetLabel: "Reply",
+                    inputPlaceholder: "Reply…"
+                )
+            ]
+        )
+
+        let restored = try JSONDecoder().decode(LiveActivity.self, from: JSONEncoder().encode(activity))
+        XCTAssertEqual(restored.resolvedActions.count, 1)
+        XCTAssertEqual(restored.resolvedActions.first?.kind, .textReply)
+        XCTAssertEqual(restored.resolvedActions.first?.targetLabel, "Reply")
     }
 
     func testLiveActivitySelectionFiltersBeforeChoosingWinner() {
