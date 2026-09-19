@@ -1507,6 +1507,11 @@ private final class HaloEmbeddedDropZoneController {
     }
 }
 
+@MainActor
+func haloDismissEmbeddedDropCIForIntegration() {
+    HaloEmbeddedDropZoneController.shared.dismiss()
+}
+
 // MARK: - Drop Zone Studio
 
 @MainActor
@@ -2451,6 +2456,13 @@ private final class HaloGlobalFileDragMonitor {
         }
         guard let target = targetForDrag(at: point), target.permitsGlobalDropCI else {
             deactivateForDisabledState()
+            return
+        }
+
+        if HaloIntegrationExecutionSession.shared.isActive {
+            activeTarget = target
+            target.dragStateHandler?(false, 0)
+            HaloEmbeddedDropZoneController.shared.dismiss()
             return
         }
         if let activeTarget, activeTarget !== target {
