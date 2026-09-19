@@ -285,12 +285,9 @@ final class HaloCIContextProviderEngine: ObservableObject {
 
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
             .receive(on: RunLoop.main)
-            .sink { [weak self] note in
-                let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-                self?.recordEvent(
-                    kind: "application.activated",
-                    source: app?.bundleIdentifier ?? "application"
-                )
+            .sink { [weak self] _ in
+                // The specific bundle identifier remains behind Applications.Observe.
+                self?.recordEvent(kind: "application.activated", source: "application")
             }
             .store(in: &subscriptions)
 
@@ -517,16 +514,27 @@ final class HaloCIContextProviderEngine: ObservableObject {
     }
 
     nonisolated private static func quickSummary(_ urls: [URL]) -> HaloCIDragSummary {
-        let extensions = Array(Set(urls.compactMap { url -> String? in
-            let ext = url.pathExtension.lowercased()
-            return ext.isEmpty ? nil : ext
-        })).sorted().prefix(24)
+        var files = 0
+        var folders = 0
+        var extensions = Set<String>()
+
+        for url in urls {
+            if url.hasDirectoryPath {
+                folders += 1
+            } else {
+                files += 1
+                let ext = url.pathExtension.lowercased()
+                if !ext.isEmpty, extensions.count < 24 {
+                    extensions.insert(ext)
+                }
+            }
+        }
 
         return HaloCIDragSummary(
             itemCount: urls.count,
-            fileCount: urls.count,
-            folderCount: 0,
-            extensions: Array(extensions)
+            fileCount: files,
+            folderCount: folders,
+            extensions: extensions.sorted()
         )
     }
 
