@@ -61,6 +61,26 @@ Running copies are considered first so a developer build can be tested without c
 | `name` | String | Yes | Human-readable app name. |
 | `bundleIdentifier` | String | Yes | Must match the actual macOS app bundle identifier. |
 | `actions` | Array | Yes | One or more actions exposed to Halo; maximum 64. |
+| `triggers` | Array | No | Automatic generated-CI activation requests. Protocol v1 currently supports `fileDrag`. |
+
+### Trigger fields
+
+Protocol v1 currently supports one automatic trigger:
+
+```json
+"triggers": [
+  {
+    "type": "fileDrag",
+    "supportedExtensions": ["txt"]
+  }
+]
+```
+
+`fileDrag` makes the generated Custom CI eligible while files matching the declared extensions are being dragged over Halo. It does not require Drop CI to be enabled.
+
+`supportedExtensions` is optional. If omitted or empty, Halo derives the trigger extensions from the union of the app's advertised action extensions. Explicit trigger extensions must be supported by at least one advertised action.
+
+A drag containing folders does not satisfy `fileDrag`.
 
 ### Action fields
 
@@ -101,6 +121,9 @@ Halo validates a manifest before adding the app to the integration catalogue:
 - the declared bundle identifier must match the actual app bundle;
 - at least one action is required;
 - no more than 64 actions are accepted;
+- no more than 16 integration triggers are accepted;
+- protocol v1 integration triggers must currently use `fileDrag`;
+- explicit file-drag extensions must correspond to an advertised action;
 - action IDs must be non-empty and unique;
 - action display names must be non-empty;
 - no more than 32 options are accepted per action;
