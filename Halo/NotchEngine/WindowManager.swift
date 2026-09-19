@@ -154,7 +154,9 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private var acceptsFileDrop: Bool { dropEnabled?() ?? true }
+    // Fail closed until WindowManager installs the permission provider. This avoids a
+    // brief registration window during startup before commercial access has been restored.
+    private var acceptsFileDrop: Bool { dropEnabled?() ?? false }
 
     /// Drop CI owns only the surface-wide drag destination. When disabled we unregister
     /// this hosting view entirely so descendant drop targets (notably File Shelf) remain usable.
@@ -423,6 +425,7 @@ final class WindowManager {
     private var lastHUDCapsLock = false
     private let store: AppStore
     private let startupActivationContext: ActivationLaunchContext
+    private var commercialAccessGranted = false
     private var initialActivationPending = false
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
@@ -449,6 +452,29 @@ final class WindowManager {
         self.startupActivationContext = startupActivationContext
     }
 
+    private var dropCISettingEnabled: Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: "HaloContextDropEnabled") == nil
+            ? true
+            : defaults.bool(forKey: "HaloContextDropEnabled")
+    }
+
+    private var dropCIAllowed: Bool {
+        commercialAccessGranted && dropCISettingEnabled
+    }
+
+    func setCommercialAccessGranted(_ granted: Bool) {
+        guard commercialAccessGranted != granted else { return }
+        commercialAccessGranted = granted
+
+        hosts.values.forEach { host in
+            host.refreshDropCIRegistration?()
+            if !dropCIAllowed && host.state.dropTargeted {
+                host.state.endFileDrop(collapseAfterDelay: true)
+            }
+        }
+    }
+
     func start() {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
@@ -463,11 +489,9 @@ final class WindowManager {
             .sink { [weak self] _ in
                 guard let self else { return }
                 let defaults = UserDefaults.standard
-                let dropEnabled = defaults.object(forKey: "HaloContextDropEnabled") == nil
-                    ? true : defaults.bool(forKey: "HaloContextDropEnabled")
                 self.hosts.values.forEach { host in
                     host.refreshDropCIRegistration?()
-                    if !dropEnabled && host.state.dropTargeted {
+                    if !self.dropCIAllowed && host.state.dropTargeted {
                         host.state.endFileDrop(collapseAfterDelay: true)
                     }
                 }
@@ -1689,20 +1713,21 @@ final class WindowManager {
                 .environment(\.haloScreenFrame, screen.frame)
                 let view = HaloDropHostingView(rootView: root)
                 view.sizingOptions = []
-                view.dropEnabled = {
-                    let defaults = UserDefaults.standard
-                    return defaults.object(forKey: "HaloContextDropEnabled") == nil
-                        ? true : defaults.bool(forKey: "HaloContextDropEnabled")
+                view.dropEnabled = { [weak self] in
+                    self?.dropCIAllowed ?? false
                 }
                 host.refreshDropCIRegistration = { [weak view] in
                     view?.refreshDropRegistration()
                 }
-                view.dragStateHandler = { [weak host] active, count in
-                    guard let host else { return }
-                    let defaults = UserDefaults.standard
-                    let ciEnabled = defaults.object(forKey: "HaloContextDropEnabled") == nil
-                        ? true : defaults.bool(forKey: "HaloContextDropEnabled")
-                    if active && ciEnabled {
+                view.dragStateHandler = { [weak self, weak host] active, count in
+                    guard let self, let host else { return }
+                    guard self.dropCIAllowed else {
+                        if host.state.dropTargeted {
+                            host.state.endFileDrop(collapseAfterDelay: true)
+                        }
+                        return
+                    }
+                    if active {
                         ActivationSequenceCoordinator.shared.cancelForInteraction()
                         host.state.beginFileDrop(count: count)
                     } else if host.state.dropTargeted {
@@ -1711,10 +1736,7 @@ final class WindowManager {
                 }
                 view.dropHandler = { [weak self, weak host] urls in
                     guard let self, let host else { return }
-                    let defaults = UserDefaults.standard
-                    let ciEnabled = defaults.object(forKey: "HaloContextDropEnabled") == nil
-                        ? true : defaults.bool(forKey: "HaloContextDropEnabled")
-                    guard ciEnabled else {
+                    guard self.dropCIAllowed else {
                         host.state.endFileDrop(collapseAfterDelay: true)
                         return
                     }
