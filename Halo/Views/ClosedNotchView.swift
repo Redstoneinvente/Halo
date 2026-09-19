@@ -151,6 +151,7 @@ struct ClosedNotchView: View {
     @AppStorage("HaloBluetoothClosedNotchPoweredOff") private var bluetoothPoweredOff = true
     @AppStorage("HaloBluetoothClosedNotchSide") private var bluetoothSide = BluetoothClosedNotchSide.automatic.rawValue
     @AppStorage("HaloBluetoothClosedNotchDuration") private var bluetoothDuration = 10.0
+    @AppStorage("HaloLiveActivitiesClosedAutoPresent") private var liveActivitiesAutoPresent = true
     @State private var activityClock = Date()
     let layout: WorkspaceLayout
     let occlusion: CGRect?
@@ -168,11 +169,19 @@ struct ClosedNotchView: View {
         return hud
     }
     private var activeActivity: LiveActivity? {
-        workspace.activities.first { activity in
-            guard activityAllowed(activity) else { return false }
-            let duration = BluetoothClosedActivity.kind(for: activity) == nil ? 12.0 : min(20, max(2, bluetoothDuration))
-            return (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(duration) > activityClock
-        }
+        workspace.activities
+            .filter { activity in
+                guard activityAllowed(activity) else { return false }
+                if activity.isPersistent { return activity.resolvedState != .ended || (activity.expiresAt ?? .distantFuture) > activityClock }
+                if let expiresAt = activity.expiresAt { return expiresAt > activityClock }
+                let duration = BluetoothClosedActivity.kind(for: activity) == nil ? 12.0 : min(20, max(2, bluetoothDuration))
+                return (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(duration) > activityClock
+            }
+            .sorted {
+                if $0.resolvedPriority != $1.resolvedPriority { return $0.resolvedPriority > $1.resolvedPriority }
+                return $0.resolvedUpdatedAt > $1.resolvedUpdatedAt
+            }
+            .first
     }
     private func activityAllowed(_ activity: LiveActivity) -> Bool {
         guard let kind = BluetoothClosedActivity.kind(for: activity) else { return true }
@@ -191,7 +200,10 @@ struct ClosedNotchView: View {
         }
         var left = options.left
         var right = options.right
-        guard let activity = activeActivity, left != .activity, right != .activity else { return (left, right) }
+        guard liveActivitiesAutoPresent,
+              let activity = activeActivity,
+              left != .activity,
+              right != .activity else { return (left, right) }
 
         if BluetoothClosedActivity.kind(for: activity) != nil {
             switch BluetoothClosedNotchSide(rawValue: bluetoothSide) ?? .automatic {
@@ -633,8 +645,8 @@ struct ClosedNotchSlot: View {
                                                 inheritedColor: effectiveTextColor, spacing: elementSpacing)
                 } else {
                     HStack(spacing: elementSpacing) {
-                        Image(systemName: "waveform.path")
-                            .frame(width: max(12, textSize), alignment: .center)
+                        Image(systemName: activity.resolvedSymbolName)
+                            .frame(width: max(12, textSize + 2), alignment: .center)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(activity.title)
                                 .lineLimit(1)
