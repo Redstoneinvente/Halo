@@ -173,6 +173,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .uppercased()
 
         guard Self.looksLikeHaloLicenseKey(candidate) else { return }
+
+        // Tell the locked activation surface why it is about to open. Do not include the
+        // clipboard contents in the notification; the UI only needs the detection event.
+        NotificationCenter.default.post(
+            name: .init("HaloLicenseClipboardDetected"),
+            object: nil
+        )
         engine?.expandAll()
     }
 
