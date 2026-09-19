@@ -44,6 +44,14 @@ final class SurfaceState: ObservableObject {
     var editingGeometry = false
     private var fileDropAllowed = false
 
+    // Hover expansion can briefly emit an exit while the NSPanel is resizing from
+    // compact to open geometry. Track only that in-flight opening so the false exit
+    // cannot reverse the animation midway. This is not a normal hover-close delay.
+    private var hoverInside = false
+    private var hoverExpansionRequested = false
+    private var hoverOpeningGuardActive = false
+    private var hoverExitPendingDuringOpening = false
+
     func setFileDropAllowed(_ allowed: Bool) {
         guard fileDropAllowed != allowed else { return }
         fileDropAllowed = allowed
@@ -101,7 +109,47 @@ final class SurfaceState: ObservableObject {
         }
     }
 
+    func consumeHoverExpansionRequest() -> Bool {
+        let requested = hoverExpansionRequested
+        hoverExpansionRequested = false
+        return requested
+    }
+
+    func beginHoverOpeningGuard() {
+        hoverOpeningGuardActive = true
+        hoverExitPendingDuringOpening = false
+    }
+
+    func completeHoverOpeningGuard(cursorInsidePanel: Bool) {
+        guard hoverOpeningGuardActive else { return }
+        hoverOpeningGuardActive = false
+
+        let shouldCollapse =
+            hoverExitPendingDuringOpening &&
+            !hoverInside &&
+            !cursorInsidePanel &&
+            !pinned &&
+            !editingGeometry &&
+            !dropTargeted
+
+        hoverExitPendingDuringOpening = false
+        if shouldCollapse && expanded {
+            expanded = false
+        }
+    }
+
+    func cancelHoverOpeningGuard() {
+        hoverOpeningGuardActive = false
+        hoverExitPendingDuringOpening = false
+        hoverExpansionRequested = false
+    }
+
     func hover(_ inside: Bool, enabled: Bool, openDelay: Double = 0) {
+        hoverInside = inside
+        if inside {
+            hoverExitPendingDuringOpening = false
+        }
+
         collapseTask?.cancel()
         if !inside {
             hoverExpandTask?.cancel()
@@ -128,6 +176,7 @@ final class SurfaceState: ObservableObject {
             hoverExpandTask?.cancel()
             guard delay > 0.001 else {
                 hoverExpandTask = nil
+                hoverExpansionRequested = true
                 expanded = true
                 return
             }
@@ -138,12 +187,20 @@ final class SurfaceState: ObservableObject {
                       !self.editingGeometry,
                       !self.dropTargeted else { return }
                 self.hoverExpandTask = nil
+                self.hoverExpansionRequested = true
                 self.expanded = true
             }
         } else if !pinned {
-            // Hover exit itself is immediate. If Pixel Pal is present and has a
-            // boot-down animation, WindowManager gates the actual panel collapse
-            // for exactly that animation duration. No Pixel Pal means no delay.
+            if hoverOpeningGuardActive {
+                // A resize can temporarily move SwiftUI's hover boundary underneath
+                // the stationary cursor. Finish opening first, then verify the actual
+                // cursor position before deciding whether to retract.
+                hoverExitPendingDuringOpening = true
+                return
+            }
+
+            // Once the opening transition is complete, hover exit is truly immediate.
+            // Pixel Pal's optional boot-down gate is applied later by WindowManager.
             expanded = false
         }
     }
@@ -449,6 +506,7 @@ final class WindowManager {
         var contextCompactHeightSubscription: AnyCancellable?
         var refreshDropCIRegistration: (() -> Void)?
         var pixelPalCollapseWork: DispatchWorkItem?
+        var hoverOpeningCompletionWork: DispatchWorkItem?
         init() {
             panel = HaloPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             panel.isReleasedWhenClosed = false
@@ -1416,7 +1474,11 @@ final class WindowManager {
         activityExpiry?.cancel()
         hudNotchHideWork?.cancel(); hudNotchHideWork = nil
         if let hudMonitor { NSEvent.removeMonitor(hudMonitor); self.hudMonitor = nil }
-        hosts.values.forEach { $0.stop() }
+        hosts.values.forEach {
+            $0.pixelPalCollapseWork?.cancel()
+            $0.hoverOpeningCompletionWork?.cancel()
+            $0.stop()
+        }
         hosts.removeAll()
         subscriptions.removeAll()
     }
@@ -1683,6 +1745,58 @@ final class WindowManager {
         }
     }
 
+    private func hoverOpeningAnimationDuration(for host: Host) -> TimeInterval {
+        guard let geometry = host.geometry else { return 0 }
+
+        let options = geometry.appearance.surface
+        let animationsEnabled =
+            host.state.theme.animations &&
+            !host.state.editingGeometry &&
+            !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion &&
+            geometry.appearance.animation != .none &&
+            options.opening != .instant
+
+        guard animationsEnabled else { return 0 }
+        return max(0.01, options.duration)
+    }
+
+    private func armHoverOpeningGuardIfNeeded(for host: Host) {
+        host.hoverOpeningCompletionWork?.cancel()
+        host.hoverOpeningCompletionWork = nil
+
+        guard host.state.consumeHoverExpansionRequest() else {
+            host.state.cancelHoverOpeningGuard()
+            return
+        }
+
+        let duration = hoverOpeningAnimationDuration(for: host)
+        guard duration > 0.001 else {
+            host.state.cancelHoverOpeningGuard()
+            return
+        }
+
+        host.state.beginHoverOpeningGuard()
+
+        let work = DispatchWorkItem { [weak host] in
+            guard let host else { return }
+            host.hoverOpeningCompletionWork = nil
+
+            let cursorInsidePanel = NSMouseInRect(
+                NSEvent.mouseLocation,
+                host.panel.frame,
+                false
+            )
+            host.state.completeHoverOpeningGuard(
+                cursorInsidePanel: cursorInsidePanel
+            )
+        }
+        host.hoverOpeningCompletionWork = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + duration,
+            execute: work
+        )
+    }
+
     private func applyExpandedState(_ expanded: Bool, to host: Host) {
         guard let geometry = host.geometry else { return }
         if !expanded { host.state.contextPreferredSize = nil }
@@ -1866,9 +1980,16 @@ final class WindowManager {
 
                     if expanded {
                         ActivationSequenceCoordinator.shared.cancelForInteraction()
+                        self.armHoverOpeningGuardIfNeeded(for: host)
                         self.applyExpandedState(true, to: host)
-                    } else if !self.schedulePixelPalGatedCollapse(for: host) {
-                        self.applyExpandedState(false, to: host)
+                    } else {
+                        host.hoverOpeningCompletionWork?.cancel()
+                        host.hoverOpeningCompletionWork = nil
+                        host.state.cancelHoverOpeningGuard()
+
+                        if !self.schedulePixelPalGatedCollapse(for: host) {
+                            self.applyExpandedState(false, to: host)
+                        }
                     }
                 }
                 host.contextSizeSubscription = host.state.$contextPreferredSize.dropFirst().removeDuplicates(by: { lhs, rhs in
