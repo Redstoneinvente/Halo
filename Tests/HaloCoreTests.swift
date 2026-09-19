@@ -41,6 +41,25 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(legacy.resolvedSymbolName, "waveform.path")
     }
 
+    func testLiveActivityClassifierSeparatesMessagesCallsAndNotifications() {
+        XCTAssertEqual(
+            LiveActivityClassifier.kind(sourceName: "Messages", title: "Pranav", detail: "Are you free?"),
+            .message
+        )
+        XCTAssertEqual(
+            LiveActivityClassifier.kind(sourceName: "FaceTime", title: "Alex", detail: "Incoming"),
+            .call
+        )
+        XCTAssertEqual(
+            LiveActivityClassifier.kind(sourceName: "Microsoft Teams", title: "Incoming video call", detail: "Alex"),
+            .call
+        )
+        XCTAssertEqual(
+            LiveActivityClassifier.kind(sourceName: "Mail", title: "Build finished", detail: "New mail"),
+            .notification
+        )
+    }
+
     func testLiveActivityMetadataRoundTripsAndClampsPriority() throws {
         let started = Date(timeIntervalSince1970: 1_700_000_000)
         let activity = LiveActivity(
