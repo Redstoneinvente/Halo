@@ -141,12 +141,7 @@ final class SurfaceState: ObservableObject {
         let shouldCollapse = collapseSurface && dropOpenedSurfaceAutomatically
         dropOpenedSurfaceAutomatically = false
         guard shouldCollapse, !pinned, !editingGeometry else { return }
-        collapseTask?.cancel()
-        collapseTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 650_000_000)
-            guard !Task.isCancelled, let self, !self.pinned, !self.editingGeometry, !self.dropTargeted else { return }
-            self.expanded = false
-        }
+        requestDismissal(reason: .ciCompleted, delayOverride: 0.65)
     }
 
     func consumeHoverExpansionRequest() -> Bool {
@@ -253,9 +248,14 @@ final class SurfaceState: ObservableObject {
 
     func requestDismissal(
         reason: HaloDismissReason,
-        destination: HaloDismissDestination = .compact
+        destination: HaloDismissDestination = .compact,
+        delayOverride: TimeInterval? = nil
     ) {
-        dismissCoordinator.requestDismissal(reason: reason, destination: destination)
+        dismissCoordinator.requestDismissal(
+            reason: reason,
+            destination: destination,
+            delayOverride: delayOverride
+        )
     }
 
     func updateDismissPreferences(
