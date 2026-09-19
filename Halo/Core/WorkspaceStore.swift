@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Combine
 import UserNotifications
 import CoreAudio
@@ -58,6 +59,21 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     private var scheduleEvaluationQueued = false
     private var lastScheduleMinute: Int?
     @Published var activities: [LiveActivity] = []
+
+    var primaryLiveActivity: LiveActivity? {
+        let now = Date()
+        return activities
+            .filter { activity in
+                if activity.isPersistent { return activity.resolvedState != .ended || (activity.expiresAt ?? .distantFuture) > now }
+                return (activity.expiresAt ?? activity.created.addingTimeInterval(12)) > now
+            }
+            .sorted {
+                if $0.resolvedPriority != $1.resolvedPriority { return $0.resolvedPriority > $1.resolvedPriority }
+                return $0.resolvedUpdatedAt > $1.resolvedUpdatedAt
+            }
+            .first
+    }
+
     @Published var plugins: [PluginManifest] = []
     @Published var error: String?
     @Published var runningApps: [NSRunningApplication] = []
@@ -113,6 +129,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     private var pendingSave: DispatchWorkItem?
     private var hudEngine: HaloHUDEngine?
     private var systemAudioFallback: SystemAudioMediaFallback?
+    private var systemLiveActivitySource: SystemLiveActivitySource?
     var applyTheme: ((Theme) -> Void)?
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -198,6 +215,10 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         IntegrationCIRuntime.shared.start()
         IntegrationShortcutManager.shared.start()
         pollMedia()
+        if systemLiveActivitySource == nil {
+            systemLiveActivitySource = SystemLiveActivitySource(workspace: self, defaults: defaults)
+        }
+        systemLiveActivitySource?.start()
 
         bluetooth.$lastEvent
             .compactMap { $0 }
@@ -212,6 +233,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             guard let self else { return }
             self.tick += 1
             self.pollMedia()
+            self.pruneLiveActivities()
             let minute = Int(Date().timeIntervalSince1970 / 60)
             if self.lastScheduleMinute != minute { self.lastScheduleMinute = minute; self.evaluateSchedules() }
             self.clipboard.poll(enabled: self.settings.clipboardEnabled, excluded: self.settings.clipboardExcludedApps)
@@ -253,7 +275,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.evaluateRules(); self?.hudEngine?.configurationDidChange() }.store(in: &subscriptions)
     }
-    func stop() { HaloCustomCIRuntimeStore.shared.detach(); IntegrationShortcutManager.shared.stop(); IntegrationCIRuntime.shared.stop(); pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); bluetooth.stop(); systemAudioFallback?.stop(); systemAudioFallback = nil; hudEngine?.stop(); hudEngine = nil; hotkey.stop(); retroGameHotkey.stop(); clipboardCIHotkey.stop(); clipboard.reset(); media.disconnect() }
+    func stop() { HaloCustomCIRuntimeStore.shared.detach(); IntegrationShortcutManager.shared.stop(); IntegrationCIRuntime.shared.stop(); systemLiveActivitySource?.stop(); systemLiveActivitySource = nil; pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); bluetooth.stop(); systemAudioFallback?.stop(); systemAudioFallback = nil; hudEngine?.stop(); hudEngine = nil; hotkey.stop(); retroGameHotkey.stop(); clipboardCIHotkey.stop(); clipboard.reset(); media.disconnect() }
     private func schedulePersistence() {
         pendingSave?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.persist() }
@@ -370,19 +392,84 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     }
     private func publishBluetoothClosedNotchEvent(_ event: BluetoothConnectionEvent) {
         guard bluetoothClosedNotchEventEnabled(event.kind) else { return }
-        let activity = LiveActivity(bluetoothDeviceVisual: event.deviceVisual, title: event.title, detail: event.detail, progress: nil)
-        activities = [activity] + Array(activities.prefix(19))
-
         let configured = (defaults.object(forKey: "HaloBluetoothClosedNotchDuration") as? NSNumber)?.doubleValue ?? 10
         let duration = min(20, max(2, configured))
-        let activityID = activity.id
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
-            self?.activities.removeAll { $0.id == activityID }
-        }
+        let activity = LiveActivity(
+            bluetoothDeviceVisual: event.deviceVisual,
+            externalID: "bluetooth.\(event.id.uuidString)",
+            sourceBundleIdentifier: "com.apple.systempreferences",
+            sourceName: "Bluetooth",
+            kind: .bluetooth,
+            state: .active,
+            symbolName: "wave.3.right",
+            title: event.title,
+            detail: event.detail,
+            progress: nil,
+            updatedAt: Date(),
+            expiresAt: Date().addingTimeInterval(duration),
+            priority: 46,
+            persistent: false
+        )
+        upsertLiveActivity(activity)
     }
+
     func publish(_ title: String, detail: String = "", progress: Double? = nil) {
-        let activity = LiveActivity(title: title, detail: detail, progress: progress.map { min(1, max(0, $0)) })
-        activities = [activity] + Array(activities.prefix(19))
+        let activity = LiveActivity(
+            kind: progress == nil ? .generic : .progress,
+            state: .active,
+            title: title,
+            detail: detail,
+            progress: progress.map { min(1, max(0, $0)) },
+            updatedAt: Date(),
+            expiresAt: progress == nil ? Date().addingTimeInterval(12) : nil,
+            priority: progress == nil ? 50 : 58,
+            persistent: progress != nil
+        )
+        upsertLiveActivity(activity)
+    }
+
+    func upsertLiveActivity(_ incoming: LiveActivity) {
+        var activity = incoming
+        activity.progress = activity.progress.map { min(1, max(0, $0)) }
+        activity.updatedAt = Date()
+
+        if let externalID = activity.externalID,
+           let index = activities.firstIndex(where: { $0.externalID == externalID }) {
+            let previous = activities[index]
+            activity.id = previous.id
+            activity.created = previous.created
+            if activity.startedAt == nil { activity.startedAt = previous.startedAt }
+            activities.remove(at: index)
+        }
+
+        activities.insert(activity, at: 0)
+        if activities.count > 40 { activities.removeLast(activities.count - 40) }
+        pruneLiveActivities()
+    }
+
+    func endLiveActivity(externalID: String, detail: String? = nil, linger: TimeInterval = 3) {
+        guard let index = activities.firstIndex(where: { $0.externalID == externalID }) else { return }
+        var activity = activities[index]
+        activity.state = .ended
+        if let detail { activity.detail = detail }
+        activity.updatedAt = Date()
+        activity.expiresAt = Date().addingTimeInterval(max(0, linger))
+        activity.persistent = false
+        activities[index] = activity
+    }
+
+    func dismissLiveActivity(id: UUID) {
+        activities.removeAll { $0.id == id }
+    }
+
+    func pruneLiveActivities(now: Date = Date()) {
+        activities.removeAll { activity in
+            if let expiresAt = activity.expiresAt, expiresAt <= now { return true }
+            if !activity.isPersistent, activity.progress == nil, activity.created.addingTimeInterval(90) <= now { return true }
+            if let progress = activity.progress, progress >= 1,
+               activity.resolvedUpdatedAt.addingTimeInterval(4) <= now { return true }
+            return false
+        }
     }
     func enableNotifications() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] _, error in
@@ -430,6 +517,356 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         alert.informativeText = "Open this URL? Shortcuts may perform actions configured in the Shortcuts app.\n\n\(command.url)"
         alert.addButton(withTitle: "Open"); alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(url) }
+    }
+}
+
+@MainActor
+final class SystemLiveActivitySource {
+    private weak var workspace: WorkspaceStore?
+    private let defaults: UserDefaults
+    private var timer: Timer?
+    private var didSeedNotificationFingerprints = false
+    private var notificationFingerprints = Set<String>()
+    private var activeFaceTimeExternalID: String?
+
+    private let notificationCenterBundleID = "com.apple.notificationcenterui"
+    private let faceTimeBundleID = "com.apple.FaceTime"
+
+    private let knownApps: [String: String] = [
+        "Messages": "com.apple.MobileSMS",
+        "Mail": "com.apple.mail",
+        "FaceTime": "com.apple.FaceTime",
+        "WhatsApp": "net.whatsapp.WhatsApp",
+        "Telegram": "ru.keepcoder.Telegram",
+        "Signal": "org.whispersystems.signal-desktop",
+        "Discord": "com.hnc.Discord",
+        "Slack": "com.tinyspeck.slackmacgap",
+        "Microsoft Teams": "com.microsoft.teams2",
+        "Messenger": "com.facebook.archon"
+    ]
+
+    init(workspace: WorkspaceStore, defaults: UserDefaults = .standard) {
+        self.workspace = workspace
+        self.defaults = defaults
+    }
+
+    var accessibilityTrusted: Bool { AXIsProcessTrusted() }
+
+    func start() {
+        guard timer == nil else { return }
+        let timer = Timer(timeInterval: 0.45, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.scan() }
+        }
+        timer.tolerance = 0.10
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        scan()
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        notificationFingerprints.removeAll()
+        didSeedNotificationFingerprints = false
+        activeFaceTimeExternalID = nil
+    }
+
+    func refreshNow() { scan() }
+
+    private var captureEnabled: Bool {
+        defaults.object(forKey: "HaloLiveActivitiesCaptureSystem") as? Bool ?? false
+    }
+    private var captureMessages: Bool {
+        defaults.object(forKey: "HaloLiveActivitiesCaptureMessages") as? Bool ?? true
+    }
+    private var captureCalls: Bool {
+        defaults.object(forKey: "HaloLiveActivitiesCaptureCalls") as? Bool ?? true
+    }
+    private var captureNotifications: Bool {
+        defaults.object(forKey: "HaloLiveActivitiesCaptureNotifications") as? Bool ?? true
+    }
+
+    private func scan() {
+        guard captureEnabled, AXIsProcessTrusted() else { return }
+        scanNotificationCenter()
+        scanFaceTime()
+    }
+
+    private func scanNotificationCenter() {
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: notificationCenterBundleID).first else {
+            didSeedNotificationFingerprints = false
+            notificationFingerprints.removeAll()
+            return
+        }
+
+        let root = AXUIElementCreateApplication(app.processIdentifier)
+        let windows = axElements(root, attribute: kAXWindowsAttribute as CFString)
+        var current = Set<String>()
+        var candidates: [(fingerprint: String, strings: [String])] = []
+
+        for window in windows.prefix(10) {
+            let snapshot = snapshot(of: window)
+            let strings = normalizedNotificationStrings(snapshot.strings)
+            guard (2...12).contains(strings.count) else { continue }
+            let fingerprint = stableFingerprint(strings.joined(separator: "\u{1F}"))
+            current.insert(fingerprint)
+            candidates.append((fingerprint, strings))
+        }
+
+        if !didSeedNotificationFingerprints {
+            notificationFingerprints = current
+            didSeedNotificationFingerprints = true
+            return
+        }
+
+        for candidate in candidates where !notificationFingerprints.contains(candidate.fingerprint) {
+            publishNotification(strings: candidate.strings, fingerprint: candidate.fingerprint)
+        }
+
+        notificationFingerprints = current
+    }
+
+    private func publishNotification(strings: [String], fingerprint: String) {
+        guard let workspace else { return }
+
+        let source = inferSourceName(in: strings)
+        let bundleID = bundleIdentifier(for: source)
+        let content = strings.filter { value in
+            guard let source else { return true }
+            return value.caseInsensitiveCompare(source) != .orderedSame
+        }
+
+        guard let title = content.first ?? strings.first else { return }
+        let detail = content.dropFirst().prefix(2).joined(separator: " · ")
+        let kind = classify(source: source, title: title, detail: detail)
+
+        switch kind {
+        case .message where !captureMessages: return
+        case .call where !captureCalls: return
+        case .notification where !captureNotifications: return
+        default: break
+        }
+
+        let now = Date()
+        let duration: TimeInterval = kind == .call ? 24 : kind == .message ? 18 : 14
+        let priority: Double = kind == .call ? 100 : kind == .message ? 78 : 66
+        let activity = LiveActivity(
+            externalID: "system.notification.\(fingerprint)",
+            sourceBundleIdentifier: bundleID,
+            sourceName: source,
+            kind: kind,
+            state: kind == .call ? .incoming : .active,
+            symbolName: symbol(for: kind),
+            title: title,
+            detail: detail,
+            progress: nil,
+            updatedAt: now,
+            expiresAt: now.addingTimeInterval(duration),
+            priority: priority,
+            persistent: false
+        )
+        workspace.upsertLiveActivity(activity)
+    }
+
+    private func scanFaceTime() {
+        guard captureCalls else {
+            finishFaceTimeIfNeeded()
+            return
+        }
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: faceTimeBundleID).first else {
+            finishFaceTimeIfNeeded()
+            return
+        }
+
+        let root = AXUIElementCreateApplication(app.processIdentifier)
+        let windows = axElements(root, attribute: kAXWindowsAttribute as CFString)
+        var detected: (caller: String, state: LiveActivityState, detail: String)?
+
+        for window in windows.prefix(8) {
+            let snap = snapshot(of: window)
+            let buttons = snap.buttons.map(normalize)
+            let text = snap.strings.map(normalize).filter { !$0.isEmpty }
+            let incoming = buttons.contains(where: { ["accept", "answer", "decline"].contains($0.lowercased()) }) ||
+                text.contains(where: { $0.localizedCaseInsensitiveContains("incoming") && $0.localizedCaseInsensitiveContains("call") })
+            let active = buttons.contains(where: {
+                let lower = $0.lowercased()
+                return lower.contains("end") || lower.contains("hang up") || lower == "mute"
+            })
+
+            guard incoming || active else { continue }
+            let caller = text.first(where: { value in
+                let lower = value.lowercased()
+                return !lower.contains("facetime") &&
+                    !lower.contains("incoming") &&
+                    !lower.contains("call") &&
+                    !["accept", "answer", "decline", "mute", "end"].contains(lower)
+            }) ?? "FaceTime call"
+            detected = (caller, incoming ? .incoming : .active, incoming ? "Incoming FaceTime call" : "FaceTime call in progress")
+            break
+        }
+
+        guard let detected else {
+            finishFaceTimeIfNeeded()
+            return
+        }
+
+        let externalID = "system.call.facetime." + stableFingerprint(normalize(detected.caller))
+        if let old = activeFaceTimeExternalID, old != externalID {
+            workspace?.endLiveActivity(externalID: old, detail: "Call ended", linger: 3)
+        }
+        activeFaceTimeExternalID = externalID
+
+        let previous = workspace?.activities.first(where: { $0.externalID == externalID })
+        let now = Date()
+        let activity = LiveActivity(
+            externalID: externalID,
+            sourceBundleIdentifier: faceTimeBundleID,
+            sourceName: "FaceTime",
+            kind: .call,
+            state: detected.state,
+            symbolName: detected.state == .incoming ? "phone.arrow.down.left.fill" : "phone.fill",
+            title: detected.caller,
+            detail: detected.detail,
+            progress: nil,
+            startedAt: detected.state == .active ? (previous?.startedAt ?? now) : previous?.startedAt,
+            updatedAt: now,
+            expiresAt: nil,
+            priority: detected.state == .incoming ? 100 : 92,
+            persistent: true
+        )
+        workspace?.upsertLiveActivity(activity)
+    }
+
+    private func finishFaceTimeIfNeeded() {
+        guard let externalID = activeFaceTimeExternalID else { return }
+        workspace?.endLiveActivity(externalID: externalID, detail: "Call ended", linger: 4)
+        activeFaceTimeExternalID = nil
+    }
+
+    private func classify(source: String?, title: String, detail: String) -> LiveActivityKind {
+        let combined = [source, title, detail].compactMap { $0 }.joined(separator: " ").lowercased()
+        if combined.contains("incoming call") || combined.contains("video call") ||
+            combined.contains("audio call") || source?.caseInsensitiveCompare("FaceTime") == .orderedSame {
+            return .call
+        }
+        let messageApps = ["messages", "whatsapp", "telegram", "signal", "discord", "slack", "microsoft teams", "messenger"]
+        if let source, messageApps.contains(where: { source.localizedCaseInsensitiveContains($0) }) {
+            return .message
+        }
+        return .notification
+    }
+
+    private func symbol(for kind: LiveActivityKind) -> String {
+        switch kind {
+        case .message: return "message.fill"
+        case .call: return "phone.fill"
+        default: return "bell.fill"
+        }
+    }
+
+    private func inferSourceName(in strings: [String]) -> String? {
+        for known in knownApps.keys {
+            if strings.contains(where: { $0.caseInsensitiveCompare(known) == .orderedSame }) { return known }
+        }
+        return strings.first(where: { value in
+            let lower = value.lowercased()
+            return value.count <= 48 &&
+                !lower.contains("notification center") &&
+                !["close", "show", "options", "clear", "reply"].contains(lower)
+        })
+    }
+
+    private func bundleIdentifier(for source: String?) -> String? {
+        guard let source else { return nil }
+        if let known = knownApps.first(where: { source.caseInsensitiveCompare($0.key) == .orderedSame })?.value {
+            return known
+        }
+        return NSWorkspace.shared.runningApplications.first(where: {
+            $0.localizedName?.caseInsensitiveCompare(source) == .orderedSame
+        })?.bundleIdentifier
+    }
+
+    private struct AXSnapshot {
+        var strings: [String] = []
+        var buttons: [String] = []
+    }
+
+    private func snapshot(of root: AXUIElement) -> AXSnapshot {
+        var result = AXSnapshot()
+        var visited = 0
+
+        func visit(_ element: AXUIElement, depth: Int) {
+            guard depth <= 7, visited < 220 else { return }
+            visited += 1
+
+            let role = axString(element, attribute: kAXRoleAttribute as CFString) ?? ""
+            let values = [
+                axString(element, attribute: kAXTitleAttribute as CFString),
+                axString(element, attribute: kAXValueAttribute as CFString),
+                axString(element, attribute: kAXDescriptionAttribute as CFString)
+            ].compactMap { $0 }
+
+            for value in values {
+                let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !normalized.isEmpty, normalized.count <= 600 else { continue }
+                if !result.strings.contains(normalized) { result.strings.append(normalized) }
+                if role == (kAXButtonRole as String), !result.buttons.contains(normalized) {
+                    result.buttons.append(normalized)
+                }
+            }
+
+            for child in axElements(element, attribute: kAXChildrenAttribute as CFString).prefix(48) {
+                visit(child, depth: depth + 1)
+            }
+        }
+
+        visit(root, depth: 0)
+        return result
+    }
+
+    private func normalizedNotificationStrings(_ raw: [String]) -> [String] {
+        let ignored = Set([
+            "notification center", "close", "show", "options", "clear", "reply",
+            "more", "less", "actions", "dismiss"
+        ])
+        var seen = Set<String>()
+        return raw.compactMap { value -> String? in
+            let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !clean.isEmpty, clean.count <= 420 else { return nil }
+            let lower = clean.lowercased()
+            guard !ignored.contains(lower), !lower.hasPrefix("notification center,") else { return nil }
+            guard seen.insert(clean).inserted else { return nil }
+            return clean
+        }
+    }
+
+    private func axElements(_ element: AXUIElement, attribute: CFString) -> [AXUIElement] {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let value else { return [] }
+        return value as? [AXUIElement] ?? []
+    }
+
+    private func axString(_ element: AXUIElement, attribute: CFString) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let value else { return nil }
+        if let string = value as? String { return string }
+        if let attributed = value as? NSAttributedString { return attributed.string }
+        return nil
+    }
+
+    private func normalize(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func stableFingerprint(_ value: String) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return String(hash, radix: 16)
     }
 }
 
