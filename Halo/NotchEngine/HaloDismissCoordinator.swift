@@ -43,11 +43,6 @@ final class HaloDismissCoordinator {
     private var transientHoldTasks: [HaloDismissHoldReason: Task<Void, Never>] = [:]
     private var transientHoldTokens: [HaloDismissHoldReason: UUID] = [:]
 
-    deinit {
-        pendingTask?.cancel()
-        transientHoldTasks.values.forEach { $0.cancel() }
-    }
-
     func setCIBehavior(_ behavior: CIDismissBehavior) {
         guard ciBehavior != behavior else { return }
         ciBehavior = behavior
