@@ -90,10 +90,37 @@ struct SurfaceRenderConfiguration: Equatable {
     var openFixedColumns: Int? = nil
 }
 enum GlassRendering {
-    /// The material supplies its own background. Tint must never hide the backdrop.
+    /// Kept for profiles/themes created before GlassOptions existed.
     static func tintOpacity(themeOpacity: Double) -> Double {
         guard themeOpacity.isFinite else { return 0.1 }
         return min(0.18, max(0, (themeOpacity - 0.5) * 0.36))
+    }
+
+    /// Higher clarity means less of the native blur/treatment is composited over the desktop.
+    static func materialOpacity(clarity: Double) -> Double {
+        guard clarity.isFinite else { return 0.55 }
+        let value = min(1, max(0, clarity))
+        return 0.18 + (1 - value) * 0.82
+    }
+
+    static func absorptionOpacity(_ amount: Double) -> Double {
+        guard amount.isFinite else { return 0.12 }
+        return min(0.78, max(0, amount) * 0.78)
+    }
+
+    static func chromaticOpacity(_ amount: Double) -> Double {
+        guard amount.isFinite else { return 0 }
+        return min(0.16, max(0, amount) * 0.16)
+    }
+
+    static func highlightOpacity(_ amount: Double) -> Double {
+        guard amount.isFinite else { return 0 }
+        return min(0.30, max(0, amount) * 0.30)
+    }
+
+    static func edgeDepthOpacity(_ amount: Double) -> Double {
+        guard amount.isFinite else { return 0 }
+        return min(0.40, max(0, amount) * 0.40)
     }
 }
 
