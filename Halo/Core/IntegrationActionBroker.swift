@@ -192,6 +192,10 @@ final class IntegrationActionBroker {
         guard session.eligibleActionIDs.contains(actionID) else {
             throw IntegrationActionBrokerError.actionNotEligible(actionID)
         }
+        if let committedActionID = session.committedActionID,
+           committedActionID != actionID {
+            throw IntegrationActionBrokerError.actionNotEligible(actionID)
+        }
         guard registration.supportedActions.contains(where: { $0.id == actionID }) else {
             throw IntegrationActionBrokerError.actionMissing(actionID)
         }
