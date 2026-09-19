@@ -5826,6 +5826,13 @@ private struct HaloCustomCIComponentRenderer {
     let data: [String: String]
 
     func render(_ component: HaloCIComponent) -> AnyView {
+        guard runtime.shouldRenderIntegrationComponent(
+            packageID: package.manifest.id,
+            componentID: component.id
+        ) else {
+            return AnyView(EmptyView())
+        }
+
         let raw: AnyView
         switch component.type {
         case "Text":
