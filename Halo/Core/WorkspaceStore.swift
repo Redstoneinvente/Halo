@@ -370,6 +370,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     func publish(_ title: String, detail: String = "", progress: Double? = nil) {
         let activity = LiveActivity(title: title, detail: detail, progress: progress.map { min(1, max(0, $0)) })
         activities = [activity] + Array(activities.prefix(19))
+        HaloCIContextProviderEngine.shared.reportActivityPublished(source: "halo.activity")
     }
     func enableNotifications() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] _, error in
@@ -381,6 +382,9 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             guard status.authorizationStatus == .authorized else { return }
             let content = UNMutableNotificationContent(); content.title = title; content.sound = .default
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+            Task { @MainActor in
+                HaloCIContextProviderEngine.shared.reportNotificationSent(source: "halo.notification")
+            }
         }
     }
     func refreshApps() {
@@ -1160,23 +1164,14 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         self.workspace = workspace
         subscriptions.removeAll()
 
-        workspace.media.$isPlaying.receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
-        workspace.system.$battery.receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
-        workspace.system.$charging.receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
-        workspace.$runningApps.receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
-        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
-            .receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
-        Publishers.MergeMany([
-            workspace.media.objectWillChange.eraseToAnyPublisher(),
-            workspace.system.objectWillChange.eraseToAnyPublisher(),
-            workspace.audio.objectWillChange.eraseToAnyPublisher()
-        ])
-        .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
-        .sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
-        NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
-            .receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
-        Timer.publish(every: 60, on: .main, in: .common).autoconnect()
-            .sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
+        let contextEngine = HaloCIContextProviderEngine.shared
+        contextEngine.attach(to: workspace)
+        contextEngine.$revision
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.contextDidChange() }
+            .store(in: &subscriptions)
 
         let integrationCatalog = HaloIntegrationCatalog.shared
         Publishers.CombineLatest(
@@ -1196,6 +1191,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         subscriptions.removeAll()
         integrationSyncTask?.cancel()
         integrationSyncTask = nil
+        HaloCIContextProviderEngine.shared.detach()
         workspace = nil
         manualActivationID = nil
         suppressedPackageIDs.removeAll()
@@ -1411,44 +1407,12 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     }
 
     func dataBus(for package: HaloCIParsedPackage, workspace: WorkspaceStore, expanded: Bool) -> [String: String] {
-        let grants = grantedPermissions(package.manifest.id)
-        var data: [String: String] = [
-            "halo.surface.state": expanded ? "expanded" : "closed",
-            "halo.surface.isExpanded": expanded ? "true" : "false",
-            "system.battery.isCharging": workspace.system.charging ? "true" : "false",
-            "system.lowPowerMode": workspace.system.lowPower ? "true" : "false",
-            "system.cpu.usedPercent": format(workspace.system.cpuUsage),
-            "system.memory.usedPercent": format(workspace.system.memoryUsage),
-            "system.storage.usedPercent": format(workspace.system.diskUsage)
-        ]
-        if let battery = workspace.system.battery { data["system.battery.level"] = String(battery) }
-        if grants.contains("Media.ReadState") {
-            data["media.isPlaying"] = workspace.media.isPlaying ? "true" : "false"
-            data["media.title"] = workspace.media.title
-            data["media.artist"] = workspace.media.artist
-            data["media.album"] = workspace.media.album
-        }
-        if grants.contains("Applications.Observe") {
-            let app = NSWorkspace.shared.frontmostApplication
-            data["apps.active.bundleID"] = app?.bundleIdentifier ?? ""
-            data["apps.active.name"] = app?.localizedName ?? ""
-        }
-        data["media.duration"] = format(workspace.media.duration)
-        data["media.position"] = format(workspace.media.position)
-        data["audio.output.name"] = workspace.audio.devices.first { $0.id == workspace.audio.selected }?.name
-        if workspace.audio.canSetVolume { data["audio.volume"] = format(Double(workspace.audio.volume)) }
-        data["audio.canSetVolume"] = workspace.audio.canSetVolume ? "true" : "false"
-        data["system.thermalState"] = workspace.system.thermalState
-        data["system.network.downBytesPerSecond"] = format(workspace.system.networkDownPerSecond)
-        data["system.network.upBytesPerSecond"] = format(workspace.system.networkUpPerSecond)
-        data["displays.count"] = String(NSScreen.screens.count)
-        let clock = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: Date())
-        data["time.minuteOfDay"] = String((clock.hour ?? 0) * 60 + (clock.minute ?? 0))
-        data["ci.id"] = package.manifest.id
-        data["ci.name"] = package.manifest.name
-        data["ci.activation.kind"] = manualActivationID == package.manifest.id ? "manual" : "automatic"
-        return HaloCIContextCatalog.filter(data, sdkVersion: package.manifest.sdkVersion,
-            declaredPermissions: Set(package.manifest.permissions), grantedPermissions: grants)
+        HaloCIContextProviderEngine.shared.snapshot(
+            package: package,
+            expanded: expanded,
+            activationKind: manualActivationID == package.manifest.id ? "manual" : "automatic",
+            grantedPermissions: grantedPermissions(package.manifest.id)
+        )
     }
 
     func boolState(packageID: String, key: String, default defaultValue: Bool) -> Bool {
@@ -1491,6 +1455,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         case "clipboard.copy":
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(value, forType: .string)
+            HaloCIContextProviderEngine.shared.reportClipboardCopy(textLength: value.count)
         case "url.open":
             guard let url = URL(string: value), let scheme = url.scheme?.lowercased(), ["https", "http", "mailto"].contains(scheme) else {
                 errorMessage = "Custom CI tried to open an unsupported URL."; return
