@@ -1123,6 +1123,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
 
     @Published private(set) var packages: [HaloCIParsedPackage] = []
     @Published private(set) var invalidPackages: [HaloCustomCIInvalidPackage] = []
+    @Published private(set) var generatedPackageIDs: Set<String> = []
     @Published private(set) var manualActivationID: String?
     @Published private(set) var contextRevision = 0
     @Published var notice: String?
@@ -1130,12 +1131,16 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
 
     private let defaults = UserDefaults.standard
     private let preferencesKey = "HaloCustomCI.packagePreferences.v1"
+    private let autoIntegrationCIKey = "HaloAutoIntegrationCIEnabled"
     private var preferences: [String: HaloCustomCIPackagePreferences] = [:]
     private var suppressedPackageIDs = Set<String>()
     private var subscriptions = Set<AnyCancellable>()
     private weak var workspace: WorkspaceStore?
 
     private init() {
+        if defaults.object(forKey: autoIntegrationCIKey) == nil {
+            defaults.set(true, forKey: autoIntegrationCIKey)
+        }
         if let data = defaults.data(forKey: preferencesKey),
            let saved = try? JSONDecoder().decode([String: HaloCustomCIPackagePreferences].self, from: data) {
             preferences = saved
@@ -1171,6 +1176,19 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
         Timer.publish(every: 60, on: .main, in: .common).autoconnect()
             .sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
+
+        let integrationCatalog = HaloIntegrationCatalog.shared
+        Publishers.CombineLatest(
+            integrationCatalog.$integrations,
+            integrationCatalog.$hasCompletedRefresh
+        )
+        .filter { $0.1 }
+        .map { $0.0 }
+        .receive(on: RunLoop.main)
+        .sink { [weak self] integrations in
+            self?.synchronizeGeneratedIntegrationCIs(integrations)
+        }
+        .store(in: &subscriptions)
     }
 
     func detach() {
@@ -1202,6 +1220,11 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
                 }
                 return lhs.manifest.name.localizedCaseInsensitiveCompare(rhs.manifest.name) == .orderedAscending
             }
+            generatedPackageIDs = Set(valid.compactMap { package in
+                HaloAutoIntegrationCIGenerator.isGeneratedPackage(at: package.rootURL)
+                    ? package.manifest.id
+                    : nil
+            })
             invalidPackages = invalid.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             if let manualActivationID, !packages.contains(where: { $0.manifest.id == manualActivationID }) { self.manualActivationID = nil }
             contextDidChange()
@@ -1274,6 +1297,28 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     }
 
     func package(id: String) -> HaloCIParsedPackage? { packages.first { $0.manifest.id == id } }
+    func isGeneratedIntegrationPackage(_ id: String) -> Bool { generatedPackageIDs.contains(id) }
+    var autoIntegrationCIEnabled: Bool { defaults.bool(forKey: autoIntegrationCIKey) }
+
+    func setAutoIntegrationCIEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: autoIntegrationCIKey)
+        if enabled {
+            let catalog = HaloIntegrationCatalog.shared
+            if catalog.hasCompletedRefresh {
+                synchronizeGeneratedIntegrationCIs(catalog.integrations)
+            } else {
+                catalog.refresh()
+            }
+        } else {
+            let result = HaloAutoIntegrationCIGenerator.removeGeneratedPackages(at: installRoot)
+            if result.changed { reload() }
+            if !result.diagnostics.isEmpty {
+                errorMessage = result.diagnostics.joined(separator: "\n")
+            }
+        }
+        objectWillChange.send()
+    }
+
     func isEnabled(_ id: String) -> Bool { preferences[id]?.enabled ?? true }
     func priority(_ id: String) -> Double { min(100, max(0, preferences[id]?.priority ?? 50)) }
     func grantedPermissions(_ id: String) -> Set<String> {
@@ -1456,7 +1501,72 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         case "media.playPause": workspace.media.perform("playpause", app: workspace.settings.mediaApp)
         case "media.next": workspace.media.perform("next track", app: workspace.settings.mediaApp)
         case "media.previous": workspace.media.perform("previous track", app: workspace.settings.mediaApp)
+        case "app.integration.invoke":
+            let bundleIdentifier = HaloCIBindingResolver.resolve(
+                action.arguments?["bundleIdentifier"] ?? "",
+                data: currentData
+            )
+            let actionID = HaloCIBindingResolver.resolve(
+                action.arguments?["actionID"] ?? "",
+                data: currentData
+            )
+            guard !bundleIdentifier.isEmpty, !actionID.isEmpty else {
+                errorMessage = "The app integration action is missing its bundle identifier or action ID."
+                return
+            }
+
+            do {
+                let catalog = HaloIntegrationCatalog.shared
+                let invocation = try catalog.freshInvocation(
+                    bundleIdentifier: bundleIdentifier,
+                    actionID: actionID
+                )
+                guard let files = HaloIntegrationFilePrompt.collect(
+                    for: invocation,
+                    parentWindow: NSApp.keyWindow ?? NSApp.mainWindow
+                ) else { return }
+                guard let options = HaloIntegrationOptionPrompt.collect(
+                    for: invocation,
+                    parentWindow: NSApp.keyWindow ?? NSApp.mainWindow
+                ) else { return }
+
+                guard let refreshed = self.package(id: id),
+                      refreshed.manifest == current.manifest,
+                      HaloCIActionAuthorization.allows(
+                        action.id,
+                        enabled: isEnabled(id),
+                        globallyDisabled: defaults.bool(forKey: "HaloDisableCustomCI"),
+                        declaredPermissions: Set(refreshed.manifest.permissions),
+                        grantedPermissions: grantedPermissions(id)
+                      ) else {
+                    errorMessage = "This Custom CI action is unavailable or its permission was revoked."
+                    return
+                }
+
+                let freshInvocation = try catalog.freshInvocation(
+                    bundleIdentifier: bundleIdentifier,
+                    actionID: actionID
+                )
+                try catalog.invoke(freshInvocation, files: files, options: options)
+                notice = "Sent \(freshInvocation.action.name) to \(freshInvocation.integration.name)."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         default: errorMessage = "Unsupported Custom CI action: \(action.id)"
+        }
+    }
+
+    private func synchronizeGeneratedIntegrationCIs(_ integrations: [HaloIntegration]) {
+        guard autoIntegrationCIEnabled else { return }
+        let result = HaloAutoIntegrationCIGenerator.synchronize(
+            integrations: integrations,
+            installRoot: installRoot
+        )
+        if result.changed {
+            reload()
+        }
+        if !result.diagnostics.isEmpty {
+            errorMessage = result.diagnostics.joined(separator: "\n")
         }
     }
 
