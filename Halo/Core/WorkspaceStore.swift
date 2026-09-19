@@ -1406,6 +1406,114 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         let disabled = preferences[packageID]?.disabledIntegrationActionIDs ?? []
         return integration.manifest.actions.filter { !disabled.contains($0.id) }
     }
+
+    @discardableResult
+    func updateIntegrationDragSession(files: [URL], displayID: String) -> Bool {
+        let candidates = integrationDragCandidates(for: files)
+        return HaloIntegrationDragSession.shared.update(
+            candidates: candidates,
+            files: files,
+            displayID: displayID
+        )
+    }
+
+    func integrationDragOwnsSurface(on displayID: String) -> Bool {
+        HaloIntegrationDragSession.shared.ownsSurface(on: displayID)
+    }
+
+    @discardableResult
+    func commitIntegrationDrag(files: [URL], displayID: String) -> Bool {
+        HaloIntegrationDragSession.shared.commitDrop(files: files, displayID: displayID)
+    }
+
+    @discardableResult
+    func cancelIntegrationDrag(on displayID: String) -> Bool {
+        HaloIntegrationDragSession.shared.cancelUncommitted(on: displayID)
+    }
+
+    func integrationDragCandidatePackageID(on displayID: String?) -> String? {
+        guard let displayID else { return nil }
+        let session = HaloIntegrationDragSession.shared
+        return packages
+            .filter { package in
+                let id = package.manifest.id
+                return isGeneratedIntegrationPackage(id) &&
+                    isEnabled(id) &&
+                    integrationAutomaticTriggersEnabled(id) &&
+                    session.isEligible(packageID: id, displayID: displayID)
+            }
+            .sorted {
+                let lhs = priority($0.manifest.id)
+                let rhs = priority($1.manifest.id)
+                if lhs != rhs { return lhs > rhs }
+                return $0.manifest.id < $1.manifest.id
+            }
+            .first?
+            .manifest.id
+    }
+
+    private func revalidateIntegrationDragSession() {
+        let session = HaloIntegrationDragSession.shared
+        guard session.targetDisplayID != nil, !session.files.isEmpty else { return }
+        session.revalidate(candidates: integrationDragCandidates(for: session.files))
+    }
+
+    private func integrationDragCandidates(for files: [URL]) -> [String: Set<String>] {
+        let cleanFiles = files.filter(\.isFileURL)
+        guard !cleanFiles.isEmpty else { return [:] }
+
+        var result: [String: Set<String>] = [:]
+        for package in packages {
+            let packageID = package.manifest.id
+            guard isGeneratedIntegrationPackage(packageID),
+                  isEnabled(packageID),
+                  integrationAutomaticTriggersEnabled(packageID),
+                  !suppressedPackageIDs.contains(packageID),
+                  let integration = integration(forPackageID: packageID),
+                  integration.manifest.triggers?.contains(where: { $0.type == "fileDrag" }) == true,
+                  integrationFileDragTriggerAllows(integration, files: cleanFiles) else {
+                continue
+            }
+
+            let actionIDs = Set(
+                enabledIntegrationActions(packageID: packageID)
+                    .filter { HaloIntegrationCatalog.actionSupports($0, files: cleanFiles) }
+                    .map(\.id)
+            )
+            if !actionIDs.isEmpty {
+                result[packageID] = actionIDs
+            }
+        }
+        return result
+    }
+
+    private func integrationFileDragTriggerAllows(
+        _ integration: HaloIntegration,
+        files: [URL]
+    ) -> Bool {
+        guard files.allSatisfy({ !$0.hasDirectoryPath }) else { return false }
+        let fileExtensions = files.map {
+            $0.pathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        }
+
+        return (integration.manifest.triggers ?? []).contains { trigger in
+            guard trigger.type == "fileDrag" else { return false }
+            let rawAllowed = trigger.supportedExtensions ?? []
+            if rawAllowed.isEmpty { return true }
+
+            let allowed = Set(rawAllowed.map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            }.filter { !$0.isEmpty })
+
+            if allowed.contains("*") { return true }
+            return !fileExtensions.contains(where: { $0.isEmpty }) &&
+                Set(fileExtensions).isSubset(of: allowed)
+        }
+    }
     func grantedPermissions(_ id: String) -> Set<String> {
         guard let package = package(id: id) else { return [] }
         return (preferences[id]?.grantedPermissions ?? []).intersection(package.manifest.permissions)
@@ -1467,8 +1575,12 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         NotificationCenter.default.post(name: .init("HaloCustomCICloseRequested"), object: id)
     }
 
-    func activeCandidate(workspace: WorkspaceStore, globalDisabled: Bool,
-                         blockingPriority: Double? = nil) -> HaloCustomCICandidate? {
+    func activeCandidate(
+        workspace: WorkspaceStore,
+        globalDisabled: Bool,
+        blockingPriority: Double? = nil,
+        displayID: String? = nil
+    ) -> HaloCustomCICandidate? {
         guard !globalDisabled else { return nil }
         let floor = blockingPriority ?? -Double.infinity
         let snapshot = triggerSnapshot(workspace: workspace)
@@ -1496,6 +1608,30 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
                     autoOpen: false
                 )
             }
+
+            if isGeneratedIntegrationPackage(id),
+               integrationAutomaticTriggersEnabled(id),
+               HaloIntegrationDragSession.shared.isEligible(
+                    packageID: id,
+                    displayID: displayID
+               ) {
+                return HaloCustomCICandidate(
+                    package: package,
+                    priority: priority(id),
+                    manual: false,
+                    autoOpen: true
+                )
+            }
+
+            // Generated app integrations use the dedicated drag session as the
+            // authoritative fileDrag trigger source so function enablement and
+            // the actual dragged URLs stay in sync. Avoid evaluating the static
+            // generated fileDrag trigger a second time through bounded context.
+            if isGeneratedIntegrationPackage(id),
+               package.triggers.triggers.contains(where: { $0.type == "fileDrag" }) {
+                continue
+            }
+
             let granted = grantedPermissions(id)
             if HaloCITriggerEvaluator.matches(
                 package.triggers,
