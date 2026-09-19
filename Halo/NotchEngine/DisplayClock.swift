@@ -1088,6 +1088,11 @@ private final class HaloDropZoneHostView: NSView {
         let displayID = WindowManager.displayID(screen)
         let session = HaloIntegrationExecutionSession.shared
         session.presentChoices(actions, files: urls, displayID: displayID)
+
+        guard session.ownsSurface(on: displayID) else {
+            return false
+        }
+
         if commitDrop {
             session.commitDrop(files: urls)
         }
@@ -1096,8 +1101,7 @@ private final class HaloDropZoneHostView: NSView {
 
         // Removing the AppKit Drop CI overlay synchronously from inside its own
         // NSDraggingDestination callback is fragile. Hand off on the next run-loop
-        // turn; the global monitor sees the active Integration CI and will not
-        // recreate the overlay.
+        // turn only after Integration CI has won central ownership.
         DispatchQueue.main.async {
             haloDismissEmbeddedDropCIForIntegration()
         }
