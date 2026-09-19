@@ -170,3 +170,332 @@ final class HaloIntegrationCatalog: ObservableObject {
         return (integrations, diagnostics.sorted())
     }
 }
+
+
+struct HaloIntegrationInvocation: Identifiable, Hashable {
+    let integration: HaloIntegration
+    let action: HaloIntegrationAction
+
+    var id: String {
+        integration.bundleIdentifier + "::" + action.id
+    }
+}
+
+extension HaloIntegrationCatalog {
+    func compatibleInvocations(for files: [URL]) -> [HaloIntegrationInvocation] {
+        let fileURLs = files.filter(\.isFileURL)
+        guard !fileURLs.isEmpty else { return [] }
+
+        return integrations.flatMap { integration in
+            integration.manifest.actions.compactMap { action in
+                guard Self.action(action, supports: fileURLs) else { return nil }
+                return HaloIntegrationInvocation(integration: integration, action: action)
+            }
+        }
+        .sorted {
+            if $0.integration.name != $1.integration.name {
+                return $0.integration.name.localizedCaseInsensitiveCompare($1.integration.name) == .orderedAscending
+            }
+            return $0.action.name.localizedCaseInsensitiveCompare($1.action.name) == .orderedAscending
+        }
+    }
+
+    func invoke(
+        _ invocation: HaloIntegrationInvocation,
+        files: [URL],
+        options: [String: Any]
+    ) throws {
+        let fileURLs = files.filter(\.isFileURL)
+        guard !fileURLs.isEmpty else {
+            throw HaloIntegrationInvocationError.noFiles
+        }
+        guard Self.action(invocation.action, supports: fileURLs) else {
+            throw HaloIntegrationInvocationError.unsupportedFiles
+        }
+
+        let requestID = UUID().uuidString
+        let requestDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HaloIntegrationRequests", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: requestDirectory,
+            withIntermediateDirectories: true
+        )
+
+        let requestURL = requestDirectory
+            .appendingPathComponent(requestID)
+            .appendingPathExtension("halorequest")
+
+        let payload: [String: Any] = [
+            "protocolVersion": 1,
+            "requestID": requestID,
+            "sourceBundleIdentifier": Bundle.main.bundleIdentifier ?? "com.redstoneinvente.Halo",
+            "action": invocation.action.id,
+            "options": options
+        ]
+
+        guard JSONSerialization.isValidJSONObject(payload) else {
+            throw HaloIntegrationInvocationError.invalidOptions
+        }
+
+        let data = try JSONSerialization.data(
+            withJSONObject: payload,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try data.write(to: requestURL, options: .atomic)
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+
+        NSWorkspace.shared.open(
+            [requestURL] + fileURLs,
+            withApplicationAt: invocation.integration.appURL,
+            configuration: configuration
+        ) { _, error in
+            if let error {
+                NSLog(
+                    "Halo app integration launch failed for %@: %@",
+                    invocation.integration.bundleIdentifier,
+                    error.localizedDescription
+                )
+            }
+        }
+
+        // The receiving application reads the request immediately during its open-URL callback.
+        // Keep the request around long enough for a cold launch, then clean it up.
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 120) {
+            try? FileManager.default.removeItem(at: requestURL)
+        }
+    }
+
+    nonisolated private static func action(
+        _ action: HaloIntegrationAction,
+        supports files: [URL]
+    ) -> Bool {
+        let supported = Set(
+            action.supportedExtensions.map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            }
+        )
+
+        guard !supported.isEmpty else { return false }
+        if supported.contains("*") { return true }
+
+        return files.allSatisfy { file in
+            let ext = file.pathExtension.lowercased()
+            return !ext.isEmpty && supported.contains(ext)
+        }
+    }
+}
+
+enum HaloIntegrationInvocationError: LocalizedError {
+    case noFiles
+    case unsupportedFiles
+    case invalidOptions
+
+    var errorDescription: String? {
+        switch self {
+        case .noFiles:
+            return "No files were supplied to the app integration."
+        case .unsupportedFiles:
+            return "The selected integration action does not support every dropped file."
+        case .invalidOptions:
+            return "The integration options could not be encoded as JSON."
+        }
+    }
+}
+
+@MainActor
+enum HaloIntegrationOptionPrompt {
+    private struct FieldBinding {
+        let option: HaloIntegrationOption
+        let textField: NSTextField?
+        let checkbox: NSButton?
+    }
+
+    static func collect(
+        for invocation: HaloIntegrationInvocation,
+        parentWindow: NSWindow?
+    ) -> [String: Any]? {
+        let options = invocation.action.options
+        guard !options.isEmpty else { return [:] }
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = invocation.action.name
+        alert.informativeText = "Set the request options for \(invocation.integration.name)."
+        alert.addButton(withTitle: "Run Action")
+        alert.addButton(withTitle: "Cancel")
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        var bindings: [FieldBinding] = []
+
+        for option in options {
+            let row = NSStackView()
+            row.orientation = .vertical
+            row.alignment = .leading
+            row.spacing = 4
+
+            let requiredSuffix = option.required ? " · required" : " · optional"
+            let title = NSTextField(labelWithString: option.name + requiredSuffix)
+            title.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            row.addArrangedSubview(title)
+
+            var textField: NSTextField?
+            var checkbox: NSButton?
+
+            if option.type == "boolean" {
+                let control = NSButton(
+                    checkboxWithTitle: option.key,
+                    target: nil,
+                    action: nil
+                )
+                control.allowsMixedState = !option.required
+                control.state = option.required ? .off : .mixed
+                control.toolTip = option.required
+                    ? "Off = false, On = true"
+                    : "Mixed = omit this optional value; Off = false; On = true"
+                row.addArrangedSubview(control)
+                checkbox = control
+            } else {
+                let field = NSTextField(string: "")
+                field.placeholderString = placeholder(for: option)
+                field.frame.size.width = 420
+                row.addArrangedSubview(field)
+                textField = field
+            }
+
+            if let description = option.description, !description.isEmpty {
+                let detail = NSTextField(wrappingLabelWithString: description)
+                detail.font = .systemFont(ofSize: NSFont.smallSystemFontSize - 1)
+                detail.textColor = .secondaryLabelColor
+                detail.maximumNumberOfLines = 2
+                row.addArrangedSubview(detail)
+            }
+
+            stack.addArrangedSubview(row)
+            bindings.append(
+                FieldBinding(
+                    option: option,
+                    textField: textField,
+                    checkbox: checkbox
+                )
+            )
+        }
+
+        let accessory = NSView()
+        accessory.translatesAutoresizingMaskIntoConstraints = false
+        accessory.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: accessory.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: accessory.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: accessory.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: accessory.bottomAnchor),
+            accessory.widthAnchor.constraint(equalToConstant: 440)
+        ])
+        alert.accessoryView = accessory
+
+        NSApp.activate(ignoringOtherApps: true)
+        parentWindow?.makeKeyAndOrderFront(nil)
+
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return nil }
+
+        var result: [String: Any] = [:]
+        var missingRequired: [String] = []
+
+        for binding in bindings {
+            let option = binding.option
+
+            if option.type == "boolean", let checkbox = binding.checkbox {
+                if !option.required && checkbox.state == .mixed {
+                    continue
+                }
+                result[option.key] = checkbox.state == .on
+                continue
+            }
+
+            let raw = binding.textField?.stringValue
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            if raw.isEmpty {
+                if option.required { missingRequired.append(option.name) }
+                continue
+            }
+
+            guard let value = parse(raw, as: option.type) else {
+                showValidationError(
+                    "\(option.name) must be a valid \(option.type) value."
+                )
+                return nil
+            }
+
+            result[option.key] = value
+        }
+
+        if !missingRequired.isEmpty {
+            showValidationError(
+                "Enter a value for: " + missingRequired.joined(separator: ", ")
+            )
+            return nil
+        }
+
+        return result
+    }
+
+    private static func placeholder(for option: HaloIntegrationOption) -> String {
+        switch option.type {
+        case "integer": return "42"
+        case "double": return "0.9"
+        case "stringArray": return "one, two, three"
+        case "integerArray": return "1, 2, 3"
+        case "doubleArray": return "0.25, 0.5, 1.0"
+        default: return option.key
+        }
+    }
+
+    private static func parse(_ raw: String, as type: String) -> Any? {
+        switch type {
+        case "string":
+            return raw
+        case "integer":
+            return Int(raw)
+        case "double":
+            return Double(raw)
+        case "stringArray":
+            return commaSeparated(raw)
+        case "integerArray":
+            let values = commaSeparated(raw)
+            let parsed = values.compactMap(Int.init)
+            return parsed.count == values.count ? parsed : nil
+        case "doubleArray":
+            let values = commaSeparated(raw)
+            let parsed = values.compactMap(Double.init)
+            return parsed.count == values.count ? parsed : nil
+        default:
+            return nil
+        }
+    }
+
+    private static func commaSeparated(_ raw: String) -> [String] {
+        raw.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func showValidationError(_ message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Invalid integration options"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+}
