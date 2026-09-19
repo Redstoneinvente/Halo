@@ -1252,13 +1252,70 @@ struct WorkspaceSettings: Codable {
     var hotkeyCode: UInt32 = 49
     var hotkeyModifiers: UInt32 = 2304
 }
+enum LiveActivityKind: String, Codable, CaseIterable {
+    case generic
+    case notification
+    case message
+    case call
+    case timer
+    case progress
+    case download
+    case calendar
+    case bluetooth
+    case custom
+}
+
+enum LiveActivityState: String, Codable, CaseIterable {
+    case incoming
+    case active
+    case ended
+}
+
 struct LiveActivity: Identifiable, Codable {
     var bluetoothDeviceVisual: BluetoothDeviceVisual? = nil
     var id = UUID()
+
+    // Optional additive metadata keeps older in-memory/persisted payloads decodable while
+    // allowing system and partner sources to update one stable activity over time.
+    var externalID: String? = nil
+    var sourceBundleIdentifier: String? = nil
+    var sourceName: String? = nil
+    var kind: LiveActivityKind? = nil
+    var state: LiveActivityState? = nil
+    var symbolName: String? = nil
+
     var title: String
     var detail = ""
     var progress: Double?
+
+    var startedAt: Date? = nil
+    var updatedAt: Date? = nil
+    var expiresAt: Date? = nil
+    var priority: Double? = nil
+    var persistent: Bool? = nil
+
     var created = Date()
+
+    var resolvedKind: LiveActivityKind { kind ?? .generic }
+    var resolvedState: LiveActivityState { state ?? .active }
+    var resolvedUpdatedAt: Date { updatedAt ?? created }
+    var resolvedPriority: Double { min(100, max(0, priority ?? 50)) }
+    var isPersistent: Bool { persistent ?? false }
+
+    var resolvedSymbolName: String {
+        if let symbolName, !symbolName.isEmpty { return symbolName }
+        switch resolvedKind {
+        case .notification: return "bell.fill"
+        case .message: return "message.fill"
+        case .call: return "phone.fill"
+        case .timer: return "timer"
+        case .progress: return "chart.bar.fill"
+        case .download: return "arrow.down.circle.fill"
+        case .calendar: return "calendar"
+        case .bluetooth: return "wave.3.right"
+        case .generic, .custom: return "waveform.path"
+        }
+    }
 }
 protocol LiveActivityProvider { var activities: [LiveActivity] { get } }
 struct PluginCommand: Codable, Identifiable {
