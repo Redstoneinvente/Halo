@@ -91,12 +91,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         engine = manager
         manager.start()
 
-        Publishers.CombineLatest(
+        Publishers.CombineLatest3(
             HaloAccountManager.shared.$isSignedIn.removeDuplicates(),
+            HaloAccountManager.shared.$userID.removeDuplicates(),
             HaloLicenseManager.shared.$state.removeDuplicates()
         )
         .receive(on: RunLoop.main)
-        .sink { [weak self] _, _ in self?.refreshCommercialAccess() }
+        .sink { [weak self] _, _, _ in self?.refreshCommercialAccess() }
         .store(in: &commercialBag)
 
         Task { @MainActor [weak self] in
