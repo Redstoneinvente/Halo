@@ -8,6 +8,13 @@ struct CISurfaceOwnershipDecision: Sendable {
     var session: CIActivationSession?
 }
 
+struct IntegrationFileDropCommit: Sendable {
+    var ciID: String
+    var actionID: String
+    var activationSessionID: UUID
+    var shouldExecuteImmediately: Bool
+}
+
 /// Composition root for app-integration CI services. Each responsibility remains implemented by
 /// its dedicated catalog/factory/config/router/eligibility/payload/activation/broker/transport type.
 @MainActor
@@ -23,6 +30,7 @@ final class IntegrationCIRuntime: ObservableObject {
     let payloadStore: TriggerPayloadStore
     let triggerRouter: TriggerRouter
     let activationCoordinator: CIActivationCoordinator
+    let actionDropTargets: IntegrationActionDropTargetRegistry
 
     private var eligibleByDisplay: [String: [CIEligibleCandidate]] = [:]
     private var eventsByDisplay: [String: TriggerEvent] = [:]
@@ -46,13 +54,15 @@ final class IntegrationCIRuntime: ObservableObject {
         configurationStore: CIConfigurationStore = .shared,
         payloadStore: TriggerPayloadStore = TriggerPayloadStore(),
         triggerRouter: TriggerRouter = TriggerRouter(),
-        activationCoordinator: CIActivationCoordinator = CIActivationCoordinator()
+        activationCoordinator: CIActivationCoordinator = CIActivationCoordinator(),
+        actionDropTargets: IntegrationActionDropTargetRegistry = .shared
     ) {
         self.catalog = catalog
         self.configurationStore = configurationStore
         self.payloadStore = payloadStore
         self.triggerRouter = triggerRouter
         self.activationCoordinator = activationCoordinator
+        self.actionDropTargets = actionDropTargets
     }
 
     func start() {
@@ -160,6 +170,7 @@ final class IntegrationCIRuntime: ObservableObject {
 
     func fileDragExited(displayID: String, pinned: Bool) -> Bool {
         guard eventsByDisplay[displayID]?.kind == .fileDrag else { return false }
+        actionDropTargets.clear(displayID: displayID)
         if let session = activationCoordinator.currentSession(displayID: displayID), session.committed {
             return false
         }
@@ -173,17 +184,64 @@ final class IntegrationCIRuntime: ObservableObject {
         return cancelled.shouldCollapse
     }
 
-    /// Called by the Halo-owned drag destination after the central SurfaceView arbiter has already
-    /// established that an integration owns this display.
-    func commitFileDrag(displayID: String) -> Bool {
+    /// Updates presentation-only action hover state from the Halo-owned drag destination.
+    /// No payload data is exposed to the renderer.
+    @discardableResult
+    func updateFileDragLocation(displayID: String, screenPoint: CGPoint?) -> String? {
         guard let winner = winnerCIByDisplay[displayID],
               let session = activationCoordinator.currentSession(displayID: displayID),
               session.ciID == winner,
-              let handle = session.payloadHandle,
-              payloadStore.commit(handle, sessionID: session.id, ciID: winner) else { return false }
-        _ = activationCoordinator.markCommitted(sessionID: session.id)
+              !session.committed else {
+            actionDropTargets.clear(displayID: displayID)
+            return nil
+        }
+        return actionDropTargets.updateHover(
+            screenPoint: screenPoint,
+            displayID: displayID,
+            ciID: winner,
+            sessionID: session.id
+        )
+    }
+
+    /// Commits the privileged drag payload to the action card currently under the cursor.
+    /// The action identity becomes part of the activation session and cannot be retargeted.
+    func commitFileDragAtHoveredAction(displayID: String) -> IntegrationFileDropCommit? {
+        guard let winner = winnerCIByDisplay[displayID],
+              let session = activationCoordinator.currentSession(displayID: displayID),
+              session.ciID == winner,
+              !session.committed,
+              let actionID = actionDropTargets.hoveredActionID(displayID: displayID),
+              session.eligibleActionIDs.contains(actionID),
+              let registration = registration(ciID: winner),
+              let action = registration.supportedActions.first(where: { $0.id == actionID }),
+              let handle = session.payloadHandle else {
+            return nil
+        }
+
+        let configuration = configurationStore.configuration(for: registration)
+        guard configuration.enabled,
+              configuration.actionEnabled(actionID),
+              action.requiredPermissions.isSubset(of: configuration.grantedPermissions),
+              payloadStore.commit(handle, sessionID: session.id, ciID: winner),
+              activationCoordinator.markCommitted(sessionID: session.id, actionID: actionID) != nil else {
+            return nil
+        }
+
+        let configuredDefaults = configuration.actions[actionID]?.optionDefaults ?? [:]
+        let needsUserInput = action.options.contains { option in
+            option.required &&
+            configuredDefaults[option.key] == nil &&
+            option.defaultValue == nil
+        }
+
+        actionDropTargets.clear(sessionID: session.id)
         bumpRevision()
-        return true
+        return IntegrationFileDropCommit(
+            ciID: winner,
+            actionID: actionID,
+            activationSessionID: session.id,
+            shouldExecuteImmediately: !needsUserInput
+        )
     }
 
     func surfaceWinnerDidChange(
@@ -201,6 +259,7 @@ final class IntegrationCIRuntime: ObservableObject {
         }
 
         if let previous = activationCoordinator.currentSession(displayID: displayID) {
+            actionDropTargets.clear(sessionID: previous.id)
             let finished = activationCoordinator.finish(sessionID: previous.id, pinned: pinned)
             if let handle = previous.payloadHandle, !previous.committed {
                 payloadStore.releaseBinding(handle, sessionID: previous.id)
@@ -245,6 +304,7 @@ final class IntegrationCIRuntime: ObservableObject {
 
     func dismiss(displayID: String, pinned: Bool) -> Bool {
         guard let session = activationCoordinator.currentSession(displayID: displayID) else { return false }
+        actionDropTargets.clear(sessionID: session.id)
         let result = activationCoordinator.finish(sessionID: session.id, pinned: pinned)
         if let handle = session.payloadHandle { payloadStore.remove(handle) }
         eventsByDisplay.removeValue(forKey: displayID)
@@ -271,6 +331,7 @@ final class IntegrationCIRuntime: ObservableObject {
                 parentWindow: parentWindow
             )
             guard let session = activationCoordinator.session(id: activationSessionID) else { return false }
+            actionDropTargets.clear(sessionID: session.id)
             let result = activationCoordinator.finish(sessionID: activationSessionID, pinned: pinned)
             if let handle = session.payloadHandle { payloadStore.remove(handle) }
             eventsByDisplay.removeValue(forKey: session.displayID)
@@ -288,6 +349,7 @@ final class IntegrationCIRuntime: ObservableObject {
 
     func cleanupForSleepOrWake() {
         _ = activationCoordinator.cleanupForSleepOrWake()
+        actionDropTargets.clearAll()
         payloadStore.clear()
         eligibleByDisplay.removeAll()
         eventsByDisplay.removeAll()
