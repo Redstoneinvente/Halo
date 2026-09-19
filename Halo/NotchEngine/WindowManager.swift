@@ -341,6 +341,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     override func concludeDragOperation(_ sender: NSDraggingInfo?) {
         guard hasCommercialAccess else { rejectSurfaceDrag(); return }
         if surfaceDragActive {
+            dragLocationHandler?(nil)
             _ = dragStateHandler?(false, [])
             surfaceDragActive = false
         } else {
