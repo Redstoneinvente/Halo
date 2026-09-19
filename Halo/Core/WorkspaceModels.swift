@@ -1271,6 +1271,102 @@ enum LiveActivityState: String, Codable, CaseIterable {
     case ended
 }
 
+enum LiveActivityActionKind: String, Codable {
+    case press
+    case textReply
+}
+
+enum LiveActivityActionRole: String, Codable {
+    case normal
+    case primary
+    case destructive
+}
+
+struct LiveActivityAction: Identifiable, Codable, Equatable {
+    var id: String
+    var title: String
+    var symbolName: String? = nil
+    var kind: LiveActivityActionKind = .press
+    var role: LiveActivityActionRole = .normal
+
+    // The action descriptor is serializable; source-specific runtime objects such as
+    // AXUIElement never leak into the Live Activity model.
+    var targetLabel: String
+    var inputPlaceholder: String? = nil
+}
+
+enum LiveActivityActionFactory {
+    static func actions(fromButtonLabels labels: [String], kind: LiveActivityKind) -> [LiveActivityAction] {
+        var seen = Set<String>()
+        var result: [LiveActivityAction] = []
+
+        for raw in labels {
+            let title = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+
+            let normalized = title.lowercased()
+            guard !["options", "show", "more", "less", "actions"].contains(normalized) else { continue }
+            guard seen.insert(normalized).inserted else { continue }
+
+            let actionKind: LiveActivityActionKind =
+                normalized == "reply" || normalized.hasPrefix("reply ") ? .textReply : .press
+
+            let role: LiveActivityActionRole
+            if ["accept", "answer", "join"].contains(where: { normalized == $0 || normalized.hasPrefix($0 + " ") }) {
+                role = .primary
+            } else if ["decline", "reject", "end", "hang up", "clear", "close", "dismiss"].contains(where: {
+                normalized == $0 || normalized.hasPrefix($0 + " ")
+            }) {
+                role = .destructive
+            } else if actionKind == .textReply || normalized.contains("mark as read") {
+                role = .primary
+            } else {
+                role = .normal
+            }
+
+            let symbol: String
+            if actionKind == .textReply {
+                symbol = "arrowshape.turn.up.left.fill"
+            } else if normalized.contains("mark as read") || normalized == "read" {
+                symbol = "checkmark.circle.fill"
+            } else if normalized.contains("mute") {
+                symbol = "mic.slash.fill"
+            } else if normalized.contains("decline") || normalized.contains("reject") ||
+                        normalized.contains("hang up") || normalized == "end" {
+                symbol = "phone.down.fill"
+            } else if normalized.contains("accept") || normalized.contains("answer") || normalized.contains("join") {
+                symbol = "phone.fill"
+            } else if normalized.contains("clear") || normalized.contains("close") || normalized.contains("dismiss") {
+                symbol = "xmark.circle.fill"
+            } else {
+                symbol = kind == .call ? "phone.fill" : "bolt.fill"
+            }
+
+            let slug = normalized
+                .unicodeScalars
+                .map { CharacterSet.alphanumerics.contains($0) ? Character(String($0)) : "-" }
+                .reduce(into: "") { partial, character in
+                    if character != "-" || partial.last != "-" { partial.append(character) }
+                }
+                .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+
+            result.append(LiveActivityAction(
+                id: "system.ax." + (slug.isEmpty ? "action" : slug),
+                title: title,
+                symbolName: symbol,
+                kind: actionKind,
+                role: role,
+                targetLabel: title,
+                inputPlaceholder: actionKind == .textReply ? "Reply…" : nil
+            ))
+
+            if result.count == 6 { break }
+        }
+
+        return result
+    }
+}
+
 enum LiveActivityClassifier {
     private static let messageSources = [
         "messages", "whatsapp", "telegram", "signal", "discord",
@@ -1321,6 +1417,7 @@ struct LiveActivity: Identifiable, Codable {
     var expiresAt: Date? = nil
     var priority: Double? = nil
     var persistent: Bool? = nil
+    var actions: [LiveActivityAction]? = nil
 
     var created = Date()
 
@@ -1329,6 +1426,7 @@ struct LiveActivity: Identifiable, Codable {
     var resolvedUpdatedAt: Date { updatedAt ?? created }
     var resolvedPriority: Double { min(100, max(0, priority ?? 50)) }
     var isPersistent: Bool { persistent ?? false }
+    var resolvedActions: [LiveActivityAction] { actions ?? [] }
 
     var resolvedSymbolName: String {
         if let symbolName, !symbolName.isEmpty { return symbolName }
