@@ -645,8 +645,7 @@ struct ClosedNotchSlot: View {
                                                 inheritedColor: effectiveTextColor, spacing: elementSpacing)
                 } else {
                     HStack(spacing: elementSpacing) {
-                        Image(systemName: activity.resolvedSymbolName)
-                            .frame(width: max(12, textSize + 2), alignment: .center)
+                        activityIcon(activity)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(activity.title)
                                 .lineLimit(1)
@@ -675,6 +674,31 @@ struct ClosedNotchSlot: View {
             }
         }
     }
+    @ViewBuilder
+    private func activityIcon(_ activity: LiveActivity) -> some View {
+        let side = max(12, textSize + 2)
+        if let bundleID = activity.sourceBundleIdentifier,
+           let icon = liveActivityApplicationIcon(bundleIdentifier: bundleID) {
+            Image(nsImage: icon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: side, height: side)
+                .clipShape(RoundedRectangle(cornerRadius: max(2, side * 0.22), style: .continuous))
+        } else {
+            Image(systemName: activity.resolvedSymbolName)
+                .frame(width: side, height: side, alignment: .center)
+        }
+    }
+
+    private func liveActivityApplicationIcon(bundleIdentifier: String) -> NSImage? {
+        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first,
+           let icon = running.icon {
+            return icon
+        }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else { return nil }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
+
     private func compactLabel(symbol: String, text: String) -> some View {
         HStack(spacing: elementSpacing) {
             Image(systemName: symbol)
