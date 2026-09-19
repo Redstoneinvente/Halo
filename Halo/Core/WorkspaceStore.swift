@@ -643,7 +643,7 @@ final class SystemLiveActivitySource {
 
         guard let title = content.first ?? strings.first else { return }
         let detail = content.dropFirst().prefix(2).joined(separator: " · ")
-        let kind = classify(source: source, title: title, detail: detail)
+        let kind = LiveActivityClassifier.kind(sourceName: source, title: title, detail: detail)
 
         switch kind {
         case .message where !captureMessages: return
@@ -746,19 +746,6 @@ final class SystemLiveActivitySource {
         guard let externalID = activeFaceTimeExternalID else { return }
         workspace?.endLiveActivity(externalID: externalID, detail: "Call ended", linger: 4)
         activeFaceTimeExternalID = nil
-    }
-
-    private func classify(source: String?, title: String, detail: String) -> LiveActivityKind {
-        let combined = [source, title, detail].compactMap { $0 }.joined(separator: " ").lowercased()
-        if combined.contains("incoming call") || combined.contains("video call") ||
-            combined.contains("audio call") || source?.caseInsensitiveCompare("FaceTime") == .orderedSame {
-            return .call
-        }
-        let messageApps = ["messages", "whatsapp", "telegram", "signal", "discord", "slack", "microsoft teams", "messenger"]
-        if let source, messageApps.contains(where: { source.localizedCaseInsensitiveContains($0) }) {
-            return .message
-        }
-        return .notification
     }
 
     private func symbol(for kind: LiveActivityKind) -> String {
