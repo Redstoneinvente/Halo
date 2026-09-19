@@ -211,11 +211,19 @@ final class HaloPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+private enum HaloFileDragPhase {
+    case entered
+    case exited
+    case dropped
+}
+
 @MainActor
 final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     var dragStateHandler: ((Bool, Int) -> Void)?
     var dragContextHandler: ((Bool, [URL]) -> Void)?
     var dropHandler: (([URL]) -> Void)?
+    fileprivate var fileDragHandler: ((HaloFileDragPhase, [URL]) -> Bool)?
+    private var integrationDragActive = false
 
     /// Commercial access is a hard outer boundary. When false, this hosting view
     /// must not register as a drag destination at all — including registrations
@@ -314,43 +322,42 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        // Locked means drag-dead: do not involve the Drop CI and do not hand the drag
-        // to SwiftUI/NSHostingView. Licensed + Drop-disabled is different: descendants
-        // such as File Shelf may still own their own drop destinations.
         guard hasCommercialAccess else { rejectFileDrop(); return [] }
 
         let urls = fileURLs(sender)
-        if observesFileDragContext, !urls.isEmpty {
-            dragContextHandler?(true, urls)
-        }
-
-        if observesFileDragContext, !urls.isEmpty, !acceptsFileDrop {
-            // Keep the NSDraggingDestination session alive long enough for the
-            // Context Provider Engine to classify the payload and activate a
-            // compatible Custom CI. This does not enable Drop CI and the eventual
-            // drop is still rejected unless another legitimate destination accepts it.
-            return .generic
-        }
-
-        guard acceptsFileDrop else { return super.draggingEntered(sender) }
         guard !urls.isEmpty else { return super.draggingEntered(sender) }
-        dragStateHandler?(true, urls.count)
-        return .copy
+
+        if observesFileDragContext {
+            dragContextHandler?(true, urls)
+            integrationDragActive = fileDragHandler?(.entered, urls) == true
+        } else {
+            integrationDragActive = false
+        }
+
+        if acceptsFileDrop {
+            dragStateHandler?(true, urls.count)
+        }
+
+        if integrationDragActive || acceptsFileDrop {
+            return .copy
+        }
+        return super.draggingEntered(sender)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard hasCommercialAccess else { rejectFileDrop(); return [] }
-
-        if observesFileDragContext, !acceptsFileDrop {
-            return fileURLCount(sender) > 0 ? .generic : super.draggingUpdated(sender)
-        }
-
-        guard acceptsFileDrop else { return super.draggingUpdated(sender) }
-
         let count = fileURLCount(sender)
         guard count > 0 else { return super.draggingUpdated(sender) }
-        dragStateHandler?(true, count)
-        return .copy
+
+        // Do not repeatedly decode URLs or re-run compatibility on every mouse move.
+        // The drag payload is stable for a normal NSDraggingSession; entered/dropped
+        // are the expensive boundaries.
+        if acceptsFileDrop {
+            dragStateHandler?(true, count)
+        }
+        return (integrationDragActive || acceptsFileDrop)
+            ? .copy
+            : super.draggingUpdated(sender)
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
@@ -358,14 +365,20 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             rejectFileDrop()
             return
         }
+
         if observesFileDragContext {
             dragContextHandler?(false, [])
         }
-        guard acceptsFileDrop else {
-            super.draggingExited(sender)
-            return
+        if integrationDragActive {
+            _ = fileDragHandler?(.exited, [])
+            integrationDragActive = false
         }
-        dragStateHandler?(false, 0)
+
+        if acceptsFileDrop {
+            dragStateHandler?(false, 0)
+        } else {
+            super.draggingExited(sender)
+        }
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -373,20 +386,22 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             rejectFileDrop()
             return false
         }
-        if observesFileDragContext, !acceptsFileDrop {
-            // Context-only observation must never turn into a hidden file receiver.
-            // End the transient trigger and reject the actual drop.
-            dragContextHandler?(false, [])
-            return false
-        }
-
-        guard acceptsFileDrop else { return super.performDragOperation(sender) }
 
         let urls = fileURLs(sender)
         guard !urls.isEmpty else {
-            dragStateHandler?(false, 0)
+            if acceptsFileDrop { dragStateHandler?(false, 0) }
             return super.performDragOperation(sender)
         }
+
+        if integrationDragActive,
+           fileDragHandler?(.dropped, urls) == true {
+            return true
+        }
+
+        guard acceptsFileDrop else {
+            return super.performDragOperation(sender)
+        }
+
         dropHandler?(urls)
         return true
     }
@@ -396,14 +411,20 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             rejectFileDrop()
             return
         }
+
         if observesFileDragContext {
             dragContextHandler?(false, [])
         }
-        guard acceptsFileDrop else {
-            super.concludeDragOperation(sender)
-            return
+        if integrationDragActive {
+            _ = fileDragHandler?(.exited, [])
+            integrationDragActive = false
         }
-        dragStateHandler?(false, 0)
+
+        if acceptsFileDrop {
+            dragStateHandler?(false, 0)
+        } else {
+            super.concludeDragOperation(sender)
+        }
     }
 }
 
@@ -1999,6 +2020,43 @@ final class WindowManager {
                         HaloCIContextProviderEngine.shared.reportDragStarted(urls: urls)
                     } else {
                         HaloCIContextProviderEngine.shared.reportDragEnded()
+                    }
+                }
+                view.fileDragHandler = { [weak host] phase, urls in
+                    guard let host else { return false }
+                    let runtime = HaloCustomCIRuntimeStore.shared
+
+                    switch phase {
+                    case .entered:
+                        let compatible = runtime.updateIntegrationDragSession(
+                            files: urls,
+                            displayID: id
+                        )
+                        if compatible {
+                            ActivationSequenceCoordinator.shared.cancelForInteraction()
+                        }
+                        return compatible
+
+                    case .exited:
+                        let owned = runtime.integrationDragOwnsSurface(on: id)
+                        _ = runtime.cancelIntegrationDrag(on: id)
+                        return owned
+
+                    case .dropped:
+                        guard runtime.integrationDragOwnsSurface(on: id) else {
+                            return false
+                        }
+                        HaloCIContextProviderEngine.shared.reportDrop(urls: urls)
+                        let committed = runtime.commitIntegrationDrag(
+                            files: urls,
+                            displayID: id
+                        )
+                        if committed {
+                            host.state.cancelFileDrop()
+                            host.state.dropExitTask?.cancel()
+                            host.state.collapseTask?.cancel()
+                        }
+                        return committed
                     }
                 }
                 view.dropHandler = { [weak self, weak host] urls in
