@@ -2065,18 +2065,24 @@ final class WindowManager {
                         }
 
                         ActivationSequenceCoordinator.shared.cancelForInteraction()
+                        session.presentChoices(actions, files: urls, displayID: id)
+
+                        // Eligibility is not ownership. SurfaceView's central arbiter
+                        // decides whether Integration CI or another CI owns Halo.
+                        guard session.ownsSurface(on: id) else {
+                            return false
+                        }
+
                         haloDismissEmbeddedDropCIForIntegration()
                         host.state.cancelFileDrop()
                         host.state.dropExitTask?.cancel()
                         host.state.collapseTask?.cancel()
-                        session.presentChoices(actions, files: urls, displayID: id)
                         return true
 
                     case .exited:
-                        // Resizing the notch during CI takeover can generate a
-                        // transient drag exit. Keep ownership until the global
-                        // mouse-up path decides whether the drag was committed.
-                        return session.isActive(on: id)
+                        // Only the current surface owner suppresses the normal Drop CI
+                        // exit path. An eligible-but-blocked integration remains passive.
+                        return session.ownsSurface(on: id)
 
                     case .dropped:
                         let actions = HaloIntegrationCatalog.shared.compatibleInvocations(
@@ -2087,15 +2093,19 @@ final class WindowManager {
                             return false
                         }
 
-                        haloDismissEmbeddedDropCIForIntegration()
-
                         if !session.isActive(on: id) {
                             session.presentChoices(actions, files: urls, displayID: id)
                         } else {
                             session.updateFiles(urls)
                         }
-                        session.commitDrop(files: urls)
 
+                        guard session.ownsSurface(on: id) else {
+                            session.cancelUncommittedDrag(on: id)
+                            return false
+                        }
+
+                        haloDismissEmbeddedDropCIForIntegration()
+                        session.commitDrop(files: urls)
                         host.state.cancelFileDrop()
                         host.state.dropExitTask?.cancel()
                         host.state.collapseTask?.cancel()
