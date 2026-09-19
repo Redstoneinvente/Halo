@@ -781,6 +781,221 @@ final class SystemLiveActivitySource {
         activeFaceTimeExternalID = nil
     }
 
+    func perform(action: LiveActivityAction, for activity: LiveActivity, input: String?) async -> String? {
+        guard AXIsProcessTrusted() else {
+            return "Accessibility permission is required for this action."
+        }
+
+        guard let root = actionRoot(for: activity) else {
+            return "The original notification or call is no longer available."
+        }
+
+        guard let button = firstButton(in: root, matching: action.targetLabel) else {
+            return "macOS no longer exposes the “\(action.title)” control."
+        }
+
+        switch action.kind {
+        case .press:
+            let error = AXUIElementPerformAction(button, kAXPressAction as CFString)
+            guard error == .success || error == .cannotComplete else {
+                return "macOS rejected the action (AX error \(error.rawValue))."
+            }
+
+            if action.role == .destructive {
+                workspace?.dismissLiveActivity(id: activity.id)
+            }
+
+            try? await Task.sleep(nanoseconds: 140_000_000)
+            scan()
+            return nil
+
+        case .textReply:
+            let reply = (input ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !reply.isEmpty else { return "Enter a reply first." }
+
+            let pressError = AXUIElementPerformAction(button, kAXPressAction as CFString)
+            guard pressError == .success || pressError == .cannotComplete else {
+                return "macOS could not open the reply field (AX error \(pressError.rawValue))."
+            }
+
+            for _ in 0..<12 {
+                try? await Task.sleep(nanoseconds: 90_000_000)
+
+                guard let currentRoot = actionRoot(for: activity) ?? notificationCenterRoot(),
+                      let field = replyTextField(in: currentRoot) else {
+                    continue
+                }
+
+                _ = AXUIElementSetAttributeValue(field, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+                let setError = AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, reply as CFString)
+                guard setError == .success else {
+                    return "macOS exposed Reply, but its text field could not be edited (AX error \(setError.rawValue))."
+                }
+
+                if let send = firstButton(in: currentRoot, matchingAny: ["Send"]) {
+                    let sendError = AXUIElementPerformAction(send, kAXPressAction as CFString)
+                    guard sendError == .success || sendError == .cannotComplete else {
+                        return "The reply was entered, but Send failed (AX error \(sendError.rawValue))."
+                    }
+                    workspace?.dismissLiveActivity(id: activity.id)
+                    return nil
+                }
+
+                if axActionNames(field).contains("AXConfirm") {
+                    let confirmError = AXUIElementPerformAction(field, "AXConfirm" as CFString)
+                    guard confirmError == .success || confirmError == .cannotComplete else {
+                        return "The reply was entered, but macOS rejected the send action (AX error \(confirmError.rawValue))."
+                    }
+                    workspace?.dismissLiveActivity(id: activity.id)
+                    return nil
+                }
+
+                return "Reply was filled, but macOS did not expose a Send action."
+            }
+
+            return "macOS opened Reply, but Halo could not find its text field."
+        }
+    }
+
+    private func actionRoot(for activity: LiveActivity) -> AXUIElement? {
+        if activity.externalID?.hasPrefix("system.notification.") == true {
+            return notificationRoot(for: activity)
+        }
+
+        if activity.sourceBundleIdentifier == faceTimeBundleID || activity.externalID?.hasPrefix("system.call.facetime.") == true {
+            guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: faceTimeBundleID).first else {
+                return nil
+            }
+            return AXUIElementCreateApplication(app.processIdentifier)
+        }
+
+        return nil
+    }
+
+    private func notificationCenterRoot() -> AXUIElement? {
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: notificationCenterBundleID).first else {
+            return nil
+        }
+        return AXUIElementCreateApplication(app.processIdentifier)
+    }
+
+    private func notificationCandidateRoots() -> [AXUIElement] {
+        guard let root = notificationCenterRoot() else { return [] }
+
+        var roots = axElements(root, attribute: kAXWindowsAttribute as CFString)
+        roots.append(contentsOf: axElements(root, attribute: kAXVisibleChildrenAttribute as CFString))
+        roots.append(contentsOf: axElements(root, attribute: kAXChildrenAttribute as CFString))
+        if roots.isEmpty { roots = [root] }
+        return Array(roots.prefix(32))
+    }
+
+    private func notificationRoot(for activity: LiveActivity) -> AXUIElement? {
+        let roots = notificationCandidateRoots()
+        guard !roots.isEmpty else { return nil }
+
+        if let externalID = activity.externalID,
+           externalID.hasPrefix("system.notification.") {
+            let fingerprint = String(externalID.dropFirst("system.notification.".count))
+            for root in roots {
+                let strings = normalizedNotificationStrings(snapshot(of: root).strings)
+                guard !strings.isEmpty else { continue }
+                if stableFingerprint(strings.joined(separator: "\u{1F}")) == fingerprint {
+                    return root
+                }
+            }
+        }
+
+        // Actions can change the notification hierarchy (Reply expands the banner, for
+        // example), so retain a content-based fallback after the exact fingerprint changes.
+        let needles = [activity.sourceName, activity.title, activity.detail]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var best: (root: AXUIElement, score: Int)?
+        for root in roots {
+            let haystack = snapshot(of: root).strings.joined(separator: " ").lowercased()
+            let score = needles.reduce(0) { partial, needle in
+                partial + (haystack.localizedCaseInsensitiveContains(needle) ? 1 : 0)
+            }
+            if score > (best?.score ?? 0) { best = (root, score) }
+        }
+        return best?.score ?? 0 > 0 ? best?.root : nil
+    }
+
+    private func firstButton(in root: AXUIElement, matching label: String) -> AXUIElement? {
+        firstButton(in: root, matchingAny: [label])
+    }
+
+    private func firstButton(in root: AXUIElement, matchingAny labels: [String]) -> AXUIElement? {
+        let wanted = labels.map { normalize($0).lowercased() }.filter { !$0.isEmpty }
+        guard !wanted.isEmpty else { return nil }
+
+        return firstElement(in: root) { element in
+            guard axString(element, attribute: kAXRoleAttribute as CFString) == "AXButton" else { return false }
+            let candidates = elementStrings(element).map { normalize($0).lowercased() }
+            return wanted.contains { target in
+                candidates.contains(where: { $0 == target || $0.contains(target) || target.contains($0) })
+            }
+        }
+    }
+
+    private func replyTextField(in root: AXUIElement) -> AXUIElement? {
+        if let focused = axElement(root, attribute: kAXFocusedUIElementAttribute as CFString) {
+            let role = axString(focused, attribute: kAXRoleAttribute as CFString) ?? ""
+            if role == "AXTextField" || role == "AXTextArea" { return focused }
+        }
+
+        return firstElement(in: root) { element in
+            let role = axString(element, attribute: kAXRoleAttribute as CFString) ?? ""
+            return role == "AXTextField" || role == "AXTextArea"
+        }
+    }
+
+    private func firstElement(
+        in root: AXUIElement,
+        maxDepth: Int = 9,
+        maxVisited: Int = 320,
+        where predicate: (AXUIElement) -> Bool
+    ) -> AXUIElement? {
+        var visited = 0
+
+        func visit(_ element: AXUIElement, depth: Int) -> AXUIElement? {
+            guard depth <= maxDepth, visited < maxVisited else { return nil }
+            visited += 1
+            if predicate(element) { return element }
+
+            for child in axElements(element, attribute: kAXChildrenAttribute as CFString).prefix(64) {
+                if let found = visit(child, depth: depth + 1) { return found }
+            }
+            return nil
+        }
+
+        return visit(root, depth: 0)
+    }
+
+    private func elementStrings(_ element: AXUIElement) -> [String] {
+        [
+            axString(element, attribute: kAXTitleAttribute as CFString),
+            axString(element, attribute: kAXValueAttribute as CFString),
+            axString(element, attribute: kAXDescriptionAttribute as CFString)
+        ].compactMap { $0 }
+    }
+
+    private func axElement(_ element: AXUIElement, attribute: CFString) -> AXUIElement? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let value,
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return unsafeBitCast(value, to: AXUIElement.self)
+    }
+
+    private func axActionNames(_ element: AXUIElement) -> [String] {
+        var value: CFArray?
+        guard AXUIElementCopyActionNames(element, &value) == .success,
+              let value else { return [] }
+        return value as? [String] ?? []
+    }
+
     private func symbol(for kind: LiveActivityKind) -> String {
         switch kind {
         case .message: return "message.fill"
