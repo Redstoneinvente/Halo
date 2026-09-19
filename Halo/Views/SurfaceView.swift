@@ -3441,6 +3441,15 @@ struct SurfaceView: View {
             }
         }
         .onChange(of: state.expanded) { expanded in
+            if !expanded && integrationCI.isActive {
+                state.collapseTask?.cancel()
+                DispatchQueue.main.async {
+                    if integrationCI.isActive {
+                        state.expanded = true
+                    }
+                }
+                return
+            }
             if expanded && usesVisualWorkspace && activeContext == nil {
                 visualWorkspaceSurfacePresented = true
             }
