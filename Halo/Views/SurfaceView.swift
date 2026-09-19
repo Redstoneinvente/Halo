@@ -3740,8 +3740,7 @@ private struct OpenNotchBackgroundView: View {
     private var effectiveAppearance: Appearance { options.baseAppearance(fallback) }
 
     var body: some View {
-        SurfaceBackground(appearance: effectiveAppearance, theme: theme, expanded: true, system: system)
-            .contrast(options.contrast ?? 1)
+        filteredBackground
             .overlay((options.tintColor ?? WidgetColor(red: 0.35, green: 0.55, blue: 1)).color.opacity(options.tintOpacity ?? 0))
             .overlay(Color.orange.opacity(max(0, options.warmth ?? 0) * 0.06))
             .overlay(Color.blue.opacity(max(0, -(options.warmth ?? 0)) * 0.05))
@@ -3765,6 +3764,17 @@ private struct OpenNotchBackgroundView: View {
                     }.allowsHitTesting(false)
                 }
             }
+    }
+
+    @ViewBuilder private var filteredBackground: some View {
+        if effectiveAppearance.background == .glass {
+            // Preserve NSVisualEffectView's behind-window sampling; SwiftUI image filters
+            // around the native glass can flatten it into an offscreen texture.
+            SurfaceBackground(appearance: effectiveAppearance, theme: theme, expanded: true, system: system)
+        } else {
+            SurfaceBackground(appearance: effectiveAppearance, theme: theme, expanded: true, system: system)
+                .contrast(options.contrast ?? 1)
+        }
     }
 
 }
