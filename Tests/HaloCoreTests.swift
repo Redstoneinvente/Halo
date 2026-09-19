@@ -23,10 +23,52 @@ final class HaloCoreTests: XCTestCase {
         let power = BluetoothConnectionEvent(kind: .poweredOff, deviceName: nil)
         XCTAssertNil(power.deviceVisual)
         XCTAssertEqual(power.symbol, "wave.3.right.slash")
+
+        // A pre-Live-Activities-v1 payload contains only the original fields.
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(activity)) as? [String: Any])
-        json.removeValue(forKey: "bluetoothDeviceVisual")
+        for key in [
+            "bluetoothDeviceVisual", "externalID", "sourceBundleIdentifier", "sourceName",
+            "kind", "state", "symbolName", "startedAt", "updatedAt", "expiresAt",
+            "priority", "persistent"
+        ] {
+            json.removeValue(forKey: key)
+        }
         let legacy = try JSONDecoder().decode(LiveActivity.self, from: JSONSerialization.data(withJSONObject: json))
         XCTAssertNil(legacy.bluetoothDeviceVisual)
+        XCTAssertEqual(legacy.resolvedKind, .generic)
+        XCTAssertEqual(legacy.resolvedState, .active)
+        XCTAssertEqual(legacy.resolvedPriority, 50)
+        XCTAssertEqual(legacy.resolvedSymbolName, "waveform.path")
+    }
+
+    func testLiveActivityMetadataRoundTripsAndClampsPriority() throws {
+        let started = Date(timeIntervalSince1970: 1_700_000_000)
+        let activity = LiveActivity(
+            externalID: "call.123",
+            sourceBundleIdentifier: "com.apple.FaceTime",
+            sourceName: "FaceTime",
+            kind: .call,
+            state: .incoming,
+            symbolName: nil,
+            title: "Incoming Call",
+            detail: "FaceTime",
+            progress: nil,
+            startedAt: started,
+            updatedAt: started.addingTimeInterval(2),
+            expiresAt: nil,
+            priority: 140,
+            persistent: true,
+            created: started
+        )
+        let restored = try JSONDecoder().decode(LiveActivity.self, from: JSONEncoder().encode(activity))
+        XCTAssertEqual(restored.externalID, "call.123")
+        XCTAssertEqual(restored.sourceBundleIdentifier, "com.apple.FaceTime")
+        XCTAssertEqual(restored.resolvedKind, .call)
+        XCTAssertEqual(restored.resolvedState, .incoming)
+        XCTAssertEqual(restored.resolvedPriority, 100)
+        XCTAssertEqual(restored.resolvedSymbolName, "phone.fill")
+        XCTAssertTrue(restored.isPersistent)
+        XCTAssertEqual(restored.startedAt, started)
     }
 
     func testPixelPalSquareSizesSurviveValidationAndPersistence() throws {
