@@ -64,6 +64,18 @@
 		F8614B803053291B00D4943C /* icon_16x16@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6E3053291B00D4943C /* icon_16x16@2x.png */; };
 		F8614B813053291B00D4943C /* icon_16x16.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6D3053291B00D4943C /* icon_16x16.png */; };
 		F8614B823053291B00D4943C /* Halo.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6C3053291B00D4943C /* Halo.png */; };
+
+		C1A300000000000000000001 /* Core/HaloIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000101 /* Core/HaloIntegration.swift */; };
+		C1A300000000000000000002 /* Core/CIRuntimeRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000102 /* Core/CIRuntimeRegistration.swift */; };
+		C1A300000000000000000003 /* Core/IntegrationDefinition.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000103 /* Core/IntegrationDefinition.swift */; };
+		C1A300000000000000000004 /* Core/CIConfigurationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000104 /* Core/CIConfigurationStore.swift */; };
+		C1A300000000000000000005 /* Core/CITriggerRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000105 /* Core/CITriggerRuntime.swift */; };
+		C1A300000000000000000006 /* Core/CIActivationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000106 /* Core/CIActivationCoordinator.swift */; };
+		C1A300000000000000000007 /* Core/IntegrationTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000107 /* Core/IntegrationTransport.swift */; };
+		C1A300000000000000000008 /* Core/IntegrationActionBroker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000108 /* Core/IntegrationActionBroker.swift */; };
+		C1A300000000000000000009 /* Core/IntegrationCIRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000109 /* Core/IntegrationCIRuntime.swift */; };
+		C1A30000000000000000000A /* Core/CIKeyboardShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A30000000000000000010A /* Core/CIKeyboardShortcut.swift */; };
+		C1A30000000000000000000B /* Services/IntegrationShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A30000000000000000010B /* Services/IntegrationShortcuts.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -144,6 +156,18 @@
 		F8614B743053291B00D4943C /* icon_256x256@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_256x256@2x.png"; sourceTree = "<group>"; };
 		F8614B753053291B00D4943C /* icon_512x512.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_512x512.png; sourceTree = "<group>"; };
 		F8614B763053291B00D4943C /* icon_512x512@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_512x512@2x.png"; sourceTree = "<group>"; };
+
+		C1A300000000000000000101 /* Core/HaloIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/HaloIntegration.swift; sourceTree = "<group>"; };
+		C1A300000000000000000102 /* Core/CIRuntimeRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/CIRuntimeRegistration.swift; sourceTree = "<group>"; };
+		C1A300000000000000000103 /* Core/IntegrationDefinition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/IntegrationDefinition.swift; sourceTree = "<group>"; };
+		C1A300000000000000000104 /* Core/CIConfigurationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/CIConfigurationStore.swift; sourceTree = "<group>"; };
+		C1A300000000000000000105 /* Core/CITriggerRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/CITriggerRuntime.swift; sourceTree = "<group>"; };
+		C1A300000000000000000106 /* Core/CIActivationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/CIActivationCoordinator.swift; sourceTree = "<group>"; };
+		C1A300000000000000000107 /* Core/IntegrationTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/IntegrationTransport.swift; sourceTree = "<group>"; };
+		C1A300000000000000000108 /* Core/IntegrationActionBroker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/IntegrationActionBroker.swift; sourceTree = "<group>"; };
+		C1A300000000000000000109 /* Core/IntegrationCIRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/IntegrationCIRuntime.swift; sourceTree = "<group>"; };
+		C1A30000000000000000010A /* Core/CIKeyboardShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/CIKeyboardShortcut.swift; sourceTree = "<group>"; };
+		C1A30000000000000000010B /* Services/IntegrationShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/IntegrationShortcuts.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -224,6 +248,17 @@
 				00000000000000000000006D /* Services/Integrations.swift */,
 				00000000000000000000006E /* Services/CaptureService.swift */,
 				00000000000000000000006F /* Core/ExtensionContracts.swift */,
+				C1A300000000000000000101 /* Core/HaloIntegration.swift */,
+				C1A300000000000000000102 /* Core/CIRuntimeRegistration.swift */,
+				C1A300000000000000000103 /* Core/IntegrationDefinition.swift */,
+				C1A300000000000000000104 /* Core/CIConfigurationStore.swift */,
+				C1A300000000000000000105 /* Core/CITriggerRuntime.swift */,
+				C1A300000000000000000106 /* Core/CIActivationCoordinator.swift */,
+				C1A300000000000000000107 /* Core/IntegrationTransport.swift */,
+				C1A300000000000000000108 /* Core/IntegrationActionBroker.swift */,
+				C1A300000000000000000109 /* Core/IntegrationCIRuntime.swift */,
+				C1A30000000000000000010A /* Core/CIKeyboardShortcut.swift */,
+				C1A30000000000000000010B /* Services/IntegrationShortcuts.swift */,
 				F8614B60305322E600D4943C /* AppIcon 2.icns */,
 			);
 			path = Halo;
@@ -485,6 +520,17 @@
 				0000000000000000000000D1 /* Services/Integrations.swift in Sources */,
 				0000000000000000000000D2 /* Services/CaptureService.swift in Sources */,
 				0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */,
+				C1A300000000000000000001 /* Core/HaloIntegration.swift in Sources */,
+				C1A300000000000000000002 /* Core/CIRuntimeRegistration.swift in Sources */,
+				C1A300000000000000000003 /* Core/IntegrationDefinition.swift in Sources */,
+				C1A300000000000000000004 /* Core/CIConfigurationStore.swift in Sources */,
+				C1A300000000000000000005 /* Core/CITriggerRuntime.swift in Sources */,
+				C1A300000000000000000006 /* Core/CIActivationCoordinator.swift in Sources */,
+				C1A300000000000000000007 /* Core/IntegrationTransport.swift in Sources */,
+				C1A300000000000000000008 /* Core/IntegrationActionBroker.swift in Sources */,
+				C1A300000000000000000009 /* Core/IntegrationCIRuntime.swift in Sources */,
+				C1A30000000000000000000A /* Core/CIKeyboardShortcut.swift in Sources */,
+				C1A30000000000000000000B /* Services/IntegrationShortcuts.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
