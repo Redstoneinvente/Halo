@@ -1641,6 +1641,7 @@ private struct ContextInterfaceLibraryView: View {
                 .padding(.vertical, 6)
             }
 
+            HaloAppIntegrationCISettingsSection()
             HaloCustomCISettingsSection()
 
             Section {
@@ -3250,6 +3251,372 @@ private struct HaloAccountLicenseSettingsView: View {
 
         Section("Support") {
             Link("Contact Halo support · r.support@redstoneinvente.com", destination: URL(string: "mailto:r.support@redstoneinvente.com")!)
+        }
+    }
+}
+
+@MainActor
+private struct HaloAppIntegrationCISettingsSection: View {
+    @ObservedObject private var runtime = IntegrationCIRuntime.shared
+
+    var body: some View {
+        Section("App Integration CI") {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Installed app integrations")
+                        .font(.headline)
+                    Text("Halo reads validated HaloIntegration.json manifests and registers these CIs at runtime. No managed .haloCI copy is generated.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Refresh") { runtime.refresh() }
+            }
+
+            if runtime.registrations.isEmpty {
+                Label("No compatible app integrations discovered", systemImage: "app.dashed")
+                    .foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)], alignment: .leading, spacing: 12) {
+                    ForEach(runtime.registrations) { registration in
+                        HaloAppIntegrationCICard(registration: registration)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+
+            if let error = runtime.lastError, !error.isEmpty {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+}
+
+@MainActor
+private struct HaloAppIntegrationCICard: View {
+    let registration: CIRegistration
+    @ObservedObject private var runtime = IntegrationCIRuntime.shared
+    @ObservedObject private var shortcuts = IntegrationShortcutManager.shared
+    @State private var expanded = false
+
+    private var configuration: CIConfiguration { runtime.configuration(for: registration) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 10) {
+                Image(systemName: "app.connected.to.app.below.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 38, height: 38)
+                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(registration.metadata.name).font(.headline).lineLimit(1)
+                    if case .appIntegration(let bundleID, let protocolVersion) = registration.source {
+                        Text("\(bundleID) · protocol v\(protocolVersion)")
+                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { configuration.enabled },
+                    set: { runtime.configurationStore.setEnabled($0, registration: registration) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+            }
+
+            LabeledContent("Priority") {
+                Slider(value: Binding(
+                    get: { configuration.priority },
+                    set: { runtime.configurationStore.setPriority($0, registration: registration) }
+                ), in: 0...100, step: 1)
+                .frame(width: 120)
+                Text("\(Int(configuration.priority))")
+                    .font(.caption.monospacedDigit())
+                    .frame(width: 28)
+            }
+            .font(.caption)
+
+            Button(expanded ? "Hide configuration" : "Configure actions & triggers") {
+                withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+            }
+            .controlSize(.small)
+
+            if expanded {
+                Divider()
+
+                if !registration.requiredPermissions.isEmpty {
+                    Text("Permissions").font(.caption.weight(.semibold))
+                    ForEach(registration.requiredPermissions.sorted(), id: \.self) { permission in
+                        Toggle(permission, isOn: Binding(
+                            get: { configuration.grantedPermissions.contains(permission) },
+                            set: { runtime.configurationStore.setPermission(permission, granted: $0, registration: registration) }
+                        ))
+                        .font(.caption)
+                    }
+                }
+
+                Text("Triggers").font(.caption.weight(.semibold))
+                ForEach(registration.supportedTriggers) { trigger in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Toggle(triggerLabel(trigger), isOn: Binding(
+                                get: { configuration.triggerEnabled(trigger.id) },
+                                set: { runtime.configurationStore.setTriggerEnabled($0, triggerID: trigger.id, registration: registration) }
+                            ))
+                            .font(.caption)
+                            Spacer()
+                            if trigger.type != .manual {
+                                Toggle("Auto-open", isOn: Binding(
+                                    get: { configuration.triggers[trigger.id]?.autoOpen ?? true },
+                                    set: { runtime.configurationStore.setTriggerAutoOpen($0, triggerID: trigger.id, registration: registration) }
+                                ))
+                                .font(.caption2)
+                                .toggleStyle(.switch)
+                            }
+                        }
+
+                        if trigger.type == .keyboardShortcut {
+                            keyboardShortcutControls(trigger)
+                        } else if trigger.type == .partnerEvent {
+                            Text("Partner event: \(trigger.eventName ?? "unnamed"). External event ingress is not enabled until a trusted transport is configured.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(8)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                }
+
+                Text("Actions").font(.caption.weight(.semibold))
+                ForEach(registration.supportedActions) { action in
+                    VStack(alignment: .leading, spacing: 7) {
+                        Toggle(action.name, isOn: Binding(
+                            get: { configuration.actionEnabled(action.id) },
+                            set: { runtime.configurationStore.setActionEnabled($0, actionID: action.id, registration: registration) }
+                        ))
+                        .font(.caption.weight(.medium))
+
+                        if action.input.type == .files {
+                            Text(action.input.extensions.contains("*")
+                                 ? "Files · any extension"
+                                 : "Files · " + action.input.extensions.map { "." + $0 }.joined(separator: ", "))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ForEach(action.options) { option in
+                            IntegrationActionOptionSettingsRow(
+                                registration: registration,
+                                action: action,
+                                option: option
+                            )
+                        }
+                    }
+                    .padding(8)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        }
+    }
+
+    @ViewBuilder
+    private func keyboardShortcutControls(_ trigger: CITriggerDefinition) -> some View {
+        let shortcut = configuration.triggers[trigger.id]?.keyboardShortcut ?? CIKeyboardShortcutConfiguration()
+        let keyBinding = Binding<UInt32>(
+            get: { shortcut.keyCode ?? 49 },
+            set: { key in
+                runtime.configurationStore.setKeyboardShortcut(
+                    CIKeyboardShortcutConfiguration(keyCode: key, modifiers: shortcut.modifiers ?? 2304),
+                    triggerID: trigger.id,
+                    registration: registration
+                )
+            }
+        )
+        let modifierBinding = Binding<UInt32>(
+            get: { shortcut.modifiers ?? 2304 },
+            set: { modifiers in
+                runtime.configurationStore.setKeyboardShortcut(
+                    CIKeyboardShortcutConfiguration(keyCode: shortcut.keyCode ?? 49, modifiers: modifiers),
+                    triggerID: trigger.id,
+                    registration: registration
+                )
+            }
+        )
+
+        HStack {
+            Picker("Key", selection: keyBinding) {
+                Text("Space").tag(UInt32(49))
+                Text("H").tag(UInt32(4))
+                Text("V").tag(UInt32(9))
+                Text("C").tag(UInt32(8))
+                Text("B").tag(UInt32(11))
+                Text("D").tag(UInt32(2))
+                Text("K").tag(UInt32(40))
+                Text("I").tag(UInt32(34))
+                Text("U").tag(UInt32(32))
+            }
+            Picker("Modifiers", selection: modifierBinding) {
+                Text("Option + Command").tag(UInt32(2304))
+                Text("Control + Option").tag(UInt32(6144))
+                Text("Control + Shift").tag(UInt32(4608))
+                Text("Control + Command").tag(UInt32(4352))
+            }
+            if !shortcut.isAssigned {
+                Button("Assign") {
+                    runtime.configurationStore.setKeyboardShortcut(
+                        CIKeyboardShortcutConfiguration(keyCode: 49, modifiers: 2304),
+                        triggerID: trigger.id,
+                        registration: registration
+                    )
+                }
+                .controlSize(.small)
+            } else {
+                Button("Clear") {
+                    runtime.configurationStore.setKeyboardShortcut(
+                        CIKeyboardShortcutConfiguration(),
+                        triggerID: trigger.id,
+                        registration: registration
+                    )
+                }
+                .controlSize(.small)
+            }
+        }
+        .font(.caption)
+
+        let conflictKey = registration.id + "::" + trigger.id
+        if let conflict = shortcuts.conflicts[conflictKey] {
+            Label(conflict, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+        }
+    }
+
+    private func triggerLabel(_ trigger: CITriggerDefinition) -> String {
+        switch trigger.type {
+        case .fileDrag: return "File drag"
+        case .keyboardShortcut: return "Keyboard shortcut"
+        case .partnerEvent: return "Partner event"
+        case .manual: return "Manual"
+        default: return trigger.type.rawValue
+        }
+    }
+}
+
+@MainActor
+private struct IntegrationActionOptionSettingsRow: View {
+    let registration: CIRegistration
+    let action: CIActionDefinition
+    let option: CIActionOptionDefinition
+
+    @ObservedObject private var runtime = IntegrationCIRuntime.shared
+    @State private var draft = ""
+    @State private var invalid = false
+
+    private var currentValue: CIValue? {
+        runtime.configuration(for: registration).actions[action.id]?.optionDefaults[option.key] ?? option.defaultValue
+    }
+
+    var body: some View {
+        Group {
+            if option.type == "boolean" {
+                Toggle(option.name + " default", isOn: Binding(
+                    get: {
+                        if case .boolean(let value)? = currentValue { return value }
+                        return false
+                    },
+                    set: {
+                        runtime.configurationStore.setActionDefault(
+                            .boolean($0),
+                            actionID: action.id,
+                            optionKey: option.key,
+                            registration: registration
+                        )
+                    }
+                ))
+                .font(.caption2)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        TextField(option.name + " default", text: $draft)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { persistDraft() }
+                        Button("Save") { persistDraft() }
+                            .controlSize(.small)
+                        Button("Clear") {
+                            runtime.configurationStore.setActionDefault(
+                                nil,
+                                actionID: action.id,
+                                optionKey: option.key,
+                                registration: registration
+                            )
+                            draft = ""
+                            invalid = false
+                        }
+                        .controlSize(.small)
+                    }
+                    if invalid {
+                        Text("Enter a valid \(option.type) value.")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+        }
+        .onAppear { draft = currentValue.map(display) ?? "" }
+    }
+
+    private func persistDraft() {
+        guard let value = parse(draft) else {
+            invalid = true
+            return
+        }
+        invalid = false
+        runtime.configurationStore.setActionDefault(
+            value,
+            actionID: action.id,
+            optionKey: option.key,
+            registration: registration
+        )
+    }
+
+    private func parse(_ raw: String) -> CIValue? {
+        switch option.type {
+        case "string": return .string(raw)
+        case "integer": return Int(raw).map(CIValue.integer)
+        case "double": return Double(raw).map(CIValue.double)
+        case "stringArray": return .stringArray(csv(raw))
+        case "integerArray":
+            let parts = csv(raw); let values = parts.compactMap(Int.init)
+            return values.count == parts.count ? .integerArray(values) : nil
+        case "doubleArray":
+            let parts = csv(raw); let values = parts.compactMap(Double.init)
+            return values.count == parts.count ? .doubleArray(values) : nil
+        default: return nil
+        }
+    }
+
+    private func csv(_ raw: String) -> [String] {
+        raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+
+    private func display(_ value: CIValue) -> String {
+        switch value {
+        case .string(let value): return value
+        case .integer(let value): return String(value)
+        case .double(let value): return String(value)
+        case .boolean(let value): return value ? "true" : "false"
+        case .stringArray(let value): return value.joined(separator: ", ")
+        case .integerArray(let value): return value.map(String.init).joined(separator: ", ")
+        case .doubleArray(let value): return value.map(String.init).joined(separator: ", ")
         }
     }
 }
