@@ -10,12 +10,19 @@ final class SurfaceViewport: ObservableObject {
 
 @MainActor
 final class SurfaceState: ObservableObject {
-    @Published var expanded = false
+    @Published var expanded = false {
+        didSet {
+            if !expanded {
+                dismissCoordinator.cancelPendingDismissal()
+            }
+        }
+    }
     @Published var pinned = false {
         didSet {
             if pinned {
                 hoverExpandTask?.cancel()
                 collapseTask?.cancel()
+                dismissCoordinator.cancelPendingDismissal()
                 expanded = true
             }
         }
@@ -47,7 +54,36 @@ final class SurfaceState: ObservableObject {
     var collapseTask: Task<Void, Never>?
     var hoverExpandTask: Task<Void, Never>?
     var dropExitTask: Task<Void, Never>?
-    var editingGeometry = false
+    var editingGeometry = false {
+        didSet {
+            if editingGeometry {
+                dismissCoordinator.cancelPendingDismissal()
+            }
+        }
+    }
+
+    var closeBehavior: HaloCloseBehavior = .smart
+    var customCloseDelayMilliseconds = HaloDismissTimingPolicy.smartBaselineMilliseconds
+    private var dragDismissHold: UUID?
+
+    lazy var dismissCoordinator: HaloDismissCoordinator = {
+        let coordinator = HaloDismissCoordinator()
+        coordinator.behaviorProvider = { [weak self] in
+            self?.closeBehavior ?? .smart
+        }
+        coordinator.customDelayProvider = { [weak self] in
+            self?.customCloseDelayMilliseconds ?? HaloDismissTimingPolicy.smartBaselineMilliseconds
+        }
+        coordinator.canDismiss = { [weak self] in
+            guard let self else { return false }
+            return self.expanded && !self.pinned && !self.editingGeometry && !self.dropTargeted
+        }
+        coordinator.onDismiss = { [weak self] _, _ in
+            guard let self, self.expanded else { return }
+            self.expanded = false
+        }
+        return coordinator
+    }()
 
     // Hover expansion can briefly emit an exit while the NSPanel is resizing from
     // compact to open geometry. Track only that in-flight opening so the false exit
@@ -60,6 +96,7 @@ final class SurfaceState: ObservableObject {
     func cancelFileDrop() {
         dropExitTask?.cancel()
         dropExitTask = nil
+        releaseDragDismissHold()
         if dropTargeted { dropTargeted = false }
         if dropItemCount != 0 { dropItemCount = 0 }
         dropOpenedSurfaceAutomatically = false
@@ -69,6 +106,9 @@ final class SurfaceState: ObservableObject {
     /// expansion is allowed only after SurfaceView's normal priority arbiter grants ownership.
     func beginFileDrop(count: Int) {
         dropExitTask?.cancel()
+        if dragDismissHold == nil {
+            dragDismissHold = dismissCoordinator.acquireHold(.dragging)
+        }
         let nextCount = max(1, count)
         if dropItemCount != nextCount { dropItemCount = nextCount }
         if !dropTargeted { dropTargeted = true }
@@ -89,6 +129,7 @@ final class SurfaceState: ObservableObject {
             self.dropTargeted = false
             self.dropItemCount = 0
             self.dropOpenedSurfaceAutomatically = false
+            self.releaseDragDismissHold()
         }
     }
 
@@ -96,6 +137,7 @@ final class SurfaceState: ObservableObject {
         dropExitTask?.cancel()
         dropTargeted = false
         dropItemCount = 0
+        releaseDragDismissHold()
         let shouldCollapse = collapseSurface && dropOpenedSurfaceAutomatically
         dropOpenedSurfaceAutomatically = false
         guard shouldCollapse, !pinned, !editingGeometry else { return }
@@ -131,8 +173,10 @@ final class SurfaceState: ObservableObject {
             !dropTargeted
 
         hoverExitPendingDuringOpening = false
-        if shouldCollapse && expanded {
-            expanded = false
+        if cursorInsidePanel {
+            dismissCoordinator.pointerEntered()
+        } else if shouldCollapse && expanded {
+            dismissCoordinator.pointerExited()
         }
     }
 
@@ -146,6 +190,7 @@ final class SurfaceState: ObservableObject {
         hoverInside = inside
         if inside {
             hoverExitPendingDuringOpening = false
+            dismissCoordinator.pointerEntered()
         }
 
         collapseTask?.cancel()
@@ -156,6 +201,9 @@ final class SurfaceState: ObservableObject {
         guard enabled, !editingGeometry else {
             hoverExpandTask?.cancel()
             hoverExpandTask = nil
+            if inside {
+                dismissCoordinator.cancelPendingDismissal()
+            }
             return
         }
         if dropTargeted {
@@ -197,10 +245,27 @@ final class SurfaceState: ObservableObject {
                 return
             }
 
-            // Once the opening transition is complete, hover exit is truly immediate.
-            // Pixel Pal's optional boot-down gate is applied later by WindowManager.
-            expanded = false
+            // Pointer-driven collapse is centralized. The coordinator applies the selected
+            // close behaviour, CI-aware Smart timing, holds and a final interaction-region check.
+            dismissCoordinator.pointerExited()
         }
+    }
+
+    func requestDismissal(
+        reason: HaloDismissReason,
+        destination: HaloDismissDestination = .compact
+    ) {
+        dismissCoordinator.requestDismissal(reason: reason, destination: destination)
+    }
+
+    func setCIDismissBehavior(_ behavior: CIDismissBehavior) {
+        dismissCoordinator.setCIBehavior(behavior)
+    }
+
+    private func releaseDragDismissHold() {
+        guard let token = dragDismissHold else { return }
+        dragDismissHold = nil
+        dismissCoordinator.releaseHold(token)
     }
 }
 
