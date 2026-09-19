@@ -669,6 +669,9 @@ SDK 0.2 additionally supports:
 
 ```text
 Audio.ReadState
+Clipboard.Observe
+Bluetooth.Observe
+Notifications.Observe
 AppIntegration.Execute
 ```
 
