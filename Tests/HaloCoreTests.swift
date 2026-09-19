@@ -60,6 +60,44 @@ final class HaloCoreTests: XCTestCase {
         )
     }
 
+    func testLiveActivitySelectionFiltersBeforeChoosingWinner() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let bluetooth = LiveActivity(
+            kind: .bluetooth,
+            state: .active,
+            title: "Headphones connected",
+            updatedAt: now,
+            expiresAt: now.addingTimeInterval(10),
+            priority: 99
+        )
+        let message = LiveActivity(
+            kind: .message,
+            state: .active,
+            title: "New message",
+            updatedAt: now.addingTimeInterval(1),
+            expiresAt: now.addingTimeInterval(10),
+            priority: 78
+        )
+        let expiredCall = LiveActivity(
+            kind: .call,
+            state: .ended,
+            title: "Old call",
+            updatedAt: now,
+            expiresAt: now.addingTimeInterval(-1),
+            priority: 100,
+            persistent: false
+        )
+
+        XCTAssertEqual(
+            LiveActivitySelection.primary(in: [bluetooth, message, expiredCall], now: now)?.resolvedKind,
+            .bluetooth
+        )
+        XCTAssertEqual(
+            LiveActivitySelection.primary(in: [bluetooth, message, expiredCall], now: now, excluding: [.bluetooth])?.resolvedKind,
+            .message
+        )
+    }
+
     func testLiveActivityMetadataRoundTripsAndClampsPriority() throws {
         let started = Date(timeIntervalSince1970: 1_700_000_000)
         let activity = LiveActivity(
