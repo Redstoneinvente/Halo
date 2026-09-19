@@ -257,13 +257,23 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     // All providers fail closed until WindowManager installs them.
     private var hasCommercialAccess: Bool { commercialAccessAllowed?() ?? false }
     private var acceptsDropCIFileDrag: Bool {
-        hasCommercialAccess && (dropEnabled?() ?? false)
+        HaloFileDragCapabilityPolicy.permitsDropCI(
+            commercialAccess: hasCommercialAccess,
+            dropEnabled: dropEnabled?() ?? false
+        )
     }
     private var acceptsIntegrationFileDrag: Bool {
-        hasCommercialAccess && (integrationEnabled?() ?? false)
+        HaloFileDragCapabilityPolicy.permitsAppIntegrationCI(
+            commercialAccess: hasCommercialAccess,
+            integrationEnabled: integrationEnabled?() ?? false
+        )
     }
     private var acceptsSurfaceFileDrag: Bool {
-        acceptsDropCIFileDrag || acceptsIntegrationFileDrag
+        HaloFileDragCapabilityPolicy.shouldRegisterForFileDrags(
+            commercialAccess: hasCommercialAccess,
+            dropEnabled: dropEnabled?() ?? false,
+            integrationEnabled: integrationEnabled?() ?? false
+        )
     }
 
     /// Global monitors use independent authority for Drop CI vs App Integration CI.
