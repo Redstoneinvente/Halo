@@ -61,17 +61,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     @Published var activities: [LiveActivity] = []
 
     var primaryLiveActivity: LiveActivity? {
-        let now = Date()
-        return activities
-            .filter { activity in
-                if activity.isPersistent { return activity.resolvedState != .ended || (activity.expiresAt ?? .distantFuture) > now }
-                return (activity.expiresAt ?? activity.created.addingTimeInterval(12)) > now
-            }
-            .sorted {
-                if $0.resolvedPriority != $1.resolvedPriority { return $0.resolvedPriority > $1.resolvedPriority }
-                return $0.resolvedUpdatedAt > $1.resolvedUpdatedAt
-            }
-            .first
+        LiveActivitySelection.primary(in: activities)
     }
 
     @Published var plugins: [PluginManifest] = []
