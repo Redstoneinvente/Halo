@@ -1,5 +1,7 @@
 # Custom CI V2 framework
 
+> **Required agent starting point:** follow the [Base CI template](Templates/BaseCI.md), fill its design record, and complete its verification matrix. Existing examples illustrate patterns; the template identifies the shared integration obligations and cleanup pitfalls.
+
 V2 is an additive **SDK 0.2 / schema 1** implementation of Halo's existing declarative CI architecture. SDK 0.1 packages remain supported. It is not a scripting host or a promise that arbitrary macOS context is available.
 
 ## Create an interface

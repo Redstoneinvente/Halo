@@ -6,10 +6,12 @@ This file contains repository-level instructions for AI coding agents and automa
 
 Any task involving Halo **CI (Custom Interfaces)**, CI packages, CI SDK, CI Studio, CI triggers/contexts, CI actions, third-party CI distribution, marketplace CIs, executable CI logic, or CI permissions must treat the following documents as authoritative:
 
-1. `Docs/CustomCI_Authoring.md` — practical public authoring guide and current SDK 0.1 surface/trigger/context/action reference
+1. `Docs/CustomCI_Authoring.md` — practical public authoring guide and SDK surface/trigger/context/action reference (including the V2 addendum)
 2. `Docs/CISDK.md` — canonical SDK architecture and contract direction
 3. `Docs/Architecture.md`
 4. `Docs/Plugins.md`
+5. `Docs/Templates/BaseCI.md` — required base integration template for every new CI
+6. `CI_IMPLEMENTATION_GUIDE.md` — required for native/built-in CI changes
 
 Read them **before modifying code**.
 
@@ -30,6 +32,10 @@ Read them **before modifying code**.
 - Update `Docs/CustomCI_Authoring.md` whenever an author-visible component, binding/context key, trigger, action, permission, capability, sizing/background rule, or package field changes.
 
 ### Required implementation behavior
+
+Every new or substantially changed CI must follow `Docs/Templates/BaseCI.md`. Before implementation, fill its design record in the feature documentation or PR: identity, enablement, priority/ties, eligibility, presentation, sizing, lifecycle, settings, permissions, and per-display behavior. Choose the declarative or native path explicitly. Reuse the existing arbitration/runtime; do not create a parallel base-class/plugin system merely to follow the template.
+
+Check every applicable integration point and report the template's verification matrix as pass/fail/not run with reasons before declaring completion. Document deviations and their justification. Existing priority overrides and unconditional geometry cleanup are not safe defaults to copy. Size equality alone is not proof of geometry ownership; verify handoffs and stale async callbacks, including two owners requesting the same size.
 
 Before coding, inspect the relevant existing implementation. Do not infer architecture from filenames or from a prompt alone.
 
