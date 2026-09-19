@@ -2615,10 +2615,8 @@ struct SurfaceView: View {
             (bluetoothShowWhileConnected && !bluetooth.connectedDevices.isEmpty)
     }
     private var liveActivityCandidate: LiveActivity? {
-        guard liveActivitiesEnabled,
-              let activity = workspace.primaryLiveActivity,
-              activity.resolvedKind != .bluetooth else { return nil }
-        return activity
+        guard liveActivitiesEnabled else { return nil }
+        return LiveActivitySelection.primary(in: workspace.activities, excluding: [.bluetooth])
     }
     private var builtInContextCandidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] {
         var candidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] = []
