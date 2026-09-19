@@ -3259,9 +3259,19 @@ private struct HaloAccountLicenseSettingsView: View {
 
 private struct HaloPartnerIntegrationSettingsSection: View {
     @ObservedObject private var catalog = HaloIntegrationCatalog.shared
+    @ObservedObject private var runtime = HaloCustomCIRuntimeStore.shared
 
     var body: some View {
         Section("App integrations") {
+            Toggle("Automatically create Custom CIs", isOn: Binding(
+                get: { runtime.autoIntegrationCIEnabled },
+                set: { runtime.setAutoIntegrationCIEnabled($0) }
+            ))
+            Text("When enabled, every compatible installed app gets a managed declarative Custom CI. Its actions still require the per-CI AppIntegration.Execute permission before Halo can send files or requests to another app.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Halo-enabled apps", systemImage: "app.connected.to.app.below.fill")
@@ -3324,7 +3334,12 @@ private struct HaloPartnerIntegrationSettingsSection: View {
 
 private struct HaloPartnerIntegrationCard: View {
     let integration: HaloIntegration
+    @ObservedObject private var runtime = HaloCustomCIRuntimeStore.shared
     @State private var hovered = false
+
+    private var generatedPackageID: String {
+        HaloAutoIntegrationCIGenerator.packageID(for: integration.bundleIdentifier)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -3360,6 +3375,22 @@ private struct HaloPartnerIntegrationCard: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
+
+            HStack(spacing: 8) {
+                if runtime.package(id: generatedPackageID) != nil {
+                    Label("Custom CI ready", systemImage: "rectangle.3.group.bubble.left.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                    Spacer()
+                    Button("Open CI") { runtime.requestManualActivation(generatedPackageID) }
+                        .controlSize(.small)
+                        .disabled(!runtime.isEnabled(generatedPackageID))
+                } else if runtime.autoIntegrationCIEnabled {
+                    Label("Custom CI will be generated on the next catalogue sync", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             Divider()
 
@@ -3535,7 +3566,16 @@ private struct HaloCustomCIPackageCard: View {
                     .frame(width: 38, height: 38)
                     .background(Color.accentColor.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(package.manifest.name).font(.headline).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(package.manifest.name).font(.headline).lineLimit(1)
+                        if runtime.isGeneratedIntegrationPackage(id) {
+                            Text("AUTO")
+                                .font(.system(size: 8, weight: .bold, design: .rounded))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Color.accentColor.opacity(0.14), in: Capsule())
+                        }
+                    }
                     Text("\(package.manifest.author) · v\(package.manifest.version)")
                         .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -3585,8 +3625,14 @@ private struct HaloCustomCIPackageCard: View {
                 Spacer()
                 Text("Priority \(Int(runtime.priority(id)))")
                     .font(.caption2).foregroundStyle(.secondary)
-                Button("Remove", role: .destructive) { runtime.removePackage(id) }
-                    .controlSize(.small)
+                if runtime.isGeneratedIntegrationPackage(id) {
+                    Text("Managed from App integrations")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button("Remove", role: .destructive) { runtime.removePackage(id) }
+                        .controlSize(.small)
+                }
             }
         }
         .padding(13)
