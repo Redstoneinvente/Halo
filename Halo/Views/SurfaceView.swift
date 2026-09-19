@@ -3058,7 +3058,7 @@ struct SurfaceView: View {
             if clipboardContextActive && state.expanded {
                 clipboardCI.dismiss()
                 clipboardOpenedNotch = false
-                if !state.pinned { state.expanded = false }
+                if !state.pinned { state.requestDismissal(reason: .explicit) }
                 return
             }
             guard clipboardCI.presentHistory() else { return }
@@ -3076,7 +3076,7 @@ struct SurfaceView: View {
             if retroGameRequested {
                 state.expanded = true
             } else if !state.pinned {
-                state.expanded = false
+                state.requestDismissal(reason: .explicit)
             }
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }
@@ -3111,7 +3111,7 @@ struct SurfaceView: View {
                 NotificationCenter.default.post(name: .init("HaloTeleprompterCIOwnershipChanged"), object: nil, userInfo: ["owns": owns])
                 if owns {
                     state.collapseTask?.cancel()
-                    if !state.pinned { state.expanded = false }
+                    if !state.pinned { state.requestDismissal(reason: .explicit) }
                 }
             }
         }
@@ -3122,8 +3122,13 @@ struct SurfaceView: View {
                 clipboardCI.setInteractionActive(false)
             }
             if teleprompterContextActive {
-                state.collapseTask?.cancel()
-                if !state.pinned { state.expanded = false }
+                // Teleprompter owns an external Halo surface. Report pointer intent to the
+                // coordinator, but its persistent CI policy prevents pointer-exit collapse.
+                if hovering {
+                    state.dismissCoordinator.pointerEntered()
+                } else {
+                    state.requestDismissal(reason: .pointerExit)
+                }
             } else {
                 let clipboardHover = clipboardContextActive && clipboardCI.triggerMode == "Hover to Open"
                 state.hover(
@@ -3206,7 +3211,7 @@ struct SurfaceView: View {
         .onChange(of: clipboardCI.isActive) { active in
             if !active {
                 clipboardCI.setInteractionActive(false)
-                if clipboardOpenedNotch && !state.pinned { state.expanded = false }
+                if clipboardOpenedNotch && !state.pinned { state.requestDismissal(reason: .ciCompleted) }
                 clipboardOpenedNotch = false
             }
         }
@@ -3238,7 +3243,7 @@ struct SurfaceView: View {
             NotificationCenter.default.post(name: .init("HaloTeleprompterCIOwnershipChanged"), object: nil, userInfo: ["owns": owns])
             if owns {
                 state.collapseTask?.cancel()
-                if !state.pinned { state.expanded = false }
+                if !state.pinned { state.requestDismissal(reason: .explicit) }
             }
             if clipboardContextActive {
                 state.contextMinimumExpandedWidth = ClipboardCISizing.minimumExpandedWidth(physicalNotchWidth: state.physicalNotchWidth)
@@ -3295,7 +3300,7 @@ struct SurfaceView: View {
         } else if decision.shouldCollapseSurface,
                   activeContext == nil,
                   !state.pinned {
-            state.expanded = false
+            state.requestDismissal(reason: .ciCompleted)
         }
     }
 
