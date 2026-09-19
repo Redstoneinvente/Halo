@@ -4681,6 +4681,47 @@ private struct DropContextView: View {
             .accessibilityLabel("Drop CI background for \(count) item\(count == 1 ? "" : "s")")
     }
 
+    private var composerAction: LiveActivityAction? {
+        guard let composerActionID else { return nil }
+        return activity.resolvedActions.first(where: { $0.id == composerActionID })
+    }
+
+    private func begin(_ action: LiveActivityAction) {
+        actionError = nil
+        if action.kind == .textReply {
+            composerActionID = action.id
+            actionInput = ""
+            return
+        }
+        execute(action, input: nil)
+    }
+
+    private func submitComposerAction(_ action: LiveActivityAction) {
+        let trimmed = actionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        execute(action, input: trimmed)
+    }
+
+    private func execute(_ action: LiveActivityAction, input: String?) {
+        guard performingActionID == nil else { return }
+        performingActionID = action.id
+        actionError = nil
+
+        Task { @MainActor in
+            let error = await workspace.performLiveActivityAction(
+                activityID: activity.id,
+                actionID: action.id,
+                input: input
+            )
+            performingActionID = nil
+            actionError = error
+            if error == nil, action.kind == .textReply {
+                composerActionID = nil
+                actionInput = ""
+            }
+        }
+    }
+
     private func publishPreferredSize() {
         let next = preferredSize
         DispatchQueue.main.async { [surfaceState] in
@@ -6642,13 +6683,24 @@ private struct LiveActivityContextView: View {
     @AppStorage("HaloLiveActivitiesSpacing") private var spacing = 12.0
     @AppStorage("HaloLiveActivitiesCornerRadius") private var cornerRadius = 18.0
 
+    @State private var composerActionID: String?
+    @State private var actionInput = ""
+    @State private var performingActionID: String?
+    @State private var actionError: String?
+
     private var preferredSize: CGSize {
         let detailRows = activity.detail.isEmpty ? 0.0 : 24.0
         let callRows = activity.resolvedKind == .call ? 28.0 : 0.0
         let progressRows = activity.progress == nil ? 0.0 : 24.0
+        let actionRows = activity.resolvedActions.isEmpty ? 0.0 : 38.0
+        let composerRows = composerActionID == nil ? 0.0 : 42.0
+        let errorRows = actionError == nil ? 0.0 : 28.0
         return CGSize(
-            width: min(760, max(420, 500 + horizontalMargin * 2)),
-            height: min(520, max(180, 168 + verticalMargin * 2 + detailRows + callRows + progressRows))
+            width: min(820, max(440, 520 + horizontalMargin * 2)),
+            height: min(
+                600,
+                max(180, 168 + verticalMargin * 2 + detailRows + callRows + progressRows + actionRows + composerRows + errorRows)
+            )
         )
     }
 
@@ -6708,6 +6760,71 @@ private struct LiveActivityContextView: View {
                 }
             }
 
+            if !activity.resolvedActions.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("ACTIONS")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: max(7, spacing * 0.6)) {
+                        ForEach(Array(activity.resolvedActions.prefix(4))) { action in
+                            Button {
+                                begin(action)
+                            } label: {
+                                Label(action.title, systemImage: action.symbolName ?? "bolt.fill")
+                                    .lineLimit(1)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(performingActionID != nil)
+                            .foregroundStyle(action.role == .destructive ? Color.red : Color.primary)
+                        }
+
+                        if performingActionID != nil {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+                }
+            }
+
+            if let composerAction {
+                HStack(spacing: max(7, spacing * 0.6)) {
+                    TextField(composerAction.inputPlaceholder ?? "Reply…", text: $actionInput)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { submitComposerAction(composerAction) }
+
+                    Button {
+                        submitComposerAction(composerAction)
+                    } label: {
+                        Label("Send", systemImage: "paperplane.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(
+                        actionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                        performingActionID != nil
+                    )
+
+                    Button {
+                        composerActionID = nil
+                        actionInput = ""
+                        actionError = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Cancel reply")
+                }
+            }
+
+            if let actionError {
+                Label(actionError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+            }
+
             Spacer(minLength: 0)
 
             HStack(spacing: max(8, spacing * 0.75)) {
@@ -6715,14 +6832,14 @@ private struct LiveActivityContextView: View {
                     Button {
                         openSourceApplication()
                     } label: {
-                        Label("Open", systemImage: "arrow.up.forward.app")
+                        Label("Open App", systemImage: "arrow.up.forward.app")
                     }
                 }
                 Spacer()
                 Button {
                     workspace.dismissLiveActivity(id: activity.id)
                 } label: {
-                    Label("Dismiss", systemImage: "xmark")
+                    Label("Hide", systemImage: "xmark")
                 }
             }
             .buttonStyle(.borderless)
@@ -6789,6 +6906,9 @@ private struct LiveActivityContextView: View {
             activity.detail,
             String(activity.progress ?? -1),
             activity.resolvedState.rawValue,
+            activity.resolvedActions.map(\.id).joined(separator: ","),
+            composerActionID ?? "",
+            actionError ?? "",
             String(horizontalMargin),
             String(verticalMargin),
             String(spacing)
