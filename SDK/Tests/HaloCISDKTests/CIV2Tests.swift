@@ -180,6 +180,62 @@ final class CIV2Tests: XCTestCase {
             XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid, invalid)
         }
     }
+    func testFileDragTriggerMatchesOnlyCompatibleFileDrags() throws {
+        let root = try starter()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let triggers = #"{"match":"any","triggers":[{"type":"fileDrag","extensions":["txt","md"]}]}"#
+        try Data(triggers.utf8).write(to: root.appendingPathComponent("triggers.json"))
+
+        let report = HaloCIPackageValidator.validatePackage(at: root)
+        XCTAssertTrue(report.isValid, report.issues.map(\.message).joined(separator: "\n"))
+
+        let document = try XCTUnwrap(report.package?.triggers)
+        XCTAssertTrue(HaloCITriggerEvaluator.matches(
+            document,
+            snapshot: .init(
+                fileDragActive: true,
+                fileDragFileCount: 2,
+                fileDragFolderCount: 0,
+                fileDragExtensions: ["txt", "md"]
+            ),
+            grantedPermissions: []
+        ))
+        XCTAssertFalse(HaloCITriggerEvaluator.matches(
+            document,
+            snapshot: .init(
+                fileDragActive: true,
+                fileDragFileCount: 1,
+                fileDragFolderCount: 0,
+                fileDragExtensions: ["png"]
+            ),
+            grantedPermissions: []
+        ))
+        XCTAssertFalse(HaloCITriggerEvaluator.matches(
+            document,
+            snapshot: .init(
+                fileDragActive: true,
+                fileDragFileCount: 1,
+                fileDragFolderCount: 1,
+                fileDragExtensions: ["txt"]
+            ),
+            grantedPermissions: []
+        ))
+        XCTAssertFalse(HaloCITriggerEvaluator.matches(
+            document,
+            snapshot: .init(
+                fileDragActive: false,
+                fileDragFileCount: 1,
+                fileDragFolderCount: 0,
+                fileDragExtensions: ["txt"]
+            ),
+            grantedPermissions: []
+        ))
+
+        try edit(root, "manifest.json") { $0["sdkVersion"] = "0.1" }
+        XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid)
+    }
+
     func testAppIntegrationActionRequiresSDKPermissionAndArguments() throws {
         let root = try starter()
         defer { try? FileManager.default.removeItem(at: root) }
