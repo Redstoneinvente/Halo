@@ -2860,12 +2860,10 @@ struct SurfaceView: View {
                     .contentShape(Rectangle())
                     .onTapGesture {
                         guard !teleprompterActive else { return }
-                        if state.expanded {
-                            guard !state.pinned else { return }
-                            state.requestDismissal(reason: .explicit)
-                        } else {
-                            state.expanded = true
-                        }
+                        if state.expanded && state.pinned { return }
+                        // Explicit clicks keep Halo's original immediate toggle semantics.
+                        // Smart Dismiss only owns automatic close requests such as pointer exit.
+                        state.expanded.toggle()
                     }
                     .accessibilityLabel("Toggle Halo dashboard")
                     .accessibilityAddTraits(.isButton)
