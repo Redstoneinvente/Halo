@@ -5793,11 +5793,89 @@ private enum IntegrationOptionDraftError: LocalizedError {
 }
 
 @MainActor
+private final class IntegrationActionDropTargetProbeNSView: NSView {
+    var onFrameChange: ((CGRect) -> Void)?
+    var onRemoval: (() -> Void)?
+    private var lastPublishedFrame: CGRect?
+
+    override func layout() {
+        super.layout()
+        publishFrame()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            onRemoval?()
+            lastPublishedFrame = nil
+        } else {
+            publishFrame()
+        }
+    }
+
+    func publishFrame() {
+        guard let window else { return }
+        let frameInWindow = convert(bounds, to: nil)
+        let frameInScreen = window.convertToScreen(frameInWindow)
+        guard frameInScreen.width > 1, frameInScreen.height > 1,
+              frameInScreen != lastPublishedFrame else { return }
+        lastPublishedFrame = frameInScreen
+        onFrameChange?(frameInScreen)
+    }
+}
+
+@MainActor
+private struct IntegrationActionDropTargetProbe: NSViewRepresentable {
+    let displayID: String
+    let ciID: String
+    let sessionID: UUID
+    let actionID: String
+
+    func makeNSView(context: Context) -> IntegrationActionDropTargetProbeNSView {
+        let view = IntegrationActionDropTargetProbeNSView(frame: .zero)
+        configure(view)
+        return view
+    }
+
+    func updateNSView(_ nsView: IntegrationActionDropTargetProbeNSView, context: Context) {
+        configure(nsView)
+        DispatchQueue.main.async { [weak nsView] in
+            nsView?.publishFrame()
+        }
+    }
+
+    static func dismantleNSView(_ nsView: IntegrationActionDropTargetProbeNSView, coordinator: ()) {
+        nsView.onRemoval?()
+        nsView.onFrameChange = nil
+        nsView.onRemoval = nil
+    }
+
+    private func configure(_ view: IntegrationActionDropTargetProbeNSView) {
+        view.onFrameChange = { frame in
+            IntegrationActionDropTargetRegistry.shared.register(
+                displayID: displayID,
+                ciID: ciID,
+                sessionID: sessionID,
+                actionID: actionID,
+                screenFrame: frame
+            )
+        }
+        view.onRemoval = {
+            IntegrationActionDropTargetRegistry.shared.unregister(
+                sessionID: sessionID,
+                actionID: actionID
+            )
+        }
+    }
+}
+
+@MainActor
 private struct IntegrationCIView: View {
     let candidate: CIEligibleCandidate
     let session: CIActivationSession
     @ObservedObject var surfaceState: SurfaceState
     @ObservedObject var runtime: IntegrationCIRuntime
+    @ObservedObject private var actionDropTargets = IntegrationActionDropTargetRegistry.shared
 
     @State private var textDrafts: [String: String] = [:]
     @State private var boolDrafts: [String: Bool] = [:]
@@ -5806,7 +5884,16 @@ private struct IntegrationCIView: View {
 
     private var registration: CIRegistration { candidate.registration }
     private var configuration: CIConfiguration { runtime.configuration(for: registration) }
-    private var payloadCommitted: Bool { runtime.isPayloadCommitted(session: session) }
+    private var liveSession: CIActivationSession {
+        guard let current = runtime.currentSession(displayID: session.displayID),
+              current.id == session.id else { return session }
+        return current
+    }
+    private var payloadCommitted: Bool { runtime.isPayloadCommitted(session: liveSession) }
+    private var committedActionID: String? { liveSession.committedActionID }
+    private var hoveredActionID: String? {
+        actionDropTargets.hoveredActionID(displayID: session.displayID)
+    }
     private var actions: [CIActionDefinition] {
         registration.supportedActions.filter {
             session.eligibleActionIDs.contains($0.id) && configuration.actionEnabled($0.id)
@@ -5883,8 +5970,8 @@ private struct IntegrationCIView: View {
 
     @ViewBuilder
     private var errorNotice: some View {
-        if let actionError {
-            Label(actionError, systemImage: "exclamationmark.triangle.fill")
+        if let message = actionError ?? runtime.lastError {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
                 .foregroundStyle(.orange)
         }
@@ -5923,39 +6010,79 @@ private struct IntegrationCIView: View {
 
     @ViewBuilder
     private func actionCard(_ action: CIActionDefinition) -> some View {
+        let isHovered = hoveredActionID == action.id && !payloadCommitted
+        let isCommittedAction = committedActionID == action.id
+        let isLockedToAnotherAction = committedActionID != nil && !isCommittedAction
+
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(action.name).font(.subheadline.weight(.semibold))
+                    Text(action.name)
+                        .font(.subheadline.weight(.semibold))
                     switch action.input.type {
                     case .none:
                         Text("No file input required")
-                            .font(.caption2).foregroundStyle(.secondary)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     case .files:
                         Text(fileInputSummary(action.input))
-                            .font(.caption2).foregroundStyle(.secondary)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if isHovered {
+                        Text(actionNeedsUserInput(action) ? "Drop to configure" : "Drop to run")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                    } else if isCommittedAction && payloadCommitted {
+                        Label("File ready", systemImage: "checkmark.circle.fill")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
                 }
+
                 Spacer()
+
                 Button("Run") { run(action) }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .disabled(isExecuting || (action.input.type == .files && session.payloadHandle != nil && !payloadCommitted))
+                    .disabled(
+                        isExecuting ||
+                        isLockedToAnotherAction ||
+                        (action.input.type == .files && liveSession.payloadHandle != nil && !payloadCommitted)
+                    )
             }
 
             if !action.options.isEmpty {
                 Divider().opacity(0.35)
                 ForEach(action.options) { option in
                     optionEditor(option, actionID: action.id)
+                        .disabled(isLockedToAnotherAction)
                 }
             }
         }
         .padding(11)
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(isHovered ? Color.accentColor.opacity(0.16) : Color.white.opacity(0.055))
+        )
+        .background(
+            IntegrationActionDropTargetProbe(
+                displayID: liveSession.displayID,
+                ciID: registration.id,
+                sessionID: liveSession.id,
+                actionID: action.id
+            )
+            .allowsHitTesting(false)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(
+                    isHovered ? Color.accentColor.opacity(0.9) : Color.white.opacity(0.08),
+                    lineWidth: isHovered ? 1.5 : 1
+                )
         }
+        .opacity(isLockedToAnotherAction ? 0.5 : 1)
     }
 
     @ViewBuilder
@@ -6007,6 +6134,15 @@ private struct IntegrationCIView: View {
             }
         } catch {
             actionError = error.localizedDescription
+        }
+    }
+
+    private func actionNeedsUserInput(_ action: CIActionDefinition) -> Bool {
+        let configuredDefaults = configuration.actions[action.id]?.optionDefaults ?? [:]
+        return action.options.contains { option in
+            option.required &&
+            configuredDefaults[option.key] == nil &&
+            option.defaultValue == nil
         }
     }
 
