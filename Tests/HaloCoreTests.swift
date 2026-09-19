@@ -233,8 +233,15 @@ final class HaloCoreTests: XCTestCase {
             expandedChildren.first(where: { ($0["type"] as? String) == "ScrollView" })
         )
         let actionChildren = try XCTUnwrap(scroll["children"] as? [[String: Any]])
+        let functionGroup = try XCTUnwrap(
+            actionChildren.first(where: {
+                ($0["id"] as? String) == "halo.integration.action.convert.file"
+            })
+        )
+        XCTAssertEqual(functionGroup["type"] as? String, "VStack")
+        let functionChildren = try XCTUnwrap(functionGroup["children"] as? [[String: Any]])
         let button = try XCTUnwrap(
-            actionChildren.first(where: { ($0["type"] as? String) == "Button" })
+            functionChildren.first(where: { ($0["type"] as? String) == "Button" })
         )
         let action = try XCTUnwrap(button["action"] as? [String: Any])
         XCTAssertEqual(action["id"] as? String, "app.integration.invoke")
@@ -247,6 +254,41 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(triggerDocument.triggers.count, 1)
         XCTAssertEqual(triggerDocument.triggers.first?.type, "fileDrag")
         XCTAssertEqual(triggerDocument.triggers.first?.extensions, ["txt"])
+    }
+
+    @MainActor
+    func testIntegrationDragSessionTracksPackageCandidatesAndCommittedFiles() throws {
+        let session = HaloIntegrationDragSession.shared
+        session.clear()
+        defer { session.clear() }
+
+        let file = URL(fileURLWithPath: "/tmp/example.txt")
+        XCTAssertTrue(session.update(
+            candidates: [
+                "com.example.one": ["read.text", "rename.file"],
+                "com.example.two": ["inspect.text"]
+            ],
+            files: [file],
+            displayID: "display-1"
+        ))
+
+        XCTAssertTrue(session.isEligible(packageID: "com.example.one", displayID: "display-1"))
+        XCTAssertFalse(session.isEligible(packageID: "com.example.one", displayID: "display-2"))
+
+        session.setSurfaceOwnership(packageID: "com.example.one", displayID: "display-1")
+        XCTAssertTrue(session.ownsSurface(on: "display-1"))
+
+        XCTAssertTrue(session.commitDrop(files: [file], displayID: "display-1"))
+        XCTAssertEqual(
+            session.committedFiles(packageID: "com.example.one", actionID: "read.text"),
+            [file]
+        )
+        XCTAssertNil(
+            session.committedFiles(packageID: "com.example.two", actionID: "read.text")
+        )
+
+        session.removeCandidate(packageID: "com.example.two")
+        XCTAssertTrue(session.isEligible(packageID: "com.example.one", displayID: "display-1"))
     }
 
     func testAutoIntegrationCIGeneratorUpdatesAndRemovesOnlyManagedPackages() throws {
