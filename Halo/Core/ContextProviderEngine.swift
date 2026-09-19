@@ -333,6 +333,23 @@ final class HaloCIContextProviderEngine: ObservableObject {
         lastEvent = nil
     }
 
+    func triggerSnapshot(workspace: WorkspaceStore) -> HaloCITriggerSnapshot {
+        let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: Date())
+        return HaloCITriggerSnapshot(
+            mediaIsPlaying: workspace.media.isPlaying,
+            activeApplicationBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "",
+            batteryLevel: workspace.system.battery.map(Double.init),
+            charging: workspace.system.charging,
+            minuteOfDay: (components.hour ?? 0) * 60 + (components.minute ?? 0),
+            lowPowerMode: workspace.system.lowPower,
+            displayCount: NSScreen.screens.count,
+            fileDragActive: dragActive,
+            fileDragFileCount: dragSummary.fileCount,
+            fileDragFolderCount: dragSummary.folderCount,
+            fileDragExtensions: Set(dragSummary.extensions)
+        )
+    }
+
     func snapshot(
         package: HaloCIParsedPackage,
         expanded: Bool,
