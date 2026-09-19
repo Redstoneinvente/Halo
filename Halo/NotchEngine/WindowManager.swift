@@ -541,21 +541,15 @@ final class WindowManager {
             : defaults.bool(forKey: "HaloContextDropEnabled")
     }
 
-    private var dropCIAllowed: Bool {
-        commercialAccessGranted && dropCISettingEnabled
-    }
-
     func setCommercialAccessGranted(_ granted: Bool) {
         guard commercialAccessGranted != granted else { return }
         commercialAccessGranted = granted
 
         hosts.values.forEach { host in
-            host.state.setFileDropAllowed(dropCIAllowed)
             host.refreshDropCIRegistration?()
             if !granted {
-                // Licensing is a hard boundary, not a normal drag-exit lifecycle.
-                // Remove Drop ownership synchronously so no locked surface can retain it.
                 host.state.cancelFileDrop()
+                IntegrationCIRuntime.shared.cleanupForSleepOrWake()
             }
         }
     }
@@ -575,11 +569,7 @@ final class WindowManager {
                 guard let self else { return }
                 let defaults = UserDefaults.standard
                 self.hosts.values.forEach { host in
-                    host.state.setFileDropAllowed(self.dropCIAllowed)
                     host.refreshDropCIRegistration?()
-                    if !self.dropCIAllowed && host.state.dropTargeted {
-                        host.state.endFileDrop(collapseAfterDelay: true)
-                    }
                 }
                 let next = CGSize(width: defaults.double(forKey: "HaloContextOffsetX"),
                                   height: defaults.double(forKey: "HaloContextOffsetY"))
@@ -1827,6 +1817,7 @@ final class WindowManager {
             let previousOffset = host.geometry?.offset(expanded: host.state.expanded) ?? .zero
             host.geometry = Self.geometry(screen: screen, theme: theme, appearance: appearance)
             if host.state.screenFrame != screen.frame { host.state.screenFrame = screen.frame }
+            if host.state.displayID != id { host.state.displayID = id }
             let ambientPhysicalWidth = host.geometry!.physicalNotchWidth > 0 ? host.geometry!.physicalNotchWidth : min(190, host.geometry!.compactWidth)
             let ambientPhysicalHeight = host.geometry!.safeAreaTop > 0 ? host.geometry!.safeAreaTop : min(34, host.geometry!.compactHeight)
             if host.state.physicalNotchWidth != ambientPhysicalWidth { host.state.physicalNotchWidth = ambientPhysicalWidth }
@@ -1871,37 +1862,54 @@ final class WindowManager {
                 .environment(\.haloScreenFrame, screen.frame)
                 let view = HaloDropHostingView(rootView: root)
                 view.sizingOptions = []
-                host.state.setFileDropAllowed(dropCIAllowed)
                 view.commercialAccessAllowed = { [weak self] in
                     self?.commercialAccessGranted ?? false
-                }
-                view.dropEnabled = { [weak self] in
-                    self?.dropCISettingEnabled ?? false
                 }
                 host.refreshDropCIRegistration = { [weak view] in
                     view?.refreshDropRegistration()
                 }
-                view.dragStateHandler = { [weak self, weak host] active, count in
-                    guard let self, let host else { return }
-                    guard self.dropCIAllowed else {
+                view.dragStateHandler = { [weak self, weak host] active, urls in
+                    guard let self, let host else { return false }
+                    guard self.commercialAccessGranted else {
                         host.state.cancelFileDrop()
-                        return
+                        return false
                     }
+
+                    let runtime = IntegrationCIRuntime.shared
                     if active {
                         ActivationSequenceCoordinator.shared.cancelForInteraction()
-                        host.state.beginFileDrop(count: count)
-                    } else if host.state.dropTargeted {
-                        host.state.endFileDrop(collapseAfterDelay: true)
+                        host.state.beginFileDrop(count: urls.count)
+                        let partnerEligible = runtime.fileDragEntered(files: urls, displayID: id)
+                        let claimed = self.dropCISettingEnabled || partnerEligible
+                        if !claimed {
+                            host.state.cancelFileDrop()
+                            _ = runtime.fileDragExited(displayID: id, pinned: host.state.pinned)
+                        }
+                        return claimed
                     }
+
+                    host.state.endFileDrop()
+                    let shouldCollapse = runtime.fileDragExited(displayID: id, pinned: host.state.pinned)
+                    if shouldCollapse && !host.state.pinned { host.state.expanded = false }
+                    return false
                 }
                 view.dropHandler = { [weak self, weak host] urls in
-                    guard let self, let host else { return }
-                    guard self.dropCIAllowed else {
-                        host.state.cancelFileDrop()
-                        return
+                    guard let self, let host, self.commercialAccessGranted else { return false }
+                    let runtime = IntegrationCIRuntime.shared
+
+                    if let winner = runtime.currentWinnerCIID(displayID: id),
+                       host.state.activeCIIdentifier == winner {
+                        return runtime.commitFileDrag(displayID: id)
                     }
-                    host.state.completeFileDrop()
-                    self.store.addFiles(urls)
+
+                    if host.state.activeCIIdentifier == "builtin.drop", self.dropCISettingEnabled {
+                        self.store.addFiles(urls)
+                        host.state.completeFileDrop(collapseSurface: true)
+                        _ = runtime.fileDragExited(displayID: id, pinned: host.state.pinned)
+                        return true
+                    }
+
+                    return false
                 }
                 host.panel.contentView = view
 
