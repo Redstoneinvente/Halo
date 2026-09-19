@@ -1131,6 +1131,15 @@ private struct HaloCustomCIPackagePreferences: Codable {
     var state = HaloCustomCIStoredState()
 }
 
+/// Marker written only by the pre-v3 app-integration package generator.
+/// v3 app integrations are runtime registrations and must never enter Custom CI validation.
+private struct HaloLegacyGeneratedIntegrationMarker: Decodable {
+    let generatorVersion: Int
+    let bundleIdentifier: String
+    let packageID: String
+    let sourceFingerprint: String
+}
+
 @MainActor
 final class HaloCustomCIRuntimeStore: ObservableObject {
     static let shared = HaloCustomCIRuntimeStore()
@@ -1189,8 +1198,31 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         let fm = FileManager.default
         do {
             try fm.createDirectory(at: installRoot, withIntermediateDirectories: true)
-            let urls = try fm.contentsOfDirectory(at: installRoot, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
-                .filter { $0.pathExtension.lowercased() == "haloci" }
+
+            let migration = migrateLegacyGeneratedIntegrationPackages(fileManager: fm)
+            if !migration.removedPackageIDs.isEmpty {
+                for packageID in migration.removedPackageIDs {
+                    preferences.removeValue(forKey: packageID)
+                    suppressedPackageIDs.remove(packageID)
+                    if manualActivationID == packageID { manualActivationID = nil }
+                }
+                persistPreferences()
+                notice = migration.removedPackageIDs.count == 1
+                    ? "Removed an obsolete generated app-integration CI. App integrations now register directly at runtime."
+                    : "Removed \(migration.removedPackageIDs.count) obsolete generated app-integration CIs. App integrations now register directly at runtime."
+            }
+            if !migration.errors.isEmpty {
+                errorMessage = migration.errors.joined(separator: "\n")
+            }
+
+            let urls = try fm.contentsOfDirectory(
+                at: installRoot,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )
+            .filter { $0.pathExtension.lowercased() == "haloci" }
+            .filter { !isLegacyGeneratedIntegrationPackage(at: $0) }
+
             var valid: [HaloCIParsedPackage] = []
             var invalid: [HaloCustomCIInvalidPackage] = []
             for url in urls {
@@ -1198,7 +1230,13 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
                 if let package = report.package {
                     valid.append(package)
                 } else {
-                    invalid.append(HaloCustomCIInvalidPackage(name: url.deletingPathExtension().lastPathComponent, url: url, issues: report.issues))
+                    invalid.append(
+                        HaloCustomCIInvalidPackage(
+                            name: url.deletingPathExtension().lastPathComponent,
+                            url: url,
+                            issues: report.issues
+                        )
+                    )
                 }
             }
             packages = valid.sorted { lhs, rhs in
@@ -1207,12 +1245,66 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
                 }
                 return lhs.manifest.name.localizedCaseInsensitiveCompare(rhs.manifest.name) == .orderedAscending
             }
-            invalidPackages = invalid.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            if let manualActivationID, !packages.contains(where: { $0.manifest.id == manualActivationID }) { self.manualActivationID = nil }
+            invalidPackages = invalid.sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+            if let manualActivationID,
+               !packages.contains(where: { $0.manifest.id == manualActivationID }) {
+                self.manualActivationID = nil
+            }
             contextDidChange()
         } catch {
             errorMessage = "Could not load Custom CI packages: \(error.localizedDescription)"
         }
+    }
+
+    private struct LegacyIntegrationMigrationResult {
+        var removedPackageIDs: [String] = []
+        var errors: [String] = []
+    }
+
+    private func migrateLegacyGeneratedIntegrationPackages(
+        fileManager fm: FileManager
+    ) -> LegacyIntegrationMigrationResult {
+        var result = LegacyIntegrationMigrationResult()
+        let urls = (try? fm.contentsOfDirectory(
+            at: installRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        for url in urls where url.pathExtension.lowercased() == "haloci" {
+            guard let marker = legacyGeneratedIntegrationMarker(at: url) else { continue }
+            do {
+                try fm.removeItem(at: url)
+                result.removedPackageIDs.append(marker.packageID)
+            } catch {
+                result.errors.append(
+                    "Could not remove obsolete generated integration \(url.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
+        }
+        return result
+    }
+
+    private func isLegacyGeneratedIntegrationPackage(at url: URL) -> Bool {
+        legacyGeneratedIntegrationMarker(at: url) != nil
+    }
+
+    private func legacyGeneratedIntegrationMarker(
+        at packageURL: URL
+    ) -> HaloLegacyGeneratedIntegrationMarker? {
+        let markerURL = packageURL.appendingPathComponent(".halo-generated-integration.json")
+        guard let data = try? Data(contentsOf: markerURL),
+              let marker = try? JSONDecoder().decode(HaloLegacyGeneratedIntegrationMarker.self, from: data),
+              marker.generatorVersion > 0,
+              !marker.bundleIdentifier.isEmpty,
+              !marker.sourceFingerprint.isEmpty,
+              marker.packageID == packageURL.deletingPathExtension().lastPathComponent,
+              marker.packageID.hasPrefix("com.redstoneinvente.halo.integration.") else {
+            return nil
+        }
+        return marker
     }
 
     func chooseAndImportPackage() {
