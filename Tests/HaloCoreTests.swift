@@ -76,6 +76,16 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertTrue(session.isActive(on: "display-a"))
         XCTAssertFalse(session.isActive(on: "display-b"))
         XCTAssertEqual(session.targetDisplayID, "display-a")
+        XCTAssertFalse(session.ownsSurface(on: "display-a"))
+
+        session.setSurfaceOwnership(true, displayID: "display-b")
+        XCTAssertFalse(session.ownsSurface(on: "display-b"))
+
+        session.setSurfaceOwnership(true, displayID: "display-a")
+        XCTAssertTrue(session.ownsSurface(on: "display-a"))
+
+        session.setSurfaceOwnership(false, displayID: "display-a")
+        XCTAssertFalse(session.ownsSurface(on: "display-a"))
     }
     func testBluetoothDeviceSymbolsUseReportedClassForRenamedAccessories() {
         XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0540), "keyboard")
