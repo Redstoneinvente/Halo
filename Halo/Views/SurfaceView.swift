@@ -2184,6 +2184,384 @@ private struct ClipboardContextView: View {
     }
 }
 
+@MainActor
+private struct HaloIntegrationContextView: View {
+    @ObservedObject var session: HaloIntegrationExecutionSession
+    @ObservedObject var surfaceState: SurfaceState
+
+    @State private var textValues: [String: String] = [:]
+    @State private var boolValues: [String: Bool] = [:]
+    @State private var includedOptionalBooleans: Set<String> = []
+    @State private var validationMessage: String?
+    @State private var submitted = false
+
+    private var invocation: HaloIntegrationInvocation? { session.invocation }
+
+    var body: some View {
+        Group {
+            if let invocation {
+                VStack(alignment: .leading, spacing: 14) {
+                    header(invocation)
+
+                    Divider().opacity(0.35)
+
+                    fileSummary
+
+                    if invocation.action.options.isEmpty {
+                        noOptions
+                    } else {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(invocation.action.options) { option in
+                                    optionRow(option)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+
+                    if let message = validationMessage ?? session.errorMessage {
+                        Label(message, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .lineLimit(2)
+                    } else if let status = session.statusMessage {
+                        Label(status, systemImage: "checkmark.circle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.green)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    HStack(spacing: 10) {
+                        Button("Cancel") {
+                            session.cancel()
+                        }
+                        .keyboardShortcut(.cancelAction)
+
+                        Spacer()
+
+                        Button {
+                            run(invocation)
+                        } label: {
+                            Label(
+                                submitted ? "Sent" : "Run Action",
+                                systemImage: submitted ? "checkmark.circle.fill" : "arrow.up.forward.app.fill"
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(submitted)
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .task(id: invocation.id) {
+                    resetFields(for: invocation)
+                    publishPreferredSize(for: invocation)
+                }
+            } else {
+                EmptyView()
+            }
+        }
+        .onDisappear {
+            surfaceState.contextPreferredSize = nil
+            surfaceState.contextMinimumExpandedWidth = nil
+        }
+    }
+
+    private func header(_ invocation: HaloIntegrationInvocation) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.15))
+                Image(systemName: "app.badge.checkmark")
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .frame(width: 46, height: 46)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(invocation.action.name)
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(1)
+                Text(invocation.integration.name)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(invocation.action.id)
+                    .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Text("APP INTEGRATION")
+                .font(.system(size: 8, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color.accentColor.opacity(0.10), in: Capsule())
+        }
+    }
+
+    private var fileSummary: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Label(
+                    session.files.count == 1 ? "1 file" : "\(session.files.count) files",
+                    systemImage: session.files.count == 1 ? "doc.fill" : "doc.on.doc.fill"
+                )
+                .font(.caption.weight(.semibold))
+                Spacer()
+                if session.files.count > 3 {
+                    Text("+\(session.files.count - 3) more")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 7) {
+                ForEach(Array(session.files.prefix(3)), id: \.self) { file in
+                    Text(file.lastPathComponent)
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.white.opacity(0.055), in: Capsule())
+                }
+            }
+        }
+    }
+
+    private var noOptions: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "bolt.fill")
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Ready to run")
+                    .font(.callout.weight(.semibold))
+                Text("This action does not require any additional options.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func optionRow(_ option: HaloIntegrationOption) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 7) {
+                Text(option.name)
+                    .font(.callout.weight(.semibold))
+
+                Text(option.type)
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor.opacity(0.10), in: Capsule())
+
+                Text(option.required ? "required" : "optional")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+            }
+
+            if option.type == "boolean" {
+                HStack {
+                    if !option.required {
+                        Toggle(
+                            "Send value",
+                            isOn: optionalBooleanIncludedBinding(option.key)
+                        )
+                        .toggleStyle(.checkbox)
+                        .font(.caption)
+                    }
+
+                    Spacer()
+
+                    Toggle(
+                        boolValues[option.key, default: false] ? "True" : "False",
+                        isOn: booleanBinding(option.key)
+                    )
+                    .toggleStyle(.switch)
+                    .disabled(!option.required && !includedOptionalBooleans.contains(option.key))
+                }
+            } else {
+                TextField(
+                    placeholder(for: option),
+                    text: textBinding(option.key)
+                )
+                .textFieldStyle(.roundedBorder)
+            }
+
+            if let description = option.description, !description.isEmpty {
+                Text(description)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(11)
+        .background(
+            Color.white.opacity(0.04),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.065), lineWidth: 1)
+        )
+    }
+
+    private func textBinding(_ key: String) -> Binding<String> {
+        Binding(
+            get: { textValues[key, default: ""] },
+            set: { textValues[key] = $0 }
+        )
+    }
+
+    private func booleanBinding(_ key: String) -> Binding<Bool> {
+        Binding(
+            get: { boolValues[key, default: false] },
+            set: { boolValues[key] = $0 }
+        )
+    }
+
+    private func optionalBooleanIncludedBinding(_ key: String) -> Binding<Bool> {
+        Binding(
+            get: { includedOptionalBooleans.contains(key) },
+            set: { included in
+                if included {
+                    includedOptionalBooleans.insert(key)
+                } else {
+                    includedOptionalBooleans.remove(key)
+                }
+            }
+        )
+    }
+
+    private func resetFields(for invocation: HaloIntegrationInvocation) {
+        validationMessage = nil
+        submitted = false
+        textValues = [:]
+        boolValues = [:]
+        includedOptionalBooleans = []
+
+        for option in invocation.action.options where option.type == "boolean" {
+            boolValues[option.key] = false
+            if option.required {
+                includedOptionalBooleans.insert(option.key)
+            }
+        }
+    }
+
+    private func run(_ invocation: HaloIntegrationInvocation) {
+        validationMessage = nil
+        guard let options = encodedOptions(for: invocation.action.options) else { return }
+
+        if session.run(options: options) {
+            submitted = true
+            let currentID = invocation.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
+                guard session.invocation?.id == currentID else { return }
+                session.cancel()
+            }
+        } else {
+            submitted = false
+        }
+    }
+
+    private func encodedOptions(
+        for options: [HaloIntegrationOption]
+    ) -> [String: Any]? {
+        var payload: [String: Any] = [:]
+
+        for option in options {
+            if option.type == "boolean" {
+                if option.required || includedOptionalBooleans.contains(option.key) {
+                    payload[option.key] = boolValues[option.key, default: false]
+                }
+                continue
+            }
+
+            let raw = textValues[option.key, default: ""]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if raw.isEmpty {
+                if option.required {
+                    validationMessage = "\(option.name) is required."
+                    return nil
+                }
+                continue
+            }
+
+            guard let value = parse(raw, as: option.type) else {
+                validationMessage = "\(option.name) must be a valid \(option.type) value."
+                return nil
+            }
+            payload[option.key] = value
+        }
+
+        return payload
+    }
+
+    private func parse(_ raw: String, as type: String) -> Any? {
+        switch type {
+        case "string":
+            return raw
+        case "integer":
+            return Int(raw)
+        case "double":
+            return Double(raw)
+        case "stringArray":
+            return commaSeparated(raw)
+        case "integerArray":
+            let values = commaSeparated(raw)
+            let parsed = values.compactMap(Int.init)
+            return parsed.count == values.count ? parsed : nil
+        case "doubleArray":
+            let values = commaSeparated(raw)
+            let parsed = values.compactMap(Double.init)
+            return parsed.count == values.count ? parsed : nil
+        default:
+            return nil
+        }
+    }
+
+    private func commaSeparated(_ raw: String) -> [String] {
+        raw.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func placeholder(for option: HaloIntegrationOption) -> String {
+        switch option.type {
+        case "integer": return "42"
+        case "double": return "0.9"
+        case "stringArray": return "one, two, three"
+        case "integerArray": return "1, 2, 3"
+        case "doubleArray": return "0.25, 0.5, 1.0"
+        default: return option.key
+        }
+    }
+
+    private func publishPreferredSize(for invocation: HaloIntegrationInvocation) {
+        surfaceState.contextMinimumExpandedWidth = 540
+        let optionHeight = Double(invocation.action.options.count) * 72
+        let desiredHeight = min(680, max(350, 275 + optionHeight))
+        surfaceState.contextPreferredSize = CGSize(
+            width: 620,
+            height: desiredHeight
+        )
+    }
+}
+
 private enum ActiveContextInterface: String {
     case integration, drop, teleprompter, transfer, clipboard, custom, music, bluetooth, retro
 }
