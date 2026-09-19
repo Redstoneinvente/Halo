@@ -72,6 +72,7 @@ struct HaloSurfaceRouter: View {
     private var theme: Theme { state.theme }
 
     private var activeCI: RoutedContextInterface? {
+        guard !accessLocked else { return nil }
         var candidates: [(RoutedContextInterface, Double, Int)] = []
         if dropEnabled && state.dropTargeted { candidates.append((.drop, dropPriority, 4)) }
         if retroEnabled && engine.retroGameRequested { candidates.append((.retro, retroPriority, 3)) }
@@ -144,7 +145,13 @@ struct HaloSurfaceRouter: View {
         }
         .frame(width: viewport.size.width, height: viewport.size.height, alignment: .top)
         .clipped()
-        .onAppear { updateAmbientSuppression(eiOwnsSurface) }
+        .onAppear {
+            if accessLocked { state.cancelFileDrop() }
+            updateAmbientSuppression(eiOwnsSurface)
+        }
+        .onChange(of: accessLocked) { locked in
+            if locked { state.cancelFileDrop() }
+        }
         .onChange(of: eiOwnsSurface) { active in updateAmbientSuppression(active) }
         .onDisappear { updateAmbientSuppression(false) }
     }
