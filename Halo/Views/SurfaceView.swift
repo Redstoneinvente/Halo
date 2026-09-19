@@ -3143,7 +3143,7 @@ struct SurfaceView: View {
     @AppStorage("HaloContextDropKeepClosedNotchContents") private var dropKeepsClosedContents = false
     @AppStorage("HaloContextDropPriority") private var dropPriority = 100.0
     @AppStorage("HaloContextAppIntegrationEnabled") private var appIntegrationCIEnabled = true
-    @AppStorage("HaloContextAppIntegrationPriority") private var appIntegrationPriority = 90.0
+    @AppStorage("HaloContextAppIntegrationPriority") private var appIntegrationPriority = 100.0
     @AppStorage("HaloContextBluetoothEnabled") private var bluetoothCIEnabled = false
     @AppStorage("HaloContextBluetoothShowWhileConnected") private var bluetoothShowWhileConnected = true
     @AppStorage("HaloContextBluetoothShowOnChanges") private var bluetoothShowOnChanges = true
