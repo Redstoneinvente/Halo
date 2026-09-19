@@ -3291,6 +3291,7 @@ private struct HaloAppIntegrationLibraryCard: View {
 
     @ObservedObject private var runtime = IntegrationCIRuntime.shared
     @State private var hovered = false
+    @State private var loadedBannerImage: NSImage?
 
     private var configuration: CIConfiguration {
         runtime.configuration(for: registration)
@@ -3321,11 +3322,6 @@ private struct HaloAppIntegrationLibraryCard: View {
             green: Double((value >> 8) & 0xFF) / 255.0,
             blue: Double(value & 0xFF) / 255.0
         )
-    }
-
-    private var bannerImage: NSImage? {
-        guard let url = runtime.cardBannerURL(for: registration) else { return nil }
-        return NSImage(contentsOf: url)
     }
 
     var body: some View {
@@ -3398,8 +3394,20 @@ private struct HaloAppIntegrationLibraryCard: View {
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onAppear { loadBannerImage() }
+        .onChange(of: registration.presentation.cardBannerImageName) { _ in
+            loadBannerImage()
+        }
         .onHover { hovered = $0 }
         .animation(.easeOut(duration: 0.14), value: hovered)
+    }
+
+    private func loadBannerImage() {
+        guard let url = runtime.cardBannerURL(for: registration) else {
+            loadedBannerImage = nil
+            return
+        }
+        loadedBannerImage = NSImage(contentsOf: url)
     }
 
     @ViewBuilder
@@ -3414,8 +3422,8 @@ private struct HaloAppIntegrationLibraryCard: View {
                     )
                 )
 
-            if let bannerImage {
-                Image(nsImage: bannerImage)
+            if let loadedBannerImage {
+                Image(nsImage: loadedBannerImage)
                     .resizable()
                     .scaledToFill()
             } else {
