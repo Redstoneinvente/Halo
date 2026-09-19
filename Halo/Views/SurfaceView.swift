@@ -2860,8 +2860,12 @@ struct SurfaceView: View {
                     .contentShape(Rectangle())
                     .onTapGesture {
                         guard !teleprompterActive else { return }
-                        if state.expanded && state.pinned { return }
-                        state.expanded.toggle()
+                        if state.expanded {
+                            guard !state.pinned else { return }
+                            state.requestDismissal(reason: .explicit)
+                        } else {
+                            state.expanded = true
+                        }
                     }
                     .accessibilityLabel("Toggle Halo dashboard")
                     .accessibilityAddTraits(.isButton)
