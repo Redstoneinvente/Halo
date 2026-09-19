@@ -2925,25 +2925,31 @@ struct SurfaceView: View {
             ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
         }
         .onChange(of: customCI.contextRevision) { _ in
-            let candidate = activeCustomCandidate
-            let shouldAutoOpen = customContextActive && candidate?.autoOpen == true
+            // Context revisions are published from the provider engine before SwiftUI
+            // necessarily finishes recomputing every derived arbitration property.
+            // Reconcile on the next main-loop turn so expansion uses the new trigger
+            // snapshot, not the previous render pass.
+            DispatchQueue.main.async {
+                let candidate = activeCustomCandidate
+                let shouldAutoOpen = customContextActive && candidate?.autoOpen == true
 
-            if shouldAutoOpen {
-                state.collapseTask?.cancel()
-                if !state.expanded {
-                    customCIAutoOpenedNotch = true
-                    state.expanded = true
+                if shouldAutoOpen {
+                    state.collapseTask?.cancel()
+                    if !state.expanded {
+                        customCIAutoOpenedNotch = true
+                        state.expanded = true
+                    }
+                    return
                 }
-                return
-            }
 
-            guard customCIAutoOpenedNotch else { return }
-            customCIAutoOpenedNotch = false
+                guard customCIAutoOpenedNotch else { return }
+                customCIAutoOpenedNotch = false
 
-            // Collapse only if no other CI now owns the surface. A higher-priority
-            // built-in or another custom trigger must not be closed by drag cleanup.
-            if activeContext == nil, !state.pinned {
-                state.expanded = false
+                // Collapse only if no other CI now owns the surface. A higher-priority
+                // built-in or another custom trigger must not be closed by drag cleanup.
+                if activeContext == nil, !state.pinned {
+                    state.expanded = false
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { note in
