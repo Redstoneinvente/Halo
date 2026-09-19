@@ -222,6 +222,9 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(report.package?.manifest.permissions, ["AppIntegration.Execute"])
         XCTAssertEqual(report.package?.manifest.capabilities, ["AppIntegrations"])
         XCTAssertTrue(HaloAutoIntegrationCIGenerator.isGeneratedPackage(at: packageURL))
+        XCTAssertEqual(report.package?.manifest.surface.sizing.mode, "static")
+        XCTAssertEqual(report.package?.manifest.surface.sizing.expanded.width, 580)
+        XCTAssertNotNil(report.package?.manifest.surface.sizing.expanded.height)
 
         let interfaceData = try Data(contentsOf: packageURL.appendingPathComponent("interface.json"))
         let object = try XCTUnwrap(
@@ -254,6 +257,40 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(triggerDocument.triggers.count, 1)
         XCTAssertEqual(triggerDocument.triggers.first?.type, "fileDrag")
         XCTAssertEqual(triggerDocument.triggers.first?.extensions, ["txt"])
+    }
+
+    @MainActor
+    func testContextSizingOwnershipPreventsOutgoingCICleanupFromClobberingIncomingCI() {
+        let state = SurfaceState()
+
+        state.publishContextSizing(
+            owner: "drop",
+            preferredSize: CGSize(width: 680, height: 360),
+            compactWidth: nil,
+            compactHeight: nil,
+            minimumExpandedWidth: nil
+        )
+        XCTAssertEqual(state.contextPreferredSize, CGSize(width: 680, height: 360))
+
+        state.publishContextSizing(
+            owner: "custom:partner",
+            preferredSize: CGSize(width: 580, height: 318),
+            compactWidth: 280,
+            compactHeight: 42,
+            minimumExpandedWidth: 580
+        )
+
+        state.clearContextSizing(owner: "drop")
+
+        XCTAssertEqual(state.contextSizingOwner, "custom:partner")
+        XCTAssertEqual(state.contextPreferredSize, CGSize(width: 580, height: 318))
+        XCTAssertEqual(state.contextPreferredCompactWidth, 280)
+        XCTAssertEqual(state.contextPreferredCompactHeight, 42)
+        XCTAssertEqual(state.contextMinimumExpandedWidth, 580)
+
+        state.clearContextSizing(owner: "custom:partner")
+        XCTAssertNil(state.contextSizingOwner)
+        XCTAssertNil(state.contextPreferredSize)
     }
 
     @MainActor
