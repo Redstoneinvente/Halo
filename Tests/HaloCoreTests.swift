@@ -761,6 +761,23 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(interactive.dismissBehavior, .interactive)
     }
 
+    func testCustomCIValidatorAcceptsDismissBehaviorMetadata() throws {
+        let manifest = customCIManifestJSON()
+            .replacingOccurrences(
+                of: #""supportedStates":["closed","expanded"]"#,
+                with: #""supportedStates":["closed","expanded"],"dismissBehavior":"interactive""#
+            )
+        let root = try makeCustomCIPackage(
+            manifest: manifest,
+            interface: #"{"expanded":{"type":"Text","text":"Interactive CI"}}"#
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let report = HaloCIPackageValidator.validatePackage(at: root)
+        XCTAssertTrue(report.isValid, report.issues.map(\.message).joined(separator: " | "))
+        XCTAssertEqual(report.package?.manifest.dismissBehavior, .interactive)
+    }
+
     private func customCIManifestJSON(permissions: [String] = []) -> String {
         let permissionJSON = permissions.map { "\"\($0)\"" }.joined(separator: ",")
         return """
