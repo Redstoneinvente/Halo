@@ -109,18 +109,29 @@ media.stopped
 
 ### Dragging files and folders
 
-The engine exposes:
+The Context Provider Engine exposes bounded declarative drag context:
 
 - whether a drag is active;
 - item count;
 - file count;
 - folder count;
-- kind: `none`, `files`, `folders`, or `mixed`;
-- a bounded comma-separated extension summary.
+- kind;
+- bounded extension summary.
 
-No file path is exposed.
+It never exposes file paths.
 
-Drag context observation is independent of whether **Drop CI** is enabled. Observing drag metadata does not accept a drop or claim the Halo surface.
+App integrations additionally use `HaloIntegrationDragSession`, a Halo-owned privileged trigger/input session. That session is separate from the declarative context payload because it must retain the actual dragged URLs long enough to deliver a user-selected integration function after drop.
+
+The division is:
+
+```text
+Context Provider Engine → safe metadata for Custom CI bindings/triggers
+Integration Drag Session → private URLs + compatible generated package/function IDs
+```
+
+Both feed the same Custom CI runtime; neither creates another CI architecture.
+
+Compatibility is computed once at drag entry from the generated CI's current configuration. `draggingUpdated` does not repeatedly decode URLs or rescan app manifests.
 
 ### Accepted drops
 
