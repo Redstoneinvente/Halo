@@ -505,23 +505,99 @@ enum HaloIntegrationOptionPrompt {
 final class HaloIntegrationExecutionSession: ObservableObject {
     static let shared = HaloIntegrationExecutionSession()
 
+    @Published private(set) var candidates: [HaloIntegrationInvocation] = []
     @Published private(set) var invocation: HaloIntegrationInvocation?
     @Published private(set) var files: [URL] = []
     @Published var statusMessage: String?
     @Published var errorMessage: String?
 
+    private var sourceSignature = ""
+
     private init() {}
 
-    var isActive: Bool { invocation != nil }
+    var isActive: Bool {
+        invocation != nil || !candidates.isEmpty
+    }
 
-    func present(_ invocation: HaloIntegrationInvocation, files: [URL]) {
+    func presentChoices(
+        _ candidates: [HaloIntegrationInvocation],
+        files: [URL]
+    ) {
+        let cleanFiles = files.filter(\.isFileURL)
+        let uniqueCandidates = Array(
+            Dictionary(
+                uniqueKeysWithValues: candidates.map { ($0.id, $0) }
+            ).values
+        )
+        .sorted {
+            if $0.integration.name != $1.integration.name {
+                return $0.integration.name.localizedCaseInsensitiveCompare(
+                    $1.integration.name
+                ) == .orderedAscending
+            }
+            return $0.action.name.localizedCaseInsensitiveCompare(
+                $1.action.name
+            ) == .orderedAscending
+        }
+
+        guard !uniqueCandidates.isEmpty, !cleanFiles.isEmpty else {
+            cancel()
+            return
+        }
+
+        let signature = cleanFiles.map(\.path).sorted().joined(separator: "\n")
+            + "\n--\n"
+            + uniqueCandidates.map(\.id).sorted().joined(separator: "\n")
+
+        // The global drag monitor polls frequently. Do not reset the chooser
+        // or selected action every 50 ms for the same drag payload.
+        guard sourceSignature != signature else { return }
+
+        sourceSignature = signature
+        self.candidates = uniqueCandidates
+        invocation = nil
+        self.files = cleanFiles
+        statusMessage = nil
+        errorMessage = nil
+    }
+
+    func present(
+        _ invocation: HaloIntegrationInvocation,
+        files: [URL]
+    ) {
+        sourceSignature = ""
+        candidates = [invocation]
         self.invocation = invocation
         self.files = files.filter(\.isFileURL)
         statusMessage = nil
         errorMessage = nil
     }
 
+    func select(_ invocation: HaloIntegrationInvocation) {
+        guard candidates.contains(where: { $0.id == invocation.id }) else {
+            return
+        }
+        self.invocation = invocation
+        statusMessage = nil
+        errorMessage = nil
+    }
+
+    func showActionPicker() {
+        guard !candidates.isEmpty else { return }
+        invocation = nil
+        statusMessage = nil
+        errorMessage = nil
+    }
+
+    func updateFiles(_ files: [URL]) {
+        let cleanFiles = files.filter(\.isFileURL)
+        guard !cleanFiles.isEmpty else { return }
+        self.files = cleanFiles
+    }
+
     func cancel() {
+        sourceSignature = ""
+        candidates = []
         invocation = nil
         files = []
         statusMessage = nil
