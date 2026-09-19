@@ -429,6 +429,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             activity.id = previous.id
             activity.created = previous.created
             if activity.startedAt == nil { activity.startedAt = previous.startedAt }
+            if activity.actions == nil { activity.actions = previous.actions }
             activities.remove(at: index)
         }
 
@@ -445,7 +446,21 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         activity.updatedAt = Date()
         activity.expiresAt = Date().addingTimeInterval(max(0, linger))
         activity.persistent = false
+        activity.actions = []
         activities[index] = activity
+    }
+
+    func performLiveActivityAction(activityID: UUID, actionID: String, input: String? = nil) async -> String? {
+        guard let activity = activities.first(where: { $0.id == activityID }) else {
+            return "This activity is no longer available."
+        }
+        guard let action = activity.resolvedActions.first(where: { $0.id == actionID }) else {
+            return "This action is no longer available."
+        }
+        guard let systemLiveActivitySource else {
+            return "The activity source is unavailable."
+        }
+        return await systemLiveActivitySource.perform(action: action, for: activity, input: input)
     }
 
     func dismissLiveActivity(id: UUID) {
