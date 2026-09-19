@@ -5066,7 +5066,6 @@ private struct DropContextView: View {
     let itemCount: Int
     @ObservedObject var surfaceState: SurfaceState
     @ObservedObject private var dropZones = HaloDropZoneSettingsStore.shared
-    @ObservedObject private var integrationCatalog = HaloIntegrationCatalog.shared
     @AppStorage("HaloContextDropUseFullNotchArea") private var usesFullNotchArea = true
     @AppStorage("HaloContextDropKeepClosedNotchContents") private var keepsClosedNotchContents = false
 
@@ -5098,12 +5097,10 @@ private struct DropContextView: View {
         default: width = count >= 5 ? 680 : 600
         }
         let rowHeight = count > 4 ? 76.0 : 92.0
-        let partnerReserve = integrationCatalog.integrations.isEmpty ? 0.0 : 76.0
         let height = 112
             + Double(rows) * rowHeight
             + Double(max(0, rows - 1)) * configuration.zoneSpacing
             + max(0, topInset - 22)
-            + partnerReserve
         return CGSize(width: width, height: min(700, max(270, height)))
     }
 
@@ -5114,7 +5111,6 @@ private struct DropContextView: View {
             .task { publishPreferredSize() }
             .onChange(of: itemCount) { _ in publishPreferredSize() }
             .onChange(of: dropZones.configuration) { _ in publishPreferredSize() }
-            .onChange(of: integrationCatalog.integrations) { _ in publishPreferredSize() }
             .onDisappear { surfaceState.contextPreferredSize = nil }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Drop CI background for \(count) item\(count == 1 ? "" : "s")")
