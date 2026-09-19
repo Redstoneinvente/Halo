@@ -800,13 +800,13 @@ enum HaloCIContextCatalog {
         field("input.drop.kind", "string", "Most recent drop kind: files, folders, or mixed.", since: "0.2"),
         field("input.drop.extensions", "string", "Comma-separated, bounded extension summary for the most recent drop; no paths are exposed.", since: "0.2"),
         field("input.drop.ageSeconds", "number", "Age of the most recent accepted drop.", unit: "seconds", since: "0.2"),
-        field("clipboard.hasText", "boolean", "Whether Halo's existing clipboard observer last saw bounded non-sensitive text.", since: "0.2"),
+        field("clipboard.hasText", "boolean", "Whether Halo's existing clipboard observer last saw bounded non-sensitive text.", permission: "Clipboard.Observe", since: "0.2"),
         field("clipboard.textLength", "number", "Character count for the last bounded clipboard text observation; clipboard text itself is not exposed.", unit: "characters", permission: "Clipboard.Observe", since: "0.2"),
         field("clipboard.lastEvent", "string", "Last clipboard context event observed by Halo: none, changed, copy, or paste.", permission: "Clipboard.Observe", since: "0.2"),
         field("notification.last.kind", "string", "Last notification-context event supplied to the provider engine: received, sent, or activity.", permission: "Notifications.Observe", since: "0.2"),
         field("notification.last.source", "string", "Bounded source identifier for the last notification-context event.", permission: "Notifications.Observe", since: "0.2"),
         field("notification.last.ageSeconds", "number", "Age of the last notification-context event.", unit: "seconds", permission: "Notifications.Observe", since: "0.2"),
-        field("bluetooth.poweredOn", "boolean", "Whether Halo's existing Bluetooth state provider reports Bluetooth powered on.", since: "0.2"),
+        field("bluetooth.poweredOn", "boolean", "Whether Halo's existing Bluetooth state provider reports Bluetooth powered on.", permission: "Bluetooth.Observe", since: "0.2"),
         field("bluetooth.connectedCount", "number", "Count of currently connected Bluetooth devices visible to Halo.", unit: "count", permission: "Bluetooth.Observe", since: "0.2"),
         field("bluetooth.lastEvent.kind", "string", "Most recent Bluetooth context event: connected, disconnected, poweredOn, or poweredOff.", permission: "Bluetooth.Observe", since: "0.2")
     ]
