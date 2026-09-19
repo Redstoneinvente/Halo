@@ -1107,6 +1107,7 @@ struct HaloCustomCICandidate {
     let package: HaloCIParsedPackage
     let priority: Double
     let manual: Bool
+    let autoOpen: Bool
 }
 
 private struct HaloCustomCIStoredState: Codable {
@@ -1224,6 +1225,20 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
                     ? package.manifest.id
                     : nil
             })
+
+            var initializedGeneratedPriority = false
+            for package in valid {
+                let id = package.manifest.id
+                guard generatedPackageIDs.contains(id),
+                      package.triggers.triggers.contains(where: { $0.type == "fileDrag" }),
+                      preferences[id] == nil else { continue }
+                var prefs = HaloCustomCIPackagePreferences()
+                prefs.priority = 100
+                preferences[id] = prefs
+                initializedGeneratedPriority = true
+            }
+            if initializedGeneratedPriority { persistPreferences() }
+
             invalidPackages = invalid.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             if let manualActivationID, !packages.contains(where: { $0.manifest.id == manualActivationID }) { self.manualActivationID = nil }
             contextDidChange()
@@ -1396,11 +1411,33 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         for package in ordered {
             let id = package.manifest.id
             if manualActivationID == id {
-                return HaloCustomCICandidate(package: package, priority: priority(id), manual: true)
+                return HaloCustomCICandidate(
+                    package: package,
+                    priority: priority(id),
+                    manual: true,
+                    autoOpen: false
+                )
             }
-            if HaloCITriggerEvaluator.matches(package.triggers, snapshot: snapshot,
-                                              grantedPermissions: grantedPermissions(id)) {
-                return HaloCustomCICandidate(package: package, priority: priority(id), manual: false)
+            let granted = grantedPermissions(id)
+            if HaloCITriggerEvaluator.matches(
+                package.triggers,
+                snapshot: snapshot,
+                grantedPermissions: granted
+            ) {
+                let dragAutoOpen = package.triggers.triggers.contains {
+                    $0.type == "fileDrag" &&
+                    HaloCITriggerEvaluator.matches(
+                        $0,
+                        snapshot: snapshot,
+                        grantedPermissions: granted
+                    )
+                }
+                return HaloCustomCICandidate(
+                    package: package,
+                    priority: priority(id),
+                    manual: false,
+                    autoOpen: dragAutoOpen
+                )
             }
         }
         return nil
@@ -1561,16 +1598,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     }
 
     private func triggerSnapshot(workspace: WorkspaceStore) -> HaloCITriggerSnapshot {
-        let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: Date())
-        return HaloCITriggerSnapshot(
-            mediaIsPlaying: workspace.media.isPlaying,
-            activeApplicationBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "",
-            batteryLevel: workspace.system.battery.map(Double.init),
-            charging: workspace.system.charging,
-            minuteOfDay: (components.hour ?? 0) * 60 + (components.minute ?? 0),
-            lowPowerMode: workspace.system.lowPower,
-            displayCount: NSScreen.screens.count
-        )
+        HaloCIContextProviderEngine.shared.triggerSnapshot(workspace: workspace)
     }
 
     private func mutatePreferences(_ id: String, _ body: (inout HaloCustomCIPackagePreferences) -> Void) {
