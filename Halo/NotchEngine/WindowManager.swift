@@ -302,6 +302,10 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     private func rejectFileDrop() {
         dragStateHandler?(false, 0)
         dragContextHandler?(false, [])
+        if integrationDragActive {
+            _ = fileDragHandler?(.exited, [])
+            integrationDragActive = false
+        }
     }
 
     private func fileURLCount(_ sender: NSDraggingInfo) -> Int {
