@@ -2234,6 +2234,14 @@ private struct HaloIntegrationContextView: View {
                     Spacer(minLength: 0)
 
                     HStack(spacing: 10) {
+                        if session.candidates.count > 1 {
+                            Button {
+                                session.showActionPicker()
+                            } label: {
+                                Label("Actions", systemImage: "chevron.left")
+                            }
+                        }
+
                         Button("Cancel") {
                             session.cancel()
                         }
@@ -2260,6 +2268,11 @@ private struct HaloIntegrationContextView: View {
                     resetFields(for: invocation)
                     publishPreferredSize(for: invocation)
                 }
+            } else if !session.candidates.isEmpty {
+                actionPicker
+                    .task(id: session.candidates.map(\.id).joined(separator: "|")) {
+                        publishPickerSize()
+                    }
             } else {
                 EmptyView()
             }
@@ -2268,6 +2281,115 @@ private struct HaloIntegrationContextView: View {
             surfaceState.contextPreferredSize = nil
             surfaceState.contextMinimumExpandedWidth = nil
         }
+    }
+
+    private var actionPicker: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.15))
+                    Image(systemName: "app.connected.to.app.below.fill")
+                        .font(.system(size: 21, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 46, height: 46)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("App Actions")
+                        .font(.title3.weight(.semibold))
+                    Text("Compatible actions for the file you're dragging")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Text("\(session.candidates.count) AVAILABLE")
+                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.accentColor.opacity(0.10), in: Capsule())
+            }
+
+            Divider().opacity(0.35)
+
+            fileSummary
+
+            ScrollView {
+                VStack(spacing: 9) {
+                    ForEach(session.candidates) { candidate in
+                        Button {
+                            session.select(candidate)
+                        } label: {
+                            HStack(spacing: 11) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(Color.accentColor.opacity(0.11))
+                                    Image(systemName: "app.badge.checkmark")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                                .frame(width: 38, height: 38)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(candidate.action.name)
+                                        .font(.callout.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                    Text(candidate.integration.name)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(candidate.action.id)
+                                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(.tertiary)
+                                }
+
+                                Spacer()
+
+                                if candidate.action.options.isEmpty {
+                                    Text("READY")
+                                        .font(.system(size: 7.5, weight: .bold, design: .rounded))
+                                        .foregroundStyle(.green)
+                                } else {
+                                    Text("\(candidate.action.options.count) OPTION\(candidate.action.options.count == 1 ? "" : "S")")
+                                        .font(.system(size: 7.5, weight: .bold, design: .rounded))
+                                        .foregroundStyle(Color.accentColor)
+                                }
+
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(11)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                Color.white.opacity(0.045),
+                                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                    .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            HStack {
+                Text("Release the drag, then choose the app action you want to run.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel") {
+                    session.cancel()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func header(_ invocation: HaloIntegrationInvocation) -> some View {
@@ -2549,6 +2671,15 @@ private struct HaloIntegrationContextView: View {
         case "doubleArray": return "0.25, 0.5, 1.0"
         default: return option.key
         }
+    }
+
+    private func publishPickerSize() {
+        surfaceState.contextMinimumExpandedWidth = 520
+        let rowHeight = Double(min(session.candidates.count, 5)) * 62
+        surfaceState.contextPreferredSize = CGSize(
+            width: 600,
+            height: min(620, max(330, 235 + rowHeight))
+        )
     }
 
     private func publishPreferredSize(for invocation: HaloIntegrationInvocation) {
@@ -3306,9 +3437,9 @@ struct SurfaceView: View {
             Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
             ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
         }
-        .onChange(of: integrationCI.invocation?.id) { invocationID in
+        .onChange(of: integrationCI.isActive) { active in
             state.collapseTask?.cancel()
-            if invocationID != nil {
+            if active {
                 state.expanded = true
             } else {
                 state.contextPreferredSize = nil
