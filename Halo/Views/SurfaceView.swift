@@ -1462,7 +1462,7 @@ private final class ClipboardContextMonitor: ObservableObject {
             if let url = components.url { NSWorkspace.shared.open(url) }
         case "facetime":
             let allowed = CharacterSet(charactersIn: "+0123456789")
-            let clean = trimmed.unicodeScalars.filter { allowed.contains($0) }.map(String.init).joined()
+            let clean = trimmed.unicodeScalars.filter { allowed.contains($0) }.map { String($0) }.joined()
             if let url = URL(string: "facetime://\(clean)") { NSWorkspace.shared.open(url) }
         case "maps":
             var components = URLComponents(string: "https://maps.apple.com/")
@@ -5424,7 +5424,7 @@ private struct ContextMusicView: View {
                 if let next = frame.next { Text(next.text).font(.system(size: max(10, options.resolvedLyricFontSize * 0.74))).opacity(0.35).lineLimit(1) }
             }
         case .word:
-            let words = frame.current.text.split(whereSeparator: \.isWhitespace).map(String.init)
+            let words = frame.current.text.split(whereSeparator: \.isWhitespace).map { String($0) }
             Text(words.indices.contains(frame.wordIndex) ? words[frame.wordIndex] : frame.current.text)
                 .font(.system(size: options.resolvedLyricFontSize, weight: .bold, design: .rounded)).lineLimit(1)
         case .focus:
@@ -5433,7 +5433,7 @@ private struct ContextMusicView: View {
     }
 
     private func focusedLyricLine(_ text: String, activeWord: Int) -> some View {
-        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        let words = text.split(whereSeparator: \.isWhitespace).map { String($0) }
         var result = Text("")
         for (index, word) in words.enumerated() {
             result = result + Text((index == 0 ? "" : " ") + word)
@@ -5601,7 +5601,7 @@ private struct ContextLyricFrame {
 }
 private enum ContextLyricTimeline {
     static func parse(_ value: String) -> [ContextLyricLine] {
-        let rawLines = value.split(whereSeparator: \.isNewline).map(String.init)
+        let rawLines = value.split(whereSeparator: \.isNewline).map { String($0) }
         let offset = rawLines.compactMap { raw -> Double? in
             let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard line.lowercased().hasPrefix("[offset:"), let close = line.firstIndex(of: "]") else { return nil }
@@ -6078,8 +6078,8 @@ private struct IntegrationCIView: View {
         case .double(let value): return String(value)
         case .boolean(let value): return value ? "true" : "false"
         case .stringArray(let value): return value.joined(separator: ", ")
-        case .integerArray(let value): return value.map(String.init).joined(separator: ", ")
-        case .doubleArray(let value): return value.map(String.init).joined(separator: ", ")
+        case .integerArray(let value): return value.map { String($0) }.joined(separator: ", ")
+        case .doubleArray(let value): return value.map { String($0) }.joined(separator: ", ")
         }
     }
 
