@@ -5844,11 +5844,7 @@ private struct IntegrationCIView: View {
             }
 
             if session.payloadHandle != nil && !payloadCommitted {
-                Label(
-                    candidate.event.fileDrag.map { "Drop \($0.itemCount) item\($0.itemCount == 1 ? "" : "s") to commit this payload." }
-                        ?? "Drop the files to commit this payload.",
-                    systemImage: "arrow.down.doc.fill"
-                )
+                Label(payloadCommitMessage, systemImage: "arrow.down.doc.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 10)
@@ -5863,11 +5859,19 @@ private struct IntegrationCIView: View {
             }
 
             if actions.isEmpty {
-                ContentUnavailableView(
-                    "No enabled actions",
-                    systemImage: "switch.2",
-                    description: Text("Enable an advertised action in Context Interface Settings.")
-                )
+                VStack(spacing: 8) {
+                    Image(systemName: "switch.2")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Text("No enabled actions")
+                        .font(.headline)
+                    Text("Enable an advertised action in Context Interface Settings.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
             } else {
                 ScrollView {
                     LazyVStack(spacing: 10) {
@@ -5973,6 +5977,14 @@ private struct IntegrationCIView: View {
         }
     }
 
+    private var payloadCommitMessage: String {
+        guard let drag = candidate.event.fileDrag else {
+            return "Drop the files to commit this payload."
+        }
+        let noun = drag.itemCount == 1 ? "item" : "items"
+        return "Drop \(drag.itemCount) \(noun) to commit this payload."
+    }
+
     private func typedOverrides(for action: CIActionDefinition) throws -> [String: CIValue] {
         var result: [String: CIValue] = [:]
         for option in action.options {
@@ -6051,13 +6063,13 @@ private struct IntegrationCIView: View {
             return
         }
         let presentation = registration.presentation
-        surfaceState.contextMinimumExpandedWidth = presentation.preferredExpandedWidth
+        surfaceState.contextMinimumExpandedWidth = CGFloat(presentation.preferredExpandedWidth)
         surfaceState.contextPreferredSize = CGSize(
-            width: presentation.preferredExpandedWidth,
-            height: presentation.preferredExpandedHeight
+            width: CGFloat(presentation.preferredExpandedWidth),
+            height: CGFloat(presentation.preferredExpandedHeight)
         )
-        surfaceState.contextPreferredCompactWidth = presentation.preferredCompactWidth
-        surfaceState.contextPreferredCompactHeight = presentation.preferredCompactHeight
+        surfaceState.contextPreferredCompactWidth = presentation.preferredCompactWidth.map(CGFloat.init)
+        surfaceState.contextPreferredCompactHeight = presentation.preferredCompactHeight.map(CGFloat.init)
     }
 }
 
