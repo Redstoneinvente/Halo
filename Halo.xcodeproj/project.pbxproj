@@ -21,6 +21,8 @@
 		0000000000000000000000D1 /* Services/Integrations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006D /* Services/Integrations.swift */; };
 		0000000000000000000000D2 /* Services/CaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006E /* Services/CaptureService.swift */; };
 		0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006F /* Core/ExtensionContracts.swift */; };
+		A11C0F1A0000000000000401 /* Core/HaloIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000402 /* Core/HaloIntegration.swift */; };
+		A11C0F1A0000000000000403 /* Core/HaloIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000402 /* Core/HaloIntegration.swift */; };
 		0000000000000000000000FA /* Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000065 /* Core/Models.swift */; };
 		0000000000000000000000FB /* Core/WorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006A /* Core/WorkspaceModels.swift */; };
 		0000000000000000000000FC /* Core/ExtensionContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006F /* Core/ExtensionContracts.swift */; };
@@ -84,6 +86,7 @@
 		00000000000000000000006D /* Services/Integrations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Integrations.swift; sourceTree = "<group>"; };
 		00000000000000000000006E /* Services/CaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CaptureService.swift; sourceTree = "<group>"; };
 		00000000000000000000006F /* Core/ExtensionContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/ExtensionContracts.swift; sourceTree = "<group>"; };
+		A11C0F1A0000000000000402 /* Core/HaloIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/HaloIntegration.swift; sourceTree = "<group>"; };
 		000000000000000000000096 /* Tests/HaloCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/HaloCoreTests.swift; sourceTree = "<group>"; };
 		000000000000000000000097 /* Tests/LicenseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/LicenseTests.swift; sourceTree = "<group>"; };
 		00000000000000000000012C /* Docs */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Docs; sourceTree = "<group>"; };
@@ -228,6 +231,7 @@
 				00000000000000000000006D /* Services/Integrations.swift */,
 				00000000000000000000006E /* Services/CaptureService.swift */,
 				00000000000000000000006F /* Core/ExtensionContracts.swift */,
+				A11C0F1A0000000000000402 /* Core/HaloIntegration.swift */,
 				F8614B60305322E600D4943C /* AppIcon 2.icns */,
 			);
 			path = Halo;
@@ -490,6 +494,7 @@
 				0000000000000000000000D1 /* Services/Integrations.swift in Sources */,
 				0000000000000000000000D2 /* Services/CaptureService.swift in Sources */,
 				0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */,
+				A11C0F1A0000000000000401 /* Core/HaloIntegration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -503,6 +508,7 @@
 				0000000000000000000000FA /* Core/Models.swift in Sources */,
 				0000000000000000000000FB /* Core/WorkspaceModels.swift in Sources */,
                 C12000000000000000000002 /* CIContracts.swift in Sources */,
+				A11C0F1A0000000000000403 /* Core/HaloIntegration.swift in Sources */,
 				0000000000000000000000FC /* Core/ExtensionContracts.swift in Sources */,
 				0000000000000000000000FD /* Tests/HaloCoreTests.swift in Sources */,
 				0000000000000000000000FE /* Tests/LicenseTests.swift in Sources */,
