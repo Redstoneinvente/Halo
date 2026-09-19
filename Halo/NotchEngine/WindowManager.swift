@@ -1427,6 +1427,17 @@ final class WindowManager {
         hosts.values.forEach { $0.state.collapseTask?.cancel(); $0.state.expanded = expand }
     }
 
+    /// Opens the existing Halo surfaces without toggling any already-open surface closed.
+    /// Used by activation affordances such as copying a license key while Halo is locked.
+    func expandAll() {
+        hosts.values.forEach { host in
+            host.state.collapseTask?.cancel()
+            if !host.state.expanded {
+                host.state.expanded = true
+            }
+        }
+    }
+
     private func adjustedExpandedFrame(host: Host, requested: CGSize?) -> CGRect {
         guard let geometry = host.geometry else { return .zero }
         let base = geometry.frame(expanded: true)
