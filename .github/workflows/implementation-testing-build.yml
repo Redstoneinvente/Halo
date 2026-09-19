@@ -31,9 +31,24 @@ jobs:
             DEVELOPMENT_TEAM="" \
             build | tee xcodebuild.log
 
+      - name: Test Halo
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Halo.xcodeproj \
+            -scheme Halo \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            DEVELOPMENT_TEAM="" \
+            test | tee xcodetest.log
+
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: implementation-testing-xcodebuild-log
-          path: xcodebuild.log
+          path: |
+            xcodebuild.log
+            xcodetest.log
