@@ -6101,8 +6101,8 @@ private struct IntegrationCIView: View {
             width: CGFloat(presentation.preferredExpandedWidth),
             height: CGFloat(presentation.preferredExpandedHeight)
         )
-        surfaceState.contextPreferredCompactWidth = presentation.preferredCompactWidth.map(CGFloat.init)
-        surfaceState.contextPreferredCompactHeight = presentation.preferredCompactHeight.map(CGFloat.init)
+        surfaceState.contextPreferredCompactWidth = presentation.preferredCompactWidth.map { CGFloat($0) }
+        surfaceState.contextPreferredCompactHeight = presentation.preferredCompactHeight.map { CGFloat($0) }
     }
 }
 
