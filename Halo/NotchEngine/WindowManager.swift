@@ -10,7 +10,11 @@ final class SurfaceViewport: ObservableObject {
 
 @MainActor
 final class SurfaceState: ObservableObject {
-    @Published var expanded = false
+    @Published var expanded = false {
+        didSet {
+            if expanded { beginExpandedPresentation() }
+        }
+    }
     /// Rendering stays expanded until the physical close animation completes.
     /// This decouples the logical destination from the presentation lifecycle so
     /// SwiftUI does not tear down open content while the panel is still retracting.
