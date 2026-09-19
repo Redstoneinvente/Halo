@@ -35,6 +35,40 @@ final class SurfaceState: ObservableObject {
     @Published var contextPreferredCompactWidth: CGFloat?
     @Published var contextPreferredCompactHeight: CGFloat?
     @Published var contextMinimumExpandedWidth: CGFloat?
+    private(set) var contextSizingOwner: String?
+
+    func publishContextSizing(
+        owner: String,
+        preferredSize: CGSize?,
+        compactWidth: CGFloat?,
+        compactHeight: CGFloat?,
+        minimumExpandedWidth: CGFloat?
+    ) {
+        contextSizingOwner = owner
+        if contextPreferredSize != preferredSize { contextPreferredSize = preferredSize }
+        if contextPreferredCompactWidth != compactWidth { contextPreferredCompactWidth = compactWidth }
+        if contextPreferredCompactHeight != compactHeight { contextPreferredCompactHeight = compactHeight }
+        if contextMinimumExpandedWidth != minimumExpandedWidth {
+            contextMinimumExpandedWidth = minimumExpandedWidth
+        }
+    }
+
+    func clearContextSizing(owner: String) {
+        guard contextSizingOwner == owner else { return }
+        contextSizingOwner = nil
+        contextPreferredSize = nil
+        contextPreferredCompactWidth = nil
+        contextPreferredCompactHeight = nil
+        contextMinimumExpandedWidth = nil
+    }
+
+    func clearAllContextSizing() {
+        contextSizingOwner = nil
+        contextPreferredSize = nil
+        contextPreferredCompactWidth = nil
+        contextPreferredCompactHeight = nil
+        contextMinimumExpandedWidth = nil
+    }
     /// Per-surface drag state keeps Drop CI scoped to the display beneath the dragged item.
     @Published var dropTargeted = false
     @Published var dropItemCount = 0
