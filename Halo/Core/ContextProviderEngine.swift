@@ -326,6 +326,13 @@ final class HaloCIContextProviderEngine: ObservableObject {
         revisionTask?.cancel()
         revisionTask = nil
         workspace = nil
+        dragClassificationGeneration &+= 1
+        dragActive = false
+        dragSummary = HaloCIDragSummary()
+        lastDrop = HaloCIDropRecord()
+        clipboard = HaloCIClipboardRecord()
+        notification = HaloCINotificationRecord()
+        lastEvent = nil
     }
 
     func snapshot(
