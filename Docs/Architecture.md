@@ -22,6 +22,8 @@ Theme import clamps finite numeric ranges, normalizes module order, strips asset
 
 ## Integrations
 
+`HaloIntegrationCatalog` discovers static `Contents/Resources/HaloIntegration.json` manifests from installed macOS apps and currently running developer builds. It validates protocol version, bundle identity, action IDs, option keys/types and manifest size, then exposes a read-only catalogue used by CI Settings and future Halo-owned integration surfaces. This is capability discovery only: Halo does not load partner bundles or execute code from the manifest, and discovered actions do not bypass normal CI arbitration. See `AppIntegrations.md`.
+
 CalendarService uses EventKit and a version-gated access request. MediaService serializes fixed AppleScript commands with a five-second Apple-event timeout; it does not implement system-wide Now Playing. AudioService enumerates output streams and reads/writes the selected device's master volume only where supported. ClipboardService recognizes common concealed/transient markers and user app exclusions. SystemService reads installed memory, free storage, uptime and IOKit battery state; these are not CPU/GPU usage measurements.
 
 CaptureService invokes the system region-selection tool only after user action and screen-capture access; Vision text recognition runs off the main thread. Git status runs off-main with fixed arguments and no optional locks. It has no build/run/test execution interface.
