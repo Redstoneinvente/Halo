@@ -213,6 +213,7 @@ final class HaloPanel: NSPanel {
 
 private enum HaloFileDragPhase {
     case entered
+    case updated
     case exited
     case dropped
 }
@@ -224,6 +225,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     var dropHandler: (([URL]) -> Void)?
     fileprivate var fileDragHandler: ((HaloFileDragPhase, [URL]) -> Bool)?
     private var integrationDragActive = false
+    private var integrationExitTask: Task<Void, Never>?
 
     /// Commercial access is a hard outer boundary. When false, this hosting view
     /// must not register as a drag destination at all — including registrations
@@ -300,6 +302,8 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     private func rejectFileDrop() {
+        integrationExitTask?.cancel()
+        integrationExitTask = nil
         dragStateHandler?(false, 0)
         dragContextHandler?(false, [])
         if integrationDragActive {
@@ -328,8 +332,14 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard hasCommercialAccess else { rejectFileDrop(); return [] }
 
+        integrationExitTask?.cancel()
+        integrationExitTask = nil
+
         let urls = fileURLs(sender)
         guard !urls.isEmpty else { return super.draggingEntered(sender) }
+
+        integrationExitTask?.cancel()
+        integrationExitTask = nil
 
         if observesFileDragContext {
             dragContextHandler?(true, urls)
@@ -353,9 +363,17 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
         let count = fileURLCount(sender)
         guard count > 0 else { return super.draggingUpdated(sender) }
 
-        // Do not repeatedly decode URLs or re-run compatibility on every mouse move.
-        // The drag payload is stable for a normal NSDraggingSession; entered/dropped
-        // are the expensive boundaries.
+        // A panel resize can transiently emit draggingExited/draggingUpdated while the
+        // same NSDraggingSession is still over Halo. Treat any continued update as
+        // proof the drag is alive and cancel the deferred real-exit cleanup.
+        integrationExitTask?.cancel()
+        integrationExitTask = nil
+
+        if integrationDragActive {
+            _ = fileDragHandler?(.updated, [])
+        }
+
+        // Do not repeatedly decode URLs or recompute compatibility on every mouse move.
         if acceptsFileDrop {
             dragStateHandler?(true, count)
         }
@@ -370,14 +388,33 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             return
         }
 
+        // Resizing the notch changes the NSDraggingDestination geometry and AppKit can
+        // emit a synthetic exit before the pointer re-enters the newly-sized panel.
+        // Do not destroy the generated-CI trigger synchronously. Give the same drag
+        // session one short window to produce draggingEntered/draggingUpdated again.
+        if integrationDragActive {
+            integrationExitTask?.cancel()
+            integrationExitTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 550_000_000)
+                guard !Task.isCancelled, let self else { return }
+
+                self.integrationExitTask = nil
+                let ownedBeforeExit = self.fileDragHandler?(.exited, []) == true
+                self.integrationDragActive = false
+                self.dragContextHandler?(false, [])
+
+                if self.acceptsFileDrop && !ownedBeforeExit {
+                    self.dragStateHandler?(false, 0)
+                } else if !self.acceptsFileDrop {
+                    super.draggingExited(sender)
+                }
+            }
+            return
+        }
+
         if observesFileDragContext {
             dragContextHandler?(false, [])
         }
-        if integrationDragActive {
-            _ = fileDragHandler?(.exited, [])
-            integrationDragActive = false
-        }
-
         if acceptsFileDrop {
             dragStateHandler?(false, 0)
         } else {
@@ -415,6 +452,9 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             rejectFileDrop()
             return
         }
+
+        integrationExitTask?.cancel()
+        integrationExitTask = nil
 
         if observesFileDragContext {
             dragContextHandler?(false, [])
@@ -2040,6 +2080,11 @@ final class WindowManager {
                             ActivationSequenceCoordinator.shared.cancelForInteraction()
                         }
                         return compatible
+
+                    case .updated:
+                        // Compatibility was computed on drag entry. The update phase is
+                        // only a liveness signal used to cancel synthetic resize exits.
+                        return runtime.integrationDragCandidatePackageID(on: id) != nil
 
                     case .exited:
                         let owned = runtime.integrationDragOwnsSurface(on: id)
