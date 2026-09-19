@@ -525,6 +525,69 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertLessThan(GlassRendering.tintOpacity(themeOpacity: 1), 0.2)
         XCTAssertTrue(GlassRendering.tintOpacity(themeOpacity: .nan).isFinite)
     }
+
+    func testGlassOptionsClampAndRenderingCurvesStayFinite() {
+        var options = GlassOptions()
+        options.clarity = 4
+        options.frost = -2
+        options.lightAbsorption = 3
+        options.chromaticShift = .infinity
+        options.tintAmount = 4
+        options.highlight = -1
+        options.edgeDepth = 7
+
+        let normalized = options.normalized()
+        // A non-finite optical parameter fails closed to the complete default material.
+        XCTAssertEqual(normalized, GlassOptions())
+
+        options = GlassOptions()
+        options.clarity = 2
+        options.frost = -1
+        options.lightAbsorption = 2
+        options.chromaticShift = 2
+        options.tintAmount = 2
+        options.highlight = 2
+        options.edgeDepth = 2
+        let clamped = options.normalized()
+        XCTAssertEqual(clamped.clarity, 1)
+        XCTAssertEqual(clamped.frost, 0)
+        XCTAssertEqual(clamped.lightAbsorption, 1)
+        XCTAssertEqual(clamped.chromaticShift, 1)
+        XCTAssertEqual(clamped.tintAmount, 0.5)
+        XCTAssertEqual(clamped.highlight, 1)
+        XCTAssertEqual(clamped.edgeDepth, 1)
+
+        XCTAssertGreaterThan(GlassRendering.materialOpacity(clarity: 0), GlassRendering.materialOpacity(clarity: 1))
+        XCTAssertEqual(GlassRendering.absorptionOpacity(0), 0)
+        XCTAssertLessThanOrEqual(GlassRendering.absorptionOpacity(1), 0.78)
+        XCTAssertTrue(GlassRendering.materialOpacity(clarity: .nan).isFinite)
+        XCTAssertTrue(GlassRendering.chromaticOpacity(.nan).isFinite)
+    }
+
+    func testVisualWorkspaceLegacyGlassBlurMigratesToFrost() {
+        var fallback = Appearance()
+        fallback.background = .glass
+        fallback.glass.frost = 0.1
+
+        var override = OpenNotchAppearance()
+        override.background = .glass
+        override.blur = 24
+
+        let resolved = override.baseAppearance(fallback)
+        XCTAssertEqual(resolved.glass.frost, 0.8, accuracy: 0.0001)
+
+        override.glass = GlassOptions(
+            clarity: 0.9,
+            frost: 0.25,
+            lightAbsorption: 0.2,
+            chromaticShift: 0.1,
+            tint: .white,
+            tintAmount: 0.05,
+            highlight: 0.1,
+            edgeDepth: 0.1
+        )
+        XCTAssertEqual(override.baseAppearance(fallback).glass.frost, 0.25, accuracy: 0.0001)
+    }
     private func geometry(style: SurfaceStyle = .notch, safeArea: Double = 32, requested: Double = 400) -> SurfaceGeometry {
         var appearance = Appearance(); appearance.compactWidth = requested
         return SurfaceGeometry(screen: CGRect(x: 0, y: 0, width: 1512, height: 982), visible: CGRect(x: 0, y: 40, width: 1512, height: 910),
@@ -570,6 +633,7 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(appearance.compactWidth, 301)
         XCTAssertEqual(appearance.background, .solid)
         XCTAssertEqual(appearance.surface, SurfaceOptions())
+        XCTAssertEqual(appearance.glass, GlassOptions())
     }
     func testSurfaceOptionsRoundTripAndValidation() throws {
         var appearance = Appearance(); appearance.surface.shape = .scoop; appearance.surface.closing = .slide
