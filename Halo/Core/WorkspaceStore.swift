@@ -1101,6 +1101,7 @@ struct HaloCustomCIInvalidPackage: Identifiable {
 
 struct HaloCustomCICandidate {
     let package: HaloCIParsedPackage
+    let registration: CIRegistration
     let priority: Double
     let manual: Bool
 }
@@ -1338,11 +1339,11 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         for package in ordered {
             let id = package.manifest.id
             if manualActivationID == id {
-                return HaloCustomCICandidate(package: package, priority: priority(id), manual: true)
+                return HaloCustomCICandidate(package: package, registration: CustomCIFactory.makeRegistration(from: package), priority: priority(id), manual: true)
             }
             if HaloCITriggerEvaluator.matches(package.triggers, snapshot: snapshot,
                                               grantedPermissions: grantedPermissions(id)) {
-                return HaloCustomCICandidate(package: package, priority: priority(id), manual: false)
+                return HaloCustomCICandidate(package: package, registration: CustomCIFactory.makeRegistration(from: package), priority: priority(id), manual: false)
             }
         }
         return nil
