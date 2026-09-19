@@ -2667,6 +2667,27 @@ struct SurfaceView: View {
         }
         return displayID + "::" + candidate.package.manifest.id
     }
+
+    private func publishStaticCustomCISizing(_ package: HaloCIParsedPackage) {
+        let sizing = package.manifest.surface.sizing
+        guard sizing.mode == "static" else { return }
+
+        let expandedRule = sizing.expanded
+        let expandedSize = CGSize(
+            width: expandedRule.width ?? 560,
+            height: expandedRule.height ?? 260
+        )
+        state.contextMinimumExpandedWidth = expandedSize.width
+        state.contextPreferredSize = expandedSize
+
+        if let closedRule = sizing.closed {
+            state.contextPreferredCompactWidth = closedRule.width ?? 190
+            state.contextPreferredCompactHeight = closedRule.height ?? 40
+        } else {
+            state.contextPreferredCompactWidth = nil
+            state.contextPreferredCompactHeight = nil
+        }
+    }
     private var contextOwnsFullSurface: Bool {
         guard state.expanded else { return false }
         switch activeContext {
@@ -2962,16 +2983,34 @@ struct SurfaceView: View {
                 )
             }
 
-            if active {
+            if active, let candidate {
+                // Publish the generated CI's static geometry before changing expanded
+                // state. WindowManager then opens directly to the requested CI size
+                // instead of first animating to the base/Drop geometry.
+                publishStaticCustomCISizing(candidate.package)
+
                 // App-specific integration CIs outrank generic Drop CI on the default
                 // equal-priority tie. Once ownership is known, clear Drop CI state so
                 // only the generated Custom CI controls the surface.
                 state.cancelFileDrop()
                 state.dropExitTask?.cancel()
                 state.collapseTask?.cancel()
+
                 if !state.expanded {
                     customCIAutoOpenedNotch = true
                     state.expanded = true
+                }
+
+                // The outgoing context view may run its onDisappear cleanup during this
+                // SwiftUI transaction. Reassert the new owner's static sizing on the
+                // next main-loop turn so old-CI cleanup cannot erase incoming geometry.
+                DispatchQueue.main.async {
+                    guard integrationDragOwnershipKey == key,
+                          let current = activeCustomCandidate,
+                          current.package.manifest.id == candidate.package.manifest.id else {
+                        return
+                    }
+                    publishStaticCustomCISizing(current.package)
                 }
                 return
             }
