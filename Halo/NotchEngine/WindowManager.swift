@@ -211,10 +211,18 @@ final class HaloPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+private enum HaloFileDragPhase {
+    case entered
+    case updated
+    case exited
+    case dropped
+}
+
 @MainActor
 final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     var dragStateHandler: ((Bool, Int) -> Void)?
     var dropHandler: (([URL]) -> Void)?
+    var fileDragHandler: ((HaloFileDragPhase, [URL]) -> Bool)?
 
     /// Commercial access is a hard outer boundary. When false, this hosting view
     /// must not register as a drag destination at all — including registrations
@@ -309,8 +317,14 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
         guard hasCommercialAccess else { rejectFileDrop(); return [] }
         guard acceptsFileDrop else { return super.draggingEntered(sender) }
 
-        let count = fileURLCount(sender)
+        let urls = fileURLs(sender)
+        let count = urls.isEmpty ? fileURLCount(sender) : urls.count
         guard count > 0 else { return super.draggingEntered(sender) }
+
+        if !urls.isEmpty, fileDragHandler?(.entered, urls) == true {
+            return .copy
+        }
+
         dragStateHandler?(true, count)
         return .copy
     }
@@ -319,8 +333,14 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
         guard hasCommercialAccess else { rejectFileDrop(); return [] }
         guard acceptsFileDrop else { return super.draggingUpdated(sender) }
 
-        let count = fileURLCount(sender)
+        let urls = fileURLs(sender)
+        let count = urls.isEmpty ? fileURLCount(sender) : urls.count
         guard count > 0 else { return super.draggingUpdated(sender) }
+
+        if !urls.isEmpty, fileDragHandler?(.updated, urls) == true {
+            return .copy
+        }
+
         dragStateHandler?(true, count)
         return .copy
     }
@@ -334,6 +354,8 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             super.draggingExited(sender)
             return
         }
+
+        _ = fileDragHandler?(.exited, [])
         dragStateHandler?(false, 0)
     }
 
@@ -349,6 +371,11 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             dragStateHandler?(false, 0)
             return super.performDragOperation(sender)
         }
+
+        if fileDragHandler?(.dropped, urls) == true {
+            return true
+        }
+
         dropHandler?(urls)
         return true
     }
