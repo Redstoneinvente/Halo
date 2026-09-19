@@ -31,7 +31,7 @@ Existing Halo services / real events
        Custom CI binding data bus
 ```
 
-The engine does not participate in CI ownership, priority arbitration, sizing, backgrounds, triggers, or action execution. It only owns context collection and disclosure.
+The engine does not decide CI ownership, priority, sizing, backgrounds, or action execution. It owns context collection/disclosure and supplies the authoritative trigger snapshot consumed by the Custom CI trigger evaluator.
 
 ## Provider contract
 
@@ -63,7 +63,7 @@ It reuses existing Halo service updates and macOS notifications. Provider change
 
 The only engine timer is once per minute for `time.minuteOfDay`.
 
-File/folder classification is never performed in `draggingUpdated`. Halo reads the drag payload once on drag entry, publishes an immediate bounded summary, then classifies files versus folders on a utility task. A drop is classified the same way. The engine stores counts/extensions only; it does not retain dragged file paths.
+File/folder classification is never performed in `draggingUpdated`. Halo reads the drag payload once on drag entry, publishes an immediate bounded summary, then classifies files versus folders on a utility task. The SDK `fileDrag` trigger remains false until that background classification finishes, preventing a folder from briefly masquerading as a compatible file. A drop is classified the same way. The engine stores counts/extensions only; it does not retain dragged file paths.
 
 Transient event metadata expires from the public snapshot after 30 seconds.
 
