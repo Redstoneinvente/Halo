@@ -251,6 +251,21 @@ struct SettingsView: View {
         session.displayID = nil
     }
 
+    private func closeBehaviorDescription(_ behavior: HaloCloseBehavior) -> String {
+        switch behavior {
+        case .instant:
+            return "Closes almost immediately after the pointer truly leaves Halo."
+        case .smart:
+            return "Recommended. Uses a forgiving delay that adapts to the active Context Interface."
+        case .relaxed:
+            return "Keeps Halo open for about 900 ms after pointer exit."
+        case .manual:
+            return "Pointer exit never closes Halo. Explicit close actions and CI completion still work."
+        case .custom:
+            return "Uses your selected delay from 0 to 2000 ms."
+        }
+    }
+
     private func sectionIcon(_ name: String) -> String {
         switch name {
         case "General": return "gearshape"
@@ -314,6 +329,44 @@ struct SettingsView: View {
                     }
                 }
             }
+            Section("Close Behaviour") {
+                Picker(
+                    "Close Behaviour",
+                    selection: Binding(
+                        get: { store.configuration.resolvedCloseBehavior },
+                        set: { store.configuration.closeBehavior = $0 }
+                    )
+                ) {
+                    ForEach(HaloCloseBehavior.allCases) { behavior in
+                        Text(behavior.rawValue).tag(behavior)
+                    }
+                }
+
+                Text(closeBehaviorDescription(store.configuration.resolvedCloseBehavior))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if store.configuration.resolvedCloseBehavior == .custom {
+                    LabeledContent("Close Delay") {
+                        HStack(spacing: 10) {
+                            SwiftUI.Slider(
+                                value: Binding(
+                                    get: { store.configuration.resolvedCustomCloseDelayMilliseconds },
+                                    set: { store.configuration.customCloseDelayMilliseconds = min(2_000, max(0, $0)) }
+                                ),
+                                in: 0...2_000,
+                                step: 50
+                            )
+                            .frame(width: 220)
+
+                            Text("\(Int(store.configuration.resolvedCustomCloseDelayMilliseconds)) ms")
+                                .monospacedDigit()
+                                .frame(width: 70, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+
             Toggle("Show on all displays", isOn: $store.configuration.allDisplays)
             Toggle("Launch at login", isOn: $loginEnabled).onChange(of: loginEnabled) { value in
                 do { if value { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
