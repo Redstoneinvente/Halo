@@ -141,11 +141,10 @@ final class SurfaceState: ObservableObject {
                 self.expanded = true
             }
         } else if !pinned {
-            collapseTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 450_000_000)
-                guard !Task.isCancelled, let self, !self.pinned, !self.editingGeometry, !self.dropTargeted else { return }
-                self.expanded = false
-            }
+            // Hover exit itself is immediate. If Pixel Pal is present and has a
+            // boot-down animation, WindowManager gates the actual panel collapse
+            // for exactly that animation duration. No Pixel Pal means no delay.
+            expanded = false
         }
     }
 }
@@ -1713,9 +1712,14 @@ final class WindowManager {
     }
 
     private func schedulePixelPalGatedCollapse(for host: Host) -> Bool {
+        // This is the only hover-exit collapse delay. It exists solely so a visible
+        // Pixel Pal can finish its configured boot-down animation before the panel
+        // retracts. No Pixel Pal, or Boot Down = None, collapses immediately.
         guard layoutContainsVisualWorkspacePixelPal(host) else { return false }
 
         let preferences = HaloPixelPalStore.shared.preferences
+        guard preferences.bootDownAnimation != .none else { return false }
+
         let delay = HaloPixelPalPowerAnimationTiming.closeGateDelay(
             style: preferences.bootDownAnimation,
             speed: preferences.powerAnimationSpeed
