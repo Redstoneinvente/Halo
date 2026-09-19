@@ -1285,23 +1285,25 @@ enum HaloAutoIntegrationCIGenerator {
         var actionChildren: [[String: Any]] = []
 
         for action in integration.manifest.actions {
-            actionChildren.append([
-                "type": "Button",
-                "text": action.name,
-                "systemName": "bolt.fill",
-                "accessibilityLabel": "Run \(action.name) in \(integration.name)",
-                "action": [
-                    "id": "app.integration.invoke",
-                    "arguments": [
-                        "bundleIdentifier": integration.bundleIdentifier,
-                        "actionID": action.id
+            var children: [[String: Any]] = [
+                [
+                    "type": "Button",
+                    "text": action.name,
+                    "systemName": "bolt.fill",
+                    "accessibilityLabel": "Run \(action.name) in \(integration.name)",
+                    "action": [
+                        "id": "app.integration.invoke",
+                        "arguments": [
+                            "bundleIdentifier": integration.bundleIdentifier,
+                            "actionID": action.id
+                        ]
                     ]
                 ]
-            ])
+            ]
 
             let detail = actionDetail(action)
             if !detail.isEmpty {
-                actionChildren.append([
+                children.append([
                     "type": "Text",
                     "text": detail,
                     "style": "caption",
@@ -1309,6 +1311,13 @@ enum HaloAutoIntegrationCIGenerator {
                     "lineLimit": 2
                 ])
             }
+
+            actionChildren.append([
+                "type": "VStack",
+                "id": "halo.integration.action.\(action.id)",
+                "spacing": 4,
+                "children": children
+            ])
         }
 
         let expandedChildren: [[String: Any]] = [
