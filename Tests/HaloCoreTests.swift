@@ -7,6 +7,131 @@ import XCTest
 #endif
 
 final class HaloCoreTests: XCTestCase {
+
+#if !SWIFT_PACKAGE
+    func testHaloIntegrationManifestAcceptsExistingProtocolV1Contract() throws {
+        let data = Data(#"""
+        {
+          "protocolVersion": 1,
+          "name": "Halo Integration Test",
+          "bundleIdentifier": "com.redstoneinvente.HaloIntegrationTest",
+          "actions": [
+            {
+              "id": "rename.file",
+              "name": "Rename File",
+              "supportedExtensions": ["txt"],
+              "options": [
+                {
+                  "key": "newName",
+                  "name": "New file name",
+                  "type": "string",
+                  "required": true,
+                  "description": "New file name"
+                },
+                {
+                  "key": "preserveExtension",
+                  "name": "Preserve extension",
+                  "type": "boolean",
+                  "required": false,
+                  "description": null
+                }
+              ]
+            }
+          ]
+        }
+        """#.utf8)
+
+        let manifest = try HaloIntegrationManifestCodec.decodeAndValidate(
+            data,
+            actualBundleIdentifier: "com.redstoneinvente.HaloIntegrationTest"
+        )
+
+        XCTAssertEqual(manifest.protocolVersion, 1)
+        XCTAssertEqual(manifest.actions.count, 1)
+        XCTAssertEqual(manifest.actions[0].id, "rename.file")
+        XCTAssertEqual(manifest.actions[0].options.map(\.type), ["string", "boolean"])
+    }
+
+    func testHaloIntegrationManifestRejectsBundleIdentifierMismatch() throws {
+        let data = Data(#"""
+        {
+          "protocolVersion": 1,
+          "name": "Example",
+          "bundleIdentifier": "com.example.claimed",
+          "actions": [
+            {
+              "id": "read.file",
+              "name": "Read",
+              "supportedExtensions": ["txt"],
+              "options": []
+            }
+          ]
+        }
+        """#.utf8)
+
+        XCTAssertThrowsError(
+            try HaloIntegrationManifestCodec.decodeAndValidate(
+                data,
+                actualBundleIdentifier: "com.example.actual"
+            )
+        ) { error in
+            guard case HaloIntegrationManifestError.bundleIdentifierMismatch = error else {
+                return XCTFail("Expected bundleIdentifierMismatch, got \(error)")
+            }
+        }
+    }
+
+    func testHaloIntegrationManifestRejectsDuplicateActionsAndUnknownOptionTypes() throws {
+        let duplicateActions = HaloIntegrationManifest(
+            protocolVersion: 1,
+            name: "Example",
+            bundleIdentifier: "com.example.app",
+            actions: [
+                HaloIntegrationAction(id: "convert", name: "One", supportedExtensions: ["png"], options: []),
+                HaloIntegrationAction(id: "convert", name: "Two", supportedExtensions: ["jpg"], options: [])
+            ]
+        )
+
+        XCTAssertThrowsError(
+            try HaloIntegrationManifestCodec.validate(duplicateActions)
+        ) { error in
+            guard case HaloIntegrationManifestError.duplicateActionID = error else {
+                return XCTFail("Expected duplicateActionID, got \(error)")
+            }
+        }
+
+        let unknownType = HaloIntegrationManifest(
+            protocolVersion: 1,
+            name: "Example",
+            bundleIdentifier: "com.example.app",
+            actions: [
+                HaloIntegrationAction(
+                    id: "convert",
+                    name: "Convert",
+                    supportedExtensions: ["png"],
+                    options: [
+                        HaloIntegrationOption(
+                            key: "mode",
+                            name: "Mode",
+                            type: "object",
+                            required: false,
+                            description: nil
+                        )
+                    ]
+                )
+            ]
+        )
+
+        XCTAssertThrowsError(
+            try HaloIntegrationManifestCodec.validate(unknownType)
+        ) { error in
+            guard case HaloIntegrationManifestError.unsupportedOptionType = error else {
+                return XCTFail("Expected unsupportedOptionType, got \(error)")
+            }
+        }
+    }
+#endif
+
     func testBluetoothDeviceSymbolsUseReportedClassForRenamedAccessories() {
         XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0540), "keyboard")
         XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0580), "computermouse")
