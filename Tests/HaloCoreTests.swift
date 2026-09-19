@@ -133,6 +133,144 @@ final class HaloCoreTests: XCTestCase {
             }
         }
     }
+
+    func testAutoIntegrationCIGeneratorCreatesValidatorApprovedPackage() throws {
+        let installRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HaloAutoCITests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: installRoot) }
+
+        let integration = HaloIntegration(
+            appURL: URL(fileURLWithPath: "/Applications/Partner.app"),
+            manifest: HaloIntegrationManifest(
+                protocolVersion: 1,
+                name: "Partner",
+                bundleIdentifier: "com.example.partner",
+                actions: [
+                    HaloIntegrationAction(
+                        id: "convert.file",
+                        name: "Convert File",
+                        supportedExtensions: ["txt"],
+                        options: [
+                            HaloIntegrationOption(
+                                key: "quality",
+                                name: "Quality",
+                                type: "integer",
+                                required: false,
+                                description: "Conversion quality"
+                            )
+                        ]
+                    )
+                ]
+            )
+        )
+
+        let result = HaloAutoIntegrationCIGenerator.synchronize(
+            integrations: [integration],
+            installRoot: installRoot
+        )
+        XCTAssertTrue(result.changed)
+        XCTAssertTrue(result.diagnostics.isEmpty, result.diagnostics.joined(separator: "\n"))
+
+        let packageID = HaloAutoIntegrationCIGenerator.packageID(
+            for: integration.bundleIdentifier
+        )
+        let packageURL = installRoot
+            .appendingPathComponent(packageID)
+            .appendingPathExtension("haloCI")
+        let report = HaloCIPackageValidator.validatePackage(at: packageURL)
+
+        XCTAssertTrue(report.isValid, report.issues.map(\.message).joined(separator: "\n"))
+        XCTAssertEqual(report.package?.manifest.permissions, ["AppIntegration.Execute"])
+        XCTAssertEqual(report.package?.manifest.capabilities, ["AppIntegrations"])
+        XCTAssertTrue(HaloAutoIntegrationCIGenerator.isGeneratedPackage(at: packageURL))
+
+        let interfaceData = try Data(contentsOf: packageURL.appendingPathComponent("interface.json"))
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: interfaceData) as? [String: Any]
+        )
+        let expanded = try XCTUnwrap(object["expanded"] as? [String: Any])
+        let expandedChildren = try XCTUnwrap(expanded["children"] as? [[String: Any]])
+        let scroll = try XCTUnwrap(
+            expandedChildren.first(where: { ($0["type"] as? String) == "ScrollView" })
+        )
+        let actionChildren = try XCTUnwrap(scroll["children"] as? [[String: Any]])
+        let button = try XCTUnwrap(
+            actionChildren.first(where: { ($0["type"] as? String) == "Button" })
+        )
+        let action = try XCTUnwrap(button["action"] as? [String: Any])
+        XCTAssertEqual(action["id"] as? String, "app.integration.invoke")
+        let arguments = try XCTUnwrap(action["arguments"] as? [String: String])
+        XCTAssertEqual(arguments["bundleIdentifier"], "com.example.partner")
+        XCTAssertEqual(arguments["actionID"], "convert.file")
+    }
+
+    func testAutoIntegrationCIGeneratorUpdatesAndRemovesOnlyManagedPackages() throws {
+        let installRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HaloAutoCITests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: installRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: installRoot) }
+
+        let manualURL = installRoot.appendingPathComponent("manual.haloCI", isDirectory: true)
+        try FileManager.default.createDirectory(at: manualURL, withIntermediateDirectories: true)
+        try Data("manual".utf8).write(to: manualURL.appendingPathComponent("keep.txt"))
+
+        let first = HaloIntegration(
+            appURL: URL(fileURLWithPath: "/Applications/Partner.app"),
+            manifest: HaloIntegrationManifest(
+                protocolVersion: 1,
+                name: "Partner",
+                bundleIdentifier: "com.example.partner",
+                actions: [
+                    HaloIntegrationAction(
+                        id: "read.file",
+                        name: "Read File",
+                        supportedExtensions: ["txt"],
+                        options: []
+                    )
+                ]
+            )
+        )
+
+        XCTAssertTrue(
+            HaloAutoIntegrationCIGenerator.synchronize(
+                integrations: [first],
+                installRoot: installRoot
+            ).changed
+        )
+
+        let updated = HaloIntegration(
+            appURL: first.appURL,
+            manifest: HaloIntegrationManifest(
+                protocolVersion: 1,
+                name: "Partner",
+                bundleIdentifier: "com.example.partner",
+                actions: first.manifest.actions + [
+                    HaloIntegrationAction(
+                        id: "rename.file",
+                        name: "Rename File",
+                        supportedExtensions: ["txt"],
+                        options: []
+                    )
+                ]
+            )
+        )
+
+        let updateResult = HaloAutoIntegrationCIGenerator.synchronize(
+            integrations: [updated],
+            installRoot: installRoot
+        )
+        XCTAssertTrue(updateResult.changed)
+        XCTAssertEqual(updateResult.installed.count, 1)
+
+        let removal = HaloAutoIntegrationCIGenerator.synchronize(
+            integrations: [],
+            installRoot: installRoot
+        )
+        XCTAssertTrue(removal.changed)
+        XCTAssertEqual(removal.removed.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: manualURL.path))
+    }
+
 #endif
 
     func testBluetoothDeviceSymbolsUseReportedClassForRenamedAccessories() {
