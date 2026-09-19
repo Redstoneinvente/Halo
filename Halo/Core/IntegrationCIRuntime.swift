@@ -130,6 +130,7 @@ final class IntegrationCIRuntime: ObservableObject {
 
     @discardableResult
     func fileDragEntered(files: [URL], displayID: String) -> Bool {
+        lastError = nil
         guard eventsByDisplay[displayID]?.kind != .fileDrag,
               let metadata = FileDragClassifier.classify(files) else {
             return !(eligibleByDisplay[displayID] ?? []).isEmpty
@@ -330,6 +331,7 @@ final class IntegrationCIRuntime: ObservableObject {
                 optionOverrides: options,
                 parentWindow: parentWindow
             )
+            lastError = nil
             guard let session = activationCoordinator.session(id: activationSessionID) else { return false }
             actionDropTargets.clear(sessionID: session.id)
             let result = activationCoordinator.finish(sessionID: activationSessionID, pinned: pinned)
