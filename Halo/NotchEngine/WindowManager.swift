@@ -1574,23 +1574,41 @@ final class WindowManager {
         ]
 
         dismissInteractionMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            // Do not move NSEvent itself across the actor hop. Copy only primitive event data.
+            let typeRaw = event.type.rawValue
+            let keyCode = event.keyCode
+            let windowNumber = event.windowNumber
             DispatchQueue.main.async { [weak self] in
-                self?.handleDismissInteractionEvent(event)
+                self?.handleDismissInteractionEvent(
+                    typeRaw: typeRaw,
+                    keyCode: keyCode,
+                    windowNumber: windowNumber
+                )
             }
             return event
         }
     }
 
-    private func handleDismissInteractionEvent(_ event: NSEvent) {
-        switch event.type {
-        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
-            guard let host = dismissHost(for: event.window), host.state.expanded else { return }
+    private func handleDismissInteractionEvent(
+        typeRaw: UInt,
+        keyCode: UInt16,
+        windowNumber: Int
+    ) {
+        let eventWindow = NSApp.windows.first(where: { $0.windowNumber == windowNumber })
+
+        switch typeRaw {
+        case NSEvent.EventType.leftMouseDown.rawValue,
+             NSEvent.EventType.rightMouseDown.rawValue,
+             NSEvent.EventType.otherMouseDown.rawValue:
+            guard let host = dismissHost(for: eventWindow), host.state.expanded else { return }
             if host.mouseDownDismissHold == nil {
                 host.mouseDownDismissHold = host.state.dismissCoordinator.acquireHold(.mouseDown)
             }
             syncTextEditingHold(for: host)
 
-        case .leftMouseUp, .rightMouseUp, .otherMouseUp:
+        case NSEvent.EventType.leftMouseUp.rawValue,
+             NSEvent.EventType.rightMouseUp.rawValue,
+             NSEvent.EventType.otherMouseUp.rawValue:
             for host in hosts.values {
                 if let token = host.mouseDownDismissHold {
                     host.mouseDownDismissHold = nil
@@ -1599,14 +1617,14 @@ final class WindowManager {
                 syncTextEditingHold(for: host)
             }
 
-        case .scrollWheel:
-            guard let host = dismissHost(for: event.window), host.state.expanded else { return }
+        case NSEvent.EventType.scrollWheel.rawValue:
+            guard let host = dismissHost(for: eventWindow), host.state.expanded else { return }
             host.state.dismissCoordinator.pulseHold(.scrolling, duration: 0.24)
 
-        case .keyDown:
-            guard let host = dismissHost(for: event.window), host.state.expanded else { return }
+        case NSEvent.EventType.keyDown.rawValue:
+            guard let host = dismissHost(for: eventWindow), host.state.expanded else { return }
             syncTextEditingHold(for: host)
-            if event.keyCode == 53 {
+            if keyCode == 53 {
                 // Let an active field editor/menu consume Escape first.
                 guard !isTextEditing(host) else { return }
                 host.state.requestDismissal(reason: .escapeKey)
