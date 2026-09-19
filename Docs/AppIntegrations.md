@@ -1,5 +1,7 @@
 # Halo App Integration Discovery
 
+> **Target architecture:** Discovery feeds the shared CI registration/runtime described in [`AppIntegrationCIArchitecture.md`](AppIntegrationCIArchitecture.md). The current branch still contains generated-package implementation work, but physical managed `.haloCI` generation is a migration detail, not the long-term integration contract.
+
 Halo discovers capabilities exposed by installed macOS applications by reading a static manifest from the application bundle. It does not load third-party code into Halo.
 
 Discovery feeds the [Automatic App Integration Custom CI framework](AutoIntegrationCI.md). Halo can generate normal declarative `.haloCI` packages from discovered manifests, but the discovery layer itself remains static capability metadata.
