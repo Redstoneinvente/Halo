@@ -81,6 +81,8 @@ SDK 0.2 adds two conditions, composable with existing `any`/`all` triggers:
 
 `lowPowerMode` defaults to true if `bool` is omitted. `displayCount` is an exact match and requires an integer from 1 to 64. Neither requires sensitive access. These remain eligibility conditions; they do not resize a panel or bypass a higher-priority owner. Existing suppression-until-false behavior applies.
 
+SDK 0.2 also supports `fileDrag` with an optional `extensions` array. It becomes eligible only for a currently active, background-classified file-only drag whose extension set is contained by the trigger's allowed set. It does not require a permission because Halo exposes no paths and the drag is a direct interaction with Halo.
+
 ## Extending the framework safely
 
 1. Add a context descriptor in `SDK/Sources/HaloCISDK/CIContracts.swift`, with an explicit SDK version, type, units and permission. Never add a key for a data source that does not exist.
