@@ -4681,47 +4681,6 @@ private struct DropContextView: View {
             .accessibilityLabel("Drop CI background for \(count) item\(count == 1 ? "" : "s")")
     }
 
-    private var composerAction: LiveActivityAction? {
-        guard let composerActionID else { return nil }
-        return activity.resolvedActions.first(where: { $0.id == composerActionID })
-    }
-
-    private func begin(_ action: LiveActivityAction) {
-        actionError = nil
-        if action.kind == .textReply {
-            composerActionID = action.id
-            actionInput = ""
-            return
-        }
-        execute(action, input: nil)
-    }
-
-    private func submitComposerAction(_ action: LiveActivityAction) {
-        let trimmed = actionInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        execute(action, input: trimmed)
-    }
-
-    private func execute(_ action: LiveActivityAction, input: String?) {
-        guard performingActionID == nil else { return }
-        performingActionID = action.id
-        actionError = nil
-
-        Task { @MainActor in
-            let error = await workspace.performLiveActivityAction(
-                activityID: activity.id,
-                actionID: action.id,
-                input: input
-            )
-            performingActionID = nil
-            actionError = error
-            if error == nil, action.kind == .textReply {
-                composerActionID = nil
-                actionInput = ""
-            }
-        }
-    }
-
     private func publishPreferredSize() {
         let next = preferredSize
         DispatchQueue.main.async { [surfaceState] in
@@ -6913,6 +6872,47 @@ private struct LiveActivityContextView: View {
             String(verticalMargin),
             String(spacing)
         ].joined(separator: "|")
+    }
+
+    private var composerAction: LiveActivityAction? {
+        guard let composerActionID else { return nil }
+        return activity.resolvedActions.first(where: { $0.id == composerActionID })
+    }
+
+    private func begin(_ action: LiveActivityAction) {
+        actionError = nil
+        if action.kind == .textReply {
+            composerActionID = action.id
+            actionInput = ""
+            return
+        }
+        execute(action, input: nil)
+    }
+
+    private func submitComposerAction(_ action: LiveActivityAction) {
+        let trimmed = actionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        execute(action, input: trimmed)
+    }
+
+    private func execute(_ action: LiveActivityAction, input: String?) {
+        guard performingActionID == nil else { return }
+        performingActionID = action.id
+        actionError = nil
+
+        Task { @MainActor in
+            let error = await workspace.performLiveActivityAction(
+                activityID: activity.id,
+                actionID: action.id,
+                input: input
+            )
+            performingActionID = nil
+            actionError = error
+            if error == nil, action.kind == .textReply {
+                composerActionID = nil
+                actionInput = ""
+            }
+        }
     }
 
     private func publishPreferredSize() {
