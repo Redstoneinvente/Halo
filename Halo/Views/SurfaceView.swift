@@ -2691,6 +2691,10 @@ struct SurfaceView: View {
     /// Logical expansion flips as soon as close is requested. Presentation expansion
     /// remains true until WindowManager reports that the physical retract animation ended.
     private var visuallyExpanded: Bool { state.expanded || state.presentationExpanded }
+    private var reportsOpenedNotchVisible: Bool {
+        visuallyExpanded &&
+        (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive || integrationContextActive)
+    }
     private var contextOwnsFullSurface: Bool {
         guard visuallyExpanded else { return false }
         switch activeContext {
@@ -3118,8 +3122,8 @@ struct SurfaceView: View {
             }
         }
         .onAppear {
-            workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive), token: openVisibilityToken)
-            visualWorkspaceSurfacePresented = state.expanded && usesVisualWorkspace && activeContext == nil
+            workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
+            visualWorkspaceSurfacePresented = visuallyExpanded && usesVisualWorkspace && activeContext == nil
         }
         .onDisappear { workspace.setOpenedNotchVisible(false, token: openVisibilityToken) }
         .onReceive(state.viewport.$size) { size in
@@ -3134,7 +3138,7 @@ struct SurfaceView: View {
         .onChange(of: usesVisualWorkspace) { active in
             if !active {
                 visualWorkspaceSurfacePresented = false
-            } else if state.expanded && activeContext == nil {
+            } else if visuallyExpanded && activeContext == nil {
                 visualWorkspaceSurfacePresented = true
             }
         }
@@ -3144,31 +3148,36 @@ struct SurfaceView: View {
             }
             if teleprompterContextActive && expanded {
                 state.expanded = false
-                workspace.setOpenedNotchVisible(false, token: openVisibilityToken)
+                workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
                 return
             }
-            workspace.setOpenedNotchVisible(expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive), token: openVisibilityToken)
-            if !expanded {
-                state.contextPreferredSize = nil
-                if transferContextActive {
-                    // Preserve the content-driven open target while Transfer remains active,
-                    // so the next hover/click opens directly to the correct size.
-                    DispatchQueue.main.async {
-                        guard transferContextActive, !state.expanded else { return }
-                        state.contextMinimumExpandedWidth = TransferCISizing.minimumExpandedWidth(physicalNotchWidth: state.physicalNotchWidth)
-                        state.contextPreferredCompactWidth = TransferCISizing.closedPreferredWidth(physicalNotchWidth: state.physicalNotchWidth)
-                        state.contextPreferredSize = TransferCISizing.openPreferredSize()
-                    }
-                } else if clipboardContextActive {
-                    DispatchQueue.main.async {
-                        guard clipboardContextActive, !state.expanded else { return }
-                        state.contextMinimumExpandedWidth = ClipboardCISizing.minimumExpandedWidth(physicalNotchWidth: state.physicalNotchWidth)
-                        state.contextPreferredCompactWidth = ClipboardCISizing.closedPreferredWidth(monitor: clipboardCI, physicalNotchWidth: state.physicalNotchWidth)
-                        state.contextPreferredSize = ClipboardCISizing.openPreferredSize(actionCount: clipboardCI.actions.count, historyCount: clipboardCI.history.count, kind: clipboardCI.kind)
-                    }
+            workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
+        }
+        .onChange(of: state.presentationExpanded) { presentationExpanded in
+            workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
+            guard !presentationExpanded, !state.expanded else { return }
+
+            // Open-only state is torn down only after the physical retract finishes.
+            // This prevents the panel from animating around an already-empty SwiftUI tree.
+            state.contextPreferredSize = nil
+            if transferContextActive {
+                // Preserve the content-driven open target while Transfer remains active,
+                // so the next hover/click opens directly to the correct size.
+                DispatchQueue.main.async {
+                    guard transferContextActive, !state.expanded else { return }
+                    state.contextMinimumExpandedWidth = TransferCISizing.minimumExpandedWidth(physicalNotchWidth: state.physicalNotchWidth)
+                    state.contextPreferredCompactWidth = TransferCISizing.closedPreferredWidth(physicalNotchWidth: state.physicalNotchWidth)
+                    state.contextPreferredSize = TransferCISizing.openPreferredSize()
                 }
-                retroGameRequested = false
+            } else if clipboardContextActive {
+                DispatchQueue.main.async {
+                    guard clipboardContextActive, !state.expanded else { return }
+                    state.contextMinimumExpandedWidth = ClipboardCISizing.minimumExpandedWidth(physicalNotchWidth: state.physicalNotchWidth)
+                    state.contextPreferredCompactWidth = ClipboardCISizing.closedPreferredWidth(monitor: clipboardCI, physicalNotchWidth: state.physicalNotchWidth)
+                    state.contextPreferredSize = ClipboardCISizing.openPreferredSize(actionCount: clipboardCI.actions.count, historyCount: clipboardCI.history.count, kind: clipboardCI.kind)
+                }
             }
+            retroGameRequested = false
         }
         .onChange(of: clipboardCI.eventSerial) { _ in
             guard clipboardCIEnabled, clipboardCI.isActive, clipboardCI.triggerMode == "Pop Up" else { return }
@@ -3205,7 +3214,7 @@ struct SurfaceView: View {
             synchronizeSurfaceCIOwnership()
         }
         .onChange(of: activeContext) { _ in
-            if activeContext == nil, state.expanded, usesVisualWorkspace {
+            if activeContext == nil, visuallyExpanded, usesVisualWorkspace {
                 visualWorkspaceSurfacePresented = true
             } else if activeContext != nil {
                 visualWorkspaceSurfacePresented = false
@@ -3235,7 +3244,7 @@ struct SurfaceView: View {
                 state.contextMinimumExpandedWidth = nil
                 if activeContext != nil && !contextMusicActive { state.contextPreferredSize = nil }
             }
-            workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive || integrationContextActive), token: openVisibilityToken)
+            workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
         }
     }
 
