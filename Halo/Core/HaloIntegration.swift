@@ -558,6 +558,7 @@ final class HaloIntegrationExecutionSession: ObservableObject {
     @Published private(set) var invocation: HaloIntegrationInvocation?
     @Published private(set) var files: [URL] = []
     @Published private(set) var targetDisplayID: String?
+    @Published private(set) var owningDisplayID: String?
     @Published private(set) var dropCommitted = false
     @Published var statusMessage: String?
     @Published var errorMessage: String?
@@ -671,12 +672,30 @@ final class HaloIntegrationExecutionSession: ObservableObject {
         isActive && targetDisplayID == displayID
     }
 
+    func setSurfaceOwnership(
+        _ ownsSurface: Bool,
+        displayID: String
+    ) {
+        guard targetDisplayID == displayID else { return }
+
+        if ownsSurface {
+            owningDisplayID = displayID
+        } else if owningDisplayID == displayID {
+            owningDisplayID = nil
+        }
+    }
+
+    func ownsSurface(on displayID: String) -> Bool {
+        owningDisplayID == displayID && isActive(on: displayID)
+    }
+
     func cancel() {
         sourceSignature = ""
         candidates = []
         invocation = nil
         files = []
         targetDisplayID = nil
+        owningDisplayID = nil
         dropCommitted = false
         statusMessage = nil
         errorMessage = nil
