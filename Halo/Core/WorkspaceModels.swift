@@ -1345,6 +1345,30 @@ struct LiveActivity: Identifiable, Codable {
         }
     }
 }
+enum LiveActivitySelection {
+    static func primary(
+        in activities: [LiveActivity],
+        now: Date = Date(),
+        excluding excludedKinds: Set<LiveActivityKind> = []
+    ) -> LiveActivity? {
+        activities
+            .filter { activity in
+                guard !excludedKinds.contains(activity.resolvedKind) else { return false }
+                if activity.isPersistent {
+                    return activity.resolvedState != .ended || (activity.expiresAt ?? .distantFuture) > now
+                }
+                return (activity.expiresAt ?? activity.created.addingTimeInterval(12)) > now
+            }
+            .sorted {
+                if $0.resolvedPriority != $1.resolvedPriority {
+                    return $0.resolvedPriority > $1.resolvedPriority
+                }
+                return $0.resolvedUpdatedAt > $1.resolvedUpdatedAt
+            }
+            .first
+    }
+}
+
 protocol LiveActivityProvider { var activities: [LiveActivity] { get } }
 struct PluginCommand: Codable, Identifiable {
     var id: String
