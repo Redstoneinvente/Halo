@@ -1,4 +1,4 @@
-name: Validate App Integration Discovery
+name: Validate App Integration Auto CI
 
 on:
   push:
@@ -6,6 +6,12 @@ on:
       - codex/implementation-of-custom-ci-v2
     paths:
       - 'Halo/Core/HaloIntegration.swift'
+      - 'Halo/Core/WorkspaceStore.swift'
+      - 'SDK/Sources/HaloCISDK/CIContracts.swift'
+      - 'SDK/Tests/HaloCISDKTests/**'
+      - 'Docs/AutoIntegrationCI.md'
+      - 'Docs/CustomCI_V2.md'
+      - 'Docs/CustomCI_Authoring.md'
       - 'Halo/Views/WorkspaceSettingsView.swift'
       - 'Halo.xcodeproj/project.pbxproj'
       - 'Tests/HaloCoreTests.swift'
@@ -14,6 +20,12 @@ on:
   pull_request:
     paths:
       - 'Halo/Core/HaloIntegration.swift'
+      - 'Halo/Core/WorkspaceStore.swift'
+      - 'SDK/Sources/HaloCISDK/CIContracts.swift'
+      - 'SDK/Tests/HaloCISDKTests/**'
+      - 'Docs/AutoIntegrationCI.md'
+      - 'Docs/CustomCI_V2.md'
+      - 'Docs/CustomCI_Authoring.md'
       - 'Halo/Views/WorkspaceSettingsView.swift'
       - 'Halo.xcodeproj/project.pbxproj'
       - 'Tests/HaloCoreTests.swift'
@@ -62,7 +74,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: app-integration-discovery-xcode-logs
+          name: app-integration-auto-ci-xcode-logs
           path: |
             xcodebuild.log
             xcodetest.log
