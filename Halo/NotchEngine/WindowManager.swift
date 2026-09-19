@@ -665,6 +665,7 @@ final class WindowManager {
     }
 
     func start() {
+        installDismissInteractionMonitoring()
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloPreviewActivationSequence"))
@@ -673,6 +674,22 @@ final class WindowManager {
             .receive(on: RunLoop.main).sink { [weak self] _ in
                 self?.playActivation(context: ActivationLaunchContext(event: .wake, macJustStarted: false))
             }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.beginGlobalDismissHold(.menu) }
+            .store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: NSMenu.didEndTrackingNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.endGlobalDismissHold(.menu) }
+            .store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: NSPopover.willShowNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.beginGlobalDismissHold(.popover) }
+            .store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: NSPopover.didCloseNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.endGlobalDismissHold(.popover) }
+            .store(in: &subscriptions)
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .debounce(for: .milliseconds(80), scheduler: RunLoop.main)
             .sink { [weak self] _ in
@@ -1518,6 +1535,10 @@ final class WindowManager {
         activityExpiry?.cancel()
         hudNotchHideWork?.cancel(); hudNotchHideWork = nil
         if let hudMonitor { NSEvent.removeMonitor(hudMonitor); self.hudMonitor = nil }
+        if let dismissInteractionMonitor {
+            NSEvent.removeMonitor(dismissInteractionMonitor)
+            self.dismissInteractionMonitor = nil
+        }
         hosts.values.forEach {
             $0.pixelPalCollapseWork?.cancel()
             $0.hoverOpeningCompletionWork?.cancel()
@@ -1525,6 +1546,131 @@ final class WindowManager {
         }
         hosts.removeAll()
         subscriptions.removeAll()
+    }
+
+    private func installDismissInteractionMonitoring() {
+        guard dismissInteractionMonitor == nil else { return }
+
+        let mask: NSEvent.EventTypeMask = [
+            .leftMouseDown, .leftMouseUp,
+            .rightMouseDown, .rightMouseUp,
+            .otherMouseDown, .otherMouseUp,
+            .scrollWheel, .keyDown
+        ]
+
+        dismissInteractionMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            DispatchQueue.main.async { [weak self] in
+                self?.handleDismissInteractionEvent(event)
+            }
+            return event
+        }
+    }
+
+    private func handleDismissInteractionEvent(_ event: NSEvent) {
+        switch event.type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            guard let host = dismissHost(for: event.window), host.state.expanded else { return }
+            if host.mouseDownDismissHold == nil {
+                host.mouseDownDismissHold = host.state.dismissCoordinator.acquireHold(.mouseDown)
+            }
+
+        case .leftMouseUp, .rightMouseUp, .otherMouseUp:
+            for host in hosts.values {
+                if let token = host.mouseDownDismissHold {
+                    host.mouseDownDismissHold = nil
+                    host.state.dismissCoordinator.releaseHold(token)
+                }
+            }
+
+        case .scrollWheel:
+            guard let host = dismissHost(for: event.window), host.state.expanded else { return }
+            host.state.dismissCoordinator.pulseHold(.scrolling, duration: 0.24)
+
+        case .keyDown:
+            guard let host = dismissHost(for: event.window), host.state.expanded else { return }
+            if event.keyCode == 53 {
+                // Let an active field editor/menu consume Escape first.
+                guard !isTextEditing(host) else { return }
+                host.state.requestDismissal(reason: .escapeKey)
+            } else {
+                host.state.dismissCoordinator.pulseHold(.keyboardInteraction, duration: 0.18)
+            }
+
+        default:
+            break
+        }
+    }
+
+    private func dismissHost(for window: NSWindow?) -> Host? {
+        guard let window else { return nil }
+        return hosts.values.first { host in
+            if window === host.panel || window === host.geometryEditorPanel { return true }
+            var candidate: NSWindow? = window.parent
+            while let current = candidate {
+                if current === host.panel { return true }
+                candidate = current.parent
+            }
+            return false
+        }
+    }
+
+    private func isTextEditing(_ host: Host) -> Bool {
+        guard let editor = host.panel.firstResponder as? NSTextView else { return false }
+        return editor.isFieldEditor
+    }
+
+    private func pointerInsideOwnedHaloSurface(_ host: Host) -> Bool {
+        let point = NSEvent.mouseLocation
+
+        if host.panel.isVisible, NSMouseInRect(point, host.panel.frame, false) {
+            return true
+        }
+        if host.geometryEditorPanel.isVisible,
+           NSMouseInRect(point, host.geometryEditorPanel.frame, false) {
+            return true
+        }
+
+        for window in host.panel.childWindows ?? [] where window.isVisible {
+            if NSMouseInRect(point, window.frame, false) { return true }
+        }
+
+        // A focused field editor is an active Halo interaction even when the pointer itself
+        // temporarily leaves the surface.
+        return isTextEditing(host)
+    }
+
+    private func pointerInsideHaloForgivenessRegion(_ host: Host) -> Bool {
+        guard host.panel.isVisible else { return false }
+        let point = NSEvent.mouseLocation
+        let frame = host.panel.frame
+        guard !NSMouseInRect(point, frame, false) else { return false }
+        let grace = CGFloat(HaloDismissTimingPolicy.graceRegionPoints)
+        return NSMouseInRect(point, frame.insetBy(dx: -grace, dy: -grace), false)
+    }
+
+    private func beginGlobalDismissHold(_ reason: HaloDismissHoldReason) {
+        for host in hosts.values where host.state.expanded {
+            let token = host.state.dismissCoordinator.acquireHold(reason)
+            switch reason {
+            case .menu: host.menuDismissHolds.append(token)
+            case .popover: host.popoverDismissHolds.append(token)
+            default: break
+            }
+        }
+    }
+
+    private func endGlobalDismissHold(_ reason: HaloDismissHoldReason) {
+        for host in hosts.values {
+            let token: UUID?
+            switch reason {
+            case .menu: token = host.menuDismissHolds.popLast()
+            case .popover: token = host.popoverDismissHolds.popLast()
+            default: token = nil
+            }
+            if let token {
+                host.state.dismissCoordinator.releaseHold(token)
+            }
+        }
     }
 
     func toggleAll() {
