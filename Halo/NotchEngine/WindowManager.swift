@@ -688,8 +688,9 @@ final class WindowManager {
             host.refreshDropCIRegistration?()
             if !granted {
                 // Licensing is a hard boundary, not a normal drag-exit lifecycle.
-                // Remove Drop ownership synchronously so no locked surface can retain it.
+                // Remove file-drag ownership synchronously so no locked surface can retain it.
                 host.state.cancelFileDrop()
+                HaloIntegrationExecutionSession.shared.cancel()
             }
         }
     }
@@ -713,6 +714,9 @@ final class WindowManager {
                     host.refreshDropCIRegistration?()
                     if !self.dropCIAllowed && host.state.dropTargeted {
                         host.state.endFileDrop(collapseAfterDelay: true)
+                    }
+                    if !self.appIntegrationCIAllowed {
+                        HaloIntegrationExecutionSession.shared.cancel()
                     }
                 }
                 let next = CGSize(width: defaults.double(forKey: "HaloContextOffsetX"),
@@ -2046,7 +2050,7 @@ final class WindowManager {
                             for: urls
                         )
                         guard !actions.isEmpty else {
-                            session.cancelUncommittedDrag()
+                            session.cancelUncommittedDrag(on: id)
                             return false
                         }
 
@@ -2062,20 +2066,20 @@ final class WindowManager {
                         // Resizing the notch during CI takeover can generate a
                         // transient drag exit. Keep ownership until the global
                         // mouse-up path decides whether the drag was committed.
-                        return session.isActive
+                        return session.isActive(on: id)
 
                     case .dropped:
                         let actions = HaloIntegrationCatalog.shared.compatibleInvocations(
                             for: urls
                         )
                         guard !actions.isEmpty else {
-                            session.cancelUncommittedDrag()
+                            session.cancelUncommittedDrag(on: id)
                             return false
                         }
 
                         haloDismissEmbeddedDropCIForIntegration()
 
-                        if !session.isActive {
+                        if !session.isActive(on: id) {
                             session.presentChoices(actions, files: urls, displayID: id)
                         } else {
                             session.updateFiles(urls)
