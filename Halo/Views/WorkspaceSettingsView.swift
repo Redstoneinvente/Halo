@@ -3801,9 +3801,9 @@ private struct IntegrationActionOptionSettingsRow: View {
         case .stringArray(let value):
             return value.joined(separator: ", ")
         case .integerArray(let value):
-            return value.map(String.init).joined(separator: ", ")
+            return value.map { String($0) }.joined(separator: ", ")
         case .doubleArray(let value):
-            return value.map(String.init).joined(separator: ", ")
+            return value.map { String($0) }.joined(separator: ", ")
         }
     }
 }
