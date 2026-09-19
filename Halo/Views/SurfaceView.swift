@@ -3501,6 +3501,10 @@ struct SurfaceView: View {
             ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
         }
         .onChange(of: integrationContextActive) { active in
+            if let displayID = surfaceDisplayID {
+                integrationCI.setSurfaceOwnership(active, displayID: displayID)
+            }
+
             if active {
                 state.collapseTask?.cancel()
                 if !state.expanded {
