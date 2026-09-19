@@ -3103,7 +3103,8 @@ struct SurfaceView: View {
                 state.hover(
                     hovering,
                     enabled: store.configuration.hoverToExpand || clipboardHover,
-                    openDelay: store.configuration.hoverToExpand ? store.configuration.resolvedHoverOpenDelay : 0
+                    openDelay: store.configuration.hoverToExpand ? store.configuration.resolvedHoverOpenDelay : 0,
+                    closeDelay: store.configuration.hoverToExpand ? store.configuration.resolvedHoverCloseDelay : 0
                 )
             }
         }
