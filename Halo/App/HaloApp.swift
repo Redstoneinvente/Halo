@@ -107,7 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func refreshCommercialAccess() {
-        if commercialAccessGranted {
+        let granted = commercialAccessGranted
+        engine?.setCommercialAccessGranted(granted)
+
+        if granted {
             startLicensedServices()
 
             let defaults = UserDefaults.standard
