@@ -30,6 +30,7 @@ final class HaloDismissCoordinator {
     var customDelayProvider: () -> Double = { HaloDismissTimingPolicy.smartBaselineMilliseconds }
     var canDismiss: () -> Bool = { true }
     var pointerInsideInteractionEnvironment: () -> Bool = { false }
+    var pointerInsideForgivenessRegion: () -> Bool = { false }
     var onDismiss: DismissHandler?
 
     private(set) var ciBehavior: CIDismissBehavior = .standard
@@ -98,7 +99,7 @@ final class HaloDismissCoordinator {
             guard canDismiss() else { return }
         }
 
-        guard let delay = HaloDismissTimingPolicy.delay(
+        guard var delay = HaloDismissTimingPolicy.delay(
             behavior: behaviorProvider(),
             customMilliseconds: customDelayProvider(),
             ciBehavior: ciBehavior,
@@ -107,6 +108,12 @@ final class HaloDismissCoordinator {
             cancelPendingDismissal()
             debugLog("Dismiss ignored: \(reason.rawValue)")
             return
+        }
+
+        if reason == .pointerExit, pointerInsideForgivenessRegion() {
+            // The cursor only just crossed Halo's visible edge. Give it a little extra time
+            // to return without creating a polling loop or a second close authority.
+            delay += 0.16
         }
 
         cancelPendingDismissal()
