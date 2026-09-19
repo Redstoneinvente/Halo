@@ -10,12 +10,14 @@ Any task involving Halo **CI (Custom Interfaces)**, CI packages, CI SDK, CI Stud
 2. `Docs/CISDK.md` — canonical SDK architecture and contract direction
 3. `Docs/Architecture.md`
 4. `Docs/Plugins.md`
+5. `Docs/AppIntegrationCIArchitecture.md` — authoritative target architecture for installed-app integrations, triggers, activation sessions, payload delivery, and partner actions
 
 Read them **before modifying code**.
 
 ### Hard rules
 
 - Do not invent a second CI/plugin architecture.
+- App integrations must use the shared CI registration/arbitration path defined in `Docs/AppIntegrationCIArchitecture.md`; triggers, rendering, discovery, payload ownership, and action delivery must remain separate responsibilities.
 - Do not expose arbitrary Halo Swift/SwiftUI/AppKit internals as a public SDK.
 - Do not execute third-party JavaScript, Swift, dylibs, shell commands, or downloaded native code inside the Halo app process.
 - Do not use `Bundle.load`, generic `eval`, shell interpolation, or unrestricted process execution as an SDK shortcut.
