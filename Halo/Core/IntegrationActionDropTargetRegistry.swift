@@ -50,9 +50,11 @@ final class IntegrationActionDropTargetRegistry: ObservableObject {
     }
 
     func clear(sessionID: UUID) {
-        targetsBySession.removeValue(forKey: sessionID)
-        hoveredActionByDisplay = hoveredActionByDisplay.filter { _, actionID in
-            !targetsBySession[sessionID, default: [:]].keys.contains(actionID)
+        let removed = targetsBySession.removeValue(forKey: sessionID) ?? [:]
+        guard !removed.isEmpty else { return }
+        let affectedDisplays = Set(removed.values.map(\.displayID))
+        for displayID in affectedDisplays {
+            hoveredActionByDisplay.removeValue(forKey: displayID)
         }
     }
 
