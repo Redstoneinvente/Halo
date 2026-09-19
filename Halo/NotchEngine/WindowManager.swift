@@ -159,9 +159,21 @@ final class HaloPanel: NSPanel {
 final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     var dragStateHandler: ((Bool, Int) -> Void)?
     var dropHandler: (([URL]) -> Void)?
+
+    /// Commercial access is a hard outer boundary. When false, this hosting view
+    /// must not register as a drag destination at all — including registrations
+    /// requested internally by SwiftUI descendant .dropDestination views.
+    var commercialAccessAllowed: (() -> Bool)? {
+        didSet { refreshDropRegistration() }
+    }
+
+    /// This controls only the surface-wide Drop CI feature. It is deliberately
+    /// separate from commercial access so licensed users can disable Drop CI while
+    /// retaining legitimate descendant drop targets such as File Shelf.
     var dropEnabled: (() -> Bool)? {
         didSet { refreshDropRegistration() }
     }
+
     private var dropCIRegistered = false
 
     required init(rootView: Content) {
@@ -172,20 +184,38 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    // Fail closed until WindowManager installs the permission provider. This avoids a
-    // brief registration window during startup before commercial access has been restored.
-    private var acceptsFileDrop: Bool { dropEnabled?() ?? false }
+    // Both providers fail closed until WindowManager installs them.
+    private var hasCommercialAccess: Bool { commercialAccessAllowed?() ?? false }
+    private var acceptsFileDrop: Bool { hasCommercialAccess && (dropEnabled?() ?? false) }
 
-    /// Drop CI owns only the surface-wide drag destination. When disabled we unregister
-    /// this hosting view entirely so descendant drop targets (notably File Shelf) remain usable.
+    /// Prevent SwiftUI or any descendant from re-registering the locked Halo surface
+    /// as a drag destination. Once commercially unlocked, normal NSHostingView
+    /// registration is allowed again so File Shelf and other descendant targets work.
+    override func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {
+        guard hasCommercialAccess else { return }
+        super.registerForDraggedTypes(newTypes)
+    }
+
+    /// Drop CI owns only the surface-wide drag destination. Commercial lock is stronger
+    /// than the Drop CI setting: while locked, remove every drag registration from this
+    /// hosting view and reject any stale in-flight Drop CI state synchronously.
     func refreshDropRegistration() {
-        let shouldRegister = acceptsFileDrop
+        guard hasCommercialAccess else {
+            unregisterDraggedTypes()
+            dropCIRegistered = false
+            rejectFileDrop()
+            return
+        }
+
+        let shouldRegister = dropEnabled?() ?? false
         guard shouldRegister != dropCIRegistered else { return }
+
         if shouldRegister {
             registerForDraggedTypes([.fileURL])
         } else {
             unregisterDraggedTypes()
         }
+
         dropCIRegistered = shouldRegister
         if !shouldRegister { rejectFileDrop() }
     }
@@ -212,11 +242,12 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        // When the surface-wide Drop CI is unavailable (disabled or commercially
-        // locked), this subclass must not become the drag owner. SwiftUI may still
-        // have legitimate descendant drop destinations such as File Shelf, so defer
-        // completely to NSHostingView instead of swallowing the drag with [].
+        // Locked means drag-dead: do not involve the Drop CI and do not hand the drag
+        // to SwiftUI/NSHostingView. Licensed + Drop-disabled is different: descendants
+        // such as File Shelf may still own their own drop destinations.
+        guard hasCommercialAccess else { rejectFileDrop(); return [] }
         guard acceptsFileDrop else { return super.draggingEntered(sender) }
+
         let count = fileURLCount(sender)
         guard count > 0 else { return super.draggingEntered(sender) }
         dragStateHandler?(true, count)
@@ -224,7 +255,9 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard hasCommercialAccess else { rejectFileDrop(); return [] }
         guard acceptsFileDrop else { return super.draggingUpdated(sender) }
+
         let count = fileURLCount(sender)
         guard count > 0 else { return super.draggingUpdated(sender) }
         dragStateHandler?(true, count)
@@ -232,6 +265,10 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
+        guard hasCommercialAccess else {
+            rejectFileDrop()
+            return
+        }
         guard acceptsFileDrop else {
             super.draggingExited(sender)
             return
@@ -240,7 +277,12 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard hasCommercialAccess else {
+            rejectFileDrop()
+            return false
+        }
         guard acceptsFileDrop else { return super.performDragOperation(sender) }
+
         let urls = fileURLs(sender)
         guard !urls.isEmpty else {
             dragStateHandler?(false, 0)
@@ -251,6 +293,10 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+        guard hasCommercialAccess else {
+            rejectFileDrop()
+            return
+        }
         guard acceptsFileDrop else {
             super.concludeDragOperation(sender)
             return
@@ -1748,8 +1794,11 @@ final class WindowManager {
                 let view = HaloDropHostingView(rootView: root)
                 view.sizingOptions = []
                 host.state.setFileDropAllowed(dropCIAllowed)
+                view.commercialAccessAllowed = { [weak self] in
+                    self?.commercialAccessGranted ?? false
+                }
                 view.dropEnabled = { [weak self] in
-                    self?.dropCIAllowed ?? false
+                    self?.dropCISettingEnabled ?? false
                 }
                 host.refreshDropCIRegistration = { [weak view] in
                     view?.refreshDropRegistration()
