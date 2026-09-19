@@ -45,3 +45,5 @@ No executable-plugin isolation, universal media transport, shader editor, networ
 ## Custom CI runtime path
 
 Third-party Context Interfaces use the declarative SDK in `Docs/CISDK.md`. `HaloCIPackageValidator` owns schema/security validation; `HaloCustomCIRuntimeStore` owns installed package preferences, permission grants, isolated local state and trigger eligibility; and `SurfaceView` feeds the winning package into a Halo-owned declarative renderer. Custom CI is a candidate in the existing Context Interface arbitration rather than a parallel window/surface architecture. The global `HaloDisableCustomCI` preference gates only third-party packages; built-in CIs are not routed through it.
+
+The V2 CI contract is extracted into `SDK/Sources/HaloCISDK/CIContracts.swift`, compiled by both the app and standalone SDK package. Its catalog centralizes version/type/permission metadata; runtime values remain supplied by existing Halo services. The `halo-ci` authoring CLI shares this validator. See `CustomCI_V2.md`.

@@ -1,0 +1,51 @@
+{
+  "author" : "Your Name",
+  "capabilities" : [
+
+  ],
+  "description" : "",
+  "entryInterface" : "interface.json",
+  "id" : "com.example.context-dashboard",
+  "minimumHaloVersion" : "1.0.0",
+  "name" : "Context Dashboard",
+  "permissions" : [
+
+  ],
+  "schemaVersion" : 1,
+  "sdkVersion" : "0.2",
+  "supportedStates" : [
+    "closed",
+    "expanded"
+  ],
+  "supportedSurfaces" : [
+    "notch"
+  ],
+  "surface" : {
+    "background" : {
+      "closed" : {
+        "blur" : 0,
+        "color" : "#101014",
+        "opacity" : 1,
+        "type" : "solid"
+      },
+      "expanded" : {
+        "blur" : 0,
+        "color" : "#101014",
+        "opacity" : 1,
+        "type" : "solid"
+      }
+    },
+    "sizing" : {
+      "closed" : {
+        "height" : 40,
+        "width" : 190
+      },
+      "expanded" : {
+        "height" : 260,
+        "width" : 560
+      },
+      "mode" : "static"
+    }
+  },
+  "version" : "1.0.0"
+}

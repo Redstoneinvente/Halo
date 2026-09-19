@@ -1,5 +1,7 @@
 # Building Custom Interfaces for Halo
 
+> **Custom CI V2 is implemented as SDK 0.2 / schema 1**, with SDK 0.1 compatibility. See [the V2 framework guide](CustomCI_V2.md) for the shared context catalog, new bindings/permissions/triggers, CLI starter and validator, tests and extension workflow. Earlier 0.1 examples below remain valid unless marked conceptual. The V2 guide defines the additive implemented contract.
+
 > **Custom CI author guide — SDK 0.1**
 >
 > This is the practical guide for people who want to build and share a Halo Custom Interface (`.haloCI`). For the security model, architecture rules, and long-term SDK design, see [`CISDK.md`](CISDK.md). If this guide and `CISDK.md` ever disagree on architecture, `CISDK.md` is authoritative.

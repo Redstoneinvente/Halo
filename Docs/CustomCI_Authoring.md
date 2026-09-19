@@ -1,5 +1,7 @@
 # Halo Custom CI Authoring Guide
 
+> **Custom CI V2 is implemented as SDK 0.2 / schema 1**, with SDK 0.1 compatibility. See [the V2 framework guide](CustomCI_V2.md) for the shared context catalog, new bindings/permissions/triggers, CLI starter and validator, tests and extension workflow. Earlier 0.1 examples below remain valid unless marked conceptual. The V2 guide defines the additive implemented contract.
+
 This is the practical, copy-first guide for building third-party **Custom CIs** for Halo.
 
 If you only want to make a CI, start here. If you are changing the SDK/runtime itself, also read `Docs/CISDK.md`, `Docs/Architecture.md`, `Docs/Plugins.md`, and `AGENTS.md`.

@@ -1160,6 +1160,15 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         workspace.$runningApps.receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
+        Publishers.MergeMany([
+            workspace.media.objectWillChange.eraseToAnyPublisher(),
+            workspace.system.objectWillChange.eraseToAnyPublisher(),
+            workspace.audio.objectWillChange.eraseToAnyPublisher()
+        ])
+        .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
+        .sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
+            .receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
         Timer.publish(every: 60, on: .main, in: .common).autoconnect()
             .sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
     }
@@ -1267,7 +1276,10 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     func package(id: String) -> HaloCIParsedPackage? { packages.first { $0.manifest.id == id } }
     func isEnabled(_ id: String) -> Bool { preferences[id]?.enabled ?? true }
     func priority(_ id: String) -> Double { min(100, max(0, preferences[id]?.priority ?? 50)) }
-    func grantedPermissions(_ id: String) -> Set<String> { preferences[id]?.grantedPermissions ?? [] }
+    func grantedPermissions(_ id: String) -> Set<String> {
+        guard let package = package(id: id) else { return [] }
+        return (preferences[id]?.grantedPermissions ?? []).intersection(package.manifest.permissions)
+    }
     func requestedPermissions(_ package: HaloCIParsedPackage) -> [String] {
         Array(Set(package.manifest.permissions)).sorted()
     }
@@ -1371,7 +1383,22 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
             data["apps.active.bundleID"] = app?.bundleIdentifier ?? ""
             data["apps.active.name"] = app?.localizedName ?? ""
         }
-        return data
+        data["media.duration"] = format(workspace.media.duration)
+        data["media.position"] = format(workspace.media.position)
+        data["audio.output.name"] = workspace.audio.devices.first { $0.id == workspace.audio.selected }?.name
+        if workspace.audio.canSetVolume { data["audio.volume"] = format(Double(workspace.audio.volume)) }
+        data["audio.canSetVolume"] = workspace.audio.canSetVolume ? "true" : "false"
+        data["system.thermalState"] = workspace.system.thermalState
+        data["system.network.downBytesPerSecond"] = format(workspace.system.networkDownPerSecond)
+        data["system.network.upBytesPerSecond"] = format(workspace.system.networkUpPerSecond)
+        data["displays.count"] = String(NSScreen.screens.count)
+        let clock = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: Date())
+        data["time.minuteOfDay"] = String((clock.hour ?? 0) * 60 + (clock.minute ?? 0))
+        data["ci.id"] = package.manifest.id
+        data["ci.name"] = package.manifest.name
+        data["ci.activation.kind"] = manualActivationID == package.manifest.id ? "manual" : "automatic"
+        return HaloCIContextCatalog.filter(data, sdkVersion: package.manifest.sdkVersion,
+            declaredPermissions: Set(package.manifest.permissions), grantedPermissions: grants)
     }
 
     func boolState(packageID: String, key: String, default defaultValue: Bool) -> Bool {
@@ -1399,11 +1426,16 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
 
     func perform(_ action: HaloCIActionDescriptor, package: HaloCIParsedPackage, workspace: WorkspaceStore, data: [String: String]) {
         let id = package.manifest.id
-        if let permission = HaloCISDK.permissionForAction(action.id), !hasPermission(id, permission) {
-            errorMessage = "\(package.manifest.name) needs \(permission) before it can perform \(action.id)."
+        guard let current = self.package(id: id), current.manifest == package.manifest,
+              HaloCIActionAuthorization.allows(action.id, enabled: isEnabled(id),
+                globallyDisabled: defaults.bool(forKey: "HaloDisableCustomCI"),
+                declaredPermissions: Set(current.manifest.permissions), grantedPermissions: grantedPermissions(id)) else {
+            errorMessage = "This Custom CI action is unavailable or its permission was revoked."
             return
         }
-        let value = HaloCIBindingResolver.resolve(action.value ?? action.arguments?["value"] ?? action.arguments?["url"] ?? "", data: data)
+        // Rebuild context at invocation so an old view cannot reuse revoked values.
+        let currentData = dataBus(for: current, workspace: workspace, expanded: data["halo.surface.isExpanded"] == "true")
+        let value = HaloCIBindingResolver.resolve(action.value ?? action.arguments?["value"] ?? action.arguments?["url"] ?? "", data: currentData)
         switch action.id {
         case "halo.ci.close": dismiss(id)
         case "clipboard.copy":
@@ -1418,7 +1450,9 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
             alert.informativeText = url.absoluteString
             alert.addButton(withTitle: "Open")
             alert.addButton(withTitle: "Cancel")
-            if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(url) }
+            if alert.runModal() == .alertFirstButtonReturn,
+               !defaults.bool(forKey: "HaloDisableCustomCI"), isEnabled(id), hasPermission(id, "URL.Open"),
+               self.package(id: id)?.manifest == current.manifest { NSWorkspace.shared.open(url) }
         case "media.playPause": workspace.media.perform("playpause", app: workspace.settings.mediaApp)
         case "media.next": workspace.media.perform("next track", app: workspace.settings.mediaApp)
         case "media.previous": workspace.media.perform("previous track", app: workspace.settings.mediaApp)
@@ -1445,7 +1479,9 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
             activeApplicationBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "",
             batteryLevel: workspace.system.battery.map(Double.init),
             charging: workspace.system.charging,
-            minuteOfDay: (components.hour ?? 0) * 60 + (components.minute ?? 0)
+            minuteOfDay: (components.hour ?? 0) * 60 + (components.minute ?? 0),
+            lowPowerMode: workspace.system.lowPower,
+            displayCount: NSScreen.screens.count
         )
     }
 

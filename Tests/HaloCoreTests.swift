@@ -1,3 +1,6 @@
+#if SWIFT_PACKAGE
+@testable import HaloCISDK
+#endif
 import XCTest
 #if SWIFT_PACKAGE
 @testable import HaloCore
@@ -660,7 +663,7 @@ final class HaloCoreTests: XCTestCase {
     private func customCIManifestJSON(permissions: [String] = []) -> String {
         let permissionJSON = permissions.map { "\"\($0)\"" }.joined(separator: ",")
         return """
-        {"schemaVersion":1,"sdkVersion":"0.1","id":"com.redstoneinvente.tests.hello","name":"Hello CI","author":"Tests","version":"1.0.0","minimumHaloVersion":"1.0.0","entryInterface":"interface.json","description":"Test package","permissions":[\(permissionJSON)],"capabilities":[],"supportedSurfaces":["notch"],"supportedStates":["closed","expanded"]}
+        {"schemaVersion":1,"sdkVersion":"0.1","id":"com.redstoneinvente.tests.hello","name":"Hello CI","author":"Tests","version":"1.0.0","minimumHaloVersion":"1.0.0","entryInterface":"interface.json","description":"Test package","permissions":[\(permissionJSON)],"capabilities":[],"supportedSurfaces":["notch"],"supportedStates":["closed","expanded"],"surface":{"sizing":{"mode":"static","closed":{"width":250,"height":40},"expanded":{"width":500,"height":220}},"background":{"closed":{"type":"solid","color":"#101010"},"expanded":{"type":"solid","color":"#101010"}}}}
         """
     }
 

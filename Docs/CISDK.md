@@ -1,5 +1,7 @@
 # Halo CI SDK — Authoritative Architecture and Implementation Instructions
 
+> **Custom CI V2 is implemented as SDK 0.2 / schema 1**, with SDK 0.1 compatibility. See [the V2 framework guide](CustomCI_V2.md) for the shared context catalog, new bindings/permissions/triggers, CLI starter and validator, tests and extension workflow. Earlier 0.1 examples below remain valid unless marked conceptual. The V2 guide defines the additive implemented contract.
+
 > **Status:** Canonical design specification for Halo Custom Interfaces (CI).
 >
 > **Audience:** Halo maintainers, contributors, coding agents, and future SDK/tooling authors.
