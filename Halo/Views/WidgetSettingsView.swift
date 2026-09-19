@@ -1771,10 +1771,10 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
                 Button {
                     HaloPixelPalSettingsWindowController.shared.show()
                 } label: {
-                    Label("Pixel Pet Settings…", systemImage: "slider.horizontal.3")
+                    Label("Pixel Pal Settings…", systemImage: "slider.horizontal.3")
                 }
                 .buttonStyle(.borderedProminent)
-                Text("Expressions, face style, accessories, animation and LED/background appearance are configured in Pixel Pet Settings.")
+                Text("Expressions, face style, accessories, animation and LED/background appearance are configured in Pixel Pal Settings.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
