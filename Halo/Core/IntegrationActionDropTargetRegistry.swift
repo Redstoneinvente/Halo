@@ -41,11 +41,15 @@ final class IntegrationActionDropTargetRegistry: ObservableObject {
 
     func unregister(sessionID: UUID, actionID: String) {
         guard var sessionTargets = targetsBySession[sessionID] else { return }
-        sessionTargets.removeValue(forKey: actionID)
+        let removed = sessionTargets.removeValue(forKey: actionID)
         if sessionTargets.isEmpty {
             targetsBySession.removeValue(forKey: sessionID)
         } else {
             targetsBySession[sessionID] = sessionTargets
+        }
+        if let removed,
+           hoveredActionByDisplay[removed.displayID] == actionID {
+            hoveredActionByDisplay.removeValue(forKey: removed.displayID)
         }
     }
 
@@ -59,7 +63,9 @@ final class IntegrationActionDropTargetRegistry: ObservableObject {
     }
 
     func clear(displayID: String) {
-        for (sessionID, targets) in targetsBySession {
+        let sessionIDs = Array(targetsBySession.keys)
+        for sessionID in sessionIDs {
+            guard let targets = targetsBySession[sessionID] else { continue }
             let remaining = targets.filter { $0.value.displayID != displayID }
             if remaining.isEmpty {
                 targetsBySession.removeValue(forKey: sessionID)
