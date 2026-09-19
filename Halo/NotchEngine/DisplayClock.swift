@@ -411,6 +411,7 @@ private enum HaloDropZoneLayoutResolver {
 private protocol HaloGlobalDropTarget: AnyObject {
     var dragStateHandler: ((Bool, Int) -> Void)? { get }
     var dropHandler: (([URL]) -> Void)? { get set }
+    var permitsGlobalDropCI: Bool { get }
 }
 
 extension HaloDropHostingView: HaloGlobalDropTarget {}
@@ -1067,7 +1068,7 @@ private final class HaloEmbeddedDropZoneController {
     private(set) var dropHandled = false
 
     func begin(target: any HaloGlobalDropTarget, itemCount: Int) {
-        guard haloDropCIEnabled else {
+        guard haloDropCIEnabled, target.permitsGlobalDropCI else {
             target.dragStateHandler?(false, 0)
             dismiss()
             return
@@ -1092,6 +1093,15 @@ private final class HaloEmbeddedDropZoneController {
         guard let view = target as? NSView else { return }
         targetView = view
 
+        // NSHostingView does not support arbitrary AppKit subviews. The Drop Zone host
+        // must be a sibling layered above the hosting view in their common superview.
+        // If that hierarchy is not available, fail closed rather than corrupting SwiftUI.
+        guard let overlayParent = view.superview else {
+            target.dragStateHandler?(false, 0)
+            dismiss()
+            return
+        }
+
         let host: HaloDropZoneHostView
         if let existing = hostView {
             host = existing
@@ -1102,15 +1112,15 @@ private final class HaloEmbeddedDropZoneController {
             host = created
         }
 
-        if host.superview !== view {
+        if host.superview !== overlayParent {
             host.removeFromSuperview()
-            host.frame = view.bounds
-            view.addSubview(host, positioned: .above, relativeTo: nil)
+            overlayParent.addSubview(host, positioned: .above, relativeTo: view)
         }
-        host.frame = view.bounds
+
+        // view.frame is already expressed in overlayParent coordinates.
+        host.frame = view.frame
         host.needsLayout = true
         host.layoutSubtreeIfNeeded()
-        view.addSubview(host, positioned: .above, relativeTo: nil)
     }
 
     func containsScreenPoint(_ point: NSPoint) -> Bool {
@@ -2132,6 +2142,10 @@ private final class HaloGlobalFileDragMonitor {
             deactivateForDisabledState()
             return
         }
+        if let activeTarget, !activeTarget.permitsGlobalDropCI {
+            deactivateForDisabledState()
+            return
+        }
         let leftButtonDown = (NSEvent.pressedMouseButtons & 1) != 0
         guard leftButtonDown else {
             if activeTarget != nil || sawMouseDrag { finishAfterDropOpportunity() }
@@ -2181,7 +2195,10 @@ private final class HaloGlobalFileDragMonitor {
             deactivateForDisabledState()
             return
         }
-        guard let target = targetForDrag(at: point) else { return }
+        guard let target = targetForDrag(at: point), target.permitsGlobalDropCI else {
+            deactivateForDisabledState()
+            return
+        }
         if let activeTarget, activeTarget !== target {
             activeTarget.dragStateHandler?(false, 0)
             HaloEmbeddedDropZoneController.shared.dismiss()
@@ -2193,13 +2210,19 @@ private final class HaloGlobalFileDragMonitor {
 
     private func targetForDrag(at point: NSPoint) -> (any HaloGlobalDropTarget)? {
         let panels = NSApp.windows.compactMap { $0 as? HaloPanel }
+
         if let panel = panels.first(where: { panel in
             guard let screen = panel.screen else { return false }
             return screen.frame.contains(point)
-        }), let target = panel.contentView as? any HaloGlobalDropTarget {
+        }),
+           let target = panel.contentView as? any HaloGlobalDropTarget,
+           target.permitsGlobalDropCI {
             return target
         }
-        return panels.compactMap { $0.contentView as? any HaloGlobalDropTarget }.first
+
+        return panels
+            .compactMap { $0.contentView as? any HaloGlobalDropTarget }
+            .first(where: { $0.permitsGlobalDropCI })
     }
 
     private func finishAfterDropOpportunity() {
