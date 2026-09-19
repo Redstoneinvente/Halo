@@ -2157,7 +2157,7 @@ enum HaloCIBindingResolver {
 enum HaloCIPackageValidator {
     private static let manifestKeys: Set<String> = [
         "schemaVersion", "sdkVersion", "id", "name", "author", "version", "minimumHaloVersion",
-        "entryInterface", "description", "permissions", "capabilities", "supportedSurfaces", "supportedStates", "surface"
+        "entryInterface", "description", "permissions", "capabilities", "supportedSurfaces", "supportedStates", "surface", "dismissBehavior"
     ]
     private static let surfaceKeys: Set<String> = ["sizing", "background"]
     private static let sizingKeys: Set<String> = ["mode", "closed", "expanded"]
