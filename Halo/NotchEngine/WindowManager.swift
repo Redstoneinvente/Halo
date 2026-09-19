@@ -215,6 +215,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     /// The callback receives URLs only at the privileged AppKit boundary; URLs are immediately
     /// moved into TriggerPayloadStore before any Custom CI/public context can observe them.
     var dragStateHandler: ((Bool, [URL]) -> Bool)?
+    var dragLocationHandler: ((CGPoint?) -> Void)?
     var dropHandler: (([URL]) -> Bool)?
 
     /// Commercial access remains the hard outer boundary for Halo's surface-wide drag source.
@@ -266,10 +267,17 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     private func rejectSurfaceDrag() {
+        dragLocationHandler?(nil)
         if surfaceDragActive {
+            dragLocationHandler?(nil)
             _ = dragStateHandler?(false, [])
             surfaceDragActive = false
         }
+    }
+
+    private func dragScreenPoint(_ sender: NSDraggingInfo) -> CGPoint? {
+        guard let window else { return nil }
+        return window.convertPoint(toScreen: sender.draggingLocation)
     }
 
     private func fileURLs(_ sender: NSDraggingInfo) -> [URL] {
@@ -291,17 +299,25 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
         // Classification/payload capture happens once on enter. draggingUpdated never rebuilds it.
         let claimed = dragStateHandler?(true, urls) ?? false
         surfaceDragActive = claimed
+        if claimed {
+            dragLocationHandler?(dragScreenPoint(sender))
+        }
         return claimed ? .copy : super.draggingEntered(sender)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard hasCommercialAccess else { rejectSurfaceDrag(); return [] }
-        return surfaceDragActive ? .copy : super.draggingUpdated(sender)
+        if surfaceDragActive {
+            dragLocationHandler?(dragScreenPoint(sender))
+            return .copy
+        }
+        return super.draggingUpdated(sender)
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
         guard hasCommercialAccess else { rejectSurfaceDrag(); return }
         if surfaceDragActive {
+            dragLocationHandler?(nil)
             _ = dragStateHandler?(false, [])
             surfaceDragActive = false
         } else {
@@ -317,6 +333,8 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             rejectSurfaceDrag()
             return false
         }
+        // Publish the exact release point before resolving the action target.
+        dragLocationHandler?(dragScreenPoint(sender))
         return dropHandler?(urls) ?? false
     }
 
@@ -1918,13 +1936,44 @@ final class WindowManager {
                     if shouldCollapse && !host.state.pinned { host.state.expanded = false }
                     return false
                 }
+                view.dragLocationHandler = { [weak host] screenPoint in
+                    guard host != nil else { return }
+                    _ = IntegrationCIRuntime.shared.updateFileDragLocation(
+                        displayID: id,
+                        screenPoint: screenPoint
+                    )
+                }
                 view.dropHandler = { [weak self, weak host] urls in
                     guard let self, let host, self.commercialAccessGranted else { return false }
                     let runtime = IntegrationCIRuntime.shared
 
                     if let winner = runtime.currentWinnerCIID(displayID: id),
                        host.state.activeCIIdentifier == winner {
-                        return runtime.commitFileDrag(displayID: id)
+                        guard let commit = runtime.commitFileDragAtHoveredAction(displayID: id) else {
+                            return false
+                        }
+
+                        if commit.shouldExecuteImmediately {
+                            Task { @MainActor [weak host] in
+                                guard let host else { return }
+                                do {
+                                    let shouldCollapse = try await runtime.executeAction(
+                                        ciID: commit.ciID,
+                                        actionID: commit.actionID,
+                                        activationSessionID: commit.activationSessionID,
+                                        options: [:],
+                                        parentWindow: host.panel,
+                                        pinned: host.state.pinned
+                                    )
+                                    if shouldCollapse && !host.state.pinned {
+                                        host.state.expanded = false
+                                    }
+                                } catch {
+                                    // IntegrationCIRuntime publishes the broker/transport error.
+                                }
+                            }
+                        }
+                        return true
                     }
 
                     if host.state.activeCIIdentifier == "builtin.drop", self.dropCISettingEnabled {
