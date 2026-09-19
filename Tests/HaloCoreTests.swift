@@ -144,8 +144,7 @@ final class HaloCoreTests: XCTestCase {
         )
         XCTAssertEqual(
             HaloPixelPalPowerAnimationTiming.duration(style: .none, direction: .up, speed: 1),
-            0,
-            accuracy: 0.0001
+            0
         )
         XCTAssertGreaterThan(
             HaloPixelPalPowerAnimationTiming.closeGateDelay(style: .sparkle, speed: 1),
@@ -665,8 +664,7 @@ final class HaloCoreTests: XCTestCase {
                 ciBehavior: .standard,
                 reason: .pointerExit
             ),
-            0.45,
-            accuracy: 0.0001
+            0.45
         )
         XCTAssertEqual(
             HaloDismissTimingPolicy.delay(
@@ -675,8 +673,7 @@ final class HaloCoreTests: XCTestCase {
                 ciBehavior: .transient,
                 reason: .pointerExit
             ),
-            0.28,
-            accuracy: 0.0001
+            0.28
         )
         XCTAssertEqual(
             HaloDismissTimingPolicy.delay(
@@ -685,8 +682,7 @@ final class HaloCoreTests: XCTestCase {
                 ciBehavior: .interactive,
                 reason: .pointerExit
             ),
-            0.68,
-            accuracy: 0.0001
+            0.68
         )
         XCTAssertNil(
             HaloDismissTimingPolicy.delay(
@@ -711,8 +707,7 @@ final class HaloCoreTests: XCTestCase {
                 ciBehavior: .standard,
                 reason: .pointerExit
             ),
-            1.5,
-            accuracy: 0.0001
+            1.5
         )
         XCTAssertEqual(
             HaloDismissTimingPolicy.delay(
@@ -721,8 +716,7 @@ final class HaloCoreTests: XCTestCase {
                 ciBehavior: .standard,
                 reason: .pointerExit
             ),
-            0.9,
-            accuracy: 0.0001
+            0.9
         )
         XCTAssertEqual(
             HaloDismissTimingPolicy.delay(
@@ -731,8 +725,7 @@ final class HaloCoreTests: XCTestCase {
                 ciBehavior: .interactive,
                 reason: .escapeKey
             ),
-            0,
-            accuracy: 0.0001
+            0
         )
     }
 
