@@ -1498,7 +1498,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     }
 }
 
-private enum ContextInterfaceSelection: String, Identifiable {
+private enum ContextInterfaceSelection: String, CaseIterable, Identifiable {
     case drop, music, teleprompter, transfer, clipboard, bluetooth, retro
     var id: String { rawValue }
 }
@@ -1508,6 +1508,8 @@ private struct ContextInterfaceLibraryView: View {
     @ObservedObject private var integrationRuntime = IntegrationCIRuntime.shared
     @State private var selection: ContextInterfaceSelection?
     @State private var selectedIntegrationID: String?
+    @State private var ciSearchText = ""
+    @AppStorage("HaloThirdPartyCISectionExpanded") private var thirdPartyExpanded = true
     @AppStorage("HaloContextDropEnabled") private var dropEnabled = true
     @AppStorage("HaloContextTransferEnabled") private var transferEnabled = true
     @AppStorage("HaloContextClipboardEnabled") private var clipboardEnabled = true
@@ -1515,6 +1517,21 @@ private struct ContextInterfaceLibraryView: View {
     @AppStorage("HaloContextRetroEnabled") private var retroEnabled = false
 
     private var musicEnabled: Bool { layout.contextMusic?.enabled ?? false }
+
+    private var normalizedSearchText: String {
+        ciSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var filteredIntegrations: [CIRegistration] {
+        guard !normalizedSearchText.isEmpty else { return integrationRuntime.registrations }
+        return integrationRuntime.registrations.filter { registration in
+            integrationMatchesSearch(registration)
+        }
+    }
+
+    private var hasBuiltInMatches: Bool {
+        ContextInterfaceSelection.allCases.contains { builtInMatchesSearch($0) }
+    }
 
     private var selectedIntegration: CIRegistration? {
         guard let selectedIntegrationID else { return nil }
@@ -1626,51 +1643,161 @@ private struct ContextInterfaceLibraryView: View {
             ContextRetroGameSettings()
         } else {
             Section {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("Context Notch Interfaces").font(.title2.bold())
-                    Text("CI changes what Halo becomes when the notch opens. Choose an interface to configure its content, behaviour and visual style.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Context Notch Interfaces").font(.title2.bold())
+                        Text("CI changes what Halo becomes when the notch opens. Choose an interface to configure its content, behaviour and visual style.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 9) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                        TextField("Search Context Interfaces", text: $ciSearchText)
+                            .textFieldStyle(.plain)
+
+                        if !ciSearchText.isEmpty {
+                            Button {
+                                ciSearchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Clear search")
+                        }
+                    }
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 9)
+                    .background(
+                        Color.primary.opacity(0.045),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    }
                 }
                 .padding(.vertical, 4)
             }
+            .onChange(of: ciSearchText) { _ in
+                if !normalizedSearchText.isEmpty && !filteredIntegrations.isEmpty {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        thirdPartyExpanded = true
+                    }
+                }
+            }
 
-            Section("Available CI") {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 14)], alignment: .leading, spacing: 14) {
-                    DropContextInterfaceCard(enabled: dropEnabled) {
-                        withAnimation(.easeInOut(duration: 0.18)) { selection = .drop }
-                    }
-                    ContextInterfaceCard(enabled: musicEnabled) {
-                        withAnimation(.easeInOut(duration: 0.18)) { selection = .music }
-                    }
-                    TeleprompterContextInterfaceCard {
-                        withAnimation(.easeInOut(duration: 0.18)) { selection = .teleprompter }
-                    }
-                    TransferContextInterfaceCard(enabled: transferEnabled) {
-                        withAnimation(.easeInOut(duration: 0.18)) { selection = .transfer }
-                    }
-                    ClipboardContextInterfaceCard(enabled: clipboardEnabled) {
-                        withAnimation(.easeInOut(duration: 0.18)) { selection = .clipboard }
-                    }
-                    BluetoothContextInterfaceCard(enabled: bluetoothEnabled) {
-                        withAnimation(.easeInOut(duration: 0.18)) { selection = .bluetooth }
-                    }
-                    RetroGameContextInterfaceCard(enabled: retroEnabled) {
-                        withAnimation(.easeInOut(duration: 0.18)) { selection = .retro }
-                    }
-                    ForEach(integrationRuntime.registrations) { registration in
-                        HaloAppIntegrationLibraryCard(registration: registration) {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                selection = nil
-                                selectedIntegrationID = registration.id
+            if hasBuiltInMatches {
+                Section("Halo Integrations") {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 14)], alignment: .leading, spacing: 14) {
+                        if builtInMatchesSearch(.drop) {
+                            DropContextInterfaceCard(enabled: dropEnabled) {
+                                withAnimation(.easeInOut(duration: 0.18)) { selection = .drop }
+                            }
+                        }
+                        if builtInMatchesSearch(.music) {
+                            ContextInterfaceCard(enabled: musicEnabled) {
+                                withAnimation(.easeInOut(duration: 0.18)) { selection = .music }
+                            }
+                        }
+                        if builtInMatchesSearch(.teleprompter) {
+                            TeleprompterContextInterfaceCard {
+                                withAnimation(.easeInOut(duration: 0.18)) { selection = .teleprompter }
+                            }
+                        }
+                        if builtInMatchesSearch(.transfer) {
+                            TransferContextInterfaceCard(enabled: transferEnabled) {
+                                withAnimation(.easeInOut(duration: 0.18)) { selection = .transfer }
+                            }
+                        }
+                        if builtInMatchesSearch(.clipboard) {
+                            ClipboardContextInterfaceCard(enabled: clipboardEnabled) {
+                                withAnimation(.easeInOut(duration: 0.18)) { selection = .clipboard }
+                            }
+                        }
+                        if builtInMatchesSearch(.bluetooth) {
+                            BluetoothContextInterfaceCard(enabled: bluetoothEnabled) {
+                                withAnimation(.easeInOut(duration: 0.18)) { selection = .bluetooth }
+                            }
+                        }
+                        if builtInMatchesSearch(.retro) {
+                            RetroGameContextInterfaceCard(enabled: retroEnabled) {
+                                withAnimation(.easeInOut(duration: 0.18)) { selection = .retro }
                             }
                         }
                     }
+                    .padding(.vertical, 6)
                 }
-                .padding(.vertical, 6)
             }
 
-            HaloAppIntegrationCISettingsSection()
+            Section {
+                DisclosureGroup(isExpanded: $thirdPartyExpanded) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Installed partner app integrations")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Refresh") { integrationRuntime.refresh() }
+                                .controlSize(.small)
+                        }
+
+                        if integrationRuntime.registrations.isEmpty {
+                            Label("No compatible 3rd party integrations discovered", systemImage: "app.dashed")
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 8)
+                        } else if filteredIntegrations.isEmpty {
+                            Label("No 3rd party integrations match “\(normalizedSearchText)”", systemImage: "magnifyingglass")
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 8)
+                        } else {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 14)], alignment: .leading, spacing: 14) {
+                                ForEach(filteredIntegrations) { registration in
+                                    HaloAppIntegrationLibraryCard(registration: registration) {
+                                        withAnimation(.easeInOut(duration: 0.18)) {
+                                            selection = nil
+                                            selectedIntegrationID = registration.id
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+
+                        if let error = integrationRuntime.lastError, !error.isEmpty {
+                            Label(error, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    HStack(spacing: 8) {
+                        Label("3rd Party Integrations", systemImage: "puzzlepiece.extension.fill")
+                            .font(.headline)
+                        Spacer()
+                        Text("\(filteredIntegrations.count)")
+                            .font(.caption2.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.primary.opacity(0.06), in: Capsule())
+                    }
+                }
+            }
+
+            if !normalizedSearchText.isEmpty && !hasBuiltInMatches && filteredIntegrations.isEmpty {
+                Section {
+                    ContentUnavailableView(
+                        "No Context Interfaces Found",
+                        systemImage: "magnifyingglass",
+                        description: Text("Try a different name, category, capability, or integration.")
+                    )
+                }
+            }
+
             HaloCustomCISettingsSection()
 
             Section {
@@ -1679,6 +1806,42 @@ private struct ContextInterfaceLibraryView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func builtInMatchesSearch(_ selection: ContextInterfaceSelection) -> Bool {
+        guard !normalizedSearchText.isEmpty else { return true }
+
+        let searchableText: String
+        switch selection {
+        case .drop:
+            searchableText = "Drop CI Files Folders drag drop zones file actions"
+        case .music:
+            searchableText = "Music CI Now Playing playback artwork controls lyrics visualizer audio"
+        case .teleprompter:
+            searchableText = "Teleprompter CI Creator Presentation scripts read record present camera"
+        case .transfer:
+            searchableText = "Transfer CI Downloads Uploads network transfer speed throughput"
+        case .clipboard:
+            searchableText = "Clipboard CI Copy Actions clipboard text links images files paste"
+        case .bluetooth:
+            searchableText = "Bluetooth CI devices accessories connection bluetooth"
+        case .retro:
+            searchableText = "Retro Game CI game controller pixel retro arcade"
+        }
+        return searchableText.localizedCaseInsensitiveContains(normalizedSearchText)
+    }
+
+    private func integrationMatchesSearch(_ registration: CIRegistration) -> Bool {
+        let searchableText = [
+            registration.metadata.name,
+            registration.metadata.author,
+            registration.metadata.description,
+            registration.presentation.cardCategory ?? "",
+            registration.presentation.cardDescription ?? "",
+            registration.supportedActions.map(\.name).joined(separator: " ")
+        ].joined(separator: " ")
+
+        return searchableText.localizedCaseInsensitiveContains(normalizedSearchText)
     }
 }
 
