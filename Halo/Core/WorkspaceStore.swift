@@ -589,21 +589,38 @@ final class SystemLiveActivitySource {
 
     private func scanNotificationCenter() {
         guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: notificationCenterBundleID).first else {
-            didSeedNotificationFingerprints = false
-            notificationFingerprints.removeAll()
+            // Treat "Notification Center is not currently exposing an AX app" as a valid
+            // empty baseline. Otherwise the first real banner that launches/exposes the
+            // process becomes the seed pass and is silently swallowed.
+            didSeedNotificationFingerprints = true
             return
         }
 
         let root = AXUIElementCreateApplication(app.processIdentifier)
-        let windows = axElements(root, attribute: kAXWindowsAttribute as CFString)
+
+        // AXWindows is recommended for application elements, not guaranteed. Notification
+        // banners can be exposed as top-level/visible children instead, depending on macOS
+        // version and presentation state. Scan all cheap top-level entry points and dedupe
+        // by the normalized content fingerprint.
+        var candidateRoots = axElements(root, attribute: kAXWindowsAttribute as CFString)
+        candidateRoots.append(contentsOf: axElements(root, attribute: kAXVisibleChildrenAttribute as CFString))
+        candidateRoots.append(contentsOf: axElements(root, attribute: kAXChildrenAttribute as CFString))
+        if candidateRoots.isEmpty {
+            candidateRoots = [root]
+        }
+
         var current = Set<String>()
         var candidates: [(fingerprint: String, strings: [String])] = []
+        var seenCandidates = Set<String>()
 
-        for window in windows.prefix(10) {
-            let snapshot = snapshot(of: window)
+        for candidateRoot in candidateRoots.prefix(32) {
+            let snapshot = snapshot(of: candidateRoot)
             let strings = normalizedNotificationStrings(snapshot.strings)
-            guard (2...12).contains(strings.count) else { continue }
+            guard (2...24).contains(strings.count) else { continue }
+
             let fingerprint = stableFingerprint(strings.joined(separator: "\u{1F}"))
+            guard seenCandidates.insert(fingerprint).inserted else { continue }
+
             current.insert(fingerprint)
             candidates.append((fingerprint, strings))
         }
