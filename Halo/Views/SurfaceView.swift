@@ -2185,7 +2185,7 @@ private struct ClipboardContextView: View {
 }
 
 private enum ActiveContextInterface: String {
-    case drop, teleprompter, transfer, clipboard, custom, music, bluetooth, retro
+    case integration, drop, teleprompter, transfer, clipboard, custom, music, bluetooth, retro
 }
 
 
@@ -2564,6 +2564,7 @@ struct SurfaceView: View {
     @ObservedObject private var transfer = TransferActivityMonitor.shared
     @ObservedObject private var clipboardCI = ClipboardContextMonitor.shared
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
+    @ObservedObject private var integrationCI = HaloIntegrationExecutionSession.shared
     @State private var clipboardOpenedNotch = false
     @State private var teleprompterActive = false
     @State private var visualWorkspaceSurfacePresented = false
@@ -2605,6 +2606,7 @@ struct SurfaceView: View {
     }
     private var builtInContextCandidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] {
         var candidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] = []
+        if integrationCI.isActive { candidates.append((.integration, 1200, 200)) }
         if dropCIEnabled && state.dropTargeted { candidates.append((.drop, dropPriority, 4)) }
         if retroCIEnabled && retroGameRequested { candidates.append((.retro, retroPriority, 4)) }
         if teleprompterCIEnabled && teleprompterActive { candidates.append((.teleprompter, teleprompterPriority, 3)) }
@@ -2627,6 +2629,7 @@ struct SurfaceView: View {
             return lhs.tieRank < rhs.tieRank
         }?.interface
     }
+    private var integrationContextActive: Bool { activeContext == .integration }
     private var dropContextActive: Bool { activeContext == .drop }
     private var contextMusicActive: Bool { activeContext == .music }
     private var bluetoothContextActive: Bool { activeContext == .bluetooth }
@@ -2638,6 +2641,7 @@ struct SurfaceView: View {
     private var contextOwnsFullSurface: Bool {
         guard state.expanded else { return false }
         switch activeContext {
+        case .integration: return true
         case .drop: return dropUsesFullNotchArea
         case .music: return contextMusicUsesFullNotchArea
         case .bluetooth: return bluetoothUsesFullNotchArea
@@ -2651,6 +2655,7 @@ struct SurfaceView: View {
     }
     private var keepsClosedContentsWhileExpanded: Bool {
         switch activeContext {
+        case .integration: return false
         case .drop: return dropKeepsClosedContents
         case .music: return contextMusicKeepsClosedContents
         case .bluetooth: return bluetoothKeepsClosedContents
@@ -2871,7 +2876,12 @@ struct SurfaceView: View {
 
             if contextOwnsFullSurface {
                 Group {
-                    if dropContextActive {
+                    if integrationContextActive {
+                        HaloIntegrationContextView(
+                            session: integrationCI,
+                            surfaceState: state
+                        )
+                    } else if dropContextActive {
                         DropContextView(itemCount: state.dropItemCount, surfaceState: state)
                     } else if contextMusicActive {
                         ContextMusicView(media: workspace.media, options: contextOptions,
@@ -2917,6 +2927,16 @@ struct SurfaceView: View {
             Button(state.pinned ? "Unpin" : "Keep open") { state.pinned.toggle() }
             Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
             ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
+        }
+        .onChange(of: integrationCI.invocation?.id) { invocationID in
+            state.collapseTask?.cancel()
+            if invocationID != nil {
+                state.expanded = true
+            } else {
+                state.contextPreferredSize = nil
+                state.contextMinimumExpandedWidth = nil
+                if !state.pinned { state.expanded = false }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { note in
             guard !disableCustomCI, let requestedID = note.object as? String else { return }
