@@ -1505,7 +1505,9 @@ private enum ContextInterfaceSelection: String, Identifiable {
 
 private struct ContextInterfaceLibraryView: View {
     @Binding var layout: WorkspaceLayout
+    @ObservedObject private var integrationRuntime = IntegrationCIRuntime.shared
     @State private var selection: ContextInterfaceSelection?
+    @State private var selectedIntegrationID: String?
     @AppStorage("HaloContextDropEnabled") private var dropEnabled = true
     @AppStorage("HaloContextTransferEnabled") private var transferEnabled = true
     @AppStorage("HaloContextClipboardEnabled") private var clipboardEnabled = true
@@ -1514,8 +1516,27 @@ private struct ContextInterfaceLibraryView: View {
 
     private var musicEnabled: Bool { layout.contextMusic?.enabled ?? false }
 
+    private var selectedIntegration: CIRegistration? {
+        guard let selectedIntegrationID else { return nil }
+        return integrationRuntime.registrations.first(where: { $0.id == selectedIntegrationID })
+    }
+
     @ViewBuilder var body: some View {
-        if selection == .drop {
+        if let registration = selectedIntegration {
+            Section {
+                HStack(spacing: 12) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) { selectedIntegrationID = nil }
+                    } label: {
+                        Label("All CI", systemImage: "chevron.left")
+                    }
+                    Spacer()
+                    Label(registration.metadata.name, systemImage: "app.connected.to.app.below.fill")
+                        .font(.headline)
+                }
+            }
+            HaloAppIntegrationCICard(registration: registration, initiallyExpanded: true)
+        } else if selection == .drop {
             Section {
                 HStack(spacing: 12) {
                     Button {
@@ -1636,6 +1657,14 @@ private struct ContextInterfaceLibraryView: View {
                     }
                     RetroGameContextInterfaceCard(enabled: retroEnabled) {
                         withAnimation(.easeInOut(duration: 0.18)) { selection = .retro }
+                    }
+                    ForEach(integrationRuntime.registrations) { registration in
+                        HaloAppIntegrationLibraryCard(registration: registration) {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                selection = nil
+                                selectedIntegrationID = registration.id
+                            }
+                        }
                     }
                 }
                 .padding(.vertical, 6)
