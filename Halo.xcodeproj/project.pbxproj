@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        C12000000000000000000001 /* CIContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C12000000000000000000003; };
+        C12000000000000000000002 /* CIContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C12000000000000000000003; };
 		0000000000000000000000C8 /* App/HaloApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000064 /* App/HaloApp.swift */; };
 		0000000000000000000000C9 /* Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000065 /* Core/Models.swift */; };
 		0000000000000000000000CA /* Core/AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000066 /* Core/AppStore.swift */; };
@@ -19,6 +21,9 @@
 		0000000000000000000000D1 /* Services/Integrations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006D /* Services/Integrations.swift */; };
 		0000000000000000000000D2 /* Services/CaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006E /* Services/CaptureService.swift */; };
 		0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006F /* Core/ExtensionContracts.swift */; };
+		A11C0F1A0000000000000401 /* Core/HaloIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000402 /* Core/HaloIntegration.swift */; };
+		A11C0F1A0000000000000410 /* Core/ContextProviderEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000411 /* Core/ContextProviderEngine.swift */; };
+		A11C0F1A0000000000000403 /* Core/HaloIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000402 /* Core/HaloIntegration.swift */; };
 		0000000000000000000000FA /* Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000065 /* Core/Models.swift */; };
 		0000000000000000000000FB /* Core/WorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006A /* Core/WorkspaceModels.swift */; };
 		0000000000000000000000FC /* Core/ExtensionContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006F /* Core/ExtensionContracts.swift */; };
@@ -67,6 +72,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+        C12000000000000000000003 /* CIContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SDK/Sources/HaloCISDK/CIContracts.swift; sourceTree = SOURCE_ROOT; };
 		000000000000000000000006 /* Halo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Halo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000015 /* HaloCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HaloCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000064 /* App/HaloApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/HaloApp.swift; sourceTree = "<group>"; };
@@ -81,6 +87,8 @@
 		00000000000000000000006D /* Services/Integrations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Integrations.swift; sourceTree = "<group>"; };
 		00000000000000000000006E /* Services/CaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CaptureService.swift; sourceTree = "<group>"; };
 		00000000000000000000006F /* Core/ExtensionContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/ExtensionContracts.swift; sourceTree = "<group>"; };
+		A11C0F1A0000000000000402 /* Core/HaloIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/HaloIntegration.swift; sourceTree = "<group>"; };
+		A11C0F1A0000000000000411 /* Core/ContextProviderEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/ContextProviderEngine.swift; sourceTree = "<group>"; };
 		000000000000000000000096 /* Tests/HaloCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/HaloCoreTests.swift; sourceTree = "<group>"; };
 		000000000000000000000097 /* Tests/LicenseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/LicenseTests.swift; sourceTree = "<group>"; };
 		00000000000000000000012C /* Docs */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Docs; sourceTree = "<group>"; };
@@ -216,6 +224,7 @@
 				000000000000000000000068 /* Views/SurfaceView.swift */,
 				000000000000000000000069 /* Views/WorkspaceSettingsView.swift */,
 				00000000000000000000006A /* Core/WorkspaceModels.swift */,
+                C12000000000000000000003 /* CIContracts.swift */,
 				00000000000000000000006B /* Core/WorkspaceStore.swift */,
 				00000000000000000000006C /* Views/ModuleViews.swift */,
 				A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */,
@@ -224,6 +233,8 @@
 				00000000000000000000006D /* Services/Integrations.swift */,
 				00000000000000000000006E /* Services/CaptureService.swift */,
 				00000000000000000000006F /* Core/ExtensionContracts.swift */,
+				A11C0F1A0000000000000402 /* Core/HaloIntegration.swift */,
+				A11C0F1A0000000000000411 /* Core/ContextProviderEngine.swift */,
 				F8614B60305322E600D4943C /* AppIcon 2.icns */,
 			);
 			path = Halo;
@@ -477,6 +488,7 @@
 				0000000000000000000000CC /* Views/SurfaceView.swift in Sources */,
 				0000000000000000000000CD /* Views/WorkspaceSettingsView.swift in Sources */,
 				0000000000000000000000CE /* Core/WorkspaceModels.swift in Sources */,
+                C12000000000000000000001 /* CIContracts.swift in Sources */,
 				0000000000000000000000CF /* Core/WorkspaceStore.swift in Sources */,
 				0000000000000000000000D0 /* Views/ModuleViews.swift in Sources */,
 				A11C0F1A0000000000000311 /* Views/VisualWorkspaceAdaptiveWidgets.swift in Sources */,
@@ -485,6 +497,8 @@
 				0000000000000000000000D1 /* Services/Integrations.swift in Sources */,
 				0000000000000000000000D2 /* Services/CaptureService.swift in Sources */,
 				0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */,
+				A11C0F1A0000000000000401 /* Core/HaloIntegration.swift in Sources */,
+				A11C0F1A0000000000000410 /* Core/ContextProviderEngine.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -497,6 +511,8 @@
 				0000000000000000000001A4 /* Core/SurfaceModels.swift in Sources */,
 				0000000000000000000000FA /* Core/Models.swift in Sources */,
 				0000000000000000000000FB /* Core/WorkspaceModels.swift in Sources */,
+                C12000000000000000000002 /* CIContracts.swift in Sources */,
+				A11C0F1A0000000000000403 /* Core/HaloIntegration.swift in Sources */,
 				0000000000000000000000FC /* Core/ExtensionContracts.swift in Sources */,
 				0000000000000000000000FD /* Tests/HaloCoreTests.swift in Sources */,
 				0000000000000000000000FE /* Tests/LicenseTests.swift in Sources */,

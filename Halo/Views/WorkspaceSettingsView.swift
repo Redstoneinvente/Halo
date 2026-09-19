@@ -1641,6 +1641,8 @@ private struct ContextInterfaceLibraryView: View {
                 .padding(.vertical, 6)
             }
 
+            HaloPartnerIntegrationSettingsSection()
+
             HaloCustomCISettingsSection()
 
             Section {
@@ -3254,6 +3256,235 @@ private struct HaloAccountLicenseSettingsView: View {
     }
 }
 
+
+private struct HaloPartnerIntegrationSettingsSection: View {
+    @ObservedObject private var catalog = HaloIntegrationCatalog.shared
+    @ObservedObject private var runtime = HaloCustomCIRuntimeStore.shared
+
+    var body: some View {
+        Section("App integrations") {
+            Toggle("Automatically create Custom CIs", isOn: Binding(
+                get: { runtime.autoIntegrationCIEnabled },
+                set: { runtime.setAutoIntegrationCIEnabled($0) }
+            ))
+            Text("When enabled, every compatible installed app gets a managed declarative Custom CI. Its actions still require the per-CI AppIntegration.Execute permission before Halo can send files or requests to another app.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Halo-enabled apps", systemImage: "app.connected.to.app.below.fill")
+                        .font(.headline)
+                    Text("Halo scans installed apps for Contents/Resources/HaloIntegration.json and reads the actions they expose.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if catalog.isRefreshing {
+                    ProgressView().controlSize(.small)
+                }
+                Button("Scan Again") { catalog.refresh() }
+                    .disabled(catalog.isRefreshing)
+            }
+
+            Text("Discovery is independent from Drop CI. A partner app only needs to bundle a valid HaloIntegration.json; it does not need to be running.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if !catalog.isRefreshing && catalog.integrations.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("No Halo app integrations found", systemImage: "shippingbox")
+                        .font(.headline)
+                    Text("An integrated app must include HaloIntegration.json in its Copy Bundle Resources build phase so the built app contains Contents/Resources/HaloIntegration.json.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 5)
+            }
+        }
+
+        if !catalog.integrations.isEmpty {
+            Section("Compatible apps") {
+                Label(
+                    "\(catalog.integrations.count) compatible app\(catalog.integrations.count == 1 ? "" : "s") found",
+                    systemImage: "checkmark.circle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.green)
+
+                Text("Each compatible app is represented by a managed Custom CI card below. Configure its functions, trigger behavior, priority and permissions from that card.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        if !catalog.diagnostics.isEmpty {
+            Section("App integration diagnostics") {
+                ForEach(Array(catalog.diagnostics.prefix(8)), id: \.self) { diagnostic in
+                    Label(diagnostic, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                if catalog.diagnostics.count > 8 {
+                    Text("+ \(catalog.diagnostics.count - 8) more")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+private struct HaloPartnerIntegrationCard: View {
+    let integration: HaloIntegration
+    @ObservedObject private var runtime = HaloCustomCIRuntimeStore.shared
+    @State private var hovered = false
+
+    private var generatedPackageID: String {
+        HaloAutoIntegrationCIGenerator.packageID(for: integration.bundleIdentifier)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "app.badge.checkmark")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 38, height: 38)
+                    .background(
+                        Color.accentColor.opacity(0.11),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(integration.manifest.name)
+                        .font(.headline)
+                    Text(integration.manifest.bundleIdentifier)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+
+                Spacer()
+
+                Text("\(integration.manifest.actions.count) action\(integration.manifest.actions.count == 1 ? "" : "s")")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(integration.appURL.path)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+
+            HStack(spacing: 8) {
+                if runtime.package(id: generatedPackageID) != nil {
+                    Label("Custom CI ready", systemImage: "rectangle.3.group.bubble.left.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                    Spacer()
+                    Button("Open CI") { runtime.requestManualActivation(generatedPackageID) }
+                        .controlSize(.small)
+                        .disabled(!runtime.isEnabled(generatedPackageID))
+                } else if runtime.autoIntegrationCIEnabled {
+                    Label("Custom CI will be generated on the next catalogue sync", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
+            ForEach(integration.manifest.actions) { action in
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(action.name)
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Text(action.id)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+
+                    HStack(spacing: 6) {
+                        Text("Files")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(action.supportedExtensions.isEmpty
+                             ? "none"
+                             : action.supportedExtensions.map { $0 == "*" ? "*" : ".\($0)" }.joined(separator: ", "))
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if action.options.isEmpty {
+                        Text("No request options")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(action.options) { option in
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(option.name)
+                                        .font(.caption)
+                                    Text(option.key)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                    Spacer(minLength: 8)
+                                    Text(option.type)
+                                        .font(.caption2.monospaced().weight(.semibold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(
+                                            Color.accentColor.opacity(0.10),
+                                            in: Capsule()
+                                        )
+                                    Text(option.required ? "required" : "optional")
+                                        .font(.caption2)
+                                        .foregroundStyle(option.required ? .primary : .secondary)
+                                }
+
+                                if let description = option.description,
+                                   !description.isEmpty {
+                                    Text(description)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.leading, 2)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(10)
+                .background(
+                    Color.primary.opacity(0.035),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+            }
+        }
+        .padding(13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color.primary.opacity(hovered ? 0.075 : 0.045),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(
+                    hovered ? Color.accentColor.opacity(0.38) : Color.primary.opacity(0.08),
+                    lineWidth: 1
+                )
+        )
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovered)
+    }
+}
+
+
 private struct HaloCustomCISettingsSection: View {
     @ObservedObject private var runtime = HaloCustomCIRuntimeStore.shared
     @AppStorage("HaloDisableCustomCI") private var disableCustomCI = false
@@ -3329,6 +3560,12 @@ private struct HaloCustomCIPackageCard: View {
 
     private var id: String { package.manifest.id }
     private var requested: [String] { runtime.requestedPermissions(package) }
+    private var integration: HaloIntegration? { runtime.integration(forPackageID: id) }
+    private var enabledIntegrationActionCount: Int {
+        integration?.manifest.actions.filter {
+            runtime.isIntegrationActionEnabled(packageID: id, actionID: $0.id)
+        }.count ?? 0
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -3339,7 +3576,16 @@ private struct HaloCustomCIPackageCard: View {
                     .frame(width: 38, height: 38)
                     .background(Color.accentColor.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(package.manifest.name).font(.headline).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(package.manifest.name).font(.headline).lineLimit(1)
+                        if runtime.isGeneratedIntegrationPackage(id) {
+                            Text("AUTO")
+                                .font(.system(size: 8, weight: .bold, design: .rounded))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Color.accentColor.opacity(0.14), in: Capsule())
+                        }
+                    }
                     Text("\(package.manifest.author) · v\(package.manifest.version)")
                         .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -3362,6 +3608,83 @@ private struct HaloCustomCIPackageCard: View {
                 .frame(maxWidth: 120)
                 Text("\(Int(runtime.priority(id)))").font(.caption.monospacedDigit()).frame(width: 28)
             }.font(.caption)
+
+            if let integration {
+                Divider()
+
+                HStack {
+                    Text("Functions")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Text("\(enabledIntegrationActionCount)/\(integration.manifest.actions.count) enabled")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(integration.manifest.actions) { action in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle(isOn: Binding(
+                                get: {
+                                    runtime.isIntegrationActionEnabled(
+                                        packageID: id,
+                                        actionID: action.id
+                                    )
+                                },
+                                set: {
+                                    runtime.setIntegrationActionEnabled(
+                                        $0,
+                                        packageID: id,
+                                        actionID: action.id
+                                    )
+                                }
+                            )) {
+                                HStack {
+                                    Text(action.name)
+                                        .font(.caption.weight(.semibold))
+                                    Spacer()
+                                    Text(action.id)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            HStack(spacing: 7) {
+                                Text(action.supportedExtensions.isEmpty
+                                     ? "No file input"
+                                     : action.supportedExtensions.map {
+                                         $0 == "*" ? "Any file" : ".\($0)"
+                                     }.joined(separator: ", "))
+                                if !action.options.isEmpty {
+                                    Text("·")
+                                    Text(action.options.map {
+                                        "\($0.name): \($0.type)\($0.required ? "*" : "")"
+                                    }.joined(separator: ", "))
+                                }
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 22)
+                        }
+                    }
+                }
+
+                if integration.manifest.triggers?.contains(where: { $0.type == "fileDrag" }) == true {
+                    Divider()
+                    Toggle(
+                        "Open when compatible files are dragged",
+                        isOn: Binding(
+                            get: { runtime.integrationAutomaticTriggersEnabled(id) },
+                            set: { runtime.setIntegrationAutomaticTriggersEnabled($0, packageID: id) }
+                        )
+                    )
+                    .font(.caption)
+
+                    Text("Halo opens this CI only when at least one enabled function accepts the dragged files. Disabled functions do not participate in trigger matching.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             if !requested.isEmpty {
                 Divider()
@@ -3389,8 +3712,14 @@ private struct HaloCustomCIPackageCard: View {
                 Spacer()
                 Text("Priority \(Int(runtime.priority(id)))")
                     .font(.caption2).foregroundStyle(.secondary)
-                Button("Remove", role: .destructive) { runtime.removePackage(id) }
-                    .controlSize(.small)
+                if runtime.isGeneratedIntegrationPackage(id) {
+                    Text("Managed from App integrations")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button("Remove", role: .destructive) { runtime.removePackage(id) }
+                        .controlSize(.small)
+                }
             }
         }
         .padding(13)

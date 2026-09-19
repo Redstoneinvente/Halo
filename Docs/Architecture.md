@@ -22,6 +22,8 @@ Theme import clamps finite numeric ranges, normalizes module order, strips asset
 
 ## Integrations
 
+`HaloIntegrationCatalog` discovers static `Contents/Resources/HaloIntegration.json` manifests from installed macOS apps and currently running developer builds. It validates protocol version, bundle identity, action IDs, option keys/types and manifest size. `HaloAutoIntegrationCIGenerator` consumes completed catalogue snapshots and synchronizes marked declarative `.haloCI` packages into the normal Custom CI install root. Generated packages are validated before replacement, never overwrite unmarked user packages, and use ordinary Custom CI enablement, priority, permission and surface arbitration. `app.integration.invoke` is a permissioned broker that re-reads the partner manifest at execution time and delivers only a temporary `.halorequest` plus user-selected files; it is not generic process execution. See `AppIntegrations.md` and `AutoIntegrationCI.md`.
+
 CalendarService uses EventKit and a version-gated access request. MediaService serializes fixed AppleScript commands with a five-second Apple-event timeout; it does not implement system-wide Now Playing. AudioService enumerates output streams and reads/writes the selected device's master volume only where supported. ClipboardService recognizes common concealed/transient markers and user app exclusions. SystemService reads installed memory, free storage, uptime and IOKit battery state; these are not CPU/GPU usage measurements.
 
 CaptureService invokes the system region-selection tool only after user action and screen-capture access; Vision text recognition runs off the main thread. Git status runs off-main with fixed arguments and no optional locks. It has no build/run/test execution interface.
@@ -42,6 +44,12 @@ SignedLicense verifies Ed25519 signatures through CryptoKit, product identity, s
 
 No executable-plugin isolation, universal media transport, shader editor, network monitoring, comprehensive gestures, unattended task execution, updater, or production performance guarantees. See ImplementationStatus.md for the complete handoff.
 
+## Custom CI context authority
+
+`HaloCIContextProviderEngine` is the only runtime authority for declarative Custom CI context snapshots. It reuses existing service/event sources, coalesces invalidations, performs file/folder classification off-main at drag/drop boundaries, and filters every snapshot through `HaloCIContextCatalog`. Renderers and action brokers do not assemble private context dictionaries. See `ContextProviderEngine.md`.
+
 ## Custom CI runtime path
 
 Third-party Context Interfaces use the declarative SDK in `Docs/CISDK.md`. `HaloCIPackageValidator` owns schema/security validation; `HaloCustomCIRuntimeStore` owns installed package preferences, permission grants, isolated local state and trigger eligibility; and `SurfaceView` feeds the winning package into a Halo-owned declarative renderer. Custom CI is a candidate in the existing Context Interface arbitration rather than a parallel window/surface architecture. The global `HaloDisableCustomCI` preference gates only third-party packages; built-in CIs are not routed through it.
+
+The V2 CI contract is extracted into `SDK/Sources/HaloCISDK/CIContracts.swift`, compiled by both the app and standalone SDK package. Its catalog centralizes version/type/permission metadata; runtime values remain supplied by existing Halo services. The `halo-ci` authoring CLI shares this validator. See `CustomCI_V2.md`.

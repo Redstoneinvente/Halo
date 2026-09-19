@@ -8,6 +8,8 @@ Imported manifests are stored as JSON in preferences. Reimporting the same ID re
 
 HaloModule/ModuleContext describe internal views. NotchCommand, LiveActivityProvider, AutomationTrigger and AutomationAction are source-level contracts, not a public binary ABI. WeatherProvider and AIActionProvider have no default implementation. External AI must not receive clipboard or screenshot content without a dedicated explicit user action showing destination and content.
 
+The SDK 0.2 `app.integration.invoke` action is not executable-plugin hosting: it can only target a currently installed app/action pair advertised by a validated `HaloIntegration.json`, and it delivers a bounded request through normal macOS app opening. It does not load the partner bundle into Halo.
+
 Before offering executable third-party plugins, implement a separate process/XPC host, versioned message schema, capability-based requests, time/memory limits, cancellation, code-signature policy, revocation and crash recovery. Do not replace the manifest loader with Bundle.load or arbitrary shell execution.
 
 Offline licenses use signed payload bytes, not re-encoded claims. SignedLicense verifies the original payload's signature with an explicitly supplied Curve25519 signing public key. Private keys belong only in an external issuance workflow.

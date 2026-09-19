@@ -1,5 +1,7 @@
 # Halo Context Interface (CI) Implementation Guide
 
+> **Required agent starting point:** follow the [Base CI template](Docs/Templates/BaseCI.md), fill its design record, and complete its verification matrix. Existing examples illustrate patterns; the template identifies the shared integration obligations and cleanup pitfalls.
+
 ## Purpose
 
 This document explains how to implement a built-in visual Context Interface in Halo without breaking notch ownership, sizing, priority arbitration, closed-notch rendering, or the surrounding WindowManager architecture.
@@ -675,6 +677,8 @@ Treat published geometry as state that should change only when its value genuine
 ---
 
 # 15. Cleanup must be ownership-aware
+
+> The size-comparison example below is a legacy heuristic. Equal dimensions do not establish ownership. New CIs must use the handoff rules in `Docs/Templates/BaseCI.md`, including stale callbacks and equal-size owners.
 
 Do not blindly clear shared CI geometry in onDisappear.
 

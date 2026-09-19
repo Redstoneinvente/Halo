@@ -1498,6 +1498,7 @@ private final class ClipboardContextMonitor: ObservableObject {
             } else {
                 writeToPasteboard(text)
             }
+            HaloCIContextProviderEngine.shared.reportClipboardCopy(textLength: text.count)
         default:
             break
         }
@@ -1777,6 +1778,7 @@ private final class ClipboardContextMonitor: ObservableObject {
             return
         }
 
+        HaloCIContextProviderEngine.shared.reportClipboardPaste(textLength: text.count)
         target.activate(options: [.activateIgnoringOtherApps])
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
             let source = CGEventSource(stateID: .combinedSessionState)
@@ -2564,6 +2566,8 @@ struct SurfaceView: View {
     @ObservedObject private var transfer = TransferActivityMonitor.shared
     @ObservedObject private var clipboardCI = ClipboardContextMonitor.shared
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
+    @ObservedObject private var integrationDrag = HaloIntegrationDragSession.shared
+    @State private var customCIAutoOpenedNotch = false
     @State private var clipboardOpenedNotch = false
     @State private var teleprompterActive = false
     @State private var visualWorkspaceSurfacePresented = false
@@ -2615,13 +2619,27 @@ struct SurfaceView: View {
         return candidates
     }
     private var highestBuiltInContextPriority: Double? { builtInContextCandidates.map { $0.priority }.max() }
+
+    private var surfaceDisplayID: String? {
+        NSScreen.screens
+            .first(where: { $0.frame.equalTo(state.screenFrame) })
+            .map(WindowManager.displayID)
+    }
+
     private var activeCustomCandidate: HaloCustomCICandidate? {
-        customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI,
-                                 blockingPriority: highestBuiltInContextPriority)
+        customCI.activeCandidate(
+            workspace: workspace,
+            globalDisabled: disableCustomCI,
+            blockingPriority: highestBuiltInContextPriority,
+            displayID: surfaceDisplayID
+        )
     }
     private var activeContext: ActiveContextInterface? {
         var candidates = builtInContextCandidates
-        if let custom = activeCustomCandidate { candidates.append((.custom, custom.priority, custom.manual ? 100 : 3)) }
+        if let custom = activeCustomCandidate {
+            let tieRank = custom.manual ? 100 : (custom.autoOpen ? 5 : 3)
+            candidates.append((.custom, custom.priority, tieRank))
+        }
         return candidates.max { lhs, rhs in
             if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
             return lhs.tieRank < rhs.tieRank
@@ -2635,6 +2653,42 @@ struct SurfaceView: View {
     private var transferContextActive: Bool { activeContext == .transfer }
     private var clipboardContextActive: Bool { activeContext == .clipboard }
     private var customContextActive: Bool { activeContext == .custom }
+
+    private var integrationDragOwnershipKey: String {
+        guard customContextActive,
+              let candidate = activeCustomCandidate,
+              candidate.autoOpen,
+              let displayID = surfaceDisplayID,
+              integrationDrag.isEligible(
+                packageID: candidate.package.manifest.id,
+                displayID: displayID
+              ) else {
+            return "none"
+        }
+        return displayID + "::" + candidate.package.manifest.id
+    }
+
+    private func publishStaticCustomCISizing(_ package: HaloCIParsedPackage) {
+        let sizing = package.manifest.surface.sizing
+        guard sizing.mode == "static" else { return }
+
+        let expandedRule = sizing.expanded
+        let expandedSize = CGSize(
+            width: expandedRule.width ?? 560,
+            height: expandedRule.height ?? 260
+        )
+        let closedSize = sizing.closed.map {
+            CGSize(width: $0.width ?? 190, height: $0.height ?? 40)
+        }
+
+        state.publishContextSizing(
+            owner: "custom:\(package.manifest.id)",
+            preferredSize: expandedSize,
+            compactWidth: closedSize?.width,
+            compactHeight: closedSize?.height,
+            minimumExpandedWidth: expandedSize.width
+        )
+    }
     private var contextOwnsFullSurface: Bool {
         guard state.expanded else { return false }
         switch activeContext {
@@ -2918,6 +2972,21 @@ struct SurfaceView: View {
             Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
             ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
         }
+        .onChange(of: integrationDragOwnershipKey) { key in
+            let candidate = activeCustomCandidate
+            let active = key != "none"
+
+            if let displayID = surfaceDisplayID {
+                integrationDrag.setSurfaceOwnership(
+                    packageID: active ? candidate?.package.manifest.id : nil,
+                    displayID: displayID
+                )
+            }
+
+            // Drag-session ownership is intentionally separate from surface
+            // presentation. Opening/closing is handled by the authoritative
+            // activeContext transition below, exactly like the built-in CIs.
+        }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { note in
             guard !disableCustomCI, let requestedID = note.object as? String else { return }
             guard customContextActive, activeCustomCandidate?.package.manifest.id == requestedID else {
@@ -2929,10 +2998,7 @@ struct SurfaceView: View {
             state.expanded = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCICloseRequested"))) { _ in
-            state.contextPreferredSize = nil
-            state.contextPreferredCompactWidth = nil
-            state.contextPreferredCompactHeight = nil
-            state.contextMinimumExpandedWidth = nil
+            state.clearAllContextSizing()
             if !state.pinned { state.expanded = false }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloClipboardCIToggle"))) { _ in
@@ -3101,12 +3167,14 @@ struct SurfaceView: View {
             } else if activeContext != nil {
                 visualWorkspaceSurfacePresented = false
             }
+
             let owns = teleprompterCIEnabled && teleprompterActive && activeContext == .teleprompter
             NotificationCenter.default.post(name: .init("HaloTeleprompterCIOwnershipChanged"), object: nil, userInfo: ["owns": owns])
             if owns {
                 state.collapseTask?.cancel()
                 if !state.pinned { state.expanded = false }
             }
+
             if clipboardContextActive {
                 state.contextMinimumExpandedWidth = ClipboardCISizing.minimumExpandedWidth(physicalNotchWidth: state.physicalNotchWidth)
                 state.contextPreferredCompactWidth = ClipboardCISizing.closedPreferredWidth(monitor: clipboardCI, physicalNotchWidth: state.physicalNotchWidth)
@@ -3120,13 +3188,53 @@ struct SurfaceView: View {
                 clipboardCI.setInteractionActive(false)
                 if activeContext != nil { clipboardOpenedNotch = false }
             }
+
+            if customContextActive,
+               let candidate = activeCustomCandidate,
+               candidate.autoOpen {
+                // This is the same ownership → presentation boundary used by the
+                // built-in Context Interfaces: the winning CI publishes geometry,
+                // cancels pending collapse work, and flips the shared SurfaceState.
+                publishStaticCustomCISizing(candidate.package)
+                state.cancelFileDrop()
+                state.dropExitTask?.cancel()
+                state.hoverExpandTask?.cancel()
+                state.collapseTask?.cancel()
+
+                if !state.expanded {
+                    customCIAutoOpenedNotch = true
+                    state.expanded = true
+                }
+
+                // The generated declarative view mounts after the state transition
+                // and republishes the same contract. Reassert once after the handoff
+                // so WindowManager sees the incoming CI size even if an outgoing
+                // context view disappears in the same transaction.
+                DispatchQueue.main.async {
+                    guard customContextActive,
+                          activeCustomCandidate?.package.manifest.id == candidate.package.manifest.id else {
+                        return
+                    }
+                    publishStaticCustomCISizing(candidate.package)
+                }
+            } else if customCIAutoOpenedNotch && !customContextActive {
+                customCIAutoOpenedNotch = false
+                if activeContext == nil, !state.pinned {
+                    state.expanded = false
+                }
+            }
+
             if !transferContextActive && !clipboardContextActive && !customContextActive {
                 state.contextPreferredCompactWidth = nil
                 state.contextPreferredCompactHeight = nil
                 state.contextMinimumExpandedWidth = nil
                 if activeContext != nil && !contextMusicActive { state.contextPreferredSize = nil }
             }
-            workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive), token: openVisibilityToken)
+
+            workspace.setOpenedNotchVisible(
+                state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive),
+                token: openVisibilityToken
+            )
         }
     }
 
@@ -4502,7 +4610,7 @@ private struct DropContextView: View {
             .task { publishPreferredSize() }
             .onChange(of: itemCount) { _ in publishPreferredSize() }
             .onChange(of: dropZones.configuration) { _ in publishPreferredSize() }
-            .onDisappear { surfaceState.contextPreferredSize = nil }
+            .onDisappear { surfaceState.clearContextSizing(owner: "drop") }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Drop CI background for \(count) item\(count == 1 ? "" : "s")")
     }
@@ -4510,9 +4618,13 @@ private struct DropContextView: View {
     private func publishPreferredSize() {
         let next = preferredSize
         DispatchQueue.main.async { [surfaceState] in
-            if let current = surfaceState.contextPreferredSize,
-               abs(current.width - next.width) < 1, abs(current.height - next.height) < 1 { return }
-            surfaceState.contextPreferredSize = next
+            surfaceState.publishContextSizing(
+                owner: "drop",
+                preferredSize: next,
+                compactWidth: surfaceState.contextPreferredCompactWidth,
+                compactHeight: surfaceState.contextPreferredCompactHeight,
+                minimumExpandedWidth: surfaceState.contextMinimumExpandedWidth
+            )
         }
     }
 }
@@ -4681,6 +4793,7 @@ struct BuiltinOrIntegrationWidget: View {
         .dropDestination(for: URL.self) { urls, _ in
             let files = urls.filter(\.isFileURL)
             guard !files.isEmpty else { return false }
+            HaloCIContextProviderEngine.shared.reportDrop(urls: files)
             store.addFiles(files)
             return true
         }
@@ -5678,6 +5791,9 @@ private struct HaloCustomCISurfaceView: View {
         .onAppear { publishSizing() }
         .onChange(of: expanded) { _ in publishSizing() }
         .onChange(of: runtime.contextRevision) { _ in publishSizing() }
+        .onDisappear {
+            surfaceState.clearContextSizing(owner: "custom:\(package.manifest.id)")
+        }
     }
 
     private func resolved(_ rule: HaloCISizeRule, measured: CGSize, closed: Bool) -> CGSize {
@@ -5695,18 +5811,19 @@ private struct HaloCustomCISurfaceView: View {
     private func publishSizing() {
         let sizing = package.manifest.surface.sizing
         let expandedSize = resolved(sizing.expanded, measured: measuredExpanded, closed: false)
-        surfaceState.contextMinimumExpandedWidth = sizing.mode == "dynamic"
+        let minimumExpandedWidth = sizing.mode == "dynamic"
             ? (sizing.expanded.minWidth ?? expandedSize.width)
             : expandedSize.width
-        surfaceState.contextPreferredSize = expandedSize
-        if let closed = sizing.closed {
-            let closedSize = resolved(closed, measured: measuredClosed, closed: true)
-            surfaceState.contextPreferredCompactWidth = closedSize.width
-            surfaceState.contextPreferredCompactHeight = closedSize.height
-        } else {
-            surfaceState.contextPreferredCompactWidth = nil
-            surfaceState.contextPreferredCompactHeight = nil
+        let closedSize = sizing.closed.map {
+            resolved($0, measured: measuredClosed, closed: true)
         }
+        surfaceState.publishContextSizing(
+            owner: "custom:\(package.manifest.id)",
+            preferredSize: expandedSize,
+            compactWidth: closedSize?.width,
+            compactHeight: closedSize?.height,
+            minimumExpandedWidth: minimumExpandedWidth
+        )
     }
 }
 
@@ -5758,6 +5875,13 @@ private struct HaloCustomCIComponentRenderer {
     let data: [String: String]
 
     func render(_ component: HaloCIComponent) -> AnyView {
+        guard runtime.shouldRenderIntegrationComponent(
+            packageID: package.manifest.id,
+            componentID: component.id
+        ) else {
+            return AnyView(EmptyView())
+        }
+
         let raw: AnyView
         switch component.type {
         case "Text":

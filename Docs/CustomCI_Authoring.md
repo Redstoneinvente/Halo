@@ -1,5 +1,7 @@
 # Halo Custom CI Authoring Guide
 
+> **Custom CI V2 is implemented as SDK 0.2 / schema 1**, with SDK 0.1 compatibility. See [the V2 framework guide](CustomCI_V2.md) for the shared context catalog, new bindings/permissions/triggers, CLI starter and validator, tests and extension workflow. Earlier 0.1 examples below remain valid unless marked conceptual. The V2 guide defines the additive implemented contract.
+
 This is the practical, copy-first guide for building third-party **Custom CIs** for Halo.
 
 If you only want to make a CI, start here. If you are changing the SDK/runtime itself, also read `Docs/CISDK.md`, `Docs/Architecture.md`, `Docs/Plugins.md`, and `AGENTS.md`.
@@ -645,6 +647,22 @@ Important rules:
 
 Authors should therefore design triggers as **eligibility**, not as an assumption of guaranteed presentation.
 
+SDK 0.2 also supports a `fileDrag` trigger:
+
+```json
+{
+  "type": "fileDrag",
+  "extensions": ["txt", "md"]
+}
+```
+
+It becomes eligible only while Halo has a background-classified **file-only** drag whose extensions are all accepted by the trigger. Folder drags do not match. `"*"` accepts any file extension. File-drag triggers require no additional permission because Halo exposes no paths and the user is directly dragging those items onto Halo.
+
+For generated app-integration CIs, partner developers normally declare the equivalent trigger in `HaloIntegration.json`; Halo writes the package `triggers.json` automatically.
+
+
+Custom CI bindings are supplied by Halo's centralized Context Provider Engine. SDK 0.2 includes bounded event metadata for recent drag/drop, clipboard, power, notification-provider and Bluetooth context in addition to the existing media/system/application fields. See [ContextProviderEngine.md](ContextProviderEngine.md) for the current context families and privacy/performance rules.
+
 Users can change each Custom CI's priority in Halo Settings.
 
 ---
@@ -661,7 +679,17 @@ Clipboard.Write
 URL.Open
 ```
 
-Declare only what you use.
+SDK 0.2 additionally supports:
+
+```text
+Audio.ReadState
+Clipboard.Observe
+Bluetooth.Observe
+Notifications.Observe
+AppIntegration.Execute
+```
+
+`AppIntegration.Execute` allows only the manifest-backed `app.integration.invoke` broker; it is not generic process execution. Declare only what you use.
 
 Examples:
 
@@ -687,7 +715,9 @@ AutomaticTriggers
 MediaControls
 ```
 
-Use them to describe what the package intends to use. Do not invent capability strings: unknown values are rejected.
+SDK 0.2 additionally supports `AppIntegrations` for packages that use the app-integration broker.
+
+Use capability labels to describe what the package intends to use. Do not invent capability strings: unknown values are rejected.
 
 ---
 
@@ -729,6 +759,33 @@ Permission requirements:
 | `media.previous` | `Media.Control` |
 
 Action `value` and string `arguments` can contain supported bindings.
+
+### SDK 0.2 app integration action
+
+SDK 0.2 adds:
+
+```text
+app.integration.invoke
+```
+
+It requires `AppIntegration.Execute` and the `bundleIdentifier` + `actionID` string arguments:
+
+```json
+{
+  "type": "Button",
+  "text": "Convert file",
+  "accessibilityLabel": "Convert file with Example Converter",
+  "action": {
+    "id": "app.integration.invoke",
+    "arguments": {
+      "bundleIdentifier": "com.example.converter",
+      "actionID": "convert.file"
+    }
+  }
+}
+```
+
+Halo revalidates the installed app's current `HaloIntegration.json` before execution. This action cannot target an arbitrary application command. See [Automatic App Integration Custom CIs](AutoIntegrationCI.md).
 
 ---
 

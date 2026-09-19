@@ -1,5 +1,7 @@
 # Halo CI SDK — Authoritative Architecture and Implementation Instructions
 
+> **Custom CI V2 is implemented as SDK 0.2 / schema 1**, with SDK 0.1 compatibility. See [the V2 framework guide](CustomCI_V2.md) for the shared context catalog, new bindings/permissions/triggers, CLI starter and validator, tests and extension workflow. Earlier 0.1 examples below remain valid unless marked conceptual. The V2 guide defines the additive implemented contract.
+
 > **Status:** Canonical design specification for Halo Custom Interfaces (CI).
 >
 > **Audience:** Halo maintainers, contributors, coding agents, and future SDK/tooling authors.
@@ -391,6 +393,8 @@ A single CI can support multiple contexts and adapt its UI accordingly.
 
 The context payload must be typed and bounded. Do not pass arbitrary internal service objects.
 
+`HaloCIContextProviderEngine` is the runtime authority for Custom CI context. Renderers and action brokers consume its filtered snapshots rather than assembling their own context dictionaries. Providers must be synchronous and side-effect free at snapshot time; event ingestion may prepare bounded state off-main when needed. See `Docs/ContextProviderEngine.md`.
+
 ## 10. Action system
 
 CIs invoke operations through a public, brokered action catalog.
@@ -410,6 +414,7 @@ clipboard.copy
 media.playPause
 media.next
 media.previous
+app.integration.invoke
 audio.volume.set
 shortcut.run
 file.openSelected
@@ -464,6 +469,7 @@ Media.Control
 Audio.ReadState
 Audio.Control
 Applications.Observe
+AppIntegration.Execute
 Bluetooth.Observe
 ScreenRecording.Observe
 Network.HTTP
@@ -1177,9 +1183,9 @@ Each package also has its own enable toggle, priority, permission grants, and is
 }
 ```
 
-Supported permissions: `Media.ReadState`, `Media.Control`, `Applications.Observe`, `Clipboard.Write`, `URL.Open`.
+Supported permissions: `Media.ReadState`, `Media.Control`, `Applications.Observe`, `Clipboard.Write`, `URL.Open`; SDK 0.2 additionally implements `Audio.ReadState`, `Clipboard.Observe`, `Bluetooth.Observe`, `Notifications.Observe`, and `AppIntegration.Execute`.
 
-Supported capability labels: `LocalAssets`, `LocalState`, `AutomaticTriggers`, `MediaControls`. Capabilities are descriptive; they never grant authority. Permissions remain explicit and revocable.
+Supported capability labels: `LocalAssets`, `LocalState`, `AutomaticTriggers`, `MediaControls`; SDK 0.2 additionally implements `AppIntegrations`. Capabilities are descriptive; they never grant authority. Permissions remain explicit and revocable.
 
 ### Interface document
 
@@ -1244,10 +1250,18 @@ SDK 0.1 button actions are inline descriptors. Supported actions are:
 - `media.playPause` — `Media.Control`
 - `media.next` — `Media.Control`
 - `media.previous` — `Media.Control`
+- SDK 0.2: `app.integration.invoke` — `AppIntegration.Execute`; requires `bundleIdentifier` and `actionID`, and resolves only against a currently validated installed `HaloIntegration.json`
 
-No action can launch a process, shell, script, dylib, arbitrary selector, or arbitrary AppKit/Swift call.
+`app.integration.invoke` is a manifest-backed broker, not a generic process launcher. No action can launch a shell, script, dylib, arbitrary selector, or arbitrary AppKit/Swift call.
 
+### Automatic app-integration CIs
+
+Halo may generate managed SDK 0.2 `.haloCI` packages from validated installed-app integration manifests. Generation must use the normal package validator, normal per-package preferences, normal priority arbitration, and the same action authorization boundary. Generated packages are identified by Halo-owned marker metadata and must never overwrite an unmarked user package.
+
+The authoritative implementation/partner guide is `Docs/AutoIntegrationCI.md`.
 ### Triggers
+
+SDK 0.2 includes `fileDrag`, backed by the Context Provider Engine. Its optional `extensions` array is normalized without leading dots. Matching requires an active classified file-only drag; folders do not match. Trigger evaluation never performs filesystem I/O.
 
 `triggers.json` is optional. Without automatic triggers a package can still be opened manually.
 

@@ -1,9 +1,402 @@
+#if SWIFT_PACKAGE
+@testable import HaloCISDK
+#endif
 import XCTest
 #if SWIFT_PACKAGE
 @testable import HaloCore
 #endif
 
 final class HaloCoreTests: XCTestCase {
+
+#if !SWIFT_PACKAGE
+    func testHaloIntegrationManifestAcceptsExistingProtocolV1Contract() throws {
+        let data = Data(#"""
+        {
+          "protocolVersion": 1,
+          "name": "Halo Integration Test",
+          "bundleIdentifier": "com.redstoneinvente.HaloIntegrationTest",
+          "actions": [
+            {
+              "id": "rename.file",
+              "name": "Rename File",
+              "supportedExtensions": ["txt"],
+              "options": [
+                {
+                  "key": "newName",
+                  "name": "New file name",
+                  "type": "string",
+                  "required": true,
+                  "description": "New file name"
+                },
+                {
+                  "key": "preserveExtension",
+                  "name": "Preserve extension",
+                  "type": "boolean",
+                  "required": false,
+                  "description": null
+                }
+              ]
+            }
+          ]
+        }
+        """#.utf8)
+
+        let manifest = try HaloIntegrationManifestCodec.decodeAndValidate(
+            data,
+            actualBundleIdentifier: "com.redstoneinvente.HaloIntegrationTest"
+        )
+
+        XCTAssertEqual(manifest.protocolVersion, 1)
+        XCTAssertEqual(manifest.actions.count, 1)
+        XCTAssertEqual(manifest.actions[0].id, "rename.file")
+        XCTAssertEqual(manifest.actions[0].options.map(\.type), ["string", "boolean"])
+    }
+
+    func testHaloIntegrationManifestRejectsBundleIdentifierMismatch() throws {
+        let data = Data(#"""
+        {
+          "protocolVersion": 1,
+          "name": "Example",
+          "bundleIdentifier": "com.example.claimed",
+          "actions": [
+            {
+              "id": "read.file",
+              "name": "Read",
+              "supportedExtensions": ["txt"],
+              "options": []
+            }
+          ]
+        }
+        """#.utf8)
+
+        XCTAssertThrowsError(
+            try HaloIntegrationManifestCodec.decodeAndValidate(
+                data,
+                actualBundleIdentifier: "com.example.actual"
+            )
+        ) { error in
+            guard let integrationError = error as? HaloIntegrationManifestError,
+                  case .bundleIdentifierMismatch = integrationError else {
+                return XCTFail("Expected bundleIdentifierMismatch, got \(error)")
+            }
+        }
+    }
+
+    func testHaloIntegrationManifestRejectsDuplicateActionsAndUnknownOptionTypes() throws {
+        let duplicateActions = HaloIntegrationManifest(
+            protocolVersion: 1,
+            name: "Example",
+            bundleIdentifier: "com.example.app",
+            actions: [
+                HaloIntegrationAction(id: "convert", name: "One", supportedExtensions: ["png"], options: []),
+                HaloIntegrationAction(id: "convert", name: "Two", supportedExtensions: ["jpg"], options: [])
+            ]
+        )
+
+        XCTAssertThrowsError(
+            try HaloIntegrationManifestCodec.validate(duplicateActions)
+        ) { error in
+            guard let integrationError = error as? HaloIntegrationManifestError,
+                  case .duplicateActionID = integrationError else {
+                return XCTFail("Expected duplicateActionID, got \(error)")
+            }
+        }
+
+        let unknownType = HaloIntegrationManifest(
+            protocolVersion: 1,
+            name: "Example",
+            bundleIdentifier: "com.example.app",
+            actions: [
+                HaloIntegrationAction(
+                    id: "convert",
+                    name: "Convert",
+                    supportedExtensions: ["png"],
+                    options: [
+                        HaloIntegrationOption(
+                            key: "mode",
+                            name: "Mode",
+                            type: "object",
+                            required: false,
+                            description: nil
+                        )
+                    ]
+                )
+            ]
+        )
+
+        XCTAssertThrowsError(
+            try HaloIntegrationManifestCodec.validate(unknownType)
+        ) { error in
+            guard let integrationError = error as? HaloIntegrationManifestError,
+                  case .unsupportedOptionType = integrationError else {
+                return XCTFail("Expected unsupportedOptionType, got \(error)")
+            }
+        }
+    }
+
+    func testHaloIntegrationManifestAcceptsFileDragTriggerAndRejectsUnsupportedExtension() throws {
+        let manifest = HaloIntegrationManifest(
+            protocolVersion: 1,
+            name: "Partner",
+            bundleIdentifier: "com.example.partner",
+            actions: [
+                HaloIntegrationAction(
+                    id: "read.text",
+                    name: "Read Text",
+                    supportedExtensions: ["txt"],
+                    options: []
+                )
+            ],
+            triggers: [
+                HaloIntegrationTrigger(type: "fileDrag", supportedExtensions: ["txt"])
+            ]
+        )
+        XCTAssertNoThrow(try HaloIntegrationManifestCodec.validate(manifest))
+
+        let invalid = HaloIntegrationManifest(
+            protocolVersion: 1,
+            name: "Partner",
+            bundleIdentifier: "com.example.partner",
+            actions: manifest.actions,
+            triggers: [
+                HaloIntegrationTrigger(type: "fileDrag", supportedExtensions: ["png"])
+            ]
+        )
+        XCTAssertThrowsError(try HaloIntegrationManifestCodec.validate(invalid)) { error in
+            guard let integrationError = error as? HaloIntegrationManifestError,
+                  case .triggerExtensionHasNoAction("png") = integrationError else {
+                return XCTFail("Expected triggerExtensionHasNoAction, got \(error)")
+            }
+        }
+    }
+
+    func testAutoIntegrationCIGeneratorCreatesValidatorApprovedPackage() throws {
+        let installRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HaloAutoCITests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: installRoot) }
+
+        let integration = HaloIntegration(
+            appURL: URL(fileURLWithPath: "/Applications/Partner.app"),
+            manifest: HaloIntegrationManifest(
+                protocolVersion: 1,
+                name: "Partner",
+                bundleIdentifier: "com.example.partner",
+                actions: [
+                    HaloIntegrationAction(
+                        id: "convert.file",
+                        name: "Convert File",
+                        supportedExtensions: ["txt"],
+                        options: [
+                            HaloIntegrationOption(
+                                key: "quality",
+                                name: "Quality",
+                                type: "integer",
+                                required: false,
+                                description: "Conversion quality"
+                            )
+                        ]
+                    )
+                ],
+                triggers: [
+                    HaloIntegrationTrigger(type: "fileDrag", supportedExtensions: ["txt"])
+                ]
+            )
+        )
+
+        let result = HaloAutoIntegrationCIGenerator.synchronize(
+            integrations: [integration],
+            installRoot: installRoot
+        )
+        XCTAssertTrue(result.changed)
+        XCTAssertTrue(result.diagnostics.isEmpty, result.diagnostics.joined(separator: "\n"))
+
+        let packageID = HaloAutoIntegrationCIGenerator.packageID(
+            for: integration.bundleIdentifier
+        )
+        let packageURL = installRoot
+            .appendingPathComponent(packageID)
+            .appendingPathExtension("haloCI")
+        let report = HaloCIPackageValidator.validatePackage(at: packageURL)
+
+        XCTAssertTrue(report.isValid, report.issues.map(\.message).joined(separator: "\n"))
+        XCTAssertEqual(report.package?.manifest.permissions, ["AppIntegration.Execute"])
+        XCTAssertEqual(report.package?.manifest.capabilities, ["AppIntegrations"])
+        XCTAssertTrue(HaloAutoIntegrationCIGenerator.isGeneratedPackage(at: packageURL))
+        XCTAssertEqual(report.package?.manifest.surface.sizing.mode, "static")
+        XCTAssertEqual(report.package?.manifest.surface.sizing.expanded.width, 580)
+        XCTAssertNotNil(report.package?.manifest.surface.sizing.expanded.height)
+
+        let interfaceData = try Data(contentsOf: packageURL.appendingPathComponent("interface.json"))
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: interfaceData) as? [String: Any]
+        )
+        let expanded = try XCTUnwrap(object["expanded"] as? [String: Any])
+        let expandedChildren = try XCTUnwrap(expanded["children"] as? [[String: Any]])
+        let scroll = try XCTUnwrap(
+            expandedChildren.first(where: { ($0["type"] as? String) == "ScrollView" })
+        )
+        let actionChildren = try XCTUnwrap(scroll["children"] as? [[String: Any]])
+        let functionGroup = try XCTUnwrap(
+            actionChildren.first(where: {
+                ($0["id"] as? String) == "halo.integration.action.convert.file"
+            })
+        )
+        XCTAssertEqual(functionGroup["type"] as? String, "VStack")
+        let functionChildren = try XCTUnwrap(functionGroup["children"] as? [[String: Any]])
+        let button = try XCTUnwrap(
+            functionChildren.first(where: { ($0["type"] as? String) == "Button" })
+        )
+        let action = try XCTUnwrap(button["action"] as? [String: Any])
+        XCTAssertEqual(action["id"] as? String, "app.integration.invoke")
+        let arguments = try XCTUnwrap(action["arguments"] as? [String: String])
+        XCTAssertEqual(arguments["bundleIdentifier"], "com.example.partner")
+        XCTAssertEqual(arguments["actionID"], "convert.file")
+
+        let triggerData = try Data(contentsOf: packageURL.appendingPathComponent("triggers.json"))
+        let triggerDocument = try JSONDecoder().decode(HaloCITriggerDocument.self, from: triggerData)
+        XCTAssertEqual(triggerDocument.triggers.count, 1)
+        XCTAssertEqual(triggerDocument.triggers.first?.type, "fileDrag")
+        XCTAssertEqual(triggerDocument.triggers.first?.extensions, ["txt"])
+    }
+
+    @MainActor
+    func testContextSizingOwnershipPreventsOutgoingCICleanupFromClobberingIncomingCI() {
+        let state = SurfaceState()
+
+        state.publishContextSizing(
+            owner: "drop",
+            preferredSize: CGSize(width: 680, height: 360),
+            compactWidth: nil,
+            compactHeight: nil,
+            minimumExpandedWidth: nil
+        )
+        XCTAssertEqual(state.contextPreferredSize, CGSize(width: 680, height: 360))
+
+        state.publishContextSizing(
+            owner: "custom:partner",
+            preferredSize: CGSize(width: 580, height: 318),
+            compactWidth: 280,
+            compactHeight: 42,
+            minimumExpandedWidth: 580
+        )
+
+        state.clearContextSizing(owner: "drop")
+
+        XCTAssertEqual(state.contextSizingOwner, "custom:partner")
+        XCTAssertEqual(state.contextPreferredSize, CGSize(width: 580, height: 318))
+        XCTAssertEqual(state.contextPreferredCompactWidth, 280)
+        XCTAssertEqual(state.contextPreferredCompactHeight, 42)
+        XCTAssertEqual(state.contextMinimumExpandedWidth, 580)
+
+        state.clearContextSizing(owner: "custom:partner")
+        XCTAssertNil(state.contextSizingOwner)
+        XCTAssertNil(state.contextPreferredSize)
+    }
+
+    @MainActor
+    func testIntegrationDragSessionTracksPackageCandidatesAndCommittedFiles() throws {
+        let session = HaloIntegrationDragSession.shared
+        session.clear()
+        defer { session.clear() }
+
+        let file = URL(fileURLWithPath: "/tmp/example.txt")
+        XCTAssertTrue(session.update(
+            candidates: [
+                "com.example.one": ["read.text", "rename.file"],
+                "com.example.two": ["inspect.text"]
+            ],
+            files: [file],
+            displayID: "display-1"
+        ))
+
+        XCTAssertTrue(session.isEligible(packageID: "com.example.one", displayID: "display-1"))
+        XCTAssertFalse(session.isEligible(packageID: "com.example.one", displayID: "display-2"))
+
+        session.setSurfaceOwnership(packageID: "com.example.one", displayID: "display-1")
+        XCTAssertTrue(session.ownsSurface(on: "display-1"))
+
+        XCTAssertTrue(session.commitDrop(files: [file], displayID: "display-1"))
+        XCTAssertEqual(
+            session.committedFiles(packageID: "com.example.one", actionID: "read.text"),
+            [file]
+        )
+        XCTAssertNil(
+            session.committedFiles(packageID: "com.example.two", actionID: "read.text")
+        )
+
+        session.removeCandidate(packageID: "com.example.two")
+        XCTAssertTrue(session.isEligible(packageID: "com.example.one", displayID: "display-1"))
+    }
+
+    func testAutoIntegrationCIGeneratorUpdatesAndRemovesOnlyManagedPackages() throws {
+        let installRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HaloAutoCITests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: installRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: installRoot) }
+
+        let manualURL = installRoot.appendingPathComponent("manual.haloCI", isDirectory: true)
+        try FileManager.default.createDirectory(at: manualURL, withIntermediateDirectories: true)
+        try Data("manual".utf8).write(to: manualURL.appendingPathComponent("keep.txt"))
+
+        let first = HaloIntegration(
+            appURL: URL(fileURLWithPath: "/Applications/Partner.app"),
+            manifest: HaloIntegrationManifest(
+                protocolVersion: 1,
+                name: "Partner",
+                bundleIdentifier: "com.example.partner",
+                actions: [
+                    HaloIntegrationAction(
+                        id: "read.file",
+                        name: "Read File",
+                        supportedExtensions: ["txt"],
+                        options: []
+                    )
+                ]
+            )
+        )
+
+        XCTAssertTrue(
+            HaloAutoIntegrationCIGenerator.synchronize(
+                integrations: [first],
+                installRoot: installRoot
+            ).changed
+        )
+
+        let updated = HaloIntegration(
+            appURL: first.appURL,
+            manifest: HaloIntegrationManifest(
+                protocolVersion: 1,
+                name: "Partner",
+                bundleIdentifier: "com.example.partner",
+                actions: first.manifest.actions + [
+                    HaloIntegrationAction(
+                        id: "rename.file",
+                        name: "Rename File",
+                        supportedExtensions: ["txt"],
+                        options: []
+                    )
+                ]
+            )
+        )
+
+        let updateResult = HaloAutoIntegrationCIGenerator.synchronize(
+            integrations: [updated],
+            installRoot: installRoot
+        )
+        XCTAssertTrue(updateResult.changed)
+        XCTAssertEqual(updateResult.installed.count, 1)
+
+        let removal = HaloAutoIntegrationCIGenerator.synchronize(
+            integrations: [],
+            installRoot: installRoot
+        )
+        XCTAssertTrue(removal.changed)
+        XCTAssertEqual(removal.removed.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: manualURL.path))
+    }
+
+#endif
+
     func testBluetoothDeviceSymbolsUseReportedClassForRenamedAccessories() {
         XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0540), "keyboard")
         XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0580), "computermouse")
@@ -660,7 +1053,7 @@ final class HaloCoreTests: XCTestCase {
     private func customCIManifestJSON(permissions: [String] = []) -> String {
         let permissionJSON = permissions.map { "\"\($0)\"" }.joined(separator: ",")
         return """
-        {"schemaVersion":1,"sdkVersion":"0.1","id":"com.redstoneinvente.tests.hello","name":"Hello CI","author":"Tests","version":"1.0.0","minimumHaloVersion":"1.0.0","entryInterface":"interface.json","description":"Test package","permissions":[\(permissionJSON)],"capabilities":[],"supportedSurfaces":["notch"],"supportedStates":["closed","expanded"]}
+        {"schemaVersion":1,"sdkVersion":"0.1","id":"com.redstoneinvente.tests.hello","name":"Hello CI","author":"Tests","version":"1.0.0","minimumHaloVersion":"1.0.0","entryInterface":"interface.json","description":"Test package","permissions":[\(permissionJSON)],"capabilities":[],"supportedSurfaces":["notch"],"supportedStates":["closed","expanded"],"surface":{"sizing":{"mode":"static","closed":{"width":250,"height":40},"expanded":{"width":500,"height":220}},"background":{"closed":{"type":"solid","color":"#101010"},"expanded":{"type":"solid","color":"#101010"}}}}
         """
     }
 

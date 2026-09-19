@@ -83,3 +83,8 @@ See Docs/Architecture.md and Docs/Plugins.md for extension contracts.
 - **Rendering:** dashboard layout stays at its final width during transitions; lazy widget creation, unchanged-state suppression and background disk/power sampling reduce main-thread work.
 
 See [Personalization.md](Docs/Personalization.md) for behavior and the Mac validation checklist. The pending nine visualizer styles and optional artwork colors are included in this update. Source and Swift grammar checks pass in the editing environment; macOS build/runtime performance remain unverified.
+## Custom CI V2 authoring
+
+Create and validate declarative notch interfaces with `swift run halo-ci init MyPanel.haloCI com.example.my-panel "My Panel"` and `swift run halo-ci validate MyPanel.haloCI`. See [the framework guide](Docs/CustomCI_V2.md). Run independent contract tests with `swift test --package-path SDK`.
+
+Halo also discovers capabilities exposed by installed partner apps through `Contents/Resources/HaloIntegration.json` and can automatically generate managed declarative Custom CIs for them. See [App Integration Discovery](Docs/AppIntegrations.md) and [Automatic App Integration Custom CIs](Docs/AutoIntegrationCI.md). Partner actions use the permissioned `app.integration.invoke` broker; third-party code is not loaded into Halo and CI ownership arbitration is unchanged.

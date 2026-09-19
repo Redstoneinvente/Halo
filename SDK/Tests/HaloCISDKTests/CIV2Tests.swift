@@ -1,0 +1,317 @@
+import XCTest
+@testable import HaloCISDK
+
+final class CIV2Tests: XCTestCase {
+    private func starter() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".haloCI")
+        _ = try HaloCIDeveloperTools.run(["init", url.path, "com.example.tests", "Test CI"])
+        return url
+    }
+    private func edit(_ root: URL, _ file: String, _ body: (inout [String: Any]) -> Void) throws {
+        let url = root.appendingPathComponent(file)
+        var value = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        body(&value)
+        try JSONSerialization.data(withJSONObject: value).write(to: url)
+    }
+    func testStarterUsesAppValidatorAndDoesNotOverwrite() throws {
+        let root = try starter()
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertTrue(try HaloCIDeveloperTools.run(["validate", root.path]).contains("SDK 0.2"))
+        let before = try Data(contentsOf: root.appendingPathComponent("manifest.json"))
+        XCTAssertThrowsError(try HaloCIDeveloperTools.run(["init", root.path, "other.id", "Other"]))
+        XCTAssertEqual(before, try Data(contentsOf: root.appendingPathComponent("manifest.json")))
+    }
+    func testInvalidStarterDoesNotLeaveDestination() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".haloCI")
+        XCTAssertThrowsError(try HaloCIDeveloperTools.run(["init", root.path, "invalid", "Test"]))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+    func testCatalogIsUniqueAndExportable() throws {
+        let fields = try JSONDecoder().decode([HaloCIContextField].self, from: Data(HaloCIDeveloperTools.run(["catalog"]).utf8))
+        XCTAssertEqual(fields, HaloCIContextCatalog.fields)
+        XCTAssertEqual(Set(fields.map(\.key)).count, fields.count)
+        XCTAssertTrue(fields.allSatisfy { ["boolean", "number", "string"].contains($0.type) })
+    }
+    func testContextProviderEngineFieldsAreCataloguedAndVersionGated() {
+        let keys = Set(HaloCIContextCatalog.fields.map(\.key))
+        for key in [
+            "context.event.kind",
+            "input.drag.active",
+            "input.drag.folderCount",
+            "input.drop.kind",
+            "clipboard.lastEvent",
+            "notification.last.kind",
+            "system.battery.onBattery",
+            "system.power.source",
+            "bluetooth.connectedCount"
+        ] {
+            XCTAssertTrue(keys.contains(key), key)
+        }
+
+        XCTAssertFalse(keys.contains("clipboard.text"))
+        XCTAssertFalse(keys.contains("input.drag.paths"))
+        XCTAssertFalse(keys.contains("notification.last.body"))
+
+        let publicValues = [
+            "context.event.kind": "drag.entered",
+            "input.drag.active": "true",
+            "input.drag.folderCount": "1"
+        ]
+
+        XCTAssertTrue(
+            HaloCIContextCatalog.filter(
+                publicValues,
+                sdkVersion: "0.1",
+                declaredPermissions: [],
+                grantedPermissions: []
+            ).isEmpty
+        )
+
+        XCTAssertEqual(
+            HaloCIContextCatalog.filter(
+                publicValues,
+                sdkVersion: "0.2",
+                declaredPermissions: [],
+                grantedPermissions: []
+            ),
+            publicValues
+        )
+
+        let privateValues = [
+            "clipboard.lastEvent": "copy",
+            "notification.last.kind": "received",
+            "bluetooth.connectedCount": "2"
+        ]
+        let permissions: Set<String> = [
+            "Clipboard.Observe", "Notifications.Observe", "Bluetooth.Observe"
+        ]
+
+        XCTAssertTrue(
+            HaloCIContextCatalog.filter(
+                privateValues,
+                sdkVersion: "0.2",
+                declaredPermissions: permissions,
+                grantedPermissions: []
+            ).isEmpty
+        )
+        XCTAssertEqual(
+            HaloCIContextCatalog.filter(
+                privateValues,
+                sdkVersion: "0.2",
+                declaredPermissions: permissions,
+                grantedPermissions: permissions
+            ),
+            privateValues
+        )
+    }
+
+    func testContextObservationPermissionsRequireSDK02() throws {
+        for permission in ["Clipboard.Observe", "Notifications.Observe", "Bluetooth.Observe"] {
+            let root = try starter()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            try edit(root, "manifest.json") {
+                $0["permissions"] = [permission]
+                $0["sdkVersion"] = "0.1"
+            }
+            XCTAssertFalse(
+                HaloCIPackageValidator.validatePackage(at: root).isValid,
+                permission
+            )
+        }
+    }
+
+    func testContextRequiresBothDeclaredAndGrantedPermission() {
+        let values = ["audio.volume": "0.5", "media.title": "Private", "displays.count": "2", "private.key": "secret"]
+        let declared: Set<String> = ["Media.ReadState", "Audio.ReadState"]
+        XCTAssertEqual(HaloCIContextCatalog.filter(values, sdkVersion: "0.2", declaredPermissions: declared, grantedPermissions: []), ["displays.count": "2"])
+        XCTAssertEqual(HaloCIContextCatalog.filter(values, sdkVersion: "0.2", declaredPermissions: [], grantedPermissions: declared), ["displays.count": "2"])
+        XCTAssertEqual(HaloCIContextCatalog.filter(values, sdkVersion: "0.2", declaredPermissions: declared, grantedPermissions: declared).count, 3)
+    }
+    func testVersionAndTypeFilteringFailClosed() {
+        let values = ["displays.count": "2", "system.cpu.usedPercent": "nan", "media.isPlaying": "yes", "media.title": "Song"]
+        XCTAssertEqual(HaloCIContextCatalog.filter(values, sdkVersion: "0.1", declaredPermissions: ["Media.ReadState"], grantedPermissions: ["Media.ReadState"]), ["media.title": "Song"])
+        XCTAssertTrue(HaloCIContextCatalog.filter(values, sdkVersion: "9.0", declaredPermissions: [], grantedPermissions: []).isEmpty)
+    }
+    func testMixedMalformedBindingIsRejected() throws {
+        XCTAssertFalse(HaloCIBindingResolver.isWellFormed("{{ media.title }} {{ arbitrary() }}"))
+        XCTAssertFalse(HaloCIBindingResolver.isWellFormed("hello }}"))
+        XCTAssertTrue(HaloCIBindingResolver.isWellFormed("😀 {{ media.title }}"))
+        let root = try starter()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try edit(root, "interface.json") { $0["expanded"] = ["type": "Text", "text": "{{ ci.name }} {{ eval() }}"] }
+        XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid)
+    }
+    func testNewBindingsRequireNewSDKAndPermissions() throws {
+        let root = try starter()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try edit(root, "interface.json") { $0["expanded"] = ["type": "Text", "text": "{{ audio.output.name }}"] }
+        XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid)
+        try edit(root, "manifest.json") { $0["permissions"] = ["Audio.ReadState"] }
+        XCTAssertTrue(HaloCIPackageValidator.validatePackage(at: root).isValid)
+        try edit(root, "manifest.json") { $0["sdkVersion"] = "0.1" }
+        XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid)
+    }
+    func testHiddenExecutableAndSymlinkRejected() throws {
+        let root = try starter()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let hidden = root.appendingPathComponent(".hidden.js")
+        try Data("bad".utf8).write(to: hidden)
+        XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid)
+        try FileManager.default.removeItem(at: hidden)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent(".hidden"), withDestinationURL: root.appendingPathComponent("manifest.json"))
+        XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid)
+    }
+    func testNewTriggersAndVersionGate() throws {
+        let root = try starter()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let triggers = #"{"match":"all","triggers":[{"type":"lowPowerMode","bool":true},{"type":"displayCount","number":2}]}"#
+        try Data(triggers.utf8).write(to: root.appendingPathComponent("triggers.json"))
+        let report = HaloCIPackageValidator.validatePackage(at: root)
+        XCTAssertTrue(report.isValid)
+        let doc = try XCTUnwrap(report.package?.triggers)
+        XCTAssertTrue(HaloCITriggerEvaluator.matches(doc, snapshot: .init(lowPowerMode: true, displayCount: 2), grantedPermissions: []))
+        XCTAssertFalse(HaloCITriggerEvaluator.matches(doc, snapshot: .init(lowPowerMode: false, displayCount: 2), grantedPermissions: []))
+        try edit(root, "manifest.json") { $0["sdkVersion"] = "0.1" }
+        XCTAssertTrue(HaloCIPackageValidator.validatePackage(at: root).issues.contains { $0.message.contains("trigger requires SDK 0.2") })
+        try edit(root, "manifest.json") { $0["sdkVersion"] = "0.2" }
+        for invalid in ["2.5", "true", "0", "65"] {
+            try Data(triggers.replacingOccurrences(of: "\"number\":2", with: "\"number\":\(invalid)").utf8).write(to: root.appendingPathComponent("triggers.json"))
+            XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid, invalid)
+        }
+    }
+    func testFileDragTriggerMatchesOnlyCompatibleFileDrags() throws {
+        let root = try starter()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let triggers = #"{"match":"any","triggers":[{"type":"fileDrag","extensions":["txt","md"]}]}"#
+        try Data(triggers.utf8).write(to: root.appendingPathComponent("triggers.json"))
+
+        let report = HaloCIPackageValidator.validatePackage(at: root)
+        XCTAssertTrue(report.isValid, report.issues.map(\.message).joined(separator: "\n"))
+
+        let document = try XCTUnwrap(report.package?.triggers)
+        XCTAssertTrue(HaloCITriggerEvaluator.matches(
+            document,
+            snapshot: .init(
+                fileDragActive: true,
+                fileDragFileCount: 2,
+                fileDragFolderCount: 0,
+                fileDragExtensions: ["txt", "md"]
+            ),
+            grantedPermissions: []
+        ))
+        XCTAssertFalse(HaloCITriggerEvaluator.matches(
+            document,
+            snapshot: .init(
+                fileDragActive: true,
+                fileDragFileCount: 1,
+                fileDragFolderCount: 0,
+                fileDragExtensions: ["png"]
+            ),
+            grantedPermissions: []
+        ))
+        XCTAssertFalse(HaloCITriggerEvaluator.matches(
+            document,
+            snapshot: .init(
+                fileDragActive: true,
+                fileDragFileCount: 1,
+                fileDragFolderCount: 1,
+                fileDragExtensions: ["txt"]
+            ),
+            grantedPermissions: []
+        ))
+        XCTAssertFalse(HaloCITriggerEvaluator.matches(
+            document,
+            snapshot: .init(
+                fileDragActive: false,
+                fileDragFileCount: 1,
+                fileDragFolderCount: 0,
+                fileDragExtensions: ["txt"]
+            ),
+            grantedPermissions: []
+        ))
+
+        try edit(root, "manifest.json") { $0["sdkVersion"] = "0.1" }
+        XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid)
+    }
+
+    func testAppIntegrationActionRequiresSDKPermissionAndArguments() throws {
+        let root = try starter()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try edit(root, "manifest.json") {
+            $0["permissions"] = ["AppIntegration.Execute"]
+            $0["capabilities"] = ["AppIntegrations"]
+        }
+        try edit(root, "interface.json") {
+            $0["expanded"] = [
+                "type": "Button",
+                "text": "Convert",
+                "accessibilityLabel": "Convert with partner app",
+                "action": [
+                    "id": "app.integration.invoke",
+                    "arguments": [
+                        "bundleIdentifier": "com.example.partner",
+                        "actionID": "convert.file"
+                    ]
+                ]
+            ]
+        }
+
+        XCTAssertTrue(
+            HaloCIPackageValidator.validatePackage(at: root).isValid,
+            HaloCIPackageValidator.validatePackage(at: root).issues.map(\.message).joined(separator: "\n")
+        )
+
+        try edit(root, "manifest.json") { $0["sdkVersion"] = "0.1" }
+        XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid)
+
+        try edit(root, "manifest.json") { $0["sdkVersion"] = "0.2" }
+        try edit(root, "interface.json") {
+            guard var expanded = $0["expanded"] as? [String: Any],
+                  var action = expanded["action"] as? [String: Any],
+                  var arguments = action["arguments"] as? [String: Any] else { return }
+            arguments.removeValue(forKey: "actionID")
+            action["arguments"] = arguments
+            expanded["action"] = action
+            $0["expanded"] = expanded
+        }
+        XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid)
+    }
+
+    func testAppIntegrationActionAuthorizationIsRevocable() {
+        let permission: Set<String> = ["AppIntegration.Execute"]
+        XCTAssertTrue(HaloCIActionAuthorization.allows(
+            "app.integration.invoke",
+            enabled: true,
+            globallyDisabled: false,
+            declaredPermissions: permission,
+            grantedPermissions: permission
+        ))
+        XCTAssertFalse(HaloCIActionAuthorization.allows(
+            "app.integration.invoke",
+            enabled: true,
+            globallyDisabled: false,
+            declaredPermissions: permission,
+            grantedPermissions: []
+        ))
+    }
+
+    func testActionsFailClosedAfterDisableOrRevocation() {
+        let permission: Set<String> = ["Clipboard.Write"]
+        XCTAssertTrue(HaloCIActionAuthorization.allows("clipboard.copy", enabled: true, globallyDisabled: false, declaredPermissions: permission, grantedPermissions: permission))
+        for (enabled, disabled, declared, granted) in [
+            (false, false, permission, permission), (true, true, permission, permission),
+            (true, false, Set<String>(), permission), (true, false, permission, Set<String>())
+        ] {
+            XCTAssertFalse(HaloCIActionAuthorization.allows("clipboard.copy", enabled: enabled, globallyDisabled: disabled, declaredPermissions: declared, grantedPermissions: granted))
+        }
+        XCTAssertFalse(HaloCIActionAuthorization.allows("shell.run", enabled: true, globallyDisabled: false, declaredPermissions: permission, grantedPermissions: permission))
+    }
+    func testLegacySampleStillValid() throws {
+        let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let report = HaloCIPackageValidator.validatePackage(at: repository.appendingPathComponent("Examples/HelloWorld.haloCI"))
+        XCTAssertTrue(report.isValid, report.issues.map(\.message).joined(separator: "\n"))
+    }
+}

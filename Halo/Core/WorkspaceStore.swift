@@ -370,6 +370,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     func publish(_ title: String, detail: String = "", progress: Double? = nil) {
         let activity = LiveActivity(title: title, detail: detail, progress: progress.map { min(1, max(0, $0)) })
         activities = [activity] + Array(activities.prefix(19))
+        HaloCIContextProviderEngine.shared.reportActivityPublished(source: "halo.activity")
     }
     func enableNotifications() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] _, error in
@@ -381,6 +382,9 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             guard status.authorizationStatus == .authorized else { return }
             let content = UNMutableNotificationContent(); content.title = title; content.sound = .default
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+            Task { @MainActor in
+                HaloCIContextProviderEngine.shared.reportNotificationSent(source: "halo.notification")
+            }
         }
     }
     func refreshApps() {
@@ -1103,6 +1107,7 @@ struct HaloCustomCICandidate {
     let package: HaloCIParsedPackage
     let priority: Double
     let manual: Bool
+    let autoOpen: Bool
 }
 
 private struct HaloCustomCIStoredState: Codable {
@@ -1113,7 +1118,10 @@ private struct HaloCustomCIStoredState: Codable {
 private struct HaloCustomCIPackagePreferences: Codable {
     var enabled = true
     var priority = 50.0
+    var priorityWasUserSet: Bool?
     var grantedPermissions: Set<String> = []
+    var disabledIntegrationActionIDs: Set<String>?
+    var integrationAutomaticTriggersEnabled: Bool?
     var state = HaloCustomCIStoredState()
 }
 
@@ -1123,6 +1131,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
 
     @Published private(set) var packages: [HaloCIParsedPackage] = []
     @Published private(set) var invalidPackages: [HaloCustomCIInvalidPackage] = []
+    @Published private(set) var generatedPackageIDs: Set<String> = []
     @Published private(set) var manualActivationID: String?
     @Published private(set) var contextRevision = 0
     @Published var notice: String?
@@ -1130,12 +1139,17 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
 
     private let defaults = UserDefaults.standard
     private let preferencesKey = "HaloCustomCI.packagePreferences.v1"
+    private let autoIntegrationCIKey = "HaloAutoIntegrationCIEnabled"
     private var preferences: [String: HaloCustomCIPackagePreferences] = [:]
     private var suppressedPackageIDs = Set<String>()
     private var subscriptions = Set<AnyCancellable>()
+    private var integrationSyncTask: Task<Void, Never>?
     private weak var workspace: WorkspaceStore?
 
     private init() {
+        if defaults.object(forKey: autoIntegrationCIKey) == nil {
+            defaults.set(true, forKey: autoIntegrationCIKey)
+        }
         if let data = defaults.data(forKey: preferencesKey),
            let saved = try? JSONDecoder().decode([String: HaloCustomCIPackagePreferences].self, from: data) {
             preferences = saved
@@ -1154,18 +1168,34 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         self.workspace = workspace
         subscriptions.removeAll()
 
-        workspace.media.$isPlaying.receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
-        workspace.system.$battery.receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
-        workspace.system.$charging.receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
-        workspace.$runningApps.receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
-        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
-            .receive(on: RunLoop.main).sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
-        Timer.publish(every: 60, on: .main, in: .common).autoconnect()
-            .sink { [weak self] _ in self?.contextDidChange() }.store(in: &subscriptions)
+        let contextEngine = HaloCIContextProviderEngine.shared
+        contextEngine.attach(to: workspace)
+        contextEngine.$revision
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.contextDidChange() }
+            .store(in: &subscriptions)
+
+        let integrationCatalog = HaloIntegrationCatalog.shared
+        Publishers.CombineLatest(
+            integrationCatalog.$integrations,
+            integrationCatalog.$hasCompletedRefresh
+        )
+        .filter { $0.1 }
+        .map { $0.0 }
+        .receive(on: RunLoop.main)
+        .sink { [weak self] integrations in
+            self?.synchronizeGeneratedIntegrationCIs(integrations)
+        }
+        .store(in: &subscriptions)
     }
 
     func detach() {
         subscriptions.removeAll()
+        integrationSyncTask?.cancel()
+        integrationSyncTask = nil
+        HaloCIContextProviderEngine.shared.detach()
         workspace = nil
         manualActivationID = nil
         suppressedPackageIDs.removeAll()
@@ -1193,6 +1223,31 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
                 }
                 return lhs.manifest.name.localizedCaseInsensitiveCompare(rhs.manifest.name) == .orderedAscending
             }
+            generatedPackageIDs = Set(valid.compactMap { package in
+                HaloAutoIntegrationCIGenerator.isGeneratedPackage(at: package.rootURL)
+                    ? package.manifest.id
+                    : nil
+            })
+
+            var initializedGeneratedPriority = false
+            for package in valid {
+                let id = package.manifest.id
+                guard generatedPackageIDs.contains(id),
+                      package.triggers.triggers.contains(where: { $0.type == "fileDrag" }) else {
+                    continue
+                }
+
+                var prefs = preferences[id] ?? HaloCustomCIPackagePreferences()
+                guard prefs.priorityWasUserSet != true else { continue }
+                if prefs.priority != 100 || preferences[id] == nil {
+                    prefs.priority = 100
+                    prefs.priorityWasUserSet = false
+                    preferences[id] = prefs
+                    initializedGeneratedPriority = true
+                }
+            }
+            if initializedGeneratedPriority { persistPreferences() }
+
             invalidPackages = invalid.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             if let manualActivationID, !packages.contains(where: { $0.manifest.id == manualActivationID }) { self.manualActivationID = nil }
             contextDidChange()
@@ -1265,9 +1320,214 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     }
 
     func package(id: String) -> HaloCIParsedPackage? { packages.first { $0.manifest.id == id } }
+    func isGeneratedIntegrationPackage(_ id: String) -> Bool { generatedPackageIDs.contains(id) }
+    var autoIntegrationCIEnabled: Bool { defaults.bool(forKey: autoIntegrationCIKey) }
+
+    func setAutoIntegrationCIEnabled(_ enabled: Bool) {
+        integrationSyncTask?.cancel()
+        integrationSyncTask = nil
+        defaults.set(enabled, forKey: autoIntegrationCIKey)
+        if enabled {
+            let catalog = HaloIntegrationCatalog.shared
+            if catalog.hasCompletedRefresh {
+                synchronizeGeneratedIntegrationCIs(catalog.integrations)
+            } else {
+                catalog.refresh()
+            }
+        } else {
+            let result = HaloAutoIntegrationCIGenerator.removeGeneratedPackages(at: installRoot)
+            if result.changed { reload() }
+            if !result.diagnostics.isEmpty {
+                errorMessage = result.diagnostics.joined(separator: "\n")
+            }
+        }
+        objectWillChange.send()
+    }
+
     func isEnabled(_ id: String) -> Bool { preferences[id]?.enabled ?? true }
     func priority(_ id: String) -> Double { min(100, max(0, preferences[id]?.priority ?? 50)) }
-    func grantedPermissions(_ id: String) -> Set<String> { preferences[id]?.grantedPermissions ?? [] }
+
+    func integration(forPackageID packageID: String) -> HaloIntegration? {
+        guard let package = package(id: packageID),
+              let metadata = HaloAutoIntegrationCIGenerator.metadata(at: package.rootURL) else {
+            return nil
+        }
+        return HaloIntegrationCatalog.shared.integrations.first {
+            $0.bundleIdentifier == metadata.bundleIdentifier
+        }
+    }
+
+    func isIntegrationActionEnabled(packageID: String, actionID: String) -> Bool {
+        !(preferences[packageID]?.disabledIntegrationActionIDs ?? []).contains(actionID)
+    }
+
+    func setIntegrationActionEnabled(
+        _ enabled: Bool,
+        packageID: String,
+        actionID: String
+    ) {
+        guard isGeneratedIntegrationPackage(packageID),
+              integration(forPackageID: packageID)?.manifest.actions.contains(where: { $0.id == actionID }) == true else {
+            return
+        }
+
+        mutatePreferences(packageID) { prefs in
+            var disabled = prefs.disabledIntegrationActionIDs ?? []
+            if enabled {
+                disabled.remove(actionID)
+            } else {
+                disabled.insert(actionID)
+            }
+            prefs.disabledIntegrationActionIDs = disabled
+        }
+
+        revalidateIntegrationDragSession()
+        contextDidChange()
+    }
+
+    func integrationAutomaticTriggersEnabled(_ packageID: String) -> Bool {
+        preferences[packageID]?.integrationAutomaticTriggersEnabled ?? true
+    }
+
+    func setIntegrationAutomaticTriggersEnabled(_ enabled: Bool, packageID: String) {
+        guard isGeneratedIntegrationPackage(packageID) else { return }
+        mutatePreferences(packageID) { $0.integrationAutomaticTriggersEnabled = enabled }
+        if !enabled {
+            HaloIntegrationDragSession.shared.removeCandidate(packageID: packageID)
+        }
+        contextDidChange()
+    }
+
+    func enabledIntegrationActions(packageID: String) -> [HaloIntegrationAction] {
+        guard let integration = integration(forPackageID: packageID) else { return [] }
+        let disabled = preferences[packageID]?.disabledIntegrationActionIDs ?? []
+        return integration.manifest.actions.filter { !disabled.contains($0.id) }
+    }
+
+    func shouldRenderIntegrationComponent(
+        packageID: String,
+        componentID: String?
+    ) -> Bool {
+        guard isGeneratedIntegrationPackage(packageID),
+              let componentID,
+              componentID.hasPrefix("halo.integration.action.") else {
+            return true
+        }
+        let actionID = String(componentID.dropFirst("halo.integration.action.".count))
+        return isIntegrationActionEnabled(packageID: packageID, actionID: actionID)
+    }
+
+    @discardableResult
+    func updateIntegrationDragSession(files: [URL], displayID: String) -> Bool {
+        let candidates = integrationDragCandidates(for: files)
+        return HaloIntegrationDragSession.shared.update(
+            candidates: candidates,
+            files: files,
+            displayID: displayID
+        )
+    }
+
+    func integrationDragOwnsSurface(on displayID: String) -> Bool {
+        HaloIntegrationDragSession.shared.ownsSurface(on: displayID)
+    }
+
+    @discardableResult
+    func commitIntegrationDrag(files: [URL], displayID: String) -> Bool {
+        HaloIntegrationDragSession.shared.commitDrop(files: files, displayID: displayID)
+    }
+
+    @discardableResult
+    func cancelIntegrationDrag(on displayID: String) -> Bool {
+        HaloIntegrationDragSession.shared.cancelUncommitted(on: displayID)
+    }
+
+    func integrationDragCandidatePackageID(on displayID: String?) -> String? {
+        guard let displayID else { return nil }
+        let session = HaloIntegrationDragSession.shared
+        return packages
+            .filter { package in
+                let id = package.manifest.id
+                return isGeneratedIntegrationPackage(id) &&
+                    isEnabled(id) &&
+                    integrationAutomaticTriggersEnabled(id) &&
+                    session.isEligible(packageID: id, displayID: displayID)
+            }
+            .sorted {
+                let lhs = priority($0.manifest.id)
+                let rhs = priority($1.manifest.id)
+                if lhs != rhs { return lhs > rhs }
+                return $0.manifest.id < $1.manifest.id
+            }
+            .first?
+            .manifest.id
+    }
+
+    private func revalidateIntegrationDragSession() {
+        let session = HaloIntegrationDragSession.shared
+        guard session.targetDisplayID != nil, !session.files.isEmpty else { return }
+        session.revalidate(candidates: integrationDragCandidates(for: session.files))
+    }
+
+    private func integrationDragCandidates(for files: [URL]) -> [String: Set<String>] {
+        let cleanFiles = files.filter(\.isFileURL)
+        guard !cleanFiles.isEmpty else { return [:] }
+
+        var result: [String: Set<String>] = [:]
+        for package in packages {
+            let packageID = package.manifest.id
+            guard isGeneratedIntegrationPackage(packageID),
+                  isEnabled(packageID),
+                  integrationAutomaticTriggersEnabled(packageID),
+                  !suppressedPackageIDs.contains(packageID),
+                  let integration = integration(forPackageID: packageID),
+                  integration.manifest.triggers?.contains(where: { $0.type == "fileDrag" }) == true,
+                  integrationFileDragTriggerAllows(integration, files: cleanFiles) else {
+                continue
+            }
+
+            let actionIDs = Set(
+                enabledIntegrationActions(packageID: packageID)
+                    .filter { HaloIntegrationCatalog.actionSupports($0, files: cleanFiles) }
+                    .map(\.id)
+            )
+            if !actionIDs.isEmpty {
+                result[packageID] = actionIDs
+            }
+        }
+        return result
+    }
+
+    private func integrationFileDragTriggerAllows(
+        _ integration: HaloIntegration,
+        files: [URL]
+    ) -> Bool {
+        guard files.allSatisfy({ !$0.hasDirectoryPath }) else { return false }
+        let fileExtensions = files.map {
+            $0.pathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        }
+
+        return (integration.manifest.triggers ?? []).contains { trigger in
+            guard trigger.type == "fileDrag" else { return false }
+            let rawAllowed = trigger.supportedExtensions ?? []
+            if rawAllowed.isEmpty { return true }
+
+            let allowed = Set(rawAllowed.map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            }.filter { !$0.isEmpty })
+
+            if allowed.contains("*") { return true }
+            return !fileExtensions.contains(where: { $0.isEmpty }) &&
+                Set(fileExtensions).isSubset(of: allowed)
+        }
+    }
+    func grantedPermissions(_ id: String) -> Set<String> {
+        guard let package = package(id: id) else { return [] }
+        return (preferences[id]?.grantedPermissions ?? []).intersection(package.manifest.permissions)
+    }
     func requestedPermissions(_ package: HaloCIParsedPackage) -> [String] {
         Array(Set(package.manifest.permissions)).sorted()
     }
@@ -1278,12 +1538,18 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         if !enabled {
             if manualActivationID == packageID { manualActivationID = nil }
             suppressedPackageIDs.remove(packageID)
+            if isGeneratedIntegrationPackage(packageID) {
+                HaloIntegrationDragSession.shared.removeCandidate(packageID: packageID)
+            }
         }
         contextDidChange()
     }
 
     func setPriority(_ priority: Double, packageID: String) {
-        mutatePreferences(packageID) { $0.priority = min(100, max(0, priority)) }
+        mutatePreferences(packageID) {
+            $0.priority = min(100, max(0, priority))
+            $0.priorityWasUserSet = true
+        }
         contextDidChange()
     }
 
@@ -1312,12 +1578,19 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     func dismiss(_ id: String) {
         if manualActivationID == id { manualActivationID = nil }
         suppressedPackageIDs.insert(id)
+        if isGeneratedIntegrationPackage(id) {
+            HaloIntegrationDragSession.shared.clear()
+        }
         contextRevision &+= 1
         NotificationCenter.default.post(name: .init("HaloCustomCICloseRequested"), object: id)
     }
 
-    func activeCandidate(workspace: WorkspaceStore, globalDisabled: Bool,
-                         blockingPriority: Double? = nil) -> HaloCustomCICandidate? {
+    func activeCandidate(
+        workspace: WorkspaceStore,
+        globalDisabled: Bool,
+        blockingPriority: Double? = nil,
+        displayID: String? = nil
+    ) -> HaloCustomCICandidate? {
         guard !globalDisabled else { return nil }
         let floor = blockingPriority ?? -Double.infinity
         let snapshot = triggerSnapshot(workspace: workspace)
@@ -1338,40 +1611,69 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         for package in ordered {
             let id = package.manifest.id
             if manualActivationID == id {
-                return HaloCustomCICandidate(package: package, priority: priority(id), manual: true)
+                return HaloCustomCICandidate(
+                    package: package,
+                    priority: priority(id),
+                    manual: true,
+                    autoOpen: false
+                )
             }
-            if HaloCITriggerEvaluator.matches(package.triggers, snapshot: snapshot,
-                                              grantedPermissions: grantedPermissions(id)) {
-                return HaloCustomCICandidate(package: package, priority: priority(id), manual: false)
+
+            if isGeneratedIntegrationPackage(id),
+               integrationAutomaticTriggersEnabled(id),
+               HaloIntegrationDragSession.shared.isEligible(
+                    packageID: id,
+                    displayID: displayID
+               ) {
+                return HaloCustomCICandidate(
+                    package: package,
+                    priority: priority(id),
+                    manual: false,
+                    autoOpen: true
+                )
+            }
+
+            // Generated app integrations use the dedicated drag session as the
+            // authoritative fileDrag trigger source so function enablement and
+            // the actual dragged URLs stay in sync. Avoid evaluating the static
+            // generated fileDrag trigger a second time through bounded context.
+            if isGeneratedIntegrationPackage(id),
+               package.triggers.triggers.contains(where: { $0.type == "fileDrag" }) {
+                continue
+            }
+
+            let granted = grantedPermissions(id)
+            if HaloCITriggerEvaluator.matches(
+                package.triggers,
+                snapshot: snapshot,
+                grantedPermissions: granted
+            ) {
+                let dragAutoOpen = package.triggers.triggers.contains {
+                    $0.type == "fileDrag" &&
+                    HaloCITriggerEvaluator.matches(
+                        $0,
+                        snapshot: snapshot,
+                        grantedPermissions: granted
+                    )
+                }
+                return HaloCustomCICandidate(
+                    package: package,
+                    priority: priority(id),
+                    manual: false,
+                    autoOpen: dragAutoOpen
+                )
             }
         }
         return nil
     }
 
     func dataBus(for package: HaloCIParsedPackage, workspace: WorkspaceStore, expanded: Bool) -> [String: String] {
-        let grants = grantedPermissions(package.manifest.id)
-        var data: [String: String] = [
-            "halo.surface.state": expanded ? "expanded" : "closed",
-            "halo.surface.isExpanded": expanded ? "true" : "false",
-            "system.battery.isCharging": workspace.system.charging ? "true" : "false",
-            "system.lowPowerMode": workspace.system.lowPower ? "true" : "false",
-            "system.cpu.usedPercent": format(workspace.system.cpuUsage),
-            "system.memory.usedPercent": format(workspace.system.memoryUsage),
-            "system.storage.usedPercent": format(workspace.system.diskUsage)
-        ]
-        if let battery = workspace.system.battery { data["system.battery.level"] = String(battery) }
-        if grants.contains("Media.ReadState") {
-            data["media.isPlaying"] = workspace.media.isPlaying ? "true" : "false"
-            data["media.title"] = workspace.media.title
-            data["media.artist"] = workspace.media.artist
-            data["media.album"] = workspace.media.album
-        }
-        if grants.contains("Applications.Observe") {
-            let app = NSWorkspace.shared.frontmostApplication
-            data["apps.active.bundleID"] = app?.bundleIdentifier ?? ""
-            data["apps.active.name"] = app?.localizedName ?? ""
-        }
-        return data
+        HaloCIContextProviderEngine.shared.snapshot(
+            package: package,
+            expanded: expanded,
+            activationKind: manualActivationID == package.manifest.id ? "manual" : "automatic",
+            grantedPermissions: grantedPermissions(package.manifest.id)
+        )
     }
 
     func boolState(packageID: String, key: String, default defaultValue: Bool) -> Bool {
@@ -1399,16 +1701,22 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
 
     func perform(_ action: HaloCIActionDescriptor, package: HaloCIParsedPackage, workspace: WorkspaceStore, data: [String: String]) {
         let id = package.manifest.id
-        if let permission = HaloCISDK.permissionForAction(action.id), !hasPermission(id, permission) {
-            errorMessage = "\(package.manifest.name) needs \(permission) before it can perform \(action.id)."
+        guard let current = self.package(id: id), current.manifest == package.manifest,
+              HaloCIActionAuthorization.allows(action.id, enabled: isEnabled(id),
+                globallyDisabled: defaults.bool(forKey: "HaloDisableCustomCI"),
+                declaredPermissions: Set(current.manifest.permissions), grantedPermissions: grantedPermissions(id)) else {
+            errorMessage = "This Custom CI action is unavailable or its permission was revoked."
             return
         }
-        let value = HaloCIBindingResolver.resolve(action.value ?? action.arguments?["value"] ?? action.arguments?["url"] ?? "", data: data)
+        // Rebuild context at invocation so an old view cannot reuse revoked values.
+        let currentData = dataBus(for: current, workspace: workspace, expanded: data["halo.surface.isExpanded"] == "true")
+        let value = HaloCIBindingResolver.resolve(action.value ?? action.arguments?["value"] ?? action.arguments?["url"] ?? "", data: currentData)
         switch action.id {
         case "halo.ci.close": dismiss(id)
         case "clipboard.copy":
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(value, forType: .string)
+            HaloCIContextProviderEngine.shared.reportClipboardCopy(textLength: value.count)
         case "url.open":
             guard let url = URL(string: value), let scheme = url.scheme?.lowercased(), ["https", "http", "mailto"].contains(scheme) else {
                 errorMessage = "Custom CI tried to open an unsupported URL."; return
@@ -1418,11 +1726,113 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
             alert.informativeText = url.absoluteString
             alert.addButton(withTitle: "Open")
             alert.addButton(withTitle: "Cancel")
-            if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(url) }
+            if alert.runModal() == .alertFirstButtonReturn,
+               !defaults.bool(forKey: "HaloDisableCustomCI"), isEnabled(id), hasPermission(id, "URL.Open"),
+               self.package(id: id)?.manifest == current.manifest { NSWorkspace.shared.open(url) }
         case "media.playPause": workspace.media.perform("playpause", app: workspace.settings.mediaApp)
         case "media.next": workspace.media.perform("next track", app: workspace.settings.mediaApp)
         case "media.previous": workspace.media.perform("previous track", app: workspace.settings.mediaApp)
+        case "app.integration.invoke":
+            let bundleIdentifier = HaloCIBindingResolver.resolve(
+                action.arguments?["bundleIdentifier"] ?? "",
+                data: currentData
+            )
+            let actionID = HaloCIBindingResolver.resolve(
+                action.arguments?["actionID"] ?? "",
+                data: currentData
+            )
+            guard !bundleIdentifier.isEmpty, !actionID.isEmpty else {
+                errorMessage = "The app integration action is missing its bundle identifier or action ID."
+                return
+            }
+            if isGeneratedIntegrationPackage(id),
+               !isIntegrationActionEnabled(packageID: id, actionID: actionID) {
+                errorMessage = "This integration function is disabled in the Custom CI settings."
+                return
+            }
+
+            do {
+                let catalog = HaloIntegrationCatalog.shared
+                let invocation = try catalog.freshInvocation(
+                    bundleIdentifier: bundleIdentifier,
+                    actionID: actionID
+                )
+
+                let draggedFiles = HaloIntegrationDragSession.shared.committedFiles(
+                    packageID: id,
+                    actionID: actionID
+                )
+                let files: [URL]
+                if let draggedFiles {
+                    guard HaloIntegrationCatalog.actionSupports(
+                        invocation.action,
+                        files: draggedFiles
+                    ) else {
+                        errorMessage = "The dropped files are no longer compatible with this function."
+                        return
+                    }
+                    files = draggedFiles
+                } else {
+                    guard let selected = HaloIntegrationFilePrompt.collect(
+                        for: invocation,
+                        parentWindow: NSApp.keyWindow ?? NSApp.mainWindow
+                    ) else { return }
+                    files = selected
+                }
+
+                guard let options = HaloIntegrationOptionPrompt.collect(
+                    for: invocation,
+                    parentWindow: NSApp.keyWindow ?? NSApp.mainWindow
+                ) else { return }
+
+                guard let refreshed = self.package(id: id),
+                      refreshed.manifest == current.manifest,
+                      HaloCIActionAuthorization.allows(
+                        action.id,
+                        enabled: isEnabled(id),
+                        globallyDisabled: defaults.bool(forKey: "HaloDisableCustomCI"),
+                        declaredPermissions: Set(refreshed.manifest.permissions),
+                        grantedPermissions: grantedPermissions(id)
+                      ) else {
+                    errorMessage = "This Custom CI action is unavailable or its permission was revoked."
+                    return
+                }
+
+                let freshInvocation = try catalog.freshInvocation(
+                    bundleIdentifier: bundleIdentifier,
+                    actionID: actionID
+                )
+                try catalog.invoke(freshInvocation, files: files, options: options)
+                if draggedFiles != nil {
+                    HaloIntegrationDragSession.shared.clear()
+                }
+                notice = "Sent \(freshInvocation.action.name) to \(freshInvocation.integration.name)."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         default: errorMessage = "Unsupported Custom CI action: \(action.id)"
+        }
+    }
+
+    private func synchronizeGeneratedIntegrationCIs(_ integrations: [HaloIntegration]) {
+        guard autoIntegrationCIEnabled else { return }
+        integrationSyncTask?.cancel()
+        let root = installRoot
+        integrationSyncTask = Task { [weak self] in
+            let result = await Task.detached(priority: .utility) {
+                HaloAutoIntegrationCIGenerator.synchronize(
+                    integrations: integrations,
+                    installRoot: root
+                )
+            }.value
+
+            guard !Task.isCancelled, let self, self.autoIntegrationCIEnabled else { return }
+            if result.changed {
+                self.reload()
+            }
+            if !result.diagnostics.isEmpty {
+                self.errorMessage = result.diagnostics.joined(separator: "\n")
+            }
         }
     }
 
@@ -1439,14 +1849,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     }
 
     private func triggerSnapshot(workspace: WorkspaceStore) -> HaloCITriggerSnapshot {
-        let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: Date())
-        return HaloCITriggerSnapshot(
-            mediaIsPlaying: workspace.media.isPlaying,
-            activeApplicationBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "",
-            batteryLevel: workspace.system.battery.map(Double.init),
-            charging: workspace.system.charging,
-            minuteOfDay: (components.hour ?? 0) * 60 + (components.minute ?? 0)
-        )
+        HaloCIContextProviderEngine.shared.triggerSnapshot(workspace: workspace)
     }
 
     private func mutatePreferences(_ id: String, _ body: (inout HaloCustomCIPackagePreferences) -> Void) {

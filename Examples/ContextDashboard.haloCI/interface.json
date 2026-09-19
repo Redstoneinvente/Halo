@@ -1,0 +1,47 @@
+{
+  "closed": {
+    "lineLimit": 1,
+    "padding": 8,
+    "text": "{{ ci.name }}",
+    "type": "Text"
+  },
+  "expanded": {
+    "children": [
+      {
+        "style": "headline",
+        "text": "{{ ci.name }}",
+        "type": "Text"
+      },
+      {
+        "type": "Text",
+        "text": "Thermal: {{ system.thermalState }}",
+        "style": "caption"
+      },
+      {
+        "type": "Text",
+        "text": "CPU: {{ system.cpu.usedPercent }}% \u00b7 Memory: {{ system.memory.usedPercent }}%",
+        "style": "caption"
+      },
+      {
+        "type": "Text",
+        "text": "Network \u2193 {{ system.network.downBytesPerSecond }} B/s \u2191 {{ system.network.upBytesPerSecond }} B/s",
+        "style": "caption"
+      },
+      {
+        "text": "Surface: {{ halo.surface.state }} \u00b7 Displays: {{ displays.count }}",
+        "type": "Text"
+      },
+      {
+        "accessibilityLabel": "Close interface",
+        "action": {
+          "id": "halo.ci.close"
+        },
+        "text": "Close",
+        "type": "Button"
+      }
+    ],
+    "padding": 18,
+    "spacing": 12,
+    "type": "NotchContainer"
+  }
+}

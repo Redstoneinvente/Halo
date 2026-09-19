@@ -1,0 +1,38 @@
+name: Validate Custom CI SDK
+on:
+  push:
+    branches: [main, codex/implementation-of-custom-ci-v2]
+    paths:
+      - 'SDK/**'
+      - 'Tools/HaloCI/**'
+      - 'Examples/**.haloCI/**'
+      - 'Package.swift'
+      - 'Halo/Core/WorkspaceStore.swift'
+      - '.github/workflows/validate-custom-ci-sdk.yml'
+  pull_request:
+    paths:
+      - 'SDK/**'
+      - 'Tools/HaloCI/**'
+      - 'Examples/**.haloCI/**'
+      - 'Package.swift'
+      - 'Halo/Core/WorkspaceStore.swift'
+      - '.github/workflows/validate-custom-ci-sdk.yml'
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test shared production contracts
+        run: swift test --package-path SDK
+      - name: Validate current and legacy examples
+        run: |
+          swift run halo-ci validate Examples/HelloWorld.haloCI
+          swift run halo-ci validate Examples/ContextDashboard.haloCI
+      - name: Exercise author workflow
+        run: |
+          swift run halo-ci init "$RUNNER_TEMP/Smoke.haloCI" com.example.smoke "Smoke Test"
+          swift run halo-ci validate "$RUNNER_TEMP/Smoke.haloCI"
+          swift run halo-ci catalog > "$RUNNER_TEMP/ci-context-catalog.json"
