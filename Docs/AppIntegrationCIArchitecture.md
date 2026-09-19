@@ -539,6 +539,8 @@ Example:
     }
   },
 
+  "dismissBehavior": "interactive",
+
   "actions": [
     {
       "id": "read.text",
@@ -603,6 +605,8 @@ Example:
 Actions own their input requirements.
 
 Partner card presentation is optional additive metadata. `bannerImage` is resolved only as a filename inside the discovered app's Resources directory; absolute paths, path traversal and remote artwork are not accepted. Recommended partner artwork is 1200 × 540 px with important content kept inside a centered 1040 × 420 px safe area. If artwork is absent or cannot be loaded, Halo renders a generated fallback card.
+
+`dismissBehavior` is optional and backward-compatible. Supported values are `transient`, `standard`, `interactive`, and `persistent`. If omitted, Halo derives `interactive` for a registration that exposes a file-drag trigger and otherwise uses `standard`. This metadata influences Smart Dismiss timing only; it does not grant surface ownership or permission to close Halo directly.
 
 A `fileDrag` trigger referencing actions derives compatibility from those actions instead of duplicating extensions in multiple places.
 
