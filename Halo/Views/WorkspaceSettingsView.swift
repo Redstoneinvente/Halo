@@ -1790,11 +1790,19 @@ private struct ContextInterfaceLibraryView: View {
 
             if !normalizedSearchText.isEmpty && !hasBuiltInMatches && filteredIntegrations.isEmpty {
                 Section {
-                    ContentUnavailableView(
-                        "No Context Interfaces Found",
-                        systemImage: "magnifyingglass",
-                        description: Text("Try a different name, category, capability, or integration.")
-                    )
+                    VStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 26, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text("No Context Interfaces Found")
+                            .font(.headline)
+                        Text("Try a different name, category, capability, or integration.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
                 }
             }
 
@@ -1833,6 +1841,7 @@ private struct ContextInterfaceLibraryView: View {
 
     private func integrationMatchesSearch(_ registration: CIRegistration) -> Bool {
         let searchableText = [
+            "3rd party third-party partner integration",
             registration.metadata.name,
             registration.metadata.author,
             registration.metadata.description,
