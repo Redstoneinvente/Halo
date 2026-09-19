@@ -2974,56 +2974,18 @@ struct SurfaceView: View {
         }
         .onChange(of: integrationDragOwnershipKey) { key in
             let candidate = activeCustomCandidate
-            let packageID = candidate?.package.manifest.id
             let active = key != "none"
 
             if let displayID = surfaceDisplayID {
                 integrationDrag.setSurfaceOwnership(
-                    packageID: active ? packageID : nil,
+                    packageID: active ? candidate?.package.manifest.id : nil,
                     displayID: displayID
                 )
             }
 
-            if active, let candidate {
-                // Publish the generated CI's static geometry before changing expanded
-                // state. WindowManager then opens directly to the requested CI size
-                // instead of first animating to the base/Drop geometry.
-                publishStaticCustomCISizing(candidate.package)
-
-                // App-specific integration CIs outrank generic Drop CI on the default
-                // equal-priority tie. Once ownership is known, clear Drop CI state so
-                // only the generated Custom CI controls the surface.
-                state.cancelFileDrop()
-                state.dropExitTask?.cancel()
-                state.collapseTask?.cancel()
-
-                if !state.expanded {
-                    customCIAutoOpenedNotch = true
-                    state.expanded = true
-                }
-
-                // The outgoing context view may run its onDisappear cleanup during this
-                // SwiftUI transaction. Reassert the new owner's static sizing on the
-                // next main-loop turn so old-CI cleanup cannot erase incoming geometry.
-                DispatchQueue.main.async {
-                    guard integrationDragOwnershipKey == key,
-                          let current = activeCustomCandidate,
-                          current.package.manifest.id == candidate.package.manifest.id else {
-                        return
-                    }
-                    publishStaticCustomCISizing(current.package)
-                }
-                return
-            }
-
-            guard customCIAutoOpenedNotch else { return }
-            customCIAutoOpenedNotch = false
-
-            // If another CI now owns Halo, it decides expansion. Collapse only when
-            // the integration trigger ended and no replacement owner needs the surface.
-            if activeContext == nil, !state.pinned {
-                state.expanded = false
-            }
+            // Drag-session ownership is intentionally separate from surface
+            // presentation. Opening/closing is handled by the authoritative
+            // activeContext transition below, exactly like the built-in CIs.
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { note in
             guard !disableCustomCI, let requestedID = note.object as? String else { return }
@@ -3205,12 +3167,14 @@ struct SurfaceView: View {
             } else if activeContext != nil {
                 visualWorkspaceSurfacePresented = false
             }
+
             let owns = teleprompterCIEnabled && teleprompterActive && activeContext == .teleprompter
             NotificationCenter.default.post(name: .init("HaloTeleprompterCIOwnershipChanged"), object: nil, userInfo: ["owns": owns])
             if owns {
                 state.collapseTask?.cancel()
                 if !state.pinned { state.expanded = false }
             }
+
             if clipboardContextActive {
                 state.contextMinimumExpandedWidth = ClipboardCISizing.minimumExpandedWidth(physicalNotchWidth: state.physicalNotchWidth)
                 state.contextPreferredCompactWidth = ClipboardCISizing.closedPreferredWidth(monitor: clipboardCI, physicalNotchWidth: state.physicalNotchWidth)
@@ -3224,13 +3188,53 @@ struct SurfaceView: View {
                 clipboardCI.setInteractionActive(false)
                 if activeContext != nil { clipboardOpenedNotch = false }
             }
+
+            if customContextActive,
+               let candidate = activeCustomCandidate,
+               candidate.autoOpen {
+                // This is the same ownership → presentation boundary used by the
+                // built-in Context Interfaces: the winning CI publishes geometry,
+                // cancels pending collapse work, and flips the shared SurfaceState.
+                publishStaticCustomCISizing(candidate.package)
+                state.cancelFileDrop()
+                state.dropExitTask?.cancel()
+                state.hoverExpandTask?.cancel()
+                state.collapseTask?.cancel()
+
+                if !state.expanded {
+                    customCIAutoOpenedNotch = true
+                    state.expanded = true
+                }
+
+                // The generated declarative view mounts after the state transition
+                // and republishes the same contract. Reassert once after the handoff
+                // so WindowManager sees the incoming CI size even if an outgoing
+                // context view disappears in the same transaction.
+                DispatchQueue.main.async {
+                    guard customContextActive,
+                          activeCustomCandidate?.package.manifest.id == candidate.package.manifest.id else {
+                        return
+                    }
+                    publishStaticCustomCISizing(candidate.package)
+                }
+            } else if customCIAutoOpenedNotch && !customContextActive {
+                customCIAutoOpenedNotch = false
+                if activeContext == nil, !state.pinned {
+                    state.expanded = false
+                }
+            }
+
             if !transferContextActive && !clipboardContextActive && !customContextActive {
                 state.contextPreferredCompactWidth = nil
                 state.contextPreferredCompactHeight = nil
                 state.contextMinimumExpandedWidth = nil
                 if activeContext != nil && !contextMusicActive { state.contextPreferredSize = nil }
             }
-            workspace.setOpenedNotchVisible(state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive), token: openVisibilityToken)
+
+            workspace.setOpenedNotchVisible(
+                state.expanded && (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive),
+                token: openVisibilityToken
+            )
         }
     }
 
