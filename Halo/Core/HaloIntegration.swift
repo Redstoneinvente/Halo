@@ -567,8 +567,10 @@ final class HaloIntegrationExecutionSession: ObservableObject {
             return
         }
 
-        let signature = cleanFiles.map(\.path).sorted().joined(separator: "\n")
-            + "\n--\n"
+        let signature = displayID
+            + "\n--files--\n"
+            + cleanFiles.map(\.path).sorted().joined(separator: "\n")
+            + "\n--actions--\n"
             + uniqueCandidates.map(\.id).sorted().joined(separator: "\n")
 
         // The global drag monitor polls frequently. Do not reset the chooser
