@@ -2566,6 +2566,7 @@ struct SurfaceView: View {
     @ObservedObject private var transfer = TransferActivityMonitor.shared
     @ObservedObject private var clipboardCI = ClipboardContextMonitor.shared
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
+    @ObservedObject private var integrationDrag = HaloIntegrationDragSession.shared
     @State private var customCIAutoOpenedNotch = false
     @State private var clipboardOpenedNotch = false
     @State private var teleprompterActive = false
@@ -2618,9 +2619,20 @@ struct SurfaceView: View {
         return candidates
     }
     private var highestBuiltInContextPriority: Double? { builtInContextCandidates.map { $0.priority }.max() }
+
+    private var surfaceDisplayID: String? {
+        NSScreen.screens
+            .first(where: { $0.frame.equalTo(state.screenFrame) })
+            .map(WindowManager.displayID)
+    }
+
     private var activeCustomCandidate: HaloCustomCICandidate? {
-        customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI,
-                                 blockingPriority: highestBuiltInContextPriority)
+        customCI.activeCandidate(
+            workspace: workspace,
+            globalDisabled: disableCustomCI,
+            blockingPriority: highestBuiltInContextPriority,
+            displayID: surfaceDisplayID
+        )
     }
     private var activeContext: ActiveContextInterface? {
         var candidates = builtInContextCandidates
@@ -2641,6 +2653,20 @@ struct SurfaceView: View {
     private var transferContextActive: Bool { activeContext == .transfer }
     private var clipboardContextActive: Bool { activeContext == .clipboard }
     private var customContextActive: Bool { activeContext == .custom }
+
+    private var integrationDragOwnershipKey: String {
+        guard customContextActive,
+              let candidate = activeCustomCandidate,
+              candidate.autoOpen,
+              let displayID = surfaceDisplayID,
+              integrationDrag.isEligible(
+                packageID: candidate.package.manifest.id,
+                displayID: displayID
+              ) else {
+            return "none"
+        }
+        return displayID + "::" + candidate.package.manifest.id
+    }
     private var contextOwnsFullSurface: Bool {
         guard state.expanded else { return false }
         switch activeContext {
@@ -2924,32 +2950,39 @@ struct SurfaceView: View {
             Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
             ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
         }
-        .onChange(of: customCI.contextRevision) { _ in
-            // Context revisions are published from the provider engine before SwiftUI
-            // necessarily finishes recomputing every derived arbitration property.
-            // Reconcile on the next main-loop turn so expansion uses the new trigger
-            // snapshot, not the previous render pass.
-            DispatchQueue.main.async {
-                let candidate = activeCustomCandidate
-                let shouldAutoOpen = customContextActive && candidate?.autoOpen == true
+        .onChange(of: integrationDragOwnershipKey) { key in
+            let candidate = activeCustomCandidate
+            let packageID = candidate?.package.manifest.id
+            let active = key != "none"
 
-                if shouldAutoOpen {
-                    state.collapseTask?.cancel()
-                    if !state.expanded {
-                        customCIAutoOpenedNotch = true
-                        state.expanded = true
-                    }
-                    return
+            if let displayID = surfaceDisplayID {
+                integrationDrag.setSurfaceOwnership(
+                    packageID: active ? packageID : nil,
+                    displayID: displayID
+                )
+            }
+
+            if active {
+                // App-specific integration CIs outrank generic Drop CI on the default
+                // equal-priority tie. Once ownership is known, clear Drop CI state so
+                // only the generated Custom CI controls the surface.
+                state.cancelFileDrop()
+                state.dropExitTask?.cancel()
+                state.collapseTask?.cancel()
+                if !state.expanded {
+                    customCIAutoOpenedNotch = true
+                    state.expanded = true
                 }
+                return
+            }
 
-                guard customCIAutoOpenedNotch else { return }
-                customCIAutoOpenedNotch = false
+            guard customCIAutoOpenedNotch else { return }
+            customCIAutoOpenedNotch = false
 
-                // Collapse only if no other CI now owns the surface. A higher-priority
-                // built-in or another custom trigger must not be closed by drag cleanup.
-                if activeContext == nil, !state.pinned {
-                    state.expanded = false
-                }
+            // If another CI now owns Halo, it decides expansion. Collapse only when
+            // the integration trigger ended and no replacement owner needs the surface.
+            if activeContext == nil, !state.pinned {
+                state.expanded = false
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { note in
