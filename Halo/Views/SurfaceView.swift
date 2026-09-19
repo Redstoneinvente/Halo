@@ -2675,7 +2675,7 @@ private struct HaloIntegrationContextView: View {
 
     private func publishPickerSize() {
         surfaceState.contextMinimumExpandedWidth = 520
-        let rowHeight = Double(min(session.candidates.count, 5)) * 62
+        let rowHeight = CGFloat(min(session.candidates.count, 5)) * 62
         surfaceState.contextPreferredSize = CGSize(
             width: 600,
             height: min(620, max(330, 235 + rowHeight))
@@ -2684,7 +2684,7 @@ private struct HaloIntegrationContextView: View {
 
     private func publishPreferredSize(for invocation: HaloIntegrationInvocation) {
         surfaceState.contextMinimumExpandedWidth = 540
-        let optionHeight = Double(invocation.action.options.count) * 72
+        let optionHeight = CGFloat(invocation.action.options.count) * 72
         let desiredHeight = min(680, max(350, 275 + optionHeight))
         surfaceState.contextPreferredSize = CGSize(
             width: 620,
