@@ -42,8 +42,26 @@ final class SurfaceState: ObservableObject {
     var hoverExpandTask: Task<Void, Never>?
     var dropExitTask: Task<Void, Never>?
     var editingGeometry = false
+    private var fileDropAllowed = false
+
+    func setFileDropAllowed(_ allowed: Bool) {
+        guard fileDropAllowed != allowed else { return }
+        fileDropAllowed = allowed
+        if !allowed { cancelFileDrop() }
+    }
+
+    func cancelFileDrop() {
+        dropExitTask?.cancel()
+        dropExitTask = nil
+        if dropTargeted { dropTargeted = false }
+        if dropItemCount != 0 { dropItemCount = 0 }
+    }
 
     func beginFileDrop(count: Int) {
+        guard fileDropAllowed else {
+            cancelFileDrop()
+            return
+        }
         dropExitTask?.cancel()
         hoverExpandTask?.cancel()
         collapseTask?.cancel()
@@ -468,9 +486,12 @@ final class WindowManager {
         commercialAccessGranted = granted
 
         hosts.values.forEach { host in
+            host.state.setFileDropAllowed(dropCIAllowed)
             host.refreshDropCIRegistration?()
-            if !dropCIAllowed && host.state.dropTargeted {
-                host.state.endFileDrop(collapseAfterDelay: true)
+            if !granted {
+                // Licensing is a hard boundary, not a normal drag-exit lifecycle.
+                // Remove Drop ownership synchronously so no locked surface can retain it.
+                host.state.cancelFileDrop()
             }
         }
     }
@@ -490,6 +511,7 @@ final class WindowManager {
                 guard let self else { return }
                 let defaults = UserDefaults.standard
                 self.hosts.values.forEach { host in
+                    host.state.setFileDropAllowed(self.dropCIAllowed)
                     host.refreshDropCIRegistration?()
                     if !self.dropCIAllowed && host.state.dropTargeted {
                         host.state.endFileDrop(collapseAfterDelay: true)
@@ -1713,6 +1735,7 @@ final class WindowManager {
                 .environment(\.haloScreenFrame, screen.frame)
                 let view = HaloDropHostingView(rootView: root)
                 view.sizingOptions = []
+                host.state.setFileDropAllowed(dropCIAllowed)
                 view.dropEnabled = { [weak self] in
                     self?.dropCIAllowed ?? false
                 }
@@ -1722,9 +1745,7 @@ final class WindowManager {
                 view.dragStateHandler = { [weak self, weak host] active, count in
                     guard let self, let host else { return }
                     guard self.dropCIAllowed else {
-                        if host.state.dropTargeted {
-                            host.state.endFileDrop(collapseAfterDelay: true)
-                        }
+                        host.state.cancelFileDrop()
                         return
                     }
                     if active {
@@ -1737,7 +1758,7 @@ final class WindowManager {
                 view.dropHandler = { [weak self, weak host] urls in
                     guard let self, let host else { return }
                     guard self.dropCIAllowed else {
-                        host.state.endFileDrop(collapseAfterDelay: true)
+                        host.state.cancelFileDrop()
                         return
                     }
                     host.state.completeFileDrop()
