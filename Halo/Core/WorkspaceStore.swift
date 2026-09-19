@@ -1118,6 +1118,7 @@ private struct HaloCustomCIStoredState: Codable {
 private struct HaloCustomCIPackagePreferences: Codable {
     var enabled = true
     var priority = 50.0
+    var priorityWasUserSet: Bool?
     var grantedPermissions: Set<String> = []
     var state = HaloCustomCIStoredState()
 }
@@ -1230,12 +1231,18 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
             for package in valid {
                 let id = package.manifest.id
                 guard generatedPackageIDs.contains(id),
-                      package.triggers.triggers.contains(where: { $0.type == "fileDrag" }),
-                      preferences[id] == nil else { continue }
-                var prefs = HaloCustomCIPackagePreferences()
-                prefs.priority = 100
-                preferences[id] = prefs
-                initializedGeneratedPriority = true
+                      package.triggers.triggers.contains(where: { $0.type == "fileDrag" }) else {
+                    continue
+                }
+
+                var prefs = preferences[id] ?? HaloCustomCIPackagePreferences()
+                guard prefs.priorityWasUserSet != true else { continue }
+                if prefs.priority != 100 || preferences[id] == nil {
+                    prefs.priority = 100
+                    prefs.priorityWasUserSet = false
+                    preferences[id] = prefs
+                    initializedGeneratedPriority = true
+                }
             }
             if initializedGeneratedPriority { persistPreferences() }
 
@@ -1356,7 +1363,10 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     }
 
     func setPriority(_ priority: Double, packageID: String) {
-        mutatePreferences(packageID) { $0.priority = min(100, max(0, priority)) }
+        mutatePreferences(packageID) {
+            $0.priority = min(100, max(0, priority))
+            $0.priorityWasUserSet = true
+        }
         contextDidChange()
     }
 
