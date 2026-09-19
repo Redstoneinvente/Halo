@@ -105,6 +105,27 @@ final class IntegrationCIRuntime: ObservableObject {
         registrations.first(where: { $0.id == ciID })
     }
 
+    /// Resolves partner card artwork strictly from the discovered app bundle.
+    /// Manifest metadata may name a resource, but cannot escape the bundle or load remote content.
+    func cardBannerURL(for registration: CIRegistration) -> URL? {
+        guard case .appIntegration(let bundleIdentifier, _) = registration.source,
+              let filename = registration.presentation.cardBannerImageName?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !filename.isEmpty,
+              filename == URL(fileURLWithPath: filename).lastPathComponent,
+              let integration = catalog.integration(bundleIdentifier: bundleIdentifier),
+              let resources = Bundle(url: integration.appURL)?.resourceURL else {
+            return nil
+        }
+
+        let candidate = resources.appendingPathComponent(filename, isDirectory: false)
+        guard candidate.deletingLastPathComponent().standardizedFileURL == resources.standardizedFileURL,
+              FileManager.default.fileExists(atPath: candidate.path) else {
+            return nil
+        }
+        return candidate
+    }
+
     func eligibleCandidates(displayID: String) -> [CIEligibleCandidate] {
         eligibleByDisplay[displayID] ?? []
     }
