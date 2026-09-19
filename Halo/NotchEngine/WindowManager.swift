@@ -1439,7 +1439,7 @@ final class WindowManager {
             let newHeight = geometry.compactHeight
             let newOffset = geometry.activeCompactCenterOffset ?? 0
 
-            guard !host.state.expanded else {
+            guard !host.state.expanded && !host.state.presentationExpanded else {
                 host.state.compactWidth = newWidth
                 host.state.compactHeight = newHeight
                 host.state.closedOcclusion = geometry.closedCameraOcclusion
@@ -2100,7 +2100,8 @@ final class WindowManager {
                     default: return false
                     }
                 }).receive(on: DispatchQueue.main).sink { [weak self, weak host] _ in
-                    guard let self, let host, let geometry = host.geometry, !host.state.expanded else { return }
+                    guard let self, let host, let geometry = host.geometry,
+                          !host.state.expanded, !host.state.presentationExpanded else { return }
                     let target = self.targetFrame(host: host, expanded: false)
                     guard host.targetFrame != target else { return }
                     host.targetFrame = target
@@ -2122,7 +2123,8 @@ final class WindowManager {
                     default: return false
                     }
                 }).receive(on: DispatchQueue.main).sink { [weak self, weak host] _ in
-                    guard let self, let host, let geometry = host.geometry, !host.state.expanded else { return }
+                    guard let self, let host, let geometry = host.geometry,
+                          !host.state.expanded, !host.state.presentationExpanded else { return }
                     let target = self.targetFrame(host: host, expanded: false)
                     guard host.targetFrame != target else { return }
                     host.targetFrame = target
