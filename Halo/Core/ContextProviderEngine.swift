@@ -594,6 +594,13 @@ final class HaloCIContextProviderEngine: ObservableObject {
         if files + folders < boundedCount {
             files += boundedCount - files - folders
         }
+        if urls.count > boundedCount {
+            let uninspected = urls.count - boundedCount
+            files += uninspected
+            // Fail closed for extension-specific triggers when the bounded classifier
+            // intentionally did not inspect every item.
+            extensionless += uninspected
+        }
 
         return HaloCIDragSummary(
             itemCount: urls.count,
