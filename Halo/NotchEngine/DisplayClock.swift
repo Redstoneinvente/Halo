@@ -780,12 +780,25 @@ struct HaloDropCIBackgroundView: View {
 private struct HaloDropZoneBoardView: View {
     @ObservedObject var settings: HaloDropZoneSettingsStore
     @ObservedObject var model: HaloDropZoneRuntimeModel
+    @ObservedObject private var integrationCatalog = HaloIntegrationCatalog.shared
     @FocusState private var renameFieldFocused: Bool
 
     var body: some View {
         GeometryReader { proxy in
             let configuration = settings.configuration
-            let frames = HaloDropZoneLayoutResolver.frames(size: proxy.size, configuration: configuration)
+            let partnerActions = Array(
+                integrationCatalog.compatibleInvocations(for: model.draggedURLs).prefix(4)
+            )
+            let frames = HaloDropZoneLayoutResolver.frames(
+                size: proxy.size,
+                configuration: configuration,
+                partnerCount: partnerActions.count
+            )
+            let partnerFrames = HaloDropZoneLayoutResolver.partnerFrames(
+                size: proxy.size,
+                configuration: configuration,
+                count: partnerActions.count
+            )
             let dense = configuration.zones.count >= 6 || proxy.size.height < 260
 
             ZStack(alignment: .topLeading) {
@@ -811,13 +824,41 @@ private struct HaloDropZoneBoardView: View {
                     }
                 }
 
-                HStack(spacing: 6) {
-                    Image(systemName: model.renameZoneID != nil ? "pencil" : (model.hoveredZone == nil ? "cursorarrow.motionlines" : "arrow.down.circle.fill"))
-                        .font(.system(size: 8.5, weight: .semibold))
-                    Text(model.renameZoneID != nil ? "Type a new name · Return to confirm · Esc to cancel" : (model.hoveredZone == nil ? "Move over an action" : "Release to run this action"))
-                        .font(.system(size: 8.5, weight: .medium, design: .rounded))
+                ForEach(Array(partnerActions.enumerated()), id: \.element.id) { index, invocation in
+                    if partnerFrames.indices.contains(index) {
+                        let frame = partnerFrames[index]
+                        integrationCard(
+                            invocation,
+                            active: model.hoveredIntegrationID == invocation.id,
+                            configuration: configuration
+                        )
+                        .frame(width: frame.width, height: frame.height)
+                        .position(x: frame.midX, y: frame.midY)
+                    }
                 }
-                .foregroundStyle(model.renameZoneID != nil ? Color.white.opacity(0.72) : (model.hoveredZone == nil ? Color.white.opacity(0.36) : Color.white.opacity(0.70)))
+
+                HStack(spacing: 6) {
+                    let hoveringAction = model.hoveredZone != nil || model.hoveredIntegrationID != nil
+                    Image(
+                        systemName: model.renameZoneID != nil
+                            ? "pencil"
+                            : (hoveringAction ? "arrow.down.circle.fill" : "cursorarrow.motionlines")
+                    )
+                    .font(.system(size: 8.5, weight: .semibold))
+                    Text(
+                        model.renameZoneID != nil
+                            ? "Type a new name · Return to confirm · Esc to cancel"
+                            : (hoveringAction ? "Release to run this action" : "Move over an action")
+                    )
+                    .font(.system(size: 8.5, weight: .medium, design: .rounded))
+                }
+                .foregroundStyle(
+                    model.renameZoneID != nil
+                        ? Color.white.opacity(0.72)
+                        : ((model.hoveredZone != nil || model.hoveredIntegrationID != nil)
+                            ? Color.white.opacity(0.70)
+                            : Color.white.opacity(0.36))
+                )
                 .position(x: proxy.size.width / 2, y: max(12, proxy.size.height - 11))
             }
             .foregroundStyle(.white)
@@ -861,6 +902,19 @@ private struct HaloDropZoneBoardView: View {
 
             Spacer(minLength: 8)
 
+            let partnerCount = integrationCatalog.compatibleInvocations(for: model.draggedURLs).count
+            if partnerCount > 0 {
+                HStack(spacing: 5) {
+                    Image(systemName: "app.badge.checkmark")
+                    Text("\(partnerCount) app action\(partnerCount == 1 ? "" : "s")")
+                }
+                .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.accentColor.opacity(0.09), in: Capsule())
+            }
+
             HStack(spacing: 5) {
                 Image(systemName: model.itemCount == 1 ? "doc.fill" : "doc.on.doc.fill")
                 Text(model.itemCount == 1 ? "1 item" : "\(model.itemCount) items")
@@ -871,6 +925,70 @@ private struct HaloDropZoneBoardView: View {
             .padding(.vertical, 6)
             .background(Color.white.opacity(0.065), in: Capsule())
         }
+    }
+
+    private func integrationCard(
+        _ invocation: HaloIntegrationInvocation,
+        active: Bool,
+        configuration: HaloDropZoneConfiguration
+    ) -> some View {
+        let accent = Color.accentColor
+        return ZStack {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(Color.white.opacity(active ? 0.115 : 0.055))
+            LinearGradient(
+                colors: [accent.opacity(active ? 0.30 : 0.11), Color.clear],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+            HStack(spacing: 9) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(accent.opacity(active ? 0.30 : 0.14))
+                    Image(systemName: "app.badge.checkmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(active ? Color.white : accent)
+                }
+                .frame(width: 32, height: 32)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(invocation.action.name)
+                        .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                    Text(invocation.integration.name)
+                        .font(.system(size: 8, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.43))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 2)
+
+                if active {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(accent)
+                } else {
+                    Text("APP")
+                        .font(.system(size: 7.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(accent.opacity(0.10), in: Capsule())
+                }
+            }
+            .padding(.horizontal, 9)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(
+                    active ? accent.opacity(configuration.highlightStrength) : Color.white.opacity(0.07),
+                    lineWidth: active ? 1.7 : 1
+                )
+        )
+        .shadow(color: active ? accent.opacity(0.20) : .clear, radius: active ? 9 : 0, y: 3)
+        .animation(.easeOut(duration: 0.13), value: active)
     }
 
     private func zoneCard(
