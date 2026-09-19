@@ -3047,7 +3047,6 @@ struct SurfaceView: View {
                 customCI.notice = "Custom CI did not open because a higher-priority CI currently owns the notch."
                 return
             }
-            state.collapseTask?.cancel()
             state.expanded = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCICloseRequested"))) { _ in
@@ -3068,7 +3067,6 @@ struct SurfaceView: View {
             guard clipboardCI.presentHistory() else { return }
             DispatchQueue.main.async {
                 guard clipboardCIEnabled, clipboardCI.isActive else { return }
-                state.collapseTask?.cancel()
                 clipboardOpenedNotch = true
                 state.expanded = true
             }
@@ -3076,7 +3074,6 @@ struct SurfaceView: View {
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloRetroGameToggle"))) { _ in
             guard retroCIEnabled else { return }
             retroGameRequested.toggle()
-            state.collapseTask?.cancel()
             if retroGameRequested {
                 state.expanded = true
             } else if !state.pinned {
@@ -3114,7 +3111,6 @@ struct SurfaceView: View {
                 let owns = teleprompterCIEnabled && teleprompterActive && activeContext == .teleprompter
                 NotificationCenter.default.post(name: .init("HaloTeleprompterCIOwnershipChanged"), object: nil, userInfo: ["owns": owns])
                 if owns {
-                    state.collapseTask?.cancel()
                     if !state.pinned { state.requestDismissal(reason: .explicit) }
                 }
             }
@@ -3144,7 +3140,6 @@ struct SurfaceView: View {
         }
         .onChange(of: state.dropTargeted) { active in
             if active && dropCIEnabled {
-                state.collapseTask?.cancel()
                 state.expanded = true
             }
         }
@@ -3207,7 +3202,6 @@ struct SurfaceView: View {
                 guard clipboardCIEnabled, clipboardCI.isActive, activeContext == .clipboard, !state.pinned else { return }
                 if !state.expanded {
                     clipboardOpenedNotch = true
-                    state.collapseTask?.cancel()
                     state.expanded = true
                 }
             }
@@ -3246,7 +3240,6 @@ struct SurfaceView: View {
             let owns = teleprompterCIEnabled && teleprompterActive && activeContext == .teleprompter
             NotificationCenter.default.post(name: .init("HaloTeleprompterCIOwnershipChanged"), object: nil, userInfo: ["owns": owns])
             if owns {
-                state.collapseTask?.cancel()
                 if !state.pinned { state.requestDismissal(reason: .explicit) }
             }
             if clipboardContextActive {
@@ -3255,7 +3248,6 @@ struct SurfaceView: View {
                 state.contextPreferredSize = ClipboardCISizing.openPreferredSize(actionCount: clipboardCI.actions.count, historyCount: clipboardCI.history.count, kind: clipboardCI.kind)
                 if clipboardCI.triggerMode == "Pop Up", !state.expanded, !state.pinned {
                     clipboardOpenedNotch = true
-                    state.collapseTask?.cancel()
                     state.expanded = true
                 }
             } else {
@@ -3288,7 +3280,6 @@ struct SurfaceView: View {
 
         if decision.shouldOpenSurface, !state.expanded {
             integrationAutoOpeningSurface = true
-            state.collapseTask?.cancel()
             state.expanded = true
             DispatchQueue.main.async {
                 integrationAutoOpeningSurface = false
