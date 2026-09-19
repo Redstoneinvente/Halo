@@ -91,6 +91,68 @@ final class CIV2Tests: XCTestCase {
             XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid, invalid)
         }
     }
+    func testAppIntegrationActionRequiresSDKPermissionAndArguments() throws {
+        let root = try starter()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try edit(root, "manifest.json") {
+            $0["permissions"] = ["AppIntegration.Execute"]
+            $0["capabilities"] = ["AppIntegrations"]
+        }
+        try edit(root, "interface.json") {
+            $0["expanded"] = [
+                "type": "Button",
+                "text": "Convert",
+                "accessibilityLabel": "Convert with partner app",
+                "action": [
+                    "id": "app.integration.invoke",
+                    "arguments": [
+                        "bundleIdentifier": "com.example.partner",
+                        "actionID": "convert.file"
+                    ]
+                ]
+            ]
+        }
+
+        XCTAssertTrue(
+            HaloCIPackageValidator.validatePackage(at: root).isValid,
+            HaloCIPackageValidator.validatePackage(at: root).issues.map(\.message).joined(separator: "\n")
+        )
+
+        try edit(root, "manifest.json") { $0["sdkVersion"] = "0.1" }
+        XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid)
+
+        try edit(root, "manifest.json") { $0["sdkVersion"] = "0.2" }
+        try edit(root, "interface.json") {
+            guard var expanded = $0["expanded"] as? [String: Any],
+                  var action = expanded["action"] as? [String: Any],
+                  var arguments = action["arguments"] as? [String: Any] else { return }
+            arguments.removeValue(forKey: "actionID")
+            action["arguments"] = arguments
+            expanded["action"] = action
+            $0["expanded"] = expanded
+        }
+        XCTAssertFalse(HaloCIPackageValidator.validatePackage(at: root).isValid)
+    }
+
+    func testAppIntegrationActionAuthorizationIsRevocable() {
+        let permission: Set<String> = ["AppIntegration.Execute"]
+        XCTAssertTrue(HaloCIActionAuthorization.allows(
+            "app.integration.invoke",
+            enabled: true,
+            globallyDisabled: false,
+            declaredPermissions: permission,
+            grantedPermissions: permission
+        ))
+        XCTAssertFalse(HaloCIActionAuthorization.allows(
+            "app.integration.invoke",
+            enabled: true,
+            globallyDisabled: false,
+            declaredPermissions: permission,
+            grantedPermissions: []
+        ))
+    }
+
     func testActionsFailClosedAfterDisableOrRevocation() {
         let permission: Set<String> = ["Clipboard.Write"]
         XCTAssertTrue(HaloCIActionAuthorization.allows("clipboard.copy", enabled: true, globallyDisabled: false, declaredPermissions: permission, grantedPermissions: permission))
