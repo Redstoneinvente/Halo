@@ -3258,9 +3258,42 @@ private struct HaloAccountLicenseSettingsView: View {
 
 private struct HaloPartnerIntegrationSettingsSection: View {
     @ObservedObject private var catalog = HaloIntegrationCatalog.shared
+    @AppStorage("HaloContextAppIntegrationEnabled") private var integrationCIEnabled = true
+    @AppStorage("HaloContextAppIntegrationPriority") private var integrationPriority = 90.0
 
     var body: some View {
         Section("App integrations") {
+            Toggle("Enable App Integration CI", isOn: $integrationCIEnabled)
+                .onChange(of: integrationCIEnabled) { enabled in
+                    if !enabled {
+                        HaloIntegrationExecutionSession.shared.cancel()
+                    }
+                }
+
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Priority")
+                    Text("Controls ownership when another Context Interface is also eligible.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Slider(value: $integrationPriority, in: 0...100, step: 1)
+                    .frame(width: 180)
+                    .disabled(!integrationCIEnabled)
+                Text("\(Int(integrationPriority))")
+                    .font(.caption.monospacedDigit())
+                    .frame(width: 30, alignment: .trailing)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("App Integration CI is independent from Drop CI. Compatible partner actions can appear even when Drop CI is disabled.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Halo-enabled apps", systemImage: "app.connected.to.app.below.fill")
