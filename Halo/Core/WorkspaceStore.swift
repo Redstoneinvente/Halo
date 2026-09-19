@@ -1407,6 +1407,19 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         return integration.manifest.actions.filter { !disabled.contains($0.id) }
     }
 
+    func shouldRenderIntegrationComponent(
+        packageID: String,
+        componentID: String?
+    ) -> Bool {
+        guard isGeneratedIntegrationPackage(packageID),
+              let componentID,
+              componentID.hasPrefix("halo.integration.action.") else {
+            return true
+        }
+        let actionID = String(componentID.dropFirst("halo.integration.action.".count))
+        return isIntegrationActionEnabled(packageID: packageID, actionID: actionID)
+    }
+
     @discardableResult
     func updateIntegrationDragSession(files: [URL], displayID: String) -> Bool {
         let candidates = integrationDragCandidates(for: files)
