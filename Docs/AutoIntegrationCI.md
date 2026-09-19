@@ -1,5 +1,7 @@
 # Automatic App Integration Custom CIs
 
+> **Architecture update:** This document records the current generated-package implementation and remains useful for migration/reference. The authoritative target architecture is now [`AppIntegrationCIArchitecture.md`](AppIntegrationCIArchitecture.md). Where the documents conflict, the newer architecture wins: app integrations should produce in-memory `CIRegistration` objects with configuration persisted separately, rather than generating one physical managed `.haloCI` package per compatible app. Trigger detection, eligibility, surface ownership, privileged payload storage, rendering, action brokering, and transport must remain separate layers.
+
 Halo can turn compatible installed macOS apps into **managed declarative Custom CIs automatically**.
 
 This framework connects the existing app-integration catalogue to the existing Custom CI runtime. It does **not** introduce another renderer, another priority system, or native partner code inside Halo.
