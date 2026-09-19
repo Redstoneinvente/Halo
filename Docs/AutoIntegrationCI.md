@@ -136,9 +136,26 @@ Turning automatic generation off removes the managed packages, but does not dele
 
 ## 5. Generated CI activation
 
-Generated integration CIs are **manual-only by default**.
+Generated integration CIs are manual-only when the partner manifest declares no automatic trigger.
 
-Discovery does not imply eligibility, ownership, or automatic expansion.
+A partner app may request the protocol-v1 `fileDrag` trigger:
+
+```json
+"triggers": [
+  {
+    "type": "fileDrag",
+    "supportedExtensions": ["txt"]
+  }
+]
+```
+
+Halo translates that request into the generated package's normal SDK 0.2 `triggers.json`. Compatible file drags are supplied by the Context Provider Engine, so this does not depend on Drop CI.
+
+A matching drag makes the generated CI eligible and requests expansion **through normal Custom CI arbitration**. It does not bypass another higher-priority owner.
+
+Generated drag CIs default to priority 100. On an equal-priority compatible drag they outrank the generic Drop CI because the app-specific CI can actually act on that file. The priority remains user-adjustable; once the user changes it, Halo preserves that choice.
+
+Discovery by itself still does not imply eligibility, ownership, or automatic expansion.
 
 The generated CI appears in the normal **Loaded custom CI** library and participates in the same:
 
@@ -405,17 +422,10 @@ Tests and manual checks: SDK action validation/authorization tests; generator cr
 | SDK 0.1 compatibility | Existing 0.1 packages do not need migration |
 | Full build/runtime | Covered by the app-integration macOS workflow; manual end-to-end UI exercise remains recommended before release |
 
-## 17. Future extension: drag-triggered generated CIs
+## 17. Drag-triggered generated CIs
 
-The generator deliberately does not make discovery itself an automatic trigger.
+Protocol v1 now supports a declarative `fileDrag` integration trigger. Halo converts it into the standard SDK 0.2 Custom CI trigger and evaluates it from the Context Provider Engine's classified drag snapshot.
 
-A future drag context can safely build on this framework by:
+The trigger stores no file paths and performs no work during `draggingUpdated`. File/folder classification happens off-main once at drag entry; only then can `fileDrag` become true.
 
-1. asking `HaloIntegrationCatalog` for compatible actions for the dragged files;
-2. selecting the already-generated package ID for the matching app;
-3. storing the user-selected files in a short-lived Halo-owned invocation session;
-4. requesting normal Custom CI activation;
-5. letting `activeContext` decide ownership;
-6. delivering only after the same permission and manifest revalidation described above.
-
-That future path should reuse the generated package and action broker rather than reintroducing a separate built-in App Integration CI.
+The generated CI still reuses the existing package, action broker, permissions and `activeContext` arbitration. No separate built-in App Integration CI is introduced.
