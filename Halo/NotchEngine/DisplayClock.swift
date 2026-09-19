@@ -2087,6 +2087,7 @@ private final class HaloGlobalFileDragMonitor {
     private var lastCompletedPasteboardChangeCount: Int?
     private var sawMouseDrag = false
     private var deferredFinishPending = false
+    private var pointerSessionGeneration: UInt64 = 0
 
     private init() {}
 
@@ -2129,6 +2130,7 @@ private final class HaloGlobalFileDragMonitor {
     }
 
     private func beginPointerSession() {
+        pointerSessionGeneration &+= 1
         let pasteboard = NSPasteboard(name: .drag)
         dragSessionBaselineChangeCount = pasteboard.changeCount
         sawMouseDrag = false
@@ -2231,19 +2233,37 @@ private final class HaloGlobalFileDragMonitor {
 
     private func finishAfterDropOpportunity() {
         guard !deferredFinishPending else { return }
-        if HaloEmbeddedDropZoneController.shared.containsScreenPoint(NSEvent.mouseLocation) {
-            deferredFinishPending = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) { [weak self] in
-                guard let self else { return }
-                self.deferredFinishPending = false
-                if HaloEmbeddedDropZoneController.shared.dropHandled {
-                    self.resetSessionState()
-                } else {
-                    self.finishDrag()
-                }
+        guard activeTarget != nil || sawMouseDrag else {
+            resetSessionState()
+            return
+        }
+
+        // Mouse-up notifications from the global/local event monitors can arrive before
+        // NSDraggingDestination.performDragOperation. Never tear down the shared CI drag
+        // session synchronously here: partner integrations need the payload/session to
+        // survive until the real AppKit drop callback commits it.
+        deferredFinishPending = true
+        let generation = pointerSessionGeneration
+        let usesDropZoneOverlay = HaloEmbeddedDropZoneController.shared.containsScreenPoint(NSEvent.mouseLocation)
+        let delay: TimeInterval = usesDropZoneOverlay ? 0.30 : 0.18
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self,
+                  generation == self.pointerSessionGeneration else { return }
+
+            self.deferredFinishPending = false
+
+            if usesDropZoneOverlay,
+               HaloEmbeddedDropZoneController.shared.dropHandled {
+                self.resetSessionState()
+                return
             }
-        } else {
-            finishDrag()
+
+            // If AppKit committed an integration payload during the delay,
+            // dragStateHandler(false) is safe: IntegrationCIRuntime preserves
+            // committed activation sessions. Otherwise this performs normal
+            // drag-cancellation cleanup.
+            self.finishDrag()
         }
     }
 
