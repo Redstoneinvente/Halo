@@ -1498,6 +1498,7 @@ private final class ClipboardContextMonitor: ObservableObject {
             } else {
                 writeToPasteboard(text)
             }
+            HaloCIContextProviderEngine.shared.reportClipboardCopy(textLength: text.count)
         default:
             break
         }
@@ -1777,6 +1778,7 @@ private final class ClipboardContextMonitor: ObservableObject {
             return
         }
 
+        HaloCIContextProviderEngine.shared.reportClipboardPaste(textLength: text.count)
         target.activate(options: [.activateIgnoringOtherApps])
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
             let source = CGEventSource(stateID: .combinedSessionState)
