@@ -2413,12 +2413,7 @@ private final class HaloGlobalFileDragMonitor {
         inspectDragPasteboard()
 
         if activeTarget != nil {
-            let files = dragPasteboardFileURLs()
-            activateTarget(
-                at: NSEvent.mouseLocation,
-                count: max(1, activeItemCount),
-                files: files
-            )
+            activateTarget(at: NSEvent.mouseLocation, count: max(1, activeItemCount))
         }
     }
 
@@ -2428,8 +2423,7 @@ private final class HaloGlobalFileDragMonitor {
             return
         }
         let pasteboard = NSPasteboard(name: .drag)
-        let files = dragPasteboardFileURLs(pasteboard)
-        let count = files.count
+        let count = dragPasteboardFileCount(pasteboard)
         guard count > 0 else { return }
 
         if activeTarget == nil {
@@ -2441,28 +2435,16 @@ private final class HaloGlobalFileDragMonitor {
         }
 
         activeItemCount = count
-        activateTarget(
-            at: NSEvent.mouseLocation,
-            count: count,
-            files: files
-        )
+        activateTarget(at: NSEvent.mouseLocation, count: count)
     }
 
-    private func dragPasteboardFileURLs(
-        _ pasteboard: NSPasteboard = NSPasteboard(name: .drag)
-    ) -> [URL] {
-        let objects = pasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) ?? []
-        return objects.compactMap { ($0 as? NSURL).map { $0 as URL } }
+    private func dragPasteboardFileCount(_ pasteboard: NSPasteboard = NSPasteboard(name: .drag)) -> Int {
+        pasteboard.pasteboardItems?.reduce(into: 0) { result, item in
+            if item.availableType(from: [.fileURL]) != nil { result += 1 }
+        } ?? 0
     }
 
-    private func activateTarget(
-        at point: NSPoint,
-        count: Int,
-        files: [URL]
-    ) {
+    private func activateTarget(at point: NSPoint, count: Int) {
         guard haloDropCIEnabled else {
             deactivateForDisabledState()
             return
@@ -2476,33 +2458,8 @@ private final class HaloGlobalFileDragMonitor {
             HaloEmbeddedDropZoneController.shared.dismiss()
         }
         activeTarget = target
-
-        let partnerActions = HaloIntegrationCatalog.shared.compatibleInvocations(
-            for: files
-        )
-
-        if !partnerActions.isEmpty {
-            // A compatible third-party integration owns the notch immediately.
-            // Do not summon normal Drop CI first; present the integration action
-            // chooser as soon as the drag payload can be identified.
-            HaloEmbeddedDropZoneController.shared.dismiss()
-            target.dragStateHandler?(false, 0)
-            HaloIntegrationExecutionSession.shared.presentChoices(
-                partnerActions,
-                files: files
-            )
-            return
-        }
-
-        if HaloIntegrationExecutionSession.shared.isActive {
-            HaloIntegrationExecutionSession.shared.cancel()
-        }
-
         target.dragStateHandler?(true, max(1, count))
-        HaloEmbeddedDropZoneController.shared.begin(
-            target: target,
-            itemCount: max(1, count)
-        )
+        HaloEmbeddedDropZoneController.shared.begin(target: target, itemCount: max(1, count))
     }
 
     private func targetForDrag(at point: NSPoint) -> (any HaloGlobalDropTarget)? {
