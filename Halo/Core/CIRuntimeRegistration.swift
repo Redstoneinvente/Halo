@@ -171,6 +171,10 @@ struct CIPresentationDescriptor: Codable, Hashable, Sendable {
     var preferredCompactHeight: Double?
     var usesFullSurface: Bool
     var keepsClosedContents: Bool
+    var cardBannerImageName: String? = nil
+    var cardCategory: String? = nil
+    var cardDescription: String? = nil
+    var cardAccentHex: String? = nil
 
     static let integrationDefault = CIPresentationDescriptor(
         preferredExpandedWidth: 560,
@@ -248,7 +252,18 @@ enum IntegrationCIFactory {
             supportedTriggers: triggers,
             supportedActions: definition.actions,
             requiredPermissions: Set(definition.actions.flatMap(\.requiredPermissions)),
-            presentation: .integrationDefault
+            presentation: CIPresentationDescriptor(
+                preferredExpandedWidth: CIPresentationDescriptor.integrationDefault.preferredExpandedWidth,
+                preferredExpandedHeight: CIPresentationDescriptor.integrationDefault.preferredExpandedHeight,
+                preferredCompactWidth: CIPresentationDescriptor.integrationDefault.preferredCompactWidth,
+                preferredCompactHeight: CIPresentationDescriptor.integrationDefault.preferredCompactHeight,
+                usesFullSurface: CIPresentationDescriptor.integrationDefault.usesFullSurface,
+                keepsClosedContents: CIPresentationDescriptor.integrationDefault.keepsClosedContents,
+                cardBannerImageName: definition.presentation?.card?.bannerImage,
+                cardCategory: definition.presentation?.card?.category,
+                cardDescription: definition.presentation?.card?.description,
+                cardAccentHex: definition.presentation?.card?.accentColor
+            )
         )
     }
 }
