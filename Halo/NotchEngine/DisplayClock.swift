@@ -1437,33 +1437,20 @@ private final class HaloEmbeddedDropZoneController {
         dropHandled = true
         model.hoveredZone = nil
         model.hoveredIntegrationID = invocation.id
-        model.result = "Preparing \(invocation.action.name)…"
+        model.result = "Opening \(invocation.action.name)…"
 
-        if let window = targetView?.window {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-        }
+        HaloIntegrationExecutionSession.shared.present(
+            invocation,
+            files: urls
+        )
 
-        guard let options = HaloIntegrationOptionPrompt.collect(
-            for: invocation,
-            parentWindow: targetView?.window
-        ) else {
-            target.dragStateHandler?(false, 0)
-            completeDrop(result: "App action cancelled")
-            return
-        }
+        target.dragStateHandler?(false, 0)
 
-        do {
-            try HaloIntegrationCatalog.shared.invoke(
-                invocation,
-                files: urls,
-                options: options
-            )
-            target.dragStateHandler?(false, 0)
-            completeDrop(result: "Sent to \(invocation.integration.name)")
-        } catch {
-            target.dragStateHandler?(false, 0)
-            completeDrop(result: error.localizedDescription)
+        // Hand ownership of the notch to the dedicated Integration CI.
+        // Dismiss only the transient Drop CI overlay; the SurfaceView keeps
+        // the notch expanded while HaloIntegrationExecutionSession is active.
+        DispatchQueue.main.async { [weak self] in
+            self?.dismiss()
         }
     }
 
