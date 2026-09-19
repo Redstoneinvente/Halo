@@ -28,6 +28,36 @@ enum ModuleID: String, Codable, CaseIterable, Identifiable {
 
 enum BackgroundKind: String, Codable, CaseIterable { case gradient, solid, glass, image, video }
 
+struct GlassOptions: Codable, Equatable {
+    /// 0 = dense / strongly treated, 1 = very transparent.
+    var clarity = 0.72
+    /// Controls the native material family Halo asks macOS to use.
+    var frost = 0.46
+    /// Darkens transmitted light without replacing the live backdrop.
+    var lightAbsorption = 0.16
+    /// Adds subtle cyan/magenta separation to the glass coloration.
+    var chromaticShift = 0.08
+    var tint = WidgetColor(red: 0.72, green: 0.82, blue: 1.0)
+    var tintAmount = 0.04
+    var highlight = 0.12
+    var edgeDepth = 0.10
+
+    func normalized() -> GlassOptions {
+        var value = self
+        let finite = [clarity, frost, lightAbsorption, chromaticShift, tintAmount, highlight, edgeDepth]
+        guard finite.allSatisfy(\.isFinite) else { return GlassOptions() }
+        value.clarity = min(1, max(0, clarity))
+        value.frost = min(1, max(0, frost))
+        value.lightAbsorption = min(1, max(0, lightAbsorption))
+        value.chromaticShift = min(1, max(0, chromaticShift))
+        value.tintAmount = min(0.5, max(0, tintAmount))
+        value.highlight = min(1, max(0, highlight))
+        value.edgeDepth = min(1, max(0, edgeDepth))
+        value.tint = (try? tint.validated()) ?? GlassOptions().tint
+        return value
+    }
+}
+
 enum NotchSkinPreset: String, CaseIterable, Identifiable, Codable {
     case haloGlow = "Halo Glow"
     case carbonWeave = "Carbon Weave"
@@ -127,6 +157,7 @@ struct Appearance: Codable, Equatable {
     var surface = SurfaceOptions()
     var background: BackgroundKind = .gradient
     var skin = NotchSkinOptions()
+    var glass = GlassOptions()
     var solidColor: WidgetColor?
     var gradientStartColor: WidgetColor?
     var gradientEndColor: WidgetColor?
@@ -141,7 +172,7 @@ struct Appearance: Codable, Equatable {
     var pauseVideoOnBattery = true
     init() {}
     private enum CodingKeys: String, CodingKey {
-        case grain, backgroundSchedule, surface, background, skin, solidColor, gradientStartColor, gradientEndColor, assetPath, blur, saturation, brightness, expandedHeight, compactWidth, spacing, animation, pauseVideoOnBattery
+        case grain, backgroundSchedule, surface, background, skin, glass, solidColor, gradientStartColor, gradientEndColor, assetPath, blur, saturation, brightness, expandedHeight, compactWidth, spacing, animation, pauseVideoOnBattery
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -150,6 +181,7 @@ struct Appearance: Codable, Equatable {
         surface = try c.decodeIfPresent(SurfaceOptions.self, forKey: .surface) ?? SurfaceOptions()
         background = try c.decodeIfPresent(BackgroundKind.self, forKey: .background) ?? .gradient
         skin = (try c.decodeIfPresent(NotchSkinOptions.self, forKey: .skin) ?? NotchSkinOptions()).normalized()
+        glass = (try c.decodeIfPresent(GlassOptions.self, forKey: .glass) ?? GlassOptions()).normalized()
         solidColor = try c.decodeIfPresent(WidgetColor.self, forKey: .solidColor)
         gradientStartColor = try c.decodeIfPresent(WidgetColor.self, forKey: .gradientStartColor)
         gradientEndColor = try c.decodeIfPresent(WidgetColor.self, forKey: .gradientEndColor)
@@ -733,6 +765,7 @@ struct OpenNotchAppearance: Codable, Equatable {
     var saturation: Double?
     var brightness: Double?
     var contrast: Double?
+    var glass: GlassOptions?
     var tintColor: WidgetColor?
     var tintOpacity: Double?
     var grain: Double?
@@ -755,6 +788,14 @@ struct OpenNotchAppearance: Codable, Equatable {
         if let blur { value.blur = blur }
         if let saturation { value.saturation = saturation }
         if let brightness { value.brightness = brightness }
+        if let glass {
+            value.glass = glass.normalized()
+        } else if (background ?? fallback.background) == .glass, let blur {
+            // Preserve the old Visual Workspace "Glass blur" control as a frost migration.
+            var migrated = value.glass
+            migrated.frost = min(1, max(0, blur / 30))
+            value.glass = migrated.normalized()
+        }
         return value
     }
     func validated() throws -> OpenNotchAppearance {
@@ -790,6 +831,7 @@ struct OpenNotchAppearance: Codable, Equatable {
         if let glow { v.glow = min(0.5, max(0, glow)) }
         v.solidColor = try solidColor?.validated(); v.gradientStartColor = try gradientStartColor?.validated()
         v.gradientEndColor = try gradientEndColor?.validated(); v.tintColor = try tintColor?.validated(); v.borderColor = try borderColor?.validated()
+        if let glass { v.glass = glass.normalized() }
         v.assetPath = String(assetPath.prefix(2048))
         return v
     }
