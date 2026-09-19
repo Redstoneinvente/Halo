@@ -1956,6 +1956,15 @@ final class WindowManager {
                         host.state.cancelFileDrop()
                         return
                     }
+
+                    if HaloIntegrationExecutionSession.shared.isActive {
+                        HaloIntegrationExecutionSession.shared.updateFiles(urls)
+                        host.state.cancelFileDrop()
+                        host.state.collapseTask?.cancel()
+                        host.state.expanded = true
+                        return
+                    }
+
                     host.state.completeFileDrop()
                     self.store.addFiles(urls)
                 }
