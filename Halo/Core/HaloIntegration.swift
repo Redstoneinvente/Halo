@@ -936,6 +936,21 @@ final class HaloIntegrationDragSession: ObservableObject {
         return hadCandidates
     }
 
+    func removeCandidate(packageID: String) {
+        guard candidateActionIDsByPackage.removeValue(forKey: packageID) != nil else {
+            return
+        }
+        if owningPackageID == packageID {
+            owningPackageID = nil
+            owningDisplayID = nil
+        }
+        if candidateActionIDsByPackage.isEmpty {
+            clear()
+            return
+        }
+        revision &+= 1
+    }
+
     func clear(packageID: String? = nil) {
         if let packageID,
            candidateActionIDsByPackage[packageID] == nil,
