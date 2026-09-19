@@ -611,7 +611,7 @@ final class WindowManager {
             geometryEditorPanel.animationBehavior = .none
         }
         func stop() {
-            animator.cancel(); state.hoverExpandTask?.cancel(); state. state.dropExitTask?.cancel()
+            animator.cancel(); state.hoverExpandTask?.cancel(); state.dropExitTask?.cancel()
             state.dismissCoordinator.reset()
             pixelPalCollapseWork?.cancel()
             subscription?.cancel(); contextSizeSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); contextCompactHeightSubscription?.cancel()
@@ -768,7 +768,7 @@ final class WindowManager {
                 self?.hosts.forEach { id, host in
                     guard display == nil || display == id else { return }
                     host.state.editingGeometry = editing
-                    if editing { host.state. host.state.expanded = expanded }
+                    if editing { host.state.expanded = expanded }
                 }
                 self?.refreshDynamicWidths()
                 DispatchQueue.main.async { self?.refreshGeometryEditorPanels() }
@@ -1731,7 +1731,6 @@ final class WindowManager {
     func toggleAll() {
         let expand = !hosts.values.contains { $0.state.expanded }
         hosts.values.forEach { host in
-            host.state.
             if expand {
                 host.state.dismissCoordinator.cancelPendingDismissal()
                 host.state.expanded = true
@@ -1745,7 +1744,6 @@ final class WindowManager {
     /// Used by activation affordances such as copying a license key while Halo is locked.
     func expandAll() {
         hosts.values.forEach { host in
-            host.state.
             if !host.state.expanded {
                 host.state.expanded = true
             }
