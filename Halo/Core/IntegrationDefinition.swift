@@ -26,6 +26,7 @@ struct IntegrationDefinition: Codable, Hashable, Identifiable, Sendable {
     var protocolVersion: Int
     var app: IntegrationAppIdentity
     var presentation: IntegrationPresentationDefinition? = nil
+    var dismissBehavior: CIDismissBehavior? = nil
     var actions: [CIActionDefinition]
     var triggers: [CITriggerDefinition]
     var delivery: IntegrationDeliveryDefinition
@@ -160,6 +161,7 @@ enum IntegrationManifestCodec {
         var protocolVersion: Int
         var app: App
         var presentation: Presentation?
+        var dismissBehavior: String?
         var actions: [Action]
         var triggers: [Trigger]?
         var delivery: Delivery?
@@ -203,6 +205,10 @@ enum IntegrationManifestCodec {
         guard definition.triggers.count <= 32 else { throw IntegrationManifestError.tooManyTriggers(definition.triggers.count) }
         guard definition.delivery.type == "openRequest" else { throw IntegrationManifestError.unsupportedDelivery(definition.delivery.type) }
         try validate(presentation: definition.presentation)
+        if let dismissBehavior = definition.dismissBehavior,
+           !CIDismissBehavior.allCases.contains(dismissBehavior) {
+            throw IntegrationManifestError.invalidPresentation("dismissBehavior is invalid.")
+        }
 
         var actionIDs = Set<String>()
         for action in definition.actions {
@@ -374,6 +380,7 @@ enum IntegrationManifestCodec {
             protocolVersion: 2,
             app: IntegrationAppIdentity(name: manifest.app.name, bundleIdentifier: manifest.app.bundleIdentifier),
             presentation: presentation,
+            dismissBehavior: manifest.dismissBehavior.flatMap(CIDismissBehavior.init(rawValue:)),
             actions: actions,
             triggers: triggers,
             delivery: IntegrationDeliveryDefinition(type: manifest.delivery?.type ?? "openRequest")
