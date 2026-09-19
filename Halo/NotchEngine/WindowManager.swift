@@ -276,6 +276,19 @@ final class SurfaceState: ObservableObject {
         dismissCoordinator.setCIBehavior(behavior)
     }
 
+    @discardableResult
+    func acquireDismissHold(_ reason: HaloDismissHoldReason) -> UUID {
+        dismissCoordinator.acquireHold(reason)
+    }
+
+    func releaseDismissHold(_ token: UUID) {
+        dismissCoordinator.releaseHold(token)
+    }
+
+    func pulseDismissHold(_ reason: HaloDismissHoldReason, duration: TimeInterval) {
+        dismissCoordinator.pulseHold(reason, duration: duration)
+    }
+
     private func releaseDragDismissHold() {
         guard let token = dragDismissHold else { return }
         dragDismissHold = nil
