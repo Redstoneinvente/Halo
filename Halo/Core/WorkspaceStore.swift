@@ -625,7 +625,7 @@ final class SystemLiveActivitySource {
         }
 
         var current = Set<String>()
-        var candidates: [(fingerprint: String, strings: [String])] = []
+        var candidates: [(fingerprint: String, strings: [String], buttons: [String])] = []
         var seenCandidates = Set<String>()
 
         for candidateRoot in candidateRoots.prefix(32) {
@@ -637,7 +637,7 @@ final class SystemLiveActivitySource {
             guard seenCandidates.insert(fingerprint).inserted else { continue }
 
             current.insert(fingerprint)
-            candidates.append((fingerprint, strings))
+            candidates.append((fingerprint, strings, snapshot.buttons))
         }
 
         if !didSeedNotificationFingerprints {
@@ -647,13 +647,17 @@ final class SystemLiveActivitySource {
         }
 
         for candidate in candidates where !notificationFingerprints.contains(candidate.fingerprint) {
-            publishNotification(strings: candidate.strings, fingerprint: candidate.fingerprint)
+            publishNotification(
+                strings: candidate.strings,
+                buttons: candidate.buttons,
+                fingerprint: candidate.fingerprint
+            )
         }
 
         notificationFingerprints = current
     }
 
-    private func publishNotification(strings: [String], fingerprint: String) {
+    private func publishNotification(strings: [String], buttons: [String], fingerprint: String) {
         guard let workspace else { return }
 
         let source = inferSourceName(in: strings)
@@ -690,7 +694,8 @@ final class SystemLiveActivitySource {
             updatedAt: now,
             expiresAt: now.addingTimeInterval(duration),
             priority: priority,
-            persistent: false
+            persistent: false,
+            actions: LiveActivityActionFactory.actions(fromButtonLabels: buttons, kind: kind)
         )
         workspace.upsertLiveActivity(activity)
     }
@@ -707,7 +712,7 @@ final class SystemLiveActivitySource {
 
         let root = AXUIElementCreateApplication(app.processIdentifier)
         let windows = axElements(root, attribute: kAXWindowsAttribute as CFString)
-        var detected: (caller: String, state: LiveActivityState, detail: String)?
+        var detected: (caller: String, state: LiveActivityState, detail: String, buttons: [String])?
 
         for window in windows.prefix(8) {
             let snap = snapshot(of: window)
@@ -728,7 +733,12 @@ final class SystemLiveActivitySource {
                     !lower.contains("call") &&
                     !["accept", "answer", "decline", "mute", "end"].contains(lower)
             }) ?? "FaceTime call"
-            detected = (caller, incoming ? .incoming : .active, incoming ? "Incoming FaceTime call" : "FaceTime call in progress")
+            detected = (
+                caller,
+                incoming ? .incoming : .active,
+                incoming ? "Incoming FaceTime call" : "FaceTime call in progress",
+                snap.buttons
+            )
             break
         }
 
@@ -759,7 +769,8 @@ final class SystemLiveActivitySource {
             updatedAt: now,
             expiresAt: nil,
             priority: detected.state == .incoming ? 100 : 92,
-            persistent: true
+            persistent: true,
+            actions: LiveActivityActionFactory.actions(fromButtonLabels: detected.buttons, kind: .call)
         )
         workspace?.upsertLiveActivity(activity)
     }
