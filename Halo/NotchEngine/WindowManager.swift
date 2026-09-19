@@ -19,6 +19,9 @@ final class SurfaceState: ObservableObject {
     /// This decouples the logical destination from the presentation lifecycle so
     /// SwiftUI does not tear down open content while the panel is still retracting.
     @Published private(set) var presentationExpanded = false
+    /// Pixel Pal may request a dedicated boot-down presentation before/through retract.
+    /// Normal surface closes must never enter this filtered presentation.
+    @Published private(set) var pixelPalCloseGateActive = false
     @Published var pinned = false {
         didSet {
             if pinned {
@@ -58,10 +61,16 @@ final class SurfaceState: ObservableObject {
     var editingGeometry = false
 
     func beginExpandedPresentation() {
+        if pixelPalCloseGateActive { pixelPalCloseGateActive = false }
         if !presentationExpanded { presentationExpanded = true }
     }
 
+    func setPixelPalCloseGateActive(_ active: Bool) {
+        if pixelPalCloseGateActive != active { pixelPalCloseGateActive = active }
+    }
+
     func completeCollapsedPresentation() {
+        if pixelPalCloseGateActive { pixelPalCloseGateActive = false }
         if presentationExpanded { presentationExpanded = false }
     }
 
@@ -1872,6 +1881,7 @@ final class WindowManager {
         guard delay > 0.001 else { return false }
 
         host.pixelPalCollapseWork?.cancel()
+        host.state.setPixelPalCloseGateActive(true)
         let work = DispatchWorkItem { [weak self, weak host] in
             guard let self, let host, !host.state.expanded else { return }
             host.pixelPalCollapseWork = nil
@@ -2061,8 +2071,9 @@ final class WindowManager {
                     guard let self, let host else { return }
                     host.pixelPalCollapseWork?.cancel()
                     host.pixelPalCollapseWork = nil
-
                     if expanded {
+                        host.state.setPixelPalCloseGateActive(false)
+
                         ActivationSequenceCoordinator.shared.cancelForInteraction()
                         self.armHoverOpeningGuardIfNeeded(for: host)
                         self.applyExpandedState(true, to: host)
