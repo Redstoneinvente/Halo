@@ -6,6 +6,7 @@ struct CIActivationSession: Identifiable, Hashable, Sendable {
     var displayID: String
     var triggerEventID: UUID
     var triggerID: String
+    var eligibleActionIDs: Set<String>
     var payloadHandle: TriggerPayloadHandle?
     var activatedAt: Date
     var committed: Bool
@@ -47,6 +48,7 @@ final class CIActivationCoordinator {
             displayID: candidate.event.displayID,
             triggerEventID: candidate.event.id,
             triggerID: candidate.triggerID,
+            eligibleActionIDs: candidate.actionIDs,
             payloadHandle: candidate.event.payloadHandle,
             activatedAt: now,
             committed: false,
@@ -91,8 +93,6 @@ final class CIActivationCoordinator {
         sessionsByDisplay[displayID] = session
     }
 
-    /// Ends only an uncommitted drag activation. Returns whether the caller may collapse the
-    /// normal Halo surface. A surface the user had opened/pinned/overridden is never collapsed.
     func cancelUncommitted(displayID: String, pinned: Bool) -> (session: CIActivationSession?, shouldCollapse: Bool) {
         lock.lock(); defer { lock.unlock() }
         guard var session = sessionsByDisplay[displayID], !session.committed else { return (nil, false) }
