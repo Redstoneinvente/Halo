@@ -258,6 +258,20 @@ final class SurfaceState: ObservableObject {
         dismissCoordinator.requestDismissal(reason: reason, destination: destination)
     }
 
+    func updateDismissPreferences(
+        behavior: HaloCloseBehavior,
+        customDelayMilliseconds: Double
+    ) {
+        let boundedDelay = min(2_000, max(0, customDelayMilliseconds))
+        guard closeBehavior != behavior || self.customCloseDelayMilliseconds != boundedDelay else { return }
+        closeBehavior = behavior
+        self.customCloseDelayMilliseconds = boundedDelay
+        dismissCoordinator.cancelPendingDismissal()
+        if expanded && !hoverInside && !pinned && !editingGeometry && !dropTargeted {
+            dismissCoordinator.requestDismissal(reason: .pointerExit)
+        }
+    }
+
     func setCIDismissBehavior(_ behavior: CIDismissBehavior) {
         dismissCoordinator.setCIBehavior(behavior)
     }
@@ -2074,6 +2088,10 @@ final class WindowManager {
             host.geometry = Self.geometry(screen: screen, theme: theme, appearance: appearance)
             if host.state.screenFrame != screen.frame { host.state.screenFrame = screen.frame }
             if host.state.displayID != id { host.state.displayID = id }
+            host.state.updateDismissPreferences(
+                behavior: store.configuration.resolvedCloseBehavior,
+                customDelayMilliseconds: store.configuration.resolvedCustomCloseDelayMilliseconds
+            )
             let ambientPhysicalWidth = host.geometry!.physicalNotchWidth > 0 ? host.geometry!.physicalNotchWidth : min(190, host.geometry!.compactWidth)
             let ambientPhysicalHeight = host.geometry!.safeAreaTop > 0 ? host.geometry!.safeAreaTop : min(34, host.geometry!.compactHeight)
             if host.state.physicalNotchWidth != ambientPhysicalWidth { host.state.physicalNotchWidth = ambientPhysicalWidth }
@@ -2103,6 +2121,15 @@ final class WindowManager {
                                                 userInfo: ["frame": target, "screen": id])
             }
             if existing == nil {
+                host.state.dismissCoordinator.pointerInsideInteractionEnvironment = { [weak self, weak host] in
+                    guard let self, let host else { return false }
+                    return self.pointerInsideOwnedHaloSurface(host)
+                }
+                host.state.dismissCoordinator.pointerInsideForgivenessRegion = { [weak self, weak host] in
+                    guard let self, let host else { return false }
+                    return self.pointerInsideHaloForgivenessRegion(host)
+                }
+
                 let ambientRoot = NotchAmbientOverlayView(store: store, state: host.state, workspace: store.workspace)
                 let ambientView = NSHostingView(rootView: ambientRoot)
                 ambientView.sizingOptions = []
