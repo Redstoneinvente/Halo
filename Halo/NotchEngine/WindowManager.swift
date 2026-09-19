@@ -324,6 +324,14 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             dragContextHandler?(true, urls)
         }
 
+        if observesFileDragContext, !urls.isEmpty, !acceptsFileDrop {
+            // Keep the NSDraggingDestination session alive long enough for the
+            // Context Provider Engine to classify the payload and activate a
+            // compatible Custom CI. This does not enable Drop CI and the eventual
+            // drop is still rejected unless another legitimate destination accepts it.
+            return .generic
+        }
+
         guard acceptsFileDrop else { return super.draggingEntered(sender) }
         guard !urls.isEmpty else { return super.draggingEntered(sender) }
         dragStateHandler?(true, urls.count)
@@ -332,6 +340,11 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard hasCommercialAccess else { rejectFileDrop(); return [] }
+
+        if observesFileDragContext, !acceptsFileDrop {
+            return fileURLCount(sender) > 0 ? .generic : super.draggingUpdated(sender)
+        }
+
         guard acceptsFileDrop else { return super.draggingUpdated(sender) }
 
         let count = fileURLCount(sender)
@@ -360,6 +373,13 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             rejectFileDrop()
             return false
         }
+        if observesFileDragContext, !acceptsFileDrop {
+            // Context-only observation must never turn into a hidden file receiver.
+            // End the transient trigger and reject the actual drop.
+            dragContextHandler?(false, [])
+            return false
+        }
+
         guard acceptsFileDrop else { return super.performDragOperation(sender) }
 
         let urls = fileURLs(sender)
