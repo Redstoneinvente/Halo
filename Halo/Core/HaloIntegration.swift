@@ -499,3 +499,52 @@ enum HaloIntegrationOptionPrompt {
         alert.runModal()
     }
 }
+
+
+@MainActor
+final class HaloIntegrationExecutionSession: ObservableObject {
+    static let shared = HaloIntegrationExecutionSession()
+
+    @Published private(set) var invocation: HaloIntegrationInvocation?
+    @Published private(set) var files: [URL] = []
+    @Published var statusMessage: String?
+    @Published var errorMessage: String?
+
+    private init() {}
+
+    var isActive: Bool { invocation != nil }
+
+    func present(_ invocation: HaloIntegrationInvocation, files: [URL]) {
+        self.invocation = invocation
+        self.files = files.filter(\.isFileURL)
+        statusMessage = nil
+        errorMessage = nil
+    }
+
+    func cancel() {
+        invocation = nil
+        files = []
+        statusMessage = nil
+        errorMessage = nil
+    }
+
+    @discardableResult
+    func run(options: [String: Any]) -> Bool {
+        guard let invocation else { return false }
+
+        do {
+            try HaloIntegrationCatalog.shared.invoke(
+                invocation,
+                files: files,
+                options: options
+            )
+            statusMessage = "Sent to \(invocation.integration.name)"
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            statusMessage = nil
+            return false
+        }
+    }
+}
