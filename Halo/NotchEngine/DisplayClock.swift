@@ -1189,11 +1189,17 @@ private final class HaloDropZoneHostView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if handOffToIntegrationIfCompatible(sender, commitDrop: false) {
+            return .copy
+        }
         update(sender)
         return .copy
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if handOffToIntegrationIfCompatible(sender, commitDrop: false) {
+            return .copy
+        }
         update(sender)
         return .copy
     }
@@ -1205,10 +1211,46 @@ private final class HaloDropZoneHostView: NSView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if handOffToIntegrationIfCompatible(sender, commitDrop: true) {
+            return true
+        }
+
         let urls = fileURLs(sender)
         guard !urls.isEmpty else { return false }
         let local = convert(sender.draggingLocation, from: nil)
         onDrop?(urls, local)
+        return true
+    }
+
+    private func handOffToIntegrationIfCompatible(
+        _ sender: NSDraggingInfo,
+        commitDrop: Bool
+    ) -> Bool {
+        let urls = fileURLs(sender)
+        guard !urls.isEmpty else { return false }
+
+        let actions = HaloIntegrationCatalog.shared.compatibleInvocations(
+            for: urls
+        )
+        guard !actions.isEmpty else { return false }
+
+        let session = HaloIntegrationExecutionSession.shared
+        session.presentChoices(actions, files: urls)
+        if commitDrop {
+            session.commitDrop(files: urls)
+        }
+
+        model.draggedURLs = urls
+        model.hoveredZone = nil
+        model.hoveredIntegrationID = nil
+
+        // Removing the AppKit Drop CI overlay synchronously from inside its own
+        // NSDraggingDestination callback is fragile. Hand off on the next run-loop
+        // turn; the global monitor sees the active Integration CI and will not
+        // recreate the overlay.
+        DispatchQueue.main.async {
+            haloDismissEmbeddedDropCIForIntegration()
+        }
         return true
     }
 
@@ -2511,11 +2553,13 @@ private final class HaloGlobalFileDragMonitor {
 
     private func finishDrag() {
         guard activeTarget != nil || sawMouseDrag else {
+            HaloIntegrationExecutionSession.shared.cancelUncommittedDrag()
             resetSessionState()
             return
         }
         activeTarget?.dragStateHandler?(false, 0)
         HaloEmbeddedDropZoneController.shared.cancelIfNeeded()
+        HaloIntegrationExecutionSession.shared.cancelUncommittedDrag()
         resetSessionState()
     }
 
@@ -2523,6 +2567,7 @@ private final class HaloGlobalFileDragMonitor {
         deferredFinishPending = false
         activeTarget?.dragStateHandler?(false, 0)
         HaloEmbeddedDropZoneController.shared.dismiss()
+        HaloIntegrationExecutionSession.shared.cancelUncommittedDrag()
         resetSessionState()
     }
 
