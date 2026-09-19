@@ -13,6 +13,7 @@ Any task involving Halo **CI (Custom Interfaces)**, CI packages, CI SDK, CI Stud
 5. `Docs/Templates/BaseCI.md` — required base integration template for every new CI
 6. `CI_IMPLEMENTATION_GUIDE.md` — required for native/built-in CI changes
 7. `Docs/AutoIntegrationCI.md` — required for compatible-app discovery, generated app CIs, or `app.integration.invoke`
+8. `Docs/ContextProviderEngine.md` — required for Custom CI context providers, bindings, transient context, or context performance changes
 
 Read them **before modifying code**.
 
@@ -26,6 +27,7 @@ Read them **before modifying code**.
 - Until that isolated host exists, third-party CI packages are declarative.
 - Permissions and sensitive data access must be explicit, granular, brokered, reviewable, and revocable.
 - Do not advertise data sources or macOS capabilities that Halo does not actually implement.
+- Custom CI runtime context must flow through `HaloCIContextProviderEngine`; do not assemble a second ad-hoc context dictionary in renderers, triggers, or action brokers.
 - Reuse existing surface ownership, trigger, automation, profile, and service infrastructure where appropriate instead of duplicating it.
 - Preserve CI package/API compatibility unless a breaking change is explicitly versioned.
 - Add tests for parsers, validators, permissions, bindings, triggers, actions, migrations, and failure paths introduced by the change.
