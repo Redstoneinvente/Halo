@@ -647,6 +647,8 @@ Important rules:
 
 Authors should therefore design triggers as **eligibility**, not as an assumption of guaranteed presentation.
 
+Custom CI bindings are supplied by Halo's centralized Context Provider Engine. SDK 0.2 includes bounded event metadata for recent drag/drop, clipboard, power, notification-provider and Bluetooth context in addition to the existing media/system/application fields. See [ContextProviderEngine.md](ContextProviderEngine.md) for the current context families and privacy/performance rules.
+
 Users can change each Custom CI's priority in Halo Settings.
 
 ---
