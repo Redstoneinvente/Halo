@@ -9,27 +9,35 @@ The pipeline is:
 ```text
 Partner App
   └─ Contents/Resources/HaloIntegration.json
-                ↓
-        HaloIntegrationCatalog
-                ↓
-   HaloAutoIntegrationCIGenerator
-                ↓
- Application Support/Halo/CustomCI/
-   com.redstoneinvente.halo.integration.… .haloCI
-                ↓
-      Halo Custom CI validator
-                ↓
-      normal Custom CI runtime
-                ↓
-     activeContext arbitration
-                ↓
- Halo-owned declarative renderer
-                ↓
- app.integration.invoke broker
-                ↓
-       Partner App receives
-   .halorequest + selected files
+        │
+        ├─ functions/actions
+        │    ├─ stable ID
+        │    ├─ supported file types
+        │    └─ typed options
+        │
+        └─ requested trigger(s)
+                  ↓
+          HaloIntegrationCatalog
+                  ↓
+     HaloAutoIntegrationCIGenerator
+                  ↓
+         one managed Custom CI
+                  ↓
+      normal Custom CI settings card
+        ├─ CI enable/disable
+        ├─ priority
+        ├─ permissions
+        ├─ per-function enable/disable
+        └─ automatic trigger enable/disable
+                  ↓
+      normal Custom CI arbitration
+                  ↓
+       generated declarative UI
+                  ↓
+        app.integration.invoke
 ```
+
+The generated Custom CI is the persistent product object. Dragging, clipboard events, or future integration triggers are only **trigger/input sources** for that CI; they are not separate Integration CIs.
 
 ## 1. What partner developers need to do
 
@@ -73,24 +81,31 @@ See [AppIntegrations.md](AppIntegrations.md) for the discovery manifest contract
 
 ## 2. What Halo generates
 
-For every valid discovered app, Halo creates one managed `.haloCI` package.
+For every valid discovered app, Halo creates one managed `.haloCI` package and exposes it as a normal card in **Loaded custom CI**.
 
-The package has:
+The card is the authority for user configuration. It includes:
+
+- normal Custom CI enable/disable;
+- normal priority;
+- normal per-CI permissions;
+- Open;
+- one toggle per advertised app function;
+- live function metadata such as file types and typed option definitions;
+- automatic-trigger enable/disable when the app requests a trigger.
+
+All advertised functions are preserved in the managed package, but disabled functions are hidden from the actual generated notch UI and are excluded from trigger compatibility.
+
+The generated package itself has:
 
 - a deterministic stable CI ID derived from the partner bundle identifier;
-- a compact closed presentation showing the app name and action count;
-- an expanded action list;
-- a scrollable action area;
-- its own declared sizing;
-- its own background contract;
-- one button per advertised partner action;
+- its own closed and expanded declarative presentation;
+- its own sizing/background contract;
+- one generated function group per advertised app function;
 - the normal Halo Close action;
 - the `AppIntegration.Execute` permission;
 - the `AppIntegrations` capability label.
 
-Generated packages use **SDK 0.2 / schema 1** and are passed through the exact same `HaloCIPackageValidator` as imported Custom CIs.
-
-If the generated package does not validate, Halo does not install it.
+Generated packages use **SDK 0.2 / schema 1** and are passed through the same `HaloCIPackageValidator` as imported Custom CIs.
 
 ## 3. Managed identity and ownership
 
@@ -136,9 +151,9 @@ Turning automatic generation off removes the managed packages, but does not dele
 
 ## 5. Generated CI activation
 
-Generated integration CIs are manual-only when the partner manifest declares no automatic trigger.
+Without an automatic trigger, the generated integration CI behaves like an ordinary manual Custom CI.
 
-A partner app may request the protocol-v1 `fileDrag` trigger:
+A partner app can request:
 
 ```json
 "triggers": [
@@ -149,28 +164,34 @@ A partner app may request the protocol-v1 `fileDrag` trigger:
 ]
 ```
 
-Halo translates that request into the generated package's normal SDK 0.2 `triggers.json`. Compatible file drags are supplied by the Context Provider Engine, so this does not depend on Drop CI.
+The runtime flow is deliberately split:
 
-A matching drag makes the generated CI eligible and requests expansion **through normal Custom CI arbitration**. It does not bypass another higher-priority owner.
+```text
+NSDraggingSession
+      ↓
+HaloIntegrationDragSession
+  holds actual dragged URLs privately
+      ↓
+generated CI compatibility
+  = trigger requested
+  + CI enabled
+  + automatic trigger enabled
+  + at least one enabled function accepts every dragged file
+      ↓
+normal Custom CI candidate
+      ↓
+normal activeContext arbitration
+      ↓
+if generated CI wins → expand Halo
+```
 
-Generated drag CIs default to priority 100. On an equal-priority compatible drag they outrank the generic Drop CI because the app-specific CI can actually act on that file. The priority remains user-adjustable; once the user changes it, Halo preserves that choice.
+The actual file URLs are never placed in the declarative Custom CI context bus. The Context Provider Engine still publishes bounded drag metadata for general Custom CI bindings, while the Halo-owned integration drag session privately retains the real URLs needed to deliver the eventual app action.
 
-Discovery by itself still does not imply eligibility, ownership, or automatic expansion.
+If Drop CI is also enabled, both may become candidates. The generated app CI defaults to priority 100 and uses the app-specific drag tie rank above generic Drop CI at equal priority. If the user changes the generated CI's priority, that choice is respected.
 
-The generated CI appears in the normal **Loaded custom CI** library and participates in the same:
+When the user drops while the generated integration CI owns the surface, the session commits those files to that generated CI. Pressing one of its compatible enabled functions then uses the dropped files directly rather than asking for them again.
 
-- enable/disable state;
-- priority range;
-- permission grants;
-- manual Open flow;
-- active-context arbitration;
-- surface sizing;
-- background ownership;
-- dismissal lifecycle.
-
-No generated CI adds an `ActiveContextInterface` case or bypasses the normal Custom CI candidate path.
-
-This also means a higher-priority CI can block a generated integration CI exactly as it can block any other Custom CI.
+Leaving the drag without dropping cancels the uncommitted session. Executing a committed function or dismissing the integration CI ends the session.
 
 ## 6. The brokered action
 
