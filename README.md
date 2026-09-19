@@ -86,3 +86,5 @@ See [Personalization.md](Docs/Personalization.md) for behavior and the Mac valid
 ## Custom CI V2 authoring
 
 Create and validate declarative notch interfaces with `swift run halo-ci init MyPanel.haloCI com.example.my-panel "My Panel"` and `swift run halo-ci validate MyPanel.haloCI`. See [the framework guide](Docs/CustomCI_V2.md). Run independent contract tests with `swift test --package-path SDK`.
+
+Halo also discovers capabilities exposed by installed partner apps through `Contents/Resources/HaloIntegration.json`. See [App Integration Discovery](Docs/AppIntegrations.md). This catalogue is discovery-only and does not load third-party code or bypass CI ownership arbitration.
