@@ -3259,7 +3259,7 @@ private struct HaloAccountLicenseSettingsView: View {
 private struct HaloPartnerIntegrationSettingsSection: View {
     @ObservedObject private var catalog = HaloIntegrationCatalog.shared
     @AppStorage("HaloContextAppIntegrationEnabled") private var integrationCIEnabled = true
-    @AppStorage("HaloContextAppIntegrationPriority") private var integrationPriority = 90.0
+    @AppStorage("HaloContextAppIntegrationPriority") private var integrationPriority = 100.0
 
     var body: some View {
         Section("App integrations") {
