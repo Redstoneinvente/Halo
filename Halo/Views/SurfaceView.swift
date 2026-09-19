@@ -5815,77 +5815,110 @@ private struct IntegrationCIView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: "app.connected.to.app.below.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 34, height: 34)
-                    .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            integrationHeader
+            payloadNotice
+            errorNotice
+            actionList
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear {
+            publishSizingIfCurrent()
+        }
+        .onChange(of: runtime.revision) { _ in
+            publishSizingIfCurrent()
+        }
+    }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(registration.metadata.name)
-                        .font(.headline)
-                    Text("Third-party integration · \(registration.metadata.version)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+    private var integrationHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "app.connected.to.app.below.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 34, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.14))
+                )
 
-                Spacer()
-
-                Button {
-                    let shouldCollapse = runtime.dismiss(displayID: session.displayID, pinned: surfaceState.pinned)
-                    if shouldCollapse && !surfaceState.pinned {
-                        surfaceState.expanded = false
-                    }
-                } label: {
-                    Image(systemName: "xmark")
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Close \(registration.metadata.name)")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(registration.metadata.name)
+                    .font(.headline)
+                Text("Third-party integration · \(registration.metadata.version)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
-            if session.payloadHandle != nil && !payloadCommitted {
-                Label(payloadCommitMessage, systemImage: "arrow.down.doc.fill")
+            Spacer()
+
+            Button {
+                let shouldCollapse = runtime.dismiss(
+                    displayID: session.displayID,
+                    pinned: surfaceState.pinned
+                )
+                if shouldCollapse && !surfaceState.pinned {
+                    surfaceState.expanded = false
+                }
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Close \(registration.metadata.name)")
+        }
+    }
+
+    @ViewBuilder
+    private var payloadNotice: some View {
+        if session.payloadHandle != nil && !payloadCommitted {
+            Label(payloadCommitMessage, systemImage: "arrow.down.doc.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            }
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                )
+        }
+    }
 
-            if let actionError {
-                Label(actionError, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
+    @ViewBuilder
+    private var errorNotice: some View {
+        if let actionError {
+            Label(actionError, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+    }
 
-            if actions.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "switch.2")
-                        .font(.system(size: 24, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Text("No enabled actions")
-                        .font(.headline)
-                    Text("Enable an advertised action in Context Interface Settings.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding()
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(actions) { action in
-                            actionCard(action)
-                        }
+    @ViewBuilder
+    private var actionList: some View {
+        if actions.isEmpty {
+            emptyActionsView
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(actions) { action in
+                        actionCard(action)
                     }
                 }
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear { publishSizingIfCurrent() }
-        .onChange(of: runtime.revision) { _ in publishSizingIfCurrent() }
+    }
+
+    private var emptyActionsView: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "switch.2")
+                .font(.system(size: 24, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text("No enabled actions")
+                .font(.headline)
+            Text("Enable an advertised action in Context Interface Settings.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 
     @ViewBuilder
