@@ -397,7 +397,10 @@ final class HaloIntegrationCatalog: ObservableObject {
         )
 
         if supported.isEmpty { return files.isEmpty }
-        guard !files.isEmpty else { return false }
+        guard !files.isEmpty,
+              files.allSatisfy({ $0.isFileURL && !$0.hasDirectoryPath }) else {
+            return false
+        }
         if supported.contains("*") { return true }
 
         return files.allSatisfy { file in
