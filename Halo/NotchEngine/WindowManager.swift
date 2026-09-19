@@ -188,6 +188,11 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     private var hasCommercialAccess: Bool { commercialAccessAllowed?() ?? false }
     private var acceptsFileDrop: Bool { hasCommercialAccess && (dropEnabled?() ?? false) }
 
+    /// The global file-drag monitor lives outside the normal NSDraggingDestination path.
+    /// Expose the same authoritative, in-memory permission so it cannot create a second
+    /// unlicensed Drop CI path.
+    var permitsGlobalDropCI: Bool { acceptsFileDrop }
+
     /// Prevent SwiftUI or any descendant from re-registering the locked Halo surface
     /// as a drag destination. Once commercially unlocked, normal NSHostingView
     /// registration is allowed again so File Shelf and other descendant targets work.
