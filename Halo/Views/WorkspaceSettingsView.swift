@@ -2068,12 +2068,6 @@ private struct LiveActivityContextSettings: View {
             Toggle("Keep Closed Notch contents visible", isOn: $keepClosedContents)
         }
 
-        Section("Closed Notch widget") {
-            Label("Live Activities are available as the Activity item in Closed notch → Content → Left slot / Right slot.", systemImage: "rectangle.split.2x1")
-            Text("The closed widget deliberately inherits the Closed Notch horizontal/vertical padding, margin from camera, margin from outer edge, and element spacing. It can also temporarily use a free side when automatic placement is enabled there.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-
         Section("Test Live Activities") {
             HStack {
                 Button("Message") { publishMessagePreview() }
