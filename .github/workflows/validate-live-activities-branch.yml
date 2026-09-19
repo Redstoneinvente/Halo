@@ -1,0 +1,22 @@
+name: Validate Live Activities branch
+
+on:
+  push:
+    branches:
+      - codex/live-activities-v1
+    paths:
+      - 'Halo/**'
+      - 'Tests/**'
+      - '.github/workflows/validate-live-activities-branch.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Halo and run core tests
+        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build test
