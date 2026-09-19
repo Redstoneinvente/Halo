@@ -571,6 +571,7 @@ final class WindowManager {
         var pixelPalCollapseWork: DispatchWorkItem?
         var hoverOpeningCompletionWork: DispatchWorkItem?
         var mouseDownDismissHold: UUID?
+        var textEditingDismissHold: UUID?
         var menuDismissHolds: [UUID] = []
         var popoverDismissHolds: [UUID] = []
         init() {
@@ -1587,6 +1588,7 @@ final class WindowManager {
             if host.mouseDownDismissHold == nil {
                 host.mouseDownDismissHold = host.state.dismissCoordinator.acquireHold(.mouseDown)
             }
+            syncTextEditingHold(for: host)
 
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
             for host in hosts.values {
@@ -1594,6 +1596,7 @@ final class WindowManager {
                     host.mouseDownDismissHold = nil
                     host.state.dismissCoordinator.releaseHold(token)
                 }
+                syncTextEditingHold(for: host)
             }
 
         case .scrollWheel:
@@ -1602,6 +1605,7 @@ final class WindowManager {
 
         case .keyDown:
             guard let host = dismissHost(for: event.window), host.state.expanded else { return }
+            syncTextEditingHold(for: host)
             if event.keyCode == 53 {
                 // Let an active field editor/menu consume Escape first.
                 guard !isTextEditing(host) else { return }
@@ -1631,6 +1635,17 @@ final class WindowManager {
     private func isTextEditing(_ host: Host) -> Bool {
         guard let editor = host.panel.firstResponder as? NSTextView else { return false }
         return editor.isFieldEditor
+    }
+
+    private func syncTextEditingHold(for host: Host) {
+        if isTextEditing(host) {
+            if host.textEditingDismissHold == nil {
+                host.textEditingDismissHold = host.state.dismissCoordinator.acquireHold(.textEditing)
+            }
+        } else if let token = host.textEditingDismissHold {
+            host.textEditingDismissHold = nil
+            host.state.dismissCoordinator.releaseHold(token)
+        }
     }
 
     private func pointerInsideOwnedHaloSurface(_ host: Host) -> Bool {
