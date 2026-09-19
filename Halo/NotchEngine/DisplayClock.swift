@@ -323,8 +323,7 @@ private enum HaloDropZoneLayoutResolver {
 
     static func frames(
         size: CGSize,
-        configuration: HaloDropZoneConfiguration,
-        partnerCount: Int = 0
+        configuration: HaloDropZoneConfiguration
     ) -> [CGRect] {
         let count = configuration.zones.count
         guard count > 0, size.width > 80, size.height > 100 else { return [] }
@@ -336,10 +335,9 @@ private enum HaloDropZoneLayoutResolver {
         let horizontalInset = padding + edgeSafety
         let top = headerHeight + padding + edgeSafety
         let availableWidth = max(1, size.width - horizontalInset * 2)
-        let partnerReserve: CGFloat = partnerCount > 0 ? 76 : 0
         let availableHeight = max(
             1,
-            size.height - top - footerHeight - padding - edgeSafety - partnerReserve
+            size.height - top - footerHeight - padding - edgeSafety
         )
         let rect = CGRect(
             x: horizontalInset,
@@ -412,61 +410,15 @@ private enum HaloDropZoneLayoutResolver {
     static func index(
         at localAppKitPoint: CGPoint,
         size: CGSize,
-        configuration: HaloDropZoneConfiguration,
-        partnerCount: Int = 0
+        configuration: HaloDropZoneConfiguration
     ) -> Int? {
-        let swiftUIPoint = CGPoint(x: localAppKitPoint.x, y: size.height - localAppKitPoint.y)
+        let swiftUIPoint = CGPoint(
+            x: localAppKitPoint.x,
+            y: size.height - localAppKitPoint.y
+        )
         return frames(
             size: size,
-            configuration: configuration,
-            partnerCount: partnerCount
-        ).firstIndex { $0.contains(swiftUIPoint) }
-    }
-
-    static func partnerFrames(
-        size: CGSize,
-        configuration: HaloDropZoneConfiguration,
-        count: Int
-    ) -> [CGRect] {
-        let visibleCount = min(4, max(0, count))
-        guard visibleCount > 0, size.width > 80, size.height > 150 else { return [] }
-
-        let padding = max(8, CGFloat(configuration.boardPadding))
-        let gap = max(6, CGFloat(configuration.zoneSpacing))
-        let edgeSafety: CGFloat = 8
-        let horizontalInset = padding + edgeSafety
-        let availableWidth = max(1, size.width - horizontalInset * 2)
-        let height: CGFloat = 62
-        let width = max(
-            80,
-            (availableWidth - gap * CGFloat(visibleCount - 1)) / CGFloat(visibleCount)
-        )
-        let y = max(
-            headerHeight + padding,
-            size.height - footerHeight - padding - edgeSafety - height
-        )
-
-        return (0..<visibleCount).map { index in
-            CGRect(
-                x: horizontalInset + CGFloat(index) * (width + gap),
-                y: y,
-                width: width,
-                height: height
-            )
-        }
-    }
-
-    static func partnerIndex(
-        at localAppKitPoint: CGPoint,
-        size: CGSize,
-        configuration: HaloDropZoneConfiguration,
-        count: Int
-    ) -> Int? {
-        let swiftUIPoint = CGPoint(x: localAppKitPoint.x, y: size.height - localAppKitPoint.y)
-        return partnerFrames(
-            size: size,
-            configuration: configuration,
-            count: count
+            configuration: configuration
         ).firstIndex { $0.contains(swiftUIPoint) }
     }
 }
@@ -725,8 +677,6 @@ private enum HaloDropZoneActionExecutor {
 @MainActor
 private final class HaloDropZoneRuntimeModel: ObservableObject {
     @Published var hoveredZone: Int?
-    @Published var hoveredIntegrationID: String?
-    @Published var draggedURLs: [URL] = []
     @Published var itemCount = 1
     @Published var result: String?
     @Published var renameZoneID: UUID?
@@ -781,24 +731,14 @@ struct HaloDropCIBackgroundView: View {
 private struct HaloDropZoneBoardView: View {
     @ObservedObject var settings: HaloDropZoneSettingsStore
     @ObservedObject var model: HaloDropZoneRuntimeModel
-    @ObservedObject private var integrationCatalog = HaloIntegrationCatalog.shared
     @FocusState private var renameFieldFocused: Bool
 
     var body: some View {
         GeometryReader { proxy in
             let configuration = settings.configuration
-            let partnerActions = Array(
-                integrationCatalog.compatibleInvocations(for: model.draggedURLs).prefix(4)
-            )
             let frames = HaloDropZoneLayoutResolver.frames(
                 size: proxy.size,
-                configuration: configuration,
-                partnerCount: partnerActions.count
-            )
-            let partnerFrames = HaloDropZoneLayoutResolver.partnerFrames(
-                size: proxy.size,
-                configuration: configuration,
-                count: partnerActions.count
+                configuration: configuration
             )
             let dense = configuration.zones.count >= 6 || proxy.size.height < 260
 
@@ -825,40 +765,26 @@ private struct HaloDropZoneBoardView: View {
                     }
                 }
 
-                ForEach(Array(partnerActions.enumerated()), id: \.element.id) { index, invocation in
-                    if partnerFrames.indices.contains(index) {
-                        let frame = partnerFrames[index]
-                        integrationCard(
-                            invocation,
-                            active: model.hoveredIntegrationID == invocation.id,
-                            configuration: configuration
-                        )
-                        .frame(width: frame.width, height: frame.height)
-                        .position(x: frame.midX, y: frame.midY)
-                    }
-                }
-
                 HStack(spacing: 6) {
-                    let hoveringAction = model.hoveredZone != nil || model.hoveredIntegrationID != nil
                     Image(
                         systemName: model.renameZoneID != nil
                             ? "pencil"
-                            : (hoveringAction ? "arrow.down.circle.fill" : "cursorarrow.motionlines")
+                            : (model.hoveredZone == nil ? "cursorarrow.motionlines" : "arrow.down.circle.fill")
                     )
                     .font(.system(size: 8.5, weight: .semibold))
                     Text(
                         model.renameZoneID != nil
                             ? "Type a new name · Return to confirm · Esc to cancel"
-                            : (hoveringAction ? "Release to run this action" : "Move over an action")
+                            : (model.hoveredZone == nil ? "Move over an action" : "Release to run this action")
                     )
                     .font(.system(size: 8.5, weight: .medium, design: .rounded))
                 }
                 .foregroundStyle(
                     model.renameZoneID != nil
                         ? Color.white.opacity(0.72)
-                        : ((model.hoveredZone != nil || model.hoveredIntegrationID != nil)
-                            ? Color.white.opacity(0.70)
-                            : Color.white.opacity(0.36))
+                        : (model.hoveredZone == nil
+                            ? Color.white.opacity(0.36)
+                            : Color.white.opacity(0.70))
                 )
                 .position(x: proxy.size.width / 2, y: max(12, proxy.size.height - 11))
             }
@@ -903,19 +829,6 @@ private struct HaloDropZoneBoardView: View {
 
             Spacer(minLength: 8)
 
-            let partnerCount = integrationCatalog.compatibleInvocations(for: model.draggedURLs).count
-            if partnerCount > 0 {
-                HStack(spacing: 5) {
-                    Image(systemName: "app.badge.checkmark")
-                    Text("\(partnerCount) app action\(partnerCount == 1 ? "" : "s")")
-                }
-                .font(.system(size: 8.5, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.accentColor)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(Color.accentColor.opacity(0.09), in: Capsule())
-            }
-
             HStack(spacing: 5) {
                 Image(systemName: model.itemCount == 1 ? "doc.fill" : "doc.on.doc.fill")
                 Text(model.itemCount == 1 ? "1 item" : "\(model.itemCount) items")
@@ -926,70 +839,6 @@ private struct HaloDropZoneBoardView: View {
             .padding(.vertical, 6)
             .background(Color.white.opacity(0.065), in: Capsule())
         }
-    }
-
-    private func integrationCard(
-        _ invocation: HaloIntegrationInvocation,
-        active: Bool,
-        configuration: HaloDropZoneConfiguration
-    ) -> some View {
-        let accent = Color.accentColor
-        return ZStack {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(Color.white.opacity(active ? 0.115 : 0.055))
-            LinearGradient(
-                colors: [accent.opacity(active ? 0.30 : 0.11), Color.clear],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-
-            HStack(spacing: 9) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(accent.opacity(active ? 0.30 : 0.14))
-                    Image(systemName: "app.badge.checkmark")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(active ? Color.white : accent)
-                }
-                .frame(width: 32, height: 32)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(invocation.action.name)
-                        .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                        .lineLimit(1)
-                    Text(invocation.integration.name)
-                        .font(.system(size: 8, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.43))
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 2)
-
-                if active {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(accent)
-                } else {
-                    Text("APP")
-                        .font(.system(size: 7.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(accent)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(accent.opacity(0.10), in: Capsule())
-                }
-            }
-            .padding(.horizontal, 9)
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(
-                    active ? accent.opacity(configuration.highlightStrength) : Color.white.opacity(0.07),
-                    lineWidth: active ? 1.7 : 1
-                )
-        )
-        .shadow(color: active ? accent.opacity(0.20) : .clear, radius: active ? 9 : 0, y: 3)
-        .animation(.easeOut(duration: 0.13), value: active)
     }
 
     private func zoneCard(
@@ -1261,31 +1110,11 @@ private final class HaloDropZoneHostView: NSView {
 
     private func update(_ sender: NSDraggingInfo) {
         let local = convert(sender.draggingLocation, from: nil)
-        let urls = fileURLs(sender)
-        model.draggedURLs = urls
-
-        let partnerActions = Array(
-            HaloIntegrationCatalog.shared.compatibleInvocations(for: urls).prefix(4)
-        )
-        let partnerIndex = HaloDropZoneLayoutResolver.partnerIndex(
+        model.hoveredZone = HaloDropZoneLayoutResolver.index(
             at: local,
             size: bounds.size,
-            configuration: settings.configuration,
-            count: partnerActions.count
+            configuration: settings.configuration
         )
-
-        if let partnerIndex, partnerActions.indices.contains(partnerIndex) {
-            model.hoveredIntegrationID = partnerActions[partnerIndex].id
-            model.hoveredZone = nil
-        } else {
-            model.hoveredIntegrationID = nil
-            model.hoveredZone = HaloDropZoneLayoutResolver.index(
-                at: local,
-                size: bounds.size,
-                configuration: settings.configuration,
-                partnerCount: partnerActions.count
-            )
-        }
 
         let count = sender.draggingPasteboard.pasteboardItems?.reduce(into: 0) { result, item in
             if item.availableType(from: [.fileURL]) != nil { result += 1 }
@@ -1417,8 +1246,6 @@ private final class HaloEmbeddedDropZoneController {
         target = nil
         originalDropHandler = nil
         model.hoveredZone = nil
-        model.hoveredIntegrationID = nil
-        model.draggedURLs = []
         model.result = nil
         model.clearRename()
         dropHandled = false
@@ -1440,30 +1267,10 @@ private final class HaloEmbeddedDropZoneController {
             return
         }
 
-        let partnerActions = Array(
-            HaloIntegrationCatalog.shared.compatibleInvocations(for: urls).prefix(4)
-        )
-        let size = targetView?.bounds.size ?? .zero
-
-        if let partnerIndex = HaloDropZoneLayoutResolver.partnerIndex(
-            at: localPoint,
-            size: size,
-            configuration: settings.configuration,
-            count: partnerActions.count
-        ), partnerActions.indices.contains(partnerIndex) {
-            performPartnerAction(
-                partnerActions[partnerIndex],
-                urls: urls,
-                target: target
-            )
-            return
-        }
-
         let index = HaloDropZoneLayoutResolver.index(
             at: localPoint,
-            size: size,
-            configuration: settings.configuration,
-            partnerCount: partnerActions.count
+            size: targetView?.bounds.size ?? .zero,
+            configuration: settings.configuration
         )
 
         guard let index, settings.configuration.zones.indices.contains(index) else {
@@ -1485,38 +1292,6 @@ private final class HaloEmbeddedDropZoneController {
             closeHandler: { [weak target] in target?.dragStateHandler?(false, 0) }
         )
         completeDrop(result: result)
-    }
-
-    private func performPartnerAction(
-        _ invocation: HaloIntegrationInvocation,
-        urls: [URL],
-        target: any HaloGlobalDropTarget
-    ) {
-        dropHandled = true
-        model.hoveredZone = nil
-        model.hoveredIntegrationID = invocation.id
-        model.result = "Opening \(invocation.action.name)…"
-
-        guard let view = target as? NSView,
-              let screen = view.window?.screen else {
-            completeDrop(result: "Could not resolve the target display")
-            return
-        }
-
-        HaloIntegrationExecutionSession.shared.present(
-            invocation,
-            files: urls,
-            displayID: WindowManager.displayID(screen)
-        )
-
-        target.dragStateHandler?(false, 0)
-
-        // Hand ownership of the notch to the dedicated Integration CI.
-        // Dismiss only the transient Drop CI overlay; the SurfaceView keeps
-        // the notch expanded while HaloIntegrationExecutionSession is active.
-        DispatchQueue.main.async { [weak self] in
-            self?.dismiss()
-        }
     }
 
     private func beginInlineRename(zone: HaloDropZone, urls: [URL], target: any HaloGlobalDropTarget) {
