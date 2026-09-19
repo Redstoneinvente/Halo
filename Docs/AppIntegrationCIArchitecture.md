@@ -530,6 +530,15 @@ Example:
     "bundleIdentifier": "com.redstoneinvente.HaloIntegrationTest"
   },
 
+  "presentation": {
+    "card": {
+      "bannerImage": "HaloCardBanner.png",
+      "category": "File Tools",
+      "description": "Read or rename dropped text files.",
+      "accentColor": "#1E7BFF"
+    }
+  },
+
   "actions": [
     {
       "id": "read.text",
@@ -592,6 +601,8 @@ Example:
 ```
 
 Actions own their input requirements.
+
+Partner card presentation is optional additive metadata. `bannerImage` is resolved only as a filename inside the discovered app's Resources directory; absolute paths, path traversal and remote artwork are not accepted. Recommended partner artwork is 1200 × 540 px with important content kept inside a centered 1040 × 420 px safe area. If artwork is absent or cannot be loaded, Halo renders a generated fallback card.
 
 A `fileDrag` trigger referencing actions derives compatibility from those actions instead of duplicating extensions in multiple places.
 
