@@ -181,6 +181,67 @@ enum SurfaceAppearanceScope {
     case all, background, geometry, closedGeometry, openedPosition, surfaceGeometry, motion
 }
 
+private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
+    case crystal = "Crystal"
+    case balanced = "Balanced"
+    case frosted = "Frosted"
+    case smoked = "Smoked"
+    case prism = "Prism"
+
+    var id: String { rawValue }
+
+    var options: GlassOptions {
+        switch self {
+        case .crystal:
+            return GlassOptions(
+                clarity: 0.94,
+                frost: 0.14,
+                lightAbsorption: 0.04,
+                chromaticShift: 0.02,
+                tint: WidgetColor(red: 0.80, green: 0.88, blue: 1.0),
+                tintAmount: 0.015,
+                highlight: 0.10,
+                edgeDepth: 0.03
+            )
+        case .balanced:
+            return GlassOptions()
+        case .frosted:
+            return GlassOptions(
+                clarity: 0.46,
+                frost: 0.82,
+                lightAbsorption: 0.18,
+                chromaticShift: 0.04,
+                tint: WidgetColor(red: 0.76, green: 0.84, blue: 1.0),
+                tintAmount: 0.055,
+                highlight: 0.18,
+                edgeDepth: 0.13
+            )
+        case .smoked:
+            return GlassOptions(
+                clarity: 0.62,
+                frost: 0.52,
+                lightAbsorption: 0.52,
+                chromaticShift: 0.03,
+                tint: WidgetColor(red: 0.24, green: 0.28, blue: 0.34),
+                tintAmount: 0.16,
+                highlight: 0.07,
+                edgeDepth: 0.22
+            )
+        case .prism:
+            return GlassOptions(
+                clarity: 0.74,
+                frost: 0.38,
+                lightAbsorption: 0.10,
+                chromaticShift: 0.72,
+                tint: WidgetColor(red: 0.64, green: 0.78, blue: 1.0),
+                tintAmount: 0.07,
+                highlight: 0.24,
+                edgeDepth: 0.07
+            )
+        }
+    }
+}
+
 @MainActor struct SurfaceAppearanceControls: View {
     @Binding var appearance: Appearance
     let theme: Theme
@@ -371,6 +432,42 @@ enum SurfaceAppearanceScope {
                     appearance.gradientStartColor = nil
                     appearance.gradientEndColor = nil
                 }
+            }
+        } else if appearance.background == .glass {
+            Section("Glass behavior") {
+                Text("Halo keeps macOS's live backdrop sampling and layers optical controls on top. Frost changes the native material family; clarity changes how strongly that material is composited.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 7) {
+                        ForEach(GlassAppearancePreset.allCases) { preset in
+                            Button(preset.rawValue) { appearance.glass = preset.options }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
+                    }
+                    Menu("Glass preset") {
+                        ForEach(GlassAppearancePreset.allCases) { preset in
+                            Button(preset.rawValue) { appearance.glass = preset.options }
+                        }
+                    }
+                }
+
+                PreciseSlider(title: "Clarity", value: $appearance.glass.clarity, range: 0...1, step: 0.01, decimals: 2)
+                PreciseSlider(title: "Frost", value: $appearance.glass.frost, range: 0...1, step: 0.01, decimals: 2)
+                PreciseSlider(title: "Light absorption", value: $appearance.glass.lightAbsorption, range: 0...1, step: 0.01, decimals: 2)
+                PreciseSlider(title: "Chromatic alteration", value: $appearance.glass.chromaticShift, range: 0...1, step: 0.01, decimals: 2)
+
+                ColorPicker("Glass tint", selection: Binding(
+                    get: { appearance.glass.tint.color },
+                    set: { appearance.glass.tint = widgetColor(from: $0) }
+                ), supportsOpacity: false)
+                PreciseSlider(title: "Tint strength", value: $appearance.glass.tintAmount, range: 0...0.5, step: 0.01, decimals: 2)
+                PreciseSlider(title: "Specular highlight", value: $appearance.glass.highlight, range: 0...1, step: 0.01, decimals: 2)
+                PreciseSlider(title: "Edge depth", value: $appearance.glass.edgeDepth, range: 0...1, step: 0.01, decimals: 2)
+
+                Button("Reset glass") { appearance.glass = GlassOptions() }
             }
         } else if appearance.background == .image || appearance.background == .video {
             Section(appearance.background == .image ? "Image background" : "Video background") {
