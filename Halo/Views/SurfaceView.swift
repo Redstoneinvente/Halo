@@ -2688,6 +2688,32 @@ struct SurfaceView: View {
     private var clipboardContextActive: Bool { activeContext == .clipboard }
     private var customContextActive: Bool { activeContext == .custom }
     private var integrationContextActive: Bool { activeContext == .integration }
+
+    private var activeCIDismissBehavior: CIDismissBehavior {
+        switch activeContext {
+        case .drop:
+            return .interactive
+        case .music:
+            return .standard
+        case .bluetooth:
+            return .standard
+        case .retro:
+            return .interactive
+        case .teleprompter:
+            return .persistent
+        case .transfer:
+            return .interactive
+        case .clipboard:
+            return .interactive
+        case .custom:
+            return activeCustomCandidate?.registration.presentation.resolvedDismissBehavior ?? .standard
+        case .integration:
+            return activeIntegrationRegistration?.presentation.resolvedDismissBehavior ?? .standard
+        case .none:
+            return .standard
+        }
+    }
+
     private var contextOwnsFullSurface: Bool {
         guard state.expanded else { return false }
         switch activeContext {
@@ -3025,7 +3051,7 @@ struct SurfaceView: View {
             state.contextPreferredCompactWidth = nil
             state.contextPreferredCompactHeight = nil
             state.contextMinimumExpandedWidth = nil
-            if !state.pinned { state.expanded = false }
+            if !state.pinned { state.requestDismissal(reason: .ciCompleted) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloClipboardCIToggle"))) { _ in
             guard clipboardCIEnabled else { return }
@@ -3192,9 +3218,11 @@ struct SurfaceView: View {
             }
         }
         .onAppear {
+            state.setCIDismissBehavior(activeCIDismissBehavior)
             synchronizeSurfaceCIOwnership()
         }
         .onChange(of: activeContextCandidate?.arbitration.ciID) { _ in
+            state.setCIDismissBehavior(activeCIDismissBehavior)
             synchronizeSurfaceCIOwnership()
         }
         .onChange(of: state.displayID) { _ in
