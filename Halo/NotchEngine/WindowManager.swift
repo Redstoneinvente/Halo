@@ -2210,7 +2210,7 @@ final class WindowManager {
                                         pinned: host.state.pinned
                                     )
                                     if shouldCollapse && !host.state.pinned {
-                                        host.state.expanded = false
+                                        host.state.requestDismissal(reason: .ciCompleted)
                                     }
                                 } catch {
                                     // IntegrationCIRuntime publishes the broker/transport error.
