@@ -737,7 +737,7 @@ struct HaloGeneratedIntegrationCIMetadata: Codable, Equatable {
     let sourceFingerprint: String
 }
 
-struct HaloAutoIntegrationCISyncResult {
+struct HaloAutoIntegrationCISyncResult: Sendable {
     var changed = false
     var installed: [String] = []
     var removed: [String] = []
@@ -762,7 +762,7 @@ enum HaloAutoIntegrationCIGenerator {
         let url = packageURL.appendingPathComponent(markerFileName)
         guard let data = try? Data(contentsOf: url),
               let value = try? JSONDecoder().decode(HaloGeneratedIntegrationCIMetadata.self, from: data),
-              value.generatorVersion == generatorVersion else {
+              value.generatorVersion > 0 else {
             return nil
         }
         return value
@@ -805,7 +805,9 @@ enum HaloAutoIntegrationCIGenerator {
                     continue
                 }
                 let report = HaloCIPackageValidator.validatePackage(at: destination)
-                if existing.sourceFingerprint == fingerprint, report.package != nil {
+                if existing.generatorVersion == generatorVersion,
+                   existing.sourceFingerprint == fingerprint,
+                   report.package != nil {
                     continue
                 }
             }
