@@ -231,6 +231,12 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
         didSet { refreshDropRegistration() }
     }
 
+    /// Context observation is deliberately independent from Drop CI enablement.
+    /// It observes only bounded drag metadata and never accepts the drop by itself.
+    var contextDragObservationEnabled: (() -> Bool)? {
+        didSet { refreshDropRegistration() }
+    }
+
     private var dropCIRegistered = false
 
     required init(rootView: Content) {
@@ -244,6 +250,9 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     // Both providers fail closed until WindowManager installs them.
     private var hasCommercialAccess: Bool { commercialAccessAllowed?() ?? false }
     private var acceptsFileDrop: Bool { hasCommercialAccess && (dropEnabled?() ?? false) }
+    private var observesFileDragContext: Bool {
+        hasCommercialAccess && (contextDragObservationEnabled?() ?? false)
+    }
 
     /// The global file-drag monitor lives outside the normal NSDraggingDestination path.
     /// Expose the same authoritative, in-memory permission so it cannot create a second
@@ -269,7 +278,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             return
         }
 
-        let shouldRegister = dropEnabled?() ?? false
+        let shouldRegister = (dropEnabled?() ?? false) || observesFileDragContext
         guard shouldRegister != dropCIRegistered else { return }
 
         if shouldRegister {
@@ -309,12 +318,15 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
         // to SwiftUI/NSHostingView. Licensed + Drop-disabled is different: descendants
         // such as File Shelf may still own their own drop destinations.
         guard hasCommercialAccess else { rejectFileDrop(); return [] }
-        guard acceptsFileDrop else { return super.draggingEntered(sender) }
 
         let urls = fileURLs(sender)
+        if observesFileDragContext, !urls.isEmpty {
+            dragContextHandler?(true, urls)
+        }
+
+        guard acceptsFileDrop else { return super.draggingEntered(sender) }
         guard !urls.isEmpty else { return super.draggingEntered(sender) }
         dragStateHandler?(true, urls.count)
-        dragContextHandler?(true, urls)
         return .copy
     }
 
@@ -333,12 +345,14 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             rejectFileDrop()
             return
         }
+        if observesFileDragContext {
+            dragContextHandler?(false, [])
+        }
         guard acceptsFileDrop else {
             super.draggingExited(sender)
             return
         }
         dragStateHandler?(false, 0)
-        dragContextHandler?(false, [])
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -362,12 +376,14 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             rejectFileDrop()
             return
         }
+        if observesFileDragContext {
+            dragContextHandler?(false, [])
+        }
         guard acceptsFileDrop else {
             super.concludeDragOperation(sender)
             return
         }
         dragStateHandler?(false, 0)
-        dragContextHandler?(false, [])
     }
 }
 
@@ -1938,6 +1954,9 @@ final class WindowManager {
                 }
                 view.dropEnabled = { [weak self] in
                     self?.dropCISettingEnabled ?? false
+                }
+                view.contextDragObservationEnabled = {
+                    !UserDefaults.standard.bool(forKey: "HaloDisableCustomCI")
                 }
                 host.refreshDropCIRegistration = { [weak view] in
                     view?.refreshDropRegistration()
