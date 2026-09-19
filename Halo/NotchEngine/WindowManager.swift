@@ -1829,9 +1829,11 @@ final class WindowManager {
             target.origin.y = host.panel.frame.maxY - target.height + newOffset.height - oldOffset.height
         }
 
-        let baseWidth = geometry.frame(expanded: true).width
-        let contentWidth = expanded && host.state.contextPreferredSize != nil ? target.width : baseWidth
-        if host.state.dashboardWidth != contentWidth { host.state.dashboardWidth = contentWidth }
+        if expanded {
+            let baseWidth = geometry.frame(expanded: true).width
+            let contentWidth = host.state.contextPreferredSize != nil ? target.width : baseWidth
+            if host.state.dashboardWidth != contentWidth { host.state.dashboardWidth = contentWidth }
+        }
         host.targetFrame = target
         let completion: (() -> Void)? = expanded ? nil : { [weak host] in
             guard let host, !host.state.expanded else { return }
