@@ -1977,6 +1977,65 @@ final class WindowManager {
                         host.state.endFileDrop(collapseAfterDelay: true)
                     }
                 }
+                view.fileDragHandler = { [weak self, weak host] phase, urls in
+                    guard let self, let host else { return false }
+                    guard self.dropCIAllowed else {
+                        HaloIntegrationExecutionSession.shared.cancelUncommittedDrag()
+                        return false
+                    }
+
+                    let session = HaloIntegrationExecutionSession.shared
+
+                    switch phase {
+                    case .entered, .updated:
+                        let actions = HaloIntegrationCatalog.shared.compatibleInvocations(
+                            for: urls
+                        )
+                        guard !actions.isEmpty else {
+                            session.cancelUncommittedDrag()
+                            return false
+                        }
+
+                        ActivationSequenceCoordinator.shared.cancelForInteraction()
+                        host.state.cancelFileDrop()
+                        host.state.dropExitTask?.cancel()
+                        host.state.collapseTask?.cancel()
+                        session.presentChoices(actions, files: urls)
+                        if !host.state.expanded {
+                            host.state.expanded = true
+                        }
+                        return true
+
+                    case .exited:
+                        let handled = session.isActive && !session.dropCommitted
+                        session.cancelUncommittedDrag()
+                        return handled
+
+                    case .dropped:
+                        let actions = HaloIntegrationCatalog.shared.compatibleInvocations(
+                            for: urls
+                        )
+                        guard !actions.isEmpty else {
+                            session.cancelUncommittedDrag()
+                            return false
+                        }
+
+                        if !session.isActive {
+                            session.presentChoices(actions, files: urls)
+                        } else {
+                            session.updateFiles(urls)
+                        }
+                        session.commitDrop(files: urls)
+
+                        host.state.cancelFileDrop()
+                        host.state.dropExitTask?.cancel()
+                        host.state.collapseTask?.cancel()
+                        if !host.state.expanded {
+                            host.state.expanded = true
+                        }
+                        return true
+                    }
+                }
                 view.dropHandler = { [weak self, weak host] urls in
                     guard let self, let host else { return }
                     guard self.dropCIAllowed else {
