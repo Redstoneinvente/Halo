@@ -1997,6 +1997,7 @@ final class WindowManager {
                         }
 
                         ActivationSequenceCoordinator.shared.cancelForInteraction()
+                        haloDismissEmbeddedDropCIForIntegration()
                         host.state.cancelFileDrop()
                         host.state.dropExitTask?.cancel()
                         host.state.collapseTask?.cancel()
@@ -2019,6 +2020,8 @@ final class WindowManager {
                             session.cancelUncommittedDrag()
                             return false
                         }
+
+                        haloDismissEmbeddedDropCIForIntegration()
 
                         if !session.isActive {
                             session.presentChoices(actions, files: urls)
