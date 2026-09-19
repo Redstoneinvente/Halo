@@ -134,6 +134,42 @@ final class HaloCoreTests: XCTestCase {
         }
     }
 
+    func testHaloIntegrationManifestAcceptsFileDragTriggerAndRejectsUnsupportedExtension() throws {
+        let manifest = HaloIntegrationManifest(
+            protocolVersion: 1,
+            name: "Partner",
+            bundleIdentifier: "com.example.partner",
+            actions: [
+                HaloIntegrationAction(
+                    id: "read.text",
+                    name: "Read Text",
+                    supportedExtensions: ["txt"],
+                    options: []
+                )
+            ],
+            triggers: [
+                HaloIntegrationTrigger(type: "fileDrag", supportedExtensions: ["txt"])
+            ]
+        )
+        XCTAssertNoThrow(try HaloIntegrationManifestCodec.validate(manifest))
+
+        let invalid = HaloIntegrationManifest(
+            protocolVersion: 1,
+            name: "Partner",
+            bundleIdentifier: "com.example.partner",
+            actions: manifest.actions,
+            triggers: [
+                HaloIntegrationTrigger(type: "fileDrag", supportedExtensions: ["png"])
+            ]
+        )
+        XCTAssertThrowsError(try HaloIntegrationManifestCodec.validate(invalid)) { error in
+            guard let integrationError = error as? HaloIntegrationManifestError,
+                  case .triggerExtensionHasNoAction("png") = integrationError else {
+                return XCTFail("Expected triggerExtensionHasNoAction, got \(error)")
+            }
+        }
+    }
+
     func testAutoIntegrationCIGeneratorCreatesValidatorApprovedPackage() throws {
         let installRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("HaloAutoCITests-\(UUID().uuidString)", isDirectory: true)
@@ -160,6 +196,9 @@ final class HaloCoreTests: XCTestCase {
                             )
                         ]
                     )
+                ],
+                triggers: [
+                    HaloIntegrationTrigger(type: "fileDrag", supportedExtensions: ["txt"])
                 ]
             )
         )
@@ -202,6 +241,12 @@ final class HaloCoreTests: XCTestCase {
         let arguments = try XCTUnwrap(action["arguments"] as? [String: String])
         XCTAssertEqual(arguments["bundleIdentifier"], "com.example.partner")
         XCTAssertEqual(arguments["actionID"], "convert.file")
+
+        let triggerData = try Data(contentsOf: packageURL.appendingPathComponent("triggers.json"))
+        let triggerDocument = try JSONDecoder().decode(HaloCITriggerDocument.self, from: triggerData)
+        XCTAssertEqual(triggerDocument.triggers.count, 1)
+        XCTAssertEqual(triggerDocument.triggers.first?.type, "fileDrag")
+        XCTAssertEqual(triggerDocument.triggers.first?.extensions, ["txt"])
     }
 
     func testAutoIntegrationCIGeneratorUpdatesAndRemovesOnlyManagedPackages() throws {
