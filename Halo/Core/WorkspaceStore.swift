@@ -1381,10 +1381,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
             prefs.disabledIntegrationActionIDs = disabled
         }
 
-        if !enabled,
-           HaloIntegrationDragSession.shared.actionIDs(packageID: packageID).contains(actionID) {
-            revalidateIntegrationDragSession()
-        }
+        revalidateIntegrationDragSession()
         contextDidChange()
     }
 
@@ -1396,7 +1393,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         guard isGeneratedIntegrationPackage(packageID) else { return }
         mutatePreferences(packageID) { $0.integrationAutomaticTriggersEnabled = enabled }
         if !enabled {
-            HaloIntegrationDragSession.shared.clear(packageID: packageID)
+            HaloIntegrationDragSession.shared.removeCandidate(packageID: packageID)
         }
         contextDidChange()
     }
@@ -1542,7 +1539,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
             if manualActivationID == packageID { manualActivationID = nil }
             suppressedPackageIDs.remove(packageID)
             if isGeneratedIntegrationPackage(packageID) {
-                HaloIntegrationDragSession.shared.clear(packageID: packageID)
+                HaloIntegrationDragSession.shared.removeCandidate(packageID: packageID)
             }
         }
         contextDidChange()
@@ -1582,7 +1579,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         if manualActivationID == id { manualActivationID = nil }
         suppressedPackageIDs.insert(id)
         if isGeneratedIntegrationPackage(id) {
-            HaloIntegrationDragSession.shared.clear(packageID: id)
+            HaloIntegrationDragSession.shared.clear()
         }
         contextRevision &+= 1
         NotificationCenter.default.post(name: .init("HaloCustomCICloseRequested"), object: id)
@@ -1807,7 +1804,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
                 )
                 try catalog.invoke(freshInvocation, files: files, options: options)
                 if draggedFiles != nil {
-                    HaloIntegrationDragSession.shared.clear(packageID: id)
+                    HaloIntegrationDragSession.shared.clear()
                 }
                 notice = "Sent \(freshInvocation.action.name) to \(freshInvocation.integration.name)."
             } catch {
