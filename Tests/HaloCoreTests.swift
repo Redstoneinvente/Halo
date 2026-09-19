@@ -531,6 +531,8 @@ final class HaloCoreTests: XCTestCase {
         options.clarity = 4
         options.frost = -2
         options.lightAbsorption = 3
+        options.refraction = 4
+        options.refractionSpread = -2
         options.chromaticShift = .infinity
         options.tintAmount = 4
         options.highlight = -1
@@ -544,6 +546,8 @@ final class HaloCoreTests: XCTestCase {
         options.clarity = 2
         options.frost = -1
         options.lightAbsorption = 2
+        options.refraction = 2
+        options.refractionSpread = -1
         options.chromaticShift = 2
         options.tintAmount = 2
         options.highlight = 2
@@ -552,6 +556,8 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(clamped.clarity, 1)
         XCTAssertEqual(clamped.frost, 0)
         XCTAssertEqual(clamped.lightAbsorption, 1)
+        XCTAssertEqual(clamped.refraction, 1)
+        XCTAssertEqual(clamped.refractionSpread, 0)
         XCTAssertEqual(clamped.chromaticShift, 1)
         XCTAssertEqual(clamped.tintAmount, 0.5)
         XCTAssertEqual(clamped.highlight, 1)
@@ -580,6 +586,8 @@ final class HaloCoreTests: XCTestCase {
             clarity: 0.9,
             frost: 0.25,
             lightAbsorption: 0.2,
+            refraction: 0.4,
+            refractionSpread: 0.6,
             chromaticShift: 0.1,
             tint: .white,
             tintAmount: 0.05,
