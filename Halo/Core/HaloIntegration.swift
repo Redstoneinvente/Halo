@@ -796,6 +796,160 @@ enum HaloIntegrationOptionPrompt {
     }
 }
 
+
+@MainActor
+final class HaloIntegrationDragSession: ObservableObject {
+    static let shared = HaloIntegrationDragSession()
+
+    @Published private(set) var revision: UInt64 = 0
+    @Published private(set) var targetDisplayID: String?
+    @Published private(set) var owningDisplayID: String?
+    @Published private(set) var owningPackageID: String?
+    @Published private(set) var dropCommitted = false
+
+    private(set) var files: [URL] = []
+    private var candidateActionIDsByPackage: [String: Set<String>] = [:]
+    private var sourceSignature = ""
+
+    private init() {}
+
+    var hasCandidates: Bool { !candidateActionIDsByPackage.isEmpty }
+
+    func update(
+        candidates: [String: Set<String>],
+        files: [URL],
+        displayID: String
+    ) -> Bool {
+        let cleanFiles = files.filter(\.isFileURL)
+        guard !cleanFiles.isEmpty, !candidates.isEmpty else {
+            cancelUncommitted(on: displayID)
+            return false
+        }
+
+        let signature = Self.signature(
+            candidates: candidates,
+            files: cleanFiles,
+            displayID: displayID
+        )
+        guard sourceSignature != signature else { return true }
+
+        sourceSignature = signature
+        candidateActionIDsByPackage = candidates
+        self.files = cleanFiles
+        targetDisplayID = displayID
+        dropCommitted = false
+        owningDisplayID = nil
+        owningPackageID = nil
+        revision &+= 1
+        return true
+    }
+
+    func isEligible(packageID: String, displayID: String?) -> Bool {
+        guard let displayID,
+              targetDisplayID == displayID,
+              candidateActionIDsByPackage[packageID]?.isEmpty == false else {
+            return false
+        }
+        return true
+    }
+
+    func actionIDs(packageID: String) -> Set<String> {
+        candidateActionIDsByPackage[packageID] ?? []
+    }
+
+    func setSurfaceOwnership(
+        packageID: String?,
+        displayID: String
+    ) {
+        guard targetDisplayID == displayID else {
+            if owningDisplayID == displayID {
+                owningDisplayID = nil
+                owningPackageID = nil
+                revision &+= 1
+            }
+            return
+        }
+
+        let nextPackageID = packageID.flatMap {
+            candidateActionIDsByPackage[$0]?.isEmpty == false ? $0 : nil
+        }
+        guard owningDisplayID != displayID || owningPackageID != nextPackageID else {
+            return
+        }
+        owningDisplayID = nextPackageID == nil ? nil : displayID
+        owningPackageID = nextPackageID
+        revision &+= 1
+    }
+
+    func ownsSurface(on displayID: String) -> Bool {
+        owningDisplayID == displayID && owningPackageID != nil
+    }
+
+    func commitDrop(files: [URL], displayID: String) -> Bool {
+        guard targetDisplayID == displayID, !candidateActionIDsByPackage.isEmpty else {
+            return false
+        }
+        let cleanFiles = files.filter(\.isFileURL)
+        guard !cleanFiles.isEmpty else { return false }
+
+        self.files = cleanFiles
+        dropCommitted = true
+        sourceSignature = ""
+        revision &+= 1
+        return true
+    }
+
+    func committedFiles(packageID: String, actionID: String) -> [URL]? {
+        guard dropCommitted,
+              candidateActionIDsByPackage[packageID]?.contains(actionID) == true,
+              !files.isEmpty else {
+            return nil
+        }
+        return files
+    }
+
+    @discardableResult
+    func cancelUncommitted(on displayID: String) -> Bool {
+        guard targetDisplayID == displayID else { return false }
+        let hadCandidates = !candidateActionIDsByPackage.isEmpty
+        guard !dropCommitted else { return hadCandidates }
+        clear()
+        return hadCandidates
+    }
+
+    func clear(packageID: String? = nil) {
+        if let packageID,
+           candidateActionIDsByPackage[packageID] == nil,
+           owningPackageID != packageID {
+            return
+        }
+
+        candidateActionIDsByPackage.removeAll()
+        files.removeAll()
+        targetDisplayID = nil
+        owningDisplayID = nil
+        owningPackageID = nil
+        dropCommitted = false
+        sourceSignature = ""
+        revision &+= 1
+    }
+
+    private static func signature(
+        candidates: [String: Set<String>],
+        files: [URL],
+        displayID: String
+    ) -> String {
+        let filePart = files
+            .map { $0.standardizedFileURL.path }
+            .sorted()
+            .joined(separator: "\n")
+        let candidatePart = candidates.keys.sorted().map { packageID in
+            packageID + ":" + (candidates[packageID] ?? []).sorted().joined(separator: ",")
+        }.joined(separator: "\n")
+        return displayID + "\n--files--\n" + filePart + "\n--candidates--\n" + candidatePart
+    }
+}
+
 struct HaloGeneratedIntegrationCIMetadata: Codable, Equatable {
     let generatorVersion: Int
     let bundleIdentifier: String
