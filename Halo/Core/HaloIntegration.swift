@@ -42,6 +42,36 @@ struct HaloIntegration: Hashable, Identifiable, Sendable {
     var bundleIdentifier: String { manifest.bundleIdentifier }
 }
 
+enum HaloFileDragCapabilityPolicy {
+    static func permitsDropCI(
+        commercialAccess: Bool,
+        dropEnabled: Bool
+    ) -> Bool {
+        commercialAccess && dropEnabled
+    }
+
+    static func permitsAppIntegrationCI(
+        commercialAccess: Bool,
+        integrationEnabled: Bool
+    ) -> Bool {
+        commercialAccess && integrationEnabled
+    }
+
+    static func shouldRegisterForFileDrags(
+        commercialAccess: Bool,
+        dropEnabled: Bool,
+        integrationEnabled: Bool
+    ) -> Bool {
+        permitsDropCI(
+            commercialAccess: commercialAccess,
+            dropEnabled: dropEnabled
+        ) || permitsAppIntegrationCI(
+            commercialAccess: commercialAccess,
+            integrationEnabled: integrationEnabled
+        )
+    }
+}
+
 @MainActor
 final class HaloIntegrationCatalog: ObservableObject {
     static let shared = HaloIntegrationCatalog()
