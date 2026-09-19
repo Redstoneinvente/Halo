@@ -106,7 +106,7 @@ private struct HaloCITransientContextProvider: HaloCIContextProvider {
         workspace: WorkspaceStore,
         engine: HaloCIContextProviderEngine
     ) -> [String: String] {
-        engine.transientValues()
+        engine.transientValues(for: request)
     }
 }
 
@@ -446,7 +446,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
         recordEvent(kind: "activity.published", source: notification.source)
     }
 
-    fileprivate func transientValues() -> [String: String] {
+    fileprivate func transientValues(for request: HaloCIContextRequest) -> [String: String] {
         var values: [String: String] = [
             "input.drag.active": dragActive ? "true" : "false",
             "input.drag.itemCount": String(dragSummary.itemCount),
@@ -468,7 +468,9 @@ final class HaloCIContextProviderEngine: ObservableObject {
             values["input.drop.ageSeconds"] = Self.age(lastDrop.date)
         }
 
-        if let event = lastEvent, Date().timeIntervalSince(event.date) <= transientLifetime {
+        if let event = lastEvent,
+           Date().timeIntervalSince(event.date) <= transientLifetime,
+           Self.eventVisible(event.kind, grantedPermissions: request.grantedPermissions) {
             values["context.event.kind"] = event.kind
             values["context.event.source"] = event.source
             values["context.event.sequence"] = String(event.sequence)
@@ -588,6 +590,28 @@ final class HaloCIContextProviderEngine: ObservableObject {
             self.revision &+= 1
             self.revisionTask = nil
         }
+    }
+
+    nonisolated private static func eventVisible(
+        _ kind: String,
+        grantedPermissions: Set<String>
+    ) -> Bool {
+        if kind.hasPrefix("media.") {
+            return grantedPermissions.contains("Media.ReadState")
+        }
+        if kind.hasPrefix("application.") {
+            return grantedPermissions.contains("Applications.Observe")
+        }
+        if kind.hasPrefix("clipboard.") {
+            return grantedPermissions.contains("Clipboard.Observe")
+        }
+        if kind.hasPrefix("bluetooth.") {
+            return grantedPermissions.contains("Bluetooth.Observe")
+        }
+        if kind.hasPrefix("notification.") || kind.hasPrefix("activity.") {
+            return grantedPermissions.contains("Notifications.Observe")
+        }
+        return true
     }
 
     nonisolated private static func age(_ date: Date) -> String {
