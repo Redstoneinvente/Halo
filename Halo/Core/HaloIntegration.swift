@@ -527,6 +527,7 @@ final class HaloIntegrationExecutionSession: ObservableObject {
     @Published private(set) var candidates: [HaloIntegrationInvocation] = []
     @Published private(set) var invocation: HaloIntegrationInvocation?
     @Published private(set) var files: [URL] = []
+    @Published private(set) var targetDisplayID: String?
     @Published private(set) var dropCommitted = false
     @Published var statusMessage: String?
     @Published var errorMessage: String?
@@ -541,7 +542,8 @@ final class HaloIntegrationExecutionSession: ObservableObject {
 
     func presentChoices(
         _ candidates: [HaloIntegrationInvocation],
-        files: [URL]
+        files: [URL],
+        displayID: String
     ) {
         let cleanFiles = files.filter(\.isFileURL)
         let uniqueCandidates = Array(
@@ -577,6 +579,7 @@ final class HaloIntegrationExecutionSession: ObservableObject {
         self.candidates = uniqueCandidates
         invocation = nil
         self.files = cleanFiles
+        targetDisplayID = displayID
         dropCommitted = false
         statusMessage = nil
         errorMessage = nil
@@ -584,12 +587,14 @@ final class HaloIntegrationExecutionSession: ObservableObject {
 
     func present(
         _ invocation: HaloIntegrationInvocation,
-        files: [URL]
+        files: [URL],
+        displayID: String
     ) {
         sourceSignature = ""
         candidates = [invocation]
         self.invocation = invocation
         self.files = files.filter(\.isFileURL)
+        targetDisplayID = displayID
         dropCommitted = true
         statusMessage = nil
         errorMessage = nil
@@ -624,9 +629,14 @@ final class HaloIntegrationExecutionSession: ObservableObject {
         self.files = cleanFiles
     }
 
-    func cancelUncommittedDrag() {
+    func cancelUncommittedDrag(on displayID: String? = nil) {
         guard !dropCommitted else { return }
+        if let displayID, targetDisplayID != displayID { return }
         cancel()
+    }
+
+    func isActive(on displayID: String) -> Bool {
+        isActive && targetDisplayID == displayID
     }
 
     func cancel() {
@@ -634,6 +644,7 @@ final class HaloIntegrationExecutionSession: ObservableObject {
         candidates = []
         invocation = nil
         files = []
+        targetDisplayID = nil
         dropCommitted = false
         statusMessage = nil
         errorMessage = nil
