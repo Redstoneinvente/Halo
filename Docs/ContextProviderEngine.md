@@ -188,6 +188,20 @@ This gives a Custom CI one common way to react visually to a recent context tran
 
 It remains context only. It does not make the CI eligible, open it automatically, or override another CI.
 
+## Context permissions
+
+The engine still uses the normal declared + granted permission boundary. SDK 0.2 context-specific permissions are:
+
+| Permission | Context |
+| --- | --- |
+| `Clipboard.Observe` | clipboard presence/length/event metadata; never clipboard bodies |
+| `Bluetooth.Observe` | Bluetooth powered state, connected count and event kind |
+| `Notifications.Observe` | notification-provider kind/source/age metadata |
+
+Sensitive event families are also hidden from the generic `context.event.*` stream unless the corresponding permission is currently granted. Media and active-application event metadata continue to respect `Media.ReadState` and `Applications.Observe`.
+
+Drag/drop counts and extensions describe a direct interaction with Halo and do not expose file paths, so they do not require an additional file permission in SDK 0.2.
+
 ## Privacy boundary
 
 The context engine exposes metadata that is already available to Halo and explicitly catalogued.
