@@ -28,6 +28,10 @@ final class SurfaceState: ObservableObject {
     @Published var physicalNotchWidth: CGFloat = 190
     @Published var physicalNotchHeight: CGFloat = 32
     @Published var screenFrame: CGRect = .zero
+    @Published var displayID: String = ""
+    /// The winner selected by SurfaceView's existing CI arbiter. AppKit drag delivery reads this
+    /// value but never chooses surface ownership itself.
+    @Published var activeCIIdentifier: String?
     @Published var theme = Theme()
     @Published var activationSurfaceOptions = SurfaceOptions()
     @Published var layoutOverride: WorkspaceLayout?
@@ -35,14 +39,14 @@ final class SurfaceState: ObservableObject {
     @Published var contextPreferredCompactWidth: CGFloat?
     @Published var contextPreferredCompactHeight: CGFloat?
     @Published var contextMinimumExpandedWidth: CGFloat?
-    /// Per-surface drag state keeps Drop CI scoped to the display beneath the dragged item.
+    /// Per-surface drag metadata comes from Halo's shared file-drag source. Drop CI is merely one
+    /// consumer of this state; partner integrations receive the same event independently.
     @Published var dropTargeted = false
     @Published var dropItemCount = 0
     var collapseTask: Task<Void, Never>?
     var hoverExpandTask: Task<Void, Never>?
     var dropExitTask: Task<Void, Never>?
     var editingGeometry = false
-    private var fileDropAllowed = false
 
     // Hover expansion can briefly emit an exit while the NSPanel is resizing from
     // compact to open geometry. Track only that in-flight opening so the false exit
@@ -52,12 +56,6 @@ final class SurfaceState: ObservableObject {
     private var hoverOpeningGuardActive = false
     private var hoverExitPendingDuringOpening = false
 
-    func setFileDropAllowed(_ allowed: Bool) {
-        guard fileDropAllowed != allowed else { return }
-        fileDropAllowed = allowed
-        if !allowed { cancelFileDrop() }
-    }
-
     func cancelFileDrop() {
         dropExitTask?.cancel()
         dropExitTask = nil
@@ -65,42 +63,30 @@ final class SurfaceState: ObservableObject {
         if dropItemCount != 0 { dropItemCount = 0 }
     }
 
+    /// Records a Halo-owned drag event for the surface. This intentionally does not expand Halo:
+    /// expansion is allowed only after SurfaceView's normal priority arbiter grants ownership.
     func beginFileDrop(count: Int) {
-        guard fileDropAllowed else {
-            cancelFileDrop()
-            return
-        }
         dropExitTask?.cancel()
-        hoverExpandTask?.cancel()
-        collapseTask?.cancel()
         let nextCount = max(1, count)
         if dropItemCount != nextCount { dropItemCount = nextCount }
         if !dropTargeted { dropTargeted = true }
-        if !expanded { expanded = true }
     }
 
-    func endFileDrop(collapseAfterDelay: Bool = true) {
+    func endFileDrop() {
         dropExitTask?.cancel()
         dropExitTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 180_000_000)
+            try? await Task.sleep(nanoseconds: 120_000_000)
             guard !Task.isCancelled, let self else { return }
             self.dropTargeted = false
             self.dropItemCount = 0
-            guard collapseAfterDelay, !self.pinned, !self.editingGeometry else { return }
-            self.collapseTask?.cancel()
-            self.collapseTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 420_000_000)
-                guard !Task.isCancelled, let self, !self.pinned, !self.editingGeometry, !self.dropTargeted else { return }
-                self.expanded = false
-            }
         }
     }
 
-    func completeFileDrop() {
+    func completeFileDrop(collapseSurface: Bool) {
         dropExitTask?.cancel()
         dropTargeted = false
         dropItemCount = 0
-        guard !pinned, !editingGeometry else { return }
+        guard collapseSurface, !pinned, !editingGeometry else { return }
         collapseTask?.cancel()
         collapseTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 650_000_000)
