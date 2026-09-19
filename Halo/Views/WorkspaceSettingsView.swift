@@ -3285,6 +3285,159 @@ private struct HaloAccountLicenseSettingsView: View {
 }
 
 @MainActor
+private struct HaloAppIntegrationLibraryCard: View {
+    let registration: CIRegistration
+    let action: () -> Void
+
+    @ObservedObject private var runtime = IntegrationCIRuntime.shared
+    @State private var hovered = false
+
+    private var configuration: CIConfiguration {
+        runtime.configuration(for: registration)
+    }
+
+    private var category: String {
+        let value = registration.presentation.cardCategory?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? "App Integration" : value
+    }
+
+    private var cardDescription: String {
+        let value = registration.presentation.cardDescription?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? registration.metadata.description : value
+    }
+
+    private var accent: Color {
+        guard let hex = registration.presentation.cardAccentHex?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              hex.count == 7,
+              hex.first == "#",
+              let value = UInt64(hex.dropFirst(), radix: 16) else {
+            return Color.accentColor
+        }
+        return Color(
+            red: Double((value >> 16) & 0xFF) / 255.0,
+            green: Double((value >> 8) & 0xFF) / 255.0,
+            blue: Double(value & 0xFF) / 255.0
+        )
+    }
+
+    private var bannerImage: NSImage? {
+        guard let url = runtime.cardBannerURL(for: registration) else { return nil }
+        return NSImage(contentsOf: url)
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                banner
+
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(registration.metadata.name)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(category)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    Text(configuration.enabled ? "Enabled" : "Available")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            (configuration.enabled ? Color.green : Color.secondary).opacity(0.12),
+                            in: Capsule()
+                        )
+                        .foregroundStyle(configuration.enabled ? Color.green : Color.secondary)
+                }
+
+                Text(cardDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(3)
+
+                HStack {
+                    Label(
+                        "\(registration.supportedActions.count) action\(registration.supportedActions.count == 1 ? "" : "s")",
+                        systemImage: "square.grid.2x2"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                    Text("Priority \(Int(configuration.priority))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Label("Edit", systemImage: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(accent)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                Color.primary.opacity(hovered ? 0.075 : 0.045),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(
+                        hovered ? accent.opacity(0.48) : Color.primary.opacity(0.08),
+                        lineWidth: 1
+                    )
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovered)
+    }
+
+    @ViewBuilder
+    private var banner: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [accent.opacity(0.28), Color.black.opacity(0.96)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            if let bannerImage {
+                Image(nsImage: bannerImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "app.connected.to.app.below.fill")
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text(registration.metadata.name.uppercased())
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 14)
+            }
+        }
+        .frame(height: 112)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+@MainActor
 private struct HaloAppIntegrationCISettingsSection: View {
     @ObservedObject private var runtime = IntegrationCIRuntime.shared
 
@@ -3306,12 +3459,12 @@ private struct HaloAppIntegrationCISettingsSection: View {
                 Label("No compatible app integrations discovered", systemImage: "app.dashed")
                     .foregroundStyle(.secondary)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)], alignment: .leading, spacing: 12) {
-                    ForEach(runtime.registrations) { registration in
-                        HaloAppIntegrationCICard(registration: registration)
-                    }
-                }
-                .padding(.vertical, 4)
+                Label(
+                    "\(runtime.registrations.count) partner integration\(runtime.registrations.count == 1 ? "" : "s") available in the CI library above.",
+                    systemImage: "checkmark.circle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             if let error = runtime.lastError, !error.isEmpty {
@@ -3326,9 +3479,17 @@ private struct HaloAppIntegrationCISettingsSection: View {
 @MainActor
 private struct HaloAppIntegrationCICard: View {
     let registration: CIRegistration
+    let initiallyExpanded: Bool
+
     @ObservedObject private var runtime = IntegrationCIRuntime.shared
     @ObservedObject private var shortcuts = IntegrationShortcutManager.shared
-    @State private var expanded = false
+    @State private var expanded: Bool
+
+    init(registration: CIRegistration, initiallyExpanded: Bool = false) {
+        self.registration = registration
+        self.initiallyExpanded = initiallyExpanded
+        _expanded = State(initialValue: initiallyExpanded)
+    }
 
     private var configuration: CIConfiguration {
         runtime.configuration(for: registration)
