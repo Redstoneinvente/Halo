@@ -657,6 +657,117 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertTrue(report.issues.contains { $0.path.contains("sdkVersion") })
     }
 
+    func testSmartDismissTimingPresetsAndCIContext() {
+        XCTAssertEqual(
+            HaloDismissTimingPolicy.delay(
+                behavior: .smart,
+                customMilliseconds: 450,
+                ciBehavior: .standard,
+                reason: .pointerExit
+            ),
+            0.45,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            HaloDismissTimingPolicy.delay(
+                behavior: .smart,
+                customMilliseconds: 450,
+                ciBehavior: .transient,
+                reason: .pointerExit
+            ),
+            0.28,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            HaloDismissTimingPolicy.delay(
+                behavior: .smart,
+                customMilliseconds: 450,
+                ciBehavior: .interactive,
+                reason: .pointerExit
+            ),
+            0.68,
+            accuracy: 0.0001
+        )
+        XCTAssertNil(
+            HaloDismissTimingPolicy.delay(
+                behavior: .smart,
+                customMilliseconds: 450,
+                ciBehavior: .persistent,
+                reason: .pointerExit
+            )
+        )
+        XCTAssertNil(
+            HaloDismissTimingPolicy.delay(
+                behavior: .manual,
+                customMilliseconds: 450,
+                ciBehavior: .standard,
+                reason: .pointerExit
+            )
+        )
+        XCTAssertEqual(
+            HaloDismissTimingPolicy.delay(
+                behavior: .custom,
+                customMilliseconds: 1_500,
+                ciBehavior: .standard,
+                reason: .pointerExit
+            ),
+            1.5,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            HaloDismissTimingPolicy.delay(
+                behavior: .relaxed,
+                customMilliseconds: 0,
+                ciBehavior: .standard,
+                reason: .pointerExit
+            ),
+            0.9,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            HaloDismissTimingPolicy.delay(
+                behavior: .smart,
+                customMilliseconds: 450,
+                ciBehavior: .interactive,
+                reason: .escapeKey
+            ),
+            0,
+            accuracy: 0.0001
+        )
+    }
+
+    func testConfigurationWithoutDismissSettingsMigratesToSmart() throws {
+        let original = Configuration()
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any]
+        )
+        object.removeValue(forKey: "closeBehavior")
+        object.removeValue(forKey: "customCloseDelayMilliseconds")
+
+        let restored = try JSONDecoder().decode(
+            Configuration.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertEqual(restored.resolvedCloseBehavior, .smart)
+        XCTAssertEqual(
+            restored.resolvedCustomCloseDelayMilliseconds,
+            HaloDismissTimingPolicy.smartBaselineMilliseconds
+        )
+    }
+
+    func testCustomCIDismissBehaviorIsOptionalAndRoundTrips() throws {
+        let legacyData = Data(customCIManifestJSON().utf8)
+        let legacy = try JSONDecoder().decode(HaloCIManifest.self, from: legacyData)
+        XCTAssertNil(legacy.dismissBehavior)
+
+        let interactiveJSON = customCIManifestJSON()
+            .replacingOccurrences(of: #""supportedStates":["closed","expanded"]"#,
+                                  with: #""supportedStates":["closed","expanded"],"dismissBehavior":"interactive""#)
+        let interactive = try JSONDecoder().decode(HaloCIManifest.self, from: Data(interactiveJSON.utf8))
+        XCTAssertEqual(interactive.dismissBehavior, .interactive)
+    }
+
     private func customCIManifestJSON(permissions: [String] = []) -> String {
         let permissionJSON = permissions.map { "\"\($0)\"" }.joined(separator: ",")
         return """
