@@ -1,37 +1,35 @@
 # Halo App Integration Discovery
 
-Halo can discover capabilities exposed by installed macOS applications without loading third-party code into the Halo process.
+Halo discovers capabilities exposed by installed macOS applications by reading a static manifest from the application bundle. It does not load third-party code into Halo.
 
-This protocol is **capability discovery only**. It does not create a second CI renderer, bypass Context Interface arbitration, or grant an external app direct access to Halo UI. Halo remains responsible for any CI presentation, permissions, ownership, sizing, backgrounds, and user interaction.
+Discovery feeds the [Automatic App Integration Custom CI framework](AutoIntegrationCI.md). Halo can generate normal declarative `.haloCI` packages from discovered manifests, but the discovery layer itself remains static capability metadata.
 
 ## Manifest location
 
-A partner app includes this file in its bundle:
+A partner app includes:
 
-\`\`\`text
+```text
 Partner App.app/
 └── Contents/
     └── Resources/
         └── HaloIntegration.json
-\`\`\`
+```
 
-In Xcode, add \`HaloIntegration.json\` to the app target's **Copy Bundle Resources** build phase.
+In Xcode, add `HaloIntegration.json` to the app target's **Copy Bundle Resources** build phase.
 
 Halo scans:
 
-- \`/Applications\`
-- \`~/Applications\`
-- \`/System/Applications\`
-- \`/System/Library/CoreServices/Applications\`
+- `/Applications`
+- `~/Applications`
+- `/System/Applications`
+- `/System/Library/CoreServices/Applications`
 - currently running app bundles, including Xcode/DerivedData builds
 
-Running copies are considered first so a developer build can be tested without installing it into \`/Applications\`.
+Running copies are considered first so a developer build can be tested without copying it to `/Applications`.
 
 ## Protocol v1
 
-Example:
-
-\`\`\`json
+```json
 {
   "protocolVersion": 1,
   "name": "Partner App",
@@ -53,63 +51,67 @@ Example:
     }
   ]
 }
-\`\`\`
+```
 
 ### Root fields
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| \`protocolVersion\` | Integer | Yes | Must currently be \`1\`. |
-| \`name\` | String | Yes | Human-readable app name. |
-| \`bundleIdentifier\` | String | Yes | Must match the actual macOS app bundle identifier. |
-| \`actions\` | Array | Yes | One or more actions exposed to Halo. |
+| `protocolVersion` | Integer | Yes | Must currently be `1`. |
+| `name` | String | Yes | Human-readable app name. |
+| `bundleIdentifier` | String | Yes | Must match the actual macOS app bundle identifier. |
+| `actions` | Array | Yes | One or more actions exposed to Halo; maximum 64. |
 
 ### Action fields
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| \`id\` | String | Yes | Stable unique action ID within the app. |
-| \`name\` | String | Yes | Human-readable action name. |
-| \`supportedExtensions\` | String array | Yes | File extensions accepted by the action. \`"*"\` means any extension. |
-| \`options\` | Array | Yes | Typed parameters accepted by the action. May be empty. |
+| `id` | String | Yes | Stable unique action ID within the app. |
+| `name` | String | Yes | Human-readable action name. |
+| `supportedExtensions` | String array | Yes | Accepted extensions. `"*"` accepts any file; an empty array means no file input. |
+| `options` | Array | Yes | Typed parameters accepted by the action; maximum 32. May be empty. |
 
 ### Option fields
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| \`key\` | String | Yes | Unique option key within the action. |
-| \`name\` | String | Yes | Human-readable label. |
-| \`type\` | String | Yes | One of the supported types below. |
-| \`required\` | Boolean | Yes | Whether the caller must provide the option. |
-| \`description\` | String/null | No | Help text. |
+| `key` | String | Yes | Unique option key within the action. |
+| `name` | String | Yes | Human-readable label. |
+| `type` | String | Yes | One of the supported types below. |
+| `required` | Boolean | Yes | Whether the caller must provide the option. |
+| `description` | String/null | No | Help text. |
 
 Supported option types:
 
-- \`string\`
-- \`integer\`
-- \`double\`
-- \`boolean\`
-- \`stringArray\`
-- \`integerArray\`
-- \`doubleArray\`
+- `string`
+- `integer`
+- `double`
+- `boolean`
+- `stringArray`
+- `integerArray`
+- `doubleArray`
 
 ## Validation and trust boundary
 
-Halo validates the manifest before adding an app to the integration catalogue:
+Halo validates a manifest before adding the app to the integration catalogue:
 
 - protocol version must be supported;
-- the manifest is size-bounded;
+- the manifest is limited to 256 KB;
 - app name and bundle identifier must be non-empty;
 - the declared bundle identifier must match the actual app bundle;
+- at least one action is required;
+- no more than 64 actions are accepted;
 - action IDs must be non-empty and unique;
+- action display names must be non-empty;
+- no more than 32 options are accepted per action;
 - option keys must be non-empty and unique per action;
 - option types must be from the supported set.
 
 Malformed manifests are ignored and surfaced in CI Settings diagnostics.
 
-Halo does **not** use \`Bundle.load\`, load a third-party dylib, evaluate scripts, or execute code merely because an app provides this manifest. Discovery reads static JSON from the app's Resources directory.
+Halo does **not** use `Bundle.load`, load a partner dylib, evaluate scripts, or execute code because an app provides this manifest.
 
-## Halo UI
+## Halo UI and generated CIs
 
 Open:
 
@@ -117,56 +119,23 @@ Open:
 
 Halo lists each discovered app, bundle identifier, application path, supported file extensions, actions, and typed options. **Scan Again** refreshes the catalogue.
 
-The catalogue is independent of Drop CI. Future file-drag or other Context Interface experiences may consume this catalogue, but ownership still has to go through Halo's normal CI arbitration.
+When **Automatically create Custom CIs** is enabled, a completed catalogue refresh synchronizes one managed Custom CI per compatible app. Generated packages are validated and then participate in Halo's normal Custom CI ownership and permission model.
 
-## Base CI design record
+Discovery and generation are independent of Drop CI.
 
-This feature is **not itself a Context Interface**. It is an app-capability discovery service intended to feed Halo-owned CI experiences, so it deliberately does not register an `ActiveContextInterface`, render a surface, publish geometry, or participate in priority arbitration.
+See [AutoIntegrationCI.md](AutoIntegrationCI.md) for generated package identity, action brokering, permissions, file delivery, update/removal semantics, and partner-side request handling.
+
+## Discovery design record
 
 ```text
-CI name / stable identity: App Integration Discovery Catalog (service, not a CI owner)
-Implementation path and reason: Native app-owned discovery service; filesystem/app-bundle discovery cannot be expressed by a .haloCI package, and no new render path is introduced.
-Purpose: Find installed partner apps that explicitly advertise Halo-compatible actions.
-Real context source / existing service: NSWorkspace running applications plus standard macOS application folders and static app Resources.
-Enable setting and default: not needed — discovery is passive metadata lookup when the catalogue is created/refreshed.
-Priority setting and default (normal range 0...100): not needed — catalogue does not compete for the surface.
-Tie behavior / reason: not needed — no arbitration candidate is registered.
-Side-effect-free eligibility rule: not needed — discovery produces metadata, not eligibility.
-Manual activation behavior: not needed — Scan Again only refreshes the catalogue.
-Automatic expansion policy (default: no auto-open): no auto-open.
-Dismissal / retrigger policy: not needed.
-Closed presentation (default: normal Closed Notch): unchanged.
-Expanded presentation: unchanged; CI Settings only lists discovered capabilities.
-Full-surface ownership (default: false for native opened-only CI): false / not applicable.
-Keep Closed Notch contents while expanded (default: false): unchanged / not applicable.
-Background owner / layer: none — discovery does not render a notch background.
-Expanded size rule and sizing inputs: none.
-Compact width / height / minimum expanded width (only if needed): none.
-Geometry publication and handoff/cleanup owner: none.
-Global versus profile settings: global read-only catalogue; no profile state.
-Context bindings, units, unavailable-data behavior: none.
-Permissions / revocation / commercial-access boundaries: no sensitive Halo data is granted; malformed/unsupported manifests are ignored with diagnostics.
-Actions and their broker: discovery only — no partner action is executed by this implementation.
-Subscriptions / refresh cadence / cancellation: initial refresh on catalogue creation plus explicit Scan Again; running app URLs are snapshotted before detached scanning.
-Per-display versus shared state: shared global catalogue; it has no per-display surface state.
-Settings card / controls / accessibility: Context Notch Interfaces → App integrations, with Scan Again and readable action/option metadata.
-Compatibility and persistence migration: protocol v1 matches the existing Halo-Integration-Test-App manifest; no persisted migration.
-Tests and manual checks: protocol-v1 decode, bundle-ID mismatch, duplicate actions and unsupported option types covered by HaloCoreTests; macOS build/test workflow added.
+Feature identity: App Integration Discovery Catalog
+Implementation path: native app-owned discovery service; it does not own a CI surface
+Purpose: find installed apps that explicitly advertise Halo-compatible actions
+Real source: NSWorkspace running applications plus standard macOS app folders
+Eligibility/priority/presentation/geometry: not applicable — discovery is metadata only
+Permissions: no sensitive Halo data is granted by discovery
+Refresh: initial scan plus explicit Scan Again
+Per-display state: none; catalogue is shared
+Failure behavior: malformed manifests are omitted and diagnostic text is surfaced
+Generated-CI handoff: completed catalogue results are consumed by HaloAutoIntegrationCIGenerator
 ```
-
-### Verification matrix
-
-| Check | Result | Reason |
-| --- | --- | --- |
-| Disabled at launch / disabled while active | Not applicable | Discovery is not a CI owner and has no enable lifecycle. |
-| Eligible closed vs expanded / auto-open | Pass by construction | No eligibility registration and no expansion mutation. |
-| Higher/equal-priority arbitration | Not applicable | No arbitration candidate is added. |
-| Replaced by another CI / geometry cleanup | Pass by construction | No SurfaceState geometry is written. |
-| Full-surface/background ownership | Not applicable | Catalogue renders only in Settings. |
-| Close/dismiss/pinning | Not applicable | No surface activation. |
-| Permission denial/revocation / stale UI action | Not applicable for discovery | No protected data or partner action execution is introduced. |
-| Unavailable/malformed context | Covered by tests/diagnostics | Invalid manifests fail validation and are omitted. |
-| Two displays / host removal / sleep-wake | Not applicable | Catalogue is global metadata and owns no display host. |
-| Settings/accessibility | Implemented; manual runtime check not run here | Settings uses standard SwiftUI controls/text. |
-| Existing SDK 0.1 compatibility | Unchanged | No `.haloCI` schema/component/action/permission field changed. |
-| Full Halo Xcode build/test | Workflow added; result not claimed here | `validate-app-integration-discovery.yml` runs macOS build + tests on this branch. |
