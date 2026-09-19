@@ -222,7 +222,7 @@ private enum HaloFileDragPhase {
 final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     var dragStateHandler: ((Bool, Int) -> Void)?
     var dropHandler: (([URL]) -> Void)?
-    var fileDragHandler: ((HaloFileDragPhase, [URL]) -> Bool)?
+    fileprivate var fileDragHandler: ((HaloFileDragPhase, [URL]) -> Bool)?
 
     /// Commercial access is a hard outer boundary. When false, this hosting view
     /// must not register as a drag destination at all — including registrations
