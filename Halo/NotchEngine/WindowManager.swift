@@ -11,6 +11,10 @@ final class SurfaceViewport: ObservableObject {
 @MainActor
 final class SurfaceState: ObservableObject {
     @Published var expanded = false
+    /// Rendering stays expanded until the physical close animation completes.
+    /// This decouples the logical destination from the presentation lifecycle so
+    /// SwiftUI does not tear down open content while the panel is still retracting.
+    @Published private(set) var presentationExpanded = false
     @Published var pinned = false {
         didSet {
             if pinned {
@@ -48,6 +52,14 @@ final class SurfaceState: ObservableObject {
     var hoverExpandTask: Task<Void, Never>?
     var dropExitTask: Task<Void, Never>?
     var editingGeometry = false
+
+    func beginExpandedPresentation() {
+        if !presentationExpanded { presentationExpanded = true }
+    }
+
+    func completeCollapsedPresentation() {
+        if presentationExpanded { presentationExpanded = false }
+    }
 
     // Hover expansion can briefly emit an exit while the NSPanel is resizing from
     // compact to open geometry. Track only that in-flight opening so the false exit
@@ -413,7 +425,8 @@ final class SurfaceAnimator {
     func move(panel: HaloPanel, state: SurfaceState, target: CGRect, options: SurfaceOptions,
               preset: AnimationPreset, animations: Bool, opening: Bool, style: SurfaceStyle,
               liveViewportResize: Bool = true, fixedHorizontalEdge: CGRectEdge? = nil,
-              synchronizeClosedGeometry: Bool = false, closedCameraFrame: CGRect? = nil) {
+              synchronizeClosedGeometry: Bool = false, closedCameraFrame: CGRect? = nil,
+              completion: (() -> Void)? = nil) {
         cancel()
         let transition = opening ? options.opening : options.closing
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -426,6 +439,7 @@ final class SurfaceAnimator {
             }
             panel.setFrame(target, display: false)
             publishGeometry(panel: panel, frame: target)
+            completion?()
             return
         }
         let initial = panel.frame
@@ -440,6 +454,7 @@ final class SurfaceAnimator {
             }
             panel.setFrame(target, display: false)
             publishGeometry(panel: panel, frame: target)
+            completion?()
             return
         }
 
@@ -497,7 +512,10 @@ final class SurfaceAnimator {
             panel.setFrame(frame, display: false)
             self.publishGeometry(panel: panel, frame: frame)
 
-            if t >= 1 { self.clock.stop() }
+            if t >= 1 {
+                self.clock.stop()
+                completion?()
+            }
         }
     }
 }
@@ -1801,7 +1819,7 @@ final class WindowManager {
 
     private func applyExpandedState(_ expanded: Bool, to host: Host) {
         guard let geometry = host.geometry else { return }
-        if !expanded { host.state.contextPreferredSize = nil }
+        if expanded { host.state.beginExpandedPresentation() }
 
         var target = targetFrame(host: host, expanded: expanded)
         if geometry.style == .detached {
@@ -1815,6 +1833,10 @@ final class WindowManager {
         let contentWidth = expanded && host.state.contextPreferredSize != nil ? target.width : baseWidth
         if host.state.dashboardWidth != contentWidth { host.state.dashboardWidth = contentWidth }
         host.targetFrame = target
+        let completion: (() -> Void)? = expanded ? nil : { [weak host] in
+            guard let host, !host.state.expanded else { return }
+            host.state.completeCollapsedPresentation()
+        }
         host.animator.move(
             panel: host.panel,
             state: host.state,
@@ -1823,7 +1845,8 @@ final class WindowManager {
             preset: geometry.appearance.animation,
             animations: host.state.theme.animations && !host.state.editingGeometry,
             opening: expanded,
-            style: geometry.style
+            style: geometry.style,
+            completion: completion
         )
     }
 
