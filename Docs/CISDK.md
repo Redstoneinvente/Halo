@@ -393,6 +393,8 @@ A single CI can support multiple contexts and adapt its UI accordingly.
 
 The context payload must be typed and bounded. Do not pass arbitrary internal service objects.
 
+`HaloCIContextProviderEngine` is the runtime authority for Custom CI context. Renderers and action brokers consume its filtered snapshots rather than assembling their own context dictionaries. Providers must be synchronous and side-effect free at snapshot time; event ingestion may prepare bounded state off-main when needed. See `Docs/ContextProviderEngine.md`.
+
 ## 10. Action system
 
 CIs invoke operations through a public, brokered action catalog.
