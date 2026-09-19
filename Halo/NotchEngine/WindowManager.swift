@@ -1730,13 +1730,10 @@ final class WindowManager {
 
     func toggleAll() {
         let expand = !hosts.values.contains { $0.state.expanded }
-        hosts.values.forEach { host in
-            if expand {
-                host.state.dismissCoordinator.cancelPendingDismissal()
-                host.state.expanded = true
-            } else if !host.state.pinned {
-                host.state.requestDismissal(reason: .explicit)
-            }
+        // Explicit user toggles are authoritative and bypass automatic-dismiss policy.
+        hosts.values.forEach {
+            $0.state.dismissCoordinator.cancelPendingDismissal()
+            $0.state.expanded = expand
         }
     }
 
