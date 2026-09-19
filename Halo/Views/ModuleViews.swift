@@ -2201,13 +2201,88 @@ struct ResolvedSurfaceBackground: View {
     let expanded: Bool
     @ObservedObject var system: SystemService
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    var body: some View { material.overlay { GrainOverlay(options: appearance.grain ?? GrainOptions()) } }
+
+    private var glass: GlassOptions { appearance.glass.normalized() }
+
+    var body: some View {
+        material.overlay { GrainOverlay(options: appearance.grain ?? GrainOptions()) }
+    }
+
     @ViewBuilder private var material: some View {
         if appearance.background == .glass {
-            if reduceTransparency { Color.black }
-            else { DesktopGlass().overlay(Color.black.opacity(GlassRendering.tintOpacity(themeOpacity: theme.opacity))) }
-        } else { decoratedBackground }
+            if reduceTransparency {
+                Color.black
+            } else {
+                glassBackground
+            }
+        } else {
+            decoratedBackground
+        }
     }
+
+    private var glassBackground: some View {
+        ZStack {
+            // Keep the native backdrop sampler as the bottom-most layer. SwiftUI blur and
+            // saturation filters around NSVisualEffectView can break behind-window sampling.
+            DesktopGlass(options: glass)
+
+            // Light absorption controls how much luminance is removed from the transmitted
+            // desktop without turning the glass into an opaque fill.
+            Color.black.opacity(GlassRendering.absorptionOpacity(glass.lightAbsorption))
+
+            // A user tint is independent from light absorption so smoky neutral glass and
+            // bright colored glass can be tuned separately.
+            glass.tint.color.opacity(glass.tintAmount)
+
+            if glass.chromaticShift > 0.001 {
+                ZStack {
+                    LinearGradient(
+                        colors: [Color.cyan.opacity(GlassRendering.chromaticOpacity(glass.chromaticShift)), .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    LinearGradient(
+                        colors: [.clear, Color.magenta.opacity(GlassRendering.chromaticOpacity(glass.chromaticShift))],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                }
+                .blendMode(.screen)
+                .allowsHitTesting(false)
+            }
+
+            if glass.highlight > 0.001 {
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(GlassRendering.highlightOpacity(glass.highlight)),
+                        Color.white.opacity(GlassRendering.highlightOpacity(glass.highlight) * 0.22),
+                        .clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .blendMode(.screen)
+                .allowsHitTesting(false)
+            }
+
+            if glass.edgeDepth > 0.001 {
+                GeometryReader { proxy in
+                    RadialGradient(
+                        colors: [
+                            .clear,
+                            .clear,
+                            Color.black.opacity(GlassRendering.edgeDepthOpacity(glass.edgeDepth))
+                        ],
+                        center: .center,
+                        startRadius: min(proxy.size.width, proxy.size.height) * 0.12,
+                        endRadius: max(proxy.size.width, proxy.size.height) * 0.72
+                    )
+                }
+                .allowsHitTesting(false)
+            }
+        }
+    }
+
     private var decoratedBackground: some View {
         ZStack {
             Color.black.opacity(reduceTransparency ? 1 : theme.opacity)
@@ -2222,13 +2297,43 @@ struct ResolvedSurfaceBackground: View {
         }.blur(radius: reduceTransparency ? 0 : appearance.blur).saturation(appearance.saturation).brightness(appearance.brightness)
     }
 }
+
 /// Native backdrop sampling must stay out of SwiftUI blur/offscreen filter groups.
 struct DesktopGlass: NSViewRepresentable {
-    final class EffectView: NSVisualEffectView { override func hitTest(_ point: NSPoint) -> NSView? { nil } }
-    func makeNSView(context: Context) -> EffectView {
-        let view = EffectView(); view.blendingMode = .behindWindow; view.material = .hudWindow; view.state = .active; view.appearance = NSAppearance(named: .darkAqua); return view
+    let options: GlassOptions
+
+    final class EffectView: NSVisualEffectView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
-    func updateNSView(_ view: EffectView, context: Context) {}
+
+    func makeNSView(context: Context) -> EffectView {
+        let view = EffectView()
+        view.blendingMode = .behindWindow
+        view.state = .active
+        view.appearance = NSAppearance(named: .darkAqua)
+        apply(options.normalized(), to: view)
+        return view
+    }
+
+    func updateNSView(_ view: EffectView, context: Context) {
+        apply(options.normalized(), to: view)
+    }
+
+    private func apply(_ options: GlassOptions, to view: EffectView) {
+        view.material = nativeMaterial(for: options.frost)
+        view.alphaValue = CGFloat(GlassRendering.materialOpacity(clarity: options.clarity))
+    }
+
+    private func nativeMaterial(for frost: Double) -> NSVisualEffectView.Material {
+        switch frost {
+        case ..<0.30:
+            return .underWindowBackground
+        case ..<0.68:
+            return .contentBackground
+        default:
+            return .hudWindow
+        }
+    }
 }
 struct CachedBackgroundImage: View {
     let path: String
