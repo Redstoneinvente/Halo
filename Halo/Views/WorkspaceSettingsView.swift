@@ -3660,60 +3660,89 @@ private struct IntegrationActionOptionSettingsRow: View {
     @State private var invalid = false
 
     private var currentValue: CIValue? {
-        runtime.configuration(for: registration).actions[action.id]?.optionDefaults[option.key] ?? option.defaultValue
+        runtime.configuration(for: registration)
+            .actions[action.id]?
+            .optionDefaults[option.key] ?? option.defaultValue
     }
 
     var body: some View {
         Group {
             if option.type == "boolean" {
-                Toggle(option.name + " default", isOn: Binding(
-                    get: {
-                        if case .boolean(let value)? = currentValue { return value }
-                        return false
-                    },
-                    set: {
-                        runtime.configurationStore.setActionDefault(
-                            .boolean($0),
-                            actionID: action.id,
-                            optionKey: option.key,
-                            registration: registration
-                        )
-                    }
-                ))
-                .font(.caption2)
+                booleanEditor
             } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        TextField(option.name + " default", text: $draft)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit { persistDraft() }
-                        Button("Save") { persistDraft() }
-                            .controlSize(.small)
-                        Button("Clear") {
-                            runtime.configurationStore.setActionDefault(
-                                nil,
-                                actionID: action.id,
-                                optionKey: option.key,
-                                registration: registration
-                            )
-                            draft = ""
-                            invalid = false
-                        }
-                        .controlSize(.small)
-                    }
-                    if invalid {
-                        Text("Enter a valid \(option.type) value.")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
-                }
+                textEditor
             }
         }
-        .onAppear { draft = currentValue.map(display) ?? "" }
+        .onAppear {
+            draft = currentValue.map(displayValue) ?? ""
+        }
+    }
+
+    private var booleanEditor: some View {
+        Toggle(option.name + " default", isOn: booleanBinding)
+            .font(.caption2)
+    }
+
+    private var textEditor: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                TextField(option.name + " default", text: $draft)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        persistDraft()
+                    }
+
+                Button("Save") {
+                    persistDraft()
+                }
+                .controlSize(.small)
+
+                Button("Clear") {
+                    clearDraft()
+                }
+                .controlSize(.small)
+            }
+
+            if invalid {
+                Text("Enter a valid \(option.type) value.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private var booleanBinding: Binding<Bool> {
+        Binding(
+            get: {
+                guard case .boolean(let value)? = currentValue else {
+                    return false
+                }
+                return value
+            },
+            set: { newValue in
+                runtime.configurationStore.setActionDefault(
+                    .boolean(newValue),
+                    actionID: action.id,
+                    optionKey: option.key,
+                    registration: registration
+                )
+            }
+        )
+    }
+
+    private func clearDraft() {
+        runtime.configurationStore.setActionDefault(
+            nil,
+            actionID: action.id,
+            optionKey: option.key,
+            registration: registration
+        )
+        draft = ""
+        invalid = false
     }
 
     private func persistDraft() {
-        guard let value = parse(draft) else {
+        guard let value = parseValue(draft) else {
             invalid = true
             return
         }
@@ -3726,35 +3755,55 @@ private struct IntegrationActionOptionSettingsRow: View {
         )
     }
 
-    private func parse(_ raw: String) -> CIValue? {
+    private func parseValue(_ raw: String) -> CIValue? {
         switch option.type {
-        case "string": return .string(raw)
-        case "integer": return Int(raw).map(CIValue.integer)
-        case "double": return Double(raw).map(CIValue.double)
-        case "stringArray": return .stringArray(csv(raw))
+        case "string":
+            return .string(raw)
+        case "integer":
+            guard let value = Int(raw) else { return nil }
+            return .integer(value)
+        case "double":
+            guard let value = Double(raw) else { return nil }
+            return .double(value)
+        case "stringArray":
+            return .stringArray(csv(raw))
         case "integerArray":
-            let parts = csv(raw); let values = parts.compactMap(Int.init)
-            return values.count == parts.count ? .integerArray(values) : nil
+            let parts = csv(raw)
+            let values = parts.compactMap { Int($0) }
+            guard values.count == parts.count else { return nil }
+            return .integerArray(values)
         case "doubleArray":
-            let parts = csv(raw); let values = parts.compactMap(Double.init)
-            return values.count == parts.count ? .doubleArray(values) : nil
-        default: return nil
+            let parts = csv(raw)
+            let values = parts.compactMap { Double($0) }
+            guard values.count == parts.count else { return nil }
+            return .doubleArray(values)
+        default:
+            return nil
         }
     }
 
     private func csv(_ raw: String) -> [String] {
-        raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        raw.split(separator: ",", omittingEmptySubsequences: true)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
-    private func display(_ value: CIValue) -> String {
+    private func displayValue(_ value: CIValue) -> String {
         switch value {
-        case .string(let value): return value
-        case .integer(let value): return String(value)
-        case .double(let value): return String(value)
-        case .boolean(let value): return value ? "true" : "false"
-        case .stringArray(let value): return value.joined(separator: ", ")
-        case .integerArray(let value): return value.map(String.init).joined(separator: ", ")
-        case .doubleArray(let value): return value.map(String.init).joined(separator: ", ")
+        case .string(let value):
+            return value
+        case .integer(let value):
+            return String(value)
+        case .double(let value):
+            return String(value)
+        case .boolean(let value):
+            return value ? "true" : "false"
+        case .stringArray(let value):
+            return value.joined(separator: ", ")
+        case .integerArray(let value):
+            return value.map(String.init).joined(separator: ", ")
+        case .doubleArray(let value):
+            return value.map(String.init).joined(separator: ", ")
         }
     }
 }
