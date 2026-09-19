@@ -76,7 +76,7 @@ final class SurfaceState: ObservableObject {
         }
         coordinator.canDismiss = { [weak self] in
             guard let self else { return false }
-            return self.expanded && !self.pinned && !self.editingGeometry && !self.dropTargeted
+            return self.expanded && !self.pinned && !self.editingGeometry
         }
         coordinator.onDismiss = { [weak self] _, _ in
             guard let self, self.expanded else { return }
@@ -2176,8 +2176,10 @@ final class WindowManager {
                     }
 
                     host.state.endFileDrop()
-                    let shouldCollapse = runtime.fileDragExited(displayID: id, pinned: host.state.pinned)
-                    if shouldCollapse && !host.state.pinned { host.state.expanded = false }
+                    _ = runtime.fileDragExited(displayID: id, pinned: host.state.pinned)
+                    // The drag hold releases after AppKit finishes the drag lifecycle.
+                    // If the pointer is outside Halo, the coordinator resumes normal Smart
+                    // dismissal instead of force-closing the surface from this drag callback.
                     return false
                 }
                 view.dragLocationHandler = { [weak host] screenPoint in
