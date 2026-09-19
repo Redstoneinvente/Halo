@@ -1056,8 +1056,6 @@ private final class HaloDropZoneHostView: NSView {
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
         model.hoveredZone = nil
-        model.hoveredIntegrationID = nil
-        model.draggedURLs = []
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -1094,9 +1092,7 @@ private final class HaloDropZoneHostView: NSView {
             session.commitDrop(files: urls)
         }
 
-        model.draggedURLs = urls
         model.hoveredZone = nil
-        model.hoveredIntegrationID = nil
 
         // Removing the AppKit Drop CI overlay synchronously from inside its own
         // NSDraggingDestination callback is fragile. Hand off on the next run-loop
