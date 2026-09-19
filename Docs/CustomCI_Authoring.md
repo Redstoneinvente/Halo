@@ -647,6 +647,20 @@ Important rules:
 
 Authors should therefore design triggers as **eligibility**, not as an assumption of guaranteed presentation.
 
+SDK 0.2 also supports a `fileDrag` trigger:
+
+```json
+{
+  "type": "fileDrag",
+  "extensions": ["txt", "md"]
+}
+```
+
+It becomes eligible only while Halo has a background-classified **file-only** drag whose extensions are all accepted by the trigger. Folder drags do not match. `"*"` accepts any file extension. File-drag triggers require no additional permission because Halo exposes no paths and the user is directly dragging those items onto Halo.
+
+For generated app-integration CIs, partner developers normally declare the equivalent trigger in `HaloIntegration.json`; Halo writes the package `triggers.json` automatically.
+
+
 Custom CI bindings are supplied by Halo's centralized Context Provider Engine. SDK 0.2 includes bounded event metadata for recent drag/drop, clipboard, power, notification-provider and Bluetooth context in addition to the existing media/system/application fields. See [ContextProviderEngine.md](ContextProviderEngine.md) for the current context families and privacy/performance rules.
 
 Users can change each Custom CI's priority in Halo Settings.
