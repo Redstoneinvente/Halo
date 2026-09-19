@@ -30,15 +30,94 @@ struct Theme: Codable, Equatable {
     }
 }
 
+enum HaloCloseBehavior: String, Codable, CaseIterable, Identifiable {
+    case instant = "Instant"
+    case smart = "Smart"
+    case relaxed = "Relaxed"
+    case manual = "Manual"
+    case custom = "Custom"
+
+    var id: String { rawValue }
+}
+
+enum CIDismissBehavior: String, Codable, CaseIterable, Identifiable {
+    case transient
+    case standard
+    case interactive
+    case persistent
+
+    var id: String { rawValue }
+}
+
+enum HaloDismissReason: String, Codable, Hashable, Sendable {
+    case pointerExit
+    case clickOutside
+    case escapeKey
+    case ciCompleted
+    case explicit
+}
+
+struct HaloDismissTimingPolicy {
+    static let smartBaselineMilliseconds = 450.0
+    static let relaxedMilliseconds = 900.0
+    static let graceRegionPoints = 8.0
+
+    static func delay(
+        behavior: HaloCloseBehavior,
+        customMilliseconds: Double,
+        ciBehavior: CIDismissBehavior,
+        reason: HaloDismissReason
+    ) -> TimeInterval? {
+        switch reason {
+        case .escapeKey, .ciCompleted, .explicit:
+            return 0
+        case .clickOutside:
+            return behavior == .manual ? nil : 0.08
+        case .pointerExit:
+            break
+        }
+
+        switch behavior {
+        case .instant:
+            return 0.06
+        case .smart:
+            switch ciBehavior {
+            case .transient: return 0.28
+            case .standard: return smartBaselineMilliseconds / 1_000
+            case .interactive: return 0.68
+            case .persistent: return nil
+            }
+        case .relaxed:
+            return 0.90
+        case .manual:
+            return nil
+        case .custom:
+            return min(2_000, max(0, customMilliseconds)) / 1_000
+        }
+    }
+}
+
 struct Configuration: Codable {
     var theme = Theme()
     var hoverToExpand = true
     // Optional keeps existing saved Configuration payloads backward-compatible.
     var hoverOpenDelay: Double? = nil
+    // Optional fields preserve existing Configuration payloads while making Smart Dismiss
+    // the default for users who have never chosen a close behaviour.
+    var closeBehavior: HaloCloseBehavior? = nil
+    var customCloseDelayMilliseconds: Double? = nil
     var allDisplays = false
 
     var resolvedHoverOpenDelay: Double {
         min(10, max(0, hoverOpenDelay ?? 0))
+    }
+
+    var resolvedCloseBehavior: HaloCloseBehavior {
+        closeBehavior ?? .smart
+    }
+
+    var resolvedCustomCloseDelayMilliseconds: Double {
+        min(2_000, max(0, customCloseDelayMilliseconds ?? HaloDismissTimingPolicy.smartBaselineMilliseconds))
     }
     var simulateNotch = false
     var showClock = true
