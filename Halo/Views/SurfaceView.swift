@@ -2566,6 +2566,7 @@ struct SurfaceView: View {
     @ObservedObject private var transfer = TransferActivityMonitor.shared
     @ObservedObject private var clipboardCI = ClipboardContextMonitor.shared
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
+    @State private var customCIAutoOpenedNotch = false
     @State private var clipboardOpenedNotch = false
     @State private var teleprompterActive = false
     @State private var visualWorkspaceSurfacePresented = false
@@ -2623,7 +2624,10 @@ struct SurfaceView: View {
     }
     private var activeContext: ActiveContextInterface? {
         var candidates = builtInContextCandidates
-        if let custom = activeCustomCandidate { candidates.append((.custom, custom.priority, custom.manual ? 100 : 3)) }
+        if let custom = activeCustomCandidate {
+            let tieRank = custom.manual ? 100 : (custom.autoOpen ? 5 : 3)
+            candidates.append((.custom, custom.priority, tieRank))
+        }
         return candidates.max { lhs, rhs in
             if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
             return lhs.tieRank < rhs.tieRank
@@ -2919,6 +2923,28 @@ struct SurfaceView: View {
             Button(state.pinned ? "Unpin" : "Keep open") { state.pinned.toggle() }
             Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
             ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
+        }
+        .onChange(of: customCI.contextRevision) { _ in
+            let candidate = activeCustomCandidate
+            let shouldAutoOpen = customContextActive && candidate?.autoOpen == true
+
+            if shouldAutoOpen {
+                state.collapseTask?.cancel()
+                if !state.expanded {
+                    customCIAutoOpenedNotch = true
+                    state.expanded = true
+                }
+                return
+            }
+
+            guard customCIAutoOpenedNotch else { return }
+            customCIAutoOpenedNotch = false
+
+            // Collapse only if no other CI now owns the surface. A higher-priority
+            // built-in or another custom trigger must not be closed by drag cleanup.
+            if activeContext == nil, !state.pinned {
+                state.expanded = false
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { note in
             guard !disableCustomCI, let requestedID = note.object as? String else { return }
