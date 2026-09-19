@@ -4681,6 +4681,7 @@ struct BuiltinOrIntegrationWidget: View {
         .dropDestination(for: URL.self) { urls, _ in
             let files = urls.filter(\.isFileURL)
             guard !files.isEmpty else { return false }
+            HaloCIContextProviderEngine.shared.reportDrop(urls: files)
             store.addFiles(files)
             return true
         }
