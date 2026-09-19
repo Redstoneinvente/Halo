@@ -138,15 +138,25 @@ Halo does **not** use `Bundle.load`, load a partner dylib, evaluate scripts, or 
 
 Open:
 
-**Halo Settings → Context Notch Interfaces → App integrations**
+**Halo Settings → Context Notch Interfaces**
 
-Halo lists each discovered app, bundle identifier, application path, supported file extensions, actions, and typed options. **Scan Again** refreshes the catalogue.
+Discovery itself only establishes compatibility. When automatic app CIs are enabled, Halo turns each discovered app into **one managed Custom CI card** under **Loaded custom CI**.
 
-When **Automatically create Custom CIs** is enabled, a completed catalogue refresh synchronizes one managed Custom CI per compatible app. Generated packages are validated and then participate in Halo's normal Custom CI ownership and permission model.
+That card is where the user configures the integration:
 
-Discovery and generation are independent of Drop CI.
+- enable/disable the CI;
+- priority;
+- permissions;
+- which advertised functions are enabled;
+- whether requested automatic triggers are enabled.
 
-See [AutoIntegrationCI.md](AutoIntegrationCI.md) for generated package identity, action brokering, permissions, file delivery, update/removal semantics, and partner-side request handling.
+The separate discovery section reports compatible-app count and diagnostics; it is not a second function-configuration surface.
+
+For `fileDrag`, trigger compatibility is evaluated against the app's **currently enabled functions**. An app advertising `.txt` and `.png` functions will not open for `.png` if every `.png` function has been disabled by the user.
+
+Discovery and generated integration triggers are independent of Drop CI. They still participate in the same central surface arbitration as every other CI.
+
+See [AutoIntegrationCI.md](AutoIntegrationCI.md) for the full generated-CI and drag-session lifecycle.
 
 ## Discovery design record
 
