@@ -4,6 +4,79 @@ import XCTest
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    func testAppIntegrationFileDragRegistrationDoesNotDependOnDropCI() {
+        XCTAssertTrue(
+            HaloFileDragCapabilityPolicy.shouldRegisterForFileDrags(
+                commercialAccess: true,
+                dropEnabled: false,
+                integrationEnabled: true
+            )
+        )
+        XCTAssertTrue(
+            HaloFileDragCapabilityPolicy.permitsAppIntegrationCI(
+                commercialAccess: true,
+                integrationEnabled: true
+            )
+        )
+        XCTAssertFalse(
+            HaloFileDragCapabilityPolicy.permitsDropCI(
+                commercialAccess: true,
+                dropEnabled: false
+            )
+        )
+        XCTAssertFalse(
+            HaloFileDragCapabilityPolicy.shouldRegisterForFileDrags(
+                commercialAccess: true,
+                dropEnabled: false,
+                integrationEnabled: false
+            )
+        )
+        XCTAssertFalse(
+            HaloFileDragCapabilityPolicy.shouldRegisterForFileDrags(
+                commercialAccess: false,
+                dropEnabled: true,
+                integrationEnabled: true
+            )
+        )
+    }
+
+    @MainActor
+    func testAppIntegrationSessionOwnsOnlyItsTargetDisplay() {
+        let action = HaloIntegrationAction(
+            id: "read.text",
+            name: "Read Text File",
+            supportedExtensions: ["txt"],
+            options: []
+        )
+        let manifest = HaloIntegrationManifest(
+            protocolVersion: 1,
+            name: "Test Integration",
+            bundleIdentifier: "com.example.test-integration",
+            actions: [action]
+        )
+        let integration = HaloIntegration(
+            appURL: URL(fileURLWithPath: "/Applications/Test Integration.app"),
+            manifest: manifest
+        )
+        let invocation = HaloIntegrationInvocation(
+            integration: integration,
+            action: action
+        )
+
+        let session = HaloIntegrationExecutionSession.shared
+        session.cancel()
+        defer { session.cancel() }
+
+        session.presentChoices(
+            [invocation],
+            files: [URL(fileURLWithPath: "/tmp/example.txt")],
+            displayID: "display-a"
+        )
+
+        XCTAssertTrue(session.isActive(on: "display-a"))
+        XCTAssertFalse(session.isActive(on: "display-b"))
+        XCTAssertEqual(session.targetDisplayID, "display-a")
+    }
     func testBluetoothDeviceSymbolsUseReportedClassForRenamedAccessories() {
         XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0540), "keyboard")
         XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0580), "computermouse")
