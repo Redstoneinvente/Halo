@@ -2194,6 +2194,8 @@ private struct HaloIntegrationContextView: View {
     @State private var includedOptionalBooleans: Set<String> = []
     @State private var validationMessage: String?
     @State private var submitted = false
+    @State private var ownedPreferredSize: CGSize?
+    @State private var ownedMinimumWidth: CGFloat?
 
     private var invocation: HaloIntegrationInvocation? { session.invocation }
 
@@ -2278,8 +2280,7 @@ private struct HaloIntegrationContextView: View {
             }
         }
         .onDisappear {
-            surfaceState.contextPreferredSize = nil
-            surfaceState.contextMinimumExpandedWidth = nil
+            releaseOwnedGeometry()
         }
     }
 
@@ -2674,22 +2675,69 @@ private struct HaloIntegrationContextView: View {
     }
 
     private func publishPickerSize() {
-        surfaceState.contextMinimumExpandedWidth = 520
         let rowHeight = CGFloat(min(session.candidates.count, 5)) * 62
-        surfaceState.contextPreferredSize = CGSize(
-            width: 600,
-            height: min(620, max(330, 235 + rowHeight))
+        publishOwnedGeometry(
+            preferredSize: CGSize(
+                width: 600,
+                height: min(620, max(330, 235 + rowHeight))
+            ),
+            minimumWidth: 520
         )
     }
 
     private func publishPreferredSize(for invocation: HaloIntegrationInvocation) {
-        surfaceState.contextMinimumExpandedWidth = 540
         let optionHeight = CGFloat(invocation.action.options.count) * 72
-        let desiredHeight = min(680, max(350, 275 + optionHeight))
-        surfaceState.contextPreferredSize = CGSize(
-            width: 620,
-            height: desiredHeight
+        publishOwnedGeometry(
+            preferredSize: CGSize(
+                width: 620,
+                height: min(680, max(350, 275 + optionHeight))
+            ),
+            minimumWidth: 540
         )
+    }
+
+    private func publishOwnedGeometry(
+        preferredSize: CGSize,
+        minimumWidth: CGFloat
+    ) {
+        ownedPreferredSize = preferredSize
+        ownedMinimumWidth = minimumWidth
+
+        if !approximatelyEqual(surfaceState.contextPreferredSize, preferredSize) {
+            surfaceState.contextPreferredSize = preferredSize
+        }
+
+        if let current = surfaceState.contextMinimumExpandedWidth,
+           abs(current - minimumWidth) < 1 {
+            // Already owns the requested floor.
+        } else {
+            surfaceState.contextMinimumExpandedWidth = minimumWidth
+        }
+    }
+
+    private func releaseOwnedGeometry() {
+        if let ownedPreferredSize,
+           approximatelyEqual(surfaceState.contextPreferredSize, ownedPreferredSize) {
+            surfaceState.contextPreferredSize = nil
+        }
+
+        if let ownedMinimumWidth,
+           let current = surfaceState.contextMinimumExpandedWidth,
+           abs(current - ownedMinimumWidth) < 1 {
+            surfaceState.contextMinimumExpandedWidth = nil
+        }
+
+        self.ownedPreferredSize = nil
+        self.ownedMinimumWidth = nil
+    }
+
+    private func approximatelyEqual(
+        _ lhs: CGSize?,
+        _ rhs: CGSize
+    ) -> Bool {
+        guard let lhs else { return false }
+        return abs(lhs.width - rhs.width) < 1
+            && abs(lhs.height - rhs.height) < 1
     }
 }
 
@@ -3094,6 +3142,8 @@ struct SurfaceView: View {
     @AppStorage("HaloContextDropUseFullNotchArea") private var dropUsesFullNotchArea = true
     @AppStorage("HaloContextDropKeepClosedNotchContents") private var dropKeepsClosedContents = false
     @AppStorage("HaloContextDropPriority") private var dropPriority = 100.0
+    @AppStorage("HaloContextAppIntegrationEnabled") private var appIntegrationCIEnabled = true
+    @AppStorage("HaloContextAppIntegrationPriority") private var appIntegrationPriority = 90.0
     @AppStorage("HaloContextBluetoothEnabled") private var bluetoothCIEnabled = false
     @AppStorage("HaloContextBluetoothShowWhileConnected") private var bluetoothShowWhileConnected = true
     @AppStorage("HaloContextBluetoothShowOnChanges") private var bluetoothShowOnChanges = true
@@ -3113,9 +3163,22 @@ struct SurfaceView: View {
         return (bluetoothShowOnChanges && bluetooth.lastEvent != nil) ||
             (bluetoothShowWhileConnected && !bluetooth.connectedDevices.isEmpty)
     }
+
+    private var surfaceDisplayID: String? {
+        NSScreen.screens
+            .first(where: { $0.frame.equalTo(state.screenFrame) })
+            .map(WindowManager.displayID)
+    }
+
+    private var appIntegrationEligible: Bool {
+        guard appIntegrationCIEnabled,
+              let surfaceDisplayID else { return false }
+        return integrationCI.isActive(on: surfaceDisplayID)
+    }
+
     private var builtInContextCandidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] {
         var candidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] = []
-        if integrationCI.isActive { candidates.append((.integration, 1200, 200)) }
+        if appIntegrationEligible { candidates.append((.integration, appIntegrationPriority, 5)) }
         if dropCIEnabled && state.dropTargeted { candidates.append((.drop, dropPriority, 4)) }
         if retroCIEnabled && retroGameRequested { candidates.append((.retro, retroPriority, 4)) }
         if teleprompterCIEnabled && teleprompterActive { candidates.append((.teleprompter, teleprompterPriority, 3)) }
@@ -3437,15 +3500,20 @@ struct SurfaceView: View {
             Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
             ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
         }
-        .onChange(of: integrationCI.isActive) { active in
-            state.collapseTask?.cancel()
+        .onChange(of: integrationContextActive) { active in
             if active {
-                state.expanded = true
-            } else {
-                state.contextPreferredSize = nil
-                state.contextMinimumExpandedWidth = nil
-                if !state.pinned { state.expanded = false }
+                state.collapseTask?.cancel()
+                if !state.expanded {
+                    state.expanded = true
+                }
+                return
             }
+
+            // Eligibility is not ownership. If the integration is still eligible,
+            // a higher-priority CI won arbitration; leave surface state to that owner.
+            guard !appIntegrationEligible else { return }
+            guard activeContext == nil, !state.pinned else { return }
+            state.expanded = false
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { note in
             guard !disableCustomCI, let requestedID = note.object as? String else { return }
