@@ -58,9 +58,16 @@ final class HaloIntegrationCatalog: ObservableObject {
         guard !isRefreshing else { return }
         isRefreshing = true
 
+        // Include apps currently launched from Xcode/DerivedData. This keeps
+        // development integrations testable without requiring a copy to /Applications.
+        let runningApplicationURLs = NSWorkspace.shared.runningApplications
+            .compactMap(\.bundleURL)
+
         Task {
             let result = await Task.detached(priority: .utility) {
-                Self.discoverInstalledIntegrations()
+                Self.discoverInstalledIntegrations(
+                    additionalAppURLs: runningApplicationURLs
+                )
             }.value
 
             integrations = result.integrations
@@ -69,7 +76,9 @@ final class HaloIntegrationCatalog: ObservableObject {
         }
     }
 
-    nonisolated private static func discoverInstalledIntegrations() -> (
+    nonisolated private static func discoverInstalledIntegrations(
+        additionalAppURLs: [URL]
+    ) -> (
         integrations: [HaloIntegration],
         diagnostics: [String]
     ) {
@@ -85,6 +94,81 @@ final class HaloIntegrationCatalog: ObservableObject {
         var discovered: [String: HaloIntegration] = [:]
         var diagnostics: [String] = []
 
+        func inspectApp(at appURL: URL) {
+            guard appURL.pathExtension.lowercased() == "app",
+                  let bundle = Bundle(url: appURL),
+                  let resourcesURL = bundle.resourceURL else { return }
+
+            let manifestURL = resourcesURL.appendingPathComponent("HaloIntegration.json")
+            guard fileManager.fileExists(atPath: manifestURL.path) else { return }
+
+            do {
+                let data = try Data(contentsOf: manifestURL)
+                let manifest = try decoder.decode(HaloIntegrationManifest.self, from: data)
+
+                guard manifest.protocolVersion == 1 else {
+                    diagnostics.append("\(appURL.lastPathComponent): unsupported Halo integration protocol v\(manifest.protocolVersion).")
+                    return
+                }
+
+                guard !manifest.bundleIdentifier.isEmpty,
+                      !manifest.name.isEmpty else {
+                    diagnostics.append("\(appURL.lastPathComponent): manifest is missing its app name or bundle identifier.")
+                    return
+                }
+
+                if let actualBundleID = bundle.bundleIdentifier,
+                   actualBundleID != manifest.bundleIdentifier {
+                    diagnostics.append("\(appURL.lastPathComponent): manifest bundle identifier \(manifest.bundleIdentifier) does not match \(actualBundleID).")
+                    return
+                }
+
+                let actionIDs = manifest.actions.map(\.id)
+                guard !actionIDs.isEmpty,
+                      Set(actionIDs).count == actionIDs.count,
+                      actionIDs.allSatisfy({ !$0.isEmpty }) else {
+                    diagnostics.append("\(appURL.lastPathComponent): actions must have unique, non-empty IDs.")
+                    return
+                }
+
+                let supportedTypes: Set<String> = [
+                    "string", "integer", "double", "boolean",
+                    "stringArray", "integerArray", "doubleArray"
+                ]
+
+                for action in manifest.actions {
+                    let optionKeys = action.options.map(\.key)
+                    guard Set(optionKeys).count == optionKeys.count,
+                          !optionKeys.contains(where: { $0.isEmpty }) else {
+                        diagnostics.append("\(appURL.lastPathComponent): action \(action.id) has duplicate or empty option keys.")
+                        return
+                    }
+
+                    guard !action.options.contains(where: {
+                        !supportedTypes.contains($0.type)
+                    }) else {
+                        diagnostics.append("\(appURL.lastPathComponent): action \(action.id) declares an unsupported option type.")
+                        return
+                    }
+                }
+
+                // Prefer the running copy (for example an Xcode DerivedData build)
+                // because additionalAppURLs are inspected before filesystem roots.
+                if discovered[manifest.bundleIdentifier] == nil {
+                    discovered[manifest.bundleIdentifier] = HaloIntegration(
+                        appURL: appURL,
+                        manifest: manifest
+                    )
+                }
+            } catch {
+                diagnostics.append("\(appURL.lastPathComponent): could not read HaloIntegration.json — \(error.localizedDescription)")
+            }
+        }
+
+        for appURL in additionalAppURLs {
+            inspectApp(at: appURL)
+        }
+
         for root in roots where fileManager.fileExists(atPath: root.path) {
             guard let enumerator = fileManager.enumerator(
                 at: root,
@@ -94,72 +178,7 @@ final class HaloIntegrationCatalog: ObservableObject {
             ) else { continue }
 
             for case let appURL as URL in enumerator {
-                guard appURL.pathExtension.lowercased() == "app",
-                      let bundle = Bundle(url: appURL),
-                      let resourcesURL = bundle.resourceURL else { continue }
-
-                let manifestURL = resourcesURL.appendingPathComponent("HaloIntegration.json")
-                guard fileManager.fileExists(atPath: manifestURL.path) else { continue }
-
-                do {
-                    let data = try Data(contentsOf: manifestURL)
-                    let manifest = try decoder.decode(HaloIntegrationManifest.self, from: data)
-
-                    guard manifest.protocolVersion == 1 else {
-                        diagnostics.append("\(appURL.lastPathComponent): unsupported Halo integration protocol v\(manifest.protocolVersion).")
-                        continue
-                    }
-
-                    guard !manifest.bundleIdentifier.isEmpty,
-                          !manifest.name.isEmpty else {
-                        diagnostics.append("\(appURL.lastPathComponent): manifest is missing its app name or bundle identifier.")
-                        continue
-                    }
-
-                    if let actualBundleID = bundle.bundleIdentifier,
-                       actualBundleID != manifest.bundleIdentifier {
-                        diagnostics.append("\(appURL.lastPathComponent): manifest bundle identifier \(manifest.bundleIdentifier) does not match \(actualBundleID).")
-                        continue
-                    }
-
-                    let actionIDs = manifest.actions.map(\.id)
-                    guard !actionIDs.isEmpty,
-                          Set(actionIDs).count == actionIDs.count,
-                          actionIDs.allSatisfy({ !$0.isEmpty }) else {
-                        diagnostics.append("\(appURL.lastPathComponent): actions must have unique, non-empty IDs.")
-                        continue
-                    }
-
-                    var valid = true
-                    for action in manifest.actions {
-                        let optionKeys = action.options.map(\.key)
-                        if Set(optionKeys).count != optionKeys.count || optionKeys.contains(where: { $0.isEmpty }) {
-                            diagnostics.append("\(appURL.lastPathComponent): action \(action.id) has duplicate or empty option keys.")
-                            valid = false
-                            break
-                        }
-
-                        let supportedTypes: Set<String> = [
-                            "string", "integer", "double", "boolean",
-                            "stringArray", "integerArray", "doubleArray"
-                        ]
-                        if action.options.contains(where: { !supportedTypes.contains($0.type) }) {
-                            diagnostics.append("\(appURL.lastPathComponent): action \(action.id) declares an unsupported option type.")
-                            valid = false
-                            break
-                        }
-                    }
-                    guard valid else { continue }
-
-                    if discovered[manifest.bundleIdentifier] == nil {
-                        discovered[manifest.bundleIdentifier] = HaloIntegration(
-                            appURL: appURL,
-                            manifest: manifest
-                        )
-                    }
-                } catch {
-                    diagnostics.append("\(appURL.lastPathComponent): could not read HaloIntegration.json — \(error.localizedDescription)")
-                }
+                inspectApp(at: appURL)
             }
         }
 
