@@ -44,6 +44,25 @@ Permissions must be both declared and currently granted. Unknown keys, values fr
 
 `ci.activation.kind` describes the current manual request versus automatic eligibility; it does not grant surface ownership. All existing priority and sizing rules still apply.
 
+## App integration bridge
+
+SDK 0.2 adds the revocable `AppIntegration.Execute` permission, the descriptive `AppIntegrations` capability label, and the brokered `app.integration.invoke` action.
+
+The action accepts exactly two string arguments:
+
+```json
+{
+  "id": "app.integration.invoke",
+  "arguments": {
+    "bundleIdentifier": "com.example.partner",
+    "actionID": "convert.file"
+  }
+}
+```
+
+Halo resolves that pair against a currently installed, validated `HaloIntegration.json`; it does not provide arbitrary process execution. Partner files and typed options are selected at invocation time, and permission/app/action validity is rechecked after prompts.
+
+Halo can also generate managed declarative CIs automatically from discovered partner manifests. See [AutoIntegrationCI.md](AutoIntegrationCI.md).
 ## New triggers
 
 SDK 0.2 adds two conditions, composable with existing `any`/`all` triggers:
