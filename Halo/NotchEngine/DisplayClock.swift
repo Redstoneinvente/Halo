@@ -1200,6 +1200,8 @@ private final class HaloDropZoneHostView: NSView {
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
         model.hoveredZone = nil
+        model.hoveredIntegrationID = nil
+        model.draggedURLs = []
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -1212,11 +1214,32 @@ private final class HaloDropZoneHostView: NSView {
 
     private func update(_ sender: NSDraggingInfo) {
         let local = convert(sender.draggingLocation, from: nil)
-        model.hoveredZone = HaloDropZoneLayoutResolver.index(
+        let urls = fileURLs(sender)
+        model.draggedURLs = urls
+
+        let partnerActions = Array(
+            HaloIntegrationCatalog.shared.compatibleInvocations(for: urls).prefix(4)
+        )
+        let partnerIndex = HaloDropZoneLayoutResolver.partnerIndex(
             at: local,
             size: bounds.size,
-            configuration: settings.configuration
+            configuration: settings.configuration,
+            count: partnerActions.count
         )
+
+        if let partnerIndex, partnerActions.indices.contains(partnerIndex) {
+            model.hoveredIntegrationID = partnerActions[partnerIndex].id
+            model.hoveredZone = nil
+        } else {
+            model.hoveredIntegrationID = nil
+            model.hoveredZone = HaloDropZoneLayoutResolver.index(
+                at: local,
+                size: bounds.size,
+                configuration: settings.configuration,
+                partnerCount: partnerActions.count
+            )
+        }
+
         let count = sender.draggingPasteboard.pasteboardItems?.reduce(into: 0) { result, item in
             if item.availableType(from: [.fileURL]) != nil { result += 1 }
         } ?? 0
@@ -1336,6 +1359,8 @@ private final class HaloEmbeddedDropZoneController {
         target = nil
         originalDropHandler = nil
         model.hoveredZone = nil
+        model.hoveredIntegrationID = nil
+        model.draggedURLs = []
         model.result = nil
         model.clearRename()
         dropHandled = false
@@ -1357,10 +1382,30 @@ private final class HaloEmbeddedDropZoneController {
             return
         }
 
+        let partnerActions = Array(
+            HaloIntegrationCatalog.shared.compatibleInvocations(for: urls).prefix(4)
+        )
+        let size = targetView?.bounds.size ?? .zero
+
+        if let partnerIndex = HaloDropZoneLayoutResolver.partnerIndex(
+            at: localPoint,
+            size: size,
+            configuration: settings.configuration,
+            count: partnerActions.count
+        ), partnerActions.indices.contains(partnerIndex) {
+            performPartnerAction(
+                partnerActions[partnerIndex],
+                urls: urls,
+                target: target
+            )
+            return
+        }
+
         let index = HaloDropZoneLayoutResolver.index(
             at: localPoint,
-            size: targetView?.bounds.size ?? .zero,
-            configuration: settings.configuration
+            size: size,
+            configuration: settings.configuration,
+            partnerCount: partnerActions.count
         )
 
         guard let index, settings.configuration.zones.indices.contains(index) else {
@@ -1382,6 +1427,44 @@ private final class HaloEmbeddedDropZoneController {
             closeHandler: { [weak target] in target?.dragStateHandler?(false, 0) }
         )
         completeDrop(result: result)
+    }
+
+    private func performPartnerAction(
+        _ invocation: HaloIntegrationInvocation,
+        urls: [URL],
+        target: any HaloGlobalDropTarget
+    ) {
+        dropHandled = true
+        model.hoveredZone = nil
+        model.hoveredIntegrationID = invocation.id
+        model.result = "Preparing \(invocation.action.name)…"
+
+        if let window = targetView?.window {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+        }
+
+        guard let options = HaloIntegrationOptionPrompt.collect(
+            for: invocation,
+            parentWindow: targetView?.window
+        ) else {
+            target.dragStateHandler?(false, 0)
+            completeDrop(result: "App action cancelled")
+            return
+        }
+
+        do {
+            try HaloIntegrationCatalog.shared.invoke(
+                invocation,
+                files: urls,
+                options: options
+            )
+            target.dragStateHandler?(false, 0)
+            completeDrop(result: "Sent to \(invocation.integration.name)")
+        } catch {
+            target.dragStateHandler?(false, 0)
+            completeDrop(result: error.localizedDescription)
+        }
     }
 
     private func beginInlineRename(zone: HaloDropZone, urls: [URL], target: any HaloGlobalDropTarget) {
