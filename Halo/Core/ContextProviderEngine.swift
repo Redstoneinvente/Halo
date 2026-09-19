@@ -241,6 +241,7 @@ final class HaloCIContextProviderEngine: ObservableObject {
         .store(in: &subscriptions)
 
         workspace.$runningApps
+            .map { apps in apps.map { $0.bundleIdentifier ?? "" }.sorted() }
             .removeDuplicates()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.invalidate() }
