@@ -321,7 +321,11 @@ private enum HaloDropZoneLayoutResolver {
     private static let headerHeight: CGFloat = 58
     private static let footerHeight: CGFloat = 22
 
-    static func frames(size: CGSize, configuration: HaloDropZoneConfiguration) -> [CGRect] {
+    static func frames(
+        size: CGSize,
+        configuration: HaloDropZoneConfiguration,
+        partnerCount: Int = 0
+    ) -> [CGRect] {
         let count = configuration.zones.count
         guard count > 0, size.width > 80, size.height > 100 else { return [] }
 
@@ -332,7 +336,11 @@ private enum HaloDropZoneLayoutResolver {
         let horizontalInset = padding + edgeSafety
         let top = headerHeight + padding + edgeSafety
         let availableWidth = max(1, size.width - horizontalInset * 2)
-        let availableHeight = max(1, size.height - top - footerHeight - padding - edgeSafety)
+        let partnerReserve: CGFloat = partnerCount > 0 ? 76 : 0
+        let availableHeight = max(
+            1,
+            size.height - top - footerHeight - padding - edgeSafety - partnerReserve
+        )
         let rect = CGRect(
             x: horizontalInset,
             y: top,
@@ -401,9 +409,65 @@ private enum HaloDropZoneLayoutResolver {
         }
     }
 
-    static func index(at localAppKitPoint: CGPoint, size: CGSize, configuration: HaloDropZoneConfiguration) -> Int? {
+    static func index(
+        at localAppKitPoint: CGPoint,
+        size: CGSize,
+        configuration: HaloDropZoneConfiguration,
+        partnerCount: Int = 0
+    ) -> Int? {
         let swiftUIPoint = CGPoint(x: localAppKitPoint.x, y: size.height - localAppKitPoint.y)
-        return frames(size: size, configuration: configuration).firstIndex { $0.contains(swiftUIPoint) }
+        return frames(
+            size: size,
+            configuration: configuration,
+            partnerCount: partnerCount
+        ).firstIndex { $0.contains(swiftUIPoint) }
+    }
+
+    static func partnerFrames(
+        size: CGSize,
+        configuration: HaloDropZoneConfiguration,
+        count: Int
+    ) -> [CGRect] {
+        let visibleCount = min(4, max(0, count))
+        guard visibleCount > 0, size.width > 80, size.height > 150 else { return [] }
+
+        let padding = max(8, CGFloat(configuration.boardPadding))
+        let gap = max(6, CGFloat(configuration.zoneSpacing))
+        let edgeSafety: CGFloat = 8
+        let horizontalInset = padding + edgeSafety
+        let availableWidth = max(1, size.width - horizontalInset * 2)
+        let height: CGFloat = 62
+        let width = max(
+            80,
+            (availableWidth - gap * CGFloat(visibleCount - 1)) / CGFloat(visibleCount)
+        )
+        let y = max(
+            headerHeight + padding,
+            size.height - footerHeight - padding - edgeSafety - height
+        )
+
+        return (0..<visibleCount).map { index in
+            CGRect(
+                x: horizontalInset + CGFloat(index) * (width + gap),
+                y: y,
+                width: width,
+                height: height
+            )
+        }
+    }
+
+    static func partnerIndex(
+        at localAppKitPoint: CGPoint,
+        size: CGSize,
+        configuration: HaloDropZoneConfiguration,
+        count: Int
+    ) -> Int? {
+        let swiftUIPoint = CGPoint(x: localAppKitPoint.x, y: size.height - localAppKitPoint.y)
+        return partnerFrames(
+            size: size,
+            configuration: configuration,
+            count: count
+        ).firstIndex { $0.contains(swiftUIPoint) }
     }
 }
 
@@ -660,6 +724,8 @@ private enum HaloDropZoneActionExecutor {
 @MainActor
 private final class HaloDropZoneRuntimeModel: ObservableObject {
     @Published var hoveredZone: Int?
+    @Published var hoveredIntegrationID: String?
+    @Published var draggedURLs: [URL] = []
     @Published var itemCount = 1
     @Published var result: String?
     @Published var renameZoneID: UUID?
