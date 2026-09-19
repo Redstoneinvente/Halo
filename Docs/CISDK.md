@@ -134,7 +134,8 @@ Minimum conceptual fields:
   "permissions": [],
   "capabilities": [],
   "supportedSurfaces": ["notch"],
-  "supportedStates": ["closed", "expanded"]
+  "supportedStates": ["closed", "expanded"],
+  "dismissBehavior": "standard"
 }
 ```
 
@@ -148,6 +149,7 @@ Rules:
 - Relative paths may not escape the package root.
 - Duplicate normalized paths are invalid.
 - Symlink/path traversal tricks must not be followed.
+- `dismissBehavior` is optional and controls Smart Dismiss timing. Supported values are `transient`, `standard`, `interactive`, and `persistent`. Omitting it preserves backward compatibility and uses Halo's default policy.
 
 ## 5. Declarative UI schema
 
@@ -1173,13 +1175,23 @@ Each package also has its own enable toggle, priority, permission grants, and is
   "permissions": ["Media.ReadState", "Media.Control"],
   "capabilities": ["AutomaticTriggers", "MediaControls"],
   "supportedSurfaces": ["notch"],
-  "supportedStates": ["closed", "expanded"]
+  "supportedStates": ["closed", "expanded"],
+  "dismissBehavior": "standard"
 }
 ```
 
 Supported permissions: `Media.ReadState`, `Media.Control`, `Applications.Observe`, `Clipboard.Write`, `URL.Open`.
 
 Supported capability labels: `LocalAssets`, `LocalState`, `AutomaticTriggers`, `MediaControls`. Capabilities are descriptive; they never grant authority. Permissions remain explicit and revocable.
+
+Optional Smart Dismiss metadata:
+
+- `transient`: short-lived informational UI; Smart uses roughly 280 ms.
+- `standard`: normal interaction; Smart uses roughly 450 ms.
+- `interactive`: drag/control-heavy UI; Smart uses roughly 680 ms.
+- `persistent`: pointer exit does not dismiss while that CI owns the surface.
+
+If `dismissBehavior` is omitted, Halo defaults to `standard`, except file-drag-driven CIs are derived as `interactive` where the registration factory has enough trigger context.
 
 ### Interface document
 
