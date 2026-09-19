@@ -1,0 +1,14 @@
+name: Validate Live Activity Actions
+
+on:
+  push:
+    branches:
+      - codex/live-activities-v1
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Halo
+        run: xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
