@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ApplicationServices
 import ServiceManagement
 import UniformTypeIdentifiers
 
@@ -379,7 +380,7 @@ struct SettingsView: View {
                     return true
                 }
             }
-        case "Context Notch Interface": ContextInterfaceLibraryView(layout: $workspace.settings.layout)
+        case "Context Notch Interface": ContextInterfaceLibraryView(layout: $workspace.settings.layout, workspace: workspace)
         case "Media & Files":
             Section("Media source") {
                 Picker("Source", selection: Binding(
@@ -1559,12 +1560,13 @@ private struct HaloContextInterfaceSearchField: NSViewRepresentable {
 }
 
 private enum ContextInterfaceSelection: String, CaseIterable, Identifiable {
-    case drop, music, teleprompter, transfer, clipboard, bluetooth, retro
+    case drop, music, teleprompter, transfer, clipboard, bluetooth, retro, liveActivity
     var id: String { rawValue }
 }
 
 private struct ContextInterfaceLibraryView: View {
     @Binding var layout: WorkspaceLayout
+    @ObservedObject var workspace: WorkspaceStore
     @ObservedObject private var integrationRuntime = IntegrationCIRuntime.shared
     @State private var selection: ContextInterfaceSelection?
     @State private var selectedIntegrationID: String?
@@ -1575,6 +1577,7 @@ private struct ContextInterfaceLibraryView: View {
     @AppStorage("HaloContextClipboardEnabled") private var clipboardEnabled = true
     @AppStorage("HaloContextBluetoothEnabled") private var bluetoothEnabled = false
     @AppStorage("HaloContextRetroEnabled") private var retroEnabled = false
+    @AppStorage("HaloLiveActivitiesEnabled") private var liveActivitiesEnabled = true
 
     private var musicEnabled: Bool { layout.contextMusic?.enabled ?? false }
 
@@ -1687,6 +1690,20 @@ private struct ContextInterfaceLibraryView: View {
                 }
             }
             ContextBluetoothSettings()
+        } else if selection == .liveActivity {
+            Section {
+                HStack(spacing: 12) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) { selection = nil }
+                    } label: {
+                        Label("All CI", systemImage: "chevron.left")
+                    }
+                    Spacer()
+                    Label("Live Activities CI", systemImage: "waveform.path.ecg.rectangle.fill")
+                        .font(.headline)
+                }
+            }
+            LiveActivityContextSettings(workspace: workspace)
         } else if selection == .retro {
             Section {
                 HStack(spacing: 12) {
@@ -1760,6 +1777,11 @@ private struct ContextInterfaceLibraryView: View {
                         if builtInMatchesSearch(.retro) {
                             RetroGameContextInterfaceCard(enabled: retroEnabled) {
                                 withAnimation(.easeInOut(duration: 0.18)) { selection = .retro }
+                            }
+                        }
+                        if builtInMatchesSearch(.liveActivity) {
+                            LiveActivityContextInterfaceCard(enabled: liveActivitiesEnabled, activity: workspace.primaryLiveActivity) {
+                                withAnimation(.easeInOut(duration: 0.18)) { selection = .liveActivity }
                             }
                         }
                     }
@@ -1870,6 +1892,8 @@ private struct ContextInterfaceLibraryView: View {
             searchableText = "Bluetooth CI devices accessories connection bluetooth"
         case .retro:
             searchableText = "Retro Game CI game controller pixel retro arcade"
+        case .liveActivity:
+            searchableText = "Live Activities CI notifications messages calls incoming call alerts progress downloads activity"
         }
         return searchableText.localizedCaseInsensitiveContains(normalizedSearchText)
     }
@@ -1890,6 +1914,245 @@ private struct ContextInterfaceLibraryView: View {
 }
 
 
+
+private struct LiveActivityContextInterfaceCard: View {
+    let enabled: Bool
+    let activity: LiveActivity?
+    let action: () -> Void
+    @AppStorage("HaloLiveActivitiesPriority") private var priority = 82.0
+    @AppStorage("HaloLiveActivitiesCaptureSystem") private var captureSystem = false
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(LinearGradient(
+                            colors: [Color.accentColor.opacity(0.28), Color.black.opacity(0.96)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                    VStack(spacing: 10) {
+                        Image(systemName: activity?.resolvedSymbolName ?? "waveform.path.ecg.rectangle.fill")
+                            .font(.system(size: 30, weight: .semibold))
+                            .foregroundStyle(.white)
+                        if let activity {
+                            Text(activity.title)
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                            Text(activity.sourceName ?? activity.resolvedKind.rawValue.capitalized)
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.65))
+                                .lineLimit(1)
+                        } else {
+                            Text("NOTIFICATIONS · MESSAGES · CALLS")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                    }
+                    .padding(14)
+                }
+                .frame(height: 112)
+
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Live Activities CI").font(.headline)
+                        Text("System & app events").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(enabled ? "Enabled" : "Available")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background((enabled ? Color.green : Color.secondary).opacity(0.12), in: Capsule())
+                        .foregroundStyle(enabled ? Color.green : Color.secondary)
+                }
+
+                Text("Turns notifications, messages, calls, progress and future event sources into one updateable Halo activity surface.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Label(captureSystem ? "System capture on" : "System capture off", systemImage: captureSystem ? "bell.badge.fill" : "bell.slash")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Priority \(Int(priority))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Label("Edit", systemImage: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(hovered ? 0.075 : 0.045), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(hovered ? Color.accentColor.opacity(0.42) : Color.primary.opacity(0.08), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovered)
+    }
+}
+
+private struct LiveActivityContextSettings: View {
+    @ObservedObject var workspace: WorkspaceStore
+
+    @AppStorage("HaloLiveActivitiesEnabled") private var enabled = true
+    @AppStorage("HaloLiveActivitiesPriority") private var priority = 82.0
+    @AppStorage("HaloLiveActivitiesCaptureSystem") private var captureSystem = false
+    @AppStorage("HaloLiveActivitiesCaptureMessages") private var captureMessages = true
+    @AppStorage("HaloLiveActivitiesCaptureCalls") private var captureCalls = true
+    @AppStorage("HaloLiveActivitiesCaptureNotifications") private var captureNotifications = true
+    @AppStorage("HaloLiveActivitiesUseFullNotchArea") private var useFullNotchArea = false
+    @AppStorage("HaloLiveActivitiesKeepClosedNotchContents") private var keepClosedContents = false
+    @AppStorage("HaloLiveActivitiesHorizontalMargin") private var horizontalMargin = 24.0
+    @AppStorage("HaloLiveActivitiesVerticalMargin") private var verticalMargin = 18.0
+    @AppStorage("HaloLiveActivitiesSpacing") private var spacing = 12.0
+    @AppStorage("HaloLiveActivitiesCornerRadius") private var cornerRadius = 18.0
+
+    private var accessibilityGranted: Bool { AXIsProcessTrusted() }
+
+    var body: some View {
+        Section("Live Activities") {
+            Toggle("Enable Live Activities CI", isOn: $enabled)
+            Text("Live Activities are long-lived Halo events. A call can move from Incoming → Active → Ended using one stable activity instead of creating a new CI session for every state change.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("System capture") {
+            Toggle("Capture macOS notifications", isOn: $captureSystem)
+            Group {
+                Toggle("Messages", isOn: $captureMessages)
+                Toggle("Calls", isOn: $captureCalls)
+                Toggle("Other notifications", isOn: $captureNotifications)
+            }
+            .disabled(!captureSystem)
+
+            HStack {
+                Label(
+                    accessibilityGranted ? "Accessibility permission granted" : "Accessibility permission required",
+                    systemImage: accessibilityGranted ? "checkmark.shield.fill" : "exclamationmark.shield.fill"
+                )
+                .foregroundStyle(accessibilityGranted ? Color.green : Color.orange)
+                Spacer()
+                if !accessibilityGranted {
+                    Button("Open Accessibility Settings") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+            }
+
+            Text("Halo reads only the accessibility content macOS exposes for visible Notification Center / FaceTime UI. Hidden notification previews remain hidden; Halo does not query Messages databases or bypass macOS privacy settings.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("CI priority") {
+            Slider(value: $priority, in: 0...100, step: 1) { Text("Live Activities priority") }
+            Text("Calls, messages and notifications compete as one Live Activities CI. Internal activity priority chooses which activity is shown; this slider controls how Live Activities compete with Music, Drop, Clipboard and other CIs.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("Opened activity layout") {
+            PreciseSlider(title: "Horizontal margin", value: $horizontalMargin, range: 0...80, step: 1, suffix: "pt")
+            PreciseSlider(title: "Vertical margin", value: $verticalMargin, range: 0...80, step: 1, suffix: "pt")
+            PreciseSlider(title: "Content spacing", value: $spacing, range: 2...32, step: 1, suffix: "pt")
+            PreciseSlider(title: "Corner radius", value: $cornerRadius, range: 0...48, step: 1, suffix: "pt")
+            Toggle("Use full notch area", isOn: $useFullNotchArea)
+            Toggle("Keep Closed Notch contents visible", isOn: $keepClosedContents)
+        }
+
+        Section("Closed Notch widget") {
+            Label("Live Activities are available as the Activity item in Closed notch → Content → Left slot / Right slot.", systemImage: "rectangle.split.2x1")
+            Text("The closed widget deliberately inherits the Closed Notch horizontal/vertical padding, margin from camera, margin from outer edge, and element spacing. It can also temporarily use a free side when automatic placement is enabled there.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        Section("Test Live Activities") {
+            HStack {
+                Button("Message") { publishMessagePreview() }
+                Button("Incoming Call") { publishIncomingCallPreview() }
+                Button("Connect Call") { publishConnectedCallPreview() }
+                Button("Download") { publishDownloadPreview() }
+            }
+            Text("These previews use the real Live Activity lifecycle and CI arbitration path, so they are useful before granting Accessibility permission.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func publishMessagePreview() {
+        workspace.upsertLiveActivity(LiveActivity(
+            externalID: "debug.live.message",
+            sourceBundleIdentifier: "com.apple.MobileSMS",
+            sourceName: "Messages",
+            kind: .message,
+            state: .active,
+            symbolName: "message.fill",
+            title: "Halo Live Activity",
+            detail: "This is how an incoming message can appear.",
+            updatedAt: Date(),
+            expiresAt: Date().addingTimeInterval(18),
+            priority: 78,
+            persistent: false
+        ))
+    }
+
+    private func publishIncomingCallPreview() {
+        workspace.upsertLiveActivity(LiveActivity(
+            externalID: "debug.live.call",
+            sourceBundleIdentifier: "com.apple.FaceTime",
+            sourceName: "FaceTime",
+            kind: .call,
+            state: .incoming,
+            symbolName: "phone.arrow.down.left.fill",
+            title: "Incoming Call",
+            detail: "FaceTime",
+            updatedAt: Date(),
+            priority: 100,
+            persistent: true
+        ))
+    }
+
+    private func publishConnectedCallPreview() {
+        let previous = workspace.activities.first(where: { $0.externalID == "debug.live.call" })
+        workspace.upsertLiveActivity(LiveActivity(
+            externalID: "debug.live.call",
+            sourceBundleIdentifier: "com.apple.FaceTime",
+            sourceName: "FaceTime",
+            kind: .call,
+            state: .active,
+            symbolName: "phone.fill",
+            title: previous?.title ?? "Connected Call",
+            detail: "Call in progress",
+            startedAt: previous?.startedAt ?? Date(),
+            updatedAt: Date(),
+            priority: 92,
+            persistent: true
+        ))
+    }
+
+    private func publishDownloadPreview() {
+        workspace.upsertLiveActivity(LiveActivity(
+            externalID: "debug.live.download",
+            sourceName: "Halo",
+            kind: .download,
+            state: .active,
+            symbolName: "arrow.down.circle.fill",
+            title: "Downloading update",
+            detail: "72 MB of 100 MB",
+            progress: 0.72,
+            updatedAt: Date(),
+            priority: 62,
+            persistent: true
+        ))
+    }
+}
 
 private struct ClipboardContextInterfaceCard: View {
     let enabled: Bool
