@@ -2518,11 +2518,26 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
         }
         Section("Material") {
             if kind == .glass {
-                optionalSlider("Glass blur", b.appearance.blur, fallback: layout.appearance.blur, range: 0...30, suffix: "pt")
+                Text(b.wrappedValue.appearance.glass == nil ? "Using global glass settings" : "Using Visual Workspace glass override")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                PreciseSlider(title: "Clarity", value: glassDoubleBinding(b.appearance, \.clarity), range: 0...1, step: 0.01, decimals: 2)
+                PreciseSlider(title: "Frost", value: glassDoubleBinding(b.appearance, \.frost), range: 0...1, step: 0.01, decimals: 2)
+                PreciseSlider(title: "Light absorption", value: glassDoubleBinding(b.appearance, \.lightAbsorption), range: 0...1, step: 0.01, decimals: 2)
+                PreciseSlider(title: "Chromatic alteration", value: glassDoubleBinding(b.appearance, \.chromaticShift), range: 0...1, step: 0.01, decimals: 2)
+                ColorPicker("Glass tint", selection: glassTintBinding(b.appearance), supportsOpacity: false)
+                PreciseSlider(title: "Tint strength", value: glassDoubleBinding(b.appearance, \.tintAmount), range: 0...0.5, step: 0.01, decimals: 2)
+                PreciseSlider(title: "Specular highlight", value: glassDoubleBinding(b.appearance, \.highlight), range: 0...1, step: 0.01, decimals: 2)
+                PreciseSlider(title: "Edge depth", value: glassDoubleBinding(b.appearance, \.edgeDepth), range: 0...1, step: 0.01, decimals: 2)
+
+                if b.wrappedValue.appearance.glass != nil {
+                    Button("Use global glass settings") { b.wrappedValue.appearance.glass = nil }
+                }
             } else if kind == .image || kind == .video {
                 optionalSlider("Blur", b.appearance.blur, fallback: layout.appearance.blur, range: 0...30, suffix: "pt")
             }
-            if kind != .solid {
+            if kind != .solid && kind != .glass {
                 optionalSlider("Saturation", b.appearance.saturation, fallback: layout.appearance.saturation, range: 0...2.5, step: 0.05, suffix: "×", decimals: 2)
                 optionalSlider("Brightness", b.appearance.brightness, fallback: layout.appearance.brightness, range: -0.5...0.5, step: 0.02, decimals: 2)
                 optionalSlider("Contrast", b.appearance.contrast, fallback: 1, range: 0.5...2, step: 0.05, suffix: "×", decimals: 2)
@@ -2601,6 +2616,31 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
         PreciseSlider(title: "Bottom", value: b.bottom, range: 0...96, step: 1, suffix: "pt")
         PreciseSlider(title: "Trailing", value: b.trailing, range: 0...96, step: 1, suffix: "pt")
     }
+    private func glassDoubleBinding(_ appearance: Binding<OpenNotchAppearance>, _ keyPath: WritableKeyPath<GlassOptions, Double>) -> Binding<Double> {
+        Binding(
+            get: {
+                let glass = appearance.wrappedValue.glass ?? layout.appearance.glass
+                return glass[keyPath: keyPath]
+            },
+            set: { newValue in
+                var glass = appearance.wrappedValue.glass ?? layout.appearance.glass
+                glass[keyPath: keyPath] = newValue
+                appearance.wrappedValue.glass = glass.normalized()
+            }
+        )
+    }
+
+    private func glassTintBinding(_ appearance: Binding<OpenNotchAppearance>) -> Binding<Color> {
+        Binding(
+            get: { (appearance.wrappedValue.glass ?? layout.appearance.glass).tint.color },
+            set: { color in
+                var glass = appearance.wrappedValue.glass ?? layout.appearance.glass
+                glass.tint = WidgetColor(color)
+                appearance.wrappedValue.glass = glass.normalized()
+            }
+        )
+    }
+
     @ViewBuilder private func sizingSlider(_ title: String, _ value: Binding<Double>, _ range: ClosedRange<Double>) -> some View { PreciseSlider(title: title, value: value, range: range, step: 1, suffix: "pt") }
     @ViewBuilder private func optionalSlider(_ title: String, _ value: Binding<Double?>, fallback: Double, range: ClosedRange<Double>, step: Double = 1, suffix: String = "", decimals: Int = 0) -> some View {
         PreciseSlider(title: title, value: Binding(get: { value.wrappedValue ?? fallback }, set: { value.wrappedValue = $0 }), range: range, step: step, suffix: suffix, decimals: decimals)
