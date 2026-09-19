@@ -1498,6 +1498,44 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     }
 }
 
+@MainActor
+private struct HaloContextInterfaceSearchField: NSViewRepresentable {
+    @Binding var text: String
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField(frame: .zero)
+        field.placeholderString = "Search Context Interfaces"
+        field.sendsSearchStringImmediately = true
+        field.sendsWholeSearchString = false
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.searchChanged(_:))
+        field.focusRingType = .default
+        return field
+    }
+
+    func updateNSView(_ nsView: NSSearchField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+    }
+
+    final class Coordinator: NSObject {
+        private var text: Binding<String>
+
+        init(text: Binding<String>) {
+            self.text = text
+        }
+
+        @objc func searchChanged(_ sender: NSSearchField) {
+            text.wrappedValue = sender.stringValue
+        }
+    }
+}
+
 private enum ContextInterfaceSelection: String, CaseIterable, Identifiable {
     case drop, music, teleprompter, transfer, clipboard, bluetooth, retro
     var id: String { rawValue }
@@ -1651,33 +1689,8 @@ private struct ContextInterfaceLibraryView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    HStack(spacing: 9) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-                        TextField("Search Context Interfaces", text: $ciSearchText)
-                            .textFieldStyle(.plain)
-
-                        if !ciSearchText.isEmpty {
-                            Button {
-                                ciSearchText = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Clear search")
-                        }
-                    }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 9)
-                    .background(
-                        Color.primary.opacity(0.045),
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                    }
+                    HaloContextInterfaceSearchField(text: $ciSearchText)
+                        .frame(height: 28)
                 }
                 .padding(.vertical, 4)
             }
