@@ -1183,7 +1183,7 @@ Each package also has its own enable toggle, priority, permission grants, and is
 }
 ```
 
-Supported permissions: `Media.ReadState`, `Media.Control`, `Applications.Observe`, `Clipboard.Write`, `URL.Open`; SDK 0.2 additionally implements `Audio.ReadState` and `AppIntegration.Execute`.
+Supported permissions: `Media.ReadState`, `Media.Control`, `Applications.Observe`, `Clipboard.Write`, `URL.Open`; SDK 0.2 additionally implements `Audio.ReadState`, `Clipboard.Observe`, `Bluetooth.Observe`, `Notifications.Observe`, and `AppIntegration.Execute`.
 
 Supported capability labels: `LocalAssets`, `LocalState`, `AutomaticTriggers`, `MediaControls`; SDK 0.2 additionally implements `AppIntegrations`. Capabilities are descriptive; they never grant authority. Permissions remain explicit and revocable.
 
