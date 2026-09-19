@@ -1735,7 +1735,15 @@ final class WindowManager {
 
     func toggleAll() {
         let expand = !hosts.values.contains { $0.state.expanded }
-        hosts.values.forEach { $0.state.collapseTask?.cancel(); $0.state.expanded = expand }
+        hosts.values.forEach { host in
+            host.state.collapseTask?.cancel()
+            if expand {
+                host.state.dismissCoordinator.cancelPendingDismissal()
+                host.state.expanded = true
+            } else if !host.state.pinned {
+                host.state.requestDismissal(reason: .explicit)
+            }
+        }
     }
 
     /// Opens the existing Halo surfaces without toggling any already-open surface closed.
