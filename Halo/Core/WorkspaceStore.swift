@@ -1120,6 +1120,8 @@ private struct HaloCustomCIPackagePreferences: Codable {
     var priority = 50.0
     var priorityWasUserSet: Bool?
     var grantedPermissions: Set<String> = []
+    var disabledIntegrationActionIDs: Set<String>?
+    var integrationAutomaticTriggersEnabled: Bool?
     var state = HaloCustomCIStoredState()
 }
 
@@ -1344,6 +1346,66 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
 
     func isEnabled(_ id: String) -> Bool { preferences[id]?.enabled ?? true }
     func priority(_ id: String) -> Double { min(100, max(0, preferences[id]?.priority ?? 50)) }
+
+    func integration(forPackageID packageID: String) -> HaloIntegration? {
+        guard let package = package(id: packageID),
+              let metadata = HaloAutoIntegrationCIGenerator.metadata(at: package.rootURL) else {
+            return nil
+        }
+        return HaloIntegrationCatalog.shared.integrations.first {
+            $0.bundleIdentifier == metadata.bundleIdentifier
+        }
+    }
+
+    func isIntegrationActionEnabled(packageID: String, actionID: String) -> Bool {
+        !(preferences[packageID]?.disabledIntegrationActionIDs ?? []).contains(actionID)
+    }
+
+    func setIntegrationActionEnabled(
+        _ enabled: Bool,
+        packageID: String,
+        actionID: String
+    ) {
+        guard isGeneratedIntegrationPackage(packageID),
+              integration(forPackageID: packageID)?.manifest.actions.contains(where: { $0.id == actionID }) == true else {
+            return
+        }
+
+        mutatePreferences(packageID) { prefs in
+            var disabled = prefs.disabledIntegrationActionIDs ?? []
+            if enabled {
+                disabled.remove(actionID)
+            } else {
+                disabled.insert(actionID)
+            }
+            prefs.disabledIntegrationActionIDs = disabled
+        }
+
+        if !enabled,
+           HaloIntegrationDragSession.shared.actionIDs(packageID: packageID).contains(actionID) {
+            revalidateIntegrationDragSession()
+        }
+        contextDidChange()
+    }
+
+    func integrationAutomaticTriggersEnabled(_ packageID: String) -> Bool {
+        preferences[packageID]?.integrationAutomaticTriggersEnabled ?? true
+    }
+
+    func setIntegrationAutomaticTriggersEnabled(_ enabled: Bool, packageID: String) {
+        guard isGeneratedIntegrationPackage(packageID) else { return }
+        mutatePreferences(packageID) { $0.integrationAutomaticTriggersEnabled = enabled }
+        if !enabled {
+            HaloIntegrationDragSession.shared.clear(packageID: packageID)
+        }
+        contextDidChange()
+    }
+
+    func enabledIntegrationActions(packageID: String) -> [HaloIntegrationAction] {
+        guard let integration = integration(forPackageID: packageID) else { return [] }
+        let disabled = preferences[packageID]?.disabledIntegrationActionIDs ?? []
+        return integration.manifest.actions.filter { !disabled.contains($0.id) }
+    }
     func grantedPermissions(_ id: String) -> Set<String> {
         guard let package = package(id: id) else { return [] }
         return (preferences[id]?.grantedPermissions ?? []).intersection(package.manifest.permissions)
@@ -1358,6 +1420,9 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         if !enabled {
             if manualActivationID == packageID { manualActivationID = nil }
             suppressedPackageIDs.remove(packageID)
+            if isGeneratedIntegrationPackage(packageID) {
+                HaloIntegrationDragSession.shared.clear(packageID: packageID)
+            }
         }
         contextDidChange()
     }
@@ -1395,6 +1460,9 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     func dismiss(_ id: String) {
         if manualActivationID == id { manualActivationID = nil }
         suppressedPackageIDs.insert(id)
+        if isGeneratedIntegrationPackage(id) {
+            HaloIntegrationDragSession.shared.clear(packageID: id)
+        }
         contextRevision &+= 1
         NotificationCenter.default.post(name: .init("HaloCustomCICloseRequested"), object: id)
     }
