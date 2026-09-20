@@ -2305,10 +2305,19 @@ struct DesktopGlass: NSViewRepresentable {
     final class GlassHostView: NSView {
         private var systemGlass: NSView?
         private var legacyGlass: NSVisualEffectView?
+        private var currentOptions = GlassOptions()
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+        override func layout() {
+            super.layout()
+            if #available(macOS 26.0, *), let glassView = systemGlass as? NSGlassEffectView {
+                applySystemGeometry(glassView, options: currentOptions)
+            }
+        }
+
         func apply(_ options: GlassOptions) {
+            currentOptions = options.normalized()
             let options = options.normalized()
 
             if #available(macOS 26.0, *) {
@@ -2362,6 +2371,7 @@ struct DesktopGlass: NSViewRepresentable {
                 alpha: min(1, max(0, options.tintAmount + options.lightAbsorption * 0.18))
             )
             glassView.tintColor = tint
+            applySystemGeometry(glassView, options: options)
 
             // There is no public numeric refraction-strength API. Crossfading the native
             // glass is the only supported continuous control: zero removes the lensing;
@@ -2369,6 +2379,14 @@ struct DesktopGlass: NSViewRepresentable {
             let refractionPresence = min(1, max(0, options.refraction))
             let clarityPresence = 0.35 + (1 - options.clarity) * 0.65
             glassView.alphaValue = CGFloat(max(0.08, refractionPresence) * clarityPresence)
+        }
+
+        @available(macOS 26.0, *)
+        private func applySystemGeometry(_ glassView: NSGlassEffectView, options: GlassOptions) {
+            let maximumRadius = max(6, min(bounds.width, bounds.height) * 0.5)
+            let minimumRadius = min(8, maximumRadius)
+            glassView.cornerRadius = minimumRadius
+                + (maximumRadius - minimumRadius) * options.refractionSpread
         }
 
         private func applyLegacyGlass(_ options: GlassOptions) {
