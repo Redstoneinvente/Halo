@@ -2045,7 +2045,7 @@ final class WindowManager {
                     let leftDelta = abs(newLeft - oldLeft)
                     let rightDelta = abs(newRight - oldRight)
                     let fixedEdge: CGRectEdge? = {
-                        let tolerance: CGFloat = 0.75
+                        let tolerance = 0.75
                         if leftDelta <= tolerance && rightDelta > tolerance { return .minXEdge }
                         if rightDelta <= tolerance && leftDelta > tolerance { return .maxXEdge }
                         return nil
