@@ -2304,9 +2304,36 @@ struct ResolvedSurfaceBackground: View {
 struct DesktopGlass: NSViewRepresentable {
     let options: GlassOptions
 
-    final class EffectView: NSVisualEffectView {
-        var glassOptions = GlassOptions()
+    /// NSVisualEffectView owns the privileged live-desktop sampling. The outer view then
+    /// filters that rendered subtree. Applying a background filter directly to the effect
+    /// view only sees its ordinary layer background and does not refract the sampled desktop.
+    final class RefractiveGlassView: NSView {
+        let effectView = NSVisualEffectView()
+        private var glassOptions = GlassOptions()
         private var lastFilterSignature = ""
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+
+            wantsLayer = true
+            layerUsesCoreImageFilters = true
+            layer?.masksToBounds = true
+
+            effectView.blendingMode = .behindWindow
+            effectView.state = .active
+            effectView.appearance = NSAppearance(named: .darkAqua)
+            effectView.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(effectView)
+
+            NSLayoutConstraint.activate([
+                effectView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                effectView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                effectView.topAnchor.constraint(equalTo: topAnchor),
+                effectView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            ])
+        }
+
+        required init?(coder: NSCoder) { nil }
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -2315,10 +2342,10 @@ struct DesktopGlass: NSViewRepresentable {
             updateRefractionIfNeeded()
         }
 
-        func apply(_ options: GlassOptions) {
+        func apply(_ options: GlassOptions, material: NSVisualEffectView.Material) {
             glassOptions = options.normalized()
-            wantsLayer = true
-            layerUsesCoreImageFilters = true
+            effectView.material = material
+            effectView.alphaValue = CGFloat(GlassRendering.materialOpacity(clarity: glassOptions.clarity))
             updateRefractionIfNeeded(force: true)
         }
 
@@ -2339,47 +2366,44 @@ struct DesktopGlass: NSViewRepresentable {
                   size.width > 2,
                   size.height > 2,
                   let filter = CIFilter(name: "CIBumpDistortion") else {
-                backgroundFilters = []
+                contentFilters = []
                 return
             }
 
             filter.setDefaults()
-            filter.setValue(
-                CIVector(x: bounds.midX, y: bounds.midY),
-                forKey: kCIInputCenterKey
-            )
+            filter.name = "haloGlassRefraction"
+            filter.setValue(CIVector(x: bounds.midX, y: bounds.midY), forKey: kCIInputCenterKey)
+
             let minimumDimension = min(size.width, size.height)
             let maximumDimension = max(size.width, size.height)
-            let radius = minimumDimension * 0.55
-                + (maximumDimension * 1.05 - minimumDimension * 0.55) * options.refractionSpread
-            filter.setValue(max(1, radius), forKey: kCIInputRadiusKey)
+            let narrowRadius = max(12, minimumDimension * 0.42)
+            let broadRadius = max(narrowRadius, maximumDimension * 1.18)
+            let radius = narrowRadius + (broadRadius - narrowRadius) * options.refractionSpread
+            filter.setValue(radius, forKey: kCIInputRadiusKey)
 
-            // CIBumpDistortion is a true coordinate warp. Keep the useful range below
-            // the extreme values where text/icons behind Halo fold over themselves.
-            let scale = options.refraction * 0.82
-            filter.setValue(scale, forKey: kCIInputScaleKey)
-            filter.name = "haloGlassRefraction"
-            backgroundFilters = [filter]
+            // A larger range is intentional here: unlike the previous no-op background filter,
+            // this filter operates on the rendered NSVisualEffectView subtree and should be
+            // unmistakable at 1.0 when straight lines/text sit behind the notch.
+            filter.setValue(options.refraction * 1.35, forKey: kCIInputScaleKey)
+
+            // contentFilters maps to CALayer.filters and therefore transforms the effect view
+            // content/subtree after NSVisualEffectView has sampled the live desktop.
+            contentFilters = [filter]
         }
     }
 
-    func makeNSView(context: Context) -> EffectView {
-        let view = EffectView()
-        view.blendingMode = .behindWindow
-        view.state = .active
-        view.appearance = NSAppearance(named: .darkAqua)
+    func makeNSView(context: Context) -> RefractiveGlassView {
+        let view = RefractiveGlassView(frame: .zero)
         apply(options.normalized(), to: view)
         return view
     }
 
-    func updateNSView(_ view: EffectView, context: Context) {
+    func updateNSView(_ view: RefractiveGlassView, context: Context) {
         apply(options.normalized(), to: view)
     }
 
-    private func apply(_ options: GlassOptions, to view: EffectView) {
-        view.material = nativeMaterial(for: options.frost)
-        view.alphaValue = CGFloat(GlassRendering.materialOpacity(clarity: options.clarity))
-        view.apply(options)
+    private func apply(_ options: GlassOptions, to view: RefractiveGlassView) {
+        view.apply(options, material: nativeMaterial(for: options.frost))
     }
 
     private func nativeMaterial(for frost: Double) -> NSVisualEffectView.Material {
@@ -2393,6 +2417,7 @@ struct DesktopGlass: NSViewRepresentable {
         }
     }
 }
+
 struct CachedBackgroundImage: View {
     let path: String
     @State private var image: NSImage?
