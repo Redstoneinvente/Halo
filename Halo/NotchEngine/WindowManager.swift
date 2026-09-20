@@ -598,8 +598,14 @@ final class WindowManager {
         var persistent: Bool
     }
 
+    private struct ClosedMeasuredWingWidths {
+        var left: Double = 0
+        var right: Double = 0
+    }
+
     private var activityExpiry: DispatchWorkItem?
     private var mediaWidthHint: Double?
+    private var measuredClosedWingWidths: [String: ClosedMeasuredWingWidths] = [:]
     private var hudNotchExpansion: HUDNotchExpansion?
     private var hudNotchHideWork: DispatchWorkItem?
     private var hudMonitor: Any?
@@ -741,6 +747,26 @@ final class WindowManager {
                 self.mediaWidthHint = next
                 self.refreshDynamicWidths()
             }.store(in: &subscriptions)
+
+        NotificationCenter.default.publisher(for: .init("HaloClosedNotchMeasuredWingWidths"))
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] note in
+                guard let self,
+                      let screenString = note.userInfo?["screenFrame"] as? String,
+                      let left = note.userInfo?["left"] as? Double,
+                      let right = note.userInfo?["right"] as? Double,
+                      left.isFinite, right.isFinite else { return }
+
+                let next = ClosedMeasuredWingWidths(left: max(0, left), right: max(0, right))
+                let current = self.measuredClosedWingWidths[screenString]
+                guard current == nil ||
+                        abs((current?.left ?? 0) - next.left) >= 0.5 ||
+                        abs((current?.right ?? 0) - next.right) >= 0.5 else { return }
+
+                self.measuredClosedWingWidths[screenString] = next
+                self.refreshDynamicWidths()
+            }
+            .store(in: &subscriptions)
 
         HaloHUDNotchBridge.shared.$presentation.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] presentation in
@@ -1172,12 +1198,14 @@ final class WindowManager {
             return
         }
 
+        let measured = measuredClosedWingWidths[NSStringFromRect(geometry.screen)]
+
         if notchLike {
-            // Content fit is a safety floor, not an optional behavior. Even with Auto-size off,
-            // the closed surface must grow enough to contain every visible widget. The setting
-            // can influence preferred/tight sizing, but it may never permit clipping.
-            var leftDemand = sides.left
-            var rightDemand = sides.right
+            // Calculated demand is only the first estimate. SwiftUI reports the actual ideal
+            // width of each rendered wing back to WindowManager; that measured demand is the
+            // hard floor. If a child overflows, the physical notch grows on the next pass.
+            var leftDemand = max(sides.left, measured?.left ?? 0)
+            var rightDemand = max(sides.right, measured?.right ?? 0)
 
             if let hud = hudNotchExpansion, hud.screenFrame.equalTo(geometry.screen), !hud.vertical {
                 let hudGap = closedMetrics.elementSpacing
@@ -1234,7 +1262,9 @@ final class WindowManager {
             host.geometry?.activeCompactCenterOffset = (rightExtent - leftExtent) / 2
         } else {
             var requested = baseWidth
-            let body = sides.left + sides.right
+            let leftBody = max(sides.left, measured?.left ?? 0)
+            let rightBody = max(sides.right, measured?.right ?? 0)
+            let body = leftBody + rightBody
             if body > 0 {
                 requested = max(requested, body + closedMetrics.renderingAllowance * 2)
             }

@@ -3,7 +3,72 @@ import AppKit
 import ImageIO
 import AVFoundation
 
-enum ClosedNotchSide { case left, right }
+enum ClosedNotchSide: Hashable { case left, right }
+
+private struct ClosedNotchMeasuredWingWidthKey: PreferenceKey {
+    static var defaultValue: [ClosedNotchSide: CGFloat] = [:]
+
+    static func reduce(value: inout [ClosedNotchSide: CGFloat],
+                       nextValue: () -> [ClosedNotchSide: CGFloat]) {
+        for (side, width) in nextValue() {
+            value[side] = max(value[side] ?? 0, width)
+        }
+    }
+}
+
+/// Closed-notch content must never compress merely because the current panel is too small.
+/// This layout intentionally ignores the proposed horizontal width, asks every visible child
+/// for its ideal width, and lays the row out at that width. The outer slot can temporarily
+/// overflow while that measured demand is fed back to WindowManager, which then grows the
+/// physical panel on the next geometry pass.
+private struct ClosedNotchNoClipHStack: Layout {
+    let spacing: CGFloat
+
+    private func measuredSubviews(_ subviews: Subviews, height: CGFloat?) -> [(Subview, CGSize)] {
+        let proposal = ProposedViewSize(width: nil, height: height)
+        return subviews.map { ($0, $0.sizeThatFits(proposal)) }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize,
+                      subviews: Subviews,
+                      cache: inout ()) -> CGSize {
+        let entries = measuredSubviews(subviews, height: proposal.height)
+        let visible = entries.filter { $0.1.width > 0.01 || $0.1.height > 0.01 }
+        let width = visible.reduce(0) { $0 + $1.1.width } +
+            spacing * CGFloat(max(0, visible.count - 1))
+        let measuredHeight = visible.map { $0.1.height }.max() ?? 0
+        return CGSize(width: width, height: proposal.height ?? measuredHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect,
+                       proposal: ProposedViewSize,
+                       subviews: Subviews,
+                       cache: inout ()) {
+        let entries = measuredSubviews(subviews, height: proposal.height ?? bounds.height)
+        let visibleIndices = entries.indices.filter {
+            entries[$0].1.width > 0.01 || entries[$0].1.height > 0.01
+        }
+        var x = bounds.minX
+
+        for index in entries.indices {
+            let (subview, size) = entries[index]
+            guard visibleIndices.contains(index) else {
+                subview.place(at: CGPoint(x: x, y: bounds.midY),
+                              anchor: .leading,
+                              proposal: ProposedViewSize(width: 0, height: 0))
+                continue
+            }
+
+            subview.place(
+                at: CGPoint(x: x, y: bounds.midY),
+                anchor: .leading,
+                proposal: ProposedViewSize(width: size.width, height: size.height)
+            )
+            x += size.width
+            if index != visibleIndices.last { x += spacing }
+        }
+    }
+}
 
 struct HaloScreenFrameEnvironmentKey: EnvironmentKey {
     static let defaultValue = CGRect.zero
@@ -152,6 +217,7 @@ struct ClosedNotchView: View {
     @AppStorage("HaloBluetoothClosedNotchSide") private var bluetoothSide = BluetoothClosedNotchSide.automatic.rawValue
     @AppStorage("HaloLiveActivitiesClosedAutoPresent") private var liveActivitiesAutoPresent = true
     @State private var activityClock = Date()
+    @State private var lastPublishedMeasuredWidths: [ClosedNotchSide: CGFloat] = [:]
     let layout: WorkspaceLayout
     let occlusion: CGRect?
     let referenceWidth: CGFloat
@@ -212,7 +278,33 @@ struct ClosedNotchView: View {
             }
         }
         .foregroundStyle(options.color.color)
+        .onPreferenceChange(ClosedNotchMeasuredWingWidthKey.self) { widths in
+            publishMeasuredWingWidths(widths)
+        }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { activityClock = $0 }
+    }
+
+    private func publishMeasuredWingWidths(_ widths: [ClosedNotchSide: CGFloat]) {
+        guard !visualizerOnly else { return }
+
+        let normalized: [ClosedNotchSide: CGFloat] = [
+            .left: max(0, widths[.left] ?? 0),
+            .right: max(0, widths[.right] ?? 0)
+        ]
+        let leftChanged = abs((lastPublishedMeasuredWidths[.left] ?? -1) - (normalized[.left] ?? 0)) >= 0.5
+        let rightChanged = abs((lastPublishedMeasuredWidths[.right] ?? -1) - (normalized[.right] ?? 0)) >= 0.5
+        guard leftChanged || rightChanged else { return }
+
+        lastPublishedMeasuredWidths = normalized
+        NotificationCenter.default.post(
+            name: .init("HaloClosedNotchMeasuredWingWidths"),
+            object: nil,
+            userInfo: [
+                "screenFrame": NSStringFromRect(haloScreenFrame),
+                "left": Double(normalized[.left] ?? 0),
+                "right": Double(normalized[.right] ?? 0)
+            ]
+        )
     }
     private func verticalHUDContent(_ hud: HaloHUDNotchPresentation, size: CGSize, reservation: CGRect?) -> some View {
         let notch = hud.configuration.presentation.resolvedNotch
@@ -471,7 +563,7 @@ struct ClosedNotchSlot: View {
                     hudOnlyRow
                 }
             } else {
-                HStack(spacing: elementSpacing) {
+                ClosedNotchNoClipHStack(spacing: elementSpacing) {
                     if side == .left {
                         standardElements
                         hudElement
@@ -485,6 +577,14 @@ struct ClosedNotchSlot: View {
         .font(.system(size: textSize))
         .minimumScaleFactor(0.65)
         .foregroundStyle(effectiveTextColor)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ClosedNotchMeasuredWingWidthKey.self,
+                    value: [side: proxy.size.width + slotCameraInset + slotOuterInset]
+                )
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
         .padding(.vertical, layoutMetrics.verticalPadding)
         .padding(side == .left ? .trailing : .leading, slotCameraInset)
@@ -493,12 +593,12 @@ struct ClosedNotchSlot: View {
         .modifier(MediaGestureModifier(media: media, options: closedMediaOptions, enabled: isMusicItem && hudCollision != .replace))
     }
     private var standardRow: some View {
-        HStack(spacing: elementSpacing) { standardElements }
-            .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
+        ClosedNotchNoClipHStack(spacing: elementSpacing) { standardElements }
+            .frame(maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
     }
     private var hudOnlyRow: some View {
-        HStack(spacing: 0) { hudElement }
-            .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
+        ClosedNotchNoClipHStack(spacing: 0) { hudElement }
+            .frame(maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
     }
     @ViewBuilder private var standardElements: some View {
         if side == .left {
