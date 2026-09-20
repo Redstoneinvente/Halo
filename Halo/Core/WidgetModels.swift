@@ -295,39 +295,44 @@ struct WidgetColor: Codable, Equatable {
     }
 }
 
-/// Keeps album-derived foreground colors visually tied to the artwork while guaranteeing
-/// readable contrast against the surface behind them. Safe colors are left untouched; unsafe
-/// colors move only as far toward white or black as needed to cross the contrast threshold.
+/// Derives one cohesive foreground theme from album artwork. The generated color keeps the
+/// album's hue, softens overly aggressive saturation, and then moves toward a light or dark
+/// tonal endpoint until it remains readable across every supplied background sample.
 enum AlbumForegroundColorResolver {
-    static let minimumContrast = 4.5
+    static let minimumContrast = 5.0
 
     static func readable(_ source: WidgetColor, against background: WidgetColor) -> WidgetColor {
-        let source = clamped(source)
-        let background = clamped(background)
-        guard contrast(source, background) < minimumContrast else { return source }
+        readable(source, against: [background])
+    }
 
-        let target = contrast(.white, background) >= contrast(.black, background)
-            ? WidgetColor.white
-            : WidgetColor.black
+    static func readable(_ source: WidgetColor, against backgrounds: [WidgetColor]) -> WidgetColor {
+        let source = clamped(source)
+        let backgrounds = backgrounds.isEmpty ? [WidgetColor.black] : backgrounds.map(clamped)
+        let softened = soften(source)
+
+        let whiteScore = worstContrast(.white, against: backgrounds)
+        let blackScore = worstContrast(.black, against: backgrounds)
+        let target = whiteScore >= blackScore ? WidgetColor.white : WidgetColor.black
+
+        // First establish a calmer album-tinted foreground. This runs even when the raw album
+        // color technically passes WCAG so highly saturated/neon artwork does not fight the UI.
+        let tonalBase = blend(softened, toward: target, amount: target == .white ? 0.18 : 0.12)
+        if worstContrast(tonalBase, against: backgrounds) >= minimumContrast { return tonalBase }
 
         var lower = 0.0
         var upper = 1.0
-        for _ in 0..<20 {
+        for _ in 0..<22 {
             let amount = (lower + upper) * 0.5
-            let candidate = blend(source, toward: target, amount: amount)
-            if contrast(candidate, background) >= minimumContrast {
+            let candidate = blend(tonalBase, toward: target, amount: amount)
+            if worstContrast(candidate, against: backgrounds) >= minimumContrast {
                 upper = amount
             } else {
                 lower = amount
             }
         }
 
-        let resolved = blend(source, toward: target, amount: upper)
-        return contrast(resolved, background) >= minimumContrast ? resolved : target
-    }
-
-    static func palette(_ colors: [WidgetColor], against background: WidgetColor) -> [WidgetColor] {
-        colors.map { readable($0, against: background) }
+        let resolved = blend(tonalBase, toward: target, amount: upper)
+        return worstContrast(resolved, against: backgrounds) >= minimumContrast ? resolved : target
     }
 
     static func blend(_ source: WidgetColor, toward target: WidgetColor, amount: Double) -> WidgetColor {
@@ -343,6 +348,52 @@ enum AlbumForegroundColorResolver {
         let a = relativeLuminance(clamped(lhs))
         let b = relativeLuminance(clamped(rhs))
         return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
+    static func worstContrast(_ foreground: WidgetColor, against backgrounds: [WidgetColor]) -> Double {
+        backgrounds.map { contrast(foreground, $0) }.min() ?? contrast(foreground, .black)
+    }
+
+    private static func soften(_ color: WidgetColor) -> WidgetColor {
+        let maxChannel = max(color.red, max(color.green, color.blue))
+        let minChannel = min(color.red, min(color.green, color.blue))
+        let chroma = maxChannel - minChannel
+        guard chroma > 0.0001 else { return color }
+
+        let lightness = (maxChannel + minChannel) * 0.5
+        let saturation = chroma / max(0.0001, 1 - abs(2 * lightness - 1))
+        let softenedSaturation = min(0.58, saturation * 0.68)
+
+        let hue: Double
+        if maxChannel == color.red {
+            hue = ((color.green - color.blue) / chroma).truncatingRemainder(dividingBy: 6)
+        } else if maxChannel == color.green {
+            hue = (color.blue - color.red) / chroma + 2
+        } else {
+            hue = (color.red - color.green) / chroma + 4
+        }
+        let normalizedHue = (hue / 6 + 1).truncatingRemainder(dividingBy: 1)
+        return hsl(hue: normalizedHue, saturation: softenedSaturation, lightness: lightness)
+    }
+
+    private static func hsl(hue: Double, saturation: Double, lightness: Double) -> WidgetColor {
+        let h = (hue.truncatingRemainder(dividingBy: 1) + 1).truncatingRemainder(dividingBy: 1)
+        let s = min(1, max(0, saturation))
+        let l = min(1, max(0, lightness))
+        let chroma = (1 - abs(2 * l - 1)) * s
+        let segment = h * 6
+        let x = chroma * (1 - abs(segment.truncatingRemainder(dividingBy: 2) - 1))
+        let rgb: (Double, Double, Double)
+        switch segment {
+        case 0..<1: rgb = (chroma, x, 0)
+        case 1..<2: rgb = (x, chroma, 0)
+        case 2..<3: rgb = (0, chroma, x)
+        case 3..<4: rgb = (0, x, chroma)
+        case 4..<5: rgb = (x, 0, chroma)
+        default: rgb = (chroma, 0, x)
+        }
+        let match = l - chroma * 0.5
+        return WidgetColor(red: rgb.0 + match, green: rgb.1 + match, blue: rgb.2 + match)
     }
 
     private static func clamped(_ color: WidgetColor) -> WidgetColor {
