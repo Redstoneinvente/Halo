@@ -6,7 +6,7 @@ import AVFoundation
 enum ClosedNotchSide: Hashable { case left, right }
 
 private struct ClosedNotchMeasuredWingWidthKey: PreferenceKey {
-    static var defaultValue: [ClosedNotchSide: CGFloat] = [:]
+    static let defaultValue: [ClosedNotchSide: CGFloat] = [:]
 
     static func reduce(value: inout [ClosedNotchSide: CGFloat],
                        nextValue: () -> [ClosedNotchSide: CGFloat]) {
@@ -24,7 +24,7 @@ private struct ClosedNotchMeasuredWingWidthKey: PreferenceKey {
 private struct ClosedNotchNoClipHStack: Layout {
     let spacing: CGFloat
 
-    private func measuredSubviews(_ subviews: Subviews, height: CGFloat?) -> [(Subview, CGSize)] {
+    private func measuredSubviews(_ subviews: Subviews, height: CGFloat?) -> [(LayoutSubview, CGSize)] {
         let proposal = ProposedViewSize(width: nil, height: height)
         return subviews.map { ($0, $0.sizeThatFits(proposal)) }
     }
