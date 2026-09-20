@@ -1248,9 +1248,10 @@ final class WindowManager {
             host.geometry?.activeCompactHeight = min(220, max(baseHeight, verticalHUD.height))
 
             let hudWidth = verticalHUD.width + closedMetrics.outerInset * 2 + closedMetrics.renderingAllowance * 2
+            let currentCompactWidth = host.geometry?.activeCompactWidth ?? baseWidth
             host.geometry?.activeCompactWidth = min(
                 geometry.visible.width,
-                max(host.geometry?.activeCompactWidth ?? baseWidth, hudWidth)
+                max(currentCompactWidth, hudWidth)
             )
         }
     }
