@@ -2330,7 +2330,6 @@ struct DesktopGlass: NSViewRepresentable {
 
                 let created = NSGlassEffectView(frame: .zero)
                 created.translatesAutoresizingMaskIntoConstraints = false
-                created.effectIsInteractive = false
 
                 // Give the system glass a transparent content view. Halo's actual controls
                 // remain in SwiftUI above this background; this view exists only to render
