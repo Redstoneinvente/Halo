@@ -334,7 +334,7 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SH
         overallAdaptive = AdaptiveBandState()
     }
 
-    private func adaptiveEnvelope(_ value: Double, state: inout AdaptiveBandState) -> Double {
+    private static func adaptiveEnvelope(_ value: Double, state: inout AdaptiveBandState) -> Double {
         let x = min(1, max(0, value))
 
         if !state.initialized {
@@ -445,10 +445,14 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SH
         smoothed.treble = smooth(smoothed.treble, treble)
         smoothed.overall = smooth(smoothed.overall, overall)
 
-        smoothed.reactiveBass = adaptiveEnvelope(bass, state: &bassAdaptive)
-        smoothed.reactiveMids = adaptiveEnvelope(mids, state: &midsAdaptive)
-        smoothed.reactiveTreble = adaptiveEnvelope(treble, state: &trebleAdaptive)
-        smoothed.reactiveOverall = adaptiveEnvelope(overall, state: &overallAdaptive)
+        let reactiveBass = Self.adaptiveEnvelope(bass, state: &bassAdaptive)
+        let reactiveMids = Self.adaptiveEnvelope(mids, state: &midsAdaptive)
+        let reactiveTreble = Self.adaptiveEnvelope(treble, state: &trebleAdaptive)
+        let reactiveOverall = Self.adaptiveEnvelope(overall, state: &overallAdaptive)
+        smoothed.reactiveBass = reactiveBass
+        smoothed.reactiveMids = reactiveMids
+        smoothed.reactiveTreble = reactiveTreble
+        smoothed.reactiveOverall = reactiveOverall
 
         // Keep liveness raw. A smoothed release here can take several seconds to decay and is
         // appropriate for animation, not for deciding whether Audio CI should still exist.
