@@ -2526,7 +2526,7 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
                 PreciseSlider(title: "Frost", value: glassDoubleBinding(b.appearance, \.frost), range: 0...1, step: 0.01, decimals: 2)
                 PreciseSlider(title: "Light absorption", value: glassDoubleBinding(b.appearance, \.lightAbsorption), range: 0...1, step: 0.01, decimals: 2)
                 PreciseSlider(title: "Refraction", value: glassDoubleBinding(b.appearance, \.refraction), range: 0...1, step: 0.01, decimals: 2)
-                PreciseSlider(title: "Refraction spread", value: glassDoubleBinding(b.appearance, \.refractionSpread), range: 0...1, step: 0.01, decimals: 2)
+                PreciseSlider(title: "Lens curvature", value: glassDoubleBinding(b.appearance, \.refractionSpread), range: 0...1, step: 0.01, decimals: 2)
                 PreciseSlider(title: "Chromatic alteration", value: glassDoubleBinding(b.appearance, \.chromaticShift), range: 0...1, step: 0.01, decimals: 2)
                 ColorPicker("Glass tint", selection: glassTintBinding(b.appearance), supportsOpacity: false)
                 PreciseSlider(title: "Tint strength", value: glassDoubleBinding(b.appearance, \.tintAmount), range: 0...0.5, step: 0.01, decimals: 2)
