@@ -87,12 +87,38 @@ private struct MediaBlurTransitionModifier: ViewModifier {
     func body(content: Content) -> some View { content.blur(radius: blur).opacity(opacity) }
 }
 
+private struct ClosedLyricTransitionModifier: ViewModifier {
+    let opacity: Double
+    let blur: CGFloat
+    let yOffset: CGFloat
+    let scale: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(opacity)
+            .blur(radius: blur)
+            .offset(y: yOffset)
+            .scaleEffect(scale)
+    }
+}
+
 private extension MediaChangeAnimation {
     var transition: AnyTransition {
         switch self {
         case .none: return .identity
         case .fade: return .opacity
         case .slide: return .asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .move(edge: .leading).combined(with: .opacity))
+        case .lift:
+            return .asymmetric(
+                insertion: .modifier(
+                    active: ClosedLyricTransitionModifier(opacity: 0, blur: 0, yOffset: 10, scale: 1),
+                    identity: ClosedLyricTransitionModifier(opacity: 1, blur: 0, yOffset: 0, scale: 1)
+                ),
+                removal: .modifier(
+                    active: ClosedLyricTransitionModifier(opacity: 0, blur: 0, yOffset: -6, scale: 1),
+                    identity: ClosedLyricTransitionModifier(opacity: 1, blur: 0, yOffset: 0, scale: 1)
+                )
+            )
         case .scale: return .scale(scale: 0.86).combined(with: .opacity)
         case .blur:
             return .modifier(active: MediaBlurTransitionModifier(blur: 8, opacity: 0), identity: MediaBlurTransitionModifier(blur: 0, opacity: 1))
@@ -1207,13 +1233,68 @@ private struct ClosedMediaView: View {
                 let position = max(0, interpolated + options.resolvedLyricSyncOffset)
                 let lines = LyricTimeline.parse(lyrics, duration: sampledDuration)
                 if let frame = LyricTimeline.frame(lines: lines, position: position, duration: sampledDuration) {
-                    lyricPresentation(frame: frame, width: width)
+                    animatedLyricPresentation(frame: frame, width: width)
                 } else {
                     Text("Synced lyrics unavailable").opacity(0.65).lineLimit(1)
                 }
             }
         }
     }
+    private var lyricLineTransition: AnyTransition {
+        guard !reduceMotion else { return .identity }
+
+        switch options.resolvedChangeAnimation {
+        case .none:
+            return .identity
+        case .fade:
+            return .opacity
+        case .slide:
+            return .asymmetric(
+                insertion: .move(edge: .bottom).combined(with: .opacity),
+                removal: .move(edge: .top).combined(with: .opacity)
+            )
+        case .lift:
+            return .asymmetric(
+                insertion: .modifier(
+                    active: ClosedLyricTransitionModifier(opacity: 0, blur: 0, yOffset: 10, scale: 1),
+                    identity: ClosedLyricTransitionModifier(opacity: 1, blur: 0, yOffset: 0, scale: 1)
+                ),
+                removal: .modifier(
+                    active: ClosedLyricTransitionModifier(opacity: 0, blur: 0, yOffset: -6, scale: 1),
+                    identity: ClosedLyricTransitionModifier(opacity: 1, blur: 0, yOffset: 0, scale: 1)
+                )
+            )
+        case .scale:
+            return .scale(scale: 0.92).combined(with: .opacity)
+        case .blur:
+            return .asymmetric(
+                insertion: .modifier(
+                    active: ClosedLyricTransitionModifier(opacity: 0, blur: 7, yOffset: 3, scale: 0.985),
+                    identity: ClosedLyricTransitionModifier(opacity: 1, blur: 0, yOffset: 0, scale: 1)
+                ),
+                removal: .modifier(
+                    active: ClosedLyricTransitionModifier(opacity: 0, blur: 5, yOffset: -2, scale: 0.99),
+                    identity: ClosedLyricTransitionModifier(opacity: 1, blur: 0, yOffset: 0, scale: 1)
+                )
+            )
+        }
+    }
+
+    private var lyricLineAnimation: Animation? {
+        guard !reduceMotion, options.resolvedChangeAnimation != .none else { return nil }
+        return .easeInOut(duration: options.resolvedChangeAnimationDuration)
+    }
+
+    private func animatedLyricPresentation(frame: LyricFrame, width: Double) -> some View {
+        ZStack(alignment: .leading) {
+            lyricPresentation(frame: frame, width: width)
+                .id(frame.current.id)
+                .transition(lyricLineTransition)
+        }
+        .frame(maxWidth: width, alignment: .leading)
+        .animation(lyricLineAnimation, value: frame.current.id)
+    }
+
     @ViewBuilder private func lyricPresentation(frame: LyricFrame, width: Double) -> some View {
         switch options.resolvedLyricDisplay {
         case .line:
