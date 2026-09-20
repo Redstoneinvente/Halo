@@ -380,25 +380,35 @@ struct ClosedNotchSlot: View {
             : NSFont.systemFont(ofSize: powerTextSize, weight: .semibold)
         return ceil((value as NSString).size(withAttributes: [.font: font]).width)
     }
-    private var albumForegroundBackground: WidgetColor {
-        guard let dominant = media.artworkColors.first else { return .black }
+    private var albumForegroundBackgrounds: [WidgetColor] {
+        let palette = media.artworkColors
+        guard !palette.isEmpty else { return [.black] }
         if artwork.usesBackgroundArtwork {
-            let visibleArtwork = AlbumForegroundColorResolver.blend(
-                .black,
-                toward: dominant,
-                amount: artwork.backgroundOpacity
-            )
-            return AlbumForegroundColorResolver.blend(visibleArtwork, toward: .black, amount: 0.24)
+            return palette.prefix(4).map {
+                let visibleArtwork = AlbumForegroundColorResolver.blend(
+                    .black,
+                    toward: $0,
+                    amount: artwork.backgroundOpacity
+                )
+                return AlbumForegroundColorResolver.blend(visibleArtwork, toward: .black, amount: 0.24)
+            }
         }
-        if options.albumBackgroundColor == true { return dominant }
-        return .black
+        if options.albumBackgroundColor == true { return Array(palette.prefix(2)) }
+        return [.black]
+    }
+    private var generatedAlbumForeground: WidgetColor? {
+        guard let dominant = media.artworkColors.first else { return nil }
+        return AlbumForegroundColorResolver.readable(dominant, against: albumForegroundBackgrounds)
     }
     private var foregroundAlbumPalette: [WidgetColor] {
-        guard options.usesReadableAlbumForegroundColors else { return media.artworkColors }
-        return AlbumForegroundColorResolver.palette(media.artworkColors, against: albumForegroundBackground)
+        guard options.usesReadableAlbumForegroundColors, let generatedAlbumForeground else { return media.artworkColors }
+        return [generatedAlbumForeground]
     }
     private var effectiveTextColor: Color {
-        if options.albumTextColor == true, media.isPlaying, let album = foregroundAlbumPalette.first { return album.color }
+        if options.albumTextColor == true, media.isPlaying {
+            if options.usesReadableAlbumForegroundColors, let generatedAlbumForeground { return generatedAlbumForeground.color }
+            if let album = media.artworkColors.first { return album.color }
+        }
         return options.color.color
     }
     private var hudCollision: HaloHUDCollisionBehavior? { hud?.configuration.behavior.collision }
