@@ -1156,6 +1156,11 @@ private struct ClosedMediaView: View {
     @State private var sampledAt = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }
+    private var lyricTaskKey: String {
+        key + "|lyrics|" + media.album + "|" + String(Int(media.duration.rounded())) +
+        "|" + String(media.isPlaying) + "|" + String(options.usesOnlineLyrics) +
+        "|" + options.resolvedLyricDisplay.rawValue
+    }
     private var effectiveWidth: Double {
         let available = max(20, availableWidth)
         if options.overflow == .truncate || options.overflow == .marquee {
@@ -1171,7 +1176,7 @@ private struct ClosedMediaView: View {
         }
         .frame(width: effectiveWidth)
         .animation(options.resolvedChangeAnimation == .none ? nil : .easeInOut(duration: options.resolvedChangeAnimationDuration), value: key)
-        .task(id: key + "|\(options.textMode.rawValue)|\(options.usesOnlineLyrics)|\(options.resolvedLyricDisplay.rawValue)") {
+        .task(id: options.textMode == .lyrics ? lyricTaskKey : key + "|\(options.textMode.rawValue)") {
             lyrics = ""; sampledPosition = 0; sampledDuration = 0; sampledAt = Date()
             guard options.textMode == .lyrics else { return }
             lyricsLoading = true
@@ -1180,9 +1185,16 @@ private struct ClosedMediaView: View {
                 sampledPosition = initial.position
                 sampledDuration = initial.duration
                 sampledAt = initial.observedAt
+            } else if media.duration > 0 {
+                sampledPosition = min(media.duration, max(0, media.position))
+                sampledDuration = media.duration
+                sampledAt = Date()
             }
+            let lyricDuration = sampledDuration > 0
+                ? sampledDuration
+                : (initial?.duration ?? (media.duration > 0 ? media.duration : nil))
             lyrics = await MediaAssetReader.lyrics(app: media.connectedApp, key: key, title: media.title,
-                                                   artist: media.artist, duration: initial?.duration,
+                                                   artist: media.artist, duration: lyricDuration,
                                                    onlineFallback: options.usesOnlineLyrics)
             lyricsLoading = false
             await samplePlaybackLoop()
@@ -1200,6 +1212,18 @@ private struct ClosedMediaView: View {
                     sampledPosition = predicted + drift * 0.88
                 }
                 sampledDuration = sample.duration
+                sampledAt = now
+            } else if media.duration > 0 {
+                let now = Date()
+                let duration = media.duration
+                let remotePosition = min(duration, max(0, media.position))
+                let predicted = min(duration, sampledPosition + max(0, now.timeIntervalSince(sampledAt)))
+                if sampledDuration <= 0 || abs(remotePosition - predicted) > 1.35 {
+                    sampledPosition = remotePosition
+                } else {
+                    sampledPosition = media.isPlaying ? predicted : remotePosition
+                }
+                sampledDuration = duration
                 sampledAt = now
             }
             try? await Task.sleep(nanoseconds: lowPower ? 600_000_000 : 250_000_000)
