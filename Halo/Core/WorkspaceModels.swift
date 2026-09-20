@@ -753,6 +753,7 @@ enum OpenNotchPreset: String, Codable, CaseIterable, Identifiable {
     case developer = "Developer"
     case informationDense = "Information Dense"
     case showcase = "Showcase"
+    case pixelPal = "Pixel Pal"
     case custom = "Custom"
     var id: String { rawValue }
 }
@@ -1159,6 +1160,15 @@ struct OpenNotchLayout: Codable, Equatable {
                 item(.audio,      6, 1, 2, 1, .compact,  .high),
                 item(.activities, 6, 2, 2, 1, .compact,  .normal),
                 item(.capture,    6, 3, 2, 1, .compact,  .normal)
+            ])
+
+        case .pixelPal:
+            // Pixel Pal is the visual hero: a full 4×4 square on the left with two
+            // equally sized companion widgets stacked on the right.
+            return grid(8, 4, cellHeight: 104, gap: 10, [
+                item(.pet,   0, 0, 4, 4, .expanded, .alwaysVisible),
+                item(.clock, 4, 0, 4, 2, .expanded, .high),
+                item(.media, 4, 2, 4, 2, .expanded, .high)
             ])
 
         case .custom:

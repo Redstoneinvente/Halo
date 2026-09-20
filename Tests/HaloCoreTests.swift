@@ -177,6 +177,32 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(restored.startedAt, started)
     }
 
+    func testPixelPalVisualWorkspacePresetUsesFourByFourHeroAndRightStack() throws {
+        let layout = try OpenNotchLayout.made(.pixelPal).validated()
+        XCTAssertEqual(layout.preset, .pixelPal)
+        XCTAssertEqual(layout.resolvedGridColumns, 8)
+        XCTAssertEqual(layout.resolvedGridRows, 4)
+        XCTAssertEqual(layout.resolvedGridItems.count, 3)
+
+        let pet = try XCTUnwrap(layout.resolvedGridItems.first(where: { $0.module == .pet }))
+        XCTAssertEqual(pet.gridPlacement?.column, 0)
+        XCTAssertEqual(pet.gridPlacement?.row, 0)
+        XCTAssertEqual(pet.gridPlacement?.columnSpan, 4)
+        XCTAssertEqual(pet.gridPlacement?.rowSpan, 4)
+
+        let clock = try XCTUnwrap(layout.resolvedGridItems.first(where: { $0.module == .clock }))
+        XCTAssertEqual(clock.gridPlacement?.column, 4)
+        XCTAssertEqual(clock.gridPlacement?.row, 0)
+        XCTAssertEqual(clock.gridPlacement?.columnSpan, 4)
+        XCTAssertEqual(clock.gridPlacement?.rowSpan, 2)
+
+        let media = try XCTUnwrap(layout.resolvedGridItems.first(where: { $0.module == .media }))
+        XCTAssertEqual(media.gridPlacement?.column, 4)
+        XCTAssertEqual(media.gridPlacement?.row, 2)
+        XCTAssertEqual(media.gridPlacement?.columnSpan, 4)
+        XCTAssertEqual(media.gridPlacement?.rowSpan, 2)
+    }
+
     func testPixelPalSquareSizesSurviveValidationAndPersistence() throws {
         for side in 1...4 {
             var pet = OpenNotchItem.moduleItem(.pet)
