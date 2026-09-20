@@ -5349,7 +5349,7 @@ private struct ContextMusicView: View {
                         Image(systemName: "chevron.up").font(.system(size: 12, weight: .semibold))
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(effectiveControlColor)
+                    .foregroundStyle(secondaryControlColor)
                     .disabled(surfaceState.pinned)
                     .help(surfaceState.pinned ? "Unpin Halo before closing" : "Close Halo")
                     .accessibilityLabel("Close Halo")
@@ -5357,7 +5357,7 @@ private struct ContextMusicView: View {
                         Image(systemName: surfaceState.pinned ? "pin.fill" : "pin").font(.system(size: 12, weight: .semibold))
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(effectiveControlColor)
+                    .foregroundStyle(secondaryControlColor)
                     .help(surfaceState.pinned ? "Allow Halo to close" : "Keep Halo open")
                     .accessibilityLabel(surfaceState.pinned ? "Unpin Halo" : "Keep Halo open")
                     Menu {
@@ -5370,19 +5370,19 @@ private struct ContextMusicView: View {
                         Image(systemName: "rectangle.inset.filled.and.person.filled").font(.system(size: 12, weight: .semibold))
                     }
                     .menuStyle(.borderlessButton)
-                    .foregroundStyle(effectiveControlColor)
+                    .foregroundStyle(secondaryControlColor)
                     .help("Context interface layout")
                     Button { NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil) } label: {
                         Image(systemName: "gearshape.fill").font(.system(size: 12, weight: .semibold))
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(effectiveControlColor)
+                    .foregroundStyle(secondaryControlColor)
                     .help("Open Halo settings")
                 }
                 .padding(.top, controlsTopInset)
                 .padding(.trailing, safeInset)
             }
-            .foregroundStyle(effectiveTextColor)
+            .foregroundStyle(primaryTextColor)
         }
         .task(id: artworkKey) {
             artwork = nil
@@ -5589,13 +5589,19 @@ private struct ContextMusicView: View {
     private var metadata: some View {
         VStack(alignment: horizontalAlignment, spacing: max(2, options.resolvedSpacing * 0.28)) {
             if options.showTitle {
-                Text(media.title).font(.system(size: options.fontSize, weight: .semibold, design: .rounded)).lineLimit(2).multilineTextAlignment(textAlignment)
+                Text(media.title)
+                    .font(.system(size: options.fontSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(primaryTextColor)
+                    .lineLimit(2)
+                    .multilineTextAlignment(textAlignment)
             }
             if options.showArtist {
-                Text(media.artist.isEmpty ? "Unknown artist" : media.artist).font(.system(size: max(10, options.fontSize * 0.68), weight: .medium)).opacity(0.72).lineLimit(1)
+                Text(media.artist.isEmpty ? "Unknown artist" : media.artist)
+                    .font(.system(size: max(10, options.fontSize * 0.68), weight: .medium))
+                    .foregroundStyle(secondaryTextColor)
+                    .lineLimit(1)
             }
         }
-        .foregroundStyle(effectiveTextColor)
         .frame(maxWidth: .infinity,
                minHeight: CGFloat(metadataReservedHeight),
                maxHeight: CGFloat(metadataReservedHeight),
@@ -5605,9 +5611,13 @@ private struct ContextMusicView: View {
     @ViewBuilder private var lyricsView: some View {
         if options.showsLyrics {
             if lyricsLoading && lyrics.isEmpty {
-                Label("Loading lyrics…", systemImage: "text.quote").font(.system(size: options.resolvedLyricFontSize)).opacity(0.72)
+                Label("Loading lyrics…", systemImage: "text.quote")
+                    .font(.system(size: options.resolvedLyricFontSize))
+                    .foregroundStyle(secondaryTextColor)
             } else if lyrics.isEmpty {
-                Text("Synced lyrics unavailable").font(.system(size: options.resolvedLyricFontSize)).opacity(0.55)
+                Text("Synced lyrics unavailable")
+                    .font(.system(size: options.resolvedLyricFontSize))
+                    .foregroundStyle(secondaryTextColor)
             } else {
                 TimelineView(.animation(minimumInterval: 0.06, paused: !media.isPlaying)) { _ in
                     let position = (isScrubbing ? scrubValue : playbackPosition) + options.resolvedLyricSyncOffset
@@ -5679,13 +5689,24 @@ private struct ContextMusicView: View {
         switch options.resolvedLyricDisplay {
         case .line:
             VStack(alignment: horizontalAlignment, spacing: 3) {
-                Text(frame.current.text).font(.system(size: options.resolvedLyricFontSize, weight: .semibold, design: .rounded)).lineLimit(2).multilineTextAlignment(textAlignment)
-                if let next = frame.next { Text(next.text).font(.system(size: max(10, options.resolvedLyricFontSize * 0.74))).opacity(0.35).lineLimit(1) }
+                Text(frame.current.text)
+                    .font(.system(size: options.resolvedLyricFontSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(lyricCurrentColor)
+                    .lineLimit(2)
+                    .multilineTextAlignment(textAlignment)
+                if let next = frame.next {
+                    Text(next.text)
+                        .font(.system(size: max(10, options.resolvedLyricFontSize * 0.74)))
+                        .foregroundStyle(lyricUpcomingColor)
+                        .lineLimit(1)
+                }
             }
         case .word:
             let words = frame.current.text.split(whereSeparator: \.isWhitespace).map { String($0) }
             Text(words.indices.contains(frame.wordIndex) ? words[frame.wordIndex] : frame.current.text)
-                .font(.system(size: options.resolvedLyricFontSize, weight: .bold, design: .rounded)).lineLimit(1)
+                .font(.system(size: options.resolvedLyricFontSize, weight: .bold, design: .rounded))
+                .foregroundStyle(lyricCurrentColor)
+                .lineLimit(1)
         case .focus:
             focusedLyricLine(frame.current.text, activeWord: frame.wordIndex)
         }
@@ -5697,7 +5718,7 @@ private struct ContextMusicView: View {
         for (index, word) in words.enumerated() {
             result = result + Text((index == 0 ? "" : " ") + word)
                 .fontWeight(index == activeWord ? .bold : .regular)
-                .foregroundColor(index == activeWord ? effectiveTextColor : effectiveTextColor.opacity(0.5))
+                .foregroundColor(index == activeWord ? lyricCurrentColor : lyricUpcomingColor)
         }
         return result.font(.system(size: options.resolvedLyricFontSize, design: .rounded)).lineLimit(2).multilineTextAlignment(textAlignment)
     }
@@ -5705,38 +5726,49 @@ private struct ContextMusicView: View {
     @ViewBuilder private var scrubber: some View {
         if playbackDuration > 0.5 {
             VStack(spacing: 3) {
-                Slider(value: Binding(
-                    get: { isScrubbing ? scrubValue : min(playbackDuration, max(0, playbackPosition)) },
-                    set: { newValue in
-                        if !isScrubbing { scrubValue = playbackPosition }
-                        isScrubbing = true
-                        scrubValue = min(playbackDuration, max(0, newValue))
-                    }
-                ), in: 0...max(1, playbackDuration), onEditingChanged: { editing in
+                AudioCIScrubber(
+                    value: Binding(
+                        get: { isScrubbing ? scrubValue : min(playbackDuration, max(0, playbackPosition)) },
+                        set: { newValue in
+                            if !isScrubbing { scrubValue = playbackPosition }
+                            scrubValue = min(playbackDuration, max(0, newValue))
+                        }
+                    ),
+                    range: 0...max(1, playbackDuration),
+                    trackColor: progressTrackColor,
+                    fillColor: progressFillColor,
+                    thumbColor: progressThumbColor
+                ) { editing in
                     if editing {
-                        scrubValue = min(playbackDuration, max(0, playbackPosition)); isScrubbing = true
+                        scrubValue = min(playbackDuration, max(0, playbackPosition))
+                        isScrubbing = true
                     } else {
-                        let target = min(playbackDuration, max(0, scrubValue)); playbackPosition = target; isScrubbing = false
+                        let target = min(playbackDuration, max(0, scrubValue))
+                        playbackPosition = target
+                        isScrubbing = false
                         media.seek(to: target)
                     }
-                }).controlSize(.small).tint(effectiveControlColor)
+                }
                 HStack {
-                    Text(formatTime(isScrubbing ? scrubValue : playbackPosition)); Spacer()
+                    Text(formatTime(isScrubbing ? scrubValue : playbackPosition))
+                    Spacer()
                     Text("−" + formatTime(max(0, playbackDuration - (isScrubbing ? scrubValue : playbackPosition))))
-                }.font(.system(size: 9, weight: .medium, design: .monospaced)).opacity(0.62)
-            }.frame(maxWidth: 440)
+                }
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(secondaryTextColor)
+            }
+            .frame(maxWidth: 440)
         }
     }
 
     @ViewBuilder private var controls: some View {
         if options.showControls {
             HStack(spacing: options.resolvedControlSize * 1.05) {
-                control("backward.end.fill", action: "previous track", label: "Previous track")
-                control(media.isPlaying ? "pause.fill" : "play.fill", action: "playpause", label: "Play or pause")
-                control("forward.end.fill", action: "next track", label: "Next track")
+                control("backward.end.fill", action: "previous track", label: "Previous track", color: secondaryControlColor)
+                control(media.isPlaying ? "pause.fill" : "play.fill", action: "playpause", label: "Play or pause", color: primaryControlColor)
+                control("forward.end.fill", action: "next track", label: "Next track", color: secondaryControlColor)
             }
             .font(.system(size: options.resolvedControlSize, weight: .semibold))
-            .foregroundStyle(effectiveControlColor)
             .disabled(media.busy)
         }
     }
@@ -5745,7 +5777,7 @@ private struct ContextMusicView: View {
         if options.showVisualizer {
             let configured = contextVisualizerOptions
             PlaybackVisualizer(kind: options.resolvedVisualizerStyle, playing: media.hasNowPlayingPresentation, enabled: true,
-                               options: configured, palette: visualizerPalette, fallback: effectiveVisualizerColor)
+                               options: configured, palette: visualizerPalette, fallback: semanticSongColors?.primaryControl.color ?? effectiveVisualizerColor)
                 .frame(maxWidth: visualizerFullWidth ? .infinity : CGFloat(configured.width), alignment: .center)
                 .frame(height: max(18, min(64, configured.height)))
                 .contentShape(Rectangle())
@@ -5759,7 +5791,7 @@ private struct ContextMusicView: View {
                             .padding(4)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(effectiveControlColor.opacity(0.72))
+                    .foregroundStyle(secondaryControlColor)
                     .help(visualizerFullWidth ? "Use visualizer's normal width" : "Fill the interface width")
                     .padding(.trailing, 2)
                 }
@@ -5768,7 +5800,7 @@ private struct ContextMusicView: View {
 
     private var contextVisualizerOptions: VisualizerOptions {
         var value = visualizer
-        value.dynamicColors = options.usesSongVisualizerColors
+        value.dynamicColors = options.usesAdaptiveElementColors || options.usesSongVisualizerColors
         value.width = visualizerFullWidth ? max(120, surfaceState.dashboardWidth - safeInset * 2) : max(value.width, 120)
         return value
     }
@@ -5781,12 +5813,14 @@ private struct ContextMusicView: View {
         switch options.resolvedContentAlignment { case .leading: return .leading; case .center: return .center; case .trailing: return .trailing }
     }
 
-    private func control(_ symbol: String, action: String, label: String) -> some View {
+    private func control(_ symbol: String, action: String, label: String, color: Color) -> some View {
         Button {
             if let app = media.connectedApp { media.perform(action, app: app) }
             else { media.performSystem(action) }
         } label: { Image(systemName: symbol) }
-            .buttonStyle(.plain).accessibilityLabel(label)
+            .buttonStyle(.plain)
+            .foregroundStyle(color)
+            .accessibilityLabel(label)
     }
 
     private func playbackLoop() async {
