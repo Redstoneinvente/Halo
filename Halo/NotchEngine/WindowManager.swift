@@ -670,6 +670,9 @@ final class WindowManager {
                 self.hosts.values.forEach { host in
                     host.refreshDropCIRegistration?()
                 }
+                // Closed-notch event and placement preferences also live in AppStorage/UserDefaults.
+                // Re-measure immediately so the panel geometry cannot lag behind SwiftUI.
+                self.refreshDynamicWidths()
                 let next = CGSize(width: defaults.double(forKey: "HaloContextOffsetX"),
                                   height: defaults.double(forKey: "HaloContextOffsetY"))
                 guard abs(next.width - self.lastContextOffset.width) >= 0.5 ||
@@ -810,9 +813,35 @@ final class WindowManager {
         }
     }
 
+    private var closedNotchActivityPreferences: ClosedNotchActivityPreferences {
+        let defaults = UserDefaults.standard
+        func bool(_ key: String, fallback: Bool) -> Bool {
+            defaults.object(forKey: key) == nil ? fallback : defaults.bool(forKey: key)
+        }
+        return ClosedNotchActivityPreferences(
+            autoPresent: bool("HaloLiveActivitiesClosedAutoPresent", fallback: true),
+            bluetoothEvents: bool("HaloBluetoothClosedNotchEvents", fallback: true),
+            bluetoothConnected: bool("HaloBluetoothClosedNotchConnected", fallback: true),
+            bluetoothDisconnected: bool("HaloBluetoothClosedNotchDisconnected", fallback: true),
+            bluetoothPoweredOn: bool("HaloBluetoothClosedNotchPoweredOn", fallback: true),
+            bluetoothPoweredOff: bool("HaloBluetoothClosedNotchPoweredOff", fallback: true),
+            bluetoothPreferredSide: defaults.string(forKey: "HaloBluetoothClosedNotchSide") ?? "automatic"
+        )
+    }
+
     private var activeClosedActivity: LiveActivity? {
-        store.workspace.activities.first { activity in
-            (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(12) > Date()
+        ClosedNotchContentResolver.primaryActivity(
+            in: store.workspace.activities,
+            preferences: closedNotchActivityPreferences
+        )
+    }
+
+    private func closedItemIsVisible(_ item: ClosedNotchItem) -> Bool {
+        switch item {
+        case .none: return false
+        case .media, .visualizer: return store.workspace.media.hasNowPlayingPresentation
+        case .activity: return activeClosedActivity != nil
+        default: return true
         }
     }
 
@@ -845,8 +874,9 @@ final class WindowManager {
     private func resolvedHUDNotchSide(_ requested: HaloHUDNotchSide) -> HaloHUDNotchSide {
         guard requested == .automatic else { return requested }
         let closed = store.workspace.effectiveLayout.closedNotch ?? ClosedNotchOptions()
-        let leftBusy = closed.left != .none
-        let rightBusy = closed.right != .none
+        let items = resolvedClosedItems(closed)
+        let leftBusy = closedItemIsVisible(items.left)
+        let rightBusy = closedItemIsVisible(items.right)
         if !rightBusy { return .right }
         if !leftBusy { return .left }
         return .right
@@ -854,10 +884,11 @@ final class WindowManager {
 
     private func hudNotchOccupied(_ side: HaloHUDNotchSide) -> Bool {
         let closed = store.workspace.effectiveLayout.closedNotch ?? ClosedNotchOptions()
+        let items = resolvedClosedItems(closed)
         switch side {
-        case .left: return closed.left != .none
-        case .right: return closed.right != .none
-        case .full: return closed.left != .none || closed.right != .none
+        case .left: return closedItemIsVisible(items.left)
+        case .right: return closedItemIsVisible(items.right)
+        case .full: return closedItemIsVisible(items.left) || closedItemIsVisible(items.right)
         case .automatic: return false
         }
     }
@@ -985,16 +1016,13 @@ final class WindowManager {
     }
 
     private func resolvedClosedItems(_ options: ClosedNotchOptions) -> (left: ClosedNotchItem, right: ClosedNotchItem) {
-        var left = options.left
-        var right = options.right
-        guard activeClosedActivity != nil, left != .activity, right != .activity else { return (left, right) }
-        let playing = store.workspace.media.isPlaying
-        let rightAvailable = right == .none || ((right == .media || right == .visualizer) && !playing)
-        let leftAvailable = left == .none || ((left == .media || left == .visualizer) && !playing)
-        if rightAvailable { right = .activity }
-        else if leftAvailable { left = .activity }
-        else { right = .activity }
-        return (left, right)
+        let resolved = ClosedNotchContentResolver.resolve(
+            options: options,
+            activities: store.workspace.activities,
+            mediaVisible: store.workspace.media.hasNowPlayingPresentation,
+            preferences: closedNotchActivityPreferences
+        )
+        return (resolved.left, resolved.right)
     }
 
     private func sideHasLiveReason(item: ClosedNotchItem, decoration: SideDecoration?) -> Bool {
@@ -1025,14 +1053,15 @@ final class WindowManager {
         } else { return nil }
         guard style != .off else { return nil }
 
-        let playing = store.workspace.media.isPlaying
+        let mediaVisible = store.workspace.media.hasNowPlayingPresentation
+        let mediaPlaying = store.workspace.media.isPlaying
         let side: DynamicSide
         switch settings.side {
         case .left: side = .left
         case .right: side = .right
         case .automatic:
-            let rightFree = items.right == .none || ((items.right == .media || items.right == .visualizer) && !playing)
-            let leftFree = items.left == .none || ((items.left == .media || items.left == .visualizer) && !playing)
+            let rightFree = items.right == .none || ((items.right == .media || items.right == .visualizer) && !mediaVisible)
+            let leftFree = items.left == .none || ((items.left == .media || items.left == .visualizer) && !mediaVisible)
             if rightFree { side = .right }
             else if leftFree { side = .left }
             else { side = .right }
@@ -1065,7 +1094,7 @@ final class WindowManager {
         func itemIsVisible(_ item: ClosedNotchItem) -> Bool {
             switch item {
             case .none: return false
-            case .media, .visualizer: return playing
+            case .media, .visualizer: return mediaVisible
             case .activity: return activeClosedActivity != nil
             default: return true
             }
@@ -1077,7 +1106,7 @@ final class WindowManager {
             artwork.enabled = true; artwork.mode = legacy.artwork; artwork.size = legacy.artworkSize
         }
         let hasArtworkSibling: Bool = {
-            guard playing, artwork.enabled, artwork.mode != .none, artwork.mode != .background else { return false }
+            guard mediaVisible, artwork.enabled, artwork.mode != .none, artwork.mode != .background else { return false }
             switch artwork.side {
             case .left: return side == .left
             case .right: return side == .right
@@ -1088,9 +1117,10 @@ final class WindowManager {
             }
         }()
         let hasSibling = itemIsVisible(targetItem) ||
-            (targetDecoration?.isVisible(playing: playing) ?? false) || hasArtworkSibling
+            (targetDecoration?.isVisible(playing: mediaPlaying) ?? false) || hasArtworkSibling
         let extraSpace = settings.expandForEvent && !hasSibling ? settings.resolvedExtraEventSpace : 0
-        return (side, badgeWidth, settings.resolvedNotchMargin, extraSpace)
+        let cameraInset = settings.notchMargin.map { min(48, max(0, $0)) } ?? metrics.normalCameraInset
+        return (side, badgeWidth, cameraInset, extraSpace)
     }
 
     private func configureDynamicWidth(_ host: Host) {
@@ -1216,7 +1246,8 @@ final class WindowManager {
         (left: Double, right: Double, decorationLeft: Double, decorationRight: Double) {
         guard let geometry = host.geometry else { return (0, 0, 0, 0) }
         let options = layout.closedNotch ?? ClosedNotchOptions()
-        let playing = store.workspace.media.isPlaying
+        let mediaVisible = store.workspace.media.hasNowPlayingPresentation
+        let mediaPlaying = store.workspace.media.isPlaying
         let activity = activeClosedActivity
         let baseCompactHeight = max(16, geometry.appearance.surface.compactHeight)
         let metrics = ClosedNotchLayoutMetrics(options: options, height: baseCompactHeight)
@@ -1233,7 +1264,7 @@ final class WindowManager {
         }
 
         let artworkTarget: DynamicSide? = {
-            guard playing, artwork.enabled, artwork.mode != .none, artwork.mode != .background else { return nil }
+            guard mediaVisible, artwork.enabled, artwork.mode != .none, artwork.mode != .background else { return nil }
             switch artwork.side {
             case .left: return .left
             case .right: return .right
@@ -1249,7 +1280,7 @@ final class WindowManager {
         }
 
         func mediaWidth() -> Double {
-            guard playing else { return 0 }
+            guard mediaVisible else { return 0 }
             let media = options.mediaOptions ?? ClosedMediaOptions()
             let title = textWidth(String(store.workspace.media.title.prefix(120)), font: font)
             let artistValue = store.workspace.media.artist.isEmpty ? store.workspace.media.title : store.workspace.media.artist
@@ -1371,7 +1402,7 @@ final class WindowManager {
             case .media:
                 return mediaWidth()
             case .visualizer:
-                return playing ? (options.visualizer ?? VisualizerOptions()).width : 0
+                return mediaVisible ? (options.visualizer ?? VisualizerOptions()).width : 0
             case .mirror:
                 return 112
             case .files:
@@ -1391,7 +1422,7 @@ final class WindowManager {
 
         func decorationWidth(_ decoration: SideDecoration?) -> Double {
             decoration.flatMap {
-                $0.isVisible(playing: playing) ? min($0.size, innerHeight) : nil
+                $0.isVisible(playing: mediaPlaying) ? min($0.size, innerHeight) : nil
             } ?? 0
         }
 
@@ -1436,10 +1467,15 @@ final class WindowManager {
 
     private func refreshDynamicWidths() {
         activityExpiry?.cancel()
-        if let next = store.workspace.activities.map({ $0.created.addingTimeInterval(12) }).filter({ $0 > Date() }).min() {
+        let now = Date()
+        if let next = ClosedNotchContentResolver.nextExpiry(
+            in: store.workspace.activities,
+            preferences: closedNotchActivityPreferences,
+            now: now
+        ) {
             let work = DispatchWorkItem { [weak self] in self?.refreshDynamicWidths() }
             activityExpiry = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, next.timeIntervalSinceNow), execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, next.timeIntervalSince(now)), execute: work)
         }
         for host in hosts.values {
             let oldWidth = host.geometry?.compactWidth

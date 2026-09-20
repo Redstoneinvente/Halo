@@ -150,7 +150,6 @@ struct ClosedNotchView: View {
     @AppStorage("HaloBluetoothClosedNotchPoweredOn") private var bluetoothPoweredOn = true
     @AppStorage("HaloBluetoothClosedNotchPoweredOff") private var bluetoothPoweredOff = true
     @AppStorage("HaloBluetoothClosedNotchSide") private var bluetoothSide = BluetoothClosedNotchSide.automatic.rawValue
-    @AppStorage("HaloBluetoothClosedNotchDuration") private var bluetoothDuration = 10.0
     @AppStorage("HaloLiveActivitiesClosedAutoPresent") private var liveActivitiesAutoPresent = true
     @State private var activityClock = Date()
     let layout: WorkspaceLayout
@@ -168,62 +167,33 @@ struct ClosedNotchView: View {
               hud.configuration.presentation.resolvedNotch.usesVerticalExpansion else { return nil }
         return hud
     }
-    private var activeActivity: LiveActivity? {
-        workspace.activities
-            .filter { activity in
-                guard activityAllowed(activity) else { return false }
-                if activity.isPersistent { return activity.resolvedState != .ended || (activity.expiresAt ?? .distantFuture) > activityClock }
-                if let expiresAt = activity.expiresAt { return expiresAt > activityClock }
-                let duration = BluetoothClosedActivity.kind(for: activity) == nil ? 12.0 : min(20, max(2, bluetoothDuration))
-                return (activity.progress.map { $0 < 1 } ?? false) || activity.created.addingTimeInterval(duration) > activityClock
-            }
-            .sorted {
-                if $0.resolvedPriority != $1.resolvedPriority { return $0.resolvedPriority > $1.resolvedPriority }
-                return $0.resolvedUpdatedAt > $1.resolvedUpdatedAt
-            }
-            .first
+    private var activityPreferences: ClosedNotchActivityPreferences {
+        ClosedNotchActivityPreferences(
+            autoPresent: liveActivitiesAutoPresent,
+            bluetoothEvents: bluetoothEvents,
+            bluetoothConnected: bluetoothConnected,
+            bluetoothDisconnected: bluetoothDisconnected,
+            bluetoothPoweredOn: bluetoothPoweredOn,
+            bluetoothPoweredOff: bluetoothPoweredOff,
+            bluetoothPreferredSide: bluetoothSide
+        )
     }
-    private func activityAllowed(_ activity: LiveActivity) -> Bool {
-        guard let kind = BluetoothClosedActivity.kind(for: activity) else { return true }
-        guard bluetoothEvents else { return false }
-        switch kind {
-        case .connected: return bluetoothConnected
-        case .disconnected: return bluetoothDisconnected
-        case .poweredOn: return bluetoothPoweredOn
-        case .poweredOff: return bluetoothPoweredOff
-        }
+    private var resolvedContent: ClosedNotchResolvedContent {
+        ClosedNotchContentResolver.resolve(
+            options: options,
+            activities: workspace.activities,
+            mediaVisible: workspace.media.hasNowPlayingPresentation,
+            preferences: activityPreferences,
+            now: activityClock
+        )
     }
+    private var activeActivity: LiveActivity? { resolvedContent.activity }
     private var resolvedItems: (left: ClosedNotchItem, right: ClosedNotchItem) {
         if visualizerOnly {
             return (options.left == .visualizer ? .visualizer : .none,
                     options.right == .visualizer ? .visualizer : .none)
         }
-        var left = options.left
-        var right = options.right
-        guard liveActivitiesAutoPresent,
-              let activity = activeActivity,
-              left != .activity,
-              right != .activity else { return (left, right) }
-
-        if BluetoothClosedActivity.kind(for: activity) != nil {
-            switch BluetoothClosedNotchSide(rawValue: bluetoothSide) ?? .automatic {
-            case .left:
-                left = .activity
-                return (left, right)
-            case .right:
-                right = .activity
-                return (left, right)
-            case .automatic:
-                break
-            }
-        }
-
-        let rightAvailable = right == .none || ((right == .media || right == .visualizer) && !workspace.media.hasNowPlayingPresentation)
-        let leftAvailable = left == .none || ((left == .media || left == .visualizer) && !workspace.media.hasNowPlayingPresentation)
-        if rightAvailable { right = .activity }
-        else if leftAvailable { left = .activity }
-        else { right = .activity }
-        return (left, right)
+        return (resolvedContent.left, resolvedContent.right)
     }
     var body: some View {
         GeometryReader { proxy in
@@ -248,7 +218,8 @@ struct ClosedNotchView: View {
         let notch = hud.configuration.presentation.resolvedNotch
         let cameraHeight = min(size.height, max(reservation?.height ?? 0, occlusion?.height ?? 0))
         let availableHeight = max(1, size.height - cameraHeight)
-        let horizontalInset = CGFloat(max(4, options.contentPaddingX + options.contentOuterMargin))
+        let metrics = ClosedNotchLayoutMetrics(options: options, height: size.height)
+        let horizontalInset = CGFloat(metrics.outerInset)
         let maximumWidth = max(24, size.width - horizontalInset * 2)
         let hudWidth = min(maximumWidth, max(48, CGFloat(notch.width)))
         let maxOffset = max(0, (size.width - hudWidth) / 2)

@@ -903,6 +903,144 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertTrue(report.issues.contains { $0.path.contains("sdkVersion") })
     }
 
+    func testClosedNotchPowerInheritsCanonicalCameraInsetUntilOverridden() {
+        var options = ClosedNotchOptions()
+        options.horizontalPadding = 10
+        options.sideMargin = 6
+        let metrics = ClosedNotchLayoutMetrics(options: options, height: 40)
+
+        var power = PowerReactionOptions()
+        XCTAssertEqual(metrics.cameraInset(power: power), metrics.normalCameraInset, accuracy: 0.001)
+
+        power.notchMargin = 3
+        XCTAssertEqual(metrics.cameraInset(power: power), 3, accuracy: 0.001)
+    }
+
+    func testClosedNotchResolverUsesSameVisibleMediaRuleForActivityPlacement() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        var options = ClosedNotchOptions()
+        options.left = .none
+        options.right = .media
+
+        let activity = LiveActivity(
+            kind: .message,
+            state: .active,
+            title: "Message",
+            updatedAt: now,
+            expiresAt: now.addingTimeInterval(20),
+            priority: 80,
+            persistent: false,
+            created: now
+        )
+
+        let visibleMedia = ClosedNotchContentResolver.resolve(
+            options: options,
+            activities: [activity],
+            mediaVisible: true,
+            preferences: ClosedNotchActivityPreferences(),
+            now: now
+        )
+        XCTAssertEqual(visibleMedia.left, .activity)
+        XCTAssertEqual(visibleMedia.right, .media)
+        XCTAssertEqual(visibleMedia.activity?.id, activity.id)
+
+        let hiddenMedia = ClosedNotchContentResolver.resolve(
+            options: options,
+            activities: [activity],
+            mediaVisible: false,
+            preferences: ClosedNotchActivityPreferences(),
+            now: now
+        )
+        XCTAssertEqual(hiddenMedia.left, .none)
+        XCTAssertEqual(hiddenMedia.right, .activity)
+    }
+
+    func testClosedNotchResolverRespectsAutoPresentAndBluetoothSidePreferences() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        var options = ClosedNotchOptions()
+        options.left = .clock
+        options.right = .none
+
+        let bluetooth = LiveActivity(
+            kind: .bluetooth,
+            state: .active,
+            title: "Bluetooth connected",
+            detail: "Headphones",
+            updatedAt: now,
+            expiresAt: now.addingTimeInterval(10),
+            priority: 90,
+            persistent: false,
+            created: now
+        )
+
+        var preferences = ClosedNotchActivityPreferences()
+        preferences.bluetoothPreferredSide = "Left"
+        let left = ClosedNotchContentResolver.resolve(
+            options: options,
+            activities: [bluetooth],
+            mediaVisible: false,
+            preferences: preferences,
+            now: now
+        )
+        XCTAssertEqual(left.left, .activity)
+        XCTAssertEqual(left.right, .none)
+
+        preferences.autoPresent = false
+        let disabled = ClosedNotchContentResolver.resolve(
+            options: options,
+            activities: [bluetooth],
+            mediaVisible: false,
+            preferences: preferences,
+            now: now
+        )
+        XCTAssertEqual(disabled.left, .clock)
+        XCTAssertEqual(disabled.right, .none)
+        XCTAssertEqual(disabled.activity?.id, bluetooth.id)
+    }
+
+    func testClosedNotchResolverFiltersDisabledBluetoothAndSchedulesRealExpiry() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let bluetooth = LiveActivity(
+            kind: .bluetooth,
+            state: .active,
+            title: "Bluetooth connected",
+            updatedAt: now,
+            expiresAt: now.addingTimeInterval(4),
+            priority: 90,
+            persistent: false,
+            created: now
+        )
+        let message = LiveActivity(
+            kind: .message,
+            state: .active,
+            title: "Message",
+            updatedAt: now,
+            expiresAt: now.addingTimeInterval(9),
+            priority: 70,
+            persistent: false,
+            created: now
+        )
+
+        var preferences = ClosedNotchActivityPreferences()
+        preferences.bluetoothConnected = false
+        XCTAssertEqual(
+            ClosedNotchContentResolver.primaryActivity(
+                in: [bluetooth, message],
+                preferences: preferences,
+                now: now
+            )?.id,
+            message.id
+        )
+        XCTAssertEqual(
+            ClosedNotchContentResolver.nextExpiry(
+                in: [bluetooth, message],
+                preferences: preferences,
+                now: now
+            ),
+            message.expiresAt
+        )
+    }
+
     private func customCIManifestJSON(permissions: [String] = []) -> String {
         let permissionJSON = permissions.map { "\"\($0)\"" }.joined(separator: ",")
         return """

@@ -1032,9 +1032,25 @@ struct ClosedNotchSettingsView: View {
                 Picker("Charged", selection: power.charged) { powerStyles() }
                 PreciseSlider(title: "Low battery threshold", value: Binding(get: { Double(power.wrappedValue.lowThreshold) }, set: { power.wrappedValue.lowThreshold = Int($0) }), range: 5...50, step: 1, suffix: "%")
                 PreciseSlider(title: "Margin from notch", value: Binding(
-                    get: { power.wrappedValue.resolvedNotchMargin },
+                    get: {
+                        power.wrappedValue.notchMargin ??
+                            ClosedNotchLayoutMetrics(
+                                options: options.wrappedValue,
+                                height: layout.appearance.surface.compactHeight
+                            ).normalCameraInset
+                    },
                     set: { power.wrappedValue.notchMargin = $0 }
                 ), range: 0...48, step: 1, suffix: "pt")
+                HStack {
+                    Text(power.wrappedValue.notchMargin == nil
+                         ? "Inheriting the normal Closed Notch camera spacing."
+                         : "Using a power-specific camera spacing override.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Use Closed Notch spacing") { power.wrappedValue.notchMargin = nil }
+                        .disabled(power.wrappedValue.notchMargin == nil)
+                }
                 Toggle("Expand for power events", isOn: power.expandForEvent)
                 if power.wrappedValue.expandForEvent {
                     PreciseSlider(title: "Extra event space", value: Binding(

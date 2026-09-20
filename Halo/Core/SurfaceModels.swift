@@ -58,14 +58,120 @@ struct ClosedNotchLayoutMetrics: Equatable {
     var outerInset: Double { horizontalPadding + outerMargin }
     var normalShell: Double { normalCameraInset + outerInset }
 
-    /// Power-event margin is defined as the total distance from the camera edge. It intentionally
-    /// replaces generic camera padding instead of stacking on top of it.
+    /// Power-event margin is defined as the total distance from the camera edge. When no
+    /// power-specific override exists, inherit the exact same camera inset as every other
+    /// closed-notch element instead of silently falling back to a different default.
     func cameraInset(power: PowerReactionOptions?) -> Double {
-        power?.resolvedNotchMargin ?? normalCameraInset
+        guard let configured = power?.notchMargin else { return normalCameraInset }
+        return min(48, max(0, configured))
     }
 
     func shell(power: PowerReactionOptions?) -> Double {
         cameraInset(power: power) + outerInset
+    }
+}
+
+enum ClosedNotchResolvedSide: Equatable {
+    case left, right
+}
+
+struct ClosedNotchActivityPreferences: Equatable {
+    var autoPresent = true
+    var bluetoothEvents = true
+    var bluetoothConnected = true
+    var bluetoothDisconnected = true
+    var bluetoothPoweredOn = true
+    var bluetoothPoweredOff = true
+    var bluetoothPreferredSide = "automatic"
+
+    func allows(_ activity: LiveActivity) -> Bool {
+        guard activity.resolvedKind == .bluetooth else { return true }
+        guard bluetoothEvents else { return false }
+
+        switch activity.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "bluetooth connected": return bluetoothConnected
+        case "bluetooth disconnected": return bluetoothDisconnected
+        case "bluetooth on": return bluetoothPoweredOn
+        case "bluetooth off": return bluetoothPoweredOff
+        default: return true
+        }
+    }
+
+    var explicitBluetoothSide: ClosedNotchResolvedSide? {
+        let normalized = bluetoothPreferredSide.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.contains("left") { return .left }
+        if normalized.contains("right") { return .right }
+        return nil
+    }
+}
+
+struct ClosedNotchResolvedContent {
+    var left: ClosedNotchItem
+    var right: ClosedNotchItem
+    var activity: LiveActivity?
+}
+
+enum ClosedNotchContentResolver {
+    static func primaryActivity(
+        in activities: [LiveActivity],
+        preferences: ClosedNotchActivityPreferences,
+        now: Date = Date()
+    ) -> LiveActivity? {
+        LiveActivitySelection.primary(
+            in: activities.filter(preferences.allows),
+            now: now
+        )
+    }
+
+    static func resolve(
+        options: ClosedNotchOptions,
+        activities: [LiveActivity],
+        mediaVisible: Bool,
+        preferences: ClosedNotchActivityPreferences,
+        now: Date = Date()
+    ) -> ClosedNotchResolvedContent {
+        let activity = primaryActivity(in: activities, preferences: preferences, now: now)
+        var left = options.left
+        var right = options.right
+
+        guard preferences.autoPresent,
+              let activity,
+              left != .activity,
+              right != .activity else {
+            return ClosedNotchResolvedContent(left: left, right: right, activity: activity)
+        }
+
+        if activity.resolvedKind == .bluetooth, let preferred = preferences.explicitBluetoothSide {
+            if preferred == .left { left = .activity }
+            else { right = .activity }
+            return ClosedNotchResolvedContent(left: left, right: right, activity: activity)
+        }
+
+        let rightAvailable = right == .none || ((right == .media || right == .visualizer) && !mediaVisible)
+        let leftAvailable = left == .none || ((left == .media || left == .visualizer) && !mediaVisible)
+        if rightAvailable { right = .activity }
+        else if leftAvailable { left = .activity }
+        else { right = .activity }
+
+        return ClosedNotchResolvedContent(left: left, right: right, activity: activity)
+    }
+
+    static func nextExpiry(
+        in activities: [LiveActivity],
+        preferences: ClosedNotchActivityPreferences,
+        now: Date = Date()
+    ) -> Date? {
+        activities
+            .filter(preferences.allows)
+            .compactMap { activity -> Date? in
+                if activity.isPersistent {
+                    guard activity.resolvedState == .ended else { return nil }
+                    return activity.expiresAt
+                }
+                return activity.expiresAt ?? activity.created.addingTimeInterval(12)
+            }
+            .filter { $0 > now }
+            .min()
     }
 }
 
