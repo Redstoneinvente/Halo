@@ -3,8 +3,6 @@ import AppKit
 import AVKit
 import ImageIO
 import EventKit
-import CoreImage
-import QuartzCore
 
 @MainActor
 protocol HaloModule {
@@ -2304,117 +2302,120 @@ struct ResolvedSurfaceBackground: View {
 struct DesktopGlass: NSViewRepresentable {
     let options: GlassOptions
 
-    /// NSVisualEffectView owns the privileged live-desktop sampling. The outer view then
-    /// filters that rendered subtree. Applying a background filter directly to the effect
-    /// view only sees its ordinary layer background and does not refract the sampled desktop.
-    final class RefractiveGlassView: NSView {
-        let effectView = NSVisualEffectView()
-        private var glassOptions = GlassOptions()
-        private var lastFilterSignature = ""
-
-        override init(frame frameRect: NSRect) {
-            super.init(frame: frameRect)
-
-            wantsLayer = true
-            layerUsesCoreImageFilters = true
-            layer?.masksToBounds = true
-
-            effectView.blendingMode = .behindWindow
-            effectView.state = .active
-            effectView.appearance = NSAppearance(named: .darkAqua)
-            effectView.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(effectView)
-
-            NSLayoutConstraint.activate([
-                effectView.leadingAnchor.constraint(equalTo: leadingAnchor),
-                effectView.trailingAnchor.constraint(equalTo: trailingAnchor),
-                effectView.topAnchor.constraint(equalTo: topAnchor),
-                effectView.bottomAnchor.constraint(equalTo: bottomAnchor)
-            ])
-        }
-
-        required init?(coder: NSCoder) { nil }
+    final class GlassHostView: NSView {
+        private var systemGlass: NSView?
+        private var legacyGlass: NSVisualEffectView?
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-        override func layout() {
-            super.layout()
-            updateRefractionIfNeeded()
+        func apply(_ options: GlassOptions) {
+            let options = options.normalized()
+
+            if #available(macOS 26.0, *) {
+                applySystemGlass(options)
+            } else {
+                applyLegacyGlass(options)
+            }
         }
 
-        func apply(_ options: GlassOptions, material: NSVisualEffectView.Material) {
-            glassOptions = options.normalized()
-            effectView.material = material
-            effectView.alphaValue = CGFloat(GlassRendering.materialOpacity(clarity: glassOptions.clarity))
-            updateRefractionIfNeeded(force: true)
-        }
+        @available(macOS 26.0, *)
+        private func applySystemGlass(_ options: GlassOptions) {
+            let glassView: NSGlassEffectView
+            if let existing = systemGlass as? NSGlassEffectView {
+                glassView = existing
+            } else {
+                legacyGlass?.removeFromSuperview()
+                legacyGlass = nil
+                systemGlass?.removeFromSuperview()
 
-        private func updateRefractionIfNeeded(force: Bool = false) {
-            let options = glassOptions
-            let size = bounds.size
-            let signature = [
-                String(format: "%.4f", options.refraction),
-                String(format: "%.4f", options.refractionSpread),
-                String(format: "%.2f", size.width),
-                String(format: "%.2f", size.height)
-            ].joined(separator: ":")
+                let created = NSGlassEffectView(frame: .zero)
+                created.translatesAutoresizingMaskIntoConstraints = false
+                created.effectIsInteractive = false
 
-            guard force || signature != lastFilterSignature else { return }
-            lastFilterSignature = signature
+                // Give the system glass a transparent content view. Halo's actual controls
+                // remain in SwiftUI above this background; this view exists only to render
+                // the native Liquid Glass surface and its system refraction.
+                let content = NSView(frame: .zero)
+                content.wantsLayer = true
+                content.layer?.backgroundColor = NSColor.clear.cgColor
+                created.contentView = content
 
-            guard options.refraction > 0.001,
-                  size.width > 2,
-                  size.height > 2,
-                  let filter = CIFilter(name: "CIBumpDistortion") else {
-                contentFilters = []
-                return
+                addSubview(created)
+                NSLayoutConstraint.activate([
+                    created.leadingAnchor.constraint(equalTo: leadingAnchor),
+                    created.trailingAnchor.constraint(equalTo: trailingAnchor),
+                    created.topAnchor.constraint(equalTo: topAnchor),
+                    created.bottomAnchor.constraint(equalTo: bottomAnchor)
+                ])
+
+                systemGlass = created
+                glassView = created
             }
 
-            filter.setDefaults()
-            filter.name = "haloGlassRefraction"
-            filter.setValue(CIVector(x: bounds.midX, y: bounds.midY), forKey: kCIInputCenterKey)
+            // Clear keeps the desktop more legible; regular gives the stronger system
+            // Liquid Glass treatment. The underlying refraction remains Apple-controlled.
+            glassView.style = (options.frost < 0.42 || options.clarity > 0.82) ? .clear : .regular
 
-            let minimumDimension = min(size.width, size.height)
-            let maximumDimension = max(size.width, size.height)
-            let narrowRadius = max(12, minimumDimension * 0.42)
-            let broadRadius = max(narrowRadius, maximumDimension * 1.18)
-            let radius = narrowRadius + (broadRadius - narrowRadius) * options.refractionSpread
-            filter.setValue(radius, forKey: kCIInputRadiusKey)
+            let tint = NSColor(
+                calibratedRed: options.tint.red,
+                green: options.tint.green,
+                blue: options.tint.blue,
+                alpha: min(1, max(0, options.tintAmount + options.lightAbsorption * 0.18))
+            )
+            glassView.tintColor = tint
 
-            // A larger range is intentional here: unlike the previous no-op background filter,
-            // this filter operates on the rendered NSVisualEffectView subtree and should be
-            // unmistakable at 1.0 when straight lines/text sit behind the notch.
-            filter.setValue(options.refraction * 1.35, forKey: kCIInputScaleKey)
+            // There is no public numeric refraction-strength API. Crossfading the native
+            // glass is the only supported continuous control: zero removes the lensing;
+            // one gives the full system glass/refraction treatment.
+            let refractionPresence = min(1, max(0, options.refraction))
+            let clarityPresence = 0.35 + (1 - options.clarity) * 0.65
+            glassView.alphaValue = CGFloat(max(0.08, refractionPresence) * clarityPresence)
+        }
 
-            // contentFilters maps to CALayer.filters and therefore transforms the effect view
-            // content/subtree after NSVisualEffectView has sampled the live desktop.
-            contentFilters = [filter]
+        private func applyLegacyGlass(_ options: GlassOptions) {
+            systemGlass?.removeFromSuperview()
+            systemGlass = nil
+
+            let effectView: NSVisualEffectView
+            if let existing = legacyGlass {
+                effectView = existing
+            } else {
+                let created = NSVisualEffectView(frame: .zero)
+                created.translatesAutoresizingMaskIntoConstraints = false
+                created.blendingMode = .behindWindow
+                created.state = .active
+                created.appearance = NSAppearance(named: .darkAqua)
+                addSubview(created)
+                NSLayoutConstraint.activate([
+                    created.leadingAnchor.constraint(equalTo: leadingAnchor),
+                    created.trailingAnchor.constraint(equalTo: trailingAnchor),
+                    created.topAnchor.constraint(equalTo: topAnchor),
+                    created.bottomAnchor.constraint(equalTo: bottomAnchor)
+                ])
+                legacyGlass = created
+                effectView = created
+            }
+
+            switch options.frost {
+            case ..<0.30:
+                effectView.material = .underWindowBackground
+            case ..<0.68:
+                effectView.material = .contentBackground
+            default:
+                effectView.material = .hudWindow
+            }
+            effectView.alphaValue = CGFloat(GlassRendering.materialOpacity(clarity: options.clarity))
         }
     }
 
-    func makeNSView(context: Context) -> RefractiveGlassView {
-        let view = RefractiveGlassView(frame: .zero)
-        apply(options.normalized(), to: view)
+    func makeNSView(context: Context) -> GlassHostView {
+        let view = GlassHostView(frame: .zero)
+        view.apply(options)
         return view
     }
 
-    func updateNSView(_ view: RefractiveGlassView, context: Context) {
-        apply(options.normalized(), to: view)
-    }
-
-    private func apply(_ options: GlassOptions, to view: RefractiveGlassView) {
-        view.apply(options, material: nativeMaterial(for: options.frost))
-    }
-
-    private func nativeMaterial(for frost: Double) -> NSVisualEffectView.Material {
-        switch frost {
-        case ..<0.30:
-            return .underWindowBackground
-        case ..<0.68:
-            return .contentBackground
-        default:
-            return .hudWindow
-        }
+    func updateNSView(_ view: GlassHostView, context: Context) {
+        view.apply(options)
     }
 }
 
