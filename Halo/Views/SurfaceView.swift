@@ -5138,7 +5138,7 @@ private struct AudioCIScrubber: View {
     var body: some View {
         GeometryReader { proxy in
             let width = max(1, proxy.size.width)
-            let progress = fraction(for: value)
+            let progress = CGFloat(fraction(for: value))
             let thumbSize: CGFloat = 11
             ZStack(alignment: .leading) {
                 Capsule()
@@ -5301,6 +5301,7 @@ private struct ContextMusicView: View {
     private var effectiveVisualizerColor: Color { options.usesSongVisualizerColors && !rawSongPalette.isEmpty ? primarySongColor : baseTextColor }
     private var primaryTextColor: Color { semanticSongColors?.primaryText.color ?? effectiveTextColor }
     private var secondaryTextColor: Color { semanticSongColors?.secondaryText.color ?? effectiveTextColor.opacity(0.72) }
+    private var unavailableTextColor: Color { semanticSongColors?.secondaryText.color ?? effectiveTextColor.opacity(0.55) }
     private var primaryControlColor: Color { semanticSongColors?.primaryControl.color ?? effectiveControlColor }
     private var secondaryControlColor: Color { semanticSongColors?.secondaryControl.color ?? effectiveControlColor }
     private var timestampColor: Color { semanticSongColors?.secondaryText.color ?? effectiveTextColor.opacity(0.62) }
@@ -5622,7 +5623,7 @@ private struct ContextMusicView: View {
             } else if lyrics.isEmpty {
                 Text("Synced lyrics unavailable")
                     .font(.system(size: options.resolvedLyricFontSize))
-                    .foregroundStyle(secondaryTextColor)
+                    .foregroundStyle(unavailableTextColor)
             } else {
                 TimelineView(.animation(minimumInterval: 0.06, paused: !media.isPlaying)) { _ in
                     let position = (isScrubbing ? scrubValue : playbackPosition) + options.resolvedLyricSyncOffset
