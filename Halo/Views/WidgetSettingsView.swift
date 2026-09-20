@@ -1396,7 +1396,7 @@ struct ClosedNotchSettingsView: View {
                     set: { options.wrappedValue.readableAlbumForegroundColors = $0 }
                 )
             )
-            Text("Adjusts album-derived text and dynamic visualizer colors only as much as needed for readable foreground contrast. Album background colors and artwork keep their original palette.")
+            Text("Generates one calmer album-derived foreground theme for text and the dynamic visualizer. Halo softens excessive saturation and validates the result against the active album background. Artwork and background colors keep their original palette.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
