@@ -89,6 +89,7 @@ service cloud.firestore {
                     && request.resource.data.issueID == reportId
                     && request.resource.data.uid == request.auth.uid
                     && request.resource.data.email is string
+                    && request.resource.data.email == request.auth.token.email
                     && request.resource.data.email.size() <= 320
                     && request.resource.data.type in ['bug', 'feature', 'crash', 'other']
                     && request.resource.data.context is string
