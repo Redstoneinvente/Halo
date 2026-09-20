@@ -380,8 +380,25 @@ struct ClosedNotchSlot: View {
             : NSFont.systemFont(ofSize: powerTextSize, weight: .semibold)
         return ceil((value as NSString).size(withAttributes: [.font: font]).width)
     }
+    private var albumForegroundBackground: WidgetColor {
+        guard let dominant = media.artworkColors.first else { return .black }
+        if artwork.usesBackgroundArtwork {
+            let visibleArtwork = AlbumForegroundColorResolver.blend(
+                .black,
+                toward: dominant,
+                amount: artwork.backgroundOpacity
+            )
+            return AlbumForegroundColorResolver.blend(visibleArtwork, toward: .black, amount: 0.24)
+        }
+        if options.albumBackgroundColor == true { return dominant }
+        return .black
+    }
+    private var foregroundAlbumPalette: [WidgetColor] {
+        guard options.usesReadableAlbumForegroundColors else { return media.artworkColors }
+        return AlbumForegroundColorResolver.palette(media.artworkColors, against: albumForegroundBackground)
+    }
     private var effectiveTextColor: Color {
-        if options.albumTextColor == true, media.isPlaying, let album = media.artworkColors.first { return album.color }
+        if options.albumTextColor == true, media.isPlaying, let album = foregroundAlbumPalette.first { return album.color }
         return options.color.color
     }
     private var hudCollision: HaloHUDCollisionBehavior? { hud?.configuration.behavior.collision }
@@ -605,7 +622,7 @@ struct ClosedNotchSlot: View {
                         playing: true,
                         enabled: options.animate && !system.lowPower,
                         options: visualizerOptions,
-                        palette: media.artworkColors,
+                        palette: foregroundAlbumPalette,
                         fallback: effectiveTextColor
                     )
                     .frame(width: max(1, innerWidth), height: innerHeight)
@@ -616,7 +633,7 @@ struct ClosedNotchSlot: View {
                         playing: true,
                         enabled: options.animate && !system.lowPower,
                         options: visualizerOptions,
-                        palette: media.artworkColors,
+                        palette: foregroundAlbumPalette,
                         fallback: effectiveTextColor
                     )
                 }
