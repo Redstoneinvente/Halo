@@ -1,3 +1,4 @@
+import Foundation
 import AppKit
 import Sparkle
 import SwiftUI
@@ -111,8 +112,9 @@ private struct HaloReleaseStory {
     let title: String
     let subtitle: String
     let highlights: [HaloReleaseHighlight]
+    let notes: String?
 
-    static func current() -> HaloReleaseStory {
+    static func fallback() -> HaloReleaseStory {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
         return .init(
             version: version,
@@ -123,8 +125,227 @@ private struct HaloReleaseStory {
                 .init(symbol: "sparkles", title: "Native update progress", detail: "A lightweight progress trace follows the notch while updates install.", accent: .cyan),
                 .init(symbol: "sparkles.rectangle.stack.fill", title: "What's New", detail: "See the important changes after each Halo update.", accent: .purple),
                 .init(symbol: "checkmark.seal.fill", title: "Release polish", detail: "A cleaner signed appcast and release pipeline.", accent: .orange)
-            ]
+            ],
+            notes: nil
         )
+    }
+
+    static func fromWhatsNewText(_ text: String, version: String) -> HaloReleaseStory {
+        var lines = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n")
+
+        while lines.first?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+            lines.removeFirst()
+        }
+        while lines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+            lines.removeLast()
+        }
+
+        var title = "What's new in Halo"
+        var subtitle = "Version \(version)"
+        var consumed = 0
+
+        if let first = lines.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+           first.hasPrefix("# ") {
+            title = String(first.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+            consumed = 1
+        }
+
+        if lines.indices.contains(consumed) {
+            let candidate = lines[consumed].trimmingCharacters(in: .whitespacesAndNewlines)
+            if candidate.hasPrefix("> ") {
+                subtitle = String(candidate.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+                consumed += 1
+            }
+        }
+
+        let body = lines.dropFirst(consumed).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return .init(
+            version: version,
+            title: title.isEmpty ? "What's new in Halo" : title,
+            subtitle: subtitle,
+            highlights: [],
+            notes: body.isEmpty ? text.trimmingCharacters(in: .whitespacesAndNewlines) : body
+        )
+    }
+}
+
+private struct HaloAppcastReleaseLocation {
+    let releaseNotesURL: URL?
+    let enclosureURL: URL?
+}
+
+private final class HaloAppcastReleaseParser: NSObject, XMLParserDelegate {
+    private let targetVersion: String
+    private let feedURL: URL
+    private var insideItem = false
+    private var activeElement = ""
+    private var shortVersion = ""
+    private var releaseNotesLink = ""
+    private var enclosureURL: URL?
+    private(set) var match: HaloAppcastReleaseLocation?
+
+    init(targetVersion: String, feedURL: URL) {
+        self.targetVersion = targetVersion
+        self.feedURL = feedURL
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?,
+        attributes attributeDict: [String: String] = [:]
+    ) {
+        let name = Self.localName(qName ?? elementName)
+        activeElement = name
+
+        if name == "item" {
+            insideItem = true
+            shortVersion = ""
+            releaseNotesLink = ""
+            enclosureURL = nil
+            return
+        }
+
+        guard insideItem else { return }
+        if name == "enclosure", let raw = attributeDict["url"] {
+            enclosureURL = URL(string: raw, relativeTo: feedURL)?.absoluteURL
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        guard insideItem else { return }
+        switch activeElement {
+        case "shortVersionString":
+            shortVersion += string
+        case "releaseNotesLink":
+            releaseNotesLink += string
+        default:
+            break
+        }
+    }
+
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        let name = Self.localName(qName ?? elementName)
+        if name == activeElement { activeElement = "" }
+
+        guard name == "item", insideItem else { return }
+        insideItem = false
+
+        let version = shortVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard version == targetVersion else { return }
+
+        let rawReleaseNotes = releaseNotesLink.trimmingCharacters(in: .whitespacesAndNewlines)
+        let releaseNotesURL = rawReleaseNotes.isEmpty
+            ? nil
+            : URL(string: rawReleaseNotes, relativeTo: feedURL)?.absoluteURL
+
+        match = .init(releaseNotesURL: releaseNotesURL, enclosureURL: enclosureURL)
+        parser.abortParsing()
+    }
+
+    private static func localName(_ value: String) -> String {
+        value.split(separator: ":").last.map(String.init) ?? value
+    }
+}
+
+private enum HaloWhatsNewContentLoader {
+    static func loadCurrentStory() async -> HaloReleaseStory? {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+
+        if let remote = await loadFromAppcast(version: version) {
+            return HaloReleaseStory.fromWhatsNewText(remote, version: version)
+        }
+
+        // Optional local fallback for development or fully offline builds.
+        if let bundledURL = Bundle.main.url(forResource: "whatsnew", withExtension: "txt"),
+           let bundled = try? String(contentsOf: bundledURL, encoding: .utf8),
+           !bundled.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return HaloReleaseStory.fromWhatsNewText(bundled, version: version)
+        }
+
+        return nil
+    }
+
+    private static func loadFromAppcast(version: String) async -> String? {
+        guard let rawFeed = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
+              !rawFeed.isEmpty,
+              !rawFeed.contains("$("),
+              let feedURL = URL(string: rawFeed),
+              feedURL.scheme?.lowercased() == "https" else {
+            return nil
+        }
+
+        guard let appcastData = await fetchData(from: feedURL) else { return nil }
+
+        let delegate = HaloAppcastReleaseParser(targetVersion: version, feedURL: feedURL)
+        let parser = XMLParser(data: appcastData)
+        parser.delegate = delegate
+        _ = parser.parse()
+
+        // Supported release layouts, in priority order:
+        // 1. sparkle:releaseNotesLink points directly to whatsnew.txt
+        // 2. whatsnew.txt sits beside the linked release notes
+        // 3. whatsnew.txt sits beside the current version's enclosure/archive
+        // 4. <appcast directory>/<version>/whatsnew.txt
+        // 5. <appcast directory>/whatsnew-<version>.txt
+        var candidates: [URL] = []
+
+        if let releaseNotesURL = delegate.match?.releaseNotesURL {
+            if releaseNotesURL.lastPathComponent.lowercased() == "whatsnew.txt" {
+                candidates.append(releaseNotesURL)
+            } else {
+                candidates.append(releaseNotesURL.deletingLastPathComponent().appendingPathComponent("whatsnew.txt"))
+            }
+        }
+
+        if let enclosureURL = delegate.match?.enclosureURL {
+            candidates.append(enclosureURL.deletingLastPathComponent().appendingPathComponent("whatsnew.txt"))
+        }
+
+        let feedDirectory = feedURL.deletingLastPathComponent()
+        candidates.append(feedDirectory.appendingPathComponent(version).appendingPathComponent("whatsnew.txt"))
+        candidates.append(feedDirectory.appendingPathComponent("whatsnew-\(version).txt"))
+
+        var seen = Set<String>()
+        for url in candidates where seen.insert(url.absoluteString).inserted {
+            if let text = await fetchText(from: url) {
+                return text
+            }
+        }
+
+        return nil
+    }
+
+    private static func fetchData(from url: URL) async -> Data? {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 4
+        request.cachePolicy = .reloadRevalidatingCacheData
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse,
+               !(200..<300).contains(http.statusCode) {
+                return nil
+            }
+            return data
+        } catch {
+            return nil
+        }
+    }
+
+    private static func fetchText(from url: URL) async -> String? {
+        guard let data = await fetchData(from: url),
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
@@ -189,7 +410,8 @@ final class HaloWhatsNewCoordinator {
 
 private struct HaloWhatsNewView: View {
     let onDone: () -> Void
-    private let story = HaloReleaseStory.current()
+    @State private var story = HaloReleaseStory.fallback()
+    @State private var loadingNotes = true
 
     var body: some View {
         ZStack {
@@ -226,23 +448,36 @@ private struct HaloWhatsNewView: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
 
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                        ForEach(story.highlights) { item in
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: item.symbol)
-                                    .foregroundStyle(item.accent)
-                                    .frame(width: 34, height: 34)
-                                    .background(item.accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 10))
-
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text(item.title).font(.headline)
-                                    Text(item.detail).font(.callout).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                            }
-                            .padding(15)
-                            .frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
+                    if loadingNotes {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(.vertical, 18)
+                    } else if let notes = story.notes {
+                        Text(notes)
+                            .font(.body)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(20)
                             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    } else {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                            ForEach(story.highlights) { item in
+                                HStack(alignment: .top, spacing: 12) {
+                                    Image(systemName: item.symbol)
+                                        .foregroundStyle(item.accent)
+                                        .frame(width: 34, height: 34)
+                                        .background(item.accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 10))
+
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(item.title).font(.headline)
+                                        Text(item.detail).font(.callout).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                }
+                                .padding(15)
+                                .frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                            }
                         }
                     }
 
@@ -258,6 +493,12 @@ private struct HaloWhatsNewView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .task {
+            if let loaded = await HaloWhatsNewContentLoader.loadCurrentStory() {
+                story = loaded
+            }
+            loadingNotes = false
+        }
     }
 }
 
