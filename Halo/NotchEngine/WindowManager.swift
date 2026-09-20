@@ -1174,8 +1174,11 @@ final class WindowManager {
         }
 
         if notchLike {
-            var leftDemand = autoFit ? sides.left : sides.decorationLeft
-            var rightDemand = autoFit ? sides.right : sides.decorationRight
+            // Content fit is a safety floor, not an optional behavior. Even with Auto-size off,
+            // the closed surface must grow enough to contain every visible widget. The setting
+            // can influence preferred/tight sizing, but it may never permit clipping.
+            var leftDemand = sides.left
+            var rightDemand = sides.right
             // Transient power events must remain readable even when global auto-fit is disabled.
             if let power {
                 if power.side == .left { leftDemand = max(leftDemand, sides.left) }
@@ -1237,9 +1240,9 @@ final class WindowManager {
             host.geometry?.activeCompactCenterOffset = (rightExtent - leftExtent) / 2
         } else {
             var requested = baseWidth
-            if autoFit || power != nil {
-                let body = sides.left + sides.right
-                requested = max(requested, body > 0 ? body + closedMetrics.renderingAllowance * 2 : body)
+            let body = sides.left + sides.right
+            if body > 0 {
+                requested = max(requested, body + closedMetrics.renderingAllowance * 2)
             }
             if expansion.enabled && (leftExpansionLive || rightExpansionLive) { requested = max(requested, expansion.width) }
             host.geometry?.activeCompactWidth = min(geometry.visible.width, requested)
