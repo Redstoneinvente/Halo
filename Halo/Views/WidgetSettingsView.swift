@@ -1471,16 +1471,6 @@ struct ClosedNotchSettingsView: View {
         }
     }
 
-width", value: visualizer.width, range: 32...160, step: 1, suffix: "pt")
-            PreciseSlider(title: "Visualizer height", value: visualizer.height, range: 8...48, step: 1, suffix: "pt")
-            PlaybackVisualizer(kind: options.wrappedValue.animation, playing: true, enabled: options.wrappedValue.animate, options: visualizer.wrappedValue, palette: media.artworkColors, fallback: options.wrappedValue.color.color)
-                .padding(12).background(.black, in: RoundedRectangle(cornerRadius: 12))
-            Button("Retry player detection") { media.retryDetection(preferred: app) }.disabled(media.busy)
-            Text(media.title)
-            if let error = media.error { Text(error).foregroundStyle(.orange) }
-        }
-        Button("Reset closed content") { layout.closedNotch = ClosedNotchOptions() }
-    }
     private func itemPicker(_ title: String, _ value: Binding<ClosedNotchItem>) -> some View { Picker(title, selection: value) { ForEach(ClosedNotchItem.allCases) { Text($0.rawValue.capitalized).tag($0) } } }
     private func gesturePicker(_ title: String, _ value: Binding<MediaGestureAction>) -> some View {
         Picker(title, selection: value) {
