@@ -65,12 +65,6 @@ struct HaloFeedbackCenterView: View {
                         .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
                 }
 
-                Label(
-                    "The title, description, category, type, version, and status are designed to appear on Halo's public issues website. Your account details and diagnostics are stored separately and are never part of the public issue document.",
-                    systemImage: "globe"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
 
             Section("Technical diagnostics") {
@@ -143,19 +137,9 @@ struct HaloFeedbackCenterView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(
-                        feedback.isSubmitting ||
-                        title.trimmingCharacters(in: .whitespacesAndNewlines).count < 4 ||
-                        details.trimmingCharacters(in: .whitespacesAndNewlines).count < 10
-                    )
+                    .disabled(feedback.isSubmitting)
 
                     Spacer()
-
-                    if !feedback.firebaseAvailable {
-                        Label("Firebase not configured", systemImage: "exclamationmark.triangle")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
                 }
 
                 if let success = feedback.successMessage {
@@ -168,8 +152,6 @@ struct HaloFeedbackCenterView: View {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
                 }
-            } footer: {
-                Text("Public issue status updates should be performed by Halo's website/backend using trusted Firebase Admin credentials; the Mac app can only create new reports.")
             }
         }
         .onAppear {
