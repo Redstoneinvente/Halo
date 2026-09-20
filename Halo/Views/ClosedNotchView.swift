@@ -1426,22 +1426,54 @@ struct AlbumNotchBackground: View {
         else { Color.white.opacity(reactive.enabled ? 0.035 : 0) }
     }
     private func signal(at timestamp: Double) -> Double {
-        if reactive.driver == .pulse { return (sin(timestamp * reactive.speed * 5.2) + 1) / 2 }
+        if reactive.driver == .pulse {
+            return (sin(timestamp * reactive.speed * 5.2) + 1) / 2
+        }
+
         let spectrum = AudioSpectrumService.shared.snapshot()
-        guard spectrum.available else { return (sin(timestamp * reactive.speed * 4.1) + 1) * 0.08 + 0.08 }
+        // Audio-driven profiles must represent real captured music. Do not substitute a fake sine
+        // wave when capture is unavailable; that makes a broken analyser look "alive".
+        guard spectrum.available else { return 0 }
+
         let raw: Double
         switch reactive.driver {
-        case .pulse: raw = spectrum.overall
-        case .bass: raw = spectrum.bass
-        case .mids: raw = spectrum.mids
-        case .treble: raw = spectrum.treble
-        case .spectrum: raw = max(spectrum.bass, max(spectrum.mids, spectrum.treble)) * 0.65 + spectrum.overall * 0.35
+        case .pulse:
+            raw = spectrum.reactiveOverall
+        case .bass:
+            raw = spectrum.reactiveBass
+        case .mids:
+            raw = spectrum.reactiveMids
+        case .treble:
+            raw = spectrum.reactiveTreble
+        case .spectrum:
+            let strongestBand = max(spectrum.reactiveBass, max(spectrum.reactiveMids, spectrum.reactiveTreble))
+            let bandAverage = (spectrum.reactiveBass + spectrum.reactiveMids + spectrum.reactiveTreble) / 3
+            raw = strongestBand * 0.52 + bandAverage * 0.28 + spectrum.reactiveOverall * 0.20
         }
-        return min(1, max(0, raw * reactive.resolvedAudioSensitivity))
+
+        // Sensitivity now operates on an adaptive 0...1 envelope instead of an almost-static
+        // absolute dB level. A gentle gamma curve keeps quieter musical detail visible.
+        let amplified = min(1, max(0, raw * reactive.resolvedAudioSensitivity))
+        return pow(amplified, 0.78)
     }
+
     private func reactiveBackground(signal: Double) -> some View {
-        let amount = min(1, max(0, signal)) * reactive.intensity
-        return baseBackground.brightness((amount - 0.18) * reactive.brightness).saturation(1 + amount * reactive.saturation).scaleEffect(1 + amount * reactive.scale).hueRotation(.degrees(amount * reactive.hueShift * 360)).blur(radius: amount * reactive.blur).overlay(Color.white.opacity(0.012 + amount * max(0.04, reactive.brightness * 0.18))).overlay(GrainOverlay(options: GrainOptions(enabled: reactive.grain > 0, amount: amount * reactive.grain, size: 1, warmth: 0)))
+        let drive = min(1, max(0, signal))
+        let amount = drive * reactive.intensity
+
+        return baseBackground
+            .brightness((amount - 0.08) * reactive.brightness)
+            .saturation(1 + amount * reactive.saturation * 1.25)
+            .scaleEffect(1 + amount * reactive.scale * 1.20)
+            .hueRotation(.degrees(amount * reactive.hueShift * 360))
+            .blur(radius: amount * reactive.blur)
+            .overlay(Color.white.opacity(0.006 + amount * max(0.09, reactive.brightness * 0.28)))
+            .overlay(GrainOverlay(options: GrainOptions(
+                enabled: reactive.grain > 0,
+                amount: amount * reactive.grain,
+                size: 1,
+                warmth: 0
+            )))
     }
 }
 
