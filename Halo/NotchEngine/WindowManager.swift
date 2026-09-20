@@ -1163,7 +1163,6 @@ final class WindowManager {
         let notchLike = attached || geometry.style == .notch || geometry.style == .simulated
         let camera = attached ? geometry.physicalNotchWidth : 0
         let baseWidth = max(16, geometry.appearance.compactWidth)
-        let autoFit = options.autoFitContent ?? true
         let verticalHUD = hudNotchExpansion.flatMap { $0.screenFrame.equalTo(geometry.screen) && $0.vertical ? $0 : nil }
 
         guard !host.state.editingGeometry else {
@@ -1179,11 +1178,6 @@ final class WindowManager {
             // can influence preferred/tight sizing, but it may never permit clipping.
             var leftDemand = sides.left
             var rightDemand = sides.right
-            // Transient power events must remain readable even when global auto-fit is disabled.
-            if let power {
-                if power.side == .left { leftDemand = max(leftDemand, sides.left) }
-                else { rightDemand = max(rightDemand, sides.right) }
-            }
 
             if let hud = hudNotchExpansion, hud.screenFrame.equalTo(geometry.screen), !hud.vertical {
                 let hudGap = closedMetrics.elementSpacing
