@@ -287,10 +287,77 @@ struct WidgetColor: Codable, Equatable {
     var green: Double
     var blue: Double
     static let white = WidgetColor(red: 1, green: 1, blue: 1)
+    static let black = WidgetColor(red: 0, green: 0, blue: 0)
     static let accent = WidgetColor(red: 0.4, green: 0.7, blue: 1)
     func validated() throws -> WidgetColor {
         guard [red, green, blue].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         return WidgetColor(red: min(1, max(0, red)), green: min(1, max(0, green)), blue: min(1, max(0, blue)))
+    }
+}
+
+/// Keeps album-derived foreground colors visually tied to the artwork while guaranteeing
+/// readable contrast against the surface behind them. Safe colors are left untouched; unsafe
+/// colors move only as far toward white or black as needed to cross the contrast threshold.
+enum AlbumForegroundColorResolver {
+    static let minimumContrast = 4.5
+
+    static func readable(_ source: WidgetColor, against background: WidgetColor) -> WidgetColor {
+        let source = clamped(source)
+        let background = clamped(background)
+        guard contrast(source, background) < minimumContrast else { return source }
+
+        let target = contrast(.white, background) >= contrast(.black, background)
+            ? WidgetColor.white
+            : WidgetColor.black
+
+        var lower = 0.0
+        var upper = 1.0
+        for _ in 0..<20 {
+            let amount = (lower + upper) * 0.5
+            let candidate = blend(source, toward: target, amount: amount)
+            if contrast(candidate, background) >= minimumContrast {
+                upper = amount
+            } else {
+                lower = amount
+            }
+        }
+
+        let resolved = blend(source, toward: target, amount: upper)
+        return contrast(resolved, background) >= minimumContrast ? resolved : target
+    }
+
+    static func palette(_ colors: [WidgetColor], against background: WidgetColor) -> [WidgetColor] {
+        colors.map { readable($0, against: background) }
+    }
+
+    static func blend(_ source: WidgetColor, toward target: WidgetColor, amount: Double) -> WidgetColor {
+        let t = min(1, max(0, amount))
+        return WidgetColor(
+            red: source.red + (target.red - source.red) * t,
+            green: source.green + (target.green - source.green) * t,
+            blue: source.blue + (target.blue - source.blue) * t
+        )
+    }
+
+    static func contrast(_ lhs: WidgetColor, _ rhs: WidgetColor) -> Double {
+        let a = relativeLuminance(clamped(lhs))
+        let b = relativeLuminance(clamped(rhs))
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
+    private static func clamped(_ color: WidgetColor) -> WidgetColor {
+        WidgetColor(
+            red: min(1, max(0, color.red)),
+            green: min(1, max(0, color.green)),
+            blue: min(1, max(0, color.blue))
+        )
+    }
+
+    private static func relativeLuminance(_ color: WidgetColor) -> Double {
+        func linear(_ value: Double) -> Double {
+            value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(color.red) + 0.7152 * linear(color.green) + 0.0722 * linear(color.blue)
     }
 }
 enum ClockVisualStyle: String, Codable, CaseIterable, Identifiable {
@@ -1782,7 +1849,9 @@ struct ClosedNotchOptions: Codable, Equatable {
     var outerMargin: Double?
     var albumTextColor: Bool?
     var albumBackgroundColor: Bool?
+    var readableAlbumForegroundColors: Bool?
     var albumBackgroundFrequencyEffect: Bool?
+    var usesReadableAlbumForegroundColors: Bool { readableAlbumForegroundColors ?? false }
     var mediaOptions: ClosedMediaOptions?
     var artworkOptions: ClosedArtworkOptions?
     var reactiveBackground: ReactiveBackgroundOptions?
