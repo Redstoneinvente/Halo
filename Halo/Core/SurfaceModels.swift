@@ -58,6 +58,14 @@ struct ClosedNotchLayoutMetrics: Equatable {
     var outerInset: Double { horizontalPadding + outerMargin }
     var normalShell: Double { normalCameraInset + outerInset }
 
+    /// Extra window extent reserved for glyph antialiasing, shadows and animated content.
+    /// This is not user-visible padding: the renderer keeps the configured margin exactly,
+    /// while the surface grows slightly beyond its measured body so zero-margin content is
+    /// never cut off by an exact-fit frame.
+    var renderingAllowance: Double {
+        max(2, min(6, contentHeight * 0.12))
+    }
+
     /// Power-event margin is defined as the total distance from the camera edge. When no
     /// power-specific override exists, inherit the exact same camera inset as every other
     /// closed-notch element instead of silently falling back to a different default.

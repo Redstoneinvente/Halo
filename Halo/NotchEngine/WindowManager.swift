@@ -748,7 +748,10 @@ final class WindowManager {
                 if let presentation {
                     let notch = presentation.configuration.presentation.resolvedNotch
                     let vertical = notch.usesVerticalExpansion
-                    let reservedWidth = vertical ? 0 : notch.width + max(12, notch.horizontalPadding * 2) + abs(notch.horizontalOffset)
+                    // Preserve the HUD's requested body width even in vertical mode. Vertical
+                    // presentation changes height, but it must still widen the closed surface
+                    // when needed rather than compressing or clipping the HUD horizontally.
+                    let reservedWidth = notch.width + max(12, notch.horizontalPadding * 2) + abs(notch.horizontalOffset)
                     self.hudNotchExpansion = HUDNotchExpansion(
                         side: presentation.side,
                         width: reservedWidth,
@@ -937,7 +940,7 @@ final class WindowManager {
         case .full, .automatic: outwardOffset = abs(notch.horizontalOffset)
         }
         let vertical = notch.usesVerticalExpansion
-        let width = vertical ? 0 : notch.width + outwardOffset
+        let width = notch.width + outwardOffset
         let repeatedContinue = hudNotchExpansion?.kind == kind &&
             configuration.behavior.interrupt == .continue && hudNotchHideWork != nil
 
@@ -1211,6 +1214,12 @@ final class WindowManager {
                 }
             }
 
+            // Exact-fit window widths are fragile at zero/very-small margins because SwiftUI
+            // glyphs, shadows and animations can draw fractionally outside their nominal bounds.
+            // Grow the surface, not the configured content margin.
+            if leftDemand > 0 { leftDemand += closedMetrics.renderingAllowance }
+            if rightDemand > 0 { rightDemand += closedMetrics.renderingAllowance }
+
             let extents = ClosedWingSizing.extents(
                 base: baseWidth, camera: camera,
                 left: leftDemand,
@@ -1228,7 +1237,10 @@ final class WindowManager {
             host.geometry?.activeCompactCenterOffset = (rightExtent - leftExtent) / 2
         } else {
             var requested = baseWidth
-            if autoFit || power != nil { requested = max(requested, sides.left + sides.right) }
+            if autoFit || power != nil {
+                let body = sides.left + sides.right
+                requested = max(requested, body > 0 ? body + closedMetrics.renderingAllowance * 2 : body)
+            }
             if expansion.enabled && (leftExpansionLive || rightExpansionLive) { requested = max(requested, expansion.width) }
             host.geometry?.activeCompactWidth = min(geometry.visible.width, requested)
             host.geometry?.activeCompactCenterOffset = nil
@@ -1237,6 +1249,12 @@ final class WindowManager {
         if let verticalHUD {
             let baseHeight = max(16, geometry.appearance.surface.compactHeight)
             host.geometry?.activeCompactHeight = min(220, max(baseHeight, verticalHUD.height))
+
+            let hudWidth = verticalHUD.width + closedMetrics.outerInset * 2 + closedMetrics.renderingAllowance * 2
+            host.geometry?.activeCompactWidth = min(
+                geometry.visible.width,
+                max(host.geometry?.activeCompactWidth ?? baseWidth, hudWidth)
+            )
         }
     }
 

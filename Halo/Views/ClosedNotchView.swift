@@ -234,7 +234,6 @@ struct ClosedNotchView: View {
                       y: cameraHeight + availableHeight / 2)
             .id(hud.event.id)
             .transition(.opacity.combined(with: .scale(scale: 0.98)))
-            .clipped()
     }
     private func cameraReservation(width: CGFloat, height: CGFloat) -> CGRect? {
         guard var camera = occlusion else { return nil }
@@ -261,7 +260,7 @@ struct ClosedNotchView: View {
                                 visualizerOnly: visualizerOnly,
                                 expandVisualizerToAvailableWidth: expandVisualizerToAvailableWidth)
             }
-        }.frame(width: max(0, width)).clipped()
+        }.frame(width: max(0, width))
     }
 }
 
@@ -344,7 +343,7 @@ struct ClosedNotchSlot: View {
     private var slotOuterInset: Double { layoutMetrics.outerInset }
     private var decorationSize: Double {
         guard !visualizerOnly, let decoration, decoration.isVisible(playing: media.isPlaying) else { return 0 }
-        return min(decoration.size, min(innerHeight, itemIsVisible ? innerWidth / 3 : innerWidth))
+        return min(decoration.size, innerHeight)
     }
     private var textSize: Double { min(options.fontSize, innerHeight / 1.25) }
     private var powerTextSize: Double { min(textSize, max(9, innerHeight * 0.46)) }
@@ -365,7 +364,7 @@ struct ClosedNotchSlot: View {
         guard let hud, let notch = hudNotch else { return 0 }
         return hud.side == .full ? max(24, notch.width / 2) : max(24, notch.width)
     }
-    private var hudElementWidth: Double { min(max(24, hudRequestedWidth), max(24, innerWidth)) }
+    private var hudElementWidth: Double { max(24, hudRequestedWidth) }
     private var hudPushesContent: Bool {
         guard hud != nil else { return false }
         return hudCollision == .push || hudCollision == .queue || hudCollision == .showExternally
@@ -429,7 +428,7 @@ struct ClosedNotchSlot: View {
         let natural = max(16, naturalPowerWidth)
         let extra = powerUsesEventContainer ? powerSettings.resolvedExtraEventSpace : 0
         // Camera margin belongs to the slot edge inset, not to the element's own width.
-        return min(innerWidth, natural + extra)
+        return natural + extra
     }
     private var mediaSiblingFootprint: Double {
         var widths: [Double] = []
@@ -446,9 +445,7 @@ struct ClosedNotchSlot: View {
         }
         return remaining
     }
-    private var mirrorContentWidth: Double {
-        max(1, min(112, innerWidth - mediaSiblingFootprint))
-    }
+    private var mirrorContentWidth: Double { 112 }
     private var activityContentWidth: Double {
         var occupied = 0.0
         var siblingCount = 0
@@ -493,7 +490,6 @@ struct ClosedNotchSlot: View {
         .padding(side == .left ? .trailing : .leading, slotCameraInset)
         .padding(side == .left ? .leading : .trailing, slotOuterInset)
         .frame(width: availableWidth, height: availableHeight, alignment: .center)
-        .clipped()
         .modifier(MediaGestureModifier(media: media, options: closedMediaOptions, enabled: isMusicItem && hudCollision != .replace))
     }
     private var standardRow: some View {
@@ -531,7 +527,6 @@ struct ClosedNotchSlot: View {
         if let decoration, decorationSize > 0 {
             SideDecorationView(options: decoration, playing: media.isPlaying, lowPower: system.lowPower, maximumHeight: decorationSize)
                 .frame(width: decorationSize, height: decorationSize, alignment: .center)
-                .clipped()
         }
     }
     @ViewBuilder private var artworkElement: some View {
@@ -540,7 +535,6 @@ struct ClosedNotchSlot: View {
                 .padding(artwork.padding)
                 .padding(side == .left ? .trailing : .leading, artwork.margin)
                 .frame(width: artworkFootprint, height: innerHeight)
-                .clipped()
                 .layoutPriority(2)
         }
     }
@@ -557,7 +551,6 @@ struct ClosedNotchSlot: View {
             )
             .frame(width: powerFootprint, height: innerHeight,
                    alignment: side == .left ? .trailing : .leading)
-            .clipped()
             .layoutPriority(2)
         }
     }
@@ -637,7 +630,6 @@ struct ClosedNotchSlot: View {
                     }
                     .frame(width: activityContentWidth,
                            alignment: side == .left ? .trailing : .leading)
-                    .clipped()
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     .layoutPriority(1)
                 }
@@ -741,7 +733,6 @@ private struct BluetoothClosedActivityView: View {
         }
         .foregroundStyle(accent)
         .frame(width: availableWidth, alignment: alignment)
-        .clipped()
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
         .layoutPriority(2)
     }
