@@ -5116,6 +5116,82 @@ private struct ContextLyricTransitionModifier: ViewModifier {
     }
 }
 
+private struct AudioCIScrubber: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let trackColor: Color
+    let fillColor: Color
+    let thumbColor: Color
+    let onEditingChanged: (Bool) -> Void
+    @State private var dragging = false
+
+    private func fraction(for value: Double) -> Double {
+        let span = max(0.0001, range.upperBound - range.lowerBound)
+        return min(1, max(0, (value - range.lowerBound) / span))
+    }
+
+    private func value(at x: CGFloat, width: CGFloat) -> Double {
+        let fraction = min(1, max(0, Double(x / max(1, width))))
+        return range.lowerBound + fraction * (range.upperBound - range.lowerBound)
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = max(1, proxy.size.width)
+            let progress = fraction(for: value)
+            let thumbSize: CGFloat = 11
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(trackColor)
+                    .frame(height: 4)
+                Capsule()
+                    .fill(fillColor)
+                    .frame(width: max(2, width * progress), height: 4)
+                Circle()
+                    .fill(thumbColor)
+                    .overlay(Circle().stroke(fillColor.opacity(0.55), lineWidth: 1))
+                    .frame(width: thumbSize, height: thumbSize)
+                    .shadow(color: .black.opacity(0.24), radius: 2, y: 1)
+                    .offset(x: min(max(0, width * progress - thumbSize / 2), max(0, width - thumbSize)))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { gesture in
+                        if !dragging {
+                            dragging = true
+                            onEditingChanged(true)
+                        }
+                        value = value(at: gesture.location.x, width: width)
+                    }
+                    .onEnded { gesture in
+                        value = value(at: gesture.location.x, width: width)
+                        if dragging {
+                            dragging = false
+                            onEditingChanged(false)
+                        }
+                    }
+            )
+        }
+        .frame(height: 16)
+        .accessibilityElement()
+        .accessibilityLabel("Playback position")
+        .accessibilityValue("\(Int(value.rounded())) seconds")
+        .accessibilityAdjustableAction { direction in
+            let step = max(1, (range.upperBound - range.lowerBound) / 100)
+            switch direction {
+            case .increment:
+                value = min(range.upperBound, value + step)
+            case .decrement:
+                value = max(range.lowerBound, value - step)
+            @unknown default:
+                break
+            }
+        }
+    }
+}
+
 private struct ContextMusicView: View {
     @ObservedObject var media: MediaService
     let options: ContextMusicOptions
