@@ -336,7 +336,6 @@ struct ClosedNotchSlot: View {
     private var showPowerEvent: Bool { powerTargetSide == side }
     private var rendersPowerEvent: Bool { showPowerEvent && hudCollision != .replace }
     private var powerSettings: PowerReactionOptions { options.powerReaction ?? PowerReactionOptions() }
-    private var powerNotchMargin: Double { powerSettings.resolvedNotchMargin }
     // Power is always nearest the camera. Its margin is the complete camera-edge inset, not an
     // additional value layered on top of the normal horizontal padding.
     private var slotCameraInset: Double {

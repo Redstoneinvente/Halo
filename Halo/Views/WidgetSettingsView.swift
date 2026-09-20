@@ -874,7 +874,7 @@ struct ClosedNotchSettingsView: View {
         Section("Automatic width") {
             Toggle("Widen for music and live activity", isOn: expansion.enabled)
             PreciseSlider(title: "Active width", value: expansion.width, range: 120...640, step: 1, suffix: "pt")
-            Text("Optional fixed-width expansion for music and other live content. Leave this off for exact content-fit sizing. Power events always use their own measured size and margin.").font(.caption)
+            Text("Optional fixed-width expansion for music and other live content. Leave this off for exact content-fit sizing. Power events use their measured size and inherit the normal camera spacing unless you set an override below.").font(.caption)
         }
         SideDecorationSettingsView(title: "Left icon / GIF", options: Binding(get: { options.wrappedValue.leftDecoration ?? SideDecoration() }, set: { options.wrappedValue.leftDecoration = $0 }))
         SideDecorationSettingsView(title: "Right icon / GIF", options: Binding(get: { options.wrappedValue.rightDecoration ?? SideDecoration() }, set: { options.wrappedValue.rightDecoration = $0 }))
