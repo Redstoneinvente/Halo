@@ -5061,6 +5061,21 @@ private struct BluetoothContextView: View {
     }
 }
 
+private struct ContextLyricTransitionModifier: ViewModifier {
+    let opacity: Double
+    let blurRadius: CGFloat
+    let yOffset: CGFloat
+    let scale: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(opacity)
+            .blur(radius: blurRadius)
+            .offset(y: yOffset)
+            .scaleEffect(scale)
+    }
+}
+
 private struct ContextMusicView: View {
     @ObservedObject var media: MediaService
     let options: ContextMusicOptions
@@ -5423,11 +5438,66 @@ private struct ContextMusicView: View {
                     let position = (isScrubbing ? scrubValue : playbackPosition) + options.resolvedLyricSyncOffset
                     let lines = ContextLyricTimeline.parse(lyrics)
                     if let frame = ContextLyricTimeline.frame(lines: lines, position: max(0, position), duration: playbackDuration) {
-                        contextLyric(frame)
+                        animatedContextLyric(frame)
                     }
                 }
             }
         }
+    }
+
+    private var lyricLineTransition: AnyTransition {
+        guard !reduceMotion else { return .identity }
+
+        switch options.resolvedLyricTransition {
+        case .none:
+            return .identity
+        case .fade:
+            return .opacity
+        case .slide:
+            return .asymmetric(
+                insertion: .move(edge: .bottom).combined(with: .opacity),
+                removal: .move(edge: .top).combined(with: .opacity)
+            )
+        case .lift:
+            return .asymmetric(
+                insertion: .modifier(
+                    active: ContextLyricTransitionModifier(opacity: 0, blurRadius: 0, yOffset: 10, scale: 1),
+                    identity: ContextLyricTransitionModifier(opacity: 1, blurRadius: 0, yOffset: 0, scale: 1)
+                ),
+                removal: .modifier(
+                    active: ContextLyricTransitionModifier(opacity: 0, blurRadius: 0, yOffset: -6, scale: 1),
+                    identity: ContextLyricTransitionModifier(opacity: 1, blurRadius: 0, yOffset: 0, scale: 1)
+                )
+            )
+        case .scale:
+            return .scale(scale: 0.92).combined(with: .opacity)
+        case .blur:
+            return .asymmetric(
+                insertion: .modifier(
+                    active: ContextLyricTransitionModifier(opacity: 0, blurRadius: 7, yOffset: 3, scale: 0.985),
+                    identity: ContextLyricTransitionModifier(opacity: 1, blurRadius: 0, yOffset: 0, scale: 1)
+                ),
+                removal: .modifier(
+                    active: ContextLyricTransitionModifier(opacity: 0, blurRadius: 5, yOffset: -2, scale: 0.99),
+                    identity: ContextLyricTransitionModifier(opacity: 1, blurRadius: 0, yOffset: 0, scale: 1)
+                )
+            )
+        }
+    }
+
+    private var lyricLineAnimation: Animation? {
+        guard !reduceMotion, options.resolvedLyricTransition != .none else { return nil }
+        return .easeInOut(duration: options.resolvedLyricTransitionDuration)
+    }
+
+    private func animatedContextLyric(_ frame: ContextLyricFrame) -> some View {
+        ZStack(alignment: frameAlignment) {
+            contextLyric(frame)
+                .id(frame.current.id)
+                .transition(lyricLineTransition)
+        }
+        .frame(maxWidth: .infinity, alignment: frameAlignment)
+        .animation(lyricLineAnimation, value: frame.current.id)
     }
 
     @ViewBuilder private func contextLyric(_ frame: ContextLyricFrame) -> some View {
