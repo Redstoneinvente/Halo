@@ -1483,7 +1483,8 @@ struct AlbumNotchBackground: View {
     private var colors: [Color] { media.artworkColors.map(\.color) }; private var artworkOptions: ClosedArtworkOptions { options.resolvedArtwork }
     private var reactive: ReactiveBackgroundOptions { if let saved = options.reactiveBackground { return saved }; var legacy = ReactiveBackgroundOptions(); legacy.enabled = options.albumBackgroundFrequencyEffect ?? false; return legacy }
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }; private var wantsArtworkBackground: Bool { artworkOptions.usesBackgroundArtwork }
-    private var active: Bool { media.isPlaying && (reactive.enabled || (options.albumBackgroundColor == true && !colors.isEmpty) || (wantsArtworkBackground && artwork != nil)) }
+    private var activeArtwork: NSImage? { media.artworkImage ?? artwork }
+    private var active: Bool { media.isPlaying && (reactive.enabled || (options.albumBackgroundColor == true && !colors.isEmpty) || (wantsArtworkBackground && activeArtwork != nil)) }
     var body: some View {
         Group {
             if active {
@@ -1500,7 +1501,11 @@ struct AlbumNotchBackground: View {
                 }
             }
         }
-        .task(id: key + "|\(wantsArtworkBackground)") { guard media.isPlaying && wantsArtworkBackground else { artwork = nil; return }; artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key) }
+        .task(id: key + "|\(wantsArtworkBackground)") {
+            artwork = nil
+            guard media.isPlaying, wantsArtworkBackground, media.artworkImage == nil else { return }
+            artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key)
+        }
         .task(id: "spectrum|\(media.isPlaying)|\(reactive.enabled)|\(reactive.driver.rawValue)") {
             AudioSpectrumService.shared.setActive(
                 media.isPlaying && reactive.enabled && reactive.driver != .pulse,
@@ -1517,7 +1522,7 @@ struct AlbumNotchBackground: View {
     }
     private var gradientColors: [Color] { if colors.isEmpty { return [.clear, .clear] }; return colors.count == 1 ? [colors[0], colors[0].opacity(0.72)] : Array(colors.prefix(2)) }
     @ViewBuilder private var baseBackground: some View {
-        if wantsArtworkBackground, let artwork { Image(nsImage: artwork).resizable().scaledToFill().opacity(artworkOptions.backgroundOpacity).overlay(LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.42)], startPoint: .top, endPoint: .bottom)) }
+        if wantsArtworkBackground, let activeArtwork { Image(nsImage: activeArtwork).resizable().scaledToFill().opacity(artworkOptions.backgroundOpacity).overlay(LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.42)], startPoint: .top, endPoint: .bottom)) }
         else if options.albumBackgroundColor == true && !colors.isEmpty { LinearGradient(colors: gradientColors, startPoint: .leading, endPoint: .trailing) }
         else { Color.white.opacity(reactive.enabled ? 0.035 : 0) }
     }
