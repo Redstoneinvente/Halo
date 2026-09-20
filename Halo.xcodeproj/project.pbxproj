@@ -79,8 +79,6 @@
 		FBAC00000000000000000001 /* Services/HaloFeedbackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */; };
 		FBAC00000000000000000002 /* Views/HaloFeedbackCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */; };
 		FBAC00000000000000000211 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = FBAC00000000000000000201 /* FirebaseCore */; };
-		FBAC00000000000000000212 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = FBAC00000000000000000202 /* FirebaseAuth */; };
-		FBAC00000000000000000213 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = FBAC00000000000000000203 /* FirebaseFirestore */; };
 		FBAC00000000000000000214 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = FBAC00000000000000000204 /* FirebaseCrashlytics */; };
 		FBAC00000000000000000301 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000300 /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
@@ -191,8 +189,6 @@
 			files = (
 				A11C0F1A0000000000000353 /* Sparkle in Frameworks */,
 				FBAC00000000000000000211 /* FirebaseCore in Frameworks */,
-				FBAC00000000000000000212 /* FirebaseAuth in Frameworks */,
-				FBAC00000000000000000213 /* FirebaseFirestore in Frameworks */,
 				FBAC00000000000000000214 /* FirebaseCrashlytics in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -399,8 +395,6 @@
 			packageProductDependencies = (
 				A11C0F1A0000000000000354 /* Sparkle */,
 				FBAC00000000000000000201 /* FirebaseCore */,
-				FBAC00000000000000000202 /* FirebaseAuth */,
-				FBAC00000000000000000203 /* FirebaseFirestore */,
 				FBAC00000000000000000204 /* FirebaseCrashlytics */,
 			);
 			productName = Halo;
@@ -779,16 +773,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = FBAC00000000000000000200 /* XCRemoteSwiftPackageReference "Firebase" */;
 			productName = FirebaseCore;
-		};
-		FBAC00000000000000000202 /* FirebaseAuth */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = FBAC00000000000000000200 /* XCRemoteSwiftPackageReference "Firebase" */;
-			productName = FirebaseAuth;
-		};
-		FBAC00000000000000000203 /* FirebaseFirestore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = FBAC00000000000000000200 /* XCRemoteSwiftPackageReference "Firebase" */;
-			productName = FirebaseFirestore;
 		};
 		FBAC00000000000000000204 /* FirebaseCrashlytics */ = {
 			isa = XCSwiftPackageProductDependency;
