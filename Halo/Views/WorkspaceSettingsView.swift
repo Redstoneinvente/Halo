@@ -41,7 +41,7 @@ struct SettingsView: View {
             SidebarGroup(
                 title: "Halo",
                 icon: "sparkles",
-                items: ["General", "Account & License", "Privacy", "About"]
+                items: ["General", "Account & License", "Feedback & Support", "Privacy", "About"]
             ),
             SidebarGroup(
                 title: "Interface",
@@ -224,6 +224,10 @@ struct SettingsView: View {
                   let group = sidebarGroups.first(where: { $0.items.contains(selectedSection) }) else { return }
             expandedSidebarGroups.insert(group.id)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloOpenFeedback"))) { _ in
+            section = "Feedback & Support"
+            expandedSidebarGroups.insert("Halo")
+        }
         .onDisappear {
             endDirectGeometryEditingIfNeeded()
         }
@@ -272,6 +276,7 @@ struct SettingsView: View {
         case "Automation": return "bolt"
         case "Displays": return "display.2"
         case "Plugins": return "puzzlepiece.extension"
+        case "Feedback & Support": return "bubble.left.and.bubble.right.fill"
         case "Privacy": return "hand.raised"
         case "Update Animation": return "arrow.down.circle"
         case "About": return "info.circle"
@@ -350,6 +355,7 @@ struct SettingsView: View {
                 }
             }
         case "Account & License": HaloAccountLicenseSettingsView()
+        case "Feedback & Support": HaloFeedbackCenterView()
         case "Schedules": ScheduleSettingsView(workspace: workspace)
         case "Appearance": AppearanceSettingsPane(store: store, workspace: workspace)
         case "Notch Skins": NotchSkinSettingsPane(appearance: $workspace.settings.layout.appearance, theme: store.configuration.theme)
