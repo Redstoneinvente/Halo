@@ -1,9 +1,8 @@
 import Foundation
 import AppKit
-import FirebaseAuth
+import Combine
 import FirebaseCore
 import FirebaseCrashlytics
-import FirebaseFirestore
 
 enum HaloFeedbackKind: String, CaseIterable, Identifiable {
     case bug = "Bug"
@@ -49,6 +48,16 @@ struct HaloFeedbackSubmission {
     var includeDiagnostics: Bool
 }
 
+private enum HaloFeedbackError: LocalizedError {
+    case message(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .message(let value): return value
+        }
+    }
+}
+
 @MainActor
 final class HaloFeedbackService: ObservableObject {
     static let shared = HaloFeedbackService()
@@ -78,7 +87,7 @@ final class HaloFeedbackService: ObservableObject {
         started = true
         configureFirebaseIfPossible()
 
-        guard firebaseAvailable else { return }
+        guard FirebaseApp.app() != nil else { return }
 
         let crashlytics = Crashlytics.crashlytics()
         crashlytics.setCrashlyticsCollectionEnabled(crashDiagnosticsEnabled)
@@ -114,7 +123,7 @@ final class HaloFeedbackService: ObservableObject {
             crashedDuringPreviousExecution = false
             crashlytics.setUserID("")
         } else {
-            Crashlytics.crashlytics().setCustomValue(installationID(), forKey: "halo_installation_id")
+            crashlytics.setCustomValue(installationID(), forKey: "halo_installation_id")
         }
     }
 
@@ -147,12 +156,13 @@ final class HaloFeedbackService: ObservableObject {
             return false
         }
 
-        guard let user = Auth.auth().currentUser else {
+        let account = HaloAccountManager.shared
+        guard account.isSignedIn else {
             errorMessage = "Sign in to your Halo account before sending feedback."
             return false
         }
 
-        guard user.isEmailVerified else {
+        guard account.emailVerified else {
             errorMessage = "Verify your Halo account email before sending feedback."
             return false
         }
@@ -181,12 +191,9 @@ final class HaloFeedbackService: ObservableObject {
         defer { isSubmitting = false }
 
         do {
-            let db = Firestore.firestore()
-            let issueRef = db.collection("feedbackIssues").document()
-            let reportRef = db.collection("feedbackReports").document(issueRef.documentID)
-
+            let token = try await account.validIDToken()
+            let issueID = UUID().uuidString.lowercased()
             let metadata = baseMetadata()
-            let createdAt = FieldValue.serverTimestamp()
 
             var publicIssue: [String: Any] = [
                 "schemaVersion": 1,
@@ -195,8 +202,6 @@ final class HaloFeedbackService: ObservableObject {
                 "description": details,
                 "category": category.isEmpty ? "General" : category,
                 "status": "received",
-                "createdAt": createdAt,
-                "updatedAt": createdAt,
                 "appVersion": metadata["appVersion"] ?? "unknown",
                 "appBuild": metadata["appBuild"] ?? "unknown",
                 "platform": "macOS"
@@ -211,13 +216,12 @@ final class HaloFeedbackService: ObservableObject {
 
             var privateReport: [String: Any] = [
                 "schemaVersion": 1,
-                "issueID": issueRef.documentID,
-                "uid": user.uid,
-                "email": user.email ?? "",
+                "issueID": issueID,
+                "uid": account.userID,
+                "email": account.email,
                 "type": submission.kind.storageValue,
                 "context": context,
                 "includeDiagnostics": submission.includeDiagnostics,
-                "createdAt": createdAt,
                 "previousExecutionCrashed": submission.kind == .crash && crashedDuringPreviousExecution
             ]
 
@@ -228,27 +232,20 @@ final class HaloFeedbackService: ObservableObject {
                 }
             }
 
-            let batch = db.batch()
-            batch.setData(publicIssue, forDocument: issueRef)
-            batch.setData(privateReport, forDocument: reportRef)
+            try await commitFeedback(
+                issueID: issueID,
+                idToken: token,
+                publicIssue: publicIssue,
+                privateReport: privateReport
+            )
 
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                batch.commit { error in
-                    if let error {
-                        continuation.resume(throwing: error)
-                    } else {
-                        continuation.resume(returning: ())
-                    }
-                }
-            }
-
-            if crashDiagnosticsEnabled {
+            if crashDiagnosticsEnabled, FirebaseApp.app() != nil {
                 let crashlytics = Crashlytics.crashlytics()
-                crashlytics.setCustomValue(issueRef.documentID, forKey: "halo_latest_feedback_issue")
+                crashlytics.setCustomValue(issueID, forKey: "halo_latest_feedback_issue")
                 crashlytics.log("Feedback submitted: \(submission.kind.storageValue)")
             }
 
-            successMessage = "Thanks — your report was sent. Reference: \(issueRef.documentID)"
+            successMessage = "Thanks — your report was sent. Reference: \(issueID)"
             if submission.kind == .crash {
                 crashedDuringPreviousExecution = false
             }
@@ -271,7 +268,118 @@ final class HaloFeedbackService: ObservableObject {
            let options = FirebaseOptions(contentsOfFile: path) {
             FirebaseApp.configure(options: options)
         }
-        firebaseAvailable = FirebaseApp.app() != nil
+        firebaseAvailable = firebaseProjectID() != nil
+    }
+
+    private func firebaseProjectID() -> String? {
+        guard let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
+              let values = NSDictionary(contentsOfFile: path),
+              let projectID = values["PROJECT_ID"] as? String,
+              !projectID.isEmpty else {
+            return nil
+        }
+        return projectID
+    }
+
+    private func commitFeedback(
+        issueID: String,
+        idToken: String,
+        publicIssue: [String: Any],
+        privateReport: [String: Any]
+    ) async throws {
+        guard let projectID = firebaseProjectID() else {
+            throw HaloFeedbackError.message("Firebase project configuration is missing.")
+        }
+
+        let database = "projects/\(projectID)/databases/(default)"
+        guard let url = URL(string: "https://firestore.googleapis.com/v1/\(database)/documents:commit") else {
+            throw HaloFeedbackError.message("Could not create the Firestore endpoint.")
+        }
+
+        let issueName = "\(database)/documents/feedbackIssues/\(issueID)"
+        let reportName = "\(database)/documents/feedbackReports/\(issueID)"
+
+        let issueWrite: [String: Any] = [
+            "update": [
+                "name": issueName,
+                "fields": firestoreFields(publicIssue)
+            ],
+            "updateTransforms": [
+                ["fieldPath": "createdAt", "setToServerValue": "REQUEST_TIME"],
+                ["fieldPath": "updatedAt", "setToServerValue": "REQUEST_TIME"]
+            ],
+            "currentDocument": ["exists": false]
+        ]
+
+        let reportWrite: [String: Any] = [
+            "update": [
+                "name": reportName,
+                "fields": firestoreFields(privateReport)
+            ],
+            "updateTransforms": [
+                ["fieldPath": "createdAt", "setToServerValue": "REQUEST_TIME"]
+            ],
+            "currentDocument": ["exists": false]
+        ]
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(
+            withJSONObject: ["writes": [issueWrite, reportWrite]],
+            options: []
+        )
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw HaloFeedbackError.message("No response from Firestore.")
+        }
+
+        guard (200..<300).contains(http.statusCode) else {
+            throw HaloFeedbackError.message(
+                firestoreErrorMessage(from: data) ?? "Firestore request failed (\(http.statusCode))."
+            )
+        }
+    }
+
+    private func firestoreFields(_ values: [String: Any]) -> [String: Any] {
+        var fields: [String: Any] = [:]
+        for (key, value) in values {
+            fields[key] = firestoreValue(value)
+        }
+        return fields
+    }
+
+    private func firestoreValue(_ value: Any) -> [String: Any] {
+        if let value = value as? String {
+            return ["stringValue": value]
+        }
+        if let value = value as? Bool {
+            return ["booleanValue": value]
+        }
+        if let value = value as? Int {
+            return ["integerValue": String(value)]
+        }
+        if let value = value as? [String: String] {
+            let nested = value.reduce(into: [String: Any]()) { partialResult, pair in
+                partialResult[pair.key] = ["stringValue": pair.value]
+            }
+            return ["mapValue": ["fields": nested]]
+        }
+        if let value = value as? [String: Any] {
+            return ["mapValue": ["fields": firestoreFields(value)]]
+        }
+        return ["stringValue": String(describing: value)]
+    }
+
+    private func firestoreErrorMessage(from data: Data) -> String? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let error = root["error"] as? [String: Any],
+              let message = error["message"] as? String else {
+            return nil
+        }
+        return message
     }
 
     private func baseMetadata() -> [String: String] {
