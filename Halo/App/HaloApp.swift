@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        HaloFeedbackService.shared.start()
         NSApp.setActivationPolicy(.accessory)
         NotificationCenter.default.addObserver(self, selector: #selector(openSettings), name: Notification.Name("HaloOpenSettings"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(toggle), name: Notification.Name("HaloToggle"), object: nil)
@@ -55,6 +56,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let feedbackItem = NSMenuItem(title: "Send Feedback…", action: #selector(openFeedback), keyEquivalent: "")
+        feedbackItem.target = self
+        menu.addItem(feedbackItem)
 
         let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         updateItem.target = self
@@ -83,6 +88,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
         status?.menu = menu
+
+        if HaloFeedbackService.shared.crashedDuringPreviousExecution {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.presentPreviousCrashPromptIfNeeded()
+            }
+        }
     }
 
     private func configureCommercialAccessGate() {
@@ -243,6 +254,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func toggle() { engine?.toggleAll() }
+    @objc private func openFeedback() {
+        HaloFeedbackService.shared.select(.bug)
+        openSettings()
+        NotificationCenter.default.post(name: .init("HaloOpenFeedback"), object: nil)
+    }
     @objc private func checkForUpdates() { updater.checkForUpdates() }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func previewVolumeHUD() { postHUDPreview("volume") }
@@ -250,6 +266,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func previewKeyboardHUD() { postHUDPreview("keyboard") }
     private func postHUDPreview(_ kind: String) {
         NotificationCenter.default.post(name: .init("HaloHUDPreview"), object: nil, userInfo: ["kind": kind])
+    }
+
+    private func presentPreviousCrashPromptIfNeeded() {
+        guard HaloFeedbackService.shared.crashedDuringPreviousExecution else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Halo unexpectedly closed last time"
+        alert.informativeText = "If you remember what you were doing, a short description can make the crash much easier to diagnose."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Tell Us What Happened")
+        alert.addButton(withTitle: "Not Now")
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        HaloFeedbackService.shared.select(.crash)
+        openSettings()
+        NotificationCenter.default.post(name: .init("HaloOpenFeedback"), object: nil)
     }
 
     @objc func openSettings() {
