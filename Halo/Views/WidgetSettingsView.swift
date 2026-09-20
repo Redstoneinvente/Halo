@@ -1389,6 +1389,16 @@ struct ClosedNotchSettingsView: View {
                     set: { options.wrappedValue.albumTextColor = $0 }
                 )
             )
+            Toggle(
+                "Make album foreground colors readable",
+                isOn: Binding(
+                    get: { options.wrappedValue.usesReadableAlbumForegroundColors },
+                    set: { options.wrappedValue.readableAlbumForegroundColors = $0 }
+                )
+            )
+            Text("Adjusts album-derived text and dynamic visualizer colors only as much as needed for readable foreground contrast. Album background colors and artwork keep their original palette.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
 
         Section("Reactive background") {
