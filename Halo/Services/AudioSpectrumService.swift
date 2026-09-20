@@ -54,9 +54,21 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SH
 
     func setActive(_ active: Bool, owner: String) {
         stateLock.lock()
-        if active { activeOwners.insert(owner) } else { activeOwners.remove(owner) }
+        let ownerChanged: Bool
+        if active {
+            ownerChanged = activeOwners.insert(owner).inserted
+        } else {
+            ownerChanged = activeOwners.remove(owner) != nil
+        }
         wanted = !activeOwners.isEmpty
         let nowWanted = wanted
+
+        // A failed/denied capture is blocked only for the current ownership generation.
+        // A genuinely new consumer, or a complete deactivate/reactivate cycle, gets one clean retry.
+        if !nowWanted || (active && ownerChanged) {
+            blockedForCurrentActivation = false
+        }
+
         idleStopTask?.cancel()
         idleStopTask = nil
 
