@@ -5282,6 +5282,13 @@ private struct ContextMusicView: View {
         guard let dominant = rawSongPalette.first else { return nil }
         return AlbumForegroundColorResolver.readable(dominant, against: foregroundContrastBackgrounds)
     }
+    private var semanticSongColors: AudioCISemanticColors? {
+        guard options.usesAdaptiveElementColors, !rawSongPalette.isEmpty else { return nil }
+        return AudioCISemanticColorResolver.resolve(
+            album: rawSongPalette,
+            backgrounds: foregroundContrastBackgrounds
+        )
+    }
     private var baseTextColor: Color { options.textColor.color }
     private var primarySongColor: Color {
         if options.usesReadableSongForegroundColors, let generatedSongForeground { return generatedSongForeground.color }
@@ -5290,7 +5297,17 @@ private struct ContextMusicView: View {
     private var effectiveTextColor: Color { options.usesSongTextColors && !rawSongPalette.isEmpty ? primarySongColor : baseTextColor }
     private var effectiveControlColor: Color { options.usesSongControlColors && !rawSongPalette.isEmpty ? primarySongColor : baseTextColor }
     private var effectiveVisualizerColor: Color { options.usesSongVisualizerColors && !rawSongPalette.isEmpty ? primarySongColor : baseTextColor }
+    private var primaryTextColor: Color { semanticSongColors?.primaryText.color ?? effectiveTextColor }
+    private var secondaryTextColor: Color { semanticSongColors?.secondaryText.color ?? effectiveTextColor.opacity(0.62) }
+    private var primaryControlColor: Color { semanticSongColors?.primaryControl.color ?? effectiveControlColor }
+    private var secondaryControlColor: Color { semanticSongColors?.secondaryControl.color ?? effectiveControlColor.opacity(0.76) }
+    private var progressFillColor: Color { semanticSongColors?.progressFill.color ?? effectiveControlColor }
+    private var progressTrackColor: Color { semanticSongColors?.progressTrack.color ?? effectiveControlColor.opacity(0.20) }
+    private var progressThumbColor: Color { semanticSongColors?.progressThumb.color ?? effectiveControlColor }
+    private var lyricCurrentColor: Color { semanticSongColors?.lyricCurrent.color ?? effectiveTextColor }
+    private var lyricUpcomingColor: Color { semanticSongColors?.lyricUpcoming.color ?? effectiveTextColor.opacity(0.42) }
     private var visualizerPalette: [WidgetColor] {
+        if let semanticSongColors { return semanticSongColors.visualizer }
         guard options.usesSongVisualizerColors else { return [] }
         if options.usesReadableSongForegroundColors, let generatedSongForeground { return [generatedSongForeground] }
         return rawSongPalette
