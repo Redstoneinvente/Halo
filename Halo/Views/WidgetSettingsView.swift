@@ -824,6 +824,25 @@ struct WidgetSettingsView: View {
 }
 
 struct ClosedNotchSettingsView: View {
+    private enum SettingsPage: String, CaseIterable, Identifiable {
+        case content = "Content"
+        case media = "Media"
+        case events = "Events"
+        case layout = "Layout"
+
+        var id: String { rawValue }
+
+        var description: String {
+            switch self {
+            case .content: return "Choose what appears beside the notch and how the core closed content looks."
+            case .media: return "Customize music text, artwork, gestures, colors and playback animation."
+            case .events: return "Configure temporary Live Activity, Bluetooth and power-state content."
+            case .layout: return "Control fitting, spacing, expansion and how closed effects carry into the opened notch."
+            }
+        }
+    }
+
+    @State private var selectedPage: SettingsPage = .content
     @Binding var layout: WorkspaceLayout
     @ObservedObject var media: MediaService
     let app: String
@@ -847,65 +866,148 @@ struct ClosedNotchSettingsView: View {
     private var artwork: Binding<ClosedArtworkOptions> {
         Binding(get: {
             if let saved = options.wrappedValue.artworkOptions { return saved }
-            let legacy = options.wrappedValue.mediaOptions ?? ClosedMediaOptions()
-            var value = ClosedArtworkOptions()
-            if legacy.artwork != .none {
-                value.enabled = true; value.mode = legacy.artwork; value.size = legacy.artworkSize
-                value.vinylRPM = legacy.vinylRPM; value.backgroundOpacity = legacy.backgroundOpacity
+            let legacy = options.wrappedValue    var body: some View {
+        Section {
+            Picker("Category", selection: $selectedPage) {
+                ForEach(SettingsPage.allCases) { page in
+                    Text(page.rawValue).tag(page)
+                }
             }
-            return value
-        }, set: { options.wrappedValue.artworkOptions = $0 })
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            Text(selectedPage.description)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        switch selectedPage {
+        case .content:
+            contentSettings
+        case .media:
+            mediaSettings
+        case .events:
+            eventSettings
+        case .layout:
+            layoutSettings
+        }
+
+        Section {
+            Button("Reset closed content") {
+                layout.closedNotch = ClosedNotchOptions()
+            }
+        }
     }
-    private var reactive: Binding<ReactiveBackgroundOptions> { Binding(get: { options.wrappedValue.reactiveBackground ?? ReactiveBackgroundOptions() }, set: { options.wrappedValue.reactiveBackground = $0 }) }
-    private var power: Binding<PowerReactionOptions> { Binding(get: { options.wrappedValue.powerReaction ?? PowerReactionOptions() }, set: { options.wrappedValue.powerReaction = $0 }) }
-    var body: some View {
-        Section("Opened background") {
-            Toggle("Apply these background effects when opened", isOn: Binding(get: { options.wrappedValue.applyBackgroundWhenOpened ?? false }, set: { options.wrappedValue.applyBackgroundWhenOpened = $0 }))
-            Text("Reuse album colors, artwork backgrounds and reactive effects in the opened notch.").font(.caption)
-        }
-        Section("Content fit") {
-            Toggle("Auto-size to fit content", isOn: Binding(get: { options.wrappedValue.autoFitContent ?? true }, set: { options.wrappedValue.autoFitContent = $0 }))
-            Text("Closed content always has a no-clipping minimum width. Turning Auto-size off keeps your configured idle/base width preference, but Halo will still grow when a widget would otherwise be cut off.")
-                .font(.caption).foregroundStyle(.secondary)
-            PreciseSlider(title: "Horizontal padding", value: Binding(get: { options.wrappedValue.contentPaddingX }, set: { options.wrappedValue.horizontalPadding = $0 }), range: 0...24, step: 1, suffix: "pt")
-            PreciseSlider(title: "Vertical padding", value: Binding(get: { options.wrappedValue.contentPaddingY }, set: { options.wrappedValue.verticalPadding = $0 }), range: 0...12, step: 1, suffix: "pt")
-            PreciseSlider(title: "Margin from camera", value: Binding(get: { options.wrappedValue.contentSideMargin }, set: { options.wrappedValue.sideMargin = $0 }), range: 0...48, step: 1, suffix: "pt")
-            PreciseSlider(title: "Margin from outer edge", value: Binding(get: { options.wrappedValue.contentOuterMargin }, set: { options.wrappedValue.outerMargin = $0 }), range: 17...48, step: 1, suffix: "pt")
-            Text("The Appearance closed-width slider is the idle/base width. Auto-size grows only as much as visible content needs. Default padding compresses automatically at very small closed heights; explicit padding and margin values stay exact.").font(.caption)
-        }
-        Section("Automatic width") {
-            Toggle("Widen for music and live activity", isOn: expansion.enabled)
-            PreciseSlider(title: "Active width", value: expansion.width, range: 120...640, step: 1, suffix: "pt")
-            Text("Optional fixed-width expansion for music and other live content. Leave this off for exact content-fit sizing. Power events use their measured size and inherit the normal camera spacing unless you set an override below.").font(.caption)
-        }
-        SideDecorationSettingsView(title: "Left icon / GIF", options: Binding(get: { options.wrappedValue.leftDecoration ?? SideDecoration() }, set: { options.wrappedValue.leftDecoration = $0 }))
-        SideDecorationSettingsView(title: "Right icon / GIF", options: Binding(get: { options.wrappedValue.rightDecoration ?? SideDecoration() }, set: { options.wrappedValue.rightDecoration = $0 }))
+
+    @ViewBuilder
+    private var contentSettings: some View {
         Section("Content") {
             itemPicker("Left slot", options.left)
             itemPicker("Right slot", options.right)
             PreciseSlider(title: "Text size", value: options.fontSize, range: 8...24, step: 1, suffix: "pt")
-            ColorPicker("Color", selection: Binding(get: { options.wrappedValue.color.color }, set: { options.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
-            Text("Choose Activity in either slot to reserve that side for Live Activities. The Activity widget uses the same horizontal/vertical padding, camera margin, outer margin and element spacing as every other Closed Notch item.").font(.caption)
+            ColorPicker(
+                "Color",
+                selection: Binding(
+                    get: { options.wrappedValue.color.color },
+                    set: { options.wrappedValue.color = WidgetColor($0) }
+                ),
+                supportsOpacity: false
+            )
+            Text("Choose Activity in either slot to reserve that side for Live Activities. The Activity widget uses the same horizontal/vertical padding, camera margin, outer margin and element spacing as every other Closed Notch item.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+
+        SideDecorationSettingsView(
+            title: "Left icon / GIF",
+            options: Binding(
+                get: { options.wrappedValue.leftDecoration ?? SideDecoration() },
+                set: { options.wrappedValue.leftDecoration = $0 }
+            )
+        )
+
+        SideDecorationSettingsView(
+            title: "Right icon / GIF",
+            options: Binding(
+                get: { options.wrappedValue.rightDecoration ?? SideDecoration() },
+                set: { options.wrappedValue.rightDecoration = $0 }
+            )
+        )
+    }
+
+    @ViewBuilder
+    private var layoutSettings: some View {
+        Section("Content fit") {
+            Toggle(
+                "Auto-size to fit content",
+                isOn: Binding(
+                    get: { options.wrappedValue.autoFitContent ?? true },
+                    set: { options.wrappedValue.autoFitContent = $0 }
+                )
+            )
+            Text("Closed content always has a no-clipping minimum width. Turning Auto-size off keeps your configured idle/base width preference, but Halo will still grow when a widget would otherwise be cut off.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            PreciseSlider(title: "Horizontal padding", value: Binding(get: { options.wrappedValue.contentPaddingX }, set: { options.wrappedValue.horizontalPadding = $0 }), range: 0...24, step: 1, suffix: "pt")
+            PreciseSlider(title: "Vertical padding", value: Binding(get: { options.wrappedValue.contentPaddingY }, set: { options.wrappedValue.verticalPadding = $0 }), range: 0...12, step: 1, suffix: "pt")
+            PreciseSlider(title: "Margin from camera", value: Binding(get: { options.wrappedValue.contentSideMargin }, set: { options.wrappedValue.sideMargin = $0 }), range: 0...48, step: 1, suffix: "pt")
+            PreciseSlider(title: "Margin from outer edge", value: Binding(get: { options.wrappedValue.contentOuterMargin }, set: { options.wrappedValue.outerMargin = $0 }), range: 17...48, step: 1, suffix: "pt")
+            Text("The Appearance closed-width slider is the idle/base width. Auto-size grows only as much as visible content needs. Default padding compresses automatically at very small closed heights; explicit padding and margin values stay exact.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Automatic width") {
+            Toggle("Widen for music and live activity", isOn: expansion.enabled)
+            if expansion.wrappedValue.enabled {
+                PreciseSlider(title: "Active width", value: expansion.width, range: 120...640, step: 1, suffix: "pt")
+                Text("Uses a fixed active width for music and other live content. Power events still use their measured size and inherit the normal camera spacing unless you set an override.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Halo will use exact content-fit sizing instead of forcing a fixed active width.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        Section("Opened background") {
+            Toggle(
+                "Apply these background effects when opened",
+                isOn: Binding(
+                    get: { options.wrappedValue.applyBackgroundWhenOpened ?? false },
+                    set: { options.wrappedValue.applyBackgroundWhenOpened = $0 }
+                )
+            )
+            Text("Reuse album colors, artwork backgrounds and reactive effects in the opened notch.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var eventSettings: some View {
         Section("Live Activity widget") {
-            Toggle("Automatically use a free side", isOn: Binding(
-                get: { UserDefaults.standard.object(forKey: "HaloLiveActivitiesClosedAutoPresent") as? Bool ?? true },
-                set: { UserDefaults.standard.set($0, forKey: "HaloLiveActivitiesClosedAutoPresent") }
-            ))
-            Text("This controls the Closed Notch Activity widget only. Select Activity for the left or right slot above to reserve a side, or enable automatic placement to temporarily use an available side when an activity arrives.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text("The widget inherits the Closed Notch padding, camera margin, outer-edge margin and element spacing configured on this page.")
+            Toggle(
+                "Automatically use a free side",
+                isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: "HaloLiveActivitiesClosedAutoPresent") as? Bool ?? true },
+                    set: { UserDefaults.standard.set($0, forKey: "HaloLiveActivitiesClosedAutoPresent") }
+                )
+            )
+            Text("Select Activity for the left or right slot on the Content tab to reserve a side, or let Halo temporarily use an available side when an activity arrives.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+
         Section("Bluetooth events") {
             Toggle("Show Bluetooth connection states", isOn: $bluetoothEvents)
-            Group {
+            if bluetoothEvents {
                 Toggle("Device connected", isOn: $bluetoothConnected)
                 Toggle("Device disconnected", isOn: $bluetoothDisconnected)
                 Toggle("Bluetooth turned on", isOn: $bluetoothPoweredOn)
                 Toggle("Bluetooth turned off", isOn: $bluetoothPoweredOff)
+
                 Picker("Preferred side", selection: $bluetoothSide) {
                     ForEach(BluetoothClosedNotchSide.allCases) { Text($0.title).tag($0.rawValue) }
                 }
@@ -915,6 +1017,7 @@ struct ClosedNotchSettingsView: View {
                 Picker("Accent", selection: $bluetoothAccent) {
                     ForEach(BluetoothClosedNotchAccent.allCases) { Text($0.title).tag($0.rawValue) }
                 }
+
                 Toggle("Show event icon", isOn: $bluetoothShowIcon)
                 Toggle("Show event label", isOn: $bluetoothShowLabel)
                 Toggle("Show device / detail", isOn: $bluetoothShowDevice)
@@ -922,30 +1025,168 @@ struct ClosedNotchSettingsView: View {
                 if bluetoothShowIcon {
                     PreciseSlider(title: "Event icon size", value: $bluetoothIconSize, range: 10...30, step: 1, suffix: "pt")
                 }
+
+                Text("Bluetooth events can temporarily take the left or right Closed Notch slot. Your normal content returns after the selected duration.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Enable Bluetooth connection states to configure which events appear and how they are presented.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .disabled(!bluetoothEvents)
-            Text("Bluetooth events can temporarily take the left or right Closed Notch slot. Your normal content returns after the selected duration.")
-                .font(.caption).foregroundStyle(.secondary)
         }
+
+        Section("Power events") {
+            Toggle(
+                "Enable power events",
+                isOn: Binding(
+                    get: { power.wrappedValue.isEnabled },
+                    set: { power.wrappedValue.enabled = $0 }
+                )
+            )
+            if power.wrappedValue.isEnabled {
+                Picker("Side", selection: power.side) {
+                    Text("Automatic").tag(ClosedNotchSideChoice.automatic)
+                    Text("Left").tag(ClosedNotchSideChoice.left)
+                    Text("Right").tag(ClosedNotchSideChoice.right)
+                }
+                Picker("Charging", selection: power.charging) { powerStyles() }
+                Picker("Low battery", selection: power.low) { powerStyles() }
+                Picker("Charged", selection: power.charged) { powerStyles() }
+                PreciseSlider(
+                    title: "Low battery threshold",
+                    value: Binding(
+                        get: { Double(power.wrappedValue.lowThreshold) },
+                        set: { power.wrappedValue.lowThreshold = Int($0) }
+                    ),
+                    range: 5...50,
+                    step: 1,
+                    suffix: "%"
+                )
+                PreciseSlider(
+                    title: "Margin from notch",
+                    value: Binding(
+                        get: {
+                            power.wrappedValue.notchMargin ??
+                                ClosedNotchLayoutMetrics(
+                                    options: options.wrappedValue,
+                                    height: layout.appearance.surface.compactHeight
+                                ).normalCameraInset
+                        },
+                        set: { power.wrappedValue.notchMargin = $0 }
+                    ),
+                    range: 0...48,
+                    step: 1,
+                    suffix: "pt"
+                )
+                HStack {
+                    Text(
+                        power.wrappedValue.notchMargin == nil
+                            ? "Inheriting the normal Closed Notch camera spacing."
+                            : "Using a power-specific camera spacing override."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button("Use Closed Notch spacing") {
+                        power.wrappedValue.notchMargin = nil
+                    }
+                    .disabled(power.wrappedValue.notchMargin == nil)
+                }
+
+                Toggle("Expand for power events", isOn: power.expandForEvent)
+                if power.wrappedValue.expandForEvent {
+                    PreciseSlider(
+                        title: "Extra event space",
+                        value: Binding(
+                            get: { power.wrappedValue.resolvedExtraEventSpace },
+                            set: { power.wrappedValue.extraEventSpace = $0 }
+                        ),
+                        range: 0...120,
+                        step: 1,
+                        suffix: "pt"
+                    )
+                    Text("Power events size to their visible content. Extra event space is optional breathing room and no longer forces a large default wing.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Toggle(
+                    "Dynamic color by battery level",
+                    isOn: Binding(
+                        get: { power.wrappedValue.usesDynamicColor },
+                        set: { power.wrappedValue.dynamicColor = $0 }
+                    )
+                )
+                if power.wrappedValue.usesDynamicColor {
+                    ColorPicker("Low battery color", selection: Binding(get: { power.wrappedValue.resolvedLowColor.color }, set: { power.wrappedValue.lowColor = WidgetColor($0) }), supportsOpacity: false)
+                    ColorPicker("Mid battery color", selection: Binding(get: { power.wrappedValue.resolvedMidColor.color }, set: { power.wrappedValue.midColor = WidgetColor($0) }), supportsOpacity: false)
+                    ColorPicker("High battery color", selection: Binding(get: { power.wrappedValue.resolvedHighColor.color }, set: { power.wrappedValue.highColor = WidgetColor($0) }), supportsOpacity: false)
+                } else {
+                    ColorPicker("Power event color", selection: Binding(get: { power.wrappedValue.color.color }, set: { power.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false)
+                }
+            } else {
+                Text("Enable power events to configure charging, low-battery and fully-charged states.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var mediaSettings: some View {
         Section("Closed media text") {
             Picker("Text", selection: mediaOptions.textMode) {
-                Text("Track title").tag(MediaTextMode.title); Text("Artist").tag(MediaTextMode.artist); Text("Title + artist").tag(MediaTextMode.titleArtist); Text("Lyrics").tag(MediaTextMode.lyrics)
+                Text("Track title").tag(MediaTextMode.title)
+                Text("Artist").tag(MediaTextMode.artist)
+                Text("Title + artist").tag(MediaTextMode.titleArtist)
+                Text("Lyrics").tag(MediaTextMode.lyrics)
             }
+
             Picker("Overflow", selection: mediaOptions.overflow) {
-                Text("Truncate").tag(MediaOverflowMode.truncate); Text("Scale to fit").tag(MediaOverflowMode.scale); Text("Marquee").tag(MediaOverflowMode.marquee)
+                Text("Truncate").tag(MediaOverflowMode.truncate)
+                Text("Scale to fit").tag(MediaOverflowMode.scale)
+                Text("Marquee").tag(MediaOverflowMode.marquee)
             }
+
             if mediaOptions.wrappedValue.overflow == .truncate || mediaOptions.wrappedValue.overflow == .marquee {
-                PreciseSlider(title: "Media horizontal space", value: Binding(get: { mediaOptions.wrappedValue.resolvedHorizontalSpace }, set: { mediaOptions.wrappedValue.horizontalSpace = $0 }), range: 48...360, step: 1, suffix: "pt")
-                Text("This is the maximum horizontal space reserved for Truncate or Marquee media. Lyrics can still shrink below it when dynamic lyric width is enabled.").font(.caption)
+                PreciseSlider(
+                    title: "Media horizontal space",
+                    value: Binding(
+                        get: { mediaOptions.wrappedValue.resolvedHorizontalSpace },
+                        set: { mediaOptions.wrappedValue.horizontalSpace = $0 }
+                    ),
+                    range: 48...360,
+                    step: 1,
+                    suffix: "pt"
+                )
+                Text("This is the maximum horizontal space reserved for Truncate or Marquee media. Lyrics can still shrink below it when dynamic lyric width is enabled.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+
             if mediaOptions.wrappedValue.textMode == .lyrics {
-                Picker("Lyric display", selection: Binding(get: { mediaOptions.wrappedValue.resolvedLyricDisplay }, set: { mediaOptions.wrappedValue.lyricDisplay = $0 })) {
-                    Text("Current line").tag(LyricDisplayMode.line); Text("Focus phrase").tag(LyricDisplayMode.focus); Text("Current word").tag(LyricDisplayMode.word)
+                Picker(
+                    "Lyric display",
+                    selection: Binding(
+                        get: { mediaOptions.wrappedValue.resolvedLyricDisplay },
+                        set: { mediaOptions.wrappedValue.lyricDisplay = $0 }
+                    )
+                ) {
+                    Text("Current line").tag(LyricDisplayMode.line)
+                    Text("Focus phrase").tag(LyricDisplayMode.focus)
+                    Text("Current word").tag(LyricDisplayMode.word)
                 }
-                Picker("Lyric transition", selection: Binding(
-                    get: { mediaOptions.wrappedValue.resolvedLyricChangeAnimation },
-                    set: { mediaOptions.wrappedValue.lyricChangeAnimation = $0 }
-                )) {
+
+                Picker(
+                    "Lyric transition",
+                    selection: Binding(
+                        get: { mediaOptions.wrappedValue.resolvedLyricChangeAnimation },
+                        set: { mediaOptions.wrappedValue.lyricChangeAnimation = $0 }
+                    )
+                ) {
                     Text("None").tag(MediaChangeAnimation.none)
                     Text("Fade").tag(MediaChangeAnimation.fade)
                     Text("Slide").tag(MediaChangeAnimation.slide)
@@ -953,6 +1194,7 @@ struct ClosedNotchSettingsView: View {
                     Text("Scale").tag(MediaChangeAnimation.scale)
                     Text("Blur + fade").tag(MediaChangeAnimation.blur)
                 }
+
                 if mediaOptions.wrappedValue.resolvedLyricChangeAnimation != .none {
                     PreciseSlider(
                         title: "Lyric transition duration",
@@ -966,24 +1208,62 @@ struct ClosedNotchSettingsView: View {
                         decimals: 2
                     )
                 }
-                Text("Controls the animation used when the active synced lyric line changes. Focus/current-word updates within a line remain continuous.")
+
+                Toggle(
+                    "Resize notch to current lyric",
+                    isOn: Binding(
+                        get: { mediaOptions.wrappedValue.usesDynamicLyricWidth },
+                        set: { mediaOptions.wrappedValue.dynamicLyricWidth = $0 }
+                    )
+                )
+                PreciseSlider(
+                    title: "Lyrics sync offset",
+                    value: Binding(
+                        get: { mediaOptions.wrappedValue.resolvedLyricSyncOffset },
+                        set: { mediaOptions.wrappedValue.lyricSyncOffset = $0 }
+                    ),
+                    range: -5...5,
+                    step: 0.05,
+                    suffix: "s",
+                    decimals: 2
+                )
+            }
+
+            if mediaOptions.wrappedValue.textMode != .lyrics || mediaOptions.wrappedValue.resolvedLyricDisplay != .word {
+                Picker("Lines", selection: mediaOptions.lines) {
+                    Text("1 line").tag(1)
+                    Text("2 lines").tag(2)
+                }
+            }
+
+            if mediaOptions.wrappedValue.overflow == .marquee {
+                PreciseSlider(title: "Marquee speed", value: mediaOptions.marqueeSpeed, range: 8...120, step: 1, suffix: "pt/s")
+            }
+
+            Toggle("Show playback icon", isOn: mediaOptions.showPlaybackIcon)
+
+            if mediaOptions.wrappedValue.textMode == .lyrics {
+                Toggle(
+                    "Use online lyrics fallback",
+                    isOn: Binding(
+                        get: { mediaOptions.wrappedValue.usesOnlineLyrics },
+                        set: { mediaOptions.wrappedValue.onlineLyrics = $0 }
+                    )
+                )
+                Text("Halo re-samples the player clock and snaps meaningful drift automatically. The sync offset lets you correct a lyric source that is consistently early or late. Timestamped LRC offset metadata is also respected.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Toggle("Resize notch to current lyric", isOn: Binding(get: { mediaOptions.wrappedValue.usesDynamicLyricWidth }, set: { mediaOptions.wrappedValue.dynamicLyricWidth = $0 }))
-                PreciseSlider(title: "Lyrics sync offset", value: Binding(get: { mediaOptions.wrappedValue.resolvedLyricSyncOffset }, set: { mediaOptions.wrappedValue.lyricSyncOffset = $0 }), range: -5...5, step: 0.05, suffix: "s", decimals: 2)
-            }
-            if mediaOptions.wrappedValue.textMode != .lyrics || mediaOptions.wrappedValue.resolvedLyricDisplay != .word {
-                Picker("Lines", selection: mediaOptions.lines) { Text("1 line").tag(1); Text("2 lines").tag(2) }
-            }
-            if mediaOptions.wrappedValue.overflow == .marquee { PreciseSlider(title: "Marquee speed", value: mediaOptions.marqueeSpeed, range: 8...120, step: 1, suffix: "pt/s") }
-            Toggle("Show playback icon", isOn: mediaOptions.showPlaybackIcon)
-            if mediaOptions.wrappedValue.textMode == .lyrics {
-                Toggle("Use online lyrics fallback", isOn: Binding(get: { mediaOptions.wrappedValue.usesOnlineLyrics }, set: { mediaOptions.wrappedValue.onlineLyrics = $0 }))
-                Text("Halo re-samples the player clock and snaps meaningful drift automatically. The sync offset lets you correct a lyric source that is consistently early or late. Timestamped LRC offset metadata is also respected.").font(.caption)
             }
         }
+
         Section("Song changes") {
-            Picker("Transition", selection: Binding(get: { mediaOptions.wrappedValue.resolvedChangeAnimation }, set: { mediaOptions.wrappedValue.changeAnimation = $0 })) {
+            Picker(
+                "Transition",
+                selection: Binding(
+                    get: { mediaOptions.wrappedValue.resolvedChangeAnimation },
+                    set: { mediaOptions.wrappedValue.changeAnimation = $0 }
+                )
+            ) {
                 Text("None").tag(MediaChangeAnimation.none)
                 Text("Fade").tag(MediaChangeAnimation.fade)
                 Text("Slide").tag(MediaChangeAnimation.slide)
@@ -991,62 +1271,139 @@ struct ClosedNotchSettingsView: View {
                 Text("Scale").tag(MediaChangeAnimation.scale)
                 Text("Blur + fade").tag(MediaChangeAnimation.blur)
             }
+
             if mediaOptions.wrappedValue.resolvedChangeAnimation != .none {
-                PreciseSlider(title: "Transition duration", value: Binding(get: { mediaOptions.wrappedValue.resolvedChangeAnimationDuration }, set: { mediaOptions.wrappedValue.changeAnimationDuration = $0 }), range: 0.08...1.2, step: 0.02, suffix: "s", decimals: 2)
+                PreciseSlider(
+                    title: "Transition duration",
+                    value: Binding(
+                        get: { mediaOptions.wrappedValue.resolvedChangeAnimationDuration },
+                        set: { mediaOptions.wrappedValue.changeAnimationDuration = $0 }
+                    ),
+                    range: 0.08...1.2,
+                    step: 0.02,
+                    suffix: "s",
+                    decimals: 2
+                )
             }
-            Text("This transition applies to track/title text and cover/vinyl changes. When Lyrics is selected above, lyric lines use their own dedicated transition setting.").font(.caption)
+            Text("This transition applies to track/title text and cover/vinyl changes. When Lyrics is selected above, lyric lines use their own dedicated transition setting.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+
         Section("Media gestures") {
             gesturePicker("Tap", Binding(get: { mediaOptions.wrappedValue.resolvedTapAction }, set: { mediaOptions.wrappedValue.tapAction = $0 }))
             gesturePicker("Double tap", Binding(get: { mediaOptions.wrappedValue.resolvedDoubleTapAction }, set: { mediaOptions.wrappedValue.doubleTapAction = $0 }))
             gesturePicker("Swipe left", Binding(get: { mediaOptions.wrappedValue.resolvedSwipeLeftAction }, set: { mediaOptions.wrappedValue.swipeLeftAction = $0 }))
             gesturePicker("Swipe right", Binding(get: { mediaOptions.wrappedValue.resolvedSwipeRightAction }, set: { mediaOptions.wrappedValue.swipeRightAction = $0 }))
-            Text("Gestures work across the closed media region, including artwork-only layouts. Defaults: tap Play/Pause, swipe left Next, swipe right Previous.").font(.caption)
+            Text("Gestures work across the closed media region, including artwork-only layouts. Defaults: tap Play/Pause, swipe left Next, swipe right Previous.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+
         Section("Artwork layers") {
             Toggle("Show foreground artwork", isOn: artwork.enabled)
             if artwork.wrappedValue.enabled {
-                Picker("Foreground style", selection: Binding(
-                    get: { artwork.wrappedValue.mode == .vinyl ? MediaArtworkMode.vinyl : .cover },
-                    set: { artwork.wrappedValue.mode = $0 }
-                )) {
+                Picker(
+                    "Foreground style",
+                    selection: Binding(
+                        get: { artwork.wrappedValue.mode == .vinyl ? MediaArtworkMode.vinyl : .cover },
+                        set: { artwork.wrappedValue.mode = $0 }
+                    )
+                ) {
                     Text("Album cover").tag(MediaArtworkMode.cover)
                     Text("Rotating vinyl").tag(MediaArtworkMode.vinyl)
-                }.pickerStyle(.segmented)
-                Picker("Foreground side", selection: artwork.side) {
-                    Text("Automatic").tag(ClosedNotchSideChoice.automatic); Text("Left").tag(ClosedNotchSideChoice.left); Text("Right").tag(ClosedNotchSideChoice.right)
                 }
-                Toggle("Artwork only", isOn: Binding(get: { artwork.wrappedValue.isArtworkOnly }, set: { artwork.wrappedValue.artworkOnly = $0 }))
+                .pickerStyle(.segmented)
+
+                Picker("Foreground side", selection: artwork.side) {
+                    Text("Automatic").tag(ClosedNotchSideChoice.automatic)
+                    Text("Left").tag(ClosedNotchSideChoice.left)
+                    Text("Right").tag(ClosedNotchSideChoice.right)
+                }
+
+                Toggle(
+                    "Artwork only",
+                    isOn: Binding(
+                        get: { artwork.wrappedValue.isArtworkOnly },
+                        set: { artwork.wrappedValue.artworkOnly = $0 }
+                    )
+                )
                 PreciseSlider(title: "Artwork size", value: artwork.size, range: 14...72, step: 1, suffix: "pt")
                 PreciseSlider(title: "Artwork padding", value: artwork.padding, range: 0...24, step: 1, suffix: "pt")
                 PreciseSlider(title: "Artwork margin", value: artwork.margin, range: 0...48, step: 1, suffix: "pt")
-                if artwork.wrappedValue.mode == .vinyl { PreciseSlider(title: "Vinyl speed", value: artwork.vinylRPM, range: 1...45, step: 1, suffix: "rpm") }
-            }
-            Toggle("Use album art as notch background", isOn: Binding(
-                get: { artwork.wrappedValue.usesBackgroundArtwork },
-                set: { enabled in
-                    artwork.wrappedValue.backgroundEnabled = enabled
-                    if enabled && !artwork.wrappedValue.enabled { artwork.wrappedValue.enabled = true }
-                    if artwork.wrappedValue.mode == .background { artwork.wrappedValue.mode = .cover }
+                if artwork.wrappedValue.mode == .vinyl {
+                    PreciseSlider(title: "Vinyl speed", value: artwork.vinylRPM, range: 1...45, step: 1, suffix: "rpm")
                 }
-            ))
+            }
+
+            Toggle(
+                "Use album art as notch background",
+                isOn: Binding(
+                    get: { artwork.wrappedValue.usesBackgroundArtwork },
+                    set: { enabled in
+                        artwork.wrappedValue.backgroundEnabled = enabled
+                        if enabled && !artwork.wrappedValue.enabled {
+                            artwork.wrappedValue.enabled = true
+                        }
+                        if artwork.wrappedValue.mode == .background {
+                            artwork.wrappedValue.mode = .cover
+                        }
+                    }
+                )
+            )
+
             if artwork.wrappedValue.usesBackgroundArtwork {
                 PreciseSlider(title: "Artwork background opacity", value: artwork.backgroundOpacity, range: 0...1, step: 0.01, decimals: 2)
             }
-            Text("Foreground and background artwork are independent. You can show a square cover or spinning vinyl inside the closed notch while the same album art fills the notch background behind it.").font(.caption).foregroundStyle(.secondary)
+
+            if artwork.wrappedValue.enabled || artwork.wrappedValue.usesBackgroundArtwork {
+                Text("Foreground and background artwork are independent. You can show a square cover or spinning vinyl inside the closed notch while the same album art fills the notch background behind it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+
         Section("Album colors") {
-            Toggle("Color notch background from album", isOn: Binding(get: { options.wrappedValue.albumBackgroundColor ?? false }, set: { options.wrappedValue.albumBackgroundColor = $0 }))
-            Toggle("Color closed-notch text from album", isOn: Binding(get: { options.wrappedValue.albumTextColor ?? false }, set: { options.wrappedValue.albumTextColor = $0 }))
+            Toggle(
+                "Color notch background from album",
+                isOn: Binding(
+                    get: { options.wrappedValue.albumBackgroundColor ?? false },
+                    set: { options.wrappedValue.albumBackgroundColor = $0 }
+                )
+            )
+            Toggle(
+                "Color closed-notch text from album",
+                isOn: Binding(
+                    get: { options.wrappedValue.albumTextColor ?? false },
+                    set: { options.wrappedValue.albumTextColor = $0 }
+                )
+            )
         }
+
         Section("Reactive background") {
             Toggle("React while music plays", isOn: reactive.enabled)
-            Picker("Reaction profile", selection: reactive.driver) {
-                Text("Pulse").tag(ReactiveDriver.pulse); Text("Bass").tag(ReactiveDriver.bass); Text("Mids").tag(ReactiveDriver.mids); Text("Treble").tag(ReactiveDriver.treble); Text("Spectrum").tag(ReactiveDriver.spectrum)
-            }.disabled(!reactive.wrappedValue.enabled)
             if reactive.wrappedValue.enabled {
+                Picker("Reaction profile", selection: reactive.driver) {
+                    Text("Pulse").tag(ReactiveDriver.pulse)
+                    Text("Bass").tag(ReactiveDriver.bass)
+                    Text("Mids").tag(ReactiveDriver.mids)
+                    Text("Treble").tag(ReactiveDriver.treble)
+                    Text("Spectrum").tag(ReactiveDriver.spectrum)
+                }
+
                 PreciseSlider(title: "Reaction speed", value: reactive.speed, range: 0.2...3, step: 0.05, decimals: 2)
-                if reactive.wrappedValue.driver != .pulse { PreciseSlider(title: "Audio sensitivity", value: Binding(get: { reactive.wrappedValue.resolvedAudioSensitivity }, set: { reactive.wrappedValue.audioSensitivity = $0 }), range: 0.25...4, step: 0.05, decimals: 2) }
+                if reactive.wrappedValue.driver != .pulse {
+                    PreciseSlider(
+                        title: "Audio sensitivity",
+                        value: Binding(
+                            get: { reactive.wrappedValue.resolvedAudioSensitivity },
+                            set: { reactive.wrappedValue.audioSensitivity = $0 }
+                        ),
+                        range: 0.25...4,
+                        step: 0.05,
+                        decimals: 2
+                    )
+                }
                 PreciseSlider(title: "Master intensity", value: reactive.intensity, range: 0...1, step: 0.05, decimals: 2)
                 PreciseSlider(title: "Affect brightness", value: reactive.brightness, range: 0...0.8, step: 0.01, decimals: 2)
                 PreciseSlider(title: "Affect saturation", value: reactive.saturation, range: 0...1, step: 0.01, decimals: 2)
@@ -1054,63 +1411,67 @@ struct ClosedNotchSettingsView: View {
                 PreciseSlider(title: "Affect hue", value: reactive.hueShift, range: 0...1, step: 0.01, decimals: 2)
                 PreciseSlider(title: "Affect blur", value: reactive.blur, range: 0...12, step: 0.25, suffix: "pt", decimals: 2)
                 PreciseSlider(title: "Affect grain", value: reactive.grain, range: 0...0.6, step: 0.01, decimals: 2)
-            }
-            Text("Bass, Mids, Treble and Spectrum analyse captured system-audio PCM. macOS may request Screen Recording/audio-capture permission the first time. Pulse remains permission-free.").font(.caption)
-        }
-        Section("Power events") {
-            Toggle("Enable power events", isOn: Binding(get: { power.wrappedValue.isEnabled }, set: { power.wrappedValue.enabled = $0 }))
-            if power.wrappedValue.isEnabled {
-                Picker("Side", selection: power.side) { Text("Automatic").tag(ClosedNotchSideChoice.automatic); Text("Left").tag(ClosedNotchSideChoice.left); Text("Right").tag(ClosedNotchSideChoice.right) }
-                Picker("Charging", selection: power.charging) { powerStyles() }
-                Picker("Low battery", selection: power.low) { powerStyles() }
-                Picker("Charged", selection: power.charged) { powerStyles() }
-                PreciseSlider(title: "Low battery threshold", value: Binding(get: { Double(power.wrappedValue.lowThreshold) }, set: { power.wrappedValue.lowThreshold = Int($0) }), range: 5...50, step: 1, suffix: "%")
-                PreciseSlider(title: "Margin from notch", value: Binding(
-                    get: {
-                        power.wrappedValue.notchMargin ??
-                            ClosedNotchLayoutMetrics(
-                                options: options.wrappedValue,
-                                height: layout.appearance.surface.compactHeight
-                            ).normalCameraInset
-                    },
-                    set: { power.wrappedValue.notchMargin = $0 }
-                ), range: 0...48, step: 1, suffix: "pt")
-                HStack {
-                    Text(power.wrappedValue.notchMargin == nil
-                         ? "Inheriting the normal Closed Notch camera spacing."
-                         : "Using a power-specific camera spacing override.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Use Closed Notch spacing") { power.wrappedValue.notchMargin = nil }
-                        .disabled(power.wrappedValue.notchMargin == nil)
-                }
-                Toggle("Expand for power events", isOn: power.expandForEvent)
-                if power.wrappedValue.expandForEvent {
-                    PreciseSlider(title: "Extra event space", value: Binding(
-                        get: { power.wrappedValue.resolvedExtraEventSpace },
-                        set: { power.wrappedValue.extraEventSpace = $0 }
-                    ), range: 0...120, step: 1, suffix: "pt")
-                    Text("Power events size to their visible content. Extra event space is optional breathing room and no longer forces a large default wing.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Toggle("Dynamic color by battery level", isOn: Binding(get: { power.wrappedValue.usesDynamicColor }, set: { power.wrappedValue.dynamicColor = $0 }))
-                if power.wrappedValue.usesDynamicColor {
-                    ColorPicker("Low battery color", selection: Binding(get: { power.wrappedValue.resolvedLowColor.color }, set: { power.wrappedValue.lowColor = WidgetColor($0) }), supportsOpacity: false)
-                    ColorPicker("Mid battery color", selection: Binding(get: { power.wrappedValue.resolvedMidColor.color }, set: { power.wrappedValue.midColor = WidgetColor($0) }), supportsOpacity: false)
-                    ColorPicker("High battery color", selection: Binding(get: { power.wrappedValue.resolvedHighColor.color }, set: { power.wrappedValue.highColor = WidgetColor($0) }), supportsOpacity: false)
-                } else { ColorPicker("Power event color", selection: Binding(get: { power.wrappedValue.color.color }, set: { power.wrappedValue.color = WidgetColor($0) }), supportsOpacity: false) }
+
+                Text("Bass, Mids, Treble and Spectrum analyse captured system-audio PCM. macOS may request Screen Recording/audio-capture permission the first time. Pulse remains permission-free.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Enable this to make the closed-notch background respond to playback.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
+
         Section("Music animation") {
-            Picker("Visualizer style", selection: Binding<PlaybackAnimation>(get: { options.wrappedValue.animation }, set: { options.wrappedValue.animation = $0 })) {
-                ForEach(PlaybackAnimation.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
-            }
             Toggle("Animate while music plays", isOn: options.animate)
-            Toggle("Use colors from music artwork", isOn: visualizer.dynamicColors)
-            PreciseSlider(title: "Animation speed", value: visualizer.speed, range: 0.25...2, step: 0.05, decimals: 2)
-            PreciseSlider(title: "Motion intensity", value: visualizer.intensity, range: 0.1...1, step: 0.05, decimals: 2)
-            PreciseSlider(title: "Visualizer width", value: visualizer.width, range: 32...160, step: 1, suffix: "pt")
+            if options.wrappedValue.animate {
+                Picker(
+                    "Visualizer style",
+                    selection: Binding<PlaybackAnimation>(
+                        get: { options.wrappedValue.animation },
+                        set: { options.wrappedValue.animation = $0 }
+                    )
+                ) {
+                    ForEach(PlaybackAnimation.allCases, id: \.self) {
+                        Text($0.rawValue.capitalized).tag($0)
+                    }
+                }
+
+                Toggle("Use colors from music artwork", isOn: visualizer.dynamicColors)
+                PreciseSlider(title: "Animation speed", value: visualizer.speed, range: 0.25...2, step: 0.05, decimals: 2)
+                PreciseSlider(title: "Motion intensity", value: visualizer.intensity, range: 0.1...1, step: 0.05, decimals: 2)
+                PreciseSlider(title: "Visualizer width", value: visualizer.width, range: 32...160, step: 1, suffix: "pt")
+                PreciseSlider(title: "Visualizer height", value: visualizer.height, range: 8...48, step: 1, suffix: "pt")
+
+                PlaybackVisualizer(
+                    kind: options.wrappedValue.animation,
+                    playing: true,
+                    enabled: true,
+                    options: visualizer.wrappedValue,
+                    palette: media.artworkColors,
+                    fallback: options.wrappedValue.color.color
+                )
+                .padding(12)
+                .background(.black, in: RoundedRectangle(cornerRadius: 12))
+
+                Button("Retry player detection") {
+                    media.retryDetection(preferred: app)
+                }
+                .disabled(media.busy)
+
+                Text(media.title)
+                if let error = media.error {
+                    Text(error).foregroundStyle(.orange)
+                }
+            } else {
+                Text("Enable playback animation to configure the visualizer style, size and motion.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+width", value: visualizer.width, range: 32...160, step: 1, suffix: "pt")
             PreciseSlider(title: "Visualizer height", value: visualizer.height, range: 8...48, step: 1, suffix: "pt")
             PlaybackVisualizer(kind: options.wrappedValue.animation, playing: true, enabled: options.wrappedValue.animate, options: visualizer.wrappedValue, palette: media.artworkColors, fallback: options.wrappedValue.color.color)
                 .padding(12).background(.black, in: RoundedRectangle(cornerRadius: 12))
