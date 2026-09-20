@@ -158,7 +158,7 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SH
             stream = nil
             blockedForCurrentActivation = true
             smoothed = AudioSpectrumSnapshot()
-        resetAdaptiveBandsLocked()
+            resetAdaptiveBandsLocked()
             stateLock.unlock()
             return
         }
@@ -198,7 +198,7 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SH
             stream = nil
             blockedForCurrentActivation = true
             smoothed = AudioSpectrumSnapshot()
-        resetAdaptiveBandsLocked()
+            resetAdaptiveBandsLocked()
             stateLock.unlock()
         }
     }
