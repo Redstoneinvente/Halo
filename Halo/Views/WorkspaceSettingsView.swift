@@ -3084,7 +3084,7 @@ private struct ContextMusicSettings: View {
             Toggle("Color visualizer from song", isOn: boolBinding(\.songVisualizerColors, resolved: { $0.usesSongVisualizerColors }))
             Toggle("Tint background from song", isOn: boolBinding(\.songBackgroundColors, resolved: { $0.usesSongBackgroundColors }))
             Toggle("Make album foreground colors readable", isOn: boolBinding(\.readableSongForegroundColors, resolved: { $0.usesReadableSongForegroundColors }))
-            Text("When enabled, album-derived text, controls and visualizer colors keep the song's hue but are adjusted only as much as needed for safe foreground contrast. Background tints keep the original album palette.")
+            Text("Generates one calmer album-derived foreground theme for text, controls and the visualizer. Halo softens excessive saturation, chooses a readable light or dark tone, and validates it against the active album background. Background tints keep the original album palette.")
                 .font(.caption).foregroundStyle(.secondary)
             Text("Halo extracts a small palette from each track's artwork and updates these elements automatically when the song changes.").font(.caption).foregroundStyle(.secondary)
         }
