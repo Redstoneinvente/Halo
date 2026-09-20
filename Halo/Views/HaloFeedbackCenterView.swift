@@ -99,7 +99,7 @@ struct HaloFeedbackCenterView: View {
                     )
                 )
 
-                Text("You can opt out at any time. Turning this off disables future Crashlytics collection for Halo; the change is persisted for future launches. A crash stored locally while reporting is disabled may be sent if you later turn reporting back on.")
+                Text("You can opt out at any time. Turning this off disables future Crashlytics collection for Halo on subsequent launches and Halo purges any unsent crash reports it can access while reporting is disabled.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
