@@ -957,12 +957,17 @@ struct ClosedNotchSettingsView: View {
         }
         Section("Song changes") {
             Picker("Transition", selection: Binding(get: { mediaOptions.wrappedValue.resolvedChangeAnimation }, set: { mediaOptions.wrappedValue.changeAnimation = $0 })) {
-                Text("None").tag(MediaChangeAnimation.none); Text("Fade").tag(MediaChangeAnimation.fade); Text("Slide").tag(MediaChangeAnimation.slide); Text("Scale").tag(MediaChangeAnimation.scale); Text("Blur + fade").tag(MediaChangeAnimation.blur)
+                Text("None").tag(MediaChangeAnimation.none)
+                Text("Fade").tag(MediaChangeAnimation.fade)
+                Text("Slide").tag(MediaChangeAnimation.slide)
+                Text("Lift").tag(MediaChangeAnimation.lift)
+                Text("Scale").tag(MediaChangeAnimation.scale)
+                Text("Blur + fade").tag(MediaChangeAnimation.blur)
             }
             if mediaOptions.wrappedValue.resolvedChangeAnimation != .none {
                 PreciseSlider(title: "Transition duration", value: Binding(get: { mediaOptions.wrappedValue.resolvedChangeAnimationDuration }, set: { mediaOptions.wrappedValue.changeAnimationDuration = $0 }), range: 0.08...1.2, step: 0.02, suffix: "s", decimals: 2)
             }
-            Text("The chosen transition applies to song text, synced lyrics and cover/vinyl changes.").font(.caption)
+            Text("The chosen transition applies to song text, cover/vinyl changes, and each synced lyric line change. Word highlighting stays continuous within the current line.").font(.caption)
         }
         Section("Media gestures") {
             gesturePicker("Tap", Binding(get: { mediaOptions.wrappedValue.resolvedTapAction }, set: { mediaOptions.wrappedValue.tapAction = $0 }))
