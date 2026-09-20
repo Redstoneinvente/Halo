@@ -24,11 +24,30 @@ final class HaloCoreTests: XCTestCase {
         )
     }
 
-    func testReadableAlbumForegroundColorLeavesAlreadySafeColorUntouched() {
-        let album = WidgetColor(red: 0.82, green: 0.46, blue: 0.92)
+    func testReadableAlbumForegroundColorSoftensAlreadyReadableSaturatedColor() {
+        let album = WidgetColor(red: 0.82, green: 0.16, blue: 0.92)
         let resolved = AlbumForegroundColorResolver.readable(album, against: .black)
 
-        XCTAssertEqual(resolved, album)
+        XCTAssertNotEqual(resolved, album)
+        XCTAssertGreaterThanOrEqual(
+            AlbumForegroundColorResolver.contrast(resolved, .black),
+            AlbumForegroundColorResolver.minimumContrast - 0.001
+        )
+    }
+
+    func testReadableAlbumForegroundColorChecksWholeBackgroundPalette() {
+        let album = WidgetColor(red: 0.22, green: 0.62, blue: 0.88)
+        let backgrounds = [
+            WidgetColor(red: 0.08, green: 0.18, blue: 0.30),
+            WidgetColor(red: 0.18, green: 0.30, blue: 0.42),
+            WidgetColor(red: 0.12, green: 0.24, blue: 0.20)
+        ]
+        let resolved = AlbumForegroundColorResolver.readable(album, against: backgrounds)
+
+        XCTAssertGreaterThanOrEqual(
+            AlbumForegroundColorResolver.worstContrast(resolved, against: backgrounds),
+            AlbumForegroundColorResolver.minimumContrast - 0.001
+        )
     }
 
     func testBluetoothDeviceSymbolsUseReportedClassForRenamedAccessories() {
