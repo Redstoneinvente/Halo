@@ -2561,6 +2561,17 @@ struct SurfaceGeometryEditorPanelView: View {
     }
 }
 
+private enum RetainedClosedNotchGeometry {
+    static func horizontalBias(width: CGFloat, occlusion: CGRect?) -> CGFloat {
+        guard width > 0, let occlusion else { return 0 }
+        return width / 2 - occlusion.midX
+    }
+
+    static func centeredRequiredWidth(width: CGFloat, occlusion: CGRect?) -> CGFloat {
+        max(0, width) + abs(horizontalBias(width: width, occlusion: occlusion)) * 2
+    }
+}
+
 struct SurfaceView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var state: SurfaceState
@@ -2758,6 +2769,25 @@ struct SurfaceView: View {
     private var preservesClosedStripWhileExpanded: Bool {
         keepsClosedContentsWhileExpanded || preservesMusicClosedVisualizer
     }
+    private var retainedMusicClosedNotchBias: CGFloat {
+        guard contextMusicActive, contextMusicKeepsClosedContents else { return 0 }
+        return RetainedClosedNotchGeometry.horizontalBias(
+            width: state.compactWidth,
+            occlusion: state.closedOcclusion
+        )
+    }
+    @ViewBuilder
+    private var retainedMusicClosedNotch: some View {
+        ClosedNotchView(
+            store: store,
+            workspace: workspace,
+            layout: layout,
+            occlusion: state.closedOcclusion,
+            referenceWidth: state.compactWidth
+        )
+        .frame(width: state.compactWidth, height: max(40, state.compactHeight))
+        .offset(x: retainedMusicClosedNotchBias)
+    }
     private var closedBackgroundOptions: ClosedNotchOptions {
         var value = layout.closedNotch ?? ClosedNotchOptions()
         if var artwork = value.artworkOptions, artwork.usesBackgroundArtwork, artwork.mode != .background {
@@ -2837,7 +2867,12 @@ struct SurfaceView: View {
                             ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
                         }
                       } else if keepsClosedContentsWhileExpanded {
-                        ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
+                        if contextMusicActive {
+                            retainedMusicClosedNotch
+                        } else {
+                            ClosedNotchView(store: store, workspace: workspace, layout: layout,
+                                            occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
+                        }
                       } else if preservesMusicClosedVisualizer {
                         ClosedNotchView(store: store, workspace: workspace, layout: layout,
                                         occlusion: state.closedOcclusion, referenceWidth: state.compactWidth,
@@ -3007,10 +3042,15 @@ struct SurfaceView: View {
                 .zIndex(2)
 
                 if keepsClosedContentsWhileExpanded {
-                    ClosedNotchView(store: store, workspace: workspace, layout: layout,
-                                    occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
-                        .frame(height: max(40, state.compactHeight))
-                        .zIndex(3)
+                    if contextMusicActive {
+                        retainedMusicClosedNotch
+                            .zIndex(3)
+                    } else {
+                        ClosedNotchView(store: store, workspace: workspace, layout: layout,
+                                        occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
+                            .frame(height: max(40, state.compactHeight))
+                            .zIndex(3)
+                    }
                 } else if preservesMusicClosedVisualizer {
                     ClosedNotchView(store: store, workspace: workspace, layout: layout,
                                     occlusion: state.closedOcclusion, referenceWidth: state.compactWidth,
@@ -5126,7 +5166,9 @@ private struct ContextMusicView: View {
          String(options.resolvedLyricFontSize), options.resolvedVisualizerStyle.rawValue,
          String(options.resolvedSpacing), String(options.resolvedControlSize), String(visualizerFullWidth),
          String(options.resolvedHorizontalMargin), String(options.resolvedTopMargin), String(options.resolvedBottomMargin),
-         String(usesFullNotchArea), String(keepsClosedNotchContents), String(preserveClosedVisualizerStrip)].joined(separator: "|")
+         String(usesFullNotchArea), String(keepsClosedNotchContents), String(preserveClosedVisualizerStrip),
+         keepsClosedNotchContents ? String(Int(surfaceState.compactWidth.rounded())) : "compact-width-ignored",
+         keepsClosedNotchContents ? String(Int((surfaceState.closedOcclusion?.midX ?? 0).rounded())) : "compact-bias-ignored"].joined(separator: "|")
     }
     private var metadataReservedHeight: Double {
         let titleLineHeight = options.fontSize * 1.22
@@ -5283,7 +5325,14 @@ private struct ContextMusicView: View {
         }
         let legacyHorizontalMargin = max(18, options.resolvedSpacing * 1.25)
         let extraHorizontalSpace = max(0, options.resolvedHorizontalMargin - legacyHorizontalMargin) * 2
-        let requestedWidth = min(760, width + extraHorizontalSpace)
+        let audioRequestedWidth = min(760, width + extraHorizontalSpace)
+        let retainedClosedWidth = keepsClosedNotchContents
+            ? Double(RetainedClosedNotchGeometry.centeredRequiredWidth(
+                width: surfaceState.compactWidth,
+                occlusion: surfaceState.closedOcclusion
+            ))
+            : 0
+        let requestedWidth = max(audioRequestedWidth, retainedClosedWidth)
         let requestedHeight = innerHeight + contentTopInset + options.resolvedBottomMargin
         return CGSize(width: requestedWidth, height: min(700, max(150, requestedHeight)))
     }
