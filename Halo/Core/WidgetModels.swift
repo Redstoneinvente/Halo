@@ -411,6 +411,183 @@ enum AlbumForegroundColorResolver {
         return 0.2126 * linear(color.red) + 0.7152 * linear(color.green) + 0.0722 * linear(color.blue)
     }
 }
+struct AudioCISemanticColors: Equatable {
+    let primaryText: WidgetColor
+    let secondaryText: WidgetColor
+    let primaryControl: WidgetColor
+    let secondaryControl: WidgetColor
+    let progressFill: WidgetColor
+    let progressTrack: WidgetColor
+    let progressThumb: WidgetColor
+    let lyricCurrent: WidgetColor
+    let lyricUpcoming: WidgetColor
+    let visualizer: [WidgetColor]
+}
+
+/// Converts an artwork palette into semantic Audio CI roles instead of treating every element as
+/// the same accent. Hierarchy-sensitive roles deliberately use different contrast/chroma levels:
+/// text stays calm, primary controls are stronger, the scrubber gets separate track/fill/thumb
+/// colors, and the visualizer gets a small coordinated palette.
+enum AudioCISemanticColorResolver {
+    static func resolve(album colors: [WidgetColor], backgrounds: [WidgetColor]) -> AudioCISemanticColors {
+        let album = colors.isEmpty ? [WidgetColor.accent] : colors
+        let backgrounds = backgrounds.isEmpty ? [WidgetColor.black] : backgrounds
+        let dominant = album[0]
+        let accentSource = distinctSource(in: Array(album.dropFirst()), from: dominant) ?? dominant
+        let tertiarySource = distinctSource(in: Array(album.dropFirst(2)), from: accentSource) ?? dominant
+
+        let primaryText = AlbumForegroundColorResolver.readable(dominant, against: backgrounds)
+        let primaryControl = AlbumForegroundColorResolver.readable(accentSource, against: backgrounds)
+        let progressFill = AlbumForegroundColorResolver.readable(tertiarySource, against: backgrounds)
+
+        let representativeBackground = average(backgrounds)
+        let secondaryTextCandidate = AlbumForegroundColorResolver.blend(
+            primaryText,
+            toward: representativeBackground,
+            amount: 0.24
+        )
+        let secondaryText = ensureContrast(
+            secondaryTextCandidate,
+            sourceFallback: primaryText,
+            backgrounds: backgrounds,
+            minimum: 3.6
+        )
+
+        let secondaryControlCandidate = AlbumForegroundColorResolver.blend(
+            primaryControl,
+            toward: secondaryText,
+            amount: 0.38
+        )
+        let secondaryControl = ensureContrast(
+            secondaryControlCandidate,
+            sourceFallback: primaryControl,
+            backgrounds: backgrounds,
+            minimum: 3.8
+        )
+
+        // The track is intentionally subordinate to the fill. It does not carry text, so a lower
+        // contrast is desirable; the thumb then uses the strongest available foreground so the
+        // three scrubber layers remain visually distinct.
+        let progressTrack = AlbumForegroundColorResolver.blend(
+            progressFill,
+            toward: representativeBackground,
+            amount: 0.72
+        )
+        let progressThumb = bestHighContrastColor(
+            preferred: primaryText,
+            against: backgrounds + [progressFill, progressTrack]
+        )
+
+        let visualizerSecondary = harmonized(
+            source: accentSource,
+            anchor: progressFill,
+            backgrounds: backgrounds,
+            amount: 0.34
+        )
+        let visualizerTertiary = harmonized(
+            source: tertiarySource,
+            anchor: primaryControl,
+            backgrounds: backgrounds,
+            amount: 0.42
+        )
+
+        return AudioCISemanticColors(
+            primaryText: primaryText,
+            secondaryText: secondaryText,
+            primaryControl: primaryControl,
+            secondaryControl: secondaryControl,
+            progressFill: progressFill,
+            progressTrack: progressTrack,
+            progressThumb: progressThumb,
+            lyricCurrent: primaryText,
+            lyricUpcoming: secondaryText,
+            visualizer: deduplicated([primaryControl, visualizerSecondary, visualizerTertiary, progressFill])
+        )
+    }
+
+    private static func harmonized(
+        source: WidgetColor,
+        anchor: WidgetColor,
+        backgrounds: [WidgetColor],
+        amount: Double
+    ) -> WidgetColor {
+        let mixed = AlbumForegroundColorResolver.blend(source, toward: anchor, amount: amount)
+        return ensureContrast(mixed, sourceFallback: anchor, backgrounds: backgrounds, minimum: 3.5)
+    }
+
+    private static func ensureContrast(
+        _ candidate: WidgetColor,
+        sourceFallback: WidgetColor,
+        backgrounds: [WidgetColor],
+        minimum: Double
+    ) -> WidgetColor {
+        guard AlbumForegroundColorResolver.worstContrast(candidate, against: backgrounds) < minimum else {
+            return candidate
+        }
+        let whiteScore = AlbumForegroundColorResolver.worstContrast(.white, against: backgrounds)
+        let blackScore = AlbumForegroundColorResolver.worstContrast(.black, against: backgrounds)
+        let target = whiteScore >= blackScore ? WidgetColor.white : WidgetColor.black
+
+        var lower = 0.0
+        var upper = 1.0
+        for _ in 0..<20 {
+            let amount = (lower + upper) * 0.5
+            let resolved = AlbumForegroundColorResolver.blend(sourceFallback, toward: target, amount: amount)
+            if AlbumForegroundColorResolver.worstContrast(resolved, against: backgrounds) >= minimum {
+                upper = amount
+            } else {
+                lower = amount
+            }
+        }
+        return AlbumForegroundColorResolver.blend(sourceFallback, toward: target, amount: upper)
+    }
+
+    private static func bestHighContrastColor(
+        preferred: WidgetColor,
+        against backgrounds: [WidgetColor]
+    ) -> WidgetColor {
+        let candidates = [
+            preferred,
+            WidgetColor.white,
+            WidgetColor.black
+        ]
+        return candidates.max {
+            AlbumForegroundColorResolver.worstContrast($0, against: backgrounds) <
+            AlbumForegroundColorResolver.worstContrast($1, against: backgrounds)
+        } ?? preferred
+    }
+
+    private static func distinctSource(in colors: [WidgetColor], from reference: WidgetColor) -> WidgetColor? {
+        colors.max { colorDistance($0, reference) < colorDistance($1, reference) }
+    }
+
+    private static func colorDistance(_ lhs: WidgetColor, _ rhs: WidgetColor) -> Double {
+        let dr = lhs.red - rhs.red
+        let dg = lhs.green - rhs.green
+        let db = lhs.blue - rhs.blue
+        return dr * dr + dg * dg + db * db
+    }
+
+    private static func average(_ colors: [WidgetColor]) -> WidgetColor {
+        guard !colors.isEmpty else { return .black }
+        let count = Double(colors.count)
+        return WidgetColor(
+            red: colors.reduce(0) { $0 + $1.red } / count,
+            green: colors.reduce(0) { $0 + $1.green } / count,
+            blue: colors.reduce(0) { $0 + $1.blue } / count
+        )
+    }
+
+    private static func deduplicated(_ colors: [WidgetColor]) -> [WidgetColor] {
+        var result: [WidgetColor] = []
+        for color in colors {
+            guard !result.contains(where: { colorDistance($0, color) < 0.006 }) else { continue }
+            result.append(color)
+        }
+        return result.isEmpty ? [.white] : Array(result.prefix(3))
+    }
+}
+
 enum ClockVisualStyle: String, Codable, CaseIterable, Identifiable {
     case digital = "Digital"
     case minimal = "Minimal"
