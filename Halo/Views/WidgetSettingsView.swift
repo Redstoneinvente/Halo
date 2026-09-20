@@ -942,6 +942,33 @@ struct ClosedNotchSettingsView: View {
                 Picker("Lyric display", selection: Binding(get: { mediaOptions.wrappedValue.resolvedLyricDisplay }, set: { mediaOptions.wrappedValue.lyricDisplay = $0 })) {
                     Text("Current line").tag(LyricDisplayMode.line); Text("Focus phrase").tag(LyricDisplayMode.focus); Text("Current word").tag(LyricDisplayMode.word)
                 }
+                Picker("Lyric transition", selection: Binding(
+                    get: { mediaOptions.wrappedValue.resolvedLyricChangeAnimation },
+                    set: { mediaOptions.wrappedValue.lyricChangeAnimation = $0 }
+                )) {
+                    Text("None").tag(MediaChangeAnimation.none)
+                    Text("Fade").tag(MediaChangeAnimation.fade)
+                    Text("Slide").tag(MediaChangeAnimation.slide)
+                    Text("Lift").tag(MediaChangeAnimation.lift)
+                    Text("Scale").tag(MediaChangeAnimation.scale)
+                    Text("Blur + fade").tag(MediaChangeAnimation.blur)
+                }
+                if mediaOptions.wrappedValue.resolvedLyricChangeAnimation != .none {
+                    PreciseSlider(
+                        title: "Lyric transition duration",
+                        value: Binding(
+                            get: { mediaOptions.wrappedValue.resolvedLyricChangeAnimationDuration },
+                            set: { mediaOptions.wrappedValue.lyricChangeAnimationDuration = $0 }
+                        ),
+                        range: 0.08...1.2,
+                        step: 0.02,
+                        suffix: "s",
+                        decimals: 2
+                    )
+                }
+                Text("Controls the animation used when the active synced lyric line changes. Focus/current-word updates within a line remain continuous.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Toggle("Resize notch to current lyric", isOn: Binding(get: { mediaOptions.wrappedValue.usesDynamicLyricWidth }, set: { mediaOptions.wrappedValue.dynamicLyricWidth = $0 }))
                 PreciseSlider(title: "Lyrics sync offset", value: Binding(get: { mediaOptions.wrappedValue.resolvedLyricSyncOffset }, set: { mediaOptions.wrappedValue.lyricSyncOffset = $0 }), range: -5...5, step: 0.05, suffix: "s", decimals: 2)
             }
@@ -967,7 +994,7 @@ struct ClosedNotchSettingsView: View {
             if mediaOptions.wrappedValue.resolvedChangeAnimation != .none {
                 PreciseSlider(title: "Transition duration", value: Binding(get: { mediaOptions.wrappedValue.resolvedChangeAnimationDuration }, set: { mediaOptions.wrappedValue.changeAnimationDuration = $0 }), range: 0.08...1.2, step: 0.02, suffix: "s", decimals: 2)
             }
-            Text("The chosen transition applies to song text, cover/vinyl changes, and each synced lyric line change. Word highlighting stays continuous within the current line.").font(.caption)
+            Text("This transition applies to track/title text and cover/vinyl changes. When Lyrics is selected above, lyric lines use their own dedicated transition setting.").font(.caption)
         }
         Section("Media gestures") {
             gesturePicker("Tap", Binding(get: { mediaOptions.wrappedValue.resolvedTapAction }, set: { mediaOptions.wrappedValue.tapAction = $0 }))
