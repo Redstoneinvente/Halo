@@ -82,6 +82,7 @@
 		FBAC00000000000000000212 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = FBAC00000000000000000202 /* FirebaseAuth */; };
 		FBAC00000000000000000213 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = FBAC00000000000000000203 /* FirebaseFirestore */; };
 		FBAC00000000000000000214 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = FBAC00000000000000000204 /* FirebaseCrashlytics */; };
+		FBAC00000000000000000301 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000300 /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -176,6 +177,7 @@
 		F8614B763053291B00D4943C /* icon_512x512@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_512x512@2x.png"; sourceTree = "<group>"; };
 		FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HaloFeedbackService.swift; sourceTree = "<group>"; };
 		FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HaloFeedbackCenterView.swift; sourceTree = "<group>"; };
+		FBAC00000000000000000300 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -230,6 +232,7 @@
 				F8614B773053291B00D4943C /* Halo Icons */,
 				F8614B6A3053275D00D4943C /* Halo_AppIcon_Transparent.png */,
 				F8614B623053239E00D4943C /* Info.plist */,
+				FBAC00000000000000000300 /* GoogleService-Info.plist */,
 				0000000000000000000002BC /* NotchEngine/DisplayClock.swift */,
 				0000000000000000000002D0 /* Services/AudioSpectrumService.swift */,
 				0000000000000000000002E2 /* Services/HUDEngine.swift */,
@@ -474,6 +477,7 @@
 				F8614B813053291B00D4943C /* icon_16x16.png in Resources */,
 				F8614B823053291B00D4943C /* Halo.png in Resources */,
 				F8614B6B3053275D00D4943C /* Halo_AppIcon_Transparent.png in Resources */,
+				FBAC00000000000000000301 /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
