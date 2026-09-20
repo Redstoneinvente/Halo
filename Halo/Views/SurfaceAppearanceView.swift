@@ -198,7 +198,6 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
                 frost: 0.14,
                 lightAbsorption: 0.04,
                 refraction: 0.06,
-                refractionSpread: 0.90,
                 chromaticShift: 0.02,
                 tint: WidgetColor(red: 0.80, green: 0.88, blue: 1.0),
                 tintAmount: 0.015,
@@ -213,7 +212,6 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
                 frost: 0.82,
                 lightAbsorption: 0.18,
                 refraction: 0.20,
-                refractionSpread: 0.78,
                 chromaticShift: 0.04,
                 tint: WidgetColor(red: 0.76, green: 0.84, blue: 1.0),
                 tintAmount: 0.055,
@@ -226,7 +224,6 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
                 frost: 0.52,
                 lightAbsorption: 0.52,
                 refraction: 0.13,
-                refractionSpread: 0.68,
                 chromaticShift: 0.03,
                 tint: WidgetColor(red: 0.24, green: 0.28, blue: 0.34),
                 tintAmount: 0.16,
@@ -239,7 +236,6 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
                 frost: 0.38,
                 lightAbsorption: 0.10,
                 refraction: 0.38,
-                refractionSpread: 0.82,
                 chromaticShift: 0.72,
                 tint: WidgetColor(red: 0.64, green: 0.78, blue: 1.0),
                 tintAmount: 0.07,
@@ -466,7 +462,6 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
                 PreciseSlider(title: "Frost", value: $appearance.glass.frost, range: 0...1, step: 0.01, decimals: 2)
                 PreciseSlider(title: "Light absorption", value: $appearance.glass.lightAbsorption, range: 0...1, step: 0.01, decimals: 2)
                 PreciseSlider(title: "Refraction", value: $appearance.glass.refraction, range: 0...1, step: 0.01, decimals: 2)
-                PreciseSlider(title: "Lens curvature", value: $appearance.glass.refractionSpread, range: 0...1, step: 0.01, decimals: 2)
                 Text("Refraction controls how strongly Halo participates in the native Liquid Glass effect. Lens curvature changes the system glass geometry that shapes its optical response.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
