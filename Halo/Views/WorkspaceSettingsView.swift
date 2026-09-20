@@ -3086,14 +3086,30 @@ private struct ContextMusicSettings: View {
         }
 
         Section("Colors from current song") {
+            Toggle(
+                "Use adaptive per-element colors",
+                isOn: boolBinding(\.adaptiveElementColors, resolved: { $0.usesAdaptiveElementColors })
+            )
+            Text("Adaptive mode builds a semantic palette from the current artwork: primary and secondary text, transport controls, scrubber track/fill/thumb, lyrics and the visualizer each receive a role-specific color chosen for hierarchy and contrast.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Toggle("Color text from song", isOn: boolBinding(\.songTextColors, resolved: { $0.usesSongTextColors }))
+                .disabled(options.wrappedValue.usesAdaptiveElementColors)
             Toggle("Color controls and scrubber from song", isOn: boolBinding(\.songControlColors, resolved: { $0.usesSongControlColors }))
+                .disabled(options.wrappedValue.usesAdaptiveElementColors)
             Toggle("Color visualizer from song", isOn: boolBinding(\.songVisualizerColors, resolved: { $0.usesSongVisualizerColors }))
-            Toggle("Tint background from song", isOn: boolBinding(\.songBackgroundColors, resolved: { $0.usesSongBackgroundColors }))
+                .disabled(options.wrappedValue.usesAdaptiveElementColors)
             Toggle("Make album foreground colors readable", isOn: boolBinding(\.readableSongForegroundColors, resolved: { $0.usesReadableSongForegroundColors }))
-            Text("Generates one calmer album-derived foreground theme for text, controls and the visualizer. Halo softens excessive saturation, chooses a readable light or dark tone, and validates it against the active album background. Background tints keep the original album palette.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text("Halo extracts a small palette from each track's artwork and updates these elements automatically when the song changes.").font(.caption).foregroundStyle(.secondary)
+                .disabled(options.wrappedValue.usesAdaptiveElementColors)
+
+            Toggle("Tint background from song", isOn: boolBinding(\.songBackgroundColors, resolved: { $0.usesSongBackgroundColors }))
+
+            Text(options.wrappedValue.usesAdaptiveElementColors
+                 ? "The simpler foreground color switches are preserved but temporarily overridden. Turn adaptive mode off to restore them."
+                 : "Halo extracts a small palette from each track's artwork. Readable mode harmonizes foreground colors while the individual switches above decide which groups use them.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
 
         Section("Appearance") {
