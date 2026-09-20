@@ -5181,34 +5181,44 @@ private struct ContextMusicView: View {
     private var activeArtwork: NSImage? { media.artworkImage ?? artwork }
     private var rawSongPalette: [WidgetColor] { media.artworkColors }
     private var songColors: [Color] { rawSongPalette.map(\.color) }
-    private var foregroundContrastBackground: WidgetColor {
-        guard let dominant = rawSongPalette.first else { return .black }
+    private var foregroundContrastBackgrounds: [WidgetColor] {
+        guard !rawSongPalette.isEmpty else { return [.black] }
         if options.usesArtworkBackground {
-            return AlbumForegroundColorResolver.blend(
-                dominant,
-                toward: .black,
-                amount: options.resolvedArtworkBackgroundDim
-            )
+            return rawSongPalette.prefix(4).map {
+                AlbumForegroundColorResolver.blend(
+                    $0,
+                    toward: .black,
+                    amount: options.resolvedArtworkBackgroundDim
+                )
+            }
         }
         if options.usesSongBackgroundColors {
             let opacity = options.background == .gradient
                 ? options.backgroundOpacity
                 : min(0.62, max(0.12, options.backgroundOpacity * 0.82))
-            return AlbumForegroundColorResolver.blend(.black, toward: dominant, amount: opacity)
+            return rawSongPalette.prefix(4).map {
+                AlbumForegroundColorResolver.blend(.black, toward: $0, amount: opacity)
+            }
         }
-        return .black
+        return [.black]
     }
-    private var foregroundSongPalette: [WidgetColor] {
-        guard options.usesReadableSongForegroundColors else { return rawSongPalette }
-        return AlbumForegroundColorResolver.palette(rawSongPalette, against: foregroundContrastBackground)
+    private var generatedSongForeground: WidgetColor? {
+        guard let dominant = rawSongPalette.first else { return nil }
+        return AlbumForegroundColorResolver.readable(dominant, against: foregroundContrastBackgrounds)
     }
-    private var foregroundSongColors: [Color] { foregroundSongPalette.map(\.color) }
     private var baseTextColor: Color { options.textColor.color }
-    private var primarySongColor: Color { foregroundSongColors.first ?? baseTextColor }
-    private var effectiveTextColor: Color { options.usesSongTextColors && !foregroundSongColors.isEmpty ? primarySongColor : baseTextColor }
-    private var effectiveControlColor: Color { options.usesSongControlColors && !foregroundSongColors.isEmpty ? primarySongColor : baseTextColor }
-    private var effectiveVisualizerColor: Color { options.usesSongVisualizerColors && !foregroundSongColors.isEmpty ? primarySongColor : baseTextColor }
-    private var visualizerPalette: [WidgetColor] { options.usesSongVisualizerColors ? foregroundSongPalette : [] }
+    private var primarySongColor: Color {
+        if options.usesReadableSongForegroundColors, let generatedSongForeground { return generatedSongForeground.color }
+        return rawSongPalette.first?.color ?? baseTextColor
+    }
+    private var effectiveTextColor: Color { options.usesSongTextColors && !rawSongPalette.isEmpty ? primarySongColor : baseTextColor }
+    private var effectiveControlColor: Color { options.usesSongControlColors && !rawSongPalette.isEmpty ? primarySongColor : baseTextColor }
+    private var effectiveVisualizerColor: Color { options.usesSongVisualizerColors && !rawSongPalette.isEmpty ? primarySongColor : baseTextColor }
+    private var visualizerPalette: [WidgetColor] {
+        guard options.usesSongVisualizerColors else { return [] }
+        if options.usesReadableSongForegroundColors, let generatedSongForeground { return [generatedSongForeground] }
+        return rawSongPalette
+    }
     private var backgroundGradientColors: [Color] {
         options.usesSongBackgroundColors && !songColors.isEmpty ? Array(songColors.prefix(3)) : [.blue, .purple]
     }
