@@ -1,8 +1,13 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // One immutable trial claim per Firebase account. The client can create only
-    // its own claim, and only after Firebase says the email is verified.
+
+    function isVerifiedHaloUser() {
+      return request.auth != null
+             && request.auth.token.email_verified == true;
+    }
+
+    // One immutable trial claim per Firebase account.
     match /haloTrialClaims/{userId} {
       allow get: if request.auth != null && request.auth.uid == userId;
       allow list: if false;
@@ -13,11 +18,90 @@ service cloud.firestore {
                     && request.resource.data.uid == request.auth.uid
                     && request.resource.data.version == 1;
 
-      // A client must never be able to reset or remove its "trial used" record.
       allow update, delete: if false;
     }
 
-    // This rules file intentionally grants no other Firestore access.
+    // Public, website-safe issue documents.
+    // The Mac client can create a report but cannot edit status or moderation fields.
+    // A trusted backend using the Firebase Admin SDK owns later status changes.
+    match /feedbackIssues/{issueId} {
+      allow read: if true;
+
+      allow create: if isVerifiedHaloUser()
+                    && request.resource.data.keys().hasOnly([
+                      'schemaVersion',
+                      'type',
+                      'title',
+                      'description',
+                      'category',
+                      'status',
+                      'createdAt',
+                      'updatedAt',
+                      'appVersion',
+                      'appBuild',
+                      'platform',
+                      'crashRelated'
+                    ])
+                    && request.resource.data.schemaVersion == 1
+                    && request.resource.data.type in ['bug', 'feature', 'crash', 'other']
+                    && request.resource.data.title is string
+                    && request.resource.data.title.size() >= 4
+                    && request.resource.data.title.size() <= 120
+                    && request.resource.data.description is string
+                    && request.resource.data.description.size() >= 10
+                    && request.resource.data.description.size() <= 4000
+                    && request.resource.data.category is string
+                    && request.resource.data.category.size() <= 80
+                    && request.resource.data.status == 'received'
+                    && request.resource.data.createdAt == request.time
+                    && request.resource.data.updatedAt == request.time
+                    && request.resource.data.appVersion is string
+                    && request.resource.data.appVersion.size() <= 40
+                    && request.resource.data.appBuild is string
+                    && request.resource.data.appBuild.size() <= 40
+                    && request.resource.data.platform == 'macOS'
+                    && (!('crashRelated' in request.resource.data)
+                        || request.resource.data.crashRelated == true);
+
+      allow update, delete: if false;
+    }
+
+    // Private companion data for an issue.
+    // This collection is never readable by the public website client.
+    match /feedbackReports/{reportId} {
+      allow read: if false;
+
+      allow create: if isVerifiedHaloUser()
+                    && request.resource.data.keys().hasOnly([
+                      'schemaVersion',
+                      'issueID',
+                      'uid',
+                      'email',
+                      'type',
+                      'context',
+                      'includeDiagnostics',
+                      'createdAt',
+                      'previousExecutionCrashed',
+                      'diagnostics',
+                      'diagnosticsInstallationID'
+                    ])
+                    && request.resource.data.schemaVersion == 1
+                    && request.resource.data.issueID == reportId
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.email is string
+                    && request.resource.data.email.size() <= 320
+                    && request.resource.data.type in ['bug', 'feature', 'crash', 'other']
+                    && request.resource.data.context is string
+                    && request.resource.data.context.size() <= 6000
+                    && request.resource.data.includeDiagnostics is bool
+                    && request.resource.data.createdAt == request.time
+                    && request.resource.data.previousExecutionCrashed is bool
+                    && (!('diagnosticsInstallationID' in request.resource.data)
+                        || request.resource.data.diagnosticsInstallationID is string);
+
+      allow update, delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
