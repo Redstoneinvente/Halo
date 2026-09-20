@@ -1410,9 +1410,14 @@ struct AlbumNotchBackground: View {
         }
         .task(id: key + "|\(wantsArtworkBackground)") { guard media.isPlaying && wantsArtworkBackground else { artwork = nil; return }; artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key) }
         .task(id: "spectrum|\(media.isPlaying)|\(reactive.enabled)|\(reactive.driver.rawValue)") {
-            AudioSpectrumService.shared.setActive(media.isPlaying && reactive.enabled && reactive.driver != .pulse)
+            AudioSpectrumService.shared.setActive(
+                media.isPlaying && reactive.enabled && reactive.driver != .pulse,
+                owner: "closed-notch-reactive-background"
+            )
         }
-        .onDisappear { AudioSpectrumService.shared.setActive(false) }
+        .onDisappear {
+            AudioSpectrumService.shared.setActive(false, owner: "closed-notch-reactive-background")
+        }
     }
     private var gradientColors: [Color] { if colors.isEmpty { return [.clear, .clear] }; return colors.count == 1 ? [colors[0], colors[0].opacity(0.72)] : Array(colors.prefix(2)) }
     @ViewBuilder private var baseBackground: some View {
