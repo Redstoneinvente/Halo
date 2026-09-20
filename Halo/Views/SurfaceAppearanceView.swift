@@ -462,7 +462,7 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
                 PreciseSlider(title: "Frost", value: $appearance.glass.frost, range: 0...1, step: 0.01, decimals: 2)
                 PreciseSlider(title: "Light absorption", value: $appearance.glass.lightAbsorption, range: 0...1, step: 0.01, decimals: 2)
                 PreciseSlider(title: "Refraction", value: $appearance.glass.refraction, range: 0...1, step: 0.01, decimals: 2)
-                Text("Refraction controls how strongly Halo participates in the native Liquid Glass effect. Lens curvature changes the system glass geometry that shapes its optical response.")
+                Text("Refraction controls how strongly Halo participates in the native Liquid Glass effect.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 PreciseSlider(title: "Chromatic alteration", value: $appearance.glass.chromaticShift, range: 0...1, step: 0.01, decimals: 2)
