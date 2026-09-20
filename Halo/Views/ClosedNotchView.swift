@@ -1243,7 +1243,7 @@ private struct ClosedMediaView: View {
     private var lyricLineTransition: AnyTransition {
         guard !reduceMotion else { return .identity }
 
-        switch options.resolvedChangeAnimation {
+        switch options.resolvedLyricChangeAnimation {
         case .none:
             return .identity
         case .fade:
@@ -1281,8 +1281,8 @@ private struct ClosedMediaView: View {
     }
 
     private var lyricLineAnimation: Animation? {
-        guard !reduceMotion, options.resolvedChangeAnimation != .none else { return nil }
-        return .easeInOut(duration: options.resolvedChangeAnimationDuration)
+        guard !reduceMotion, options.resolvedLyricChangeAnimation != .none else { return nil }
+        return .easeInOut(duration: options.resolvedLyricChangeAnimationDuration)
     }
 
     private func animatedLyricPresentation(frame: LyricFrame, width: Double) -> some View {
