@@ -37,8 +37,6 @@ struct GlassOptions: Codable, Equatable {
     var lightAbsorption = 0.16
     /// Warps the actual content behind Halo through a Core Image backdrop filter.
     var refraction = 0.14
-    /// Controls how broad the lens distortion is across the surface.
-    var refractionSpread = 0.72
     /// Adds subtle cyan/magenta separation to the glass coloration.
     var chromaticShift = 0.08
     var tint = WidgetColor(red: 0.72, green: 0.82, blue: 1.0)
@@ -48,13 +46,12 @@ struct GlassOptions: Codable, Equatable {
 
     func normalized() -> GlassOptions {
         var value = self
-        let finite = [clarity, frost, lightAbsorption, refraction, refractionSpread, chromaticShift, tintAmount, highlight, edgeDepth]
+        let finite = [clarity, frost, lightAbsorption, refraction, chromaticShift, tintAmount, highlight, edgeDepth]
         guard finite.allSatisfy(\.isFinite) else { return GlassOptions() }
         value.clarity = min(1, max(0, clarity))
         value.frost = min(1, max(0, frost))
         value.lightAbsorption = min(1, max(0, lightAbsorption))
         value.refraction = min(1, max(0, refraction))
-        value.refractionSpread = min(1, max(0, refractionSpread))
         value.chromaticShift = min(1, max(0, chromaticShift))
         value.tintAmount = min(0.5, max(0, tintAmount))
         value.highlight = min(1, max(0, highlight))
