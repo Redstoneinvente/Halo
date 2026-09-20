@@ -4,6 +4,33 @@ import XCTest
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    func testReadableAlbumForegroundColorMeetsContrastOnDarkSurface() {
+        let album = WidgetColor(red: 0.12, green: 0.18, blue: 0.24)
+        let resolved = AlbumForegroundColorResolver.readable(album, against: .black)
+
+        XCTAssertGreaterThanOrEqual(
+            AlbumForegroundColorResolver.contrast(resolved, .black),
+            AlbumForegroundColorResolver.minimumContrast - 0.001
+        )
+    }
+
+    func testReadableAlbumForegroundColorMeetsContrastOnLightAlbumSurface() {
+        let album = WidgetColor(red: 0.92, green: 0.78, blue: 0.34)
+        let resolved = AlbumForegroundColorResolver.readable(album, against: album)
+
+        XCTAssertGreaterThanOrEqual(
+            AlbumForegroundColorResolver.contrast(resolved, album),
+            AlbumForegroundColorResolver.minimumContrast - 0.001
+        )
+    }
+
+    func testReadableAlbumForegroundColorLeavesAlreadySafeColorUntouched() {
+        let album = WidgetColor(red: 0.82, green: 0.46, blue: 0.92)
+        let resolved = AlbumForegroundColorResolver.readable(album, against: .black)
+
+        XCTAssertEqual(resolved, album)
+    }
+
     func testBluetoothDeviceSymbolsUseReportedClassForRenamedAccessories() {
         XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0540), "keyboard")
         XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0580), "computermouse")
