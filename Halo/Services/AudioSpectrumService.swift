@@ -8,10 +8,19 @@ import AVFoundation
 import ShazamKit
 
 struct AudioSpectrumSnapshot: Equatable {
+    // Absolute smoothed levels, useful for liveness / diagnostics.
     var bass: Double = 0
     var mids: Double = 0
     var treble: Double = 0
     var overall: Double = 0
+
+    // Adaptive music-reactive envelopes. These are normalized against each band's recent
+    // floor/peak so compressed/mastered music still produces visible motion.
+    var reactiveBass: Double = 0
+    var reactiveMids: Double = 0
+    var reactiveTreble: Double = 0
+    var reactiveOverall: Double = 0
+
     // Unsmoothed instantaneous energy used for playback liveness. Visual bands deliberately
     // retain release smoothing, but stop detection must not inherit that decay tail.
     var liveness: Double = 0
@@ -40,6 +49,20 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SH
     private var permissionRequestedThisRun = false
     private var idleStopTask: Task<Void, Never>?
     private var smoothed = AudioSpectrumSnapshot()
+
+    private struct AdaptiveBandState {
+        var floor: Double = 1
+        var peak: Double = 0
+        var previous: Double = 0
+        var output: Double = 0
+        var initialized = false
+    }
+
+    private var bassAdaptive = AdaptiveBandState()
+    private var midsAdaptive = AdaptiveBandState()
+    private var trebleAdaptive = AdaptiveBandState()
+    private var overallAdaptive = AdaptiveBandState()
+
     private var recognitionSession: SHSession?
     private var recognitionCompletion: ((AudioRecognitionMatch?) -> Void)?
     private var recognitionDeadline = Date.distantPast
@@ -135,6 +158,7 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SH
             stream = nil
             blockedForCurrentActivation = true
             smoothed = AudioSpectrumSnapshot()
+        resetAdaptiveBandsLocked()
             stateLock.unlock()
             return
         }
@@ -174,6 +198,7 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SH
             stream = nil
             blockedForCurrentActivation = true
             smoothed = AudioSpectrumSnapshot()
+        resetAdaptiveBandsLocked()
             stateLock.unlock()
         }
     }
@@ -192,6 +217,7 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SH
         stateLock.lock()
         if stream === current { stream = nil }
         smoothed = AudioSpectrumSnapshot()
+        resetAdaptiveBandsLocked()
         blockedForCurrentActivation = false
         idleStopTask = nil
         stateLock.unlock()
@@ -201,6 +227,7 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SH
         stateLock.lock()
         if self.stream === stream { self.stream = nil }
         smoothed = AudioSpectrumSnapshot()
+        resetAdaptiveBandsLocked()
         starting = false
         blockedForCurrentActivation = true
         stateLock.unlock()
@@ -300,6 +327,50 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SH
         analyse(mono, sampleRate: sampleRate)
     }
 
+    private func resetAdaptiveBandsLocked() {
+        bassAdaptive = AdaptiveBandState()
+        midsAdaptive = AdaptiveBandState()
+        trebleAdaptive = AdaptiveBandState()
+        overallAdaptive = AdaptiveBandState()
+    }
+
+    private func adaptiveEnvelope(_ value: Double, state: inout AdaptiveBandState) -> Double {
+        let x = min(1, max(0, value))
+
+        if !state.initialized {
+            state.floor = x
+            state.peak = min(1, x + 0.10)
+            state.previous = x
+            state.output = 0
+            state.initialized = true
+            return 0
+        }
+
+        // The floor should follow genuine quiet sections fairly quickly but only creep upward
+        // during loud passages. Peak does the inverse: catch attacks quickly, decay slowly.
+        let floorRate = x < state.floor ? 0.20 : 0.006
+        let peakRate = x > state.peak ? 0.42 : 0.018
+        state.floor += (x - state.floor) * floorRate
+        state.peak += (x - state.peak) * peakRate
+
+        if state.peak < state.floor + 0.07 {
+            state.peak = min(1, state.floor + 0.07)
+        }
+
+        let dynamicRange = max(0.07, state.peak - state.floor)
+        let level = min(1, max(0, (x - state.floor) / dynamicRange))
+
+        // Positive band-energy changes are musical attacks (kick, snare, vocal consonants, hats).
+        // Blend them with the adaptive level so sustained notes remain present but transients pop.
+        let onset = min(1, max(0, x - state.previous) * 8.0)
+        state.previous = x
+        let target = min(1, level * 0.74 + onset * 0.48)
+
+        let response = target > state.output ? 0.72 : 0.24
+        state.output += (target - state.output) * response
+        return min(1, max(0, state.output))
+    }
+
     private func analyse(_ input: [Float], sampleRate: Double) {
         let n = 2048
         guard input.count >= 128 else { return }
@@ -373,6 +444,12 @@ final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SH
         smoothed.mids = smooth(smoothed.mids, mids)
         smoothed.treble = smooth(smoothed.treble, treble)
         smoothed.overall = smooth(smoothed.overall, overall)
+
+        smoothed.reactiveBass = adaptiveEnvelope(bass, state: &bassAdaptive)
+        smoothed.reactiveMids = adaptiveEnvelope(mids, state: &midsAdaptive)
+        smoothed.reactiveTreble = adaptiveEnvelope(treble, state: &trebleAdaptive)
+        smoothed.reactiveOverall = adaptiveEnvelope(overall, state: &overallAdaptive)
+
         // Keep liveness raw. A smoothed release here can take several seconds to decay and is
         // appropriate for animation, not for deciding whether Audio CI should still exist.
         smoothed.liveness = max(overall, mids * 0.82, bass * 0.62, treble * 0.68)
