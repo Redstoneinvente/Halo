@@ -49,7 +49,7 @@ Do not expose this collection from client-side website code. Any support/admin U
 
 ## Diagnostics policy
 
-Halo's automatic Crashlytics reporting can be disabled in **Settings -> Feedback & Support**.
+Halo's native Apple MetricKit diagnostics can be disabled in **Settings -> Feedback & Support**.
 
 Safe diagnostics are intentionally limited to:
 
@@ -72,4 +72,4 @@ If the website later adds voting, comments, or authenticated issue ownership, us
 
 The app expects a bundled `GoogleService-Info.plist` whose registered bundle identifier exactly matches Halo's Xcode bundle identifier.
 
-Crashlytics dSYM uploading should be enabled once that matching plist is in the target. Use Firebase's Swift Package Manager Crashlytics run script as the final Xcode build phase.
+Halo does not require a third-party crash SDK. Apple MetricKit supplies native macOS crash diagnostics, while feedback submission uses Halo's existing Firebase Authentication token and the Firestore REST API.
