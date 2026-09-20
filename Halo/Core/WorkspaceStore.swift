@@ -1547,7 +1547,7 @@ private final class SystemAudioMediaFallback {
     func setEnabled(_ enabled: Bool) {
         guard self.enabled != enabled else { return }
         self.enabled = enabled
-        AudioSpectrumService.shared.setActive(enabled)
+        AudioSpectrumService.shared.setActive(enabled, owner: "system-audio-media-fallback")
         if !enabled {
             fastRefreshTask?.cancel()
             fastRefreshTask = nil
@@ -1640,7 +1640,7 @@ private final class SystemAudioMediaFallback {
         AudioSpectrumService.shared.cancelRecognition()
         recognitionInFlight = false
         safariAudibleSince = nil
-        AudioSpectrumService.shared.setActive(false)
+        AudioSpectrumService.shared.setActive(false, owner: "system-audio-media-fallback")
         clearIfOwned()
     }
 
