@@ -1784,7 +1784,7 @@ struct ClosedNotchOptions: Codable, Equatable {
     var contentPaddingX: Double { min(24, max(0, horizontalPadding ?? 8)) }
     var contentPaddingY: Double { min(12, max(0, verticalPadding ?? 2)) }
     var contentSideMargin: Double { min(48, max(0, sideMargin ?? 4)) }
-    var contentOuterMargin: Double { min(48, max(0, outerMargin ?? 4)) }
+    var contentOuterMargin: Double { min(48, max(17, outerMargin ?? 17)) }
     var leftDecoration: SideDecoration?
     var rightDecoration: SideDecoration?
     var visualizer: VisualizerOptions?
@@ -1797,7 +1797,7 @@ struct ClosedNotchOptions: Codable, Equatable {
     var animate = true
     func validated() throws -> ClosedNotchOptions {
         guard fontSize.isFinite else { throw CocoaError(.fileReadCorruptFile) }
-        guard (horizontalPadding ?? 8).isFinite, (verticalPadding ?? 2).isFinite, (sideMargin ?? 4).isFinite, (outerMargin ?? 4).isFinite else { throw CocoaError(.fileReadCorruptFile) }
+        guard (horizontalPadding ?? 8).isFinite, (verticalPadding ?? 2).isFinite, (sideMargin ?? 4).isFinite, (outerMargin ?? 17).isFinite else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
         if horizontalPadding != nil { v.horizontalPadding = contentPaddingX }
         if verticalPadding != nil { v.verticalPadding = contentPaddingY }

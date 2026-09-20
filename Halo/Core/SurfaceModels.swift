@@ -36,8 +36,9 @@ struct ClosedNotchLayoutMetrics: Equatable {
         verticalPadding = min(options.contentPaddingY, max(0, (safeHeight - 8) / 2))
         contentHeight = max(1, safeHeight - 2 * verticalPadding)
 
-        // Defaults should not consume an entire 16–24 pt wing. If the user explicitly chose a
-        // value, honour it exactly rather than silently clamping their customization.
+        // Horizontal/camera defaults compress gracefully at very small heights. The outer-edge
+        // margin is intentionally different: it has a hard 17 pt safety floor so content never
+        // sits close enough to the surface boundary to be clipped by the contour.
         let adaptiveHorizontal = max(1, min(8, contentHeight * 0.28))
         horizontalPadding = options.horizontalPadding == nil
             ? min(options.contentPaddingX, adaptiveHorizontal)
@@ -47,9 +48,7 @@ struct ClosedNotchLayoutMetrics: Equatable {
         cameraMargin = options.sideMargin == nil
             ? min(options.contentSideMargin, adaptiveMargin)
             : options.contentSideMargin
-        outerMargin = options.outerMargin == nil
-            ? min(options.contentOuterMargin, adaptiveMargin)
-            : options.contentOuterMargin
+        outerMargin = options.contentOuterMargin
 
         elementSpacing = min(6, max(2, contentHeight * 0.16))
     }

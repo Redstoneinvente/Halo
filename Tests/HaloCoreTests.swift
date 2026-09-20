@@ -903,15 +903,16 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertTrue(report.issues.contains { $0.path.contains("sdkVersion") })
     }
 
-    func testClosedNotchLayoutMetricsReserveRenderingAllowanceWithoutChangingUserMargins() {
+    func testClosedNotchLayoutMetricsEnforceOuterEdgeSafetyMargin() {
         var options = ClosedNotchOptions()
         options.horizontalPadding = 0
         options.sideMargin = 0
         options.outerMargin = 0
         let metrics = ClosedNotchLayoutMetrics(options: options, height: 40)
 
+        XCTAssertEqual(options.contentOuterMargin, 17, accuracy: 0.001)
         XCTAssertEqual(metrics.normalCameraInset, 0, accuracy: 0.001)
-        XCTAssertEqual(metrics.outerInset, 0, accuracy: 0.001)
+        XCTAssertEqual(metrics.outerInset, 17, accuracy: 0.001)
         XCTAssertGreaterThan(metrics.renderingAllowance, 0)
     }
 
