@@ -517,7 +517,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "GSP=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/GoogleService-Info.plist\"\nif [ -f \"$GSP\" ]; then\n  \"\${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\"\nelse\n  echo \"warning: Crashlytics dSYM upload skipped because GoogleService-Info.plist is not bundled.\"\nfi\n";
+			shellScript = "GSP=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/GoogleService-Info.plist\"\nif [ -f \"$GSP\" ]; then\n  \"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\"\nelse\n  echo \"warning: Crashlytics dSYM upload skipped because GoogleService-Info.plist is not bundled.\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
