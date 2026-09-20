@@ -1021,12 +1021,13 @@ private struct ClosedArtworkView: View {
     @State private var artwork: NSImage?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }
+    private var activeArtwork: NSImage? { media.artworkImage ?? artwork }
     private var paletteColor: Color { media.artworkColors.first?.color ?? Color.white.opacity(0.78) }
     var body: some View {
         ZStack {
             Group {
                 if options.mode == .vinyl { vinylView }
-                else if let artwork { artworkImage(artwork).clipShape(RoundedRectangle(cornerRadius: 5)) }
+                else if let activeArtwork { artworkImage(activeArtwork).clipShape(RoundedRectangle(cornerRadius: 5)) }
                 else {
                     RoundedRectangle(cornerRadius: 5)
                         .fill(paletteColor.opacity(0.22))
@@ -1041,12 +1042,12 @@ private struct ClosedArtworkView: View {
         .animation(mediaOptions.resolvedChangeAnimation == .none ? nil : .easeInOut(duration: mediaOptions.resolvedChangeAnimationDuration), value: key)
         .task(id: key + "|\(options.mode.rawValue)") {
             artwork = nil
-            guard media.isPlaying else { return }
+            guard media.isPlaying, media.artworkImage == nil else { return }
             artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key)
         }
     }
     private var vinylView: some View {
-        VinylRecordView(artwork: artwork,
+        VinylRecordView(artwork: activeArtwork,
                         size: options.size,
                         palette: media.artworkColors,
                         playing: media.isPlaying,
@@ -1057,8 +1058,8 @@ private struct ClosedArtworkView: View {
             Circle().fill(Color.black.opacity(0.96))
             Circle().stroke(Color.white.opacity(0.12), lineWidth: max(0.5, options.size * 0.025)).padding(options.size * 0.08)
             Circle().stroke(Color.white.opacity(0.08), lineWidth: max(0.5, options.size * 0.02)).padding(options.size * 0.17)
-            if let artwork {
-                Image(nsImage: artwork).resizable().scaledToFill().frame(width: options.size * 0.62, height: options.size * 0.62).clipShape(Circle())
+            if let activeArtwork {
+                Image(nsImage: activeArtwork).resizable().scaledToFill().frame(width: options.size * 0.62, height: options.size * 0.62).clipShape(Circle())
             } else {
                 Circle().fill(paletteColor.opacity(0.88)).frame(width: options.size * 0.62, height: options.size * 0.62)
                     .overlay(Image(systemName: "music.note").font(.system(size: max(7, options.size * 0.22))).foregroundStyle(.black.opacity(0.7)))
@@ -1067,7 +1068,7 @@ private struct ClosedArtworkView: View {
             Circle().fill(Color.white.opacity(0.48)).frame(width: max(1, options.size * 0.035), height: max(1, options.size * 0.035))
         }
         .frame(width: options.size, height: options.size)
-        .accessibilityLabel(artwork == nil ? "Vinyl artwork loading" : "Rotating album artwork")
+        .accessibilityLabel(activeArtwork == nil ? "Vinyl artwork loading" : "Rotating album artwork")
     }
     private func artworkImage(_ image: NSImage) -> some View { Image(nsImage: image).resizable().scaledToFill().frame(width: options.size, height: options.size).clipped() }
 }
