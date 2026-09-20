@@ -2863,6 +2863,18 @@ enum HaloPixelPalPowerAnimationDirection {
     case down
 }
 
+enum HaloPixelPalCloseGatePolicy {
+    /// Pixel Pal may delay physical retraction only while Halo's normal workspace owns
+    /// the surface. A CI-owned presentation does not render Pixel Pal, so waiting for
+    /// Pixel Pal's boot-down there would be invisible dead time.
+    static func shouldDelayCollapse(
+        layoutContainsPixelPal: Bool,
+        activeCIIdentifier: String?
+    ) -> Bool {
+        layoutContainsPixelPal && activeCIIdentifier == nil
+    }
+}
+
 enum HaloPixelPalPowerAnimationTiming {
     static let geometrySettleDelay: TimeInterval = 0.09
 

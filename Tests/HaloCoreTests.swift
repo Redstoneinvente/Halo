@@ -305,6 +305,33 @@ final class HaloCoreTests: XCTestCase {
         )
     }
 
+    func testPixelPalCloseGateSkipsCIControlledSurface() {
+        XCTAssertTrue(
+            HaloPixelPalCloseGatePolicy.shouldDelayCollapse(
+                layoutContainsPixelPal: true,
+                activeCIIdentifier: nil
+            )
+        )
+        XCTAssertFalse(
+            HaloPixelPalCloseGatePolicy.shouldDelayCollapse(
+                layoutContainsPixelPal: true,
+                activeCIIdentifier: "builtin.music"
+            )
+        )
+        XCTAssertFalse(
+            HaloPixelPalCloseGatePolicy.shouldDelayCollapse(
+                layoutContainsPixelPal: true,
+                activeCIIdentifier: "com.example.partner-ci"
+            )
+        )
+        XCTAssertFalse(
+            HaloPixelPalCloseGatePolicy.shouldDelayCollapse(
+                layoutContainsPixelPal: false,
+                activeCIIdentifier: nil
+            )
+        )
+    }
+
     func testPixelPalPowerTransitionTiming() {
         XCTAssertEqual(
             HaloPixelPalPowerAnimationTiming.duration(style: .scanline, direction: .up, speed: 1),

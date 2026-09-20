@@ -1918,10 +1918,17 @@ final class WindowManager {
     }
 
     private func schedulePixelPalGatedCollapse(for host: Host) -> Bool {
-        // This is the only hover-exit collapse delay. It exists solely so a visible
-        // Pixel Pal can finish its configured boot-down animation before the panel
-        // retracts. No Pixel Pal, or Boot Down = None, collapses immediately.
-        guard layoutContainsVisualWorkspacePixelPal(host) else { return false }
+        // This delay exists only for a Pixel Pal that is actually part of the visible
+        // normal workspace being dismissed. When a CI owns the surface, Pixel Pal is
+        // not rendered, so gating CI closure on its boot-down animation is dead time.
+        let containsPixelPal = layoutContainsVisualWorkspacePixelPal(host)
+        guard HaloPixelPalCloseGatePolicy.shouldDelayCollapse(
+            layoutContainsPixelPal: containsPixelPal,
+            activeCIIdentifier: host.state.activeCIIdentifier
+        ) else {
+            host.state.setPixelPalCloseGateActive(false)
+            return false
+        }
 
         let preferences = HaloPixelPalStore.shared.preferences
         guard preferences.bootDownAnimation != .none else { return false }
