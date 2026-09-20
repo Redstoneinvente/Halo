@@ -1729,9 +1729,9 @@ private var visualWorkspaceMargins: OpenNotchInsets {
     let configured = opened.resolvedGridPadding
     return OpenNotchInsets(
         top: max(configured.top, 10),
-        leading: max(configured.leading, safeWorkspaceSideInset),
-        bottom: max(configured.bottom, 12),
-        trailing: max(configured.trailing, safeWorkspaceSideInset)
+        leading: max(configured.leading, 0),
+        bottom: max(configured.bottom, 0),
+        trailing: max(configured.trailing, 0)
     )
 }
 
@@ -1755,9 +1755,9 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
 @ViewBuilder private var workspaceMarginsInspector: some View {
     Section("Workspace Margins") {
         PreciseSlider(title: "Top", value: gridMarginBinding(\.top), range: 10...96, step: 1, suffix: "pt")
-        PreciseSlider(title: "Leading", value: gridMarginBinding(\.leading), range: safeWorkspaceSideInset...96, step: 1, suffix: "pt")
-        PreciseSlider(title: "Bottom", value: gridMarginBinding(\.bottom), range: 12...96, step: 1, suffix: "pt")
-        PreciseSlider(title: "Trailing", value: gridMarginBinding(\.trailing), range: safeWorkspaceSideInset...96, step: 1, suffix: "pt")
+        PreciseSlider(title: "Leading", value: gridMarginBinding(\.leading), range: 0...96, step: 1, suffix: "pt")
+        PreciseSlider(title: "Bottom", value: gridMarginBinding(\.bottom), range: 0...96, step: 1, suffix: "pt")
+        PreciseSlider(title: "Trailing", value: gridMarginBinding(\.trailing), range: 0...96, step: 1, suffix: "pt")
         HStack {
             Button("Safe minimum") {
                 setWorkspaceMargins(OpenNotchInsets(top: 10, leading: safeWorkspaceSideInset, bottom: 12, trailing: safeWorkspaceSideInset))
@@ -1767,7 +1767,7 @@ private func setWorkspaceMargins(_ margins: OpenNotchInsets) {
                 setWorkspaceMargins(OpenNotchInsets(top: 16, leading: side, bottom: 16, trailing: side))
             }
         }
-        Text("These margins apply only to Visual Workspace. Halo keeps the minimum contour-safe inset, so widgets stay clear of rounded and scooped notch edges even at the tightest setting.")
+        Text("These margins apply only to Visual Workspace. Leading, Bottom and Trailing can be reduced to 0 pt; Safe minimum restores contour-aware spacing when you want it.")
             .font(.caption).foregroundStyle(.secondary)
     }
 }

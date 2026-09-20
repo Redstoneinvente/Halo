@@ -3878,14 +3878,13 @@ private struct OpenNotchWorkspaceView: View {
     private var directGap: CGFloat { CGFloat(opened.resolvedGridGap) }
     private var directPadding: OpenNotchInsets {
         let configured = opened.resolvedGridPadding
-        // Visual Workspace owns a contour-safe inset independent of the legacy opened-notch UI.
-        // Preserve larger user padding, but never let grid content hug rounded/scooped edges.
-        let shoulderInset = min(24.0, max(12.0, 8.0 + layout.appearance.surface.shoulder * 0.5))
+        // Top keeps its contour-safe minimum. The other workspace margins are
+        // intentionally user-controlled all the way down to zero.
         return OpenNotchInsets(
             top: max(configured.top, 10),
-            leading: max(configured.leading, shoulderInset),
-            bottom: max(configured.bottom, 12),
-            trailing: max(configured.trailing, shoulderInset)
+            leading: max(configured.leading, 0),
+            bottom: max(configured.bottom, 0),
+            trailing: max(configured.trailing, 0)
         )
     }
 
