@@ -84,6 +84,7 @@ final class HaloFeedbackService: ObservableObject {
         crashlytics.setCrashlyticsCollectionEnabled(crashDiagnosticsEnabled)
 
         guard crashDiagnosticsEnabled else {
+            crashlytics.deleteUnsentReports()
             crashedDuringPreviousExecution = false
             return
         }
@@ -106,10 +107,12 @@ final class HaloFeedbackService: ObservableObject {
             return
         }
 
-        Crashlytics.crashlytics().setCrashlyticsCollectionEnabled(enabled)
+        let crashlytics = Crashlytics.crashlytics()
+        crashlytics.setCrashlyticsCollectionEnabled(enabled)
         if !enabled {
+            crashlytics.deleteUnsentReports()
             crashedDuringPreviousExecution = false
-            Crashlytics.crashlytics().setUserID("")
+            crashlytics.setUserID("")
         } else {
             Crashlytics.crashlytics().setCustomValue(installationID(), forKey: "halo_installation_id")
         }
