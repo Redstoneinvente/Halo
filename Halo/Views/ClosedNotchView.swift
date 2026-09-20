@@ -1395,7 +1395,9 @@ enum MediaAssetReader {
 
 struct AlbumNotchBackground: View {
     let options: ClosedNotchOptions; @ObservedObject var media: MediaService; @ObservedObject var system: SystemService
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion; @State private var artwork: NSImage?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var artwork: NSImage?
+    @State private var reactiveAudioSignal = 0.0
     private var colors: [Color] { media.artworkColors.map(\.color) }; private var artworkOptions: ClosedArtworkOptions { options.resolvedArtwork }
     private var reactive: ReactiveBackgroundOptions { if let saved = options.reactiveBackground { return saved }; var legacy = ReactiveBackgroundOptions(); legacy.enabled = options.albumBackgroundFrequencyEffect ?? false; return legacy }
     private var key: String { (media.connectedApp ?? "") + "|" + media.title + "|" + media.artist }; private var wantsArtworkBackground: Bool { artworkOptions.usesBackgroundArtwork }
@@ -1404,8 +1406,16 @@ struct AlbumNotchBackground: View {
         Group {
             if active {
                 if reactive.enabled && !reduceMotion && !system.lowPower {
-                    RefreshTimeline(active: true) { timestamp in reactiveBackground(signal: signal(at: timestamp)) }
-                } else { baseBackground }
+                    if reactive.driver == .pulse {
+                        RefreshTimeline(active: true) { timestamp in
+                            reactiveBackground(signal: pulseSignal(at: timestamp))
+                        }
+                    } else {
+                        reactiveBackground(signal: reactiveAudioSignal)
+                    }
+                } else {
+                    baseBackground
+                }
             }
         }
         .task(id: key + "|\(wantsArtworkBackground)") { guard media.isPlaying && wantsArtworkBackground else { artwork = nil; return }; artwork = await MediaAssetReader.artwork(app: media.connectedApp, key: key) }
@@ -1415,7 +1425,11 @@ struct AlbumNotchBackground: View {
                 owner: "closed-notch-reactive-background"
             )
         }
+        .task(id: "reaction|\(media.isPlaying)|\(reactive.enabled)|\(reactive.driver.rawValue)|\(reactive.speed)|\(reactive.resolvedAudioSensitivity)") {
+            await runAudioReactionLoop()
+        }
         .onDisappear {
+            reactiveAudioSignal = 0
             AudioSpectrumService.shared.setActive(false, owner: "closed-notch-reactive-background")
         }
     }
@@ -1425,11 +1439,11 @@ struct AlbumNotchBackground: View {
         else if options.albumBackgroundColor == true && !colors.isEmpty { LinearGradient(colors: gradientColors, startPoint: .leading, endPoint: .trailing) }
         else { Color.white.opacity(reactive.enabled ? 0.035 : 0) }
     }
-    private func signal(at timestamp: Double) -> Double {
-        if reactive.driver == .pulse {
-            return (sin(timestamp * reactive.speed * 5.2) + 1) / 2
-        }
+    private func pulseSignal(at timestamp: Double) -> Double {
+        (sin(timestamp * reactive.speed * 5.2) + 1) / 2
+    }
 
+    private func currentAudioReactionTarget() -> Double {
         let spectrum = AudioSpectrumService.shared.snapshot()
         // Audio-driven profiles must represent real captured music. Do not substitute a fake sine
         // wave when capture is unavailable; that makes a broken analyser look "alive".
@@ -1451,10 +1465,38 @@ struct AlbumNotchBackground: View {
             raw = strongestBand * 0.52 + bandAverage * 0.28 + spectrum.reactiveOverall * 0.20
         }
 
-        // Sensitivity now operates on an adaptive 0...1 envelope instead of an almost-static
-        // absolute dB level. A gentle gamma curve keeps quieter musical detail visible.
         let amplified = min(1, max(0, raw * reactive.resolvedAudioSensitivity))
         return pow(amplified, 0.78)
+    }
+
+    @MainActor
+    private func runAudioReactionLoop() async {
+        guard media.isPlaying,
+              reactive.enabled,
+              reactive.driver != .pulse,
+              !reduceMotion,
+              !system.lowPower else {
+            reactiveAudioSignal = 0
+            return
+        }
+
+        while !Task.isCancelled {
+            let target = currentAudioReactionTarget()
+
+            // Reaction speed now controls the visual attack/release of real music profiles.
+            // Low values are silky; high values snap tightly to kicks, hats and vocal attacks.
+            let normalizedSpeed = min(1, max(0, (reactive.speed - 0.2) / 2.8))
+            let attack = 0.30 + normalizedSpeed * 0.52
+            let release = 0.12 + normalizedSpeed * 0.30
+            let response = target > reactiveAudioSignal ? attack : release
+            reactiveAudioSignal += (target - reactiveAudioSignal) * response
+
+            do {
+                try await Task.sleep(nanoseconds: 33_000_000)
+            } catch {
+                return
+            }
+        }
     }
 
     private func reactiveBackground(signal: Double) -> some View {
