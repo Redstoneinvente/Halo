@@ -1633,6 +1633,8 @@ struct ClosedMediaOptions: Codable, Equatable {
     var lyricSyncOffset: Double?
     var dynamicLyricWidth: Bool?
     var horizontalSpace: Double?
+    var lyricChangeAnimation: MediaChangeAnimation?
+    var lyricChangeAnimationDuration: Double?
     var changeAnimation: MediaChangeAnimation?
     var changeAnimationDuration: Double?
     var tapAction: MediaGestureAction?
@@ -1646,6 +1648,8 @@ struct ClosedMediaOptions: Codable, Equatable {
     var resolvedHorizontalSpace: Double { min(360, max(48, horizontalSpace ?? 180)) }
     var resolvedChangeAnimation: MediaChangeAnimation { changeAnimation ?? .slide }
     var resolvedChangeAnimationDuration: Double { min(1.2, max(0.08, changeAnimationDuration ?? 0.28)) }
+    var resolvedLyricChangeAnimation: MediaChangeAnimation { lyricChangeAnimation ?? resolvedChangeAnimation }
+    var resolvedLyricChangeAnimationDuration: Double { min(1.2, max(0.08, lyricChangeAnimationDuration ?? resolvedChangeAnimationDuration)) }
     var resolvedTapAction: MediaGestureAction { tapAction ?? .playPause }
     var resolvedDoubleTapAction: MediaGestureAction { doubleTapAction ?? .none }
     var resolvedSwipeLeftAction: MediaGestureAction { swipeLeftAction ?? .next }
@@ -1657,7 +1661,7 @@ struct ClosedMediaOptions: Codable, Equatable {
     var backgroundOpacity = 0.32
     var showPlaybackIcon = true
     func validated() throws -> ClosedMediaOptions {
-        guard [artworkSize, marqueeSpeed, vinylRPM, backgroundOpacity, lyricSyncOffset ?? 0, horizontalSpace ?? 180, changeAnimationDuration ?? 0.28].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        guard [artworkSize, marqueeSpeed, vinylRPM, backgroundOpacity, lyricSyncOffset ?? 0, horizontalSpace ?? 180, lyricChangeAnimationDuration ?? 0.28, changeAnimationDuration ?? 0.28].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
         v.lines = min(2, max(1, lines))
         v.artworkSize = min(72, max(14, artworkSize))
@@ -1666,6 +1670,8 @@ struct ClosedMediaOptions: Codable, Equatable {
         v.backgroundOpacity = min(1, max(0, backgroundOpacity))
         if lyricSyncOffset != nil { v.lyricSyncOffset = resolvedLyricSyncOffset }
         if horizontalSpace != nil { v.horizontalSpace = resolvedHorizontalSpace }
+        if lyricChangeAnimation != nil { v.lyricChangeAnimation = resolvedLyricChangeAnimation }
+        if lyricChangeAnimationDuration != nil { v.lyricChangeAnimationDuration = resolvedLyricChangeAnimationDuration }
         if changeAnimationDuration != nil { v.changeAnimationDuration = resolvedChangeAnimationDuration }
         return v
     }
