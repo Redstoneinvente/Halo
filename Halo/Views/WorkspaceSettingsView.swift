@@ -2981,6 +2981,8 @@ private struct ContextMusicSettings: View {
     private var lyricDisplay: Binding<LyricDisplayMode> { Binding(get: { options.wrappedValue.resolvedLyricDisplay }, set: { options.wrappedValue.lyricDisplay = $0 }) }
     private var lyricOffset: Binding<Double> { Binding(get: { options.wrappedValue.resolvedLyricSyncOffset }, set: { options.wrappedValue.lyricSyncOffset = $0 }) }
     private var lyricFontSize: Binding<Double> { Binding(get: { options.wrappedValue.resolvedLyricFontSize }, set: { options.wrappedValue.lyricFontSize = $0 }) }
+    private var lyricTransition: Binding<ContextLyricTransition> { Binding(get: { options.wrappedValue.resolvedLyricTransition }, set: { options.wrappedValue.lyricTransition = $0 }) }
+    private var lyricTransitionDuration: Binding<Double> { Binding(get: { options.wrappedValue.resolvedLyricTransitionDuration }, set: { options.wrappedValue.lyricTransitionDuration = $0 }) }
     private var onlineLyrics: Binding<Bool> { Binding(get: { options.wrappedValue.usesOnlineLyrics }, set: { options.wrappedValue.lyricsOnline = $0 }) }
     private var visualizerStyle: Binding<PlaybackAnimation> { Binding(get: { options.wrappedValue.resolvedVisualizerStyle }, set: { options.wrappedValue.visualizerStyle = $0 }) }
     private var horizontalMargin: Binding<Double> { Binding(get: { options.wrappedValue.resolvedHorizontalMargin }, set: { options.wrappedValue.horizontalMargin = $0 }) }
@@ -3031,6 +3033,16 @@ private struct ContextMusicSettings: View {
                     Text("Focus phrase").tag(LyricDisplayMode.focus)
                     Text("Current word").tag(LyricDisplayMode.word)
                 }.pickerStyle(.segmented)
+                Picker("Line transition", selection: lyricTransition) {
+                    ForEach(ContextLyricTransition.allCases) { transition in
+                        Text(transition.title).tag(transition)
+                    }
+                }
+                if lyricTransition.wrappedValue != .none {
+                    PreciseSlider(title: "Transition duration", value: lyricTransitionDuration, range: 0.08...1.2, step: 0.02, suffix: "s", decimals: 2)
+                }
+                Text("Transitions run only when the active synced lyric line changes, so word highlighting and playback timing stay fluid. Reduce Motion disables the movement automatically.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Slider(value: lyricFontSize, in: 10...44) { Text("Lyrics size") }
                 Slider(value: lyricOffset, in: -5...5, step: 0.05) { Text("Lyrics sync offset") }
                 Toggle("Use online lyrics fallback", isOn: onlineLyrics)
