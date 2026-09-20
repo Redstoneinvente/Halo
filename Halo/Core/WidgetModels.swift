@@ -1621,7 +1621,7 @@ struct VisualizerOptions: Codable, Equatable {
 enum MediaTextMode: String, Codable, CaseIterable { case title, artist, titleArtist, lyrics }
 enum MediaOverflowMode: String, Codable, CaseIterable { case truncate, scale, marquee }
 enum LyricDisplayMode: String, Codable, CaseIterable { case line, focus, word }
-enum MediaChangeAnimation: String, Codable, CaseIterable { case none, fade, slide, scale, blur }
+enum MediaChangeAnimation: String, Codable, CaseIterable { case none, fade, slide, lift, scale, blur }
 enum MediaGestureAction: String, Codable, CaseIterable { case none, playPause, next, previous, openPlayer }
 enum MediaArtworkMode: String, Codable, CaseIterable { case none, cover, background, vinyl }
 struct ClosedMediaOptions: Codable, Equatable {
