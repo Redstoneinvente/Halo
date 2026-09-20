@@ -76,6 +76,12 @@
 		F8614B803053291B00D4943C /* icon_16x16@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6E3053291B00D4943C /* icon_16x16@2x.png */; };
 		F8614B813053291B00D4943C /* icon_16x16.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6D3053291B00D4943C /* icon_16x16.png */; };
 		F8614B823053291B00D4943C /* Halo.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6C3053291B00D4943C /* Halo.png */; };
+		FBAC00000000000000000001 /* Services/HaloFeedbackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */; };
+		FBAC00000000000000000002 /* Views/HaloFeedbackCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */; };
+		FBAC00000000000000000211 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = FBAC00000000000000000201 /* FirebaseCore */; };
+		FBAC00000000000000000212 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = FBAC00000000000000000202 /* FirebaseAuth */; };
+		FBAC00000000000000000213 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = FBAC00000000000000000203 /* FirebaseFirestore */; };
+		FBAC00000000000000000214 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = FBAC00000000000000000204 /* FirebaseCrashlytics */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -168,6 +174,8 @@
 		F8614B743053291B00D4943C /* icon_256x256@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_256x256@2x.png"; sourceTree = "<group>"; };
 		F8614B753053291B00D4943C /* icon_512x512.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_512x512.png; sourceTree = "<group>"; };
 		F8614B763053291B00D4943C /* icon_512x512@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_512x512@2x.png"; sourceTree = "<group>"; };
+		FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HaloFeedbackService.swift; sourceTree = "<group>"; };
+		FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HaloFeedbackCenterView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -180,6 +188,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				A11C0F1A0000000000000353 /* Sparkle in Frameworks */,
+				FBAC00000000000000000211 /* FirebaseCore in Frameworks */,
+				FBAC00000000000000000212 /* FirebaseAuth in Frameworks */,
+				FBAC00000000000000000213 /* FirebaseFirestore in Frameworks */,
+				FBAC00000000000000000214 /* FirebaseCrashlytics in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -247,6 +259,8 @@
 				A11C0F1A0000000000000352 /* Services/SparkleUpdateController.swift */,
 				00000000000000000000006D /* Services/Integrations.swift */,
 				00000000000000000000006E /* Services/CaptureService.swift */,
+				FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */,
+				FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */,
 				00000000000000000000006F /* Core/ExtensionContracts.swift */,
 				C1A300000000000000000101 /* Core/HaloIntegration.swift */,
 				C1A300000000000000000102 /* Core/CIRuntimeRegistration.swift */,
@@ -380,6 +394,10 @@
 			name = Halo;
 			packageProductDependencies = (
 				A11C0F1A0000000000000354 /* Sparkle */,
+				FBAC00000000000000000201 /* FirebaseCore */,
+				FBAC00000000000000000202 /* FirebaseAuth */,
+				FBAC00000000000000000203 /* FirebaseFirestore */,
+				FBAC00000000000000000204 /* FirebaseCrashlytics */,
 			);
 			productName = Halo;
 			productReference = 000000000000000000000006 /* Halo.app */;
@@ -420,6 +438,7 @@
 			mainGroup = 000000000000000000000002;
 			packageReferences = (
 				A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				FBAC00000000000000000200 /* XCRemoteSwiftPackageReference "Firebase" */,
 			);
 			productRefGroup = 000000000000000000000004 /* Products */;
 			projectDirPath = "";
@@ -520,6 +539,8 @@
 				A11C0F1A0000000000000351 /* Services/SparkleUpdateController.swift in Sources */,
 				0000000000000000000000D1 /* Services/Integrations.swift in Sources */,
 				0000000000000000000000D2 /* Services/CaptureService.swift in Sources */,
+				FBAC00000000000000000001 /* Services/HaloFeedbackService.swift in Sources */,
+				FBAC00000000000000000002 /* Views/HaloFeedbackCenterView.swift in Sources */,
 				0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */,
 				C1A300000000000000000001 /* Core/HaloIntegration.swift in Sources */,
 				C1A300000000000000000002 /* Core/CIRuntimeRegistration.swift in Sources */,
@@ -580,6 +601,11 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A11C0F1A0000000000000001 /* Halo/Config/Base.xcconfig */;
 			buildSettings = {
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
@@ -617,6 +643,11 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A11C0F1A0000000000000001 /* Halo/Config/Base.xcconfig */;
 			buildSettings = {
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
@@ -705,6 +736,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		FBAC00000000000000000200 /* XCRemoteSwiftPackageReference "Firebase" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = exactVersion;
+				version = 12.19.2;
+			};
+		};
 		A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
@@ -716,6 +755,26 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		FBAC00000000000000000201 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FBAC00000000000000000200 /* XCRemoteSwiftPackageReference "Firebase" */;
+			productName = FirebaseCore;
+		};
+		FBAC00000000000000000202 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FBAC00000000000000000200 /* XCRemoteSwiftPackageReference "Firebase" */;
+			productName = FirebaseAuth;
+		};
+		FBAC00000000000000000203 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FBAC00000000000000000200 /* XCRemoteSwiftPackageReference "Firebase" */;
+			productName = FirebaseFirestore;
+		};
+		FBAC00000000000000000204 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FBAC00000000000000000200 /* XCRemoteSwiftPackageReference "Firebase" */;
+			productName = FirebaseCrashlytics;
+		};
 		A11C0F1A0000000000000354 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */;
