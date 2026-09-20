@@ -154,7 +154,11 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
                 return configuration?.appearance.primary.source == .albumArtwork ||
                        configuration?.appearance.progress.source == .albumArtwork
             }
-            return contextNeedsArtwork || contextNeedsPalette || hudNeedsPalette ||
+            let closedArtwork = layout.closedNotch?.artworkOptions
+            let closedNeedsArtwork = (closedArtwork?.enabled == true &&
+                                      (closedArtwork?.mode != .none || closedArtwork?.usesBackgroundArtwork == true)) ||
+                                     (layout.closedNotch?.mediaOptions?.artwork != .none)
+            return contextNeedsArtwork || contextNeedsPalette || hudNeedsPalette || closedNeedsArtwork ||
                 layout.closedNotch?.visualizer?.dynamicColors == true ||
                 layout.closedNotch?.albumTextColor == true ||
                 layout.closedNotch?.albumBackgroundColor == true
