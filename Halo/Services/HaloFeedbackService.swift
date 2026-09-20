@@ -1,8 +1,7 @@
 import Foundation
 import AppKit
 import Combine
-import FirebaseCore
-import FirebaseCrashlytics
+import MetricKit
 
 enum HaloFeedbackKind: String, CaseIterable, Identifiable {
     case bug = "Bug"
@@ -58,6 +57,33 @@ private enum HaloFeedbackError: LocalizedError {
     }
 }
 
+private final class HaloMetricKitBridge: NSObject, MXMetricManagerSubscriber {
+    weak var owner: HaloFeedbackService?
+
+    init(owner: HaloFeedbackService) {
+        self.owner = owner
+        super.init()
+    }
+
+    func start() {
+        MXMetricManager.shared.add(self)
+    }
+
+    func stop() {
+        MXMetricManager.shared.remove(self)
+    }
+
+    func didReceive(_ payloads: [MXMetricPayload]) {
+        // Daily performance metrics are intentionally ignored for now.
+    }
+
+    func didReceive(_ payloads: [MXDiagnosticPayload]) {
+        Task { @MainActor [weak self] in
+            self?.owner?.receiveMetricKitDiagnostics(payloads)
+        }
+    }
+}
+
 @MainActor
 final class HaloFeedbackService: ObservableObject {
     static let shared = HaloFeedbackService()
@@ -73,6 +99,9 @@ final class HaloFeedbackService: ObservableObject {
     private let defaults = UserDefaults.standard
     private let crashDiagnosticsKey = "HaloCrashDiagnosticsEnabledV1"
     private let installationIDKey = "HaloDiagnosticsInstallationIDV1"
+    private let lastMetricKitCrashKey = "HaloMetricKitLastCrashEndV1"
+    private var latestCrashSummary: [String: String] = [:]
+    private var metricKitBridge: HaloMetricKitBridge?
     private var started = false
 
     private init() {
@@ -85,45 +114,35 @@ final class HaloFeedbackService: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
-        configureFirebaseIfPossible()
-
-        guard FirebaseApp.app() != nil else { return }
-
-        let crashlytics = Crashlytics.crashlytics()
-        crashlytics.setCrashlyticsCollectionEnabled(crashDiagnosticsEnabled)
+        firebaseAvailable = firebaseProjectID() != nil
 
         guard crashDiagnosticsEnabled else {
-            crashlytics.deleteUnsentReports()
             crashedDuringPreviousExecution = false
             return
         }
 
-        crashedDuringPreviousExecution = crashlytics.didCrashDuringPreviousExecution()
-        let diagnostics = safeDiagnostics()
-        crashlytics.setCustomValue(diagnostics["appVersion"] ?? "unknown", forKey: "halo_app_version")
-        crashlytics.setCustomValue(diagnostics["appBuild"] ?? "unknown", forKey: "halo_app_build")
-        crashlytics.setCustomValue(diagnostics["macOS"] ?? "unknown", forKey: "halo_macos")
-        crashlytics.setCustomValue(diagnostics["architecture"] ?? "unknown", forKey: "halo_architecture")
-        crashlytics.setCustomValue(installationID(), forKey: "halo_installation_id")
+        let bridge = HaloMetricKitBridge(owner: self)
+        metricKitBridge = bridge
+        bridge.start()
+        receiveMetricKitDiagnostics(MXMetricManager.shared.pastDiagnosticPayloads)
     }
 
     func setCrashDiagnosticsEnabled(_ enabled: Bool) {
         crashDiagnosticsEnabled = enabled
         defaults.set(enabled, forKey: crashDiagnosticsKey)
 
-        guard FirebaseApp.app() != nil else {
-            if !enabled { crashedDuringPreviousExecution = false }
-            return
-        }
-
-        let crashlytics = Crashlytics.crashlytics()
-        crashlytics.setCrashlyticsCollectionEnabled(enabled)
-        if !enabled {
-            crashlytics.deleteUnsentReports()
-            crashedDuringPreviousExecution = false
-            crashlytics.setUserID("")
+        if enabled {
+            if metricKitBridge == nil {
+                let bridge = HaloMetricKitBridge(owner: self)
+                metricKitBridge = bridge
+                bridge.start()
+            }
+            receiveMetricKitDiagnostics(MXMetricManager.shared.pastDiagnosticPayloads)
         } else {
-            crashlytics.setCustomValue(installationID(), forKey: "halo_installation_id")
+            metricKitBridge?.stop()
+            metricKitBridge = nil
+            latestCrashSummary = [:]
+            crashedDuringPreviousExecution = false
         }
     }
 
@@ -134,20 +153,50 @@ final class HaloFeedbackService: ObservableObject {
     }
 
     func logReliabilityEvent(_ message: String) {
-        guard crashDiagnosticsEnabled, FirebaseApp.app() != nil else { return }
-        Crashlytics.crashlytics().log(message)
+        guard crashDiagnosticsEnabled else { return }
+        let key = "HaloReliabilityLastEventV1"
+        defaults.set(String(message.prefix(240)), forKey: key)
     }
 
     func recordNonFatal(_ error: Error, context: String? = nil) {
-        guard crashDiagnosticsEnabled, FirebaseApp.app() != nil else { return }
+        guard crashDiagnosticsEnabled else { return }
+        defaults.set(String(error.localizedDescription.prefix(500)), forKey: "HaloReliabilityLastNonFatalV1")
         if let context, !context.isEmpty {
-            Crashlytics.crashlytics().setCustomValue(context, forKey: "halo_nonfatal_context")
+            defaults.set(String(context.prefix(240)), forKey: "HaloReliabilityLastNonFatalContextV1")
         }
-        Crashlytics.crashlytics().record(error: error)
+    }
+
+    func receiveMetricKitDiagnostics(_ payloads: [MXDiagnosticPayload]) {
+        guard crashDiagnosticsEnabled else { return }
+
+        let lastHandled = defaults.object(forKey: lastMetricKitCrashKey) as? Date ?? .distantPast
+        var newestCrashEnd: Date?
+        var newestSummary: [String: String] = [:]
+
+        for payload in payloads {
+            guard let crashes = payload.crashDiagnostics, !crashes.isEmpty else { continue }
+            guard payload.timeStampEnd > lastHandled else { continue }
+
+            if newestCrashEnd == nil || payload.timeStampEnd > newestCrashEnd! {
+                newestCrashEnd = payload.timeStampEnd
+                newestSummary = metricKitSummary(from: crashes)
+            }
+        }
+
+        guard let newestCrashEnd else { return }
+
+        latestCrashSummary = newestSummary
+        crashedDuringPreviousExecution = true
+
+        // Mark this system payload as seen so Halo does not nag again on every launch.
+        // The user can still submit a crash report manually from Feedback & Support.
+        defaults.set(newestCrashEnd, forKey: lastMetricKitCrashKey)
+
+        NotificationCenter.default.post(name: .init("HaloMetricKitCrashDetected"), object: nil)
     }
 
     func submit(_ submission: HaloFeedbackSubmission) async -> Bool {
-        configureFirebaseIfPossible()
+        firebaseAvailable = firebaseProjectID() != nil
         successMessage = nil
         errorMessage = nil
 
@@ -207,9 +256,6 @@ final class HaloFeedbackService: ObservableObject {
                 "platform": "macOS"
             ]
 
-            // This document is intentionally safe for the public issue website.
-            // Never add uid, email, device identifiers, diagnostics, file paths,
-            // clipboard data, notes, calendar content, or integration payloads here.
             if submission.kind == .crash {
                 publicIssue["crashRelated"] = true
             }
@@ -226,7 +272,11 @@ final class HaloFeedbackService: ObservableObject {
             ]
 
             if submission.includeDiagnostics {
-                privateReport["diagnostics"] = safeDiagnostics()
+                var diagnostics = safeDiagnostics()
+                if submission.kind == .crash {
+                    latestCrashSummary.forEach { diagnostics[$0.key] = $0.value }
+                }
+                privateReport["diagnostics"] = diagnostics
                 if crashDiagnosticsEnabled {
                     privateReport["diagnosticsInstallationID"] = installationID()
                 }
@@ -239,15 +289,10 @@ final class HaloFeedbackService: ObservableObject {
                 privateReport: privateReport
             )
 
-            if crashDiagnosticsEnabled, FirebaseApp.app() != nil {
-                let crashlytics = Crashlytics.crashlytics()
-                crashlytics.setCustomValue(issueID, forKey: "halo_latest_feedback_issue")
-                crashlytics.log("Feedback submitted: \(submission.kind.storageValue)")
-            }
-
             successMessage = "Thanks — your report was sent. Reference: \(issueID)"
             if submission.kind == .crash {
                 crashedDuringPreviousExecution = false
+                latestCrashSummary = [:]
             }
             return true
         } catch {
@@ -257,18 +302,36 @@ final class HaloFeedbackService: ObservableObject {
     }
 
     func safeDiagnosticsPreview() -> [(String, String)] {
-        safeDiagnostics()
+        var preview = safeDiagnostics()
+        if selectedKind == .crash {
+            latestCrashSummary.forEach { preview[$0.key] = $0.value }
+        }
+        return preview
             .map { ($0.key, $0.value) }
             .sorted { $0.0.localizedCaseInsensitiveCompare($1.0) == .orderedAscending }
     }
 
-    private func configureFirebaseIfPossible() {
-        if FirebaseApp.app() == nil,
-           let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
-           let options = FirebaseOptions(contentsOfFile: path) {
-            FirebaseApp.configure(options: options)
+    private func metricKitSummary(from crashes: [MXCrashDiagnostic]) -> [String: String] {
+        guard let crash = crashes.last else { return [:] }
+
+        var values: [String: String] = [
+            "metricKitCrashCount": String(crashes.count)
+        ]
+
+        if let signal = crash.signal {
+            values["crashSignal"] = signal.stringValue
         }
-        firebaseAvailable = firebaseProjectID() != nil
+        if let exceptionType = crash.exceptionType {
+            values["crashExceptionType"] = exceptionType.stringValue
+        }
+        if let exceptionCode = crash.exceptionCode {
+            values["crashExceptionCode"] = exceptionCode.stringValue
+        }
+        if let terminationReason = crash.terminationReason, !terminationReason.isEmpty {
+            values["crashTerminationReason"] = String(terminationReason.prefix(500))
+        }
+
+        return values
     }
 
     private func firebaseProjectID() -> String? {
@@ -397,6 +460,7 @@ final class HaloFeedbackService: ObservableObject {
         diagnostics["displayCount"] = String(NSScreen.screens.count)
         diagnostics["notchedDisplayCount"] = String(NSScreen.screens.filter { $0.safeAreaInsets.top > 0 }.count)
         diagnostics["distribution"] = distributionName
+        diagnostics["diagnosticsSource"] = "Apple MetricKit"
         return diagnostics
     }
 
