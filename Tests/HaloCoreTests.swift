@@ -50,6 +50,52 @@ final class HaloCoreTests: XCTestCase {
         )
     }
 
+    func testAdaptiveAudioCIPaletteAssignsDistinctSemanticRoles() {
+        let album = [
+            WidgetColor(red: 0.14, green: 0.38, blue: 0.86),
+            WidgetColor(red: 0.88, green: 0.30, blue: 0.48),
+            WidgetColor(red: 0.30, green: 0.78, blue: 0.62)
+        ]
+        let backgrounds = [
+            WidgetColor(red: 0.04, green: 0.07, blue: 0.12),
+            WidgetColor(red: 0.10, green: 0.13, blue: 0.20)
+        ]
+
+        let semantic = AudioCISemanticColorResolver.resolve(album: album, backgrounds: backgrounds)
+
+        XCTAssertNotEqual(semantic.progressFill, semantic.progressTrack)
+        XCTAssertNotEqual(semantic.progressThumb, semantic.progressTrack)
+        XCTAssertNotEqual(semantic.primaryText, semantic.secondaryText)
+        XCTAssertFalse(semantic.visualizer.isEmpty)
+    }
+
+    func testAdaptiveAudioCIPaletteMaintainsRoleContrast() {
+        let album = [
+            WidgetColor(red: 0.91, green: 0.55, blue: 0.12),
+            WidgetColor(red: 0.16, green: 0.56, blue: 0.88),
+            WidgetColor(red: 0.80, green: 0.24, blue: 0.52)
+        ]
+        let backgrounds = [
+            WidgetColor(red: 0.08, green: 0.07, blue: 0.05),
+            WidgetColor(red: 0.13, green: 0.11, blue: 0.08)
+        ]
+
+        let semantic = AudioCISemanticColorResolver.resolve(album: album, backgrounds: backgrounds)
+
+        XCTAssertGreaterThanOrEqual(
+            AlbumForegroundColorResolver.worstContrast(semantic.primaryText, against: backgrounds),
+            AlbumForegroundColorResolver.minimumContrast - 0.001
+        )
+        XCTAssertGreaterThanOrEqual(
+            AlbumForegroundColorResolver.worstContrast(semantic.secondaryText, against: backgrounds),
+            3.6 - 0.001
+        )
+        XCTAssertGreaterThanOrEqual(
+            AlbumForegroundColorResolver.worstContrast(semantic.primaryControl, against: backgrounds),
+            AlbumForegroundColorResolver.minimumContrast - 0.001
+        )
+    }
+
     func testBluetoothDeviceSymbolsUseReportedClassForRenamedAccessories() {
         XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0540), "keyboard")
         XCTAssertEqual(BluetoothDeviceVisual.symbol(name: "Pranav's device", classOfDevice: 0x0580), "computermouse")
