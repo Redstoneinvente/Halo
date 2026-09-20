@@ -1582,6 +1582,23 @@ enum ContextContentAlignment: String, Codable, CaseIterable, Identifiable {
     var title: String { rawValue.capitalized }
 }
 
+enum ContextLyricTransition: String, Codable, CaseIterable, Identifiable {
+    case none, fade, slide, lift, scale, blur
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: return "None"
+        case .fade: return "Fade"
+        case .slide: return "Slide"
+        case .lift: return "Lift"
+        case .scale: return "Scale"
+        case .blur: return "Blur + fade"
+        }
+    }
+}
+
 struct ContextMusicOptions: Codable, Equatable {
     var enabled = false
     var showArtwork = true
@@ -1609,6 +1626,8 @@ struct ContextMusicOptions: Codable, Equatable {
     var lyricSyncOffset: Double?
     var lyricsOnline: Bool?
     var lyricFontSize: Double?
+    var lyricTransition: ContextLyricTransition?
+    var lyricTransitionDuration: Double?
     var visualizerStyle: PlaybackAnimation?
     var songTextColors: Bool?
     var songControlColors: Bool?
@@ -1632,6 +1651,8 @@ struct ContextMusicOptions: Codable, Equatable {
     var resolvedLyricSyncOffset: Double { min(5, max(-5, lyricSyncOffset ?? 0)) }
     var usesOnlineLyrics: Bool { lyricsOnline ?? true }
     var resolvedLyricFontSize: Double { min(44, max(10, lyricFontSize ?? max(14, fontSize * 0.72))) }
+    var resolvedLyricTransition: ContextLyricTransition { lyricTransition ?? .lift }
+    var resolvedLyricTransitionDuration: Double { min(1.2, max(0.08, lyricTransitionDuration ?? 0.28)) }
     var resolvedVisualizerStyle: PlaybackAnimation { visualizerStyle ?? .bars }
     var usesSongTextColors: Bool { songTextColors ?? false }
     var usesSongControlColors: Bool { songControlColors ?? false }
@@ -1653,6 +1674,7 @@ struct ContextMusicOptions: Codable, Equatable {
             vinylRPM ?? 8,
             lyricSyncOffset ?? 0,
             lyricFontSize ?? 16,
+            lyricTransitionDuration ?? 0.28,
             horizontalMargin ?? 18,
             topMargin ?? 0,
             bottomMargin ?? 10
@@ -1675,6 +1697,8 @@ struct ContextMusicOptions: Codable, Equatable {
         if vinylRPM != nil { result.vinylRPM = resolvedVinylRPM }
         if lyricSyncOffset != nil { result.lyricSyncOffset = resolvedLyricSyncOffset }
         if lyricFontSize != nil { result.lyricFontSize = resolvedLyricFontSize }
+        if lyricTransition != nil { result.lyricTransition = resolvedLyricTransition }
+        if lyricTransitionDuration != nil { result.lyricTransitionDuration = resolvedLyricTransitionDuration }
         if horizontalMargin != nil { result.horizontalMargin = resolvedHorizontalMargin }
         if topMargin != nil { result.topMargin = resolvedTopMargin }
         if bottomMargin != nil { result.bottomMargin = resolvedBottomMargin }
