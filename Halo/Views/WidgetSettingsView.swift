@@ -866,7 +866,18 @@ struct ClosedNotchSettingsView: View {
     private var artwork: Binding<ClosedArtworkOptions> {
         Binding(get: {
             if let saved = options.wrappedValue.artworkOptions { return saved }
-            let legacy = options.wrappedValue    var body: some View {
+            let legacy = options.wrappedValue.mediaOptions ?? ClosedMediaOptions()
+            var value = ClosedArtworkOptions()
+            if legacy.artwork != .none {
+                value.enabled = true; value.mode = legacy.artwork; value.size = legacy.artworkSize
+                value.vinylRPM = legacy.vinylRPM; value.backgroundOpacity = legacy.backgroundOpacity
+            }
+            return value
+        }, set: { options.wrappedValue.artworkOptions = $0 })
+    }
+    private var reactive: Binding<ReactiveBackgroundOptions> { Binding(get: { options.wrappedValue.reactiveBackground ?? ReactiveBackgroundOptions() }, set: { options.wrappedValue.reactiveBackground = $0 }) }
+    private var power: Binding<PowerReactionOptions> { Binding(get: { options.wrappedValue.powerReaction ?? PowerReactionOptions() }, set: { options.wrappedValue.powerReaction = $0 }) }
+    var body: some View {
         Section {
             Picker("Category", selection: $selectedPage) {
                 ForEach(SettingsPage.allCases) { page in
