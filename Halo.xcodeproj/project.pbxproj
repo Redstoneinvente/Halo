@@ -78,8 +78,6 @@
 		F8614B823053291B00D4943C /* Halo.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6C3053291B00D4943C /* Halo.png */; };
 		FBAC00000000000000000001 /* Services/HaloFeedbackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */; };
 		FBAC00000000000000000002 /* Views/HaloFeedbackCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */; };
-		FBAC00000000000000000211 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = FBAC00000000000000000201 /* FirebaseCore */; };
-		FBAC00000000000000000214 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = FBAC00000000000000000204 /* FirebaseCrashlytics */; };
 		FBAC00000000000000000301 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000300 /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
@@ -188,8 +186,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				A11C0F1A0000000000000353 /* Sparkle in Frameworks */,
-				FBAC00000000000000000211 /* FirebaseCore in Frameworks */,
-				FBAC00000000000000000214 /* FirebaseCrashlytics in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -385,7 +381,6 @@
 				000000000000000000000008 /* Frameworks */,
 				000000000000000000000009 /* Resources */,
 				A11C0F1A0000000000000394 /* Build native MediaRemote bridge */,
-				FBAC00000000000000000220 /* Upload Crashlytics dSYMs */,
 			);
 			buildRules = (
 			);
@@ -394,8 +389,6 @@
 			name = Halo;
 			packageProductDependencies = (
 				A11C0F1A0000000000000354 /* Sparkle */,
-				FBAC00000000000000000201 /* FirebaseCore */,
-				FBAC00000000000000000204 /* FirebaseCrashlytics */,
 			);
 			productName = Halo;
 			productReference = 000000000000000000000006 /* Halo.app */;
@@ -436,7 +429,6 @@
 			mainGroup = 000000000000000000000002;
 			packageReferences = (
 				A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */,
-				FBAC00000000000000000200 /* XCRemoteSwiftPackageReference "Firebase" */,
 			);
 			productRefGroup = 000000000000000000000004 /* Products */;
 			projectDirPath = "";
@@ -501,21 +493,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "set -euo pipefail\nSRC=\"$SRCROOT/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote\"\nINC=\"$SRC/include\"\nFRAMEWORKS=\"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\nRESOURCES=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH\"\nOUT=\"$FRAMEWORKS/libHaloMediaRemoteBridge.dylib\"\nmkdir -p \"$FRAMEWORKS\" \"$RESOURCES\" \"$DERIVED_FILE_DIR/HaloMediaRemoteBridge\"\nBUILT=\"\"\nfor ARCH in $ARCHS; do\n  PART=\"$DERIVED_FILE_DIR/HaloMediaRemoteBridge/libHaloMediaRemoteBridge-$ARCH.dylib\"\n  \"${CC:-/usr/bin/clang}\" -arch \"$ARCH\" -isysroot \"$SDKROOT\" -mmacosx-version-min=\"$MACOSX_DEPLOYMENT_TARGET\" -dynamiclib -fobjc-arc -fblocks -I\"$INC\" \"$SRC/MediaRemote.m\" \"$SRC/MediaRemoteAdapter.m\" \"$SRC/MediaRemoteAdapterKeys.m\" -framework Foundation -framework AppKit -install_name @rpath/libHaloMediaRemoteBridge.dylib -o \"$PART\"\n  BUILT=\"$BUILT $PART\"\ndone\nset -- $BUILT\nif [ \"$#\" -gt 1 ]; then /usr/bin/lipo -create \"$@\" -output \"$OUT\"; else /bin/cp \"$1\" \"$OUT\"; fi\n/bin/cp \"$SRCROOT/Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/Resources/run.pl\" \"$RESOURCES/run.pl\"\n/bin/chmod 755 \"$RESOURCES/run.pl\"\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ]; then\n  IDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:-}\"\n  if [ -n \"$IDENTITY\" ]; then /usr/bin/codesign --force --sign \"$IDENTITY\" --timestamp=none \"$OUT\"; else /usr/bin/codesign --force --sign - --timestamp=none \"$OUT\"; fi\nfi\n";
-		};
-		FBAC00000000000000000220 /* Upload Crashlytics dSYMs */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-			);
-			name = "Upload Crashlytics dSYMs";
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "GSP=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/GoogleService-Info.plist\"\nif [ -f \"$GSP\" ]; then\n  \"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\"\nelse\n  echo \"warning: Crashlytics dSYM upload skipped because GoogleService-Info.plist is not bundled.\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -615,11 +592,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A11C0F1A0000000000000001 /* Halo/Config/Base.xcconfig */;
 			buildSettings = {
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-ObjC",
-				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
@@ -750,14 +722,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		FBAC00000000000000000200 /* XCRemoteSwiftPackageReference "Firebase" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
-			requirement = {
-				kind = exactVersion;
-				version = 12.11.0;
-			};
-		};
 		A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
@@ -769,16 +733,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		FBAC00000000000000000201 /* FirebaseCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = FBAC00000000000000000200 /* XCRemoteSwiftPackageReference "Firebase" */;
-			productName = FirebaseCore;
-		};
-		FBAC00000000000000000204 /* FirebaseCrashlytics */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = FBAC00000000000000000200 /* XCRemoteSwiftPackageReference "Firebase" */;
-			productName = FirebaseCrashlytics;
-		};
 		A11C0F1A0000000000000354 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A11C0F1A0000000000000355 /* XCRemoteSwiftPackageReference "Sparkle" */;
