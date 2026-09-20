@@ -76,7 +76,7 @@ struct HaloFeedbackCenterView: View {
             Section("Technical diagnostics") {
                 Toggle("Include technical diagnostics with this report", isOn: $includeDiagnostics)
 
-                Text("Diagnostics contain only Halo's version/build, macOS version, CPU architecture, display count, distribution channel, and—when crash reporting is enabled—a random Halo installation identifier. They do not include clipboard contents, files, notes, calendar data, screenshots, license keys, or integration payloads.")
+                Text("Diagnostics contain only Halo's version/build, macOS version, CPU architecture, display count, distribution channel, and—when crash reporting is enabled—a random Halo installation identifier plus Apple MetricKit crash metadata such as signal/exception information. They do not include clipboard contents, files, notes, calendar data, screenshots, license keys, or integration payloads.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -99,7 +99,7 @@ struct HaloFeedbackCenterView: View {
                     )
                 )
 
-                Text("You can opt out at any time. Turning this off disables future Crashlytics collection for Halo on subsequent launches and Halo purges any unsent crash reports it can access while reporting is disabled.")
+                Text("You can opt out at any time. Turning this off unsubscribes Halo from Apple MetricKit diagnostics and Halo will not attach MetricKit crash information to feedback while reporting is disabled.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
