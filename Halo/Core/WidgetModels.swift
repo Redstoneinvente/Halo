@@ -441,37 +441,26 @@ enum AudioCISemanticColorResolver {
         let progressFill = AlbumForegroundColorResolver.readable(tertiarySource, against: backgrounds)
 
         let representativeBackground = average(backgrounds)
-        let secondaryTextCandidate = AlbumForegroundColorResolver.blend(
+        let secondaryText = receded(
             primaryText,
             toward: representativeBackground,
-            amount: 0.24
-        )
-        let secondaryText = ensureContrast(
-            secondaryTextCandidate,
-            sourceFallback: primaryText,
             backgrounds: backgrounds,
             minimum: 3.6
         )
-
-        let secondaryControlCandidate = AlbumForegroundColorResolver.blend(
+        let secondaryControl = receded(
             primaryControl,
-            toward: secondaryText,
-            amount: 0.38
-        )
-        let secondaryControl = ensureContrast(
-            secondaryControlCandidate,
-            sourceFallback: primaryControl,
+            toward: representativeBackground,
             backgrounds: backgrounds,
-            minimum: 3.8
+            minimum: 4.0
         )
 
-        // The track is intentionally subordinate to the fill. It does not carry text, so a lower
-        // contrast is desirable; the thumb then uses the strongest available foreground so the
-        // three scrubber layers remain visually distinct.
-        let progressTrack = AlbumForegroundColorResolver.blend(
+        // The track is intentionally subordinate to the fill. It does not carry text, so it sits
+        // much closer to the surface while still retaining enough separation to read as a rail.
+        let progressTrack = receded(
             progressFill,
             toward: representativeBackground,
-            amount: 0.72
+            backgrounds: backgrounds,
+            minimum: 1.45
         )
         let progressThumb = bestHighContrastColor(
             preferred: primaryText,
@@ -511,35 +500,34 @@ enum AudioCISemanticColorResolver {
         backgrounds: [WidgetColor],
         amount: Double
     ) -> WidgetColor {
-        let mixed = AlbumForegroundColorResolver.blend(source, toward: anchor, amount: amount)
-        return ensureContrast(mixed, sourceFallback: anchor, backgrounds: backgrounds, minimum: 3.5)
+        let readableSource = AlbumForegroundColorResolver.readable(source, against: backgrounds)
+        let mixed = AlbumForegroundColorResolver.blend(readableSource, toward: anchor, amount: amount)
+        return AlbumForegroundColorResolver.worstContrast(mixed, against: backgrounds) >= 3.5
+            ? mixed
+            : readableSource
     }
 
-    private static func ensureContrast(
-        _ candidate: WidgetColor,
-        sourceFallback: WidgetColor,
+    private static func receded(
+        _ foreground: WidgetColor,
+        toward background: WidgetColor,
         backgrounds: [WidgetColor],
         minimum: Double
     ) -> WidgetColor {
-        guard AlbumForegroundColorResolver.worstContrast(candidate, against: backgrounds) < minimum else {
-            return candidate
+        guard AlbumForegroundColorResolver.worstContrast(foreground, against: backgrounds) > minimum else {
+            return foreground
         }
-        let whiteScore = AlbumForegroundColorResolver.worstContrast(.white, against: backgrounds)
-        let blackScore = AlbumForegroundColorResolver.worstContrast(.black, against: backgrounds)
-        let target = whiteScore >= blackScore ? WidgetColor.white : WidgetColor.black
-
         var lower = 0.0
         var upper = 1.0
-        for _ in 0..<20 {
+        for _ in 0..<22 {
             let amount = (lower + upper) * 0.5
-            let resolved = AlbumForegroundColorResolver.blend(sourceFallback, toward: target, amount: amount)
-            if AlbumForegroundColorResolver.worstContrast(resolved, against: backgrounds) >= minimum {
-                upper = amount
-            } else {
+            let candidate = AlbumForegroundColorResolver.blend(foreground, toward: background, amount: amount)
+            if AlbumForegroundColorResolver.worstContrast(candidate, against: backgrounds) >= minimum {
                 lower = amount
+            } else {
+                upper = amount
             }
         }
-        return AlbumForegroundColorResolver.blend(sourceFallback, toward: target, amount: upper)
+        return AlbumForegroundColorResolver.blend(foreground, toward: background, amount: lower)
     }
 
     private static func bestHighContrastColor(
