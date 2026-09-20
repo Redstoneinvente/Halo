@@ -19,7 +19,7 @@ struct SettingsView: View {
     @State private var renamingProfile: UUID?
     @State private var renamedProfile = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
-    @State private var expandedSidebarGroups: Set<String> = ["Halo"]
+    @State private var expandedSidebarGroups: Set<String> = ["Core", "Design"]
 
     private struct SidebarGroup: Identifiable {
         let title: String
@@ -39,14 +39,14 @@ struct SettingsView: View {
         }
         return [
             SidebarGroup(
-                title: "Halo",
+                title: "Core",
                 icon: "sparkles",
-                items: ["General", "Account & License", "Feedback & Support", "Privacy", "About"]
+                items: ["General", "Account & License", "Privacy"]
             ),
             SidebarGroup(
-                title: "Interface",
+                title: "Design",
                 icon: "paintpalette",
-                items: ["Appearance", "Notch Skins", "Activation Sequence", "Closed notch", "Notch Ambient", "Context Notch Interface", "HUD"]
+                items: ["Appearance", "Closed notch", "Notch Skins", "Notch Ambient", "Activation Sequence", "Update Animation"]
             ),
             SidebarGroup(
                 title: "Workspace",
@@ -54,14 +54,19 @@ struct SettingsView: View {
                 items: workspaceItems
             ),
             SidebarGroup(
+                title: "Context Interfaces",
+                icon: "rectangle.stack",
+                items: ["Context Notch Interface", "HUD"]
+            ),
+            SidebarGroup(
                 title: "Profiles & Automation",
                 icon: "person.2.badge.gearshape",
                 items: ["Profiles", "Schedules", "Automation"]
             ),
             SidebarGroup(
-                title: "System",
+                title: "System & Support",
                 icon: "gearshape.2",
-                items: ["Displays", "Plugins", "Update Animation"]
+                items: ["Displays", "Plugins", "Feedback & Support", "About"]
             )
         ]
     }
@@ -114,8 +119,9 @@ struct SettingsView: View {
 
     @ViewBuilder
     private func sidebarRow(_ name: String) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             Label(name, systemImage: sectionIcon(name))
+                .labelStyle(.titleAndIcon)
             Spacer(minLength: 4)
             if isSectionUnavailable(name) {
                 HStack(spacing: 3) {
@@ -131,7 +137,7 @@ struct SettingsView: View {
                 .background(Color.secondary.opacity(0.10), in: Capsule())
             }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 3)
         .opacity(isSectionUnavailable(name) ? 0.5 : 1)
         .contentShape(Rectangle())
         .help(sectionHelp(name))
@@ -159,8 +165,9 @@ struct SettingsView: View {
                                 }
                             } label: {
                                 Label(group.title, systemImage: group.icon)
-                                    .font(.subheadline.weight(.semibold))
+                                    .font(.caption.weight(.semibold))
                                     .foregroundStyle(group.items.contains(section ?? "") ? Color.accentColor : Color.secondary)
+                                    .textCase(.uppercase)
                             }
                         }
                     } else {
@@ -186,7 +193,7 @@ struct SettingsView: View {
                     Link(destination: URL(string: "https://halo.redstoneinvente.com")!) { Label("Halo website", systemImage: "globe") }
                     Link(destination: URL(string: "https://buymeacoffee.com/redstoneinvente")!) { Label("Buy me a coffee", systemImage: "cup.and.saucer.fill") }
                 }.font(.callout).padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(width: 220)
+            }.frame(width: 236)
             Divider()
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {
@@ -226,7 +233,7 @@ struct SettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloOpenFeedback"))) { _ in
             section = "Feedback & Support"
-            expandedSidebarGroups.insert("Halo")
+            expandedSidebarGroups.insert("System & Support")
         }
         .onDisappear {
             endDirectGeometryEditingIfNeeded()
