@@ -40,6 +40,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         HaloFeedbackService.shared.start()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(metricKitCrashDetected),
+            name: .init("HaloMetricKitCrashDetected"),
+            object: nil
+        )
         NSApp.setActivationPolicy(.accessory)
         NotificationCenter.default.addObserver(self, selector: #selector(openSettings), name: Notification.Name("HaloOpenSettings"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(toggle), name: Notification.Name("HaloToggle"), object: nil)
@@ -254,6 +260,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func toggle() { engine?.toggleAll() }
+    @objc private func metricKitCrashDetected() {
+        guard HaloFeedbackService.shared.crashedDuringPreviousExecution else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.presentPreviousCrashPromptIfNeeded()
+        }
+    }
     @objc private func openFeedback() {
         HaloFeedbackService.shared.select(.bug)
         openSettings()
