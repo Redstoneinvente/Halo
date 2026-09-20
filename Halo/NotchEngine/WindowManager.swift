@@ -543,6 +543,11 @@ final class WindowManager {
         let animator = SurfaceAnimator()
         var geometry: SurfaceGeometry?
         var targetFrame: CGRect?
+        // Track only the explicit left/right Closed Notch widget selections.
+        // This lets a widget swap get its own playful resize without affecting
+        // media, Live Activity, power, or other dynamic width changes.
+        var closedWidgetLeft: ClosedNotchItem?
+        var closedWidgetRight: ClosedNotchItem?
         var subscription: AnyCancellable?
         var contextSizeSubscription: AnyCancellable?
         var contextCompactSizeSubscription: AnyCancellable?
@@ -1981,6 +1986,18 @@ final class WindowManager {
                 host.state.activationSurfaceOptions = appearance.surface
             }
             let previousOffset = host.geometry?.offset(expanded: host.state.expanded) ?? .zero
+            let previousClosedWidth = host.geometry?.compactWidth
+            let previousClosedCenterOffset = host.geometry?.activeCompactCenterOffset ?? 0
+
+            let closedOptions = effectiveLayout.closedNotch ?? ClosedNotchOptions()
+            let closedWidgetSelectionChanged =
+                existing != nil &&
+                host.closedWidgetLeft != nil &&
+                host.closedWidgetRight != nil &&
+                (host.closedWidgetLeft != closedOptions.left || host.closedWidgetRight != closedOptions.right)
+            host.closedWidgetLeft = closedOptions.left
+            host.closedWidgetRight = closedOptions.right
+
             host.geometry = Self.geometry(screen: screen, theme: theme, appearance: appearance)
             if host.state.screenFrame != screen.frame { host.state.screenFrame = screen.frame }
             if host.state.displayID != id { host.state.displayID = id }
@@ -1994,9 +2011,19 @@ final class WindowManager {
             configureDynamicWidth(host)
             let baseDashboardWidth = host.geometry!.frame(expanded: true).width
             if host.state.contextPreferredSize == nil && host.state.dashboardWidth != baseDashboardWidth { host.state.dashboardWidth = baseDashboardWidth }
-            if host.state.compactHeight != host.geometry!.compactHeight { host.state.compactHeight = host.geometry!.compactHeight }
-            if host.state.compactWidth != host.geometry!.compactWidth { host.state.compactWidth = host.geometry!.compactWidth }
-            if host.state.closedOcclusion != host.geometry!.closedCameraOcclusion { host.state.closedOcclusion = host.geometry!.closedCameraOcclusion }
+            let animateClosedWidgetResize =
+                closedWidgetSelectionChanged &&
+                !host.state.expanded &&
+                !host.state.presentationExpanded
+
+            // During the widget-swap resize, SurfaceAnimator publishes the intermediate
+            // closed geometry frame-by-frame. Publishing the final size here first would
+            // make SwiftUI jump to the destination before the panel has moved.
+            if !animateClosedWidgetResize {
+                if host.state.compactHeight != host.geometry!.compactHeight { host.state.compactHeight = host.geometry!.compactHeight }
+                if host.state.compactWidth != host.geometry!.compactWidth { host.state.compactWidth = host.geometry!.compactWidth }
+                if host.state.closedOcclusion != host.geometry!.closedCameraOcclusion { host.state.closedOcclusion = host.geometry!.closedCameraOcclusion }
+            }
             host.panel.isMovableByWindowBackground = theme.style == .detached
             var target = targetFrame(host: host, expanded: host.state.expanded)
             if existing != nil && theme.style == .detached {
@@ -2005,12 +2032,53 @@ final class WindowManager {
                 target.origin.y = host.panel.frame.maxY - target.height + delta.height - previousOffset.height
             }
             if host.targetFrame != target {
-                host.targetFrame = target; host.animator.cancel()
-                if host.state.viewport.size != target.size { host.state.viewport.size = target.size }
-                host.panel.alphaValue = 1
-                if host.panel.frame != target { host.panel.setFrame(target, display: false) }
-                NotificationCenter.default.post(name: .init("HaloPanelGeometryChanged"), object: host.panel,
-                                                userInfo: ["frame": target, "screen": id])
+                host.targetFrame = target
+
+                if animateClosedWidgetResize {
+                    let newClosedWidth = host.geometry!.compactWidth
+                    let newClosedCenterOffset = host.geometry!.activeCompactCenterOffset ?? 0
+                    let oldLogicalWidth = previousClosedWidth ?? newClosedWidth
+                    let oldLeft = previousClosedCenterOffset - oldLogicalWidth / 2
+                    let oldRight = previousClosedCenterOffset + oldLogicalWidth / 2
+                    let newLeft = newClosedCenterOffset - newClosedWidth / 2
+                    let newRight = newClosedCenterOffset + newClosedWidth / 2
+                    let leftDelta = abs(newLeft - oldLeft)
+                    let rightDelta = abs(newRight - oldRight)
+                    let fixedEdge: CGRectEdge? = {
+                        let tolerance: CGFloat = 0.75
+                        if leftDelta <= tolerance && rightDelta > tolerance { return .minXEdge }
+                        if rightDelta <= tolerance && leftDelta > tolerance { return .maxXEdge }
+                        return nil
+                    }()
+
+                    var motion = host.geometry!.appearance.surface
+                    motion.opening = .spring
+                    motion.closing = .spring
+                    motion.duration = min(0.38, max(0.24, motion.duration))
+                    motion.damping = min(0.80, max(0.62, motion.damping))
+
+                    host.animator.move(
+                        panel: host.panel,
+                        state: host.state,
+                        target: target,
+                        options: motion,
+                        preset: .elastic,
+                        animations: host.state.theme.animations && !host.state.editingGeometry,
+                        opening: true,
+                        style: host.geometry!.style,
+                        liveViewportResize: true,
+                        fixedHorizontalEdge: fixedEdge,
+                        synchronizeClosedGeometry: true,
+                        closedCameraFrame: physicalCameraFrame(for: host.geometry!)
+                    )
+                } else {
+                    host.animator.cancel()
+                    if host.state.viewport.size != target.size { host.state.viewport.size = target.size }
+                    host.panel.alphaValue = 1
+                    if host.panel.frame != target { host.panel.setFrame(target, display: false) }
+                    NotificationCenter.default.post(name: .init("HaloPanelGeometryChanged"), object: host.panel,
+                                                    userInfo: ["frame": target, "screen": id])
+                }
             }
             if existing == nil {
                 let ambientRoot = NotchAmbientOverlayView(store: store, state: host.state, workspace: store.workspace)
