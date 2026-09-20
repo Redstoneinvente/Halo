@@ -5130,7 +5130,7 @@ private struct AudioCIScrubber: View {
         return min(1, max(0, (value - range.lowerBound) / span))
     }
 
-    private func value(at x: CGFloat, width: CGFloat) -> Double {
+    private func resolvedValue(at x: CGFloat, width: CGFloat) -> Double {
         let fraction = min(1, max(0, Double(x / max(1, width))))
         return range.lowerBound + fraction * (range.upperBound - range.lowerBound)
     }
@@ -5163,10 +5163,10 @@ private struct AudioCIScrubber: View {
                             dragging = true
                             onEditingChanged(true)
                         }
-                        value = value(at: gesture.location.x, width: width)
+                        value = resolvedValue(at: gesture.location.x, width: width)
                     }
                     .onEnded { gesture in
-                        value = value(at: gesture.location.x, width: width)
+                        value = resolvedValue(at: gesture.location.x, width: width)
                         if dragging {
                             dragging = false
                             onEditingChanged(false)
@@ -5180,6 +5180,7 @@ private struct AudioCIScrubber: View {
         .accessibilityValue("\(Int(value.rounded())) seconds")
         .accessibilityAdjustableAction { direction in
             let step = max(1, (range.upperBound - range.lowerBound) / 100)
+            onEditingChanged(true)
             switch direction {
             case .increment:
                 value = min(range.upperBound, value + step)
@@ -5188,6 +5189,7 @@ private struct AudioCIScrubber: View {
             @unknown default:
                 break
             }
+            onEditingChanged(false)
         }
     }
 }
@@ -5298,14 +5300,17 @@ private struct ContextMusicView: View {
     private var effectiveControlColor: Color { options.usesSongControlColors && !rawSongPalette.isEmpty ? primarySongColor : baseTextColor }
     private var effectiveVisualizerColor: Color { options.usesSongVisualizerColors && !rawSongPalette.isEmpty ? primarySongColor : baseTextColor }
     private var primaryTextColor: Color { semanticSongColors?.primaryText.color ?? effectiveTextColor }
-    private var secondaryTextColor: Color { semanticSongColors?.secondaryText.color ?? effectiveTextColor.opacity(0.62) }
+    private var secondaryTextColor: Color { semanticSongColors?.secondaryText.color ?? effectiveTextColor.opacity(0.72) }
     private var primaryControlColor: Color { semanticSongColors?.primaryControl.color ?? effectiveControlColor }
-    private var secondaryControlColor: Color { semanticSongColors?.secondaryControl.color ?? effectiveControlColor.opacity(0.76) }
+    private var secondaryControlColor: Color { semanticSongColors?.secondaryControl.color ?? effectiveControlColor }
+    private var timestampColor: Color { semanticSongColors?.secondaryText.color ?? effectiveTextColor.opacity(0.62) }
+    private var visualizerChromeColor: Color { semanticSongColors?.secondaryControl.color ?? effectiveControlColor.opacity(0.72) }
     private var progressFillColor: Color { semanticSongColors?.progressFill.color ?? effectiveControlColor }
     private var progressTrackColor: Color { semanticSongColors?.progressTrack.color ?? effectiveControlColor.opacity(0.20) }
     private var progressThumbColor: Color { semanticSongColors?.progressThumb.color ?? effectiveControlColor }
     private var lyricCurrentColor: Color { semanticSongColors?.lyricCurrent.color ?? effectiveTextColor }
-    private var lyricUpcomingColor: Color { semanticSongColors?.lyricUpcoming.color ?? effectiveTextColor.opacity(0.42) }
+    private var lyricUpcomingColor: Color { semanticSongColors?.lyricUpcoming.color ?? effectiveTextColor.opacity(0.35) }
+    private var lyricInactiveWordColor: Color { semanticSongColors?.lyricUpcoming.color ?? effectiveTextColor.opacity(0.5) }
     private var visualizerPalette: [WidgetColor] {
         if let semanticSongColors { return semanticSongColors.visualizer }
         guard options.usesSongVisualizerColors else { return [] }
@@ -5718,7 +5723,7 @@ private struct ContextMusicView: View {
         for (index, word) in words.enumerated() {
             result = result + Text((index == 0 ? "" : " ") + word)
                 .fontWeight(index == activeWord ? .bold : .regular)
-                .foregroundColor(index == activeWord ? lyricCurrentColor : lyricUpcomingColor)
+                .foregroundColor(index == activeWord ? lyricCurrentColor : lyricInactiveWordColor)
         }
         return result.font(.system(size: options.resolvedLyricFontSize, design: .rounded)).lineLimit(2).multilineTextAlignment(textAlignment)
     }
@@ -5726,28 +5731,51 @@ private struct ContextMusicView: View {
     @ViewBuilder private var scrubber: some View {
         if playbackDuration > 0.5 {
             VStack(spacing: 3) {
-                AudioCIScrubber(
-                    value: Binding(
+                if semanticSongColors != nil {
+                    AudioCIScrubber(
+                        value: Binding(
+                            get: { isScrubbing ? scrubValue : min(playbackDuration, max(0, playbackPosition)) },
+                            set: { newValue in
+                                if !isScrubbing { scrubValue = playbackPosition }
+                                scrubValue = min(playbackDuration, max(0, newValue))
+                            }
+                        ),
+                        range: 0...max(1, playbackDuration),
+                        trackColor: progressTrackColor,
+                        fillColor: progressFillColor,
+                        thumbColor: progressThumbColor
+                    ) { editing in
+                        if editing {
+                            scrubValue = min(playbackDuration, max(0, playbackPosition))
+                            isScrubbing = true
+                        } else {
+                            let target = min(playbackDuration, max(0, scrubValue))
+                            playbackPosition = target
+                            isScrubbing = false
+                            media.seek(to: target)
+                        }
+                    }
+                } else {
+                    Slider(value: Binding(
                         get: { isScrubbing ? scrubValue : min(playbackDuration, max(0, playbackPosition)) },
                         set: { newValue in
                             if !isScrubbing { scrubValue = playbackPosition }
+                            isScrubbing = true
                             scrubValue = min(playbackDuration, max(0, newValue))
                         }
-                    ),
-                    range: 0...max(1, playbackDuration),
-                    trackColor: progressTrackColor,
-                    fillColor: progressFillColor,
-                    thumbColor: progressThumbColor
-                ) { editing in
-                    if editing {
-                        scrubValue = min(playbackDuration, max(0, playbackPosition))
-                        isScrubbing = true
-                    } else {
-                        let target = min(playbackDuration, max(0, scrubValue))
-                        playbackPosition = target
-                        isScrubbing = false
-                        media.seek(to: target)
-                    }
+                    ), in: 0...max(1, playbackDuration), onEditingChanged: { editing in
+                        if editing {
+                            scrubValue = min(playbackDuration, max(0, playbackPosition))
+                            isScrubbing = true
+                        } else {
+                            let target = min(playbackDuration, max(0, scrubValue))
+                            playbackPosition = target
+                            isScrubbing = false
+                            media.seek(to: target)
+                        }
+                    })
+                    .controlSize(.small)
+                    .tint(effectiveControlColor)
                 }
                 HStack {
                     Text(formatTime(isScrubbing ? scrubValue : playbackPosition))
@@ -5755,7 +5783,7 @@ private struct ContextMusicView: View {
                     Text("−" + formatTime(max(0, playbackDuration - (isScrubbing ? scrubValue : playbackPosition))))
                 }
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
-                .foregroundStyle(secondaryTextColor)
+                .foregroundStyle(timestampColor)
             }
             .frame(maxWidth: 440)
         }
@@ -5791,7 +5819,7 @@ private struct ContextMusicView: View {
                             .padding(4)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(secondaryControlColor)
+                    .foregroundStyle(visualizerChromeColor)
                     .help(visualizerFullWidth ? "Use visualizer's normal width" : "Fill the interface width")
                     .padding(.trailing, 2)
                 }
