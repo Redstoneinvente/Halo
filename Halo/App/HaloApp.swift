@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let forceSetupEveryLaunch = false
 
     private var commercialAccessGranted: Bool {
+        guard HaloDistribution.current.supportsExternalLicensing else { return true }
         let account = HaloAccountManager.shared
         return account.isSignedIn && HaloLicenseManager.shared.accessValid(for: account.userID)
     }
@@ -67,9 +68,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         feedbackItem.target = self
         menu.addItem(feedbackItem)
 
-        let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
-        updateItem.target = self
-        menu.addItem(updateItem)
+        if HaloDistribution.current.supportsSparkle {
+            let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+            updateItem.target = self
+            menu.addItem(updateItem)
+        }
 
         let hudRoot = NSMenuItem(title: "HUD", action: nil, keyEquivalent: "")
         let hudMenu = NSMenu(title: "HUD")
@@ -109,6 +112,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let manager = WindowManager(store: store, startupActivationContext: activationContext)
         engine = manager
         manager.start()
+
+        guard HaloDistribution.current.supportsExternalLicensing else {
+            refreshCommercialAccess()
+            return
+        }
+
         startLicenseClipboardWatcher()
 
         Publishers.CombineLatest3(
@@ -152,7 +161,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func startLicenseClipboardWatcher() {
-        guard licenseClipboardTimer == nil else { return }
+        guard HaloDistribution.current.supportsExternalLicensing,
+              licenseClipboardTimer == nil else { return }
 
         // Start from the current change count so a key that happened to already be on the
         // clipboard before Halo became locked does not unexpectedly open the notch.
@@ -175,6 +185,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func pollClipboardForLicenseKey() {
+        guard HaloDistribution.current.supportsExternalLicensing else {
+            stopLicenseClipboardWatcher()
+            return
+        }
         guard !commercialAccessGranted else {
             stopLicenseClipboardWatcher()
             return
@@ -271,7 +285,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         openSettings()
         NotificationCenter.default.post(name: .init("HaloOpenFeedback"), object: nil)
     }
-    @objc private func checkForUpdates() { updater.checkForUpdates() }
+    @objc private func checkForUpdates() {
+        guard HaloDistribution.current.supportsSparkle else { return }
+        updater.checkForUpdates()
+    }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func previewVolumeHUD() { postHUDPreview("volume") }
     @objc private func previewBrightnessHUD() { postHUDPreview("brightness") }
