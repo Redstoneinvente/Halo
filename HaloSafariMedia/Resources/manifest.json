@@ -3,6 +3,13 @@
   "name": "Halo Safari Media",
   "description": "Shows Safari media in Halo and lets Halo control the active Safari player.",
   "version": "1.0.0",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "128": "icons/icon-128.png",
+    "256": "icons/icon-256.png",
+    "512": "icons/icon-512.png"
+  },
   "permissions": [
     "nativeMessaging"
   ],
