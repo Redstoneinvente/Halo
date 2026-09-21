@@ -66,6 +66,11 @@
             value = "1"
             isEnabled = "YES">
          </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "HALO_APPSTORE_PRODUCT_IDS"
+            value = "halo_monthly"
+            isEnabled = "YES">
+         </EnvironmentVariable>
       </EnvironmentVariables>
       <StoreKitConfigurationFileReference
          identifier = "../../Halo 2.storekit">
