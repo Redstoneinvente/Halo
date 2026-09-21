@@ -43,6 +43,11 @@ struct SettingsView: View {
         }
         coreItems.append("Privacy")
 
+        var designItems = ["Appearance", "Closed notch", "Notch Skins", "Notch Ambient", "Activation Sequence"]
+        if HaloDistribution.current.supportsSparkle {
+            designItems.append("Update Animation")
+        }
+
         return [
             SidebarGroup(
                 title: "Core",
@@ -52,7 +57,7 @@ struct SettingsView: View {
             SidebarGroup(
                 title: "Design",
                 icon: "paintpalette",
-                items: ["Appearance", "Closed notch", "Notch Skins", "Notch Ambient", "Activation Sequence", "Update Animation"]
+                items: designItems
             ),
             SidebarGroup(
                 title: "Workspace",
@@ -3742,20 +3747,32 @@ private struct HaloAboutView: View {
 
         Section("Software Update") {
             LabeledContent("Installed version", value: "\(version) (\(build))")
-            HStack {
-                Button("Check for Updates…") {
-                    updates.checkForUpdates()
-                }
-                .disabled(!updates.isConfigured)
 
-                Button("What's New") {
-                    HaloWhatsNewCoordinator.shared.present()
+            if HaloDistribution.current.supportsSparkle {
+                HStack {
+                    Button("Check for Updates…") {
+                        updates.checkForUpdates()
+                    }
+                    .disabled(!updates.isConfigured)
+
+                    Button("What's New") {
+                        HaloWhatsNewCoordinator.shared.present()
+                    }
                 }
-            }
-            if !updates.isConfigured {
-                Label("Update configuration is unavailable in this build.", systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if !updates.isConfigured {
+                    Label("Update configuration is unavailable in this build.", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                HStack {
+                    Label("Updates are delivered through the Mac App Store.", systemImage: "apple.logo")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("What's New") {
+                        HaloWhatsNewCoordinator.shared.present()
+                    }
+                }
             }
         }
 
