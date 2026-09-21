@@ -418,6 +418,137 @@ private protocol HaloGlobalDropTarget: AnyObject {
 extension HaloDropHostingView: HaloGlobalDropTarget {}
 
 @MainActor
+private enum HaloSandboxDropAccess {
+    private static let bookmarkDefaultsKey = "HaloSandboxDropFolderBookmarks.v1"
+
+    enum AccessError: LocalizedError {
+        case cancelled(String)
+        case wrongFolder(expected: URL, selected: URL)
+
+        var errorDescription: String? {
+            switch self {
+            case .cancelled(let purpose):
+                return "Folder access is required to \(purpose)."
+            case .wrongFolder(let expected, let selected):
+                return "Choose \(expected.lastPathComponent) (or one of its parent folders), not \(selected.lastPathComponent)."
+            }
+        }
+    }
+
+    static func withWritableParentAccess<T>(
+        for itemURL: URL,
+        purpose: String,
+        _ body: () throws -> T
+    ) throws -> T {
+        try withWritableDirectoryAccess(
+            itemURL.deletingLastPathComponent(),
+            purpose: purpose,
+            body
+        )
+    }
+
+    static func withWritableDirectoryAccess<T>(
+        _ directory: URL,
+        purpose: String,
+        _ body: () throws -> T
+    ) throws -> T {
+        guard !HaloDistribution.current.supportsUnrestrictedFileAccess else {
+            return try body()
+        }
+
+        let target = directory.resolvingSymlinksInPath().standardizedFileURL
+
+        // Downloads has an explicit App Sandbox entitlement in the App Store build.
+        if let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first,
+           target == downloads.resolvingSymlinksInPath().standardizedFileURL {
+            return try body()
+        }
+
+        if let scopedURL = resolvedBookmarkScope(containing: target) {
+            let started = scopedURL.startAccessingSecurityScopedResource()
+            defer { if started { scopedURL.stopAccessingSecurityScopedResource() } }
+            return try body()
+        }
+
+        let panel = NSOpenPanel()
+        panel.title = "Allow Halo to Modify Files"
+        panel.message = "Halo needs access to \(target.lastPathComponent) to \(purpose). Choose this folder once; Halo will remember the permission."
+        panel.prompt = "Allow"
+        panel.directoryURL = target
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = true
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let selected = panel.url else {
+            throw AccessError.cancelled(purpose)
+        }
+
+        let selectedURL = selected.resolvingSymlinksInPath().standardizedFileURL
+        guard contains(selectedURL, target) else {
+            throw AccessError.wrongFolder(expected: target, selected: selectedURL)
+        }
+
+        try rememberSelectedDirectory(selectedURL)
+        let started = selectedURL.startAccessingSecurityScopedResource()
+        defer { if started { selectedURL.stopAccessingSecurityScopedResource() } }
+        return try body()
+    }
+
+    static func rememberSelectedDirectory(_ directory: URL) throws {
+        guard !HaloDistribution.current.supportsUnrestrictedFileAccess else { return }
+        let selected = directory.resolvingSymlinksInPath().standardizedFileURL
+        let data = try selected.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        var stored = UserDefaults.standard.dictionary(forKey: bookmarkDefaultsKey) ?? [:]
+        stored[selected.path] = data
+        UserDefaults.standard.set(stored, forKey: bookmarkDefaultsKey)
+    }
+
+    private static func resolvedBookmarkScope(containing directory: URL) -> URL? {
+        guard let stored = UserDefaults.standard.dictionary(forKey: bookmarkDefaultsKey) else {
+            return nil
+        }
+
+        let candidates: [(String, Data)] = stored.compactMap { key, value in
+            guard let data = value as? Data else { return nil }
+            return (key, data)
+        }
+        .sorted { $0.0.count > $1.0.count }
+
+        for (_, data) in candidates {
+            var stale = false
+            guard let resolved = try? URL(
+                resolvingBookmarkData: data,
+                options: [.withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            ) else { continue }
+
+            let scope = resolved.resolvingSymlinksInPath().standardizedFileURL
+            guard contains(scope, directory) else { continue }
+
+            if stale {
+                try? rememberSelectedDirectory(scope)
+            }
+            return scope
+        }
+        return nil
+    }
+
+    private static func contains(_ root: URL, _ child: URL) -> Bool {
+        let rootPath = root.standardizedFileURL.path
+        let childPath = child.standardizedFileURL.path
+        guard rootPath != "/" else { return true }
+        return childPath == rootPath || childPath.hasPrefix(rootPath + "/")
+    }
+}
+
+@MainActor
 private enum HaloDropZoneActionExecutor {
     static func perform(
         zone: HaloDropZone,
@@ -461,7 +592,9 @@ private enum HaloDropZoneActionExecutor {
                 outcome = accepted.count == 1 ? "Copied file URL" : "Copied file URLs"
             case .duplicate:
                 try accepted.forEach { url in
-                    try FileManager.default.copyItem(at: url, to: uniqueSibling(for: url, suffix: " copy"))
+                    try HaloSandboxDropAccess.withWritableParentAccess(for: url, purpose: "create a duplicate beside it") {
+                        try FileManager.default.copyItem(at: url, to: uniqueSibling(for: url, suffix: " copy"))
+                    }
                 }
                 outcome = accepted.count == 1 ? "Created duplicate" : "Created \(accepted.count) duplicates"
             case .rename:
@@ -552,104 +685,127 @@ private enum HaloDropZoneActionExecutor {
     }
 
     private static func rename(_ url: URL, newName requestedName: String) throws {
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            throw CocoaError(.fileNoSuchFile)
-        }
-
-        let ext = url.pathExtension
-        var name = requestedName.trimmingCharacters(in: .whitespacesAndNewlines)
-        name = name.replacingOccurrences(of: "/", with: "-")
-        name = name.replacingOccurrences(of: ":", with: "-")
-        guard !name.isEmpty else { throw CocoaError(.fileWriteInvalidFileName) }
-        if !ext.isEmpty && URL(fileURLWithPath: name).pathExtension.isEmpty {
-            name += "." + ext
-        }
-
-        let directory = url.deletingLastPathComponent()
-        var destination = directory.appendingPathComponent(name)
-        if destination.standardizedFileURL == url.standardizedFileURL { return }
-        if FileManager.default.fileExists(atPath: destination.path) {
-            destination = uniqueURL(
-                in: directory,
-                stem: destination.deletingPathExtension().lastPathComponent,
-                extension: destination.pathExtension
-            )
-        }
-
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-
-        let coordinator = NSFileCoordinator(filePresenter: nil)
-        var coordinationError: NSError?
-        var moveError: Error?
-        coordinator.coordinate(
-            writingItemAt: url,
-            options: .forMoving,
-            writingItemAt: destination,
-            options: [],
-            error: &coordinationError
-        ) { source, coordinatedDestination in
-            do {
-                try FileManager.default.moveItem(at: source, to: coordinatedDestination)
-            } catch {
-                moveError = error
+        try HaloSandboxDropAccess.withWritableParentAccess(for: url, purpose: "rename files in this folder") {
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                throw CocoaError(.fileNoSuchFile)
             }
+
+            let ext = url.pathExtension
+            var name = requestedName.trimmingCharacters(in: .whitespacesAndNewlines)
+            name = name.replacingOccurrences(of: "/", with: "-")
+            name = name.replacingOccurrences(of: ":", with: "-")
+            guard !name.isEmpty else { throw CocoaError(.fileWriteInvalidFileName) }
+            if !ext.isEmpty && URL(fileURLWithPath: name).pathExtension.isEmpty {
+                name += "." + ext
+            }
+
+            let directory = url.deletingLastPathComponent()
+            var destination = directory.appendingPathComponent(name)
+            if destination.standardizedFileURL == url.standardizedFileURL { return }
+            if FileManager.default.fileExists(atPath: destination.path) {
+                destination = uniqueURL(
+                    in: directory,
+                    stem: destination.deletingPathExtension().lastPathComponent,
+                    extension: destination.pathExtension
+                )
+            }
+
+            let coordinator = NSFileCoordinator(filePresenter: nil)
+            var coordinationError: NSError?
+            var moveError: Error?
+            coordinator.coordinate(
+                writingItemAt: url,
+                options: .forMoving,
+                writingItemAt: destination,
+                options: [],
+                error: &coordinationError
+            ) { source, coordinatedDestination in
+                do {
+                    try FileManager.default.moveItem(at: source, to: coordinatedDestination)
+                } catch {
+                    moveError = error
+                }
+            }
+            if let moveError { throw moveError }
+            if let coordinationError { throw coordinationError }
         }
-        if let moveError { throw moveError }
-        if let coordinationError { throw coordinationError }
     }
 
     private static func launchDittoCompress(_ url: URL) throws {
-        let destination = uniqueSibling(for: url, suffix: "", forcedExtension: "zip")
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        process.arguments = ["-c", "-k", "--sequesterRsrc", "--keepParent", url.path, destination.path]
-        try process.run()
+        try HaloSandboxDropAccess.withWritableParentAccess(for: url, purpose: "create ZIP archives in this folder") {
+            let destination = uniqueSibling(for: url, suffix: "", forcedExtension: "zip")
+            try runDitto(["-c", "-k", "--sequesterRsrc", "--keepParent", url.path, destination.path])
+        }
     }
 
     private static func launchDittoExtract(_ url: URL) throws {
-        let directory = url.deletingLastPathComponent()
-        let base = url.deletingPathExtension().lastPathComponent
-        var destination = directory.appendingPathComponent(base + " extracted", isDirectory: true)
-        var index = 2
-        while FileManager.default.fileExists(atPath: destination.path) {
-            destination = directory.appendingPathComponent(base + " extracted \(index)", isDirectory: true)
-            index += 1
+        try HaloSandboxDropAccess.withWritableParentAccess(for: url, purpose: "extract ZIP archives in this folder") {
+            let directory = url.deletingLastPathComponent()
+            let base = url.deletingPathExtension().lastPathComponent
+            var destination = directory.appendingPathComponent(base + " extracted", isDirectory: true)
+            var index = 2
+            while FileManager.default.fileExists(atPath: destination.path) {
+                destination = directory.appendingPathComponent(base + " extracted \(index)", isDirectory: true)
+                index += 1
+            }
+            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+            do {
+                try runDitto(["-x", "-k", url.path, destination.path])
+            } catch {
+                try? FileManager.default.removeItem(at: destination)
+                throw error
+            }
         }
-        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+    }
+
+    private static func runDitto(_ arguments: [String]) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        process.arguments = ["-x", "-k", url.path, destination.path]
+        process.arguments = arguments
         try process.run()
+        process.waitUntilExit()
+        guard process.terminationReason == .exit, process.terminationStatus == 0 else {
+            throw NSError(
+                domain: "HaloDropCI",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: "The file operation was blocked or failed (ditto exit \(process.terminationStatus))."]
+            )
+        }
     }
 
     private static func copy(_ urls: [URL], to folder: URL) throws {
-        for url in urls {
-            let destination = uniqueURL(
-                in: folder,
-                stem: url.deletingPathExtension().lastPathComponent,
-                extension: url.pathExtension
-            )
-            try FileManager.default.copyItem(at: url, to: destination)
+        try HaloSandboxDropAccess.withWritableDirectoryAccess(folder, purpose: "copy files into this folder") {
+            for url in urls {
+                let sourceScoped = url.startAccessingSecurityScopedResource()
+                defer { if sourceScoped { url.stopAccessingSecurityScopedResource() } }
+                let destination = uniqueURL(
+                    in: folder,
+                    stem: url.deletingPathExtension().lastPathComponent,
+                    extension: url.pathExtension
+                )
+                try FileManager.default.copyItem(at: url, to: destination)
+            }
         }
     }
 
     private static func convertImages(_ urls: [URL], output: ImageOutput) throws -> Int {
         var converted = 0
         for url in urls {
-            guard HaloDropZoneAcceptance.images.accepts(url),
-                  let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { continue }
+            guard HaloDropZoneAcceptance.images.accepts(url) else { continue }
+            try HaloSandboxDropAccess.withWritableParentAccess(for: url, purpose: "create converted images in this folder") {
+                guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                      let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return }
 
-            let ext = output == .png ? "png" : "jpg"
-            let destination = uniqueSibling(for: url, suffix: " converted", forcedExtension: ext)
-            let identifier = output == .png ? UTType.png.identifier : UTType.jpeg.identifier
-            guard let writer = CGImageDestinationCreateWithURL(destination as CFURL, identifier as CFString, 1, nil) else { continue }
-            let properties: CFDictionary? = output == .jpeg
-                ? [kCGImageDestinationLossyCompressionQuality: 0.92] as CFDictionary
-                : nil
-            CGImageDestinationAddImage(writer, image, properties)
-            if CGImageDestinationFinalize(writer) { converted += 1 }
+                let ext = output == .png ? "png" : "jpg"
+                let destination = uniqueSibling(for: url, suffix: " converted", forcedExtension: ext)
+                let identifier = output == .png ? UTType.png.identifier : UTType.jpeg.identifier
+                guard let writer = CGImageDestinationCreateWithURL(destination as CFURL, identifier as CFString, 1, nil) else { return }
+                let properties: CFDictionary? = output == .jpeg
+                    ? [kCGImageDestinationLossyCompressionQuality: 0.92] as CFDictionary
+                    : nil
+                CGImageDestinationAddImage(writer, image, properties)
+                if CGImageDestinationFinalize(writer) { converted += 1 }
+            }
         }
         if converted == 0 { throw CocoaError(.fileReadUnsupportedScheme) }
         return converted
@@ -1949,9 +2105,14 @@ struct HaloDropZoneSettingsEditor: View {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            var configuration = store.configuration
-            configuration.zones[index].parameter = url.path
-            store.configuration = configuration
+            do {
+                try HaloSandboxDropAccess.rememberSelectedDirectory(url)
+                var configuration = store.configuration
+                configuration.zones[index].parameter = url.path
+                store.configuration = configuration
+            } catch {
+                NSSound.beep()
+            }
         }
     }
 
