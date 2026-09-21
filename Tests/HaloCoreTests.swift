@@ -19,7 +19,7 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertFalse(distribution.supportsSparkle)
         XCTAssertFalse(distribution.supportsExternalLicensing)
         XCTAssertFalse(distribution.supportsUnrestrictedFileAccess)
-        XCTAssertFalse(distribution.supportsPartnerIntegrations)
+        XCTAssertTrue(distribution.supportsPartnerIntegrations)
     }
 
     func testReadableAlbumForegroundColorMeetsContrastOnDarkSurface() {
