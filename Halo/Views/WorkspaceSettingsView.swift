@@ -2998,6 +2998,12 @@ private struct ContextMusicSettings: View {
     private var lyricTransitionDuration: Binding<Double> { Binding(get: { options.wrappedValue.resolvedLyricTransitionDuration }, set: { options.wrappedValue.lyricTransitionDuration = $0 }) }
     private var onlineLyrics: Binding<Bool> { Binding(get: { options.wrappedValue.usesOnlineLyrics }, set: { options.wrappedValue.lyricsOnline = $0 }) }
     private var visualizerStyle: Binding<PlaybackAnimation> { Binding(get: { options.wrappedValue.resolvedVisualizerStyle }, set: { options.wrappedValue.visualizerStyle = $0 }) }
+    private var adaptiveColorDistribution: Binding<AudioCIColorDistribution> {
+        Binding(
+            get: { options.wrappedValue.resolvedAdaptiveColorDistribution },
+            set: { options.wrappedValue.adaptiveColorDistribution = $0 }
+        )
+    }
     private var horizontalMargin: Binding<Double> { Binding(get: { options.wrappedValue.resolvedHorizontalMargin }, set: { options.wrappedValue.horizontalMargin = $0 }) }
     private var topMargin: Binding<Double> { Binding(get: { options.wrappedValue.resolvedTopMargin }, set: { options.wrappedValue.topMargin = $0 }) }
     private var bottomMargin: Binding<Double> { Binding(get: { options.wrappedValue.resolvedBottomMargin }, set: { options.wrappedValue.bottomMargin = $0 }) }
@@ -3090,6 +3096,16 @@ private struct ContextMusicSettings: View {
                 "Use adaptive per-element colors",
                 isOn: boolBinding(\.adaptiveElementColors, resolved: { $0.usesAdaptiveElementColors })
             )
+            if options.wrappedValue.usesAdaptiveElementColors {
+                Picker("Color distribution", selection: adaptiveColorDistribution) {
+                    ForEach(AudioCIColorDistribution.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                Text(options.wrappedValue.resolvedAdaptiveColorDistribution.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Text("Adaptive mode builds a semantic palette from the current artwork: primary and secondary text, transport controls, scrubber track/fill/thumb, lyrics and the visualizer each receive a role-specific color chosen for hierarchy and contrast.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
