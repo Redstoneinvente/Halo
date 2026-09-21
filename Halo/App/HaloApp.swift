@@ -5,6 +5,23 @@ import CoreGraphics
 import IOKit
 import Combine
 
+/// Single source of truth for whether commercial Halo surfaces and Context Interfaces
+/// are allowed to activate. It intentionally starts locked so services constructed
+/// during AppStore/WorkspaceStore initialization cannot race account/license restore.
+@MainActor
+final class HaloCommercialSurfaceGate: ObservableObject {
+    static let shared = HaloCommercialSurfaceGate()
+
+    @Published private(set) var isReady = false
+
+    private init() {}
+
+    func setReady(_ ready: Bool) {
+        guard isReady != ready else { return }
+        isReady = ready
+    }
+}
+
 @main
 struct HaloApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
@@ -121,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func configureCommercialAccessGate() {
         startupAccessState = .verifyingAccess
+        HaloCommercialSurfaceGate.shared.setReady(false)
         initialAccessVerificationCompleted = false
 
         if HaloDistribution.current.supportsAppStoreLicensing {
@@ -206,6 +224,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func transitionStartupAccess(to nextState: StartupAccessState) {
+        // Publish the lifecycle state before any surface/runtime work. All CIs use this
+        // shared gate, so a locked Direct surface can exist without restoring paid UI.
+        HaloCommercialSurfaceGate.shared.setReady(nextState == .ready)
+
         if startupAccessState == nextState {
             switch nextState {
             case .ready:
@@ -530,6 +552,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        HaloCommercialSurfaceGate.shared.setReady(false)
         ActivationSequenceCoordinator.shared.markQuit()
         appStoreLicensing.stop()
         stopLicensedServices()

@@ -397,14 +397,30 @@ final class TeleprompterCoordinator: NSObject {
     private var observers: [NSObjectProtocol] = []
     private var recordingTimer: Timer?
     private var contextTimer: Timer?
+    private var commercialAccessCancellable: AnyCancellable?
     private var lastRecordingState = false
     private var triggerLatch: [UUID: Set<UUID>] = [:]
     private var contextMatchState: [UUID: Bool] = [:]
     private var contextOwnedProfileID: UUID?
     private var installed = false
 
+    private var commercialSurfaceAccessReady: Bool {
+        HaloCommercialSurfaceGate.shared.isReady
+    }
+
     func install() {
         guard !installed else { return }; installed = true
+
+        commercialAccessCancellable = HaloCommercialSurfaceGate.shared.$isReady
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] ready in
+                guard !ready else { return }
+                Task { @MainActor [weak self] in
+                    self?.resetForCommercialLock()
+                }
+            }
+
         installInputMonitors(); installWorkspaceObservers(); installRecordingPolling(); installContextAutomation()
         NotificationCenter.default.addObserver(self, selector: #selector(openSettingsNotification), name: .init("HaloOpenTeleprompterSettings"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(toggleNotification), name: .init("HaloToggleTeleprompter"), object: nil)
@@ -426,7 +442,20 @@ final class TeleprompterCoordinator: NSObject {
     @objc private func openSettingsNotification() { showSettings() }
     @objc private func toggleNotification() { toggleSelectedProfile() }
 
+    private func resetForCommercialLock() {
+        triggerLatch.removeAll()
+        contextMatchState.removeAll()
+        contextOwnedProfileID = nil
+        if promptPanel?.isVisible == true {
+            hidePrompt()
+        }
+    }
+
     func toggleSelectedProfile() {
+        guard commercialSurfaceAccessReady else {
+            resetForCommercialLock()
+            return
+        }
         contextOwnedProfileID = nil
         if promptPanel?.isVisible == true { hidePrompt() }
         else if let profile = store.selectedProfile { show(profile: profile) }
@@ -434,6 +463,10 @@ final class TeleprompterCoordinator: NSObject {
     }
 
     func show(profile: TeleprompterProfile) {
+        guard commercialSurfaceAccessReady else {
+            resetForCommercialLock()
+            return
+        }
         guard UserDefaults.standard.object(forKey: "HaloContextTeleprompterEnabled") as? Bool ?? true else { return }
         guard profile.enabled else { return }
         contextOwnedProfileID = nil
@@ -458,7 +491,12 @@ final class TeleprompterCoordinator: NSObject {
     }
 
     private func showFromContext(profile: TeleprompterProfile) {
+        guard commercialSurfaceAccessReady else {
+            resetForCommercialLock()
+            return
+        }
         show(profile: profile)
+        guard promptPanel?.isVisible == true else { return }
         contextOwnedProfileID = profile.id
     }
 
@@ -474,6 +512,10 @@ final class TeleprompterCoordinator: NSObject {
     }
 
     func showSettings() {
+        guard commercialSurfaceAccessReady else {
+            resetForCommercialLock()
+            return
+        }
         if settingsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 720), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = "Halo · Teleprompter CI"; window.contentMinSize = NSSize(width: 820, height: 620)
@@ -625,6 +667,11 @@ final class TeleprompterCoordinator: NSObject {
     }
 
     private func evaluateContextAutomation() {
+        guard commercialSurfaceAccessReady else {
+            resetForCommercialLock()
+            return
+        }
+
         let contextProfiles = store.profiles.filter { profile in
             profile.enabled && profile.contexts.contains(where: \.enabled)
         }
@@ -658,6 +705,8 @@ final class TeleprompterCoordinator: NSObject {
     }
 
     private func handleInput(_ event: NSEvent) {
+        guard commercialSurfaceAccessReady else { return }
+
         if promptPanel?.isVisible == true {
             if event.type == .keyDown {
                 if event.keyCode == 49 { runtime?.toggle(); return }
@@ -687,6 +736,8 @@ final class TeleprompterCoordinator: NSObject {
     }
 
     private func handleGesture(_ event: NSEvent) {
+        guard commercialSurfaceAccessReady else { return }
+
         if promptPanel?.isVisible == true, runtime?.profile.behavior.gestureControlsEnabled == true, event.type == .scrollWheel, abs(event.scrollingDeltaY) > 1 {
             if event.scrollingDeltaY > 0 { runtime?.previousChunk() } else { runtime?.nextChunk() }
             return
@@ -705,6 +756,7 @@ final class TeleprompterCoordinator: NSObject {
     }
 
     private func handleApplication(_ note: Notification, kind: TeleprompterTriggerKind) {
+        guard commercialSurfaceAccessReady else { return }
         evaluateContextAutomation()
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         let values = [app.localizedName ?? "", app.bundleIdentifier ?? ""]
@@ -721,6 +773,12 @@ final class TeleprompterCoordinator: NSObject {
     private func recordingStateChanged(_ active: Bool) {
         let changed = active != lastRecordingState
         lastRecordingState = active
+        guard commercialSurfaceAccessReady else {
+            triggerLatch.removeAll()
+            contextMatchState.removeAll()
+            contextOwnedProfileID = nil
+            return
+        }
         evaluateContextAutomation()
         guard changed else { return }
         for profile in store.profiles where profile.enabled {
@@ -729,6 +787,7 @@ final class TeleprompterCoordinator: NSObject {
     }
 
     private func fire(trigger: TeleprompterTrigger, profile: TeleprompterProfile) {
+        guard commercialSurfaceAccessReady else { return }
         guard contextsMatch(profile) else { return }
         contextOwnedProfileID = nil
         if profile.triggerJoin == .any { show(profile: profile); return }
