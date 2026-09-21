@@ -47,7 +47,7 @@
 		A11C0F1A0000000000000311 /* Views/VisualWorkspaceAdaptiveWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */; };
 		A11C0F1A0000000000000321 /* Views/ActivationSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */; };
 		A11C0F1A0000000000000351 /* Services/SparkleUpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000352 /* Services/SparkleUpdateController.swift */; };
-		A11C0F1A0000000000000353 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000354 /* Sparkle */; settings = {ATTRIBUTES = (Weak, ); }; };
+		A11C0F1A0000000000000353 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000354 /* Sparkle */; };
 		A11C0F1A0000000000000371 /* Views/PixelPetWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */; };
 		A57A00000000000000000001 /* Core/AppStoreLicensing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000101 /* Core/AppStoreLicensing.swift */; };
 		A57A00000000000000000011 /* Views/AppStoreSubscriptionGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */; };
@@ -771,10 +771,6 @@
 				INFOPLIST_KEY_CFBundleIconFile = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_SUFeedURL = "$(HALO_SPARKLE_FEED_URL)";
-				INFOPLIST_KEY_SUPublicEDKey = "$(HALO_SPARKLE_PUBLIC_KEY)";
-				INFOPLIST_KEY_SUEnableAutomaticChecks = NO;
-				INFOPLIST_KEY_SUAutomaticallyUpdate = NO;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.";
@@ -815,10 +811,6 @@
 				INFOPLIST_KEY_CFBundleIconFile = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_SUFeedURL = "$(HALO_SPARKLE_FEED_URL)";
-				INFOPLIST_KEY_SUPublicEDKey = "$(HALO_SPARKLE_PUBLIC_KEY)";
-				INFOPLIST_KEY_SUEnableAutomaticChecks = NO;
-				INFOPLIST_KEY_SUAutomaticallyUpdate = NO;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.";
@@ -930,10 +922,6 @@
 				INFOPLIST_KEY_CFBundleIconFile = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_SUFeedURL = "$(HALO_SPARKLE_FEED_URL)";
-				INFOPLIST_KEY_SUPublicEDKey = "$(HALO_SPARKLE_PUBLIC_KEY)";
-				INFOPLIST_KEY_SUEnableAutomaticChecks = NO;
-				INFOPLIST_KEY_SUAutomaticallyUpdate = NO;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.";
@@ -974,10 +962,6 @@
 				INFOPLIST_KEY_CFBundleIconFile = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_SUFeedURL = "$(HALO_SPARKLE_FEED_URL)";
-				INFOPLIST_KEY_SUPublicEDKey = "$(HALO_SPARKLE_PUBLIC_KEY)";
-				INFOPLIST_KEY_SUEnableAutomaticChecks = NO;
-				INFOPLIST_KEY_SUAutomaticallyUpdate = NO;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.";
@@ -1017,7 +1001,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Halo/Info.plist;
+				INFOPLIST_FILE = Halo/HaloAppStore-Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Halo;
 				INFOPLIST_KEY_CFBundleIconFile = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
@@ -1060,7 +1044,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Halo/Info.plist;
+				INFOPLIST_FILE = Halo/HaloAppStore-Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Halo;
 				INFOPLIST_KEY_CFBundleIconFile = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
