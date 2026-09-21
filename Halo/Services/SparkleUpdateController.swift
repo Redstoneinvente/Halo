@@ -1,8 +1,11 @@
 import Foundation
 import AppKit
-import Sparkle
 import SwiftUI
+#if HALO_DIRECT
+import Sparkle
+#endif
 
+#if HALO_DIRECT
 @MainActor
 final class HaloUpdateController: NSObject, SPUUpdaterDelegate {
     static let shared = HaloUpdateController()
@@ -101,6 +104,31 @@ final class HaloUpdateController: NSObject, SPUUpdaterDelegate {
         HaloUpdateAnimationPreviewController.shared.dismiss()
     }
 }
+#else
+@MainActor
+final class HaloUpdateController {
+    static let shared = HaloUpdateController()
+    private init() {}
+
+    var currentVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    }
+
+    var currentBuild: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+    }
+
+    var isConfigured: Bool { false }
+    var canCheckForUpdates: Bool { false }
+    var automaticallyChecksForUpdates: Bool { false }
+    var automaticallyDownloadsUpdates: Bool { false }
+    var lastUpdateCheckDate: Date? { nil }
+
+    func setAutomaticallyChecksForUpdates(_ value: Bool) {}
+    func setAutomaticallyDownloadsUpdates(_ value: Bool) {}
+    func checkForUpdates() {}
+}
+#endif
 
 private struct HaloReleaseHighlight: Identifiable {
     let id = UUID()
