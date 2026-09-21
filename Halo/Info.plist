@@ -24,5 +24,13 @@
 	<string>$(HALO_LICENSESEAT_PRODUCT_SLUG)</string>
 	<key>HaloLicenseSeatPublishableKey</key>
 	<string>$(HALO_LICENSESEAT_PUBLISHABLE_KEY)</string>
+	<key>SUFeedURL</key>
+	<string>$(HALO_SPARKLE_FEED_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>$(HALO_SPARKLE_PUBLIC_KEY)</string>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
 </dict>
 </plist>
