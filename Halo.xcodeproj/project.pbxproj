@@ -46,6 +46,7 @@
 		A11C0F1A0000000000000351 /* Services/SparkleUpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000352 /* Services/SparkleUpdateController.swift */; };
 		A11C0F1A0000000000000353 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000354 /* Sparkle */; };
 		A11C0F1A0000000000000371 /* Views/PixelPetWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */; };
+		A57A00000000000000000001 /* Core/AppStoreLicensing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000101 /* Core/AppStoreLicensing.swift */; };
 		D15700000000000000000001 /* Core/HaloDistribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15700000000000000000101 /* Core/HaloDistribution.swift */; };
 		D15700000000000000000002 /* Core/HaloDistribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15700000000000000000101 /* Core/HaloDistribution.swift */; };
 		C1A300000000000000000001 /* Core/HaloIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000101 /* Core/HaloIntegration.swift */; };
@@ -124,6 +125,7 @@
 		A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ActivationSequence.swift; sourceTree = "<group>"; };
 		A11C0F1A0000000000000352 /* Services/SparkleUpdateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SparkleUpdateController.swift; sourceTree = "<group>"; };
 		A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PixelPetWidget.swift; sourceTree = "<group>"; };
+		A57A00000000000000000101 /* Core/AppStoreLicensing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/AppStoreLicensing.swift; sourceTree = "<group>"; };
 		D15700000000000000000101 /* Core/HaloDistribution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/HaloDistribution.swift; sourceTree = "<group>"; };
 		C1A300000000000000000101 /* Core/HaloIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/HaloIntegration.swift; sourceTree = "<group>"; };
 		C1A300000000000000000102 /* Core/CIRuntimeRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/CIRuntimeRegistration.swift; sourceTree = "<group>"; };
@@ -260,6 +262,7 @@
 				FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */,
 				FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */,
 				00000000000000000000006F /* Core/ExtensionContracts.swift */,
+				A57A00000000000000000101 /* Core/AppStoreLicensing.swift */,
 				D15700000000000000000101 /* Core/HaloDistribution.swift */,
 				C1A300000000000000000101 /* Core/HaloIntegration.swift */,
 				C1A300000000000000000102 /* Core/CIRuntimeRegistration.swift */,
@@ -537,6 +540,7 @@
 				FBAC00000000000000000001 /* Services/HaloFeedbackService.swift in Sources */,
 				FBAC00000000000000000002 /* Views/HaloFeedbackCenterView.swift in Sources */,
 				0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */,
+				A57A00000000000000000001 /* Core/AppStoreLicensing.swift in Sources */,
 				D15700000000000000000001 /* Core/HaloDistribution.swift in Sources */,
 				C1A300000000000000000001 /* Core/HaloIntegration.swift in Sources */,
 				C1A300000000000000000002 /* Core/CIRuntimeRegistration.swift in Sources */,
