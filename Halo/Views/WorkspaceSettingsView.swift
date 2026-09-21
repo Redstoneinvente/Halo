@@ -38,7 +38,7 @@ struct SettingsView: View {
             workspaceItems.insert("Visual Workspace Editor", at: 0)
         }
         var coreItems = ["General"]
-        if HaloDistribution.current.supportsExternalLicensing {
+        if HaloDistribution.current.supportsExternalLicensing || HaloDistribution.current.supportsAppStoreLicensing {
             coreItems.append("Account & License")
         }
         coreItems.append("Privacy")
@@ -367,7 +367,12 @@ struct SettingsView: View {
                     Text("Option + Command").tag(UInt32(2304)); Text("Control + Option").tag(UInt32(6144)); Text("Control + Shift").tag(UInt32(4608))
                 }
             }
-        case "Account & License": HaloAccountLicenseSettingsView()
+        case "Account & License":
+            if HaloDistribution.current.supportsAppStoreLicensing {
+                HaloAppStoreAccountLicenseSettingsView()
+            } else {
+                HaloAccountLicenseSettingsView()
+            }
         case "Feedback & Support": HaloFeedbackCenterView()
         case "Schedules": ScheduleSettingsView(workspace: workspace)
         case "Appearance": AppearanceSettingsPane(store: store, workspace: workspace)
@@ -3689,6 +3694,128 @@ private struct HaloAboutView: View {
 }
 
 // MARK: - Halo Account & License settings
+
+@MainActor
+private struct HaloAppStoreAccountLicenseSettingsView: View {
+    @StateObject private var model = AppStoreSubscriptionGateModel()
+
+    private var statusTitle: String {
+        switch model.state {
+        case .entitled:
+            return "Active"
+        case .gracePeriod:
+            return "Active · Billing Grace Period"
+        case .billingRetry:
+            return "Billing Retry"
+        case .revoked:
+            return "Revoked"
+        case .notEntitled:
+            return "Not Active"
+        case .loading:
+            return "Checking…"
+        case .notConfigured:
+            return "Unavailable"
+        case .failed:
+            return "Unable to Verify"
+        }
+    }
+
+    private var statusSymbol: String {
+        switch model.state {
+        case .entitled, .gracePeriod:
+            return "checkmark.seal.fill"
+        case .loading:
+            return "clock.arrow.circlepath"
+        case .billingRetry:
+            return "exclamationmark.arrow.triangle.2.circlepath"
+        case .revoked, .notEntitled:
+            return "xmark.seal"
+        case .notConfigured, .failed:
+            return "exclamationmark.triangle"
+        }
+    }
+
+    var body: some View {
+        Section("Apple Account") {
+            Label("Managed by Apple App Store", systemImage: "apple.logo")
+                .font(.headline)
+
+            Text("Your Halo subscription, billing, renewal, and payment details are handled by Apple. Halo does not receive or store your Apple ID or payment information.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Subscription") {
+            HStack {
+                Label(statusTitle, systemImage: statusSymbol)
+                Spacer()
+                if model.isBusy || model.state == .loading {
+                    ProgressView().controlSize(.small)
+                }
+            }
+
+            if let product = model.products.first {
+                LabeledContent("Plan", value: product.displayName)
+                LabeledContent("Price", value: product.displayPrice)
+                LabeledContent("Product", value: product.id)
+            } else {
+                LabeledContent("Product", value: "halo_monthly")
+            }
+
+            if case .gracePeriod(_, let expiresAt) = model.state,
+               let expiresAt {
+                LabeledContent(
+                    "Grace period until",
+                    value: expiresAt.formatted(date: .abbreviated, time: .shortened)
+                )
+            }
+
+            if case .billingRetry = model.state {
+                Text("Apple is retrying payment for this subscription. Access resumes automatically when Apple reports the subscription as active again.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if case .failed(let message) = model.state {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            if let message = model.message {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Button("Check Subscription") {
+                    model.refresh()
+                }
+                .disabled(model.isBusy)
+
+                Button("Restore Purchases") {
+                    model.restore()
+                }
+                .disabled(model.isBusy)
+            }
+
+            Text("To change or cancel your subscription, use your Apple Account's subscription controls in the App Store.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Support") {
+            Text("For billing or subscription-payment issues, use Apple Support. For Halo app issues, contact Halo support.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Link("Contact Halo support · r.support@redstoneinvente.com", destination: URL(string: "mailto:r.support@redstoneinvente.com")!)
+        }
+        .onAppear {
+            model.refresh()
+        }
+    }
+}
 
 @MainActor
 private struct HaloAccountLicenseSettingsView: View {
