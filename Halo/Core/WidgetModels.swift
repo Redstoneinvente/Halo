@@ -411,6 +411,49 @@ enum AlbumForegroundColorResolver {
         return 0.2126 * linear(color.red) + 0.7152 * linear(color.green) + 0.0722 * linear(color.blue)
     }
 }
+enum AudioCIColorDistribution: String, Codable, CaseIterable, Identifiable {
+    case automatic
+    case analogous
+    case complementary
+    case triadic
+    case monochromatic
+    case vibrant
+    case soft
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .analogous: return "Analogous"
+        case .complementary: return "Complementary"
+        case .triadic: return "Triadic"
+        case .monochromatic: return "Monochromatic"
+        case .vibrant: return "Vibrant"
+        case .soft: return "Soft"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .automatic:
+            return "Halo chooses a restrained harmony from the artwork based on saturation and palette diversity."
+        case .analogous:
+            return "Uses neighboring hues for a cohesive, low-clash palette."
+        case .complementary:
+            return "Pairs the dominant album hue with its opposite for stronger separation."
+        case .triadic:
+            return "Uses three evenly spaced hues for a more expressive, balanced palette."
+        case .monochromatic:
+            return "Keeps one album hue and creates hierarchy through tone and brightness."
+        case .vibrant:
+            return "Preserves multiple artwork hues with stronger saturation and more energetic accents."
+        case .soft:
+            return "Reduces saturation and keeps the palette subtle, calm and text-friendly."
+        }
+    }
+}
+
 struct AudioCISemanticColors: Equatable {
     let primaryText: WidgetColor
     let secondaryText: WidgetColor
@@ -429,12 +472,17 @@ struct AudioCISemanticColors: Equatable {
 /// text stays calm, primary controls are stronger, the scrubber gets separate track/fill/thumb
 /// colors, and the visualizer gets a small coordinated palette.
 enum AudioCISemanticColorResolver {
-    static func resolve(album colors: [WidgetColor], backgrounds: [WidgetColor]) -> AudioCISemanticColors {
+    static func resolve(
+        album colors: [WidgetColor],
+        backgrounds: [WidgetColor],
+        distribution: AudioCIColorDistribution = .automatic
+    ) -> AudioCISemanticColors {
         let album = colors.isEmpty ? [WidgetColor.accent] : colors
         let backgrounds = backgrounds.isEmpty ? [WidgetColor.black] : backgrounds
-        let dominant = album[0]
-        let accentSource = distinctSource(in: Array(album.dropFirst()), from: dominant) ?? dominant
-        let tertiarySource = distinctSource(in: Array(album.dropFirst(2)), from: accentSource) ?? dominant
+        let distributed = distributedPalette(from: album, mode: distribution)
+        let dominant = distributed[0]
+        let accentSource = distinctSource(in: Array(distributed.dropFirst()), from: dominant) ?? dominant
+        let tertiarySource = distinctSource(in: Array(distributed.dropFirst(2)), from: accentSource) ?? dominant
 
         let primaryText = AlbumForegroundColorResolver.readable(dominant, against: backgrounds)
         let primaryControl = AlbumForegroundColorResolver.readable(accentSource, against: backgrounds)
@@ -492,6 +540,157 @@ enum AudioCISemanticColorResolver {
             lyricUpcoming: secondaryText,
             visualizer: deduplicated([primaryControl, visualizerSecondary, visualizerTertiary, progressFill])
         )
+    }
+
+    private struct HSL {
+        let hue: Double
+        let saturation: Double
+        let lightness: Double
+    }
+
+    private static func distributedPalette(
+        from album: [WidgetColor],
+        mode requestedMode: AudioCIColorDistribution
+    ) -> [WidgetColor] {
+        let source = album.isEmpty ? [WidgetColor.accent] : album
+        let mode = requestedMode == .automatic ? automaticDistribution(for: source) : requestedMode
+        let base = hsl(source[0])
+
+        switch mode {
+        case .automatic:
+            return source
+        case .analogous:
+            let saturation = clamp(max(0.34, base.saturation * 0.86), 0.34, 0.70)
+            let lightness = clamp(base.lightness, 0.34, 0.66)
+            return [
+                makeColor(hue: base.hue, saturation: saturation, lightness: lightness),
+                makeColor(hue: base.hue + 1.0 / 12.0, saturation: saturation * 0.94, lightness: clamp(lightness + 0.04, 0.28, 0.72)),
+                makeColor(hue: base.hue - 1.0 / 12.0, saturation: saturation * 0.90, lightness: clamp(lightness - 0.04, 0.28, 0.72))
+            ]
+        case .complementary:
+            let saturation = clamp(max(0.46, base.saturation * 0.90), 0.46, 0.76)
+            let lightness = clamp(base.lightness, 0.36, 0.64)
+            return [
+                makeColor(hue: base.hue, saturation: saturation, lightness: lightness),
+                makeColor(hue: base.hue + 0.5, saturation: saturation * 0.94, lightness: clamp(lightness + 0.03, 0.30, 0.70)),
+                makeColor(hue: base.hue + 0.5 + 1.0 / 18.0, saturation: saturation * 0.82, lightness: clamp(lightness - 0.03, 0.30, 0.70))
+            ]
+        case .triadic:
+            let saturation = clamp(max(0.44, base.saturation * 0.88), 0.44, 0.72)
+            let lightness = clamp(base.lightness, 0.36, 0.64)
+            return [
+                makeColor(hue: base.hue, saturation: saturation, lightness: lightness),
+                makeColor(hue: base.hue + 1.0 / 3.0, saturation: saturation * 0.94, lightness: clamp(lightness + 0.035, 0.30, 0.70)),
+                makeColor(hue: base.hue + 2.0 / 3.0, saturation: saturation * 0.90, lightness: clamp(lightness - 0.035, 0.30, 0.70))
+            ]
+        case .monochromatic:
+            let saturation = clamp(base.saturation * 0.66, 0.18, 0.56)
+            let lightness = clamp(base.lightness, 0.34, 0.64)
+            return [
+                makeColor(hue: base.hue, saturation: saturation, lightness: lightness),
+                makeColor(hue: base.hue, saturation: saturation * 0.84, lightness: clamp(lightness + 0.15, 0.32, 0.78)),
+                makeColor(hue: base.hue, saturation: saturation * 0.92, lightness: clamp(lightness - 0.13, 0.22, 0.68))
+            ]
+        case .vibrant:
+            var result = source.prefix(3).map { color -> WidgetColor in
+                let value = hsl(color)
+                return makeColor(
+                    hue: value.hue,
+                    saturation: clamp(max(0.70, value.saturation * 1.10), 0.70, 0.88),
+                    lightness: clamp(value.lightness, 0.38, 0.62)
+                )
+            }
+            while result.count < 3 {
+                let offset = result.count == 1 ? 1.0 / 3.0 : 2.0 / 3.0
+                result.append(makeColor(
+                    hue: base.hue + offset,
+                    saturation: clamp(max(0.72, base.saturation), 0.72, 0.88),
+                    lightness: clamp(base.lightness, 0.38, 0.62)
+                ))
+            }
+            return result
+        case .soft:
+            let saturation = clamp(base.saturation * 0.46, 0.14, 0.34)
+            let lightness = clamp(base.lightness * 0.48 + 0.30, 0.44, 0.68)
+            return [
+                makeColor(hue: base.hue, saturation: saturation, lightness: lightness),
+                makeColor(hue: base.hue + 0.06, saturation: saturation * 0.90, lightness: clamp(lightness + 0.06, 0.38, 0.76)),
+                makeColor(hue: base.hue - 0.06, saturation: saturation * 0.82, lightness: clamp(lightness - 0.05, 0.34, 0.72))
+            ]
+        }
+    }
+
+    private static func automaticDistribution(for album: [WidgetColor]) -> AudioCIColorDistribution {
+        let values = album.prefix(4).map(hsl)
+        guard let first = values.first else { return .analogous }
+        let averageSaturation = values.reduce(0) { $0 + $1.saturation } / Double(values.count)
+        let maximumHueDistance = values.dropFirst().map { circularHueDistance(first.hue, $0.hue) }.max() ?? 0
+
+        if averageSaturation < 0.20 { return .monochromatic }
+        if averageSaturation > 0.58 && maximumHueDistance > 0.18 { return .soft }
+        return .analogous
+    }
+
+    private static func hsl(_ color: WidgetColor) -> HSL {
+        let red = clamp(color.red, 0, 1)
+        let green = clamp(color.green, 0, 1)
+        let blue = clamp(color.blue, 0, 1)
+        let maximum = max(red, max(green, blue))
+        let minimum = min(red, min(green, blue))
+        let chroma = maximum - minimum
+        let lightness = (maximum + minimum) * 0.5
+
+        guard chroma > 0.000001 else {
+            return HSL(hue: 0, saturation: 0, lightness: lightness)
+        }
+
+        let saturation = chroma / max(0.000001, 1 - abs(2 * lightness - 1))
+        let sector: Double
+        if maximum == red {
+            sector = ((green - blue) / chroma).truncatingRemainder(dividingBy: 6)
+        } else if maximum == green {
+            sector = (blue - red) / chroma + 2
+        } else {
+            sector = (red - green) / chroma + 4
+        }
+        return HSL(
+            hue: normalizedHue(sector / 6),
+            saturation: clamp(saturation, 0, 1),
+            lightness: clamp(lightness, 0, 1)
+        )
+    }
+
+    private static func makeColor(hue: Double, saturation: Double, lightness: Double) -> WidgetColor {
+        let hue = normalizedHue(hue)
+        let saturation = clamp(saturation, 0, 1)
+        let lightness = clamp(lightness, 0, 1)
+        let chroma = (1 - abs(2 * lightness - 1)) * saturation
+        let segment = hue * 6
+        let x = chroma * (1 - abs(segment.truncatingRemainder(dividingBy: 2) - 1))
+        let rgb: (Double, Double, Double)
+        switch segment {
+        case 0..<1: rgb = (chroma, x, 0)
+        case 1..<2: rgb = (x, chroma, 0)
+        case 2..<3: rgb = (0, chroma, x)
+        case 3..<4: rgb = (0, x, chroma)
+        case 4..<5: rgb = (x, 0, chroma)
+        default: rgb = (chroma, 0, x)
+        }
+        let match = lightness - chroma * 0.5
+        return WidgetColor(red: rgb.0 + match, green: rgb.1 + match, blue: rgb.2 + match)
+    }
+
+    private static func normalizedHue(_ hue: Double) -> Double {
+        (hue.truncatingRemainder(dividingBy: 1) + 1).truncatingRemainder(dividingBy: 1)
+    }
+
+    private static func circularHueDistance(_ lhs: Double, _ rhs: Double) -> Double {
+        let distance = abs(normalizedHue(lhs) - normalizedHue(rhs))
+        return min(distance, 1 - distance)
+    }
+
+    private static func clamp(_ value: Double, _ lower: Double, _ upper: Double) -> Double {
+        min(upper, max(lower, value))
     }
 
     private static func harmonized(
