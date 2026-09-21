@@ -1746,7 +1746,15 @@ private final class ClipboardContextMonitor: ObservableObject {
               let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
               let data = bitmap.representation(using: .png, properties: [:]) else { return }
-        try? data.write(to: url, options: .atomic)
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            // Write directly to the Powerbox-authorized destination. An atomic write can
+            // require creating a sibling temporary file that the sandbox did not grant.
+            try data.write(to: url)
+        } catch {
+            NSSound.beep()
+        }
     }
 
     private func rememberPasteTarget() {
