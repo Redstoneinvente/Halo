@@ -46,6 +46,7 @@
 		A11C0F1A0000000000000351 /* Services/SparkleUpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000352 /* Services/SparkleUpdateController.swift */; };
 		A11C0F1A0000000000000353 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000354 /* Sparkle */; };
 		A11C0F1A0000000000000371 /* Views/PixelPetWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */; };
+		A57A00000000000000000011 /* Views/AppStoreSubscriptionGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */; };
 		A57A00000000000000000001 /* Core/AppStoreLicensing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000101 /* Core/AppStoreLicensing.swift */; };
 		D15700000000000000000001 /* Core/HaloDistribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15700000000000000000101 /* Core/HaloDistribution.swift */; };
 		D15700000000000000000002 /* Core/HaloDistribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15700000000000000000101 /* Core/HaloDistribution.swift */; };
@@ -125,6 +126,7 @@
 		A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ActivationSequence.swift; sourceTree = "<group>"; };
 		A11C0F1A0000000000000352 /* Services/SparkleUpdateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SparkleUpdateController.swift; sourceTree = "<group>"; };
 		A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PixelPetWidget.swift; sourceTree = "<group>"; };
+		A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/AppStoreSubscriptionGateView.swift; sourceTree = "<group>"; };
 		A57A00000000000000000101 /* Core/AppStoreLicensing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/AppStoreLicensing.swift; sourceTree = "<group>"; };
 		D15700000000000000000101 /* Core/HaloDistribution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/HaloDistribution.swift; sourceTree = "<group>"; };
 		C1A300000000000000000101 /* Core/HaloIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/HaloIntegration.swift; sourceTree = "<group>"; };
@@ -235,6 +237,7 @@
 				0000000000000000000002E2 /* Services/HUDEngine.swift */,
 				0000000000000000000002E5 /* Views/CompanionSprite.swift */,
 				A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */,
+				A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */,
 				000000000000000000000258 /* Core/PersonalizationModels.swift */,
 				000000000000000000000259 /* Views/PersonalizationSettingsView.swift */,
 				00000000000000000000025A /* Views/DecorationsView.swift */,
@@ -513,6 +516,7 @@
 				0000000000000000000002E3 /* Services/HUDEngine.swift in Sources */,
 				0000000000000000000002E4 /* Views/CompanionSprite.swift in Sources */,
 				A11C0F1A0000000000000371 /* Views/PixelPetWidget.swift in Sources */,
+				A57A00000000000000000011 /* Views/AppStoreSubscriptionGateView.swift in Sources */,
 				000000000000000000000262 /* Core/PersonalizationModels.swift in Sources */,
 				000000000000000000000263 /* Views/PersonalizationSettingsView.swift in Sources */,
 				000000000000000000000264 /* Views/DecorationsView.swift in Sources */,
