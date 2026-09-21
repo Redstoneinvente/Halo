@@ -97,6 +97,10 @@ final class IntegrationCIRuntime: ObservableObject {
 
     func refresh() { catalog.refresh() }
 
+    func addIntegrationApplications() {
+        catalog.authorizeIntegrationApplications()
+    }
+
     func configuration(for registration: CIRegistration) -> CIConfiguration {
         configurationStore.configuration(for: registration)
     }
