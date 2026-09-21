@@ -46,10 +46,8 @@
 		A11C0F1A0000000000000351 /* Services/SparkleUpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000352 /* Services/SparkleUpdateController.swift */; };
 		A11C0F1A0000000000000353 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000354 /* Sparkle */; };
 		A11C0F1A0000000000000371 /* Views/PixelPetWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */; };
-		A57A00000000000000000011 /* Views/AppStoreSubscriptionGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */; };
 		A57A00000000000000000001 /* Core/AppStoreLicensing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000101 /* Core/AppStoreLicensing.swift */; };
-		D15700000000000000000001 /* Core/HaloDistribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15700000000000000000101 /* Core/HaloDistribution.swift */; };
-		D15700000000000000000002 /* Core/HaloDistribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15700000000000000000101 /* Core/HaloDistribution.swift */; };
+		A57A00000000000000000011 /* Views/AppStoreSubscriptionGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */; };
 		C1A300000000000000000001 /* Core/HaloIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000101 /* Core/HaloIntegration.swift */; };
 		C1A300000000000000000002 /* Core/CIRuntimeRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000102 /* Core/CIRuntimeRegistration.swift */; };
 		C1A300000000000000000003 /* Core/IntegrationDefinition.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A300000000000000000103 /* Core/IntegrationDefinition.swift */; };
@@ -62,6 +60,8 @@
 		C1A30000000000000000000A /* Core/CIKeyboardShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A30000000000000000010A /* Core/CIKeyboardShortcut.swift */; };
 		C1A30000000000000000000B /* Services/IntegrationShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A30000000000000000010B /* Services/IntegrationShortcuts.swift */; };
 		C1A30000000000000000000C /* Core/IntegrationActionDropTargetRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A30000000000000000010C /* Core/IntegrationActionDropTargetRegistry.swift */; };
+		D15700000000000000000001 /* Core/HaloDistribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15700000000000000000101 /* Core/HaloDistribution.swift */; };
+		D15700000000000000000002 /* Core/HaloDistribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15700000000000000000101 /* Core/HaloDistribution.swift */; };
 		F84A0A87305545C500E8B51E /* dog.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A85305545C500E8B51E /* dog.png */; };
 		F84A0A88305545C500E8B51E /* fox.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A86305545C500E8B51E /* fox.png */; };
 		F84A0A89305545C500E8B51E /* cat.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A84305545C500E8B51E /* cat.png */; };
@@ -80,6 +80,7 @@
 		F8614B803053291B00D4943C /* icon_16x16@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6E3053291B00D4943C /* icon_16x16@2x.png */; };
 		F8614B813053291B00D4943C /* icon_16x16.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6D3053291B00D4943C /* icon_16x16.png */; };
 		F8614B823053291B00D4943C /* Halo.png in Resources */ = {isa = PBXBuildFile; fileRef = F8614B6C3053291B00D4943C /* Halo.png */; };
+		F8AFA0D33061155D004D7B68 /* Halo 2.storekit in Resources */ = {isa = PBXBuildFile; fileRef = F8AFA0D23061155D004D7B68 /* Halo 2.storekit */; };
 		FBAC00000000000000000001 /* Services/HaloFeedbackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */; };
 		FBAC00000000000000000002 /* Views/HaloFeedbackCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */; };
 		FBAC00000000000000000301 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000300 /* GoogleService-Info.plist */; };
@@ -126,9 +127,8 @@
 		A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ActivationSequence.swift; sourceTree = "<group>"; };
 		A11C0F1A0000000000000352 /* Services/SparkleUpdateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SparkleUpdateController.swift; sourceTree = "<group>"; };
 		A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PixelPetWidget.swift; sourceTree = "<group>"; };
-		A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/AppStoreSubscriptionGateView.swift; sourceTree = "<group>"; };
 		A57A00000000000000000101 /* Core/AppStoreLicensing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/AppStoreLicensing.swift; sourceTree = "<group>"; };
-		D15700000000000000000101 /* Core/HaloDistribution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/HaloDistribution.swift; sourceTree = "<group>"; };
+		A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/AppStoreSubscriptionGateView.swift; sourceTree = "<group>"; };
 		C1A300000000000000000101 /* Core/HaloIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/HaloIntegration.swift; sourceTree = "<group>"; };
 		C1A300000000000000000102 /* Core/CIRuntimeRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/CIRuntimeRegistration.swift; sourceTree = "<group>"; };
 		C1A300000000000000000103 /* Core/IntegrationDefinition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/IntegrationDefinition.swift; sourceTree = "<group>"; };
@@ -141,6 +141,7 @@
 		C1A30000000000000000010A /* Core/CIKeyboardShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/CIKeyboardShortcut.swift; sourceTree = "<group>"; };
 		C1A30000000000000000010B /* Services/IntegrationShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/IntegrationShortcuts.swift; sourceTree = "<group>"; };
 		C1A30000000000000000010C /* Core/IntegrationActionDropTargetRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/IntegrationActionDropTargetRegistry.swift; sourceTree = "<group>"; };
+		D15700000000000000000101 /* Core/HaloDistribution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/HaloDistribution.swift; sourceTree = "<group>"; };
 		F84A0A84305545C500E8B51E /* cat.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = cat.png; sourceTree = "<group>"; };
 		F84A0A85305545C500E8B51E /* dog.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = dog.png; sourceTree = "<group>"; };
 		F84A0A86305545C500E8B51E /* fox.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = fox.png; sourceTree = "<group>"; };
@@ -178,6 +179,7 @@
 		F8614B743053291B00D4943C /* icon_256x256@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_256x256@2x.png"; sourceTree = "<group>"; };
 		F8614B753053291B00D4943C /* icon_512x512.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_512x512.png; sourceTree = "<group>"; };
 		F8614B763053291B00D4943C /* icon_512x512@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon_512x512@2x.png"; sourceTree = "<group>"; };
+		F8AFA0D23061155D004D7B68 /* Halo 2.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Halo 2.storekit"; sourceTree = "<group>"; };
 		FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HaloFeedbackService.swift; sourceTree = "<group>"; };
 		FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HaloFeedbackCenterView.swift; sourceTree = "<group>"; };
 		FBAC00000000000000000300 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
@@ -210,6 +212,7 @@
 			isa = PBXGroup;
 			children = (
 				F8614B683053262D00D4943C /* Assets.xcassets */,
+				F8AFA0D23061155D004D7B68 /* Halo 2.storekit */,
 				000000000000000000000003 /* Halo */,
 				000000000000000000000096 /* Tests/HaloCoreTests.swift */,
 				000000000000000000000097 /* Tests/LicenseTests.swift */,
@@ -459,6 +462,7 @@
 				F8614B693053262D00D4943C /* Assets.xcassets in Resources */,
 				F8614B61305322E600D4943C /* AppIcon 2.icns in Resources */,
 				F8614B783053291B00D4943C /* icon_128x128@2x.png in Resources */,
+				F8AFA0D33061155D004D7B68 /* Halo 2.storekit in Resources */,
 				F8614B793053291B00D4943C /* icon_512x512@2x.png in Resources */,
 				F8614B7A3053291B00D4943C /* icon_32x32@2x.png in Resources */,
 				F8614B7B3053291B00D4943C /* icon_128x128.png in Resources */,
@@ -644,17 +648,13 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A11C0F1A0000000000000001 /* Halo/Config/Base.xcconfig */;
 			buildSettings = {
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-ObjC",
-				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 207;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -676,6 +676,10 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.2.5;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
@@ -793,17 +797,13 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A11C0F1A0000000000000001 /* Halo/Config/Base.xcconfig */;
 			buildSettings = {
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-ObjC",
-				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 207;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -825,6 +825,10 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.2.5;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
@@ -874,17 +878,13 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A11C0F1A0000000000000001 /* Halo/Config/Base.xcconfig */;
 			buildSettings = {
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-ObjC",
-				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 207;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -906,6 +906,10 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.2.5;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_APPSTORE";
