@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var licensedServicesStarted = false
     private var setupShownThisLaunch = false
     private let updater = HaloUpdateController.shared
-    private let appStoreLicensing: any AppStoreLicensing = StoreKitAppStoreLicensing.shared
+    private let appStoreLicensing: any AppStoreLicensing = AppStoreLicensingProvider.shared
     private let whatsNew = HaloWhatsNewCoordinator.shared
     private let setupCompletedKey = "HaloSetupCompletedV1"
     // Development switch: keep this true while we iterate on onboarding.
