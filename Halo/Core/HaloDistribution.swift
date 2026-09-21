@@ -26,7 +26,8 @@ enum HaloDistribution: String, CaseIterable, Sendable {
                 supportsExternalLicensing: true,
                 supportsAppStoreLicensing: false,
                 supportsUnrestrictedFileAccess: true,
-                supportsPartnerIntegrations: true
+                supportsPartnerIntegrations: true,
+                supportsSystemAudio: true
             )
         case .appStore:
             return HaloDistributionCapabilities(
@@ -34,7 +35,8 @@ enum HaloDistribution: String, CaseIterable, Sendable {
                 supportsExternalLicensing: false,
                 supportsAppStoreLicensing: true,
                 supportsUnrestrictedFileAccess: false,
-                supportsPartnerIntegrations: true
+                supportsPartnerIntegrations: true,
+                supportsSystemAudio: false
             )
         }
     }
@@ -44,6 +46,7 @@ enum HaloDistribution: String, CaseIterable, Sendable {
     var supportsAppStoreLicensing: Bool { capabilities.supportsAppStoreLicensing }
     var supportsUnrestrictedFileAccess: Bool { capabilities.supportsUnrestrictedFileAccess }
     var supportsPartnerIntegrations: Bool { capabilities.supportsPartnerIntegrations }
+    var supportsSystemAudio: Bool { capabilities.supportsSystemAudio }
 }
 
 /// Distribution-sensitive capabilities exposed to the rest of Halo.
@@ -57,4 +60,5 @@ struct HaloDistributionCapabilities: Equatable, Sendable {
     let supportsAppStoreLicensing: Bool
     let supportsUnrestrictedFileAccess: Bool
     let supportsPartnerIntegrations: Bool
+    let supportsSystemAudio: Bool
 }
