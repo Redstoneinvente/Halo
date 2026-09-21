@@ -8,8 +8,8 @@
 	<string>0.2.2</string>
 	<key>CFBundleVersion</key>
 	<string>203</string>
-	<key>NSAppleMusicUsageDescription</key>
-	<string>Halo uses Apple Music access to show the track you are currently playing and provide playback controls.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Halo controls supported media apps such as Apple Music when you use playback controls and reads the current track to display now-playing information.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Halo reads your calendars to show schedules, holidays, and meeting links. Halo does not modify events.</string>
 	<key>NSCalendarsUsageDescription</key>
