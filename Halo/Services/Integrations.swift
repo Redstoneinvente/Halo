@@ -800,7 +800,9 @@ final class MediaService: ObservableObject {
 #if HALO_APPSTORE
         if app == "com.apple.Music" {
             let details = AppStoreAppleMusicBridge.details()
-            position = details.position
+            album = details.album
+            duration = details.duration
+            position = details.duration > 0 ? min(details.duration, details.position) : details.position
             shuffleSupported = true
             shuffleEnabled = details.shuffleEnabled
             repeatSupported = true
@@ -1017,10 +1019,25 @@ private enum AppStoreAppleMusicBridge {
         player.queue.currentEntry?.artwork?.url(width: 512, height: 512)?.absoluteString
     }
 
-    static func details() -> (position: Double, shuffleEnabled: Bool, repeatMode: String) {
+    static func details() -> (album: String, duration: Double, position: Double, shuffleEnabled: Bool, repeatMode: String) {
         let playbackTime = player.playbackTime
         let position = playbackTime.isFinite && playbackTime >= 0 ? playbackTime : 0
         let shuffleEnabled = player.state.shuffleMode == .songs
+
+        var album = ""
+        var duration = 0.0
+        if let item = player.queue.currentEntry?.item {
+            switch item {
+            case .song(let song):
+                album = song.albumTitle ?? ""
+                if let value = song.duration, value.isFinite, value > 0 { duration = value }
+            case .musicVideo(let video):
+                album = video.albumTitle ?? ""
+                if let value = video.duration, value.isFinite, value > 0 { duration = value }
+            @unknown default:
+                break
+            }
+        }
 
         let repeatMode: String
         switch player.state.repeatMode {
@@ -1032,7 +1049,7 @@ private enum AppStoreAppleMusicBridge {
             repeatMode = "off"
         }
 
-        return (position, shuffleEnabled, repeatMode)
+        return (album, duration, position, shuffleEnabled, repeatMode)
     }
 
     static func toggleShuffle() {
