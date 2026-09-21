@@ -1,29 +1,78 @@
 {
-  "identifier" : "Halo.storekit",
+  "appPolicies" : {
+    "eula" : "",
+    "policies" : [
+      {
+        "locale" : "en_US",
+        "policyText" : "",
+        "policyURL" : ""
+      }
+    ]
+  },
+  "identifier" : "A11CE202",
   "nonRenewingSubscriptions" : [
+
   ],
   "products" : [
-    {
-      "displayPrice" : "2.99",
-      "familyShareable" : false,
-      "id" : "halo_monthly",
-      "name" : "Halo Monthly",
-      "type" : "Recurring Subscription",
-      "subscriptionGroup" : "Halo Subscriptions",
-      "subscriptionPeriod" : "P1M"
-    }
+
   ],
   "settings" : {
-    "_applicationUsername" : "",
-    "locale" : "en_US"
+    "_askToBuyEnabled" : false,
+    "_billingGracePeriodEnabled" : false,
+    "_billingIssuesEnabled" : false,
+    "_disableDialogs" : false,
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_renewalBillingIssuesEnabled" : false,
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ],
+    "_timeRate" : 0
   },
   "subscriptionGroups" : [
     {
-      "id" : "Halo Subscriptions",
+      "id" : "C11CE001",
+      "localizations" : [
+
+      ],
       "name" : "Halo Subscriptions",
       "subscriptions" : [
-        "halo_monthly"
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "2.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "B11CE001",
+          "introductoryOffers" : [
+
+          ],
+          "localizations" : [
+            {
+              "description" : "Full access to Halo, billed monthly.",
+              "displayName" : "Halo Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "halo_monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Halo Monthly",
+          "subscriptionGroupID" : "C11CE001",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        }
       ]
     }
-  ]
+  ],
+  "version" : {
+    "major" : 6,
+    "minor" : 3
+  }
 }
