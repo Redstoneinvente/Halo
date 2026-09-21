@@ -7,6 +7,9 @@ import Carbon
 import UserNotifications
 import ImageIO
 import Darwin
+#if HALO_APPSTORE
+import MusicKit
+#endif
 
 @MainActor
 final class CalendarService: ObservableObject {
@@ -537,6 +540,35 @@ final class MediaService: ObservableObject {
         guard !detecting, !busy else { return }
         let supported = automatic ? ["com.apple.Music", "com.spotify.client"] : [app]
         let candidates = supported.filter { !deniedApps.contains($0) && !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
+
+#if HALO_APPSTORE
+        if candidates.contains("com.apple.Music") {
+            detecting = true
+            let expectedGeneration = generation
+            Task { [weak self] in
+                let result = await AppStoreAppleMusicBridge.probe()
+                guard let self else { return }
+                self.detecting = false
+                guard self.generation == expectedGeneration else { return }
+
+                if result.denied {
+                    self.deniedApps.insert("com.apple.Music")
+                }
+
+                if let snapshot = result.snapshot, (!automatic || snapshot.playing) {
+                    self.accept(snapshot)
+                } else if self.connectedApp == "com.apple.Music" || (!automatic && self.isPlaying) {
+                    self.disconnect()
+                }
+
+                if let message = result.error, self.error != message {
+                    self.error = message
+                }
+            }
+            return
+        }
+#endif
+
         guard !candidates.isEmpty else {
             // Automatic system/Safari audio is represented with connectedApp == nil. Do not let
             // the rich-player poll erase that source just because Music/Spotify are not running.
@@ -627,6 +659,31 @@ final class MediaService: ObservableObject {
             error = "Open Apple Music or Spotify to play music."; return
         }
         deniedApps.remove(app)
+
+#if HALO_APPSTORE
+        if app == "com.apple.Music" {
+            generation += 1
+            let expectedGeneration = generation
+            busy = true
+            Task { [weak self] in
+                let result = await AppStoreAppleMusicBridge.probe(command: command)
+                guard let self else { return }
+                self.busy = false
+                guard self.generation == expectedGeneration else { return }
+
+                if result.denied {
+                    self.deniedApps.insert(app)
+                }
+                if let snapshot = result.snapshot {
+                    self.accept(snapshot)
+                } else if let message = result.error {
+                    self.error = message
+                }
+            }
+            return
+        }
+#endif
+
         generation += 1 // Ignore an older automatic probe completing behind this command.
         artworkTask?.cancel(); artworkKey = ""
         let expectedGeneration = generation
@@ -665,6 +722,16 @@ final class MediaService: ObservableObject {
         }
 
         guard let app = connectedApp else { return }
+
+#if HALO_APPSTORE
+        if app == "com.apple.Music" {
+            AppStoreAppleMusicBridge.seek(to: target)
+            position = target
+            if error != nil { error = nil }
+            return
+        }
+#endif
+
         position = target
         queue.async { [weak self] in
             let source = """
@@ -684,6 +751,15 @@ final class MediaService: ObservableObject {
 
     func toggleShuffle() {
         guard openedDetailEnabled, shuffleSupported, let app = connectedApp else { return }
+
+#if HALO_APPSTORE
+        if app == "com.apple.Music" {
+            AppStoreAppleMusicBridge.toggleShuffle()
+            refreshPlaybackDetails(app: app)
+            return
+        }
+#endif
+
         queue.async { [weak self] in
             let command = app == "com.apple.Music" ? "set shuffle enabled to not shuffle enabled" : "set shuffling to not shuffling"
             let source = "if application id \"\(app)\" is running then tell application id \"\(app)\" to \(command)"
@@ -695,6 +771,15 @@ final class MediaService: ObservableObject {
 
     func cycleRepeat() {
         guard openedDetailEnabled, repeatSupported, let app = connectedApp else { return }
+
+#if HALO_APPSTORE
+        if app == "com.apple.Music" {
+            AppStoreAppleMusicBridge.cycleRepeat()
+            refreshPlaybackDetails(app: app)
+            return
+        }
+#endif
+
         queue.async { [weak self] in
             let command: String
             if app == "com.apple.Music" {
@@ -711,6 +796,19 @@ final class MediaService: ObservableObject {
 
     private func refreshPlaybackDetails(app: String) {
         guard openedDetailEnabled else { return }
+
+#if HALO_APPSTORE
+        if app == "com.apple.Music" {
+            let details = AppStoreAppleMusicBridge.details()
+            position = details.position
+            shuffleSupported = true
+            shuffleEnabled = details.shuffleEnabled
+            repeatSupported = true
+            repeatMode = details.repeatMode
+            return
+        }
+#endif
+
         let expectedGeneration = generation
         queue.async { [weak self] in
             let shuffleRead = app == "com.apple.Music" ? "shuffle enabled" : "shuffling"
@@ -794,6 +892,24 @@ final class MediaService: ObservableObject {
         guard !trackID.isEmpty else { return }
         let expectedID = trackID
         let expectedGeneration = generation
+
+#if HALO_APPSTORE
+        if app == "com.apple.Music" {
+            let urlString = AppStoreAppleMusicBridge.artworkURL()
+            artworkTask = Task { [weak self] in
+                async let colorsValue = ArtworkReader.palette(data: nil, urlString: urlString)
+                async let imageValue = ArtworkReader.image(data: nil, urlString: urlString)
+                let (colors, image) = await (colorsValue, imageValue)
+                guard !Task.isCancelled, let self, self.artworkEnabled,
+                      self.generation == expectedGeneration, self.artworkKey == key,
+                      self.trackID == expectedID else { return }
+                self.artworkColors = colors
+                self.artworkImage = image
+            }
+            return
+        }
+#endif
+
         // A separate query runs only on track changes, never for every playback poll.
         queue.async { [weak self] in
             let artwork = app == "com.spotify.client" ? "artwork url of current track" : "raw data of artwork 1 of current track"
@@ -826,6 +942,115 @@ final class MediaService: ObservableObject {
         }
     }
 }
+
+#if HALO_APPSTORE
+@MainActor
+private enum AppStoreAppleMusicBridge {
+    private static let player = SystemMusicPlayer.shared
+
+    private static func authorizationStatus() async -> MusicAuthorization.Status {
+        let current = MusicAuthorization.currentStatus
+        if current == .notDetermined {
+            return await MusicAuthorization.request()
+        }
+        return current
+    }
+
+    static func probe(command: String = "refresh") async -> MediaProbe {
+        let status = await authorizationStatus()
+        guard status == .authorized else {
+            let message: String
+            switch status {
+            case .denied:
+                message = "Allow Halo to access Apple Music in System Settings."
+            case .restricted:
+                message = "Apple Music access is restricted on this Mac."
+            default:
+                message = "Apple Music access is required for the App Store version of Halo."
+            }
+            return MediaProbe(app: "com.apple.Music", error: message, denied: status == .denied)
+        }
+
+        do {
+            switch command {
+            case "playpause":
+                if player.state.playbackStatus == .playing {
+                    player.pause()
+                } else {
+                    try await player.play()
+                }
+            case "next track":
+                try await player.skipToNextEntry()
+            case "previous track":
+                try await player.skipToPreviousEntry()
+            case "refresh":
+                break
+            default:
+                break
+            }
+        } catch {
+            return MediaProbe(app: "com.apple.Music", error: error.localizedDescription)
+        }
+
+        guard let entry = player.queue.currentEntry else {
+            return MediaProbe(app: "com.apple.Music")
+        }
+
+        return MediaProbe(
+            app: "com.apple.Music",
+            snapshot: PlayerSnapshot(
+                app: "com.apple.Music",
+                title: entry.title,
+                artist: entry.subtitle ?? "",
+                playing: player.state.playbackStatus == .playing,
+                trackID: entry.id
+            )
+        )
+    }
+
+    static func seek(to seconds: Double) {
+        guard seconds.isFinite, seconds >= 0 else { return }
+        player.playbackTime = seconds
+    }
+
+    static func artworkURL() -> String? {
+        player.queue.currentEntry?.artwork?.url(width: 512, height: 512)?.absoluteString
+    }
+
+    static func details() -> (position: Double, shuffleEnabled: Bool, repeatMode: String) {
+        let playbackTime = player.playbackTime
+        let position = playbackTime.isFinite && playbackTime >= 0 ? playbackTime : 0
+        let shuffleEnabled = player.state.shuffleMode == .songs
+
+        let repeatMode: String
+        switch player.state.repeatMode {
+        case .one:
+            repeatMode = "one"
+        case .all:
+            repeatMode = "all"
+        default:
+            repeatMode = "off"
+        }
+
+        return (position, shuffleEnabled, repeatMode)
+    }
+
+    static func toggleShuffle() {
+        player.state.shuffleMode = player.state.shuffleMode == .songs ? .off : .songs
+    }
+
+    static func cycleRepeat() {
+        switch player.state.repeatMode {
+        case .all:
+            player.state.repeatMode = .one
+        case .one:
+            player.state.repeatMode = .none
+        default:
+            player.state.repeatMode = .all
+        }
+    }
+}
+#endif
 
 private struct MediaProbe {
     var app: String
