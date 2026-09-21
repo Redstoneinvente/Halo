@@ -18,3 +18,9 @@ Changes keep the surface contour on the animated viewport even when Default Layo
 4. Open Clipboard with compact mode on/off, 1–6 preview lines, action rows, and history. Verify the footer and actions fit; use a constrained display to verify scrolling.
 5. While Clipboard owns the surface, let Transfer stop. Switch from Drop/Bluetooth to Clipboard. Verify Clipboard retains its requested size.
 6. Repeat open/close in Visual Workspace and with a custom contour to check shared-surface regressions.
+
+## Audio retention and Transfer sizing follow-up
+
+Audio now requires Keep Closed Notch Content before retaining its closed visualizer. Transfer includes the toggle-strip height in its initial sizing and measures the rendered body at the final window width, with a scroll fallback for constrained displays.
+
+Validation: Swift parsing and isolated type-checking of the actual Transfer views passed. Size assertions passed for Dashboard, Minimal, and Indicator, in both compact modes, with 40- and 80-point strips. Interactive verification remains required.
