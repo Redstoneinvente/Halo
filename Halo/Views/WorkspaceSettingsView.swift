@@ -3798,9 +3798,14 @@ private struct HaloAppStoreAccountLicenseSettingsView: View {
                     model.restore()
                 }
                 .disabled(model.isBusy)
+
+                Link(
+                    "Manage Subscription",
+                    destination: URL(string: "https://apps.apple.com/account/subscriptions")!
+                )
             }
 
-            Text("To change or cancel your subscription, use your Apple Account's subscription controls in the App Store.")
+            Text("Subscription purchase, renewal, cancellation, billing, and payment methods are managed by Apple through the App Store.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
