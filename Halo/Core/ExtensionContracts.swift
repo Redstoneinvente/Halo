@@ -88,7 +88,8 @@ struct HaloSurfaceRouter: View {
     }
 
     private var accessLocked: Bool {
-        !account.isSignedIn || !license.accessValid(for: account.userID)
+        guard HaloDistribution.current.supportsExternalLicensing else { return false }
+        return !account.isSignedIn || !license.accessValid(for: account.userID)
     }
 
     private var eiOwnsSurface: Bool {
