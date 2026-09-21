@@ -207,9 +207,11 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         updateArtworkPreference()
         if hudEngine == nil { hudEngine = HaloHUDEngine(workspace: self); hudEngine?.start() }
         evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey(); updateRetroGameHotkey(); updateClipboardCIHotkey()
-        HaloCustomCIRuntimeStore.shared.attach(to: self)
-        IntegrationCIRuntime.shared.start()
-        IntegrationShortcutManager.shared.start()
+        if HaloDistribution.current.supportsPartnerIntegrations {
+            HaloCustomCIRuntimeStore.shared.attach(to: self)
+            IntegrationCIRuntime.shared.start()
+            IntegrationShortcutManager.shared.start()
+        }
         pollMedia()
         if systemLiveActivitySource == nil {
             systemLiveActivitySource = SystemLiveActivitySource(workspace: self, defaults: defaults)
@@ -250,7 +252,8 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             NSWorkspace.shared.notificationCenter.publisher(for: name).receive(on: RunLoop.main).sink { [weak self] notification in
                 self?.refreshApps(); self?.evaluateRules(); self?.evaluateSchedules(); self?.hudEngine?.configurationDidChange()
                 self?.pollMedia(); self?.bluetooth.refresh()
-                if notification.name == NSWorkspace.didWakeNotification {
+                if notification.name == NSWorkspace.didWakeNotification,
+                   HaloDistribution.current.supportsPartnerIntegrations {
                     IntegrationCIRuntime.shared.cleanupForSleepOrWake()
                     IntegrationCIRuntime.shared.refresh()
                     IntegrationShortcutManager.shared.sync()
@@ -260,6 +263,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)
             .receive(on: RunLoop.main)
             .sink { _ in
+                guard HaloDistribution.current.supportsPartnerIntegrations else { return }
                 IntegrationCIRuntime.shared.cleanupForSleepOrWake()
             }
             .store(in: &subscriptions)
@@ -271,7 +275,29 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.evaluateRules(); self?.hudEngine?.configurationDidChange() }.store(in: &subscriptions)
     }
-    func stop() { HaloCustomCIRuntimeStore.shared.detach(); IntegrationShortcutManager.shared.stop(); IntegrationCIRuntime.shared.stop(); systemLiveActivitySource?.stop(); systemLiveActivitySource = nil; pendingSave?.cancel(); persist(); ticker?.cancel(); subscriptions.removeAll(); bluetooth.stop(); systemAudioFallback?.stop(); systemAudioFallback = nil; hudEngine?.stop(); hudEngine = nil; hotkey.stop(); retroGameHotkey.stop(); clipboardCIHotkey.stop(); clipboard.reset(); media.disconnect() }
+    func stop() {
+        if HaloDistribution.current.supportsPartnerIntegrations {
+            HaloCustomCIRuntimeStore.shared.detach()
+            IntegrationShortcutManager.shared.stop()
+            IntegrationCIRuntime.shared.stop()
+        }
+        systemLiveActivitySource?.stop()
+        systemLiveActivitySource = nil
+        pendingSave?.cancel()
+        persist()
+        ticker?.cancel()
+        subscriptions.removeAll()
+        bluetooth.stop()
+        systemAudioFallback?.stop()
+        systemAudioFallback = nil
+        hudEngine?.stop()
+        hudEngine = nil
+        hotkey.stop()
+        retroGameHotkey.stop()
+        clipboardCIHotkey.stop()
+        clipboard.reset()
+        media.disconnect()
+    }
     private func schedulePersistence() {
         pendingSave?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.persist() }
