@@ -179,7 +179,12 @@ final class AppStore: ObservableObject {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             var layout = workspace.settings.layout
             layout.appearance.assetPath = ""
-            try encoder.encode(ThemeArchive(theme: configuration.theme, layout: layout)).write(to: url, options: .atomic)
+            let data = try encoder.encode(ThemeArchive(theme: configuration.theme, layout: layout))
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            // NSSavePanel authorizes the selected destination itself. Avoid .atomic here:
+            // atomic writes may need a sibling temporary file outside that exact sandbox grant.
+            try data.write(to: url)
         } catch { self.error = error.localizedDescription }
     }
 }
