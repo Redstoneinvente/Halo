@@ -110,6 +110,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // only the black locked notch and the sign-in/license flow; normal Halo content never runs.
         let activationContext = ActivationSequenceCoordinator.shared.classifyStartup()
         let manager = WindowManager(store: store, startupActivationContext: activationContext)
+
+        // App Store builds do not use Halo's external licensing gate. Grant access before
+        // WindowManager creates any SwiftUI surface so the first rendered frame can never
+        // be the locked/license activation UI.
+        if !HaloDistribution.current.supportsExternalLicensing {
+            manager.setCommercialAccessGranted(true)
+        }
+
         engine = manager
         manager.start()
 
