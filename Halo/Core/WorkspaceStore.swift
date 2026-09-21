@@ -8,6 +8,7 @@ import Darwin
 @MainActor
 final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     static let systemAudioSource = "com.redstoneinvente.halo.system-audio"
+    static let safariMediaSource = "com.apple.Safari"
 
     @Published var settings: WorkspaceSettings { didSet {
         schedulePersistence()
@@ -168,8 +169,9 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     }
     private var isAutomaticMediaSource: Bool { settings.automaticMedia ?? true }
     private var isSystemAudioOnly: Bool { !isAutomaticMediaSource && settings.mediaApp == Self.systemAudioSource }
+    private var isSafariMediaOnly: Bool { !isAutomaticMediaSource && settings.mediaApp == Self.safariMediaSource }
     private var wantsSystemAudioFallback: Bool {
-        if isSystemAudioOnly { return true }
+        if isSystemAudioOnly || isSafariMediaOnly { return true }
         guard isAutomaticMediaSource else { return false }
         let layout = effectiveLayout
         let contextUsesMedia = layout.contextMusic?.enabled == true
@@ -186,9 +188,10 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     }
     private func pollMedia() {
         if systemAudioFallback == nil { systemAudioFallback = SystemAudioMediaFallback(media: media) }
+        systemAudioFallback?.setSafariOnly(isSafariMediaOnly)
         systemAudioFallback?.setEnabled(wantsSystemAudioFallback)
 
-        if isSystemAudioOnly {
+        if isSystemAudioOnly || isSafariMediaOnly {
             systemAudioFallback?.refresh()
             return
         }
@@ -1564,6 +1567,7 @@ enum SystemMediaTransport {
 private final class SystemAudioMediaFallback {
     private weak var media: MediaService?
     private var enabled = false
+    private var safariOnly = false
     private var ownsFallback = false
     private var lastHeard = Date.distantPast
     private var lastSafariOutput = Date.distantPast
@@ -1575,6 +1579,10 @@ private final class SystemAudioMediaFallback {
     private var fastRefreshTask: Task<Void, Never>?
 
     init(media: MediaService) { self.media = media }
+
+    func setSafariOnly(_ safariOnly: Bool) {
+        self.safariOnly = safariOnly
+    }
 
     func setEnabled(_ enabled: Bool) {
         guard self.enabled != enabled else { return }
@@ -1601,6 +1609,47 @@ private final class SystemAudioMediaFallback {
         }
 
         let now = Date()
+
+        // Prefer the public Safari Web Extension whenever it reports a live media element.
+        // This path works in both Halo Direct and Halo App Store and does not depend on MediaRemote.
+        if let safari = SafariMediaBridge.shared.currentState(maxAge: 3.5), safari.playing {
+            if media.connectedApp != nil { media.disconnect() }
+            lastSafariOutput = now
+            lastHeard = now
+            lastRemoteMetadata = now
+            ownsFallback = true
+
+            let displayArtist = safari.artist.isEmpty ? safari.sourceLabel : safari.artist
+            let sourceKey = ["safari-extension", safari.pageURL, safari.title, safari.artist]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .joined(separator: "|")
+
+            media.acceptExternalMedia(
+                title: safari.title.isEmpty ? "Safari Media" : safari.title,
+                artist: displayArtist,
+                album: safari.album,
+                duration: safari.duration,
+                position: safari.position,
+                playing: true,
+                artworkURL: safari.artworkURL,
+                sourceKey: sourceKey
+            )
+            scheduleFastRefresh()
+            return
+        }
+
+        // Explicit Safari mode never falls through to another app. Automatic/System Audio can
+        // still use the generic system detector when the extension has no active media session.
+        if safariOnly {
+            if media.connectedApp == nil {
+                media.isPlaying = false
+                media.title = "Safari"
+                media.artist = "Waiting for media from the Halo Safari extension"
+            }
+            ownsFallback = false
+            return
+        }
+
         let safariRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").isEmpty
         let safariOutputActive: Bool
         if #available(macOS 14.2, *) {
@@ -1805,8 +1854,8 @@ private final class SystemAudioMediaFallback {
         guard ownsFallback, let media else { ownsFallback = false; return }
         if media.connectedApp == nil {
             media.isPlaying = false
-            media.title = "System Audio"
-            media.artist = "Waiting for audio from your Mac"
+            media.title = safariOnly ? "Safari" : "System Audio"
+            media.artist = safariOnly ? "Waiting for media from the Halo Safari extension" : "Waiting for audio from your Mac"
         }
         ownsFallback = false
     }
