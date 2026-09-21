@@ -52,7 +52,7 @@ function chooseSession() {
   return entries[0];
 }
 
-function publishSelected() {
+async function publishSelected() {
   const selected = chooseSession();
   const state = selected?.state || {
     version: 1,
@@ -77,11 +77,17 @@ function publishSelected() {
   };
 
   state.updatedAt = Date.now();
-  const port = ensureNativePort();
+
+  // Safari's documented JavaScript -> native path is sendNativeMessage.
+  // connectNative is kept separately so Halo can push commands back to this
+  // background script through SFSafariApplication.dispatchMessage.
   try {
-    port?.postMessage({ type: "mediaState", payload: state });
-  } catch {
-    nativePort = null;
+    await browser.runtime.sendNativeMessage("com.redstoneinvente.Halo", {
+      type: "mediaState",
+      payload: state
+    });
+  } catch (error) {
+    console.error("Halo Safari Media: failed to deliver media state to native extension", error);
   }
 }
 
