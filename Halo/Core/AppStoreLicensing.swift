@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import StoreKit
 
 struct AppStoreProductInfo: Identifiable, Equatable, Sendable {
@@ -13,12 +14,21 @@ enum AppStoreEntitlementState: Equatable, Sendable {
     case loading
     case notEntitled
     case entitled(productIDs: Set<String>)
+    case gracePeriod(productIDs: Set<String>, expiresAt: Date?)
+    case billingRetry(productIDs: Set<String>)
+    case revoked
     case failed(message: String)
 
-    var isEntitled: Bool {
-        if case .entitled = self { return true }
-        return false
+    var grantsAccess: Bool {
+        switch self {
+        case .entitled, .gracePeriod:
+            return true
+        case .notConfigured, .loading, .notEntitled, .billingRetry, .revoked, .failed:
+            return false
+        }
     }
+
+    var isEntitled: Bool { grantsAccess }
 }
 
 enum AppStorePurchaseOutcome: Equatable, Sendable {
@@ -56,6 +66,8 @@ protocol AppStoreLicensing: AnyObject {
     var state: AppStoreEntitlementState { get }
     var products: [AppStoreProductInfo] { get }
     var isEntitled: Bool { get }
+    var statePublisher: AnyPublisher<AppStoreEntitlementState, Never> { get }
+    var productsPublisher: AnyPublisher<[AppStoreProductInfo], Never> { get }
 
     func start()
     func stop()
@@ -92,8 +104,8 @@ enum AppStoreLicensingConfiguration {
 
 /// StoreKit 2 implementation of Halo's App Store licensing boundary.
 ///
-/// This object intentionally does not decide whether Halo should block launch when no
-/// entitlement exists. It only reports StoreKit state and performs StoreKit operations.
+/// StoreKit remains private to this file. Halo consumes only AppStoreLicensing state,
+/// products and actions.
 @MainActor
 private final class StoreKitAppStoreLicensing: ObservableObject, AppStoreLicensing {
     static let shared = StoreKitAppStoreLicensing()
@@ -101,7 +113,13 @@ private final class StoreKitAppStoreLicensing: ObservableObject, AppStoreLicensi
     @Published private(set) var state: AppStoreEntitlementState = .notConfigured
     @Published private(set) var products: [AppStoreProductInfo] = []
 
-    var isEntitled: Bool { state.isEntitled }
+    var isEntitled: Bool { state.grantsAccess }
+    var statePublisher: AnyPublisher<AppStoreEntitlementState, Never> {
+        $state.eraseToAnyPublisher()
+    }
+    var productsPublisher: AnyPublisher<[AppStoreProductInfo], Never> {
+        $products.eraseToAnyPublisher()
+    }
 
     private let configuredProductIDs: Set<String>
     private var storeProducts: [String: Product] = [:]
@@ -127,7 +145,7 @@ private final class StoreKitAppStoreLicensing: ObservableObject, AppStoreLicensi
                 case .verified(let transaction):
                     guard self.configuredProductIDs.contains(transaction.productID) else { continue }
                     await transaction.finish()
-                    await self.refreshEntitlements()
+                    await self.refresh()
                 case .unverified:
                     continue
                 }
@@ -158,7 +176,17 @@ private final class StoreKitAppStoreLicensing: ObservableObject, AppStoreLicensi
             return
         }
 
-        state = .loading
+        if !state.grantsAccess {
+            state = .loading
+        }
+
+        // Transaction.currentEntitlements is available independently of product
+        // merchandising. Use it first so a temporary product-loading/network failure
+        // does not lock out an already entitled customer.
+        let transactionEntitlements = await currentTransactionEntitlements()
+        if !transactionEntitlements.isEmpty {
+            state = .entitled(productIDs: transactionEntitlements)
+        }
 
         do {
             let loadedProducts = try await Product.products(for: Array(configuredProductIDs))
@@ -174,11 +202,18 @@ private final class StoreKitAppStoreLicensing: ObservableObject, AppStoreLicensi
                 }
                 .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
 
-            await refreshEntitlements()
+            await refreshEntitlements(
+                using: loadedProducts,
+                transactionEntitlements: transactionEntitlements
+            )
         } catch {
             storeProducts = [:]
             products = []
-            state = .failed(message: error.localizedDescription)
+            if transactionEntitlements.isEmpty {
+                state = .failed(message: error.localizedDescription)
+            } else {
+                state = .entitled(productIDs: transactionEntitlements)
+            }
         }
     }
 
@@ -204,7 +239,7 @@ private final class StoreKitAppStoreLicensing: ObservableObject, AppStoreLicensi
                 throw AppStoreLicensingError.unverifiedTransaction
             }
             await transaction.finish()
-            await refreshEntitlements()
+            await refresh()
             return .purchased(productID: transaction.productID)
 
         case .pending:
@@ -226,23 +261,104 @@ private final class StoreKitAppStoreLicensing: ObservableObject, AppStoreLicensi
         await refresh()
     }
 
-    private func refreshEntitlements() async {
+    private func currentTransactionEntitlements() async -> Set<String> {
         var entitledProductIDs = Set<String>()
+        let now = Date()
 
         for await result in Transaction.currentEntitlements {
             guard case .verified(let transaction) = result,
                   configuredProductIDs.contains(transaction.productID),
-                  transaction.revocationDate == nil else { continue }
+                  transaction.revocationDate == nil,
+                  !transaction.isUpgraded else { continue }
 
-            if let expirationDate = transaction.expirationDate, expirationDate <= Date() {
+            if let expirationDate = transaction.expirationDate, expirationDate <= now {
                 continue
             }
 
             entitledProductIDs.insert(transaction.productID)
         }
 
-        state = entitledProductIDs.isEmpty
-            ? .notEntitled
-            : .entitled(productIDs: entitledProductIDs)
+        return entitledProductIDs
+    }
+
+    private func refreshEntitlements(
+        using loadedProducts: [Product],
+        transactionEntitlements: Set<String>
+    ) async {
+        var entitledProductIDs = transactionEntitlements
+        var graceProductIDs = Set<String>()
+        var billingRetryProductIDs = Set<String>()
+        var latestGraceExpiration: Date?
+        var sawRevokedSubscription = false
+
+        for product in loadedProducts {
+            guard let subscription = product.subscription else { continue }
+
+            do {
+                let statuses = try await subscription.status
+                for status in statuses {
+                    let transaction: Transaction?
+                    switch status.transaction {
+                    case .verified(let verified):
+                        transaction = verified
+                    case .unverified:
+                        transaction = nil
+                    }
+
+                    guard let transaction,
+                          configuredProductIDs.contains(transaction.productID) else { continue }
+
+                    switch status.state {
+                    case .subscribed:
+                        guard transaction.revocationDate == nil,
+                              !transaction.isUpgraded else { continue }
+                        if let expirationDate = transaction.expirationDate,
+                           expirationDate <= Date() {
+                            continue
+                        }
+                        entitledProductIDs.insert(transaction.productID)
+
+                    case .inGracePeriod:
+                        guard transaction.revocationDate == nil,
+                              !transaction.isUpgraded else { continue }
+                        graceProductIDs.insert(transaction.productID)
+                        if case .verified(let renewalInfo) = status.renewalInfo,
+                           let graceExpiration = renewalInfo.gracePeriodExpirationDate {
+                            if latestGraceExpiration == nil || graceExpiration > latestGraceExpiration! {
+                                latestGraceExpiration = graceExpiration
+                            }
+                        }
+
+                    case .inBillingRetryPeriod:
+                        billingRetryProductIDs.insert(transaction.productID)
+
+                    case .revoked:
+                        sawRevokedSubscription = true
+
+                    case .expired:
+                        break
+
+                    @unknown default:
+                        break
+                    }
+                }
+            } catch {
+                // currentEntitlements above remains the authoritative fallback if
+                // subscription-status merchandising temporarily fails.
+                continue
+            }
+        }
+
+        if !entitledProductIDs.isEmpty {
+            state = .entitled(productIDs: entitledProductIDs)
+        } else if !graceProductIDs.isEmpty {
+            state = .gracePeriod(productIDs: graceProductIDs, expiresAt: latestGraceExpiration)
+        } else if !billingRetryProductIDs.isEmpty {
+            state = .billingRetry(productIDs: billingRetryProductIDs)
+        } else if sawRevokedSubscription {
+            state = .revoked
+        } else {
+            state = .notEntitled
+        }
     }
 }
