@@ -1,0 +1,42 @@
+name: Validate Halo Build Variants
+
+on:
+  push:
+    branches:
+      - app-store-testing
+  workflow_dispatch:
+
+jobs:
+  halo-direct:
+    name: Halo Direct
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Halo Direct
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Halo.xcodeproj \
+            -scheme "Halo Direct" \
+            -configuration "Debug Direct" \
+            -destination "platform=macOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+  halo-app-store:
+    name: Halo App Store
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Halo App Store
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Halo.xcodeproj \
+            -scheme "Halo App Store" \
+            -configuration "Debug App Store" \
+            -destination "platform=macOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
