@@ -15,6 +15,13 @@ struct HaloApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    private enum StartupAccessState: Equatable {
+        case launching
+        case verifyingAccess
+        case locked
+        case ready
+    }
+
     let store = AppStore()
     private var engine: WindowManager?
     private var hudController: HaloHUDController?
@@ -28,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var licenseClipboardChangeCount = NSPasteboard.general.changeCount
     private var licensedServicesStarted = false
     private var setupShownThisLaunch = false
+    private var startupAccessState: StartupAccessState = .launching
+    private var initialAccessVerificationCompleted = false
     private let updater = HaloUpdateController.shared
     private let appStoreLicensing: any AppStoreLicensing = AppStoreLicensingProvider.shared
     private let whatsNew = HaloWhatsNewCoordinator.shared
@@ -56,10 +65,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(openSettings), name: Notification.Name("HaloOpenSettings"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(toggle), name: Notification.Name("HaloToggle"), object: nil)
         configureCommercialAccessGate()
-
-        if HaloDistribution.current.supportsAppStoreLicensing {
-            appStoreLicensing.start()
-        }
 
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         status?.button?.image = NSImage(systemSymbolName: "capsule.tophalf.filled", accessibilityDescription: "Halo")
@@ -115,42 +120,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func configureCommercialAccessGate() {
+        startupAccessState = .verifyingAccess
+        initialAccessVerificationCompleted = false
+
         if HaloDistribution.current.supportsAppStoreLicensing {
-            // The App Store build has its own StoreKit gate. Do not create Halo's notch
-            // surfaces until StoreKit reports an entitlement, which keeps the Direct
-            // LicenseSeat activation UI completely out of the App Store experience.
+            // StoreKit starts listening for transaction updates immediately, but surface
+            // creation stays blocked until an explicit entitlement refresh completes.
             appStoreLicensing.statePublisher
                 .removeDuplicates()
                 .receive(on: RunLoop.main)
-                .sink { [weak self] _ in self?.refreshCommercialAccess() }
+                .sink { [weak self] _ in
+                    guard let self, self.initialAccessVerificationCompleted else { return }
+                    self.refreshCommercialAccess()
+                }
                 .store(in: &commercialBag)
-            refreshCommercialAccess()
+
+            appStoreLicensing.start()
+
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.appStoreLicensing.refresh()
+                self.initialAccessVerificationCompleted = true
+                self.refreshCommercialAccess()
+            }
             return
         }
 
-        // Direct distribution keeps the existing locked-notch account/license flow alive
-        // while access is unavailable.
-        startSurfaceEngine(commercialAccessGranted: false)
         guard HaloDistribution.current.supportsExternalLicensing else {
+            initialAccessVerificationCompleted = true
             refreshCommercialAccess()
             return
         }
 
-        startLicenseClipboardWatcher()
-
+        // Ignore the managers' initial published values while Keychain/account restoration
+        // is still in flight. Otherwise the first "signed out / inactive" values can create
+        // the notch and restore CI state before entitlement is actually known.
         Publishers.CombineLatest3(
             HaloAccountManager.shared.$isSignedIn.removeDuplicates(),
             HaloAccountManager.shared.$userID.removeDuplicates(),
             HaloLicenseManager.shared.$state.removeDuplicates()
         )
         .receive(on: RunLoop.main)
-        .sink { [weak self] _, _, _ in self?.refreshCommercialAccess() }
+        .sink { [weak self] _, _, _ in
+            guard let self, self.initialAccessVerificationCompleted else { return }
+            self.refreshCommercialAccess()
+        }
         .store(in: &commercialBag)
 
         Task { @MainActor [weak self] in
+            guard let self else { return }
             await HaloAccountManager.shared.restore()
             await HaloLicenseManager.shared.restoreAndValidate()
-            self?.refreshCommercialAccess()
+            self.initialAccessVerificationCompleted = true
+            self.refreshCommercialAccess()
         }
     }
 
@@ -164,27 +186,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let manager = WindowManager(store: store, startupActivationContext: activationContext)
         manager.setCommercialAccessGranted(granted)
         engine = manager
-        manager.start()
+
+        // Give AppKit one complete main-run-loop turn after access verification before
+        // resolving NSScreen/safe-area geometry. This removes the launch-time race that could
+        // place the notch using a transient screen frame.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.engine === manager else { return }
+            manager.start()
+        }
     }
 
     private func refreshCommercialAccess() {
-        let granted = commercialAccessGranted
-
-        if HaloDistribution.current.supportsAppStoreLicensing {
-            if granted {
-                startSurfaceEngine(commercialAccessGranted: true)
-                dismissAppStoreSubscriptionGate()
-            } else {
-                engine?.stop()
-                engine = nil
-                presentAppStoreSubscriptionGate()
-            }
-        } else {
-            engine?.setCommercialAccessGranted(granted)
+        guard initialAccessVerificationCompleted else {
+            transitionStartupAccess(to: .verifyingAccess)
+            return
         }
 
-        if granted {
+        transitionStartupAccess(to: commercialAccessGranted ? .ready : .locked)
+    }
+
+    private func transitionStartupAccess(to nextState: StartupAccessState) {
+        if startupAccessState == nextState {
+            switch nextState {
+            case .ready:
+                engine?.setCommercialAccessGranted(true)
+            case .locked:
+                engine?.setCommercialAccessGranted(false)
+            case .launching, .verifyingAccess:
+                break
+            }
+            return
+        }
+
+        startupAccessState = nextState
+
+        switch nextState {
+        case .launching, .verifyingAccess:
+            // Nothing that can restore or activate a CI is allowed to exist while entitlement
+            // is unknown. In particular, do not construct WindowManager here.
             stopLicenseClipboardWatcher()
+            stopLicensedServices()
+            engine?.stop()
+            engine = nil
+            dismissAppStoreSubscriptionGate()
+
+        case .locked:
+            stopLicensedServices()
+            setupWindow?.orderOut(nil)
+            setupWindow = nil
+            setupShownThisLaunch = false
+
+            if HaloDistribution.current.supportsAppStoreLicensing {
+                stopLicenseClipboardWatcher()
+                engine?.stop()
+                engine = nil
+                settings?.orderOut(nil)
+                hudSettings?.orderOut(nil)
+                presentAppStoreSubscriptionGate()
+            } else {
+                // The Direct build still needs its locked notch for account/license activation,
+                // but it is created only after the initial restore/validation has completed.
+                // Recreate it when falling back from ready so an already-open CI cannot survive
+                // an entitlement loss.
+                engine?.stop()
+                engine = nil
+                startSurfaceEngine(commercialAccessGranted: false)
+                startLicenseClipboardWatcher()
+            }
+
+        case .ready:
+            stopLicenseClipboardWatcher()
+            dismissAppStoreSubscriptionGate()
+            startSurfaceEngine(commercialAccessGranted: true)
             startLicensedServices()
 
             let defaults = UserDefaults.standard
@@ -194,18 +267,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             } else {
                 presentSetupIfNeeded()
             }
-        } else {
-            startLicenseClipboardWatcher()
-            setupWindow?.orderOut(nil)
-            setupWindow = nil
-            setupShownThisLaunch = false
-
-            if HaloDistribution.current.supportsAppStoreLicensing {
-                settings?.orderOut(nil)
-                hudSettings?.orderOut(nil)
-            }
-
-            stopLicensedServices()
         }
     }
 
