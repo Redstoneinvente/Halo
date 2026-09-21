@@ -41,6 +41,13 @@ final class HaloIntegrationCatalog: ObservableObject {
     private init() {}
 
     func start() {
+        guard HaloDistribution.current.supportsPartnerIntegrations else {
+            integrations = []
+            diagnostics = []
+            isRefreshing = false
+            hasCompletedRefresh = true
+            return
+        }
         guard subscriptions.isEmpty else { return }
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didWakeNotification] {
             NSWorkspace.shared.notificationCenter.publisher(for: name)
@@ -56,6 +63,13 @@ final class HaloIntegrationCatalog: ObservableObject {
     }
 
     func refresh() {
+        guard HaloDistribution.current.supportsPartnerIntegrations else {
+            integrations = []
+            diagnostics = []
+            isRefreshing = false
+            hasCompletedRefresh = true
+            return
+        }
         guard !isRefreshing else { return }
         isRefreshing = true
         let running = NSWorkspace.shared.runningApplications.compactMap(\.bundleURL)
