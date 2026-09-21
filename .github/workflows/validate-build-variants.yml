@@ -22,10 +22,12 @@ jobs:
           precondition(HaloDistribution.current == .direct)
           precondition(HaloDistribution.direct.supportsSparkle)
           precondition(HaloDistribution.direct.supportsExternalLicensing)
+          precondition(!HaloDistribution.direct.supportsAppStoreLicensing)
           precondition(HaloDistribution.direct.supportsUnrestrictedFileAccess)
           precondition(HaloDistribution.direct.supportsPartnerIntegrations)
           precondition(!HaloDistribution.appStore.supportsSparkle)
           precondition(!HaloDistribution.appStore.supportsExternalLicensing)
+          precondition(HaloDistribution.appStore.supportsAppStoreLicensing)
           precondition(!HaloDistribution.appStore.supportsUnrestrictedFileAccess)
           precondition(!HaloDistribution.appStore.supportsPartnerIntegrations)
           SWIFT
@@ -36,6 +38,7 @@ jobs:
           precondition(HaloDistribution.current == .appStore)
           precondition(!HaloDistribution.current.supportsSparkle)
           precondition(!HaloDistribution.current.supportsExternalLicensing)
+          precondition(HaloDistribution.current.supportsAppStoreLicensing)
           precondition(!HaloDistribution.current.supportsUnrestrictedFileAccess)
           precondition(!HaloDistribution.current.supportsPartnerIntegrations)
           SWIFT
