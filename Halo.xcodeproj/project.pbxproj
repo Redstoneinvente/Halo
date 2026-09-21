@@ -39,6 +39,9 @@
 		00000000000000000000026C /* Core/PersonalizationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000258 /* Core/PersonalizationModels.swift */; };
 		0000000000000000000002C6 /* NotchEngine/DisplayClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002BC /* NotchEngine/DisplayClock.swift */; };
 		0000000000000000000002D1 /* Services/AudioSpectrumService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002D0 /* Services/AudioSpectrumService.swift */; };
+		B1A0D1000000000000000001 /* Services/AudioSpectrumModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A0D1000000000000000101 /* Services/AudioSpectrumModels.swift */; };
+		B1A0D1000000000000000002 /* Services/AudioSpectrumProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A0D1000000000000000102 /* Services/AudioSpectrumProviding.swift */; };
+		B1A0D1000000000000000003 /* Services/DisabledAudioSpectrumService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A0D1000000000000000103 /* Services/DisabledAudioSpectrumService.swift */; };
 		0000000000000000000002E3 /* Services/HUDEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002E2 /* Services/HUDEngine.swift */; };
 		0000000000000000000002E4 /* Views/CompanionSprite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002E5 /* Views/CompanionSprite.swift */; };
 		A11C0F1A0000000000000311 /* Views/VisualWorkspaceAdaptiveWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */; };
@@ -152,6 +155,9 @@
 		00000000000000000000025A /* Views/DecorationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/DecorationsView.swift; sourceTree = "<group>"; };
 		0000000000000000000002BC /* NotchEngine/DisplayClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchEngine/DisplayClock.swift; sourceTree = "<group>"; };
 		0000000000000000000002D0 /* Services/AudioSpectrumService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/AudioSpectrumService.swift; sourceTree = "<group>"; };
+		B1A0D1000000000000000101 /* Services/AudioSpectrumModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/AudioSpectrumModels.swift; sourceTree = "<group>"; };
+		B1A0D1000000000000000102 /* Services/AudioSpectrumProviding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/AudioSpectrumProviding.swift; sourceTree = "<group>"; };
+		B1A0D1000000000000000103 /* Services/DisabledAudioSpectrumService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/DisabledAudioSpectrumService.swift; sourceTree = "<group>"; };
 		0000000000000000000002E2 /* Services/HUDEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HUDEngine.swift; sourceTree = "<group>"; };
 		0000000000000000000002E5 /* Views/CompanionSprite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/CompanionSprite.swift; sourceTree = "<group>"; };
 		A11C0F1A0000000000000001 /* Halo/Config/Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Halo/Config/Base.xcconfig; sourceTree = SOURCE_ROOT; };
@@ -287,6 +293,9 @@
 				FBAC00000000000000000300 /* GoogleService-Info.plist */,
 				0000000000000000000002BC /* NotchEngine/DisplayClock.swift */,
 				0000000000000000000002D0 /* Services/AudioSpectrumService.swift */,
+				B1A0D1000000000000000101 /* Services/AudioSpectrumModels.swift */,
+				B1A0D1000000000000000102 /* Services/AudioSpectrumProviding.swift */,
+				B1A0D1000000000000000103 /* Services/DisabledAudioSpectrumService.swift */,
 				0000000000000000000002E2 /* Services/HUDEngine.swift */,
 				0000000000000000000002E5 /* Views/CompanionSprite.swift */,
 				A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */,
@@ -615,6 +624,9 @@
 			files = (
 				0000000000000000000002C6 /* NotchEngine/DisplayClock.swift in Sources */,
 				0000000000000000000002D1 /* Services/AudioSpectrumService.swift in Sources */,
+				B1A0D1000000000000000001 /* Services/AudioSpectrumModels.swift in Sources */,
+				B1A0D1000000000000000002 /* Services/AudioSpectrumProviding.swift in Sources */,
+				B1A0D1000000000000000003 /* Services/DisabledAudioSpectrumService.swift in Sources */,
 				0000000000000000000002E3 /* Services/HUDEngine.swift in Sources */,
 				0000000000000000000002E4 /* Views/CompanionSprite.swift in Sources */,
 				A11C0F1A0000000000000371 /* Views/PixelPetWidget.swift in Sources */,
@@ -961,6 +973,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A11C0F1A0000000000000001 /* Halo/Config/Base.xcconfig */;
 			buildSettings = {
+				EXCLUDED_SOURCE_FILE_NAMES = "AudioSpectrumService.swift";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Halo/HaloAppStore.entitlements;
@@ -1000,6 +1013,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A11C0F1A0000000000000001 /* Halo/Config/Base.xcconfig */;
 			buildSettings = {
+				EXCLUDED_SOURCE_FILE_NAMES = "AudioSpectrumService.swift";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Halo/HaloAppStore.entitlements;
