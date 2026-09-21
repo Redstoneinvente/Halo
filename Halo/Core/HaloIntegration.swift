@@ -191,9 +191,7 @@ final class HaloIntegrationCatalog: ObservableObject {
             resolvedURLs.append(appURL)
         }
 
-        if NSDictionary(dictionary: refreshedBookmarks).isEqual(to: stored) == false {
-            UserDefaults.standard.set(refreshedBookmarks, forKey: authorizedAppsDefaultsKey)
-        }
+        UserDefaults.standard.set(refreshedBookmarks, forKey: authorizedAppsDefaultsKey)
         return resolvedURLs
     }
 
