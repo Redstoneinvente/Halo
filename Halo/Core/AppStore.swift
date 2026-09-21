@@ -1158,6 +1158,14 @@ final class HaloLicenseManager: ObservableObject {
     var trialConfigured: Bool { true }
 
     func restoreAndValidate() async {
+        guard HaloDistribution.current.supportsExternalLicensing else {
+            state = .inactive
+            details = .empty
+            licenseHint = ""
+            errorMessage = nil
+            notice = nil
+            return
+        }
         await prepareFingerprint()
         // Press licenses are a separate Halo entitlement and must never be sent to LicenseSeat.
         if await restorePressLicense() { return }
@@ -1175,6 +1183,7 @@ final class HaloLicenseManager: ObservableObject {
     }
 
     func startTrial() async {
+        guard HaloDistribution.current.supportsExternalLicensing else { return }
         await prepareFingerprint()
         guard HaloAccountManager.shared.isSignedIn else {
             errorMessage = "Sign in to your Halo account before starting a trial."
@@ -1244,6 +1253,7 @@ final class HaloLicenseManager: ObservableObject {
     }
 
     func activate(_ key: String) async {
+        guard HaloDistribution.current.supportsExternalLicensing else { return }
         let cleaned = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard cleaned.count >= 6 else { errorMessage = "Enter your Halo license key."; return }
         await prepareFingerprint()
@@ -1291,6 +1301,7 @@ final class HaloLicenseManager: ObservableObject {
     }
 
     func validate() async {
+        guard HaloDistribution.current.supportsExternalLicensing else { return }
         await prepareFingerprint()
         if await restorePressLicense() { return }
         guard isConfigured else { state = .unconfigured; return }
@@ -1321,6 +1332,7 @@ final class HaloLicenseManager: ObservableObject {
     }
 
     func deactivate() async {
+        guard HaloDistribution.current.supportsExternalLicensing else { return }
         await prepareFingerprint()
         if let key = await HaloKeychain.string(for: pressLicenseKey), Self.isPressLicenseKey(key) {
             await HaloKeychain.remove(pressLicenseKey)
@@ -1360,7 +1372,8 @@ final class HaloLicenseManager: ObservableObject {
     }
 
     func clearLocalLicense() {
-        guard !isBusy else { return }
+        guard HaloDistribution.current.supportsExternalLicensing,
+              !isBusy else { return }
         isBusy = true
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1378,6 +1391,7 @@ final class HaloLicenseManager: ObservableObject {
     }
 
     func accessValid(for accountID: String) -> Bool {
+        guard HaloDistribution.current.supportsExternalLicensing else { return true }
         guard state.isValid else { return false }
         if details.plan == "Press" {
             return !cachedPressOwner.isEmpty && cachedPressOwner == accountID
