@@ -12,6 +12,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Test core capability layer
+        run: swift test
+
       - name: Build Halo Direct
         run: |
           set -o pipefail
