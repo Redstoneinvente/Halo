@@ -37,6 +37,8 @@ final class HaloIntegrationCatalog: ObservableObject {
     @Published private(set) var hasCompletedRefresh = false
 
     private var subscriptions = Set<AnyCancellable>()
+    private let authorizedAppsDefaultsKey = "HaloAuthorizedIntegrationApplications.v1"
+    private var activeSecurityScopedApps: [String: URL] = [:]
 
     private init() {}
 
@@ -60,6 +62,55 @@ final class HaloIntegrationCatalog: ObservableObject {
 
     func stop() {
         subscriptions.removeAll()
+        for url in activeSecurityScopedApps.values {
+            url.stopAccessingSecurityScopedResource()
+        }
+        activeSecurityScopedApps.removeAll()
+    }
+
+    func authorizeIntegrationApplications() {
+        guard HaloDistribution.current.supportsPartnerIntegrations else { return }
+
+        let panel = NSOpenPanel()
+        panel.title = "Add Halo Integration"
+        panel.message = "Choose one or more partner apps that contain a HaloIntegration.json manifest. Halo will remember access to these apps."
+        panel.prompt = "Add Integration"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.resolvesAliases = true
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK else { return }
+
+        var stored = UserDefaults.standard.dictionary(forKey: authorizedAppsDefaultsKey) ?? [:]
+        var errors: [String] = []
+
+        for selected in panel.urls where selected.pathExtension.lowercased() == "app" {
+            let appURL = selected.resolvingSymlinksInPath().standardizedFileURL
+            let started = appURL.startAccessingSecurityScopedResource()
+            defer { if started { appURL.stopAccessingSecurityScopedResource() } }
+
+            do {
+                _ = try Self.loadIntegration(at: appURL)
+                if !HaloDistribution.current.supportsUnrestrictedFileAccess {
+                    let data = try appURL.bookmarkData(
+                        options: [.withSecurityScope],
+                        includingResourceValuesForKeys: nil,
+                        relativeTo: nil
+                    )
+                    stored[appURL.path] = data
+                }
+            } catch {
+                errors.append("\(appURL.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+
+        if !HaloDistribution.current.supportsUnrestrictedFileAccess {
+            UserDefaults.standard.set(stored, forKey: authorizedAppsDefaultsKey)
+        }
+        diagnostics = errors
+        refresh()
     }
 
     func refresh() {
@@ -72,17 +123,78 @@ final class HaloIntegrationCatalog: ObservableObject {
         }
         guard !isRefreshing else { return }
         isRefreshing = true
+
         let running = NSWorkspace.shared.runningApplications.compactMap(\.bundleURL)
+        let authorized = resolvedAuthorizedApplicationURLs()
+        let additionalApps = authorized + running
+        let roots: [URL]? = HaloDistribution.current.supportsUnrestrictedFileAccess ? nil : []
+
         Task { [weak self] in
             let result = await Task.detached(priority: .utility) {
-                Self.discoverInstalledIntegrations(additionalAppURLs: running)
+                Self.discoverInstalledIntegrations(
+                    additionalAppURLs: additionalApps,
+                    searchRoots: roots
+                )
             }.value
             guard let self else { return }
             integrations = result.integrations
-            diagnostics = result.diagnostics
+            if result.diagnostics.isEmpty {
+                if diagnostics.allSatisfy({ !$0.contains(".app:") }) {
+                    diagnostics = []
+                }
+            } else {
+                diagnostics = result.diagnostics
+            }
             hasCompletedRefresh = true
             isRefreshing = false
         }
+    }
+
+    private func resolvedAuthorizedApplicationURLs() -> [URL] {
+        guard !HaloDistribution.current.supportsUnrestrictedFileAccess,
+              let stored = UserDefaults.standard.dictionary(forKey: authorizedAppsDefaultsKey) else {
+            return []
+        }
+
+        var resolvedURLs: [URL] = []
+        var refreshedBookmarks = stored
+
+        for (storedPath, value) in stored {
+            guard let data = value as? Data else { continue }
+            var stale = false
+            guard let resolved = try? URL(
+                resolvingBookmarkData: data,
+                options: [.withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            ) else { continue }
+
+            let appURL = resolved.resolvingSymlinksInPath().standardizedFileURL
+            guard appURL.pathExtension.lowercased() == "app" else { continue }
+
+            let key = appURL.path
+            if activeSecurityScopedApps[key] == nil {
+                if appURL.startAccessingSecurityScopedResource() {
+                    activeSecurityScopedApps[key] = appURL
+                }
+            }
+
+            if stale,
+               let refreshed = try? appURL.bookmarkData(
+                    options: [.withSecurityScope],
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+               ) {
+                refreshedBookmarks.removeValue(forKey: storedPath)
+                refreshedBookmarks[key] = refreshed
+            }
+            resolvedURLs.append(appURL)
+        }
+
+        if NSDictionary(dictionary: refreshedBookmarks).isEqual(to: stored) == false {
+            UserDefaults.standard.set(refreshedBookmarks, forKey: authorizedAppsDefaultsKey)
+        }
+        return resolvedURLs
     }
 
     nonisolated static func discoverInstalledIntegrations(
