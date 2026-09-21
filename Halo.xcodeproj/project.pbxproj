@@ -47,7 +47,7 @@
 		A11C0F1A0000000000000311 /* Views/VisualWorkspaceAdaptiveWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */; };
 		A11C0F1A0000000000000321 /* Views/ActivationSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */; };
 		A11C0F1A0000000000000351 /* Services/SparkleUpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000352 /* Services/SparkleUpdateController.swift */; };
-		A11C0F1A0000000000000353 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000354 /* Sparkle */; };
+		A11C0F1A0000000000000353 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A11C0F1A0000000000000354 /* Sparkle */; settings = {ATTRIBUTES = (Weak, ); }; };
 		A11C0F1A0000000000000371 /* Views/PixelPetWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */; };
 		A57A00000000000000000001 /* Core/AppStoreLicensing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000101 /* Core/AppStoreLicensing.swift */; };
 		A57A00000000000000000011 /* Views/AppStoreSubscriptionGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */; };
@@ -470,6 +470,7 @@
 				000000000000000000000009 /* Resources */,
 				5AF000000000000000000404 /* Embed App Extensions */,
 				A11C0F1A0000000000000394 /* Build native MediaRemote bridge */,
+				B1A0D2000000000000000395 /* Strip Sparkle from App Store builds */,
 			);
 			buildRules = (
 			);
@@ -615,6 +616,21 @@
 			shellPath = /bin/sh;
 			shellScript = "set -euo pipefail\nSRC=\"$SRCROOT/Vendor/MediaRemoteAdapter/Sources/CIMediaRemote\"\nINC=\"$SRC/include\"\nFRAMEWORKS=\"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\nRESOURCES=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH\"\nOUT=\"$FRAMEWORKS/libHaloMediaRemoteBridge.dylib\"\nmkdir -p \"$FRAMEWORKS\" \"$RESOURCES\" \"$DERIVED_FILE_DIR/HaloMediaRemoteBridge\"\nset --\nfor ARCH in $ARCHS; do\n  PART=\"$DERIVED_FILE_DIR/HaloMediaRemoteBridge/libHaloMediaRemoteBridge-$ARCH.dylib\"\n  \"${CC:-/usr/bin/clang}\" -arch \"$ARCH\" -isysroot \"$SDKROOT\" -mmacosx-version-min=\"$MACOSX_DEPLOYMENT_TARGET\" -dynamiclib -fobjc-arc -fblocks -I\"$INC\" \"$SRC/MediaRemote.m\" \"$SRC/MediaRemoteAdapter.m\" \"$SRC/MediaRemoteAdapterKeys.m\" -framework Foundation -framework AppKit -install_name @rpath/libHaloMediaRemoteBridge.dylib -o \"$PART\"\n  set -- \"$@\" \"$PART\"\ndone\nif [ \"$#\" -gt 1 ]; then /usr/bin/lipo -create \"$@\" -output \"$OUT\"; else /bin/cp \"$1\" \"$OUT\"; fi\n/bin/cp \"$SRCROOT/Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/Resources/run.pl\" \"$RESOURCES/run.pl\"\n/bin/chmod 755 \"$RESOURCES/run.pl\"\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ]; then\n  IDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:-}\"\n  if [ -n \"$IDENTITY\" ]; then /usr/bin/codesign --force --sign \"$IDENTITY\" --timestamp=none \"$OUT\"; else /usr/bin/codesign --force --sign - --timestamp=none \"$OUT\"; fi\nfi\n";
 		};
+		B1A0D2000000000000000395 /* Strip Sparkle from App Store builds */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Strip Sparkle from App Store builds";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\ncase \" ${SWIFT_ACTIVE_COMPILATION_CONDITIONS:-} \" in\n  *\" HALO_APPSTORE \"*) ;;\n  *) exit 0 ;;\nesac\n\nAPP_BUNDLE=\"$TARGET_BUILD_DIR/$WRAPPER_NAME\"\nEXECUTABLE=\"$TARGET_BUILD_DIR/$EXECUTABLE_PATH\"\nSPARKLE_FRAMEWORK=\"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/Sparkle.framework\"\n\n/bin/rm -rf \"$SPARKLE_FRAMEWORK\"\n\nif [ -f \"$EXECUTABLE\" ] && /usr/bin/otool -L \"$EXECUTABLE\" | /usr/bin/grep -q \"Sparkle.framework\"; then\n  echo \"error: App Store executable still links Sparkle.framework\"\n  exit 1\nfi\n\nif [ -d \"$APP_BUNDLE\" ] && /usr/bin/find \"$APP_BUNDLE\" \\( -iname \"Sparkle.framework\" -o -iname \"Autoupdate.app\" -o -iname \"*Sparkle*\" \\) -print -quit | /usr/bin/grep -q .; then\n  echo \"error: Sparkle artifacts remain in the App Store bundle\"\n  exit 1\nfi\n\necho \"Verified: App Store bundle contains no Sparkle framework or linkage.\"\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -755,6 +771,10 @@
 				INFOPLIST_KEY_CFBundleIconFile = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_SUFeedURL = "$(HALO_SPARKLE_FEED_URL)";
+				INFOPLIST_KEY_SUPublicEDKey = "$(HALO_SPARKLE_PUBLIC_KEY)";
+				INFOPLIST_KEY_SUEnableAutomaticChecks = NO;
+				INFOPLIST_KEY_SUAutomaticallyUpdate = NO;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.";
@@ -795,6 +815,10 @@
 				INFOPLIST_KEY_CFBundleIconFile = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_SUFeedURL = "$(HALO_SPARKLE_FEED_URL)";
+				INFOPLIST_KEY_SUPublicEDKey = "$(HALO_SPARKLE_PUBLIC_KEY)";
+				INFOPLIST_KEY_SUEnableAutomaticChecks = NO;
+				INFOPLIST_KEY_SUAutomaticallyUpdate = NO;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.";
@@ -906,6 +930,10 @@
 				INFOPLIST_KEY_CFBundleIconFile = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_SUFeedURL = "$(HALO_SPARKLE_FEED_URL)";
+				INFOPLIST_KEY_SUPublicEDKey = "$(HALO_SPARKLE_PUBLIC_KEY)";
+				INFOPLIST_KEY_SUEnableAutomaticChecks = NO;
+				INFOPLIST_KEY_SUAutomaticallyUpdate = NO;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.";
@@ -946,6 +974,10 @@
 				INFOPLIST_KEY_CFBundleIconFile = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_SUFeedURL = "$(HALO_SPARKLE_FEED_URL)";
+				INFOPLIST_KEY_SUPublicEDKey = "$(HALO_SPARKLE_PUBLIC_KEY)";
+				INFOPLIST_KEY_SUEnableAutomaticChecks = NO;
+				INFOPLIST_KEY_SUAutomaticallyUpdate = NO;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.";
@@ -991,17 +1023,19 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
-				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Halo shows today's schedule and meeting links. It does not modify events.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Halo reads today's calendar events when you enable Calendar.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
-				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo uses ScreenCaptureKit to analyze system audio for optional music-reactive visual effects. Halo does not save or transmit screen content.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.2.5;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-Wl,-dead_strip_dylibs",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_APPSTORE";
@@ -1032,12 +1066,10 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Halo controls your selected music player when you use media controls.";
-				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Halo analyzes system audio locally to drive optional bass, mids, treble, and spectrum effects. Audio is not saved or transmitted.";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Halo reads paired and connected Bluetooth device state to show optional Context Interface and Closed Notch connection status.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Halo shows today's schedule and meeting links. It does not modify events.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Halo reads today's calendar events when you enable Calendar.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
-				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo uses ScreenCaptureKit to analyze system audio for optional music-reactive visual effects. Halo does not save or transmit screen content.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -1045,6 +1077,7 @@
 				MARKETING_VERSION = 0.2.5;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
+					"-Wl,-dead_strip_dylibs",
 					"-ObjC",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
