@@ -7,36 +7,9 @@ import AudioToolbox
 import AVFoundation
 import ShazamKit
 
-struct AudioSpectrumSnapshot: Equatable {
-    // Absolute smoothed levels, useful for liveness / diagnostics.
-    var bass: Double = 0
-    var mids: Double = 0
-    var treble: Double = 0
-    var overall: Double = 0
-
-    // Adaptive music-reactive envelopes. These are normalized against each band's recent
-    // floor/peak so compressed/mastered music still produces visible motion.
-    var reactiveBass: Double = 0
-    var reactiveMids: Double = 0
-    var reactiveTreble: Double = 0
-    var reactiveOverall: Double = 0
-
-    // Unsmoothed instantaneous energy used for playback liveness. Visual bands deliberately
-    // retain release smoothing, but stop detection must not inherit that decay tail.
-    var liveness: Double = 0
-    var available = false
-}
-
-struct AudioRecognitionMatch: Equatable {
-    let title: String
-    let artist: String
-    let artworkURL: URL?
-    let isrc: String?
-}
-
 /// System-audio analyser used by the closed-notch reactive background.
 /// ScreenCaptureKit supplies PCM audio and Accelerate converts it into normalized low/mid/high energy bands.
-final class AudioSpectrumService: NSObject, SCStreamOutput, SCStreamDelegate, SHSessionDelegate, @unchecked Sendable {
+final class AudioSpectrumService: NSObject, AudioSpectrumProviding, SCStreamOutput, SCStreamDelegate, SHSessionDelegate, @unchecked Sendable {
     static let shared = AudioSpectrumService()
 
     private let sampleQueue = DispatchQueue(label: "Halo.AudioSpectrum.Samples", qos: .userInitiated)
