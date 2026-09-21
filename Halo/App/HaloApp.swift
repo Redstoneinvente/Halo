@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var licensedServicesStarted = false
     private var setupShownThisLaunch = false
     private let updater = HaloUpdateController.shared
+    private let appStoreLicensing: any AppStoreLicensing = StoreKitAppStoreLicensing.shared
     private let whatsNew = HaloWhatsNewCoordinator.shared
     private let setupCompletedKey = "HaloSetupCompletedV1"
     // Development switch: keep this true while we iterate on onboarding.
@@ -51,6 +52,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(openSettings), name: Notification.Name("HaloOpenSettings"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(toggle), name: Notification.Name("HaloToggle"), object: nil)
         configureCommercialAccessGate()
+
+        if HaloDistribution.current.supportsAppStoreLicensing {
+            appStoreLicensing.start()
+        }
 
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         status?.button?.image = NSImage(systemSymbolName: "capsule.tophalf.filled", accessibilityDescription: "Halo")
@@ -377,6 +382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         ActivationSequenceCoordinator.shared.markQuit()
+        appStoreLicensing.stop()
         stopLicensedServices()
         engine?.stop()
         engine = nil
