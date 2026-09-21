@@ -513,7 +513,9 @@ private struct HaloWhatsNewView: View {
                     }
 
                     HStack {
-                        Button("Check for Updates") { HaloUpdateController.shared.checkForUpdates() }
+                        if HaloDistribution.current.supportsSparkle {
+                            Button("Check for Updates") { HaloUpdateController.shared.checkForUpdates() }
+                        }
                         Spacer()
                         Button("Continue") { onDone() }
                             .buttonStyle(.borderedProminent)
