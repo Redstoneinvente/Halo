@@ -217,7 +217,7 @@ final class StoreKitAppStoreLicensing: ObservableObject, AppStoreLicensing {
         guard HaloDistribution.current.supportsAppStoreLicensing else {
             throw AppStoreLicensingError.unavailableForDistribution
         }
-        try await AppStore.sync()
+        try await StoreKit.AppStore.sync()
         await refresh()
     }
 
