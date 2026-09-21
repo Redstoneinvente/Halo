@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - app-store-testing
+      - app-store-sandbox-testing
   workflow_dispatch:
 
 concurrency:
