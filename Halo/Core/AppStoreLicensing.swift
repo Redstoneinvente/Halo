@@ -64,6 +64,11 @@ protocol AppStoreLicensing: AnyObject {
     func restorePurchases() async throws
 }
 
+@MainActor
+enum AppStoreLicensingProvider {
+    static let shared: any AppStoreLicensing = StoreKitAppStoreLicensing.shared
+}
+
 enum AppStoreLicensingConfiguration {
     static var productIDs: Set<String> {
         if let values = Bundle.main.object(forInfoDictionaryKey: "HaloAppStoreProductIDs") as? [String] {
@@ -90,7 +95,7 @@ enum AppStoreLicensingConfiguration {
 /// This object intentionally does not decide whether Halo should block launch when no
 /// entitlement exists. It only reports StoreKit state and performs StoreKit operations.
 @MainActor
-final class StoreKitAppStoreLicensing: ObservableObject, AppStoreLicensing {
+private final class StoreKitAppStoreLicensing: ObservableObject, AppStoreLicensing {
     static let shared = StoreKitAppStoreLicensing()
 
     @Published private(set) var state: AppStoreEntitlementState = .notConfigured
