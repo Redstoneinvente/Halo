@@ -428,10 +428,18 @@ struct SettingsView: View {
                     Text("Automatic").tag("__automatic__")
                     Text("Apple Music").tag("com.apple.Music")
                     Text("Spotify").tag("com.spotify.client")
+                    Text("Safari").tag(WorkspaceStore.safariMediaSource)
                     Text("System Audio").tag(WorkspaceStore.systemAudioSource)
                 }
 
-                if !(workspace.settings.automaticMedia ?? true) && workspace.settings.mediaApp == WorkspaceStore.systemAudioSource {
+                if !(workspace.settings.automaticMedia ?? true) && workspace.settings.mediaApp == WorkspaceStore.safariMediaSource {
+                    Label(
+                        workspace.media.isPlaying && workspace.media.connectedApp == nil ? "Safari media detected" : "Waiting for Safari media",
+                        systemImage: workspace.media.isPlaying && workspace.media.connectedApp == nil ? "safari.fill" : "safari"
+                    )
+                    Text("Safari uses Halo's bundled Safari Web Extension for rich browser metadata, artwork, position and public webpage playback controls. Enable the extension in Safari and allow access to the sites where you want Halo media integration.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if !(workspace.settings.automaticMedia ?? true) && workspace.settings.mediaApp == WorkspaceStore.systemAudioSource {
                     Label(
                         workspace.media.isPlaying && workspace.media.connectedApp == nil ? "System Audio detected" : "Waiting for System Audio",
                         systemImage: workspace.media.isPlaying && workspace.media.connectedApp == nil ? "waveform.circle.fill" : "waveform.circle"
@@ -439,13 +447,14 @@ struct SettingsView: View {
                     Text("System Audio listens to your Mac's output through Screen Recording permission. It works with browser video, VLC, games and other apps, and can drive Halo's visualizers, reactive backgrounds and Context Notch. Generic system audio does not provide universal song title, artist, artwork, lyrics, seeking or track controls.")
                         .font(.caption).foregroundStyle(.secondary)
                 } else if workspace.settings.automaticMedia ?? true {
-                    Text("Automatic prefers rich Apple Music or Spotify metadata when either is playing, then falls back to System Audio for anything else playing on your Mac. The fallback can drive playback-aware Halo features even when track metadata is unavailable.")
+                    Text("Automatic prefers rich Apple Music or Spotify metadata when either is playing, then uses the Halo Safari extension for browser media, and finally falls back to generic System Audio for anything else playing on your Mac.")
                         .font(.caption).foregroundStyle(.secondary)
                 } else {
                     Text("Apple Music and Spotify provide rich metadata, artwork, playback controls and lyrics when available. macOS may ask for Automation permission the first time Halo connects to a player.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            SafariMediaIntegrationSettingsView()
             Toggle("Keep shelf references between launches", isOn: $workspace.settings.persistShelf).onChange(of: workspace.settings.persistShelf) { _ in store.persistFiles() }
             Picker("Remove shelf references after", selection: $workspace.settings.shelfRetentionMinutes) { Text("Manually").tag(0); Text("5 minutes").tag(5); Text("30 minutes").tag(30); Text("1 hour").tag(60) }
             Text("Up to 100 references. Pinned items do not expire. Saved references keep their original retention age after relaunch. Removing a shelf item never deletes its original.").font(.caption)
@@ -1586,6 +1595,57 @@ private struct HaloContextInterfaceSearchField: NSViewRepresentable {
 private enum ContextInterfaceSelection: String, CaseIterable, Identifiable {
     case drop, music, teleprompter, transfer, clipboard, bluetooth, retro, liveActivity
     var id: String { rawValue }
+}
+
+
+private struct SafariMediaIntegrationSettingsView: View {
+    @ObservedObject private var safari = SafariMediaBridge.shared
+
+    var body: some View {
+        Section("Safari media integration") {
+            HStack {
+                Label(
+                    safari.extensionEnabled == true ? "Safari extension enabled" :
+                        (safari.extensionEnabled == false ? "Safari extension disabled" : "Safari extension status unknown"),
+                    systemImage: safari.extensionEnabled == true ? "checkmark.circle.fill" : "safari"
+                )
+                .foregroundStyle(safari.extensionEnabled == true ? Color.green : Color.secondary)
+
+                Spacer()
+
+                Button("Safari Settings…") {
+                    safari.openExtensionPreferences()
+                }
+            }
+
+            if let state = safari.current, state.isFresh(maxAge: 5) {
+                LabeledContent("Detected", value: state.sourceLabel)
+                if !state.title.isEmpty {
+                    LabeledContent("Media", value: state.artist.isEmpty ? state.title : "\(state.title) — \(state.artist)")
+                }
+            }
+
+            Text("Halo's Safari extension reads only media state from webpages you allow in Safari. It sends title, artist, artwork and playback timing to Halo locally through the shared App Group. It does not upload browsing data.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let error = safari.lastError, !error.isEmpty {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            Button("Refresh Safari Status") {
+                safari.refreshState()
+                safari.refreshExtensionState()
+            }
+            .controlSize(.small)
+        }
+        .onAppear {
+            safari.refreshState()
+            safari.refreshExtensionState()
+        }
+    }
 }
 
 private struct ContextInterfaceLibraryView: View {
