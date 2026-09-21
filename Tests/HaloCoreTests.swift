@@ -4,6 +4,24 @@ import XCTest
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    func testDirectDistributionCapabilities() {
+        let distribution = HaloDistribution.direct
+
+        XCTAssertTrue(distribution.supportsSparkle)
+        XCTAssertTrue(distribution.supportsExternalLicensing)
+        XCTAssertTrue(distribution.supportsUnrestrictedFileAccess)
+        XCTAssertTrue(distribution.supportsPartnerIntegrations)
+    }
+
+    func testAppStoreDistributionCapabilities() {
+        let distribution = HaloDistribution.appStore
+
+        XCTAssertFalse(distribution.supportsSparkle)
+        XCTAssertFalse(distribution.supportsExternalLicensing)
+        XCTAssertFalse(distribution.supportsUnrestrictedFileAccess)
+        XCTAssertFalse(distribution.supportsPartnerIntegrations)
+    }
+
     func testReadableAlbumForegroundColorMeetsContrastOnDarkSurface() {
         let album = WidgetColor(red: 0.12, green: 0.18, blue: 0.24)
         let resolved = AlbumForegroundColorResolver.readable(album, against: .black)
