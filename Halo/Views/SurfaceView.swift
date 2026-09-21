@@ -2589,6 +2589,7 @@ struct SurfaceView: View {
     @ObservedObject private var clipboardCI = ClipboardContextMonitor.shared
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
     @ObservedObject private var integrationCI = IntegrationCIRuntime.shared
+    @ObservedObject private var commercialSurfaceGate = HaloCommercialSurfaceGate.shared
     @State private var clipboardOpenedNotch = false
     @State private var integrationAutoOpeningSurface = false
     @State private var teleprompterActive = false
@@ -2653,6 +2654,10 @@ struct SurfaceView: View {
         customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI, blockingPriority: nil)
     }
     private var surfaceContextCandidates: [SurfaceContextCandidate] {
+        // Locked Direct surfaces are activation/account UI only. No built-in, custom, or
+        // partner CI is allowed to win arbitration until commercial startup reaches ready.
+        guard commercialSurfaceGate.isReady else { return [] }
+
         var result = builtInContextCandidates.map { item in
             SurfaceContextCandidate(
                 interface: item.interface,
@@ -3153,8 +3158,15 @@ struct SurfaceView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloTeleprompterVisibilityChanged"))) { note in
-            let active = (note.userInfo?["active"] as? Bool) ?? false
+            let requestedActive = (note.userInfo?["active"] as? Bool) ?? false
+            let active = requestedActive && commercialSurfaceGate.isReady
             teleprompterActive = active
+
+            if requestedActive && !commercialSurfaceGate.isReady {
+                // Defensive backstop for any stale/late trigger emitted while Halo is locked.
+                TeleprompterCoordinator.shared.hidePrompt()
+            }
+
             DispatchQueue.main.async {
                 let owns = teleprompterCIEnabled && teleprompterActive && activeContext == .teleprompter
                 NotificationCenter.default.post(name: .init("HaloTeleprompterCIOwnershipChanged"), object: nil, userInfo: ["owns": owns])
@@ -3190,8 +3202,23 @@ struct SurfaceView: View {
             }
         }
         .onAppear {
+            if !commercialSurfaceGate.isReady {
+                teleprompterActive = false
+                TeleprompterCoordinator.shared.hidePrompt()
+            }
             workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
             visualWorkspaceSurfacePresented = visuallyExpanded && usesVisualWorkspace && activeContext == nil
+        }
+        .onChange(of: commercialSurfaceGate.isReady) { ready in
+            if !ready {
+                teleprompterActive = false
+                clipboardOpenedNotch = false
+                integrationAutoOpeningSurface = false
+                TeleprompterCoordinator.shared.hidePrompt()
+                state.cancelFileDrop()
+                if !state.pinned { state.expanded = false }
+            }
+            synchronizeSurfaceCIOwnership()
         }
         .onDisappear { workspace.setOpenedNotchVisible(false, token: openVisibilityToken) }
         .onReceive(state.viewport.$size) { size in
