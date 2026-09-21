@@ -14,6 +14,10 @@
 	<string>Halo reads your calendar events when you enable Calendar.</string>
 	<key>HaloFirebaseAPIKey</key>
 	<string>$(HALO_FIREBASE_API_KEY)</string>
+	<key>HaloAppStoreProductIDs</key>
+	<array>
+		<string>halo_monthly</string>
+	</array>
 	<key>HaloLicenseSeatProductSlug</key>
 	<string>$(HALO_LICENSESEAT_PRODUCT_SLUG)</string>
 	<key>HaloLicenseSeatPublishableKey</key>
