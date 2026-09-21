@@ -5288,7 +5288,8 @@ private struct ContextMusicView: View {
         guard options.usesAdaptiveElementColors, !rawSongPalette.isEmpty else { return nil }
         return AudioCISemanticColorResolver.resolve(
             album: rawSongPalette,
-            backgrounds: foregroundContrastBackgrounds
+            backgrounds: foregroundContrastBackgrounds,
+            distribution: options.resolvedAdaptiveColorDistribution
         )
     }
     private var baseTextColor: Color { options.textColor.color }
