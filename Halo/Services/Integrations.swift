@@ -477,7 +477,7 @@ final class AudioService: ObservableObject {
 @MainActor
 final class MediaService: ObservableObject {
     @Published var title = "Connect a player"
-    @Published var artist = "Apple Music or Spotify"
+    @Published var artist = "Apple Music, Spotify or Safari"
     @Published var error: String?
     @Published var busy = false
     @Published var isPlaying = false
@@ -520,7 +520,7 @@ final class MediaService: ObservableObject {
         artworkTask?.cancel(); artworkKey = ""; trackID = ""; artworkColors = []; artworkImage = nil
         externalArtworkData = nil; externalArtworkURL = nil
         album = ""; duration = 0; position = 0; shuffleSupported = false; shuffleEnabled = false; repeatSupported = false; repeatMode = ""
-        title = "Connect a player"; artist = "Apple Music or Spotify"
+        title = "Connect a player"; artist = "Apple Music, Spotify or Safari"
     }
     private let queue = DispatchQueue(label: "Halo.Media.AppleEvents", qos: .utility)
     func retryDetection(preferred: String) {
@@ -611,6 +611,10 @@ final class MediaService: ObservableObject {
         guard connectedApp == nil,
               ["playpause", "next track", "previous track"].contains(command),
               !busy else { return }
+        if SafariMediaBridge.shared.perform(command: command) {
+            if error != nil { error = nil }
+            return
+        }
         guard SystemMediaTransport.perform(command) else { return }
         if error != nil { error = nil }
     }
@@ -649,6 +653,11 @@ final class MediaService: ObservableObject {
         // MediaRemote session that supplied the Audio CI metadata. Optimistically anchor the
         // local position so the 500 ms playback loop cannot snap the scrubber straight back.
         if connectedApp == nil {
+            if SafariMediaBridge.shared.seek(to: target) {
+                position = target
+                if error != nil { error = nil }
+                return
+            }
             guard SystemMediaTransport.seek(to: target) else { return }
             position = target
             if error != nil { error = nil }
