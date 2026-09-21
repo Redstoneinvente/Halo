@@ -906,7 +906,10 @@ struct NotchAmbientOverlayView: View {
             closed.leftDecoration?.visibility == .always || closed.rightDecoration?.visibility == .always
     }
     private var notchLike: Bool { state.theme.style == .notch || state.theme.style == .simulated }
-    private var hasCommercialAccess: Bool { account.isSignedIn && license.accessValid(for: account.userID) }
+    private var hasCommercialAccess: Bool {
+        guard HaloDistribution.current.supportsExternalLicensing else { return true }
+        return account.isSignedIn && license.accessValid(for: account.userID)
+    }
     private var shouldShow: Bool {
         guard current.enabled, screenAwake, notchLike, hasCommercialAccess else { return false }
         guard !state.expanded, !state.dropTargeted else { return false }
