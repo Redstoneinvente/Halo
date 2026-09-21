@@ -1,11 +1,10 @@
 import Foundation
 
-/// App Store fallback implementation.
+/// App Store fallback for Halo's system-wide audio spectrum service.
 ///
-/// The direct distribution can use ScreenCaptureKit based audio capture, while
-/// App Store builds can provide this implementation when system audio capture is
-/// unavailable or intentionally excluded.
-final class DisabledAudioSpectrumService {
+/// It deliberately exposes the same shared contract while performing no capture,
+/// requesting no screen-recording permission, and always reporting unavailable audio.
+final class DisabledAudioSpectrumService: AudioSpectrumProviding {
     static let shared = DisabledAudioSpectrumService()
 
     private init() {}
@@ -15,6 +14,12 @@ final class DisabledAudioSpectrumService {
     }
 
     func setActive(_ active: Bool) {
-        // Intentionally disabled.
+        // Intentionally disabled for App Store builds.
     }
 }
+
+#if HALO_APPSTORE
+/// Preserve existing AudioSpectrumService.shared call sites in the App Store build
+/// without compiling the ScreenCaptureKit-backed implementation.
+typealias AudioSpectrumService = DisabledAudioSpectrumService
+#endif
