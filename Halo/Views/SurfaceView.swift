@@ -835,7 +835,12 @@ private enum TransferCISizing {
         max(220, physicalNotchWidth > 0 ? physicalNotchWidth + 28 : 220)
     }
 
-    static func openPreferredSize(defaults: UserDefaults = .standard) -> CGSize {
+    static func openPreferredSize(stripHeight: CGFloat = 40, defaults: UserDefaults = .standard) -> CGSize {
+        let body = bodyPreferredSize(defaults: defaults)
+        return CGSize(width: body.width, height: body.height + max(40, stripHeight))
+    }
+
+    private static func bodyPreferredSize(defaults: UserDefaults) -> CGSize {
         let openStyle = string("HaloContextTransferOpenStyle", fallback: "Dashboard", defaults: defaults)
         let compact = bool("HaloContextTransferCompact", fallback: false, defaults: defaults)
         let showDirection = bool("HaloContextTransferShowDirection", fallback: true, defaults: defaults)
@@ -945,7 +950,14 @@ private struct TransferContextView: View {
 
     private var primaryStatCount: Int { (showDownload ? 1 : 0) + (showUpload ? 1 : 0) }
     private var dashboardStatCount: Int { primaryStatCount + ((!compact && showPeak) ? 2 : 0) }
-    private var preferredSize: CGSize { TransferCISizing.openPreferredSize() }
+    @State private var measuredContentHeight: CGFloat = 0
+    private var preferredSize: CGSize {
+        var size = TransferCISizing.openPreferredSize(stripHeight: surfaceState.compactHeight)
+        if measuredContentHeight > 0 {
+            size.height = measuredContentHeight + max(40, surfaceState.compactHeight)
+        }
+        return size
+    }
     private var sizingSignature: String {
         [openStyle, compact.description, showDirection.description, showDownload.description,
          showUpload.description, showPeak.description, showSession.description,
@@ -954,6 +966,7 @@ private struct TransferContextView: View {
     }
 
     var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
         Group {
             if openStyle == "Indicator" {
                 VStack(spacing: 8) {
@@ -1025,7 +1038,20 @@ private struct TransferContextView: View {
                 .padding(compact ? 14 : 18)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .fixedSize(horizontal: false, vertical: true)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: SurfaceContentSizeKey.self, value: proxy.size)
+            }
+        }
+        }
+        .onPreferenceChange(SurfaceContentSizeKey.self) { size in
+            guard surfaceState.expanded, abs(size.width - surfaceState.dashboardWidth) < 1,
+                  size.height > 0, abs(size.height - measuredContentHeight) >= 1 else { return }
+            measuredContentHeight = size.height
+            updateSizing()
+        }
         .onAppear { updateSizing() }
         .onChange(of: sizingSignature) { _ in updateSizing() }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in updateSizing() }
@@ -1129,7 +1155,7 @@ private struct TransferClosedContextView: View {
         // Prime the next open target while still closed, so opening goes directly to the
         // correct content-driven size instead of opening large and resizing a frame later.
         if !surfaceState.expanded {
-            surfaceState.contextPreferredSize = TransferCISizing.openPreferredSize()
+            surfaceState.contextPreferredSize = TransferCISizing.openPreferredSize(stripHeight: surfaceState.compactHeight)
         }
     }
 
@@ -1975,7 +2001,7 @@ private struct ClipboardClosedContextView: View {
     }
 }
 
-private struct ClipboardContentSizeKey: PreferenceKey {
+private struct SurfaceContentSizeKey: PreferenceKey {
     static var defaultValue: CGSize = .zero
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         value = nextValue()
@@ -2073,11 +2099,11 @@ private struct ClipboardContextView: View {
         .fixedSize(horizontal: false, vertical: true)
         .background {
             GeometryReader { proxy in
-                Color.clear.preference(key: ClipboardContentSizeKey.self, value: proxy.size)
+                Color.clear.preference(key: SurfaceContentSizeKey.self, value: proxy.size)
             }
         }
         }
-        .onPreferenceChange(ClipboardContentSizeKey.self) { size in
+        .onPreferenceChange(SurfaceContentSizeKey.self) { size in
             // Ignore intermediate opening widths: reflow must not restart the window
             // animation on every frame. dashboardWidth is the final clamped target.
             guard surfaceState.expanded, abs(size.width - surfaceState.dashboardWidth) < 1,
@@ -2823,10 +2849,9 @@ struct SurfaceView: View {
         return closed.left == .visualizer || closed.right == .visualizer
     }
     /// The closed visualizer is part of the notch strip, not the expanded Music CI body.
-    /// Keep only that element alive while Music CI opens even when the general
-    /// "keep closed contents" option is disabled.
+    /// Respect the user's retained-content setting for the visualizer too.
     private var preservesMusicClosedVisualizer: Bool {
-        visuallyExpanded && contextMusicActive && hasClosedNotchVisualizer && workspace.media.hasNowPlayingPresentation
+        visuallyExpanded && contextMusicActive && contextMusicKeepsClosedContents && hasClosedNotchVisualizer && workspace.media.hasNowPlayingPresentation
     }
     private var preservesClosedStripWhileExpanded: Bool {
         keepsClosedContentsWhileExpanded || preservesMusicClosedVisualizer
@@ -3293,7 +3318,7 @@ struct SurfaceView: View {
                     guard transferContextActive, !state.expanded else { return }
                     state.contextMinimumExpandedWidth = TransferCISizing.minimumExpandedWidth(physicalNotchWidth: state.physicalNotchWidth)
                     state.contextPreferredCompactWidth = TransferCISizing.closedPreferredWidth(physicalNotchWidth: state.physicalNotchWidth)
-                    state.contextPreferredSize = TransferCISizing.openPreferredSize()
+                    state.contextPreferredSize = TransferCISizing.openPreferredSize(stripHeight: state.compactHeight)
                 }
             } else if clipboardContextActive {
                 DispatchQueue.main.async {
