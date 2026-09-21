@@ -22,21 +22,57 @@ final class CaptureService: ObservableObject {
         }
         let panel = NSSavePanel(); panel.allowedContentTypes = [.png]; panel.nameFieldStringValue = "Halo-\(Int(Date().timeIntervalSince1970)).png"
         guard panel.runModal() == .OK, let url = panel.url else { return }
+
         busy = true
-        let task = Process(); task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        task.arguments = ["-i", "-x", "-t", "png", url.path]
+        let temporaryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Halo-Capture-\(UUID().uuidString).png", isDirectory: false)
+        try? FileManager.default.removeItem(at: temporaryURL)
+
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        // Keep the child process inside Halo's sandbox container. The selected save URL is
+        // written by Halo itself after capture so the Powerbox grant remains authoritative.
+        task.arguments = ["-i", "-x", "-t", "png", temporaryURL.path]
         task.terminationHandler = { [weak self] task in
+            var exportSucceeded = false
+            var exportError: String?
+
+            if task.terminationStatus == 0,
+               FileManager.default.fileExists(atPath: temporaryURL.path) {
+                do {
+                    let data = try Data(contentsOf: temporaryURL)
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    try data.write(to: url)
+                    exportSucceeded = true
+                } catch {
+                    exportError = error.localizedDescription
+                }
+            }
+
+            try? FileManager.default.removeItem(at: temporaryURL)
+
             Task { @MainActor in
                 self?.busy = false
-                if task.terminationStatus == 0, FileManager.default.fileExists(atPath: url.path) {
+                if exportSucceeded {
                     self?.recentCaptures.removeAll { $0 == url }
                     self?.recentCaptures.insert(url, at: 0)
-                    if let count = self?.recentCaptures.count, count > 8 { self?.recentCaptures.removeLast(count - 8) }
+                    if let count = self?.recentCaptures.count, count > 8 {
+                        self?.recentCaptures.removeLast(count - 8)
+                    }
                     completion(url)
+                } else if let exportError {
+                    self?.error = "Capture export failed: \(exportError)"
                 }
             }
         }
-        do { try task.run() } catch { busy = false; self.error = error.localizedDescription }
+        do {
+            try task.run()
+        } catch {
+            busy = false
+            try? FileManager.default.removeItem(at: temporaryURL)
+            self.error = error.localizedDescription
+        }
     }
 
     func recognize(_ url: URL) {
