@@ -84,7 +84,39 @@
 		FBAC00000000000000000001 /* Services/HaloFeedbackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */; };
 		FBAC00000000000000000002 /* Views/HaloFeedbackCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */; };
 		FBAC00000000000000000301 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000300 /* GoogleService-Info.plist */; };
+
+		5AF000000000000000000001 /* Services/SafariMediaBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AF000000000000000000101 /* Services/SafariMediaBridge.swift */; };
+		5AF000000000000000000002 /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AF000000000000000000102 /* SafariWebExtensionHandler.swift */; };
+		5AF000000000000000000003 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 5AF000000000000000000105 /* manifest.json */; };
+		5AF000000000000000000004 /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 5AF000000000000000000106 /* background.js */; };
+		5AF000000000000000000005 /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 5AF000000000000000000107 /* content.js */; };
+		5AF000000000000000000007 /* HaloSafariMedia.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 5AF000000000000000000108 /* HaloSafariMedia.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+
+/* Begin PBXContainerItemProxy section */
+		5AF000000000000000000601 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5AF000000000000000000301;
+			remoteInfo = HaloSafariMedia;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		5AF000000000000000000404 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				5AF000000000000000000007 /* HaloSafariMedia.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		000000000000000000000006 /* Halo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Halo.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -183,6 +215,15 @@
 		FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HaloFeedbackService.swift; sourceTree = "<group>"; };
 		FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HaloFeedbackCenterView.swift; sourceTree = "<group>"; };
 		FBAC00000000000000000300 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+
+		5AF000000000000000000101 /* Services/SafariMediaBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SafariMediaBridge.swift; sourceTree = "<group>"; };
+		5AF000000000000000000102 /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
+		5AF000000000000000000103 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		5AF000000000000000000104 /* HaloSafariMedia.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HaloSafariMedia.entitlements; sourceTree = "<group>"; };
+		5AF000000000000000000105 /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Resources/manifest.json; sourceTree = "<group>"; };
+		5AF000000000000000000106 /* background.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = Resources/background.js; sourceTree = "<group>"; };
+		5AF000000000000000000107 /* content.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = Resources/content.js; sourceTree = "<group>"; };
+		5AF000000000000000000108 /* HaloSafariMedia.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HaloSafariMedia.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -205,6 +246,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+
+		5AF000000000000000000402 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -214,6 +263,7 @@
 				F8614B683053262D00D4943C /* Assets.xcassets */,
 				F8AFA0D23061155D004D7B68 /* Halo 2.storekit */,
 				000000000000000000000003 /* Halo */,
+				5AF000000000000000000201 /* HaloSafariMedia */,
 				000000000000000000000096 /* Tests/HaloCoreTests.swift */,
 				000000000000000000000097 /* Tests/LicenseTests.swift */,
 				00000000000000000000012C /* Docs */,
@@ -264,6 +314,7 @@
 				A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */,
 				A11C0F1A0000000000000352 /* Services/SparkleUpdateController.swift */,
 				00000000000000000000006D /* Services/Integrations.swift */,
+				5AF000000000000000000101 /* Services/SafariMediaBridge.swift */,
 				00000000000000000000006E /* Services/CaptureService.swift */,
 				FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */,
 				FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */,
@@ -292,6 +343,7 @@
 			children = (
 				000000000000000000000006 /* Halo.app */,
 				000000000000000000000015 /* HaloCoreTests.xctest */,
+				5AF000000000000000000108 /* HaloSafariMedia.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -383,6 +435,20 @@
 			path = "Halo Icons";
 			sourceTree = "<group>";
 		};
+
+		5AF000000000000000000201 /* HaloSafariMedia */ = {
+			isa = PBXGroup;
+			children = (
+				5AF000000000000000000102 /* SafariWebExtensionHandler.swift */,
+				5AF000000000000000000103 /* Info.plist */,
+				5AF000000000000000000104 /* HaloSafariMedia.entitlements */,
+				5AF000000000000000000105 /* manifest.json */,
+				5AF000000000000000000106 /* background.js */,
+				5AF000000000000000000107 /* content.js */,
+			);
+			path = HaloSafariMedia;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -393,11 +459,13 @@
 				000000000000000000000007 /* Sources */,
 				000000000000000000000008 /* Frameworks */,
 				000000000000000000000009 /* Resources */,
+				5AF000000000000000000404 /* Embed App Extensions */,
 				A11C0F1A0000000000000394 /* Build native MediaRemote bridge */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				5AF000000000000000000602 /* PBXTargetDependency */,
 			);
 			name = Halo;
 			packageProductDependencies = (
@@ -422,6 +490,24 @@
 			productName = HaloCoreTests;
 			productReference = 000000000000000000000015 /* HaloCoreTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
+		};
+
+		5AF000000000000000000301 /* HaloSafariMedia */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5AF000000000000000000501 /* Build configuration list for PBXNativeTarget "HaloSafariMedia" */;
+			buildPhases = (
+				5AF000000000000000000401 /* Sources */,
+				5AF000000000000000000402 /* Frameworks */,
+				5AF000000000000000000403 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = HaloSafariMedia;
+			productName = HaloSafariMedia;
+			productReference = 5AF000000000000000000108 /* HaloSafariMedia.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -449,6 +535,7 @@
 			targets = (
 				000000000000000000000005 /* Halo */,
 				000000000000000000000014 /* HaloCoreTests */,
+				5AF000000000000000000301 /* HaloSafariMedia */,
 			);
 		};
 /* End PBXProject section */
@@ -478,6 +565,17 @@
 				F8614B823053291B00D4943C /* Halo.png in Resources */,
 				F8614B6B3053275D00D4943C /* Halo_AppIcon_Transparent.png in Resources */,
 				FBAC00000000000000000301 /* GoogleService-Info.plist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+
+		5AF000000000000000000403 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5AF000000000000000000003 /* manifest.json in Resources */,
+				5AF000000000000000000004 /* background.js in Resources */,
+				5AF000000000000000000005 /* content.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -544,6 +642,7 @@
 				A11C0F1A0000000000000321 /* Views/ActivationSequence.swift in Sources */,
 				A11C0F1A0000000000000351 /* Services/SparkleUpdateController.swift in Sources */,
 				0000000000000000000000D1 /* Services/Integrations.swift in Sources */,
+				5AF000000000000000000001 /* Services/SafariMediaBridge.swift in Sources */,
 				0000000000000000000000D2 /* Services/CaptureService.swift in Sources */,
 				FBAC00000000000000000001 /* Services/HaloFeedbackService.swift in Sources */,
 				FBAC00000000000000000002 /* Views/HaloFeedbackCenterView.swift in Sources */,
@@ -581,7 +680,25 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+
+		5AF000000000000000000401 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5AF000000000000000000002 /* SafariWebExtensionHandler.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+
+/* Begin PBXTargetDependency section */
+		5AF000000000000000000602 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5AF000000000000000000301 /* HaloSafariMedia */;
+			targetProxy = 5AF000000000000000000601 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		00000000000000000000000C /* Debug */ = {
@@ -965,6 +1082,138 @@
 			};
 			name = "Release App Store";
 		};
+		5AF000000000000000000511 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = HaloSafariMedia/HaloSafariMedia.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 207;
+				DEVELOPMENT_TEAM = U3H97AL77M;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HaloSafariMedia/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.2.5;
+				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo.SafariMedia;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				SWIFT_VERSION = 5.0;
+			};
+			name = "Debug";
+		};
+		5AF000000000000000000512 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = HaloSafariMedia/HaloSafariMedia.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 207;
+				DEVELOPMENT_TEAM = U3H97AL77M;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HaloSafariMedia/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.2.5;
+				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo.SafariMedia;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) ";
+				SWIFT_VERSION = 5.0;
+			};
+			name = "Release";
+		};
+		5AF000000000000000000513 /* Debug Direct */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = HaloSafariMedia/HaloSafariMedia.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 207;
+				DEVELOPMENT_TEAM = U3H97AL77M;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HaloSafariMedia/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.2.5;
+				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo.SafariMedia;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG HALO_DIRECT";
+				SWIFT_VERSION = 5.0;
+			};
+			name = "Debug Direct";
+		};
+		5AF000000000000000000514 /* Release Direct */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = HaloSafariMedia/HaloSafariMedia.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 207;
+				DEVELOPMENT_TEAM = U3H97AL77M;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HaloSafariMedia/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.2.5;
+				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo.SafariMedia;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
+				SWIFT_VERSION = 5.0;
+			};
+			name = "Release Direct";
+		};
+		5AF000000000000000000515 /* Debug App Store */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = HaloSafariMedia/HaloSafariMedia.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 207;
+				DEVELOPMENT_TEAM = U3H97AL77M;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HaloSafariMedia/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.2.5;
+				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo.SafariMedia;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG HALO_APPSTORE";
+				SWIFT_VERSION = 5.0;
+			};
+			name = "Debug App Store";
+		};
+		5AF000000000000000000516 /* Release App Store */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = HaloSafariMedia/HaloSafariMedia.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 207;
+				DEVELOPMENT_TEAM = U3H97AL77M;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HaloSafariMedia/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.2.5;
+				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo.SafariMedia;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_APPSTORE";
+				SWIFT_VERSION = 5.0;
+			};
+			name = "Release App Store";
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1003,6 +1252,20 @@
 				A55000000000000000000022 /* Release Direct */,
 				A55000000000000000000023 /* Debug App Store */,
 				A55000000000000000000024 /* Release App Store */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+
+		5AF000000000000000000501 /* Build configuration list for PBXNativeTarget "HaloSafariMedia" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5AF000000000000000000511 /* Debug */,
+				5AF000000000000000000512 /* Release */,
+				5AF000000000000000000513 /* Debug Direct */,
+				5AF000000000000000000514 /* Release Direct */,
+				5AF000000000000000000515 /* Debug App Store */,
+				5AF000000000000000000516 /* Release App Store */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
