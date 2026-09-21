@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var settings: NSWindow?
     private var hudSettings: NSWindow?
     private var setupWindow: NSWindow?
+    private var appStoreGateWindow: NSWindow?
     private var commercialBag = Set<AnyCancellable>()
     private var licenseClipboardTimer: Timer?
     private var licenseClipboardChangeCount = NSPasteboard.general.changeCount
@@ -35,6 +36,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let forceSetupEveryLaunch = false
 
     private var commercialAccessGranted: Bool {
+        if HaloDistribution.current.supportsAppStoreLicensing {
+            return appStoreLicensing.state.grantsAccess
+        }
         guard HaloDistribution.current.supportsExternalLicensing else { return true }
         let account = HaloAccountManager.shared
         return account.isSignedIn && HaloLicenseManager.shared.accessValid(for: account.userID)
@@ -111,21 +115,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func configureCommercialAccessGate() {
-        // The panel/geometry engine is always alive. When access is unavailable the router renders
-        // only the black locked notch and the sign-in/license flow; normal Halo content never runs.
-        let activationContext = ActivationSequenceCoordinator.shared.classifyStartup()
-        let manager = WindowManager(store: store, startupActivationContext: activationContext)
-
-        // App Store builds do not use Halo's external licensing gate. Grant access before
-        // WindowManager creates any SwiftUI surface so the first rendered frame can never
-        // be the locked/license activation UI.
-        if !HaloDistribution.current.supportsExternalLicensing {
-            manager.setCommercialAccessGranted(true)
+        if HaloDistribution.current.supportsAppStoreLicensing {
+            // The App Store build has its own StoreKit gate. Do not create Halo's notch
+            // surfaces until StoreKit reports an entitlement, which keeps the Direct
+            // LicenseSeat activation UI completely out of the App Store experience.
+            appStoreLicensing.statePublisher
+                .removeDuplicates()
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in self?.refreshCommercialAccess() }
+                .store(in: &commercialBag)
+            refreshCommercialAccess()
+            return
         }
 
-        engine = manager
-        manager.start()
-
+        // Direct distribution keeps the existing locked-notch account/license flow alive
+        // while access is unavailable.
+        startSurfaceEngine(commercialAccessGranted: false)
         guard HaloDistribution.current.supportsExternalLicensing else {
             refreshCommercialAccess()
             return
@@ -149,9 +154,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    private func startSurfaceEngine(commercialAccessGranted granted: Bool) {
+        if let engine {
+            engine.setCommercialAccessGranted(granted)
+            return
+        }
+
+        let activationContext = ActivationSequenceCoordinator.shared.classifyStartup()
+        let manager = WindowManager(store: store, startupActivationContext: activationContext)
+        manager.setCommercialAccessGranted(granted)
+        engine = manager
+        manager.start()
+    }
+
     private func refreshCommercialAccess() {
         let granted = commercialAccessGranted
-        engine?.setCommercialAccessGranted(granted)
+
+        if HaloDistribution.current.supportsAppStoreLicensing {
+            if granted {
+                startSurfaceEngine(commercialAccessGranted: true)
+                dismissAppStoreSubscriptionGate()
+            } else {
+                engine?.stop()
+                engine = nil
+                presentAppStoreSubscriptionGate()
+            }
+        } else {
+            engine?.setCommercialAccessGranted(granted)
+        }
 
         if granted {
             stopLicenseClipboardWatcher()
@@ -169,8 +199,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             setupWindow?.orderOut(nil)
             setupWindow = nil
             setupShownThisLaunch = false
+
+            if HaloDistribution.current.supportsAppStoreLicensing {
+                settings?.orderOut(nil)
+                hudSettings?.orderOut(nil)
+            }
+
             stopLicensedServices()
         }
+    }
+
+    private func presentAppStoreSubscriptionGate() {
+        guard HaloDistribution.current.supportsAppStoreLicensing else { return }
+
+        if appStoreGateWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 620, height: 540),
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Halo · App Store Subscription"
+            window.titlebarAppearsTransparent = true
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: AppStoreSubscriptionGateView())
+            window.center()
+            appStoreGateWindow = window
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        appStoreGateWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    private func dismissAppStoreSubscriptionGate() {
+        appStoreGateWindow?.orderOut(nil)
     }
 
     private func startLicenseClipboardWatcher() {
@@ -286,7 +348,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         store.workspace.stop()
     }
 
-    @objc private func toggle() { engine?.toggleAll() }
+    @objc private func toggle() {
+        guard commercialAccessGranted else {
+            if HaloDistribution.current.supportsAppStoreLicensing {
+                presentAppStoreSubscriptionGate()
+            } else {
+                engine?.toggleAll()
+            }
+            return
+        }
+        engine?.toggleAll()
+    }
     @objc private func metricKitCrashDetected() {
         guard HaloFeedbackService.shared.crashedDuringPreviousExecution else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -328,6 +400,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func openSettings() {
+        guard commercialAccessGranted else {
+            if HaloDistribution.current.supportsAppStoreLicensing {
+                presentAppStoreSubscriptionGate()
+            } else {
+                engine?.toggleAll()
+            }
+            return
+        }
+
         if settings == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 640), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = "Halo · Settings"
@@ -366,7 +447,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func openHUDSettings() {
-        guard commercialAccessGranted else { engine?.toggleAll(); return }
+        guard commercialAccessGranted else {
+            if HaloDistribution.current.supportsAppStoreLicensing {
+                presentAppStoreSubscriptionGate()
+            } else {
+                engine?.toggleAll()
+            }
+            return
+        }
         if hudSettings == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 790), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = "Halo · HUD"
