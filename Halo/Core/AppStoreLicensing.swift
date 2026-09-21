@@ -308,8 +308,7 @@ private final class StoreKitAppStoreLicensing: ObservableObject, AppStoreLicensi
                     guard let transaction,
                           configuredProductIDs.contains(transaction.productID) else { continue }
 
-                    switch status.state {
-                    case .subscribed:
+                    if status.state == .subscribed {
                         guard transaction.revocationDate == nil,
                               !transaction.isUpgraded else { continue }
                         if let expirationDate = transaction.expirationDate,
@@ -317,8 +316,7 @@ private final class StoreKitAppStoreLicensing: ObservableObject, AppStoreLicensi
                             continue
                         }
                         entitledProductIDs.insert(transaction.productID)
-
-                    case .inGracePeriod:
+                    } else if status.state == .inGracePeriod {
                         guard transaction.revocationDate == nil,
                               !transaction.isUpgraded else { continue }
                         graceProductIDs.insert(transaction.productID)
@@ -328,18 +326,10 @@ private final class StoreKitAppStoreLicensing: ObservableObject, AppStoreLicensi
                                 latestGraceExpiration = graceExpiration
                             }
                         }
-
-                    case .inBillingRetryPeriod:
+                    } else if status.state == .inBillingRetryPeriod {
                         billingRetryProductIDs.insert(transaction.productID)
-
-                    case .revoked:
+                    } else if status.state == .revoked {
                         sawRevokedSubscription = true
-
-                    case .expired:
-                        break
-
-                    @unknown default:
-                        break
                     }
                 }
             } catch {
