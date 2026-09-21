@@ -82,10 +82,14 @@ async function publishSelected() {
   // connectNative is kept separately so Halo can push commands back to this
   // background script through SFSafariApplication.dispatchMessage.
   try {
-    await browser.runtime.sendNativeMessage("com.redstoneinvente.Halo", {
+    const response = await browser.runtime.sendNativeMessage("com.redstoneinvente.Halo", {
       type: "mediaState",
       payload: state
     });
+
+    if (response?.ok === false) {
+      console.error("Halo Safari Media: native bridge rejected media state", response?.error || response);
+    }
   } catch (error) {
     console.error("Halo Safari Media: failed to deliver media state to native extension", error);
   }
