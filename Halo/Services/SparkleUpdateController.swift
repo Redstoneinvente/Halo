@@ -14,6 +14,7 @@ final class HaloUpdateController: NSObject, SPUUpdaterDelegate {
     var currentBuild: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0" }
 
     var isConfigured: Bool {
+        guard HaloDistribution.current.supportsSparkle else { return false }
         guard let feed = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
               !feed.isEmpty, !feed.contains("$("),
               let url = URL(string: feed), url.scheme?.lowercased() == "https",
@@ -36,6 +37,7 @@ final class HaloUpdateController: NSObject, SPUUpdaterDelegate {
     }
 
     func checkForUpdates() {
+        guard HaloDistribution.current.supportsSparkle else { return }
         guard isConfigured else {
             let alert = NSAlert()
             alert.alertStyle = .informational
@@ -51,7 +53,8 @@ final class HaloUpdateController: NSObject, SPUUpdaterDelegate {
 
     @discardableResult
     private func ensureUpdaterStarted() -> Bool {
-        guard isConfigured else { return false }
+        guard HaloDistribution.current.supportsSparkle,
+              isConfigured else { return false }
         if !updaterStarted {
             controller.startUpdater()
             updaterStarted = true
