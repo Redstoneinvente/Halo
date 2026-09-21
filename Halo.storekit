@@ -1,0 +1,29 @@
+{
+  "identifier" : "Halo.storekit",
+  "nonRenewingSubscriptions" : [
+  ],
+  "products" : [
+    {
+      "displayPrice" : "2.99",
+      "familyShareable" : false,
+      "id" : "halo_monthly",
+      "name" : "Halo Monthly",
+      "type" : "Recurring Subscription",
+      "subscriptionGroup" : "Halo Subscriptions",
+      "subscriptionPeriod" : "P1M"
+    }
+  ],
+  "settings" : {
+    "_applicationUsername" : "",
+    "locale" : "en_US"
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "Halo Subscriptions",
+      "name" : "Halo Subscriptions",
+      "subscriptions" : [
+        "halo_monthly"
+      ]
+    }
+  ]
+}
