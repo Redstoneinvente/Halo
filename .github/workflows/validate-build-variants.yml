@@ -6,6 +6,10 @@ on:
       - app-store-testing
   workflow_dispatch:
 
+concurrency:
+  group: halo-build-variants-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   halo-direct:
     name: Halo Direct
