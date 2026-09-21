@@ -1817,18 +1817,31 @@ private struct ContextInterfaceLibraryView: View {
                 DisclosureGroup(isExpanded: $thirdPartyExpanded) {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text("Installed partner app integrations")
+                            Text(HaloDistribution.current.supportsUnrestrictedFileAccess
+                                 ? "Installed partner app integrations"
+                                 : "Authorized partner app integrations")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Spacer()
+                            if !HaloDistribution.current.supportsUnrestrictedFileAccess {
+                                Button("Add App…") { integrationRuntime.addIntegrationApplications() }
+                                    .controlSize(.small)
+                            }
                             Button("Refresh") { integrationRuntime.refresh() }
                                 .controlSize(.small)
                         }
 
                         if integrationRuntime.registrations.isEmpty {
-                            Label("No compatible 3rd party integrations discovered", systemImage: "app.dashed")
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 8)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label("No compatible 3rd party integrations discovered", systemImage: "app.dashed")
+                                    .foregroundStyle(.secondary)
+                                if !HaloDistribution.current.supportsUnrestrictedFileAccess {
+                                    Text("App Sandbox prevents Halo from scanning arbitrary applications. Choose Add App… once for each partner app you want Halo to use.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            .padding(.vertical, 8)
                         } else if filteredIntegrations.isEmpty {
                             Label("No 3rd party integrations match “\(normalizedSearchText)”", systemImage: "magnifyingglass")
                                 .foregroundStyle(.secondary)
@@ -4122,12 +4135,22 @@ private struct HaloAppIntegrationCISettingsSection: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                if !HaloDistribution.current.supportsUnrestrictedFileAccess {
+                    Button("Add App…") { runtime.addIntegrationApplications() }
+                }
                 Button("Refresh") { runtime.refresh() }
             }
 
             if runtime.registrations.isEmpty {
-                Label("No compatible app integrations discovered", systemImage: "app.dashed")
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("No compatible app integrations discovered", systemImage: "app.dashed")
+                        .foregroundStyle(.secondary)
+                    if !HaloDistribution.current.supportsUnrestrictedFileAccess {
+                        Text("Choose a compatible partner app once so Halo can retain sandbox-safe access to its integration manifest.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             } else {
                 Label(
                     "\(runtime.registrations.count) partner integration\(runtime.registrations.count == 1 ? "" : "s") available in the CI library above.",
