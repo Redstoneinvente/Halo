@@ -1635,6 +1635,7 @@ struct ContextMusicOptions: Codable, Equatable {
     var songBackgroundColors: Bool?
     var readableSongForegroundColors: Bool?
     var adaptiveElementColors: Bool?
+    var adaptiveColorDistribution: AudioCIColorDistribution?
     var horizontalMargin: Double?
     var topMargin: Double?
     var bottomMargin: Double?
@@ -1662,6 +1663,7 @@ struct ContextMusicOptions: Codable, Equatable {
     var usesSongBackgroundColors: Bool { songBackgroundColors ?? false }
     var usesReadableSongForegroundColors: Bool { readableSongForegroundColors ?? false }
     var usesAdaptiveElementColors: Bool { adaptiveElementColors ?? false }
+    var resolvedAdaptiveColorDistribution: AudioCIColorDistribution { adaptiveColorDistribution ?? .automatic }
     var resolvedHorizontalMargin: Double { min(120, max(0, horizontalMargin ?? max(18, resolvedSpacing * 1.25))) }
     var resolvedTopMargin: Double { min(160, max(0, topMargin ?? 0)) }
     var resolvedBottomMargin: Double { min(120, max(0, bottomMargin ?? max(10, resolvedSpacing * 0.55))) }
