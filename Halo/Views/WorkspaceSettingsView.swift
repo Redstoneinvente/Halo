@@ -37,11 +37,17 @@ struct SettingsView: View {
         if visualWorkspaceActive {
             workspaceItems.insert("Visual Workspace Editor", at: 0)
         }
+        var coreItems = ["General"]
+        if HaloDistribution.current.supportsExternalLicensing {
+            coreItems.append("Account & License")
+        }
+        coreItems.append("Privacy")
+
         return [
             SidebarGroup(
                 title: "Core",
                 icon: "sparkles",
-                items: ["General", "Account & License", "Privacy"]
+                items: coreItems
             ),
             SidebarGroup(
                 title: "Design",
