@@ -34,7 +34,7 @@ enum HaloDistribution: String, CaseIterable, Sendable {
                 supportsExternalLicensing: false,
                 supportsAppStoreLicensing: true,
                 supportsUnrestrictedFileAccess: false,
-                supportsPartnerIntegrations: false
+                supportsPartnerIntegrations: true
             )
         }
     }
