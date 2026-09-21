@@ -1848,10 +1848,20 @@ private enum ClipboardCISizing {
         let defaults = UserDefaults.standard
         let showPreview = defaults.object(forKey: "HaloContextClipboardShowClosedPreview") == nil
             ? true : defaults.bool(forKey: "HaloContextClipboardShowClosedPreview")
-        let physicalFloor = physicalNotchWidth > 0 ? physicalNotchWidth + 18 : 118
-        guard showPreview else { return max(physicalFloor, 156) }
-        let estimated = CGFloat(min(44, monitor.preview.count)) * 5.3 + 130
-        return min(540, max(physicalFloor, max(220, estimated)))
+        let showType = defaults.object(forKey: "HaloContextClipboardShowType") == nil
+            ? true : defaults.bool(forKey: "HaloContextClipboardShowType")
+        func width(_ text: String, weight: NSFont.Weight) -> CGFloat {
+            let base = NSFont.systemFont(ofSize: 9.5, weight: weight)
+            let font = base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 9.5) } ?? base
+            return ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        }
+        let leading = CGFloat(18) + (showType ? 8 + width(monitor.kind.rawValue, weight: .semibold) : 0)
+        let preview = showPreview ? min(280, width(monitor.preview, weight: .medium)) + 8 : 0
+        let trailing = preview + 42 // countdown badge, including spacing
+        if physicalNotchWidth > 0 {
+            return physicalNotchWidth + 2 * (max(leading, trailing) + 40)
+        }
+        return max(156, leading + trailing + 48)
     }
 
     static func openPreferredSize(actionCount: Int? = nil, historyCount: Int = 0, kind: ClipboardContextKind = .text) -> CGSize {
@@ -1911,15 +1921,22 @@ private struct ClipboardClosedContextView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: monitor.kind.symbol)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(monitor.kind.accent)
-                .frame(width: 18, height: 18)
-                .background(monitor.kind.accent.opacity(0.12), in: Circle())
-            if showType {
-                Text(monitor.kind.rawValue)
-                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.72))
+            HStack(spacing: 8) {
+                Image(systemName: monitor.kind.symbol)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(monitor.kind.accent)
+                    .frame(width: 18, height: 18)
+                    .background(monitor.kind.accent.opacity(0.12), in: Circle())
+                if showType {
+                    Text(monitor.kind.rawValue)
+                        .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+            }
+            .frame(width: surfaceState.closedOcclusion == nil ? nil :
+                max(0, (surfaceState.compactWidth - surfaceState.physicalNotchWidth) / 2 - 40), alignment: .leading)
+            if surfaceState.closedOcclusion != nil {
+                Color.clear.frame(width: surfaceState.physicalNotchWidth + 16)
             }
             if showPreview {
                 Text(monitor.preview)
@@ -1936,7 +1953,7 @@ private struct ClipboardClosedContextView: View {
                 .padding(.vertical, 2)
                 .background(.white.opacity(0.055), in: Capsule())
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { updateSizing() }
         .onChange(of: monitor.eventSerial) { _ in updateSizing() }
@@ -1945,8 +1962,9 @@ private struct ClipboardClosedContextView: View {
     }
 
     private func updateSizing() {
+        surfaceState.contextPreferredCompactHeight = max(32, surfaceState.physicalNotchHeight)
         surfaceState.contextMinimumExpandedWidth = ClipboardCISizing.minimumExpandedWidth(physicalNotchWidth: surfaceState.physicalNotchWidth)
-        surfaceState.contextPreferredCompactWidth = ClipboardCISizing.closedPreferredWidth(monitor: monitor, physicalNotchWidth: surfaceState.physicalNotchWidth)
+        surfaceState.contextPreferredCompactWidth = ClipboardCISizing.closedPreferredWidth(monitor: monitor, physicalNotchWidth: surfaceState.closedOcclusion == nil ? 0 : surfaceState.physicalNotchWidth)
         if !surfaceState.expanded {
             surfaceState.contextPreferredSize = ClipboardCISizing.openPreferredSize(
                 actionCount: monitor.actions.count,
@@ -1954,6 +1972,13 @@ private struct ClipboardClosedContextView: View {
                 kind: monitor.kind
             )
         }
+    }
+}
+
+private struct ClipboardContentSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
     }
 }
 
@@ -1970,6 +1995,8 @@ private struct ClipboardContextView: View {
     @AppStorage("HaloContextClipboardShowHistory") private var showHistory = true
     @AppStorage("HaloContextClipboardHistoryLimit") private var historyLimit = 8
 
+    @State private var measuredContentHeight: CGFloat = 0
+
     private var sizingSignature: String {
         [compact.description, String(previewLines), showType.description, showSource.description,
          showCharacterCount.description, String(maxActions), String(monitor.actions.count),
@@ -1978,6 +2005,7 @@ private struct ClipboardContextView: View {
     }
 
     var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
         VStack(alignment: .leading, spacing: compact ? 9 : 12) {
             HStack(spacing: 9) {
                 Image(systemName: monitor.kind.symbol)
@@ -2041,7 +2069,22 @@ private struct ClipboardContextView: View {
         }
         .padding(.horizontal, compact ? 13 : 16)
         .padding(.vertical, compact ? 11 : 14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .fixedSize(horizontal: false, vertical: true)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: ClipboardContentSizeKey.self, value: proxy.size)
+            }
+        }
+        }
+        .onPreferenceChange(ClipboardContentSizeKey.self) { size in
+            // Ignore intermediate opening widths: reflow must not restart the window
+            // animation on every frame. dashboardWidth is the final clamped target.
+            guard surfaceState.expanded, abs(size.width - surfaceState.dashboardWidth) < 1,
+                  size.height > 0, abs(size.height - measuredContentHeight) >= 1 else { return }
+            measuredContentHeight = size.height
+            updateSizing()
+        }
         .onAppear { updateSizing() }
         .onChange(of: monitor.eventSerial) { _ in updateSizing() }
         .onChange(of: sizingSignature) { _ in updateSizing() }
@@ -2182,13 +2225,19 @@ private struct ClipboardContextView: View {
     }
 
     private func updateSizing() {
+        surfaceState.contextPreferredCompactHeight = max(32, surfaceState.physicalNotchHeight)
         surfaceState.contextMinimumExpandedWidth = ClipboardCISizing.minimumExpandedWidth(physicalNotchWidth: surfaceState.physicalNotchWidth)
-        surfaceState.contextPreferredCompactWidth = ClipboardCISizing.closedPreferredWidth(monitor: monitor, physicalNotchWidth: surfaceState.physicalNotchWidth)
-        surfaceState.contextPreferredSize = ClipboardCISizing.openPreferredSize(
+        surfaceState.contextPreferredCompactWidth = ClipboardCISizing.closedPreferredWidth(monitor: monitor, physicalNotchWidth: surfaceState.closedOcclusion == nil ? 0 : surfaceState.physicalNotchWidth)
+        var size = ClipboardCISizing.openPreferredSize(
             actionCount: monitor.actions.count,
             historyCount: monitor.history.count,
             kind: monitor.kind
         )
+        if measuredContentHeight > 0 {
+            // WindowManager expects the whole surface, including the toggle strip.
+            size.height = measuredContentHeight + max(40, surfaceState.compactHeight)
+        }
+        surfaceState.contextPreferredSize = size
     }
 }
 
@@ -2859,6 +2908,7 @@ struct SurfaceView: View {
     }
 
     var body: some View {
+        GeometryReader { surfaceProxy in
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
                 if !contextOwnsFullSurface &&
@@ -3074,6 +3124,9 @@ struct SurfaceView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // Fixed-size dashboard/CI children may exceed the proposal during retract.
+        // Keep the background and contour on the live viewport, before clipping.
+        .frame(width: surfaceProxy.size.width, height: surfaceProxy.size.height, alignment: .top)
         .background {
             ZStack {
                 surfaceBackgroundLayer
@@ -3083,6 +3136,7 @@ struct SurfaceView: View {
         .clipShape(contour)
         .contentShape(contour)
         .overlay { surfaceOverlayLayer }
+        }
         .foregroundStyle(.white).preferredColorScheme(.dark)
         .buttonStyle(.borderless)
         .contextMenu {
@@ -3134,29 +3188,6 @@ struct SurfaceView: View {
             }
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }
-//        .onReceive(transfer.$isActive.removeDuplicates()) { active in
-//            if !active {
-//                if !contextMusicActive { state.contextPreferredSize = nil }
-//                state.contextPreferredCompactWidth = nil
-//                state.contextMinimumExpandedWidth = nil
-//            }
-//        }
-        .onChange(of: transfer.isActive) { active in
-            guard !active else { return }
-
-            if !contextMusicActive,
-               state.contextPreferredSize != nil {
-                state.contextPreferredSize = nil
-            }
-
-            if state.contextPreferredCompactWidth != nil {
-                state.contextPreferredCompactWidth = nil
-            }
-
-            if state.contextMinimumExpandedWidth != nil {
-                state.contextMinimumExpandedWidth = nil
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloTeleprompterVisibilityChanged"))) { note in
             let requestedActive = (note.userInfo?["active"] as? Bool) ?? false
             let active = requestedActive && commercialSurfaceGate.isReady
@@ -3268,7 +3299,7 @@ struct SurfaceView: View {
                 DispatchQueue.main.async {
                     guard clipboardContextActive, !state.expanded else { return }
                     state.contextMinimumExpandedWidth = ClipboardCISizing.minimumExpandedWidth(physicalNotchWidth: state.physicalNotchWidth)
-                    state.contextPreferredCompactWidth = ClipboardCISizing.closedPreferredWidth(monitor: clipboardCI, physicalNotchWidth: state.physicalNotchWidth)
+                    state.contextPreferredCompactWidth = ClipboardCISizing.closedPreferredWidth(monitor: clipboardCI, physicalNotchWidth: state.closedOcclusion == nil ? 0 : state.physicalNotchWidth)
                     state.contextPreferredSize = ClipboardCISizing.openPreferredSize(actionCount: clipboardCI.actions.count, historyCount: clipboardCI.history.count, kind: clipboardCI.kind)
                 }
             }
@@ -3322,7 +3353,7 @@ struct SurfaceView: View {
             }
             if clipboardContextActive {
                 state.contextMinimumExpandedWidth = ClipboardCISizing.minimumExpandedWidth(physicalNotchWidth: state.physicalNotchWidth)
-                state.contextPreferredCompactWidth = ClipboardCISizing.closedPreferredWidth(monitor: clipboardCI, physicalNotchWidth: state.physicalNotchWidth)
+                state.contextPreferredCompactWidth = ClipboardCISizing.closedPreferredWidth(monitor: clipboardCI, physicalNotchWidth: state.closedOcclusion == nil ? 0 : state.physicalNotchWidth)
                 state.contextPreferredSize = ClipboardCISizing.openPreferredSize(actionCount: clipboardCI.actions.count, historyCount: clipboardCI.history.count, kind: clipboardCI.kind)
                 if clipboardCI.triggerMode == "Pop Up", !state.expanded, !state.pinned {
                     clipboardOpenedNotch = true
@@ -4732,7 +4763,10 @@ private struct DropContextView: View {
             .task { publishPreferredSize() }
             .onChange(of: itemCount) { _ in publishPreferredSize() }
             .onChange(of: dropZones.configuration) { _ in publishPreferredSize() }
-            .onDisappear { surfaceState.contextPreferredSize = nil }
+            .onDisappear {
+                guard surfaceState.activeCIIdentifier == nil else { return }
+                surfaceState.contextPreferredSize = nil
+            }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Drop CI background for \(count) item\(count == 1 ? "" : "s")")
     }
@@ -5011,7 +5045,10 @@ private struct BluetoothContextView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: usesFullNotchArea ? 0 : 18, style: .continuous))
         .task(id: sizingKey) { publishPreferredSize() }
-        .onDisappear { surfaceState.contextPreferredSize = nil }
+        .onDisappear {
+            guard surfaceState.activeCIIdentifier == nil else { return }
+            surfaceState.contextPreferredSize = nil
+        }
     }
 
     private var header: some View {
