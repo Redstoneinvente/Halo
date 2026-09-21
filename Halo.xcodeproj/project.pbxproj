@@ -699,7 +699,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
-			name = Debug Direct;
+			name = "Debug Direct";
 		};
 		A55000000000000000000002 /* Release Direct */ = {
 			isa = XCBuildConfiguration;
@@ -709,7 +709,7 @@
 				SDKROOT = macosx;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 			};
-			name = Release Direct;
+			name = "Release Direct";
 		};
 		A55000000000000000000003 /* Debug App Store */ = {
 			isa = XCBuildConfiguration;
@@ -721,7 +721,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
-			name = Debug App Store;
+			name = "Debug App Store";
 		};
 		A55000000000000000000004 /* Release App Store */ = {
 			isa = XCBuildConfiguration;
@@ -731,7 +731,7 @@
 				SDKROOT = macosx;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 			};
-			name = Release App Store;
+			name = "Release App Store";
 		};
 		A55000000000000000000011 /* Debug Direct */ = {
 			isa = XCBuildConfiguration;
@@ -769,7 +769,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
 				SWIFT_VERSION = 5.0;
 			};
-			name = Debug Direct;
+			name = "Debug Direct";
 		};
 		A55000000000000000000012 /* Release Direct */ = {
 			isa = XCBuildConfiguration;
@@ -812,7 +812,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
 				SWIFT_VERSION = 5.0;
 			};
-			name = Release Direct;
+			name = "Release Direct";
 		};
 		A55000000000000000000013 /* Debug App Store */ = {
 			isa = XCBuildConfiguration;
@@ -850,7 +850,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_APPSTORE";
 				SWIFT_VERSION = 5.0;
 			};
-			name = Debug App Store;
+			name = "Debug App Store";
 		};
 		A55000000000000000000014 /* Release App Store */ = {
 			isa = XCBuildConfiguration;
@@ -893,7 +893,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_APPSTORE";
 				SWIFT_VERSION = 5.0;
 			};
-			name = Release App Store;
+			name = "Release App Store";
 		};
 		A55000000000000000000021 /* Debug Direct */ = {
 			isa = XCBuildConfiguration;
@@ -905,7 +905,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
 				SWIFT_VERSION = 5.0;
 			};
-			name = Debug Direct;
+			name = "Debug Direct";
 		};
 		A55000000000000000000022 /* Release Direct */ = {
 			isa = XCBuildConfiguration;
@@ -917,7 +917,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
 				SWIFT_VERSION = 5.0;
 			};
-			name = Release Direct;
+			name = "Release Direct";
 		};
 		A55000000000000000000023 /* Debug App Store */ = {
 			isa = XCBuildConfiguration;
@@ -929,7 +929,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_APPSTORE";
 				SWIFT_VERSION = 5.0;
 			};
-			name = Debug App Store;
+			name = "Debug App Store";
 		};
 		A55000000000000000000024 /* Release App Store */ = {
 			isa = XCBuildConfiguration;
@@ -941,7 +941,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_APPSTORE";
 				SWIFT_VERSION = 5.0;
 			};
-			name = Release App Store;
+			name = "Release App Store";
 		};
 /* End XCBuildConfiguration section */
 
