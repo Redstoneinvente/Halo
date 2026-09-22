@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import AppKit
 
 @MainActor
 final class AppStoreSubscriptionGateModel: ObservableObject {
@@ -78,7 +79,7 @@ final class AppStoreSubscriptionGateModel: ObservableObject {
             do {
                 try await licensing.restorePurchases()
                 if !licensing.state.grantsAccess {
-                    message = "No active Halo subscription was found for this Apple Account."
+                    message = "No active Halo purchase was found for this Apple Account."
                 }
             } catch {
                 message = error.localizedDescription
@@ -94,13 +95,11 @@ struct AppStoreSubscriptionGateView: View {
         VStack(spacing: 24) {
             Spacer(minLength: 4)
 
-            ZStack {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(.thinMaterial)
-                    .frame(width: 76, height: 76)
-                Image(systemName: "capsule.tophalf.filled")
-                    .font(.system(size: 34, weight: .semibold))
-            }
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 76, height: 76)
 
             VStack(spacing: 8) {
                 Text(title)
@@ -134,7 +133,7 @@ struct AppStoreSubscriptionGateView: View {
                 .disabled(model.isBusy)
             }
 
-            Text("Purchases and subscription status are handled by the App Store.")
+            Text("Purchases are handled by the App Store.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
 
@@ -153,7 +152,7 @@ struct AppStoreSubscriptionGateView: View {
         case .failed:
             return "Unable to Check Subscription"
         case .notConfigured:
-            return "App Store Subscription Unavailable"
+            return "App Store Purchase Unavailable"
         default:
             return "Unlock Halo"
         }
@@ -168,14 +167,47 @@ struct AppStoreSubscriptionGateView: View {
         case .failed(let message):
             return message
         case .notConfigured:
-            return "Halo could not find its App Store subscription products. Check the App Store build configuration."
+            return "Halo could not find its App Store purchase options. Check the App Store build configuration."
         case .loading:
             return "Checking your App Store purchases…"
         case .notEntitled:
-            return "An active Halo subscription is required to use this App Store version."
+            return "A Halo subscription or lifetime purchase is required to use this App Store version."
         case .entitled, .gracePeriod:
-            return "Your subscription is active. Halo is unlocking…"
+            return entitlementSubtitle
         }
+    }
+
+    private var entitlementSubtitle: String {
+        let productIDs: Set<String>
+        switch model.state {
+        case .entitled(let ids), .gracePeriod(let ids, _):
+            productIDs = ids
+        default:
+            return "Your Halo purchase is active. Halo is unlocking…"
+        }
+
+        let names = productIDs.sorted().map { productID in
+            if let product = model.products.first(where: { $0.id == productID }) {
+                return product.displayName
+            }
+
+            switch productID {
+            case "Halo_Lifetime":
+                return "Halo Lifetime"
+            case "halo_monthly":
+                return "Halo Monthly"
+            default:
+                return productID
+            }
+        }
+
+        if names.count == 1, let name = names.first {
+            return "\(name) is active. Halo is unlocking…"
+        } else if !names.isEmpty {
+            return "\(names.joined(separator: " + ")) are active. Halo is unlocking…"
+        }
+
+        return "Your Halo purchase is active. Halo is unlocking…"
     }
 
     @ViewBuilder
@@ -197,7 +229,7 @@ struct AppStoreSubscriptionGateView: View {
                     Image(systemName: "cart")
                         .font(.system(size: 24))
                         .foregroundStyle(.secondary)
-                    Text("No subscription options are currently available.")
+                    Text("No purchase options are currently available.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
