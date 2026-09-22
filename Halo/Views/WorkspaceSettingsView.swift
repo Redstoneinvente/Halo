@@ -3825,17 +3825,46 @@ private struct HaloAppStoreAccountLicenseSettingsView: View {
         }
     }
 
+    private var activeProductID: String? {
+        if let primary = model.primaryProductID {
+            return primary
+        }
+
+        switch model.state {
+        case .entitled(let ids), .gracePeriod(let ids, _):
+            return ids.count == 1 ? ids.first : nil
+        default:
+            return nil
+        }
+    }
+
+    private var activeProduct: AppStoreProductInfo? {
+        guard let activeProductID else { return nil }
+        return model.products.first(where: { $0.id == activeProductID })
+    }
+
+    private func planName(for productID: String) -> String {
+        switch productID {
+        case "Halo_Lifetime":
+            return "Halo Lifetime"
+        case "halo_monthly":
+            return "Halo Monthly"
+        default:
+            return model.products.first(where: { $0.id == productID })?.displayName ?? productID
+        }
+    }
+
     var body: some View {
         Section("Apple Account") {
             Label("Managed by Apple App Store", systemImage: "apple.logo")
                 .font(.headline)
 
-            Text("Your Halo subscription, billing, renewal, and payment details are handled by Apple. Halo does not receive or store your Apple ID or payment information.")
+            Text("Your Halo purchase, subscription billing, renewal, and payment details are handled by Apple. Halo does not receive or store your Apple ID or payment information.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
 
-        Section("Subscription") {
+        Section("App Store Purchase") {
             HStack {
                 Label(statusTitle, systemImage: statusSymbol)
                 Spacer()
@@ -3844,12 +3873,14 @@ private struct HaloAppStoreAccountLicenseSettingsView: View {
                 }
             }
 
-            if let product = model.products.first {
-                LabeledContent("Plan", value: product.displayName)
-                LabeledContent("Price", value: product.displayPrice)
-                LabeledContent("Product", value: product.id)
-            } else {
-                LabeledContent("Product", value: "halo_monthly")
+            if let productID = activeProductID {
+                LabeledContent("Plan", value: planName(for: productID))
+                if let product = activeProduct {
+                    LabeledContent("Price", value: product.displayPrice)
+                }
+                LabeledContent("Product", value: productID)
+            } else if model.state.grantsAccess {
+                LabeledContent("Plan", value: "Halo")
             }
 
             if case .gracePeriod(_, let expiresAt) = model.state,
@@ -3895,7 +3926,7 @@ private struct HaloAppStoreAccountLicenseSettingsView: View {
                 )
             }
 
-            Text("Subscription purchase, renewal, cancellation, billing, and payment methods are managed by Apple through the App Store.")
+            Text("Halo purchases, subscription renewal, cancellation, billing, and payment methods are managed by Apple through the App Store.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
