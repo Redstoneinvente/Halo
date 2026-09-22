@@ -6,6 +6,7 @@ import AppKit
 final class AppStoreSubscriptionGateModel: ObservableObject {
     @Published private(set) var state: AppStoreEntitlementState
     @Published private(set) var products: [AppStoreProductInfo]
+    @Published private(set) var primaryProductID: String?
     @Published private(set) var isBusy = false
     @Published var message: String?
 
@@ -16,6 +17,7 @@ final class AppStoreSubscriptionGateModel: ObservableObject {
         self.licensing = licensing
         self.state = licensing.state
         self.products = licensing.products
+        self.primaryProductID = licensing.primaryProductID
 
         licensing.statePublisher
             .receive(on: RunLoop.main)
@@ -28,6 +30,13 @@ final class AppStoreSubscriptionGateModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] products in
                 self?.products = products
+            }
+            .store(in: &bag)
+
+        licensing.primaryProductIDPublisher
+            .receive(on: RunLoop.main)
+            .sink { [weak self] productID in
+                self?.primaryProductID = productID
             }
             .store(in: &bag)
     }
@@ -178,6 +187,10 @@ struct AppStoreSubscriptionGateView: View {
     }
 
     private var entitlementSubtitle: String {
+        if let productID = model.primaryProductID {
+            return "\(displayName(for: productID)) is active. Halo is unlocking…"
+        }
+
         let productIDs: Set<String>
         switch model.state {
         case .entitled(let ids), .gracePeriod(let ids, _):
@@ -186,28 +199,26 @@ struct AppStoreSubscriptionGateView: View {
             return "Your Halo purchase is active. Halo is unlocking…"
         }
 
-        let names = productIDs.sorted().map { productID in
-            if let product = model.products.first(where: { $0.id == productID }) {
-                return product.displayName
-            }
-
-            switch productID {
-            case "Halo_Lifetime":
-                return "Halo Lifetime"
-            case "halo_monthly":
-                return "Halo Monthly"
-            default:
-                return productID
-            }
-        }
-
-        if names.count == 1, let name = names.first {
-            return "\(name) is active. Halo is unlocking…"
-        } else if !names.isEmpty {
-            return "\(names.joined(separator: " + ")) are active. Halo is unlocking…"
+        if productIDs.count == 1, let productID = productIDs.first {
+            return "\(displayName(for: productID)) is active. Halo is unlocking…"
         }
 
         return "Your Halo purchase is active. Halo is unlocking…"
+    }
+
+    private func displayName(for productID: String) -> String {
+        if let product = model.products.first(where: { $0.id == productID }) {
+            return product.displayName
+        }
+
+        switch productID {
+        case "Halo_Lifetime":
+            return "Halo Lifetime"
+        case "halo_monthly":
+            return "Halo Monthly"
+        default:
+            return productID
+        }
     }
 
     @ViewBuilder
