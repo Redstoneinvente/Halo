@@ -68,7 +68,7 @@
          </EnvironmentVariable>
          <EnvironmentVariable
             key = "HALO_APPSTORE_PRODUCT_IDS"
-            value = "halo_monthly"
+            value = "halo_monthly,Halo_Lifetime"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
