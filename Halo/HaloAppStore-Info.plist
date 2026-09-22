@@ -19,6 +19,7 @@
 	<key>HaloAppStoreProductIDs</key>
 	<array>
 		<string>halo_monthly</string>
+		<string>Halo_Lifetime</string>
 	</array>
 	<key>HaloLicenseSeatProductSlug</key>
 	<string>$(HALO_LICENSESEAT_PRODUCT_SLUG)</string>
