@@ -207,17 +207,13 @@ struct AppStoreSubscriptionGateView: View {
     }
 
     private func displayName(for productID: String) -> String {
-        if let product = model.products.first(where: { $0.id == productID }) {
-            return product.displayName
-        }
-
         switch productID {
         case "Halo_Lifetime":
             return "Halo Lifetime"
         case "halo_monthly":
             return "Halo Monthly"
         default:
-            return productID
+            return model.products.first(where: { $0.id == productID })?.displayName ?? productID
         }
     }
 
@@ -253,7 +249,7 @@ struct AppStoreSubscriptionGateView: View {
                         } label: {
                             HStack(spacing: 14) {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(product.displayName)
+                                    Text(displayName(for: product.id))
                                         .font(.headline)
                                     if !product.description.isEmpty {
                                         Text(product.description)
