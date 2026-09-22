@@ -84,7 +84,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         configureCommercialAccessGate()
 
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        status?.button?.image = NSImage(systemSymbolName: "capsule.tophalf.filled", accessibilityDescription: "Halo")
+        if let menuBarIcon = NSApplication.shared.applicationIconImage.copy() as? NSImage {
+            menuBarIcon.size = NSSize(width: 18, height: 18)
+            menuBarIcon.isTemplate = false
+            status?.button?.image = menuBarIcon
+            status?.button?.imageScaling = .scaleProportionallyDown
+            status?.button?.toolTip = "Halo"
+        }
         let menu = NSMenu()
 
         let toggleItem = NSMenuItem(title: "Toggle Halo", action: #selector(toggle), keyEquivalent: "")
