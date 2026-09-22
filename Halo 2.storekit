@@ -14,7 +14,17 @@
 
   ],
   "products" : [
+    {
+      "displayPrice" : "24.99",
+      "familyShareable" : false,
+      "internalID" : "0F742F7C",
+      "localizations" : [
 
+      ],
+      "productID" : "Halo_Lifetime",
+      "referenceName" : "Halo Lifetime",
+      "type" : "NonConsumable"
+    }
   ],
   "settings" : {
     "_askToBuyEnabled" : true,
