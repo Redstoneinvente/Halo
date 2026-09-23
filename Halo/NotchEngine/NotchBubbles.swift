@@ -9,6 +9,12 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
     case music
     case pixelPal
     case timer
+    case clock
+    case stopwatch
+    case system
+    case clipboard
+    case calendar
+    case audio
 
     var id: String { rawValue }
 
@@ -17,6 +23,12 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .music: return "Music"
         case .pixelPal: return "Pixel Pal"
         case .timer: return "Timer"
+        case .clock: return "Clock"
+        case .stopwatch: return "Stopwatch"
+        case .system: return "System"
+        case .clipboard: return "Clipboard"
+        case .calendar: return "Calendar"
+        case .audio: return "Audio"
         }
     }
 
@@ -25,6 +37,12 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .music: return "music.note"
         case .pixelPal: return "face.smiling"
         case .timer: return "timer"
+        case .clock: return "clock.fill"
+        case .stopwatch: return "stopwatch.fill"
+        case .system: return "gauge.with.dots.needle.67percent"
+        case .clipboard: return "doc.on.clipboard.fill"
+        case .calendar: return "calendar"
+        case .audio: return "speaker.wave.2.fill"
         }
     }
 }
@@ -76,6 +94,31 @@ enum NotchBubbleAnimationPreset: String, Codable, CaseIterable, Identifiable, Ha
     var id: String { rawValue }
 }
 
+enum MusicBubbleDisplayMode: String, Codable, CaseIterable, Identifiable {
+    case artwork = "Artwork"
+    case artworkProgress = "Artwork + Progress"
+    case controls = "Playback Control"
+    case icon = "Music Icon"
+    var id: String { rawValue }
+}
+
+enum MusicBubbleTapAction: String, Codable, CaseIterable, Identifiable {
+    case details = "Show Details"
+    case playPause = "Play / Pause"
+    case openNotch = "Open Notch"
+    case openPlayer = "Open Player"
+    var id: String { rawValue }
+}
+
+enum SystemBubbleMetric: String, Codable, CaseIterable, Identifiable {
+    case battery = "Battery"
+    case cpu = "CPU"
+    case memory = "Memory"
+    case storage = "Storage"
+    case network = "Network"
+    var id: String { rawValue }
+}
+
 struct NotchBubble: Identifiable, Equatable {
     var id: String { kind.rawValue }
 
@@ -116,6 +159,21 @@ struct NotchBubbleSettings: Codable, Equatable {
     var pixelPalEnabled = true
     var pixelPalPersistent = true
 
+    // Optional fields preserve decoding for existing Notch Bubble settings.
+    var musicDisplayMode: MusicBubbleDisplayMode?
+    var musicShowPlaybackGlyph: Bool?
+    var musicArtworkZoom: Double?
+    var musicTapAction: MusicBubbleTapAction?
+
+    var clockEnabled: Bool?
+    var stopwatchEnabled: Bool?
+    var stopwatchPersistent: Bool?
+    var systemEnabled: Bool?
+    var systemMetric: SystemBubbleMetric?
+    var clipboardEnabled: Bool?
+    var calendarEnabled: Bool?
+    var audioEnabled: Bool?
+
     func normalized() -> Self {
         var value = self
         value.version = 1
@@ -128,6 +186,9 @@ struct NotchBubbleSettings: Codable, Equatable {
         value.glassIntensity = min(1, max(0.15, glassIntensity.isFinite ? glassIntensity : 0.82))
         if let lifecycleDuration {
             value.lifecycleDuration = min(1.5, max(0.10, lifecycleDuration.isFinite ? lifecycleDuration : 0.28))
+        }
+        if let musicArtworkZoom {
+            value.musicArtworkZoom = min(1.8, max(1.0, musicArtworkZoom.isFinite ? musicArtworkZoom : 1.0))
         }
         value.maximumBubbles = min(99, max(1, maximumBubbles))
         return value
@@ -142,6 +203,23 @@ struct NotchBubbleSettings: Codable, Equatable {
         let value = lifecycleDuration ?? 0.28
         return value.isFinite ? min(1.5, max(0.10, value)) : 0.28
     }
+
+    var resolvedMusicDisplayMode: MusicBubbleDisplayMode { musicDisplayMode ?? .artwork }
+    var resolvedMusicShowPlaybackGlyph: Bool { musicShowPlaybackGlyph ?? false }
+    var resolvedMusicArtworkZoom: Double {
+        let value = musicArtworkZoom ?? 1.0
+        return value.isFinite ? min(1.8, max(1.0, value)) : 1.0
+    }
+    var resolvedMusicTapAction: MusicBubbleTapAction { musicTapAction ?? .details }
+
+    var resolvedClockEnabled: Bool { clockEnabled ?? false }
+    var resolvedStopwatchEnabled: Bool { stopwatchEnabled ?? false }
+    var resolvedStopwatchPersistent: Bool { stopwatchPersistent ?? false }
+    var resolvedSystemEnabled: Bool { systemEnabled ?? false }
+    var resolvedSystemMetric: SystemBubbleMetric { systemMetric ?? .battery }
+    var resolvedClipboardEnabled: Bool { clipboardEnabled ?? false }
+    var resolvedCalendarEnabled: Bool { calendarEnabled ?? false }
+    var resolvedAudioEnabled: Bool { audioEnabled ?? false }
 }
 
 @MainActor
@@ -249,11 +327,80 @@ private struct TimerBubbleProvider: BubbleProvider {
 }
 
 @MainActor
+private struct ClockBubbleProvider: BubbleProvider {
+    let kind: NotchBubbleKind = .clock
+    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
+        guard settings.resolvedClockEnabled else { return nil }
+        return NotchBubble(kind: kind, size: CGFloat(settings.bubbleSize), shape: settings.shape,
+                           isPersistent: true, timeout: nil, priority: .background)
+    }
+}
+
+@MainActor
+private struct StopwatchBubbleProvider: BubbleProvider {
+    let kind: NotchBubbleKind = .stopwatch
+    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
+        let active = store.workspace.stopwatchStart != nil || store.workspace.stopwatchElapsed > 0
+        guard settings.resolvedStopwatchEnabled,
+              settings.resolvedStopwatchPersistent || active else { return nil }
+        return NotchBubble(kind: kind, size: CGFloat(settings.bubbleSize), shape: settings.shape,
+                           isPersistent: settings.resolvedStopwatchPersistent, timeout: nil,
+                           priority: active ? .important : .normal)
+    }
+}
+
+@MainActor
+private struct SystemBubbleProvider: BubbleProvider {
+    let kind: NotchBubbleKind = .system
+    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
+        guard settings.resolvedSystemEnabled else { return nil }
+        return NotchBubble(kind: kind, size: CGFloat(settings.bubbleSize), shape: settings.shape,
+                           isPersistent: true, timeout: nil, priority: .background)
+    }
+}
+
+@MainActor
+private struct ClipboardBubbleProvider: BubbleProvider {
+    let kind: NotchBubbleKind = .clipboard
+    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
+        guard settings.resolvedClipboardEnabled else { return nil }
+        return NotchBubble(kind: kind, size: CGFloat(settings.bubbleSize), shape: settings.shape,
+                           isPersistent: true, timeout: nil, priority: .background)
+    }
+}
+
+@MainActor
+private struct CalendarBubbleProvider: BubbleProvider {
+    let kind: NotchBubbleKind = .calendar
+    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
+        guard settings.resolvedCalendarEnabled else { return nil }
+        return NotchBubble(kind: kind, size: CGFloat(settings.bubbleSize), shape: settings.shape,
+                           isPersistent: true, timeout: nil, priority: .background)
+    }
+}
+
+@MainActor
+private struct AudioBubbleProvider: BubbleProvider {
+    let kind: NotchBubbleKind = .audio
+    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
+        guard settings.resolvedAudioEnabled else { return nil }
+        return NotchBubble(kind: kind, size: CGFloat(settings.bubbleSize), shape: settings.shape,
+                           isPersistent: true, timeout: nil, priority: .background)
+    }
+}
+
+@MainActor
 struct BubbleRegistry {
     private let providers: [any BubbleProvider] = [
         MusicBubbleProvider(),
         PixelPalBubbleProvider(),
-        TimerBubbleProvider()
+        TimerBubbleProvider(),
+        ClockBubbleProvider(),
+        StopwatchBubbleProvider(),
+        SystemBubbleProvider(),
+        ClipboardBubbleProvider(),
+        CalendarBubbleProvider(),
+        AudioBubbleProvider()
     ]
 
     func bubbles(store: AppStore, settings: NotchBubbleSettings) -> [NotchBubble] {
@@ -276,8 +423,14 @@ struct BubbleRegistry {
     private func providerOrder(_ kind: NotchBubbleKind) -> Int {
         switch kind {
         case .music: return 0
-        case .pixelPal: return 1
-        case .timer: return 2
+        case .timer: return 1
+        case .pixelPal: return 2
+        case .stopwatch: return 3
+        case .audio: return 4
+        case .calendar: return 5
+        case .clipboard: return 6
+        case .system: return 7
+        case .clock: return 8
         }
     }
 }
