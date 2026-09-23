@@ -2733,6 +2733,31 @@ struct SurfaceView: View {
         // partner CI is allowed to win arbitration until commercial startup reaches ready.
         guard commercialSurfaceGate.isReady else { return [] }
 
+        // Notch Bubble "Open Notch" is an explicit user navigation action.
+        // .normal bypasses every CI for this opening. .music forces Music CI only when
+        // the user's Music CI is enabled and live media is actually available.
+        switch state.explicitOpenDestination {
+        case .normal:
+            return []
+        case .music:
+            guard contextOptions.enabled,
+                  workspace.media.isPlaying,
+                  workspace.media.hasNowPlayingPresentation else { return [] }
+            return [
+                SurfaceContextCandidate(
+                    interface: .music,
+                    arbitration: CIArbitrationCandidate(
+                        owner: .builtIn(ActiveContextInterface.music.rawValue),
+                        ciID: "builtin." + ActiveContextInterface.music.rawValue,
+                        priority: 10_000,
+                        tieRank: 100
+                    )
+                )
+            ]
+        case .none:
+            break
+        }
+
         var result = builtInContextCandidates.map { item in
             SurfaceContextCandidate(
                 interface: item.interface,
@@ -2802,16 +2827,10 @@ struct SurfaceView: View {
     private var visuallyExpanded: Bool { state.expanded || state.presentationExpanded }
     private var reportsOpenedNotchVisible: Bool {
         visuallyExpanded &&
-        (state.focusedModule != nil ||
-         activeContext == nil ||
-         transferContextActive ||
-         clipboardContextActive ||
-         customContextActive ||
-         integrationContextActive ||
-         liveActivityContextActive)
+        (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive || integrationContextActive || liveActivityContextActive)
     }
     private var contextOwnsFullSurface: Bool {
-        guard visuallyExpanded, state.focusedModule == nil else { return false }
+        guard visuallyExpanded else { return false }
         switch activeContext {
         case .drop: return dropUsesFullNotchArea
         case .music: return contextMusicUsesFullNotchArea
@@ -2830,9 +2849,6 @@ struct SurfaceView: View {
         }
     }
     private var keepsClosedContentsWhileExpanded: Bool {
-        if state.focusedModule != nil {
-            return usesDefaultWorkspace && keepClosedContentsWhenOpen
-        }
         switch activeContext {
         case .drop: return dropKeepsClosedContents
         case .music: return contextMusicKeepsClosedContents
@@ -2915,9 +2931,7 @@ struct SurfaceView: View {
     private var usesVisualWorkspace: Bool { layout.resolvedUsesCustomOpenNotchWorkspace }
     private var usesDefaultWorkspace: Bool { !usesVisualWorkspace }
     private var presentsVisualWorkspaceSurface: Bool {
-        usesVisualWorkspace &&
-        (state.focusedModule != nil || activeContext == nil) &&
-        (visuallyExpanded || visualWorkspaceSurfacePresented)
+        usesVisualWorkspace && activeContext == nil && (visuallyExpanded || visualWorkspaceSurfacePresented)
     }
     private var accent: Color { Color(hue: theme.tint, saturation: 0.65, brightness: 1) }
 
@@ -2994,10 +3008,7 @@ struct SurfaceView: View {
                     .accessibilityAddTraits(.isButton)
                 }
                 if visuallyExpanded || presentsVisualWorkspaceSurface {
-                    if let focusedModule = state.focusedModule {
-                        focusedOpenModuleContent(module: focusedModule)
-                            .transition(.opacity.combined(with: .scale(scale: 0.985)))
-                    } else if integrationContextActive {
+                    if integrationContextActive {
                         integrationSurfaceContent
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                             .transition(.opacity.combined(with: .scale(scale: 0.985)))
@@ -3444,7 +3455,6 @@ struct SurfaceView: View {
             state.activateDropOwnership()
         } else if decision.shouldCollapseSurface,
                   activeContext == nil,
-                  state.focusedModule == nil,
                   !state.pinned {
             state.expanded = false
         }
@@ -3452,23 +3462,7 @@ struct SurfaceView: View {
 
     @ViewBuilder private var surfaceBackgroundLayer: some View {
         ZStack {
-            if state.focusedModule != nil {
-                if usesVisualWorkspace {
-                    OpenNotchBackgroundView(
-                        options: layout.resolvedOpenNotchLayout.appearance,
-                        fallback: layout.appearance,
-                        theme: theme,
-                        system: workspace.system
-                    )
-                } else {
-                    SurfaceBackground(
-                        appearance: layout.appearance,
-                        theme: theme,
-                        expanded: visuallyExpanded,
-                        system: workspace.system
-                    )
-                }
-            } else if transferContextActive {
+            if transferContextActive {
                 TransferSurfaceBackground(monitor: transfer)
             } else if clipboardContextActive {
                 ClipboardSurfaceBackground(monitor: clipboardCI)
@@ -3492,64 +3486,6 @@ struct SurfaceView: View {
         if presentsVisualWorkspaceSurface {
             OpenNotchSurfaceChrome(contour: contour, options: layout.resolvedOpenNotchLayout.appearance)
         }
-    }
-
-    private func focusedWidgetStyle(for module: ModuleID) -> WidgetStyle {
-        if usesVisualWorkspace,
-           let item = layout.resolvedOpenNotchLayout.resolvedGridItems.first(where: { $0.module == module }),
-           let style = item.widgetStyle {
-            return style
-        }
-        return layout.widgetStyle(for: module)
-    }
-
-    @ViewBuilder
-    private func focusedOpenModuleContent(module: ModuleID) -> some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                Label(module.title, systemImage: module.symbol)
-                    .font(.headline)
-                Spacer()
-                Button {
-                    state.clearFocusedModule()
-                } label: {
-                    Image(systemName: "square.grid.2x2")
-                }
-                .help("Show full workspace")
-                .accessibilityLabel("Show full workspace")
-
-                Button {
-                    state.pinned.toggle()
-                } label: {
-                    Image(systemName: state.pinned ? "pin.fill" : "pin")
-                }
-                .help("Keep expanded")
-                .accessibilityLabel("Keep expanded")
-            }
-
-            GeometryReader { proxy in
-                WidgetCard(
-                    style: focusedWidgetStyle(for: module),
-                    availableHeight: proxy.size.height,
-                    availableWidth: proxy.size.width,
-                    fillsCell: module == .pet
-                ) {
-                    BuiltinOrIntegrationWidget(module: module, store: store)
-                }
-                .environment(\.openNotchPresentation, .expanded)
-                .environment(\.openNotchCompressionLevel, 0)
-                .environment(\.openNotchAvailableWidth, proxy.size.width)
-                .environment(\.openNotchAvailableHeight, proxy.size.height)
-                .environment(\.openNotchGridColumnSpan, module == .pet ? 4 : nil)
-                .environment(\.openNotchGridRowSpan, module == .pet ? 4 : nil)
-                .environment(\.haloPixelPalHostExpanded, state.expanded)
-                .environment(\.haloPixelPalHostTransitionDuration, layout.appearance.surface.duration)
-                .frame(width: proxy.size.width, height: proxy.size.height)
-            }
-        }
-        .padding(.horizontal, CGFloat(layout.resolvedOpenHorizontalPadding))
-        .padding(.vertical, CGFloat(layout.resolvedOpenVerticalPadding))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private func legacyHorizontalWidget(_ module: ModuleID) -> some View {
