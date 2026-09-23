@@ -344,6 +344,54 @@ struct BubbleLayoutEngine {
         return result
     }
 
+    func emergenceFrame(
+        for targetFrame: CGRect,
+        around surfaceFrame: CGRect,
+        in screenFrame: CGRect,
+        compactWidth: CGFloat,
+        compactHeight: CGFloat
+    ) -> CGRect {
+        // Always use the compact notch footprint as the origin, even when Halo is expanded.
+        // That keeps the motion feeling attached to the physical/Dynamic-Island-like source.
+        let width = max(1, compactWidth)
+        let height = max(1, compactHeight)
+        let compactFrame = CGRect(
+            x: surfaceFrame.midX - width / 2,
+            y: screenFrame.maxY - height,
+            width: width,
+            height: height
+        )
+
+        let targetCenter = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
+        let anchor: CGPoint
+
+        if targetCenter.x < compactFrame.minX {
+            anchor = CGPoint(
+                x: compactFrame.minX,
+                y: min(compactFrame.maxY, max(compactFrame.minY, targetCenter.y))
+            )
+        } else if targetCenter.x > compactFrame.maxX {
+            anchor = CGPoint(
+                x: compactFrame.maxX,
+                y: min(compactFrame.maxY, max(compactFrame.minY, targetCenter.y))
+            )
+        } else if targetCenter.y < compactFrame.minY {
+            anchor = CGPoint(
+                x: min(compactFrame.maxX, max(compactFrame.minX, targetCenter.x)),
+                y: compactFrame.minY
+            )
+        } else {
+            anchor = CGPoint(x: compactFrame.midX, y: compactFrame.midY)
+        }
+
+        return CGRect(
+            x: anchor.x - targetFrame.width / 2,
+            y: anchor.y - targetFrame.height / 2,
+            width: targetFrame.width,
+            height: targetFrame.height
+        )
+    }
+
     private func clamped(_ frame: CGRect, to screen: CGRect) -> CGRect {
         let margin: CGFloat = 4
         var value = frame
@@ -387,6 +435,7 @@ private final class BubbleFrameAnimator {
         animated: Bool
     ) {
         cancel()
+        resetVisuals(panel: panel)
 
         guard panel.frame != target else { return }
         guard animated,
@@ -427,6 +476,147 @@ private final class BubbleFrameAnimator {
             if t >= 1 {
                 panel.setFrame(target, display: false)
                 self.cancel()
+            }
+        }
+    }
+
+    func emerge(
+        panel: NSPanel,
+        from source: CGRect,
+        to target: CGRect,
+        preset: NotchBubbleAnimationPreset,
+        animated: Bool
+    ) {
+        cancel()
+        guard let view = panel.contentView else {
+            panel.setFrame(target, display: false)
+            panel.alphaValue = 1
+            panel.orderFrontRegardless()
+            return
+        }
+
+        resetVisuals(panel: panel)
+        guard animated,
+              preset != .none,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            panel.setFrame(target, display: false)
+            panel.alphaValue = 1
+            panel.orderFrontRegardless()
+            return
+        }
+
+        panel.setFrame(source, display: false)
+        panel.alphaValue = 1
+        view.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.18, y: 0.18))
+        view.layer?.opacity = 0.58
+        panel.orderFrontRegardless()
+
+        animateLifecycle(
+            panel: panel,
+            view: view,
+            from: source,
+            to: target,
+            preset: preset,
+            appearing: true,
+            completion: nil
+        )
+    }
+
+    func retract(
+        panel: NSPanel,
+        to source: CGRect,
+        preset: NotchBubbleAnimationPreset,
+        animated: Bool,
+        completion: @escaping () -> Void
+    ) {
+        cancel()
+        guard let view = panel.contentView else {
+            panel.orderOut(nil)
+            completion()
+            return
+        }
+
+        guard panel.isVisible,
+              animated,
+              preset != .none,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            resetVisuals(panel: panel)
+            panel.orderOut(nil)
+            completion()
+            return
+        }
+
+        let initial = panel.frame
+        animateLifecycle(
+            panel: panel,
+            view: view,
+            from: initial,
+            to: source,
+            preset: preset,
+            appearing: false
+        ) { [weak self, weak panel] in
+            guard let self, let panel else { return }
+            self.resetVisuals(panel: panel)
+            panel.orderOut(nil)
+            completion()
+        }
+    }
+
+    func resetVisuals(panel: NSPanel) {
+        panel.alphaValue = 1
+        panel.contentView?.layer?.setAffineTransform(.identity)
+        panel.contentView?.layer?.opacity = 1
+    }
+
+    private func animateLifecycle(
+        panel: NSPanel,
+        view: NSView,
+        from initial: CGRect,
+        to target: CGRect,
+        preset: NotchBubbleAnimationPreset,
+        appearing: Bool,
+        completion: (() -> Void)?
+    ) {
+        let start = CACurrentMediaTime()
+        let duration: CFTimeInterval
+        switch preset {
+        case .soft: duration = 0.34
+        case .fluid: duration = 0.28
+        case .snappy: duration = 0.20
+        case .bouncy: duration = 0.36
+        case .none: duration = 0
+        }
+
+        clock.start(view: view) { [weak self, weak panel, weak view] timestamp in
+            guard let self, let panel, let view else {
+                self?.cancel()
+                return
+            }
+
+            let t = min(1, max(0, (timestamp - start) / max(0.01, duration)))
+            let p = self.progress(t, preset: preset)
+            let frame = CGRect(
+                x: initial.origin.x + (target.origin.x - initial.origin.x) * p,
+                y: initial.origin.y + (target.origin.y - initial.origin.y) * p,
+                width: initial.width + (target.width - initial.width) * p,
+                height: initial.height + (target.height - initial.height) * p
+            )
+            panel.setFrame(frame, display: false)
+
+            let visualProgress = appearing ? p : (1 - p)
+            // Start/end with a small "seed" at the notch, but never fully vanish until
+            // the final frame so the motion reads as a merge rather than a fade.
+            let scale = 0.18 + 0.82 * visualProgress
+            view.layer?.setAffineTransform(CGAffineTransform(scaleX: scale, y: scale))
+            view.layer?.opacity = Float(0.58 + 0.42 * visualProgress)
+
+            if t >= 1 {
+                self.cancel()
+                if appearing {
+                    panel.setFrame(target, display: false)
+                    self.resetVisuals(panel: panel)
+                }
+                completion?()
             }
         }
     }
@@ -502,6 +692,8 @@ final class BubbleWindowController {
     private let frameAnimator = BubbleFrameAnimator()
     private var removalGeneration = 0
 
+    var frame: CGRect { panel.frame }
+
     init(kind: NotchBubbleKind, store: AppStore, state: SurfaceState) {
         self.kind = kind
         panel = NotchBubblePanel(
@@ -537,16 +729,29 @@ final class BubbleWindowController {
 
     func present(
         frame: CGRect,
+        emergenceFrame: CGRect,
         settings: NotchBubbleSettings,
         animated: Bool,
         trackingSurface: Bool = false
     ) {
         removalGeneration += 1
 
+        if !panel.isVisible {
+            frameAnimator.emerge(
+                panel: panel,
+                from: emergenceFrame,
+                to: frame,
+                preset: settings.animation,
+                animated: animated && !trackingSurface
+            )
+            return
+        }
+
         if trackingSurface {
             // SurfaceAnimator already publishes display-linked geometry every frame.
             // A second animation here makes bubbles chase the notch and visibly lag.
             frameAnimator.cancel()
+            frameAnimator.resetVisuals(panel: panel)
             if panel.frame != frame {
                 panel.setFrame(frame, display: false)
             }
@@ -558,15 +763,22 @@ final class BubbleWindowController {
                 animated: animated
             )
         }
-
-        BubbleAnimationController.show(panel: panel, animated: animated && !trackingSurface)
     }
 
-    func remove(animated: Bool, completion: @escaping () -> Void) {
-        frameAnimator.cancel()
+    func remove(
+        animated: Bool,
+        emergenceFrame: CGRect,
+        settings: NotchBubbleSettings,
+        completion: @escaping () -> Void
+    ) {
         removalGeneration += 1
         let generation = removalGeneration
-        BubbleAnimationController.hide(panel: panel, animated: animated) { [weak self] in
+        frameAnimator.retract(
+            panel: panel,
+            to: emergenceFrame,
+            preset: settings.animation,
+            animated: animated
+        ) { [weak self] in
             guard let self, self.removalGeneration == generation else { return }
             completion()
         }
@@ -734,7 +946,18 @@ private final class NotchBubbleDisplayHost {
 
         for kind in Array(controllers.keys) where !activeKinds.contains(kind) {
             guard let controller = controllers[kind] else { continue }
-            controller.remove(animated: animated) { [weak self, weak controller] in
+            let emergenceFrame = layoutEngine.emergenceFrame(
+                for: controller.frame,
+                around: surfaceFrame,
+                in: screenFrame,
+                compactWidth: state.compactWidth,
+                compactHeight: state.compactHeight
+            )
+            controller.remove(
+                animated: animated,
+                emergenceFrame: emergenceFrame,
+                settings: settings
+            ) { [weak self, weak controller] in
                 guard let self, let controller,
                       self.controllers[kind] === controller else { return }
                 controller.close()
@@ -751,8 +974,16 @@ private final class NotchBubbleDisplayHost {
                 controller = BubbleWindowController(kind: bubble.kind, store: store, state: state)
                 controllers[bubble.kind] = controller
             }
+            let emergenceFrame = layoutEngine.emergenceFrame(
+                for: frame,
+                around: surfaceFrame,
+                in: screenFrame,
+                compactWidth: state.compactWidth,
+                compactHeight: state.compactHeight
+            )
             controller.present(
                 frame: frame,
+                emergenceFrame: emergenceFrame,
                 settings: settings,
                 animated: animated,
                 trackingSurface: trackingSurface
@@ -761,8 +992,23 @@ private final class NotchBubbleDisplayHost {
     }
 
     private func removeAll(animated: Bool) {
+        let settings = settingsStore.settings.normalized()
+        let compactWidth = state?.compactWidth ?? 190
+        let compactHeight = state?.compactHeight ?? 40
+
         for (kind, controller) in controllers {
-            controller.remove(animated: animated) { [weak self, weak controller] in
+            let emergenceFrame = layoutEngine.emergenceFrame(
+                for: controller.frame,
+                around: surfaceFrame,
+                in: screenFrame,
+                compactWidth: compactWidth,
+                compactHeight: compactHeight
+            )
+            controller.remove(
+                animated: animated,
+                emergenceFrame: emergenceFrame,
+                settings: settings
+            ) { [weak self, weak controller] in
                 guard let self, let controller,
                       self.controllers[kind] === controller else { return }
                 controller.close()
