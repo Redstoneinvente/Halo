@@ -1958,6 +1958,7 @@ private enum HaloCommercialError: Error {
 final class TrailerModeController {
     private weak var store: AppStore?
     private var pendingChange: DispatchWorkItem?
+    private var pendingTransition: DispatchWorkItem?
     private var startedAt: Date?
     private var step = 0
     private var baseLayout: WorkspaceLayout?
@@ -1989,11 +1990,14 @@ final class TrailerModeController {
     func stop() {
         guard let store else { return }
         pendingChange?.cancel()
+        pendingTransition?.cancel()
         pendingChange = nil
+        pendingTransition = nil
         startedAt = nil
         step = 0
         baseLayout = nil
         baseTheme = nil
+        store.workspace.trailerTransitionActive = false
         store.workspace.trailerLayoutOverride = nil
         store.workspace.trailerThemeOverride = nil
         store.workspace.trailerModeActive = false
@@ -2004,14 +2008,58 @@ final class TrailerModeController {
     private func applyNextFrame() {
         guard let store,
               store.workspace.trailerModeActive,
+              baseLayout != nil,
+              baseTheme != nil else { return }
+
+        let configuration = store.workspace.settings.trailer ?? TrailerModeSettings()
+        let interval = currentInterval(configuration: configuration)
+
+        // The first trailer frame appears immediately. Every subsequent frame gets a
+        // short out -> swap -> in transition. The phase automatically compresses as the
+        // trailer cadence ramps up, so fast cuts never overlap one another.
+        guard configuration.transitionsEnabled, step > 0 else {
+            commitFrame(configuration: configuration)
+            store.workspace.trailerTransitionActive = false
+            scheduleNext(after: interval)
+            return
+        }
+
+        let phaseDuration = min(
+            max(0.05, configuration.resolvedSmoothing * 0.5),
+            max(0.05, interval * 0.22)
+        )
+        store.workspace.trailerTransitionStyle = resolvedTransitionStyle(configuration.transitionStyle)
+        store.workspace.trailerTransitionDuration = phaseDuration
+        store.workspace.trailerTransitionActive = true
+
+        pendingTransition?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self,
+                  let store = self.store,
+                  store.workspace.trailerModeActive else { return }
+
+            self.commitFrame(configuration: configuration)
+            store.workspace.trailerTransitionActive = false
+
+            // phaseDuration has already elapsed before the swap. Keep the total cadence
+            // equal to the requested interval while leaving room for the transition-in.
+            self.scheduleNext(after: max(0.05, interval - phaseDuration))
+        }
+        pendingTransition = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + phaseDuration, execute: work)
+    }
+
+    private func commitFrame(configuration: TrailerModeSettings) {
+        guard let store,
+              store.workspace.trailerModeActive,
               let baseLayout,
               let baseTheme else { return }
 
-        let configuration = store.workspace.settings.trailer ?? TrailerModeSettings()
         if configuration.showcaseMusic != store.workspace.media.trailerDemoActive {
             store.workspace.media.setTrailerDemoEnabled(configuration.showcaseMusic)
             if !configuration.showcaseMusic { store.workspace.refreshMediaSource() }
         }
+
         let expanded = requestedExpandedState(configuration.surfaceTarget, step: step)
         // A 5-frame cadence means Alternate mode shows music in both closed and opened states.
         let musicFrame = configuration.showcaseMusic && step % 5 == 2
@@ -2044,22 +2092,31 @@ final class TrailerModeController {
         )
 
         step += 1
-        scheduleNext(configuration: configuration)
     }
 
-    private func scheduleNext(configuration: TrailerModeSettings) {
-        pendingChange?.cancel()
-        guard let store, store.workspace.trailerModeActive else { return }
-
+    private func currentInterval(configuration: TrailerModeSettings) -> Double {
         let elapsed = max(0, Date().timeIntervalSince(startedAt ?? Date()))
         let progress = min(1, elapsed / configuration.resolvedRampDuration)
         let eased = progress * progress * (3 - 2 * progress)
-        let interval = configuration.resolvedSlowInterval +
-            (configuration.resolvedFastInterval - configuration.resolvedSlowInterval) * eased
+        return max(
+            0.12,
+            configuration.resolvedSlowInterval +
+                (configuration.resolvedFastInterval - configuration.resolvedSlowInterval) * eased
+        )
+    }
+
+    private func resolvedTransitionStyle(_ requested: TrailerTransitionStyle) -> TrailerTransitionStyle {
+        guard requested == .automatic else { return requested }
+        return [.fade, .scale, .lift].randomElement() ?? .fade
+    }
+
+    private func scheduleNext(after delay: Double) {
+        pendingChange?.cancel()
+        guard let store, store.workspace.trailerModeActive else { return }
 
         let work = DispatchWorkItem { [weak self] in self?.applyNextFrame() }
         pendingChange = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.12, interval), execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.05, delay), execute: work)
     }
 
     private func requestedExpandedState(_ target: TrailerSurfaceTarget, step: Int) -> Bool {
