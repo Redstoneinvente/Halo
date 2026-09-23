@@ -428,19 +428,23 @@ struct VisualWorkspaceTimerView: View {
             else if store.deadline != nil || store.pausedSeconds > 0 { store.pauseResume() }
             else { store.startTimer(minutes: microPresetMinutes) }
         } popover: {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Quick Timer").font(.headline)
-                HStack(spacing: 6) {
-                    ForEach([1, 5, 10, 15, 30], id: \.self) { minutes in
-                        Button("\(minutes)m") { microPresetMinutes = minutes; store.startTimer(minutes: minutes) }
-                    }
-                }
-                if active { Button("Reset Timer") { store.resetTimer() } }
+            HaloTimerDurationComposer(
+                accent: style.accentColor.color,
+                textColor: style.textColor.color,
+                quickPresets: [1, 5, 10, 15, 30],
+                initialMinutes: microPresetMinutes,
+                compact: false
+            ) { duration in
+                microPresetMinutes = max(1, Int((duration / 60).rounded()))
+                store.startTimer(duration: duration)
             }
+            .padding(10)
+            .frame(width: 350)
         }
         .background(HaloMicroScrollCapture { delta in
             guard store.deadline == nil, store.pausedSeconds <= 0 else { return }
             microPresetMinutes = min(120, max(1, microPresetMinutes + (delta > 0 ? 1 : -1)))
+            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         }.allowsHitTesting(true))
         .scaleEffect(store.finished && !reduceMotion ? 1.025 : 1)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.42).repeatCount(store.finished ? 2 : 1, autoreverses: true), value: store.finished)
@@ -531,7 +535,20 @@ struct VisualWorkspaceTimerView: View {
             if store.deadline != nil || store.pausedSeconds > 0 {
                 Button { store.pauseResume() } label: { Image(systemName: store.deadline == nil ? "play.fill" : "pause.fill") }.buttonStyle(.plain)
             } else {
-                Button { store.startTimer(minutes: style.resolvedContent.timerPresetB) } label: { Image(systemName: "play.fill") }.buttonStyle(.plain)
+                HaloTimerDurationPopoverButton(
+                    accent: style.accentColor.color,
+                    textColor: style.textColor.color,
+                    quickPresets: [
+                        style.resolvedContent.timerPresetA,
+                        style.resolvedContent.timerPresetB,
+                        style.resolvedContent.timerPresetC
+                    ],
+                    initialMinutes: style.resolvedContent.timerPresetB,
+                    label: "Set"
+                ) { duration in
+                    store.startTimer(duration: duration)
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -541,18 +558,62 @@ struct VisualWorkspaceTimerView: View {
             let controlSize: ControlSize = compact ? .mini : .small
             if store.deadline == nil && store.pausedSeconds <= 0 {
                 if context.shows("presets") {
-                    HStack(spacing: max(4, context.spacing * 0.7)) {
-                        ForEach([style.resolvedContent.timerPresetA, style.resolvedContent.timerPresetB, style.resolvedContent.timerPresetC], id: \.self) { minutes in
-                            Button("\(minutes)m") { store.startTimer(minutes: minutes) }
+                    if compact {
+                        HaloTimerDurationPopoverButton(
+                            accent: style.accentColor.color,
+                            textColor: style.textColor.color,
+                            quickPresets: [
+                                style.resolvedContent.timerPresetA,
+                                style.resolvedContent.timerPresetB,
+                                style.resolvedContent.timerPresetC
+                            ],
+                            initialMinutes: style.resolvedContent.timerPresetB,
+                            label: "Custom timer"
+                        ) { duration in
+                            store.startTimer(duration: duration)
                         }
-                    }.buttonStyle(.bordered).controlSize(controlSize)
+                        .buttonStyle(.bordered)
+                        .controlSize(controlSize)
+                    } else {
+                        HaloTimerDurationComposer(
+                            accent: style.accentColor.color,
+                            textColor: style.textColor.color,
+                            quickPresets: [
+                                style.resolvedContent.timerPresetA,
+                                style.resolvedContent.timerPresetB,
+                                style.resolvedContent.timerPresetC,
+                                45,
+                                60
+                            ],
+                            initialMinutes: style.resolvedContent.timerPresetB,
+                            compact: false
+                        ) { duration in
+                            store.startTimer(duration: duration)
+                        }
+                        .frame(maxWidth: 390)
+                    }
                 }
             } else {
                 HStack(spacing: max(5, context.spacing)) {
                     Button(store.deadline == nil ? "Resume" : "Pause") { store.pauseResume() }
-                    if !compact || context.columns >= 5 { Button("+1m") { store.addTimer(minutes: 1) } }
-                    Button(compact ? "×" : "Stop") { store.resetTimer() }
-                }.buttonStyle(.bordered).controlSize(controlSize)
+
+                    if !compact || context.columns >= 5 {
+                        Button {
+                            store.addTimer(minutes: 1)
+                            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                        } label: {
+                            Label("+1m", systemImage: "plus")
+                        }
+                    }
+
+                    Button(role: .destructive) {
+                        store.resetTimer()
+                    } label: {
+                        compact ? AnyView(Image(systemName: "xmark")) : AnyView(Label("Stop", systemImage: "stop.fill"))
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(controlSize)
             }
         }
     }
