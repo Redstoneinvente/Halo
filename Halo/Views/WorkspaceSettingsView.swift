@@ -5641,6 +5641,20 @@ private struct TrailerModeSettingsView: View {
                 .foregroundStyle(.secondary)
         }
 
+        Section("Transitions") {
+            Toggle("Animate between trailer states", isOn: binding(\.transitionsEnabled))
+            Picker("Style", selection: binding(\.transitionStyle)) {
+                ForEach(TrailerTransitionStyle.allCases) { style in
+                    Text(style.rawValue).tag(style)
+                }
+            }
+            .disabled(!(workspace.settings.trailer ?? TrailerModeSettings()).transitionsEnabled)
+
+            Text("Automatic rotates between Fade, Scale and Lift. Transition phases shrink automatically as the trailer speeds up, so the fast section stays crisp.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
         Section("Showcase") {
             Toggle("Randomize appearance and notch styles", isOn: binding(\.randomizeAppearance))
             Toggle("Randomize opened widgets and widget styles", isOn: binding(\.randomizeWidgets))
