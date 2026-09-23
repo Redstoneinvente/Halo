@@ -129,7 +129,102 @@ enum NotchBubbleBackgroundStyle: String, Codable, CaseIterable, Identifiable, Ha
     var id: String { rawValue }
 }
 
+enum NotchBubbleDesignPreset: String, Codable, CaseIterable, Identifiable, Hashable {
+    case halo = "Halo Glass"
+    case aurora = "Aurora"
+    case neon = "Neon Edge"
+    case obsidian = "Obsidian"
+    case prism = "Prism"
+    case ember = "Ember"
+    case midnight = "Midnight"
+    case minimal = "Minimal"
+
+    var id: String { rawValue }
+
+    var detail: String {
+        switch self {
+        case .halo: return "Layered dark glass with a soft inner highlight."
+        case .aurora: return "A flowing blue-violet gradient with luminous depth."
+        case .neon: return "Near-black center with a vivid double-edge glow."
+        case .obsidian: return "Dense graphite with restrained radial reflections."
+        case .prism: return "Dark glass washed with a subtle spectral gradient."
+        case .ember: return "Warm crimson and amber depth with a hot inner edge."
+        case .midnight: return "Deep navy glass with cool atmospheric highlights."
+        case .minimal: return "Almost transparent, with only a precise hairline edge."
+        }
+    }
+}
+
+enum TimerBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case ring = "Ring + Time"
+    case digits = "Digits"
+    case arc = "Progress Arc"
+    case icon = "Icon"
+    var id: String { rawValue }
+}
+
+enum ClockBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case digital = "Digital"
+    case seconds = "Digital + Seconds"
+    case analog = "Analog"
+    case date = "Date + Time"
+    var id: String { rawValue }
+}
+
+enum StopwatchBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case compact = "Compact"
+    case digits = "Digits"
+    case ring = "Ring"
+    case laps = "Lap Count"
+    var id: String { rawValue }
+}
+
+enum SystemBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case value = "Icon + Value"
+    case gauge = "Radial Gauge"
+    case bars = "Meter Bars"
+    case icon = "Icon"
+    var id: String { rawValue }
+}
+
+enum ClipboardBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case icon = "Icon"
+    case preview = "Latest Text"
+    case count = "Item Count"
+    var id: String { rawValue }
+}
+
+enum CalendarBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case date = "Date"
+    case weekday = "Date + Weekday"
+    case nextEvent = "Next Event"
+    var id: String { rawValue }
+}
+
+enum AudioBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case ring = "Volume Ring"
+    case percentage = "Percentage"
+    case icon = "Speaker Icon"
+    case device = "Output Device"
+    var id: String { rawValue }
+}
+
+enum VinylBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case fullRecord = "Full Record"
+    case labelFocus = "Label Focus"
+    case recordProgress = "Record + Progress"
+    var id: String { rawValue }
+}
+
+enum PixelPalBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case full = "Full Pixel Pal"
+    case closeUp = "Close-up"
+    case icon = "Icon"
+    var id: String { rawValue }
+}
+
 struct NotchBubbleStyleOverride: Codable, Equatable {
+    var design: NotchBubbleDesignPreset? = nil
     var size: Double? = nil
     var shape: NotchBubbleShape? = nil
     var background: NotchBubbleBackgroundStyle? = nil
@@ -160,7 +255,7 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
     }
 
     var isEmpty: Bool {
-        size == nil && shape == nil && background == nil && cornerRadius == nil &&
+        design == nil && size == nil && shape == nil && background == nil && cornerRadius == nil &&
         glassIntensity == nil && backgroundOpacity == nil && borderOpacity == nil &&
         contentScale == nil && verticalOffset == nil && tint == nil && tintAmount == nil &&
         animation == nil && lifecycleDuration == nil
@@ -168,6 +263,7 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
 }
 
 struct ResolvedNotchBubbleStyle {
+    let design: NotchBubbleDesignPreset
     let size: CGFloat
     let shape: NotchBubbleShape
     let background: NotchBubbleBackgroundStyle
@@ -240,6 +336,18 @@ struct NotchBubbleSettings: Codable, Equatable {
     var vinylEnabled: Bool?
     var vinylPersistent: Bool?
 
+    // Provider-specific content choices. Optional keeps older saved settings decodable.
+    var timerDisplayMode: TimerBubbleDisplayMode?
+    var clockDisplayMode: ClockBubbleDisplayMode?
+    var clockUse24Hour: Bool?
+    var stopwatchDisplayMode: StopwatchBubbleDisplayMode?
+    var systemDisplayMode: SystemBubbleDisplayMode?
+    var clipboardDisplayMode: ClipboardBubbleDisplayMode?
+    var calendarDisplayMode: CalendarBubbleDisplayMode?
+    var audioDisplayMode: AudioBubbleDisplayMode?
+    var vinylDisplayMode: VinylBubbleDisplayMode?
+    var pixelPalDisplayMode: PixelPalBubbleDisplayMode?
+
     /// Per-provider appearance overrides. Missing entries inherit the global bubble defaults.
     var bubbleStyles: [String: NotchBubbleStyleOverride]?
 
@@ -300,6 +408,17 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedVinylEnabled: Bool { vinylEnabled ?? false }
     var resolvedVinylPersistent: Bool { vinylPersistent ?? false }
 
+    var resolvedTimerDisplayMode: TimerBubbleDisplayMode { timerDisplayMode ?? .ring }
+    var resolvedClockDisplayMode: ClockBubbleDisplayMode { clockDisplayMode ?? .digital }
+    var resolvedClockUse24Hour: Bool { clockUse24Hour ?? false }
+    var resolvedStopwatchDisplayMode: StopwatchBubbleDisplayMode { stopwatchDisplayMode ?? .compact }
+    var resolvedSystemDisplayMode: SystemBubbleDisplayMode { systemDisplayMode ?? .value }
+    var resolvedClipboardDisplayMode: ClipboardBubbleDisplayMode { clipboardDisplayMode ?? .icon }
+    var resolvedCalendarDisplayMode: CalendarBubbleDisplayMode { calendarDisplayMode ?? .date }
+    var resolvedAudioDisplayMode: AudioBubbleDisplayMode { audioDisplayMode ?? .ring }
+    var resolvedVinylDisplayMode: VinylBubbleDisplayMode { vinylDisplayMode ?? .fullRecord }
+    var resolvedPixelPalDisplayMode: PixelPalBubbleDisplayMode { pixelPalDisplayMode ?? .full }
+
     func styleOverride(for kind: NotchBubbleKind) -> NotchBubbleStyleOverride? {
         bubbleStyles?[kind.rawValue]?.normalized()
     }
@@ -311,6 +430,7 @@ struct NotchBubbleSettings: Codable, Equatable {
             ?? (shape == .glass ? .glass : .solid)
         let tintColor = override?.tint?.color
         return ResolvedNotchBubbleStyle(
+            design: override?.design ?? .halo,
             size: CGFloat(override?.size ?? bubbleSize),
             shape: resolvedShape,
             background: resolvedBackground,
