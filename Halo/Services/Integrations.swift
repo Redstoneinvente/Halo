@@ -476,6 +476,33 @@ final class AudioService: ObservableObject {
 
 @MainActor
 final class MediaService: ObservableObject {
+    static let trailerDemoTitle = "Neon Afterglow"
+    static let trailerDemoArtist = "Halo Sessions"
+    static let trailerDemoAlbum = "Ways of Seeing"
+    static let trailerDemoDuration = 104.0
+    static let trailerDemoLyrics = """
+    [00:00.00]Light wakes up along the edge
+    [00:06.00]A little world above the screen
+    [00:12.00]Shape the space the way you want it
+    [00:18.00]Make the ordinary feel unseen
+    [00:25.00]One small spark becomes a rhythm
+    [00:31.00]Glass and color start to move
+    [00:37.00]Every glance can tell a story
+    [00:43.00]Every motion finds its groove
+    [00:50.00]Turn the quiet into motion
+    [00:56.00]Let the pixels come alive
+    [01:02.00]There are more ways to imagine
+    [01:08.00]Than a single shape can hide
+    [01:15.00]Slowly now the scene is changing
+    [01:21.00]Faster as the colors flow
+    [01:27.00]Your Mac, your space, your little halo
+    [01:34.00]Make it yours and let it glow
+    """
+
+    static func isTrailerDemo(title: String, artist: String) -> Bool {
+        title == trailerDemoTitle && artist == trailerDemoArtist
+    }
+
     @Published var title = "Connect a player"
     @Published var artist = "Apple Music, Spotify or Safari"
     @Published var error: String?
@@ -490,6 +517,10 @@ final class MediaService: ObservableObject {
     @Published private(set) var shuffleEnabled = false
     @Published private(set) var repeatSupported = false
     @Published private(set) var repeatMode = ""
+    @Published private(set) var trailerDemoActive = false
+    private var trailerDemoTimer: Timer?
+    private var trailerDemoAnchorDate = Date()
+    private var trailerDemoAnchorPosition = 0.0
     private var openedDetailEnabled = false
     private var artworkEnabled = false
     private var trackID = ""
@@ -500,6 +531,7 @@ final class MediaService: ObservableObject {
     func setArtworkEnabled(_ enabled: Bool) {
         guard artworkEnabled != enabled else { return }
         artworkEnabled = enabled
+        if trailerDemoActive { return }
         artworkTask?.cancel(); artworkKey = ""; artworkColors = []
         if enabled, let app = connectedApp { requestArtwork(app: app) }
         else if enabled { requestExternalArtwork() }
@@ -515,7 +547,126 @@ final class MediaService: ObservableObject {
     private var automaticMode = true
     private var deniedApps = Set<String>()
     private var generation = 0
+
+    func setTrailerDemoEnabled(_ enabled: Bool) {
+        if enabled {
+            guard !trailerDemoActive else { return }
+            generation += 1
+            detecting = false
+            artworkTask?.cancel()
+            trailerDemoActive = true
+            connectedApp = nil
+            error = nil
+            busy = false
+            title = Self.trailerDemoTitle
+            artist = Self.trailerDemoArtist
+            album = Self.trailerDemoAlbum
+            duration = Self.trailerDemoDuration
+            position = 0
+            trailerDemoAnchorPosition = 0
+            trailerDemoAnchorDate = Date()
+            isPlaying = true
+            shuffleSupported = false
+            shuffleEnabled = false
+            repeatSupported = false
+            repeatMode = ""
+            artworkColors = [
+                WidgetColor(red: 0.18, green: 0.72, blue: 1.0),
+                WidgetColor(red: 0.60, green: 0.30, blue: 1.0),
+                WidgetColor(red: 1.0, green: 0.32, blue: 0.64),
+                WidgetColor(red: 0.12, green: 0.10, blue: 0.28)
+            ]
+            artworkImage = Self.makeTrailerDemoArtwork()
+            startTrailerDemoClock()
+        } else {
+            guard trailerDemoActive else { return }
+            refreshTrailerDemoClock()
+            trailerDemoActive = false
+            trailerDemoTimer?.invalidate()
+            trailerDemoTimer = nil
+            disconnect()
+        }
+    }
+
+    private static func makeTrailerDemoArtwork() -> NSImage {
+        let size = NSSize(width: 512, height: 512)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        let bounds = NSRect(origin: .zero, size: size)
+        let gradient = NSGradient(colors: [
+            NSColor(calibratedRed: 0.05, green: 0.08, blue: 0.22, alpha: 1),
+            NSColor(calibratedRed: 0.24, green: 0.20, blue: 0.72, alpha: 1),
+            NSColor(calibratedRed: 0.94, green: 0.24, blue: 0.58, alpha: 1)
+        ])
+        gradient?.draw(in: bounds, angle: -38)
+
+        NSColor.white.withAlphaComponent(0.18).setStroke()
+        let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 74, dy: 74))
+        ring.lineWidth = 12
+        ring.stroke()
+
+        NSColor.white.withAlphaComponent(0.92).setFill()
+        let core = NSBezierPath(ovalIn: bounds.insetBy(dx: 198, dy: 198))
+        core.fill()
+
+        if let symbol = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil) {
+            symbol.draw(in: NSRect(x: 178, y: 178, width: 156, height: 156),
+                        from: .zero, operation: .sourceOver, fraction: 0.92)
+        }
+        image.unlockFocus()
+        return image
+    }
+
+    private func startTrailerDemoClock() {
+        trailerDemoTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.refreshTrailerDemoClock() }
+        }
+        timer.tolerance = 0.03
+        trailerDemoTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func refreshTrailerDemoClock() {
+        guard trailerDemoActive, duration > 0 else { return }
+        guard isPlaying else { return }
+        let elapsed = max(0, Date().timeIntervalSince(trailerDemoAnchorDate))
+        let next = trailerDemoAnchorPosition + elapsed
+        position = next.truncatingRemainder(dividingBy: duration)
+        if next >= duration {
+            trailerDemoAnchorPosition = position
+            trailerDemoAnchorDate = Date()
+        }
+    }
+
+    private func performTrailerDemo(_ command: String) {
+        guard trailerDemoActive else { return }
+        refreshTrailerDemoClock()
+        switch command {
+        case "playpause":
+            if isPlaying {
+                trailerDemoAnchorPosition = position
+                isPlaying = false
+            } else {
+                trailerDemoAnchorPosition = position
+                trailerDemoAnchorDate = Date()
+                isPlaying = true
+            }
+        case "next track":
+            position = 0
+            trailerDemoAnchorPosition = 0
+            trailerDemoAnchorDate = Date()
+        case "previous track":
+            position = max(0, position - 12)
+            trailerDemoAnchorPosition = position
+            trailerDemoAnchorDate = Date()
+        default:
+            break
+        }
+    }
+
     func disconnect() {
+        guard !trailerDemoActive else { return }
         generation += 1; connectedApp = nil; isPlaying = false
         artworkTask?.cancel(); artworkKey = ""; trackID = ""; artworkColors = []; artworkImage = nil
         externalArtworkData = nil; externalArtworkURL = nil
@@ -534,6 +685,10 @@ final class MediaService: ObservableObject {
     }
     func poll(app: String, automatic: Bool = true) {
         automaticMode = automatic
+        if trailerDemoActive {
+            refreshTrailerDemoClock()
+            return
+        }
         guard !detecting, !busy else { return }
         let supported = automatic ? ["com.apple.Music", "com.spotify.client"] : [app]
         let candidates = supported.filter { !deniedApps.contains($0) && !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
@@ -584,7 +739,7 @@ final class MediaService: ObservableObject {
                              artworkData: Data? = nil,
                              artworkURL: String? = nil,
                              sourceKey: String) {
-        guard connectedApp == nil else { return }
+        guard !trailerDemoActive, connectedApp == nil else { return }
         let canonicalKey = "external:" + sourceKey
         let trackChanged = trackID != canonicalKey
         if trackChanged {
@@ -608,6 +763,10 @@ final class MediaService: ObservableObject {
     }
 
     func performSystem(_ command: String) {
+        if trailerDemoActive {
+            performTrailerDemo(command)
+            return
+        }
         guard connectedApp == nil,
               ["playpause", "next track", "previous track"].contains(command),
               !busy else { return }
@@ -620,6 +779,10 @@ final class MediaService: ObservableObject {
     }
 
     func perform(_ command: String, app preferred: String) {
+        if trailerDemoActive {
+            performTrailerDemo(command)
+            return
+        }
         let app = command == "refresh" ? preferred : (connectedApp ?? preferred)
         guard ["com.apple.Music", "com.spotify.client"].contains(app),
               ["refresh", "playpause", "next track", "previous track"].contains(command), !busy else { return }
@@ -648,6 +811,12 @@ final class MediaService: ObservableObject {
     func seek(to seconds: Double) {
         guard duration > 0, seconds.isFinite else { return }
         let target = min(duration, max(0, seconds))
+        if trailerDemoActive {
+            position = target
+            trailerDemoAnchorPosition = target
+            trailerDemoAnchorDate = Date()
+            return
+        }
 
         // System/Safari media has no AppleScript-connected app. Send the seek to the same
         // MediaRemote session that supplied the Audio CI metadata. Optimistically anchor the
