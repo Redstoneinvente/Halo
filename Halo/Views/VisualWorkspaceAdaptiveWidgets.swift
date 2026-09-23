@@ -428,7 +428,7 @@ struct VisualWorkspaceTimerView: View {
             else if store.deadline != nil || store.pausedSeconds > 0 { store.pauseResume() }
             else { store.startTimer(minutes: microPresetMinutes) }
         } popover: {
-            HaloTimerDurationComposer(
+            HaloTimerHorizontalDurationComposer(
                 accent: style.accentColor.color,
                 textColor: style.textColor.color,
                 quickPresets: [1, 5, 10, 15, 30],
@@ -439,7 +439,14 @@ struct VisualWorkspaceTimerView: View {
                 store.startTimer(duration: duration)
             }
             .padding(10)
-            .frame(width: 350)
+            .frame(
+                minWidth: 310,
+                idealWidth: 410,
+                maxWidth: 500,
+                minHeight: 165,
+                idealHeight: 205,
+                maxHeight: 230
+            )
         }
         .background(HaloMicroScrollCapture { delta in
             guard store.deadline == nil, store.pausedSeconds <= 0 else { return }
@@ -459,13 +466,66 @@ struct VisualWorkspaceTimerView: View {
         return minutes == 0 ? "\(hours)h" : "\(hours)h\(minutes)m"
     }
 
+    @ViewBuilder
     private func horizontalTimer(remaining: TimeInterval, elapsed: TimeInterval, progress: Double) -> some View {
-        HStack(spacing: context.spacing) {
-            if context.columns >= 5 && style.showTitle { Text(context.settings.timerName).font(style.font(scale: 0.82)).foregroundStyle(.secondary).lineLimit(1) }
-            primaryTime(remaining: remaining, elapsed: elapsed, progress: progress, scale: context.columns >= 6 ? 1.12 : 0.94)
-            if context.columns >= 4 && context.shows("progress") { progressTreatment(progress).frame(maxWidth: context.columns >= 7 ? 180 : 110) }
-            Spacer(minLength: 2)
-            timerControls(compact: true)
+        let idle = store.deadline == nil && store.pausedSeconds <= 0 && !store.finished
+        let width = availableWidth ?? 0
+        let height = availableHeight ?? 0
+        let canInline = width >= 300 && height >= 120
+
+        if idle && canInline {
+            HaloTimerHorizontalDurationComposer(
+                accent: style.accentColor.color,
+                textColor: style.textColor.color,
+                quickPresets: [
+                    style.resolvedContent.timerPresetA,
+                    style.resolvedContent.timerPresetB,
+                    style.resolvedContent.timerPresetC,
+                    45,
+                    60
+                ],
+                initialMinutes: style.resolvedContent.timerPresetB,
+                compact: height < 180
+            ) { duration in
+                store.startTimer(duration: duration)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        } else if idle {
+            HaloTimerDurationPopoverButton(
+                accent: style.accentColor.color,
+                textColor: style.textColor.color,
+                quickPresets: [
+                    style.resolvedContent.timerPresetA,
+                    style.resolvedContent.timerPresetB,
+                    style.resolvedContent.timerPresetC
+                ],
+                initialMinutes: style.resolvedContent.timerPresetB,
+                label: "Set timer"
+            ) { duration in
+                store.startTimer(duration: duration)
+            }
+            .buttonStyle(.bordered)
+        } else {
+            HStack(spacing: context.spacing) {
+                if context.columns >= 5 && style.showTitle {
+                    Text(context.settings.timerName)
+                        .font(style.font(scale: 0.82))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                primaryTime(
+                    remaining: remaining,
+                    elapsed: elapsed,
+                    progress: progress,
+                    scale: context.columns >= 6 ? 1.12 : 0.94
+                )
+                if context.columns >= 4 && context.shows("progress") {
+                    progressTreatment(progress)
+                        .frame(maxWidth: context.columns >= 7 ? 180 : 110)
+                }
+                Spacer(minLength: 2)
+                timerControls(compact: true)
+            }
         }
     }
 
@@ -558,10 +618,14 @@ struct VisualWorkspaceTimerView: View {
             let controlSize: ControlSize = compact ? .mini : .small
             if store.deadline == nil && store.pausedSeconds <= 0 {
                 if context.shows("presets") {
+                    let width = availableWidth ?? 0
+                    let height = availableHeight ?? 0
+                    let horizontallyDominant = width / max(1, height) >= 1.45
                     let roomForInlineComposer =
                         !compact &&
-                        (availableWidth ?? 0) >= 380 &&
-                        (availableHeight ?? 0) >= 420
+                        !horizontallyDominant &&
+                        width >= 380 &&
+                        height >= 420
 
                     if !roomForInlineComposer {
                         HaloTimerDurationPopoverButton(
