@@ -903,6 +903,20 @@ final class WindowManager {
             .removeDuplicates().dropFirst()
             .throttle(for: .milliseconds(33), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+
+        // SurfaceRenderConfiguration intentionally contains layout/render fields but
+        // not the active scheduled profile theme. Observe that theme separately so
+        // profile width/corner/opacity changes immediately rebuild panel geometry.
+        store.workspace.$settings
+            .map { [store] settings -> Theme? in
+                guard let profileID = store.workspace.scheduledProfileID else { return nil }
+                return settings.profiles.first(where: { $0.id == profileID })?.theme
+            }
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reconcile() }
+            .store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloGeometryPreview"))
             .receive(on: DispatchQueue.main).sink { [weak self] note in
                 let editing = (note.userInfo?["editing"] as? Bool) ?? false

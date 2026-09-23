@@ -3456,7 +3456,13 @@ struct SurfaceView: View {
                 state.contextPreferredCompactWidth = nil
                 state.contextPreferredCompactHeight = nil
                 state.contextMinimumExpandedWidth = nil
-                if activeContext != nil && !contextMusicActive { state.contextPreferredSize = nil }
+
+                // Normal workspace sizing must become authoritative as soon as no
+                // content-sized Music CI owns the surface. Previously a stale CI size
+                // could survive when activeContext became nil and pin the opened frame.
+                if !contextMusicActive {
+                    state.contextPreferredSize = nil
+                }
             }
             workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
         }
@@ -3525,9 +3531,18 @@ struct SurfaceView: View {
                     system: workspace.system
                 )
             }
-            if !transferContextActive && !clipboardContextActive && !customContextActive && !integrationContextActive &&
-                ((!visuallyExpanded && !presentsVisualWorkspaceSurface) || layout.closedNotch?.applyBackgroundWhenOpened == true) {
-                AlbumNotchBackground(options: closedBackgroundOptions, media: workspace.media, system: workspace.system)
+            if !usesVisualWorkspace &&
+                !transferContextActive &&
+                !clipboardContextActive &&
+                !customContextActive &&
+                !integrationContextActive &&
+                ((!visuallyExpanded && !presentsVisualWorkspaceSurface) ||
+                 layout.closedNotch?.applyBackgroundWhenOpened == true) {
+                AlbumNotchBackground(
+                    options: closedBackgroundOptions,
+                    media: workspace.media,
+                    system: workspace.system
+                )
             }
         }
     }
