@@ -6141,6 +6141,9 @@ private enum ContextMusicArtworkReader {
     }
 
     static func lyrics(app: String?, key: String, title: String, artist: String, duration: Double?, onlineFallback: Bool) async -> String {
+        if MediaService.isTrailerDemo(title: title, artist: artist) {
+            return MediaService.trailerDemoLyrics
+        }
         let cacheKey = key + "|duration:" + (duration.map { String(Int($0.rounded())) } ?? "unknown")
         lock.lock(); let cached = lyricsCache[cacheKey]; lock.unlock(); if let cached { return cached }
         var value = ""
