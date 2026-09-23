@@ -1325,6 +1325,49 @@ struct TrailerModeSettings: Codable, Equatable {
     var resolvedFastInterval: Double { min(resolvedSlowInterval, max(0.12, fastInterval.isFinite ? fastInterval : 0.32)) }
     var resolvedRampDuration: Double { min(120, max(1, rampDuration.isFinite ? rampDuration : 14)) }
     var resolvedSmoothing: Double { min(1.2, max(0.08, smoothing.isFinite ? smoothing : 0.42)) }
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case hotkeyEnabled, hotkeyCode, hotkeyModifiers, surfaceTarget
+        case slowInterval, fastInterval, rampDuration, smoothing
+        case transitionsEnabled, transitionStyle
+        case randomizeAppearance, randomizeWidgets, showcaseMusic
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        hotkeyEnabled = try container.decodeIfPresent(Bool.self, forKey: .hotkeyEnabled) ?? true
+        hotkeyCode = try container.decodeIfPresent(UInt32.self, forKey: .hotkeyCode) ?? 17
+        hotkeyModifiers = try container.decodeIfPresent(UInt32.self, forKey: .hotkeyModifiers) ?? 2304
+        surfaceTarget = try container.decodeIfPresent(TrailerSurfaceTarget.self, forKey: .surfaceTarget) ?? .closedOnly
+        slowInterval = try container.decodeIfPresent(Double.self, forKey: .slowInterval) ?? 2.8
+        fastInterval = try container.decodeIfPresent(Double.self, forKey: .fastInterval) ?? 0.32
+        rampDuration = try container.decodeIfPresent(Double.self, forKey: .rampDuration) ?? 14
+        smoothing = try container.decodeIfPresent(Double.self, forKey: .smoothing) ?? 0.42
+        transitionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .transitionsEnabled) ?? true
+        transitionStyle = try container.decodeIfPresent(TrailerTransitionStyle.self, forKey: .transitionStyle) ?? .automatic
+        randomizeAppearance = try container.decodeIfPresent(Bool.self, forKey: .randomizeAppearance) ?? true
+        randomizeWidgets = try container.decodeIfPresent(Bool.self, forKey: .randomizeWidgets) ?? true
+        showcaseMusic = try container.decodeIfPresent(Bool.self, forKey: .showcaseMusic) ?? true
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(hotkeyEnabled, forKey: .hotkeyEnabled)
+        try container.encode(hotkeyCode, forKey: .hotkeyCode)
+        try container.encode(hotkeyModifiers, forKey: .hotkeyModifiers)
+        try container.encode(surfaceTarget, forKey: .surfaceTarget)
+        try container.encode(slowInterval, forKey: .slowInterval)
+        try container.encode(fastInterval, forKey: .fastInterval)
+        try container.encode(rampDuration, forKey: .rampDuration)
+        try container.encode(smoothing, forKey: .smoothing)
+        try container.encode(transitionsEnabled, forKey: .transitionsEnabled)
+        try container.encode(transitionStyle, forKey: .transitionStyle)
+        try container.encode(randomizeAppearance, forKey: .randomizeAppearance)
+        try container.encode(randomizeWidgets, forKey: .randomizeWidgets)
+        try container.encode(showcaseMusic, forKey: .showcaseMusic)
+    }
 }
 
 struct WorkspaceSettings: Codable {
