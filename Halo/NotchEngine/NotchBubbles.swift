@@ -52,6 +52,23 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .files: return "tray.full.fill"
         }
     }
+
+    /// Stable tie-breaker only. Explicit priority and presentation mode always win first.
+    var policyRank: Int {
+        switch self {
+        case .timer: return 0
+        case .calendar: return 1
+        case .files: return 2
+        case .stopwatch: return 3
+        case .music: return 4
+        case .vinyl: return 5
+        case .audio: return 6
+        case .system: return 7
+        case .clipboard: return 8
+        case .clock: return 9
+        case .pixelPal: return 10
+        }
+    }
 }
 
 enum NotchBubblePlacement: String, Codable, CaseIterable, Hashable {
@@ -570,7 +587,8 @@ final class NotchBubbleActivityCenter: ObservableObject {
     private init() {}
 
     func publishHUD(_ event: HaloHUDEvent, settings: NotchBubbleSettings) {
-        guard settings.acceptsHUDEvent(event.kind),
+        guard settings.enabled,
+              settings.acceptsHUDEvent(event.kind),
               let activity = Self.activity(from: event, settings: settings) else { return }
 
         suppressedKinds.remove(activity.kind)
@@ -1118,6 +1136,9 @@ struct NotchBubblePolicyEngine {
                         .confirmation: 3, .activeTask: 2, .pinned: 1, .onDemand: 0
                     ]
                     return rank[$0.mode, default: 0] > rank[$1.mode, default: 0]
+                }
+                if $0.kind.policyRank != $1.kind.policyRank {
+                    return $0.kind.policyRank < $1.kind.policyRank
                 }
                 return $0.updatedAt > $1.updatedAt
             }
@@ -2312,7 +2333,10 @@ private struct NotchBubbleView: View {
             .compositingGroup()
             .onHover { value in
                 hovering = value
-                activityCenter.setInteracting(kind: kind, interacting: value)
+                updateInteractionProtection()
+            }
+            .onChange(of: showingDetail) { _ in
+                updateInteractionProtection()
             }
             .simultaneousGesture(
                 TapGesture().onEnded {
@@ -3716,6 +3740,13 @@ private struct NotchBubbleView: View {
             if total < 1_000_000 { return String(format: "%.0fK", total / 1_000) }
             return String(format: "%.1fM", total / 1_000_000)
         }
+    }
+
+    private func updateInteractionProtection() {
+        activityCenter.setInteracting(
+            kind: kind,
+            interacting: hovering || showingDetail
+        )
     }
 
     private func disableBubbleKind() {
