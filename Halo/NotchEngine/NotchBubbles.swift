@@ -130,19 +130,19 @@ enum NotchBubbleBackgroundStyle: String, Codable, CaseIterable, Identifiable, Ha
 }
 
 struct NotchBubbleStyleOverride: Codable, Equatable {
-    var size: Double?
-    var shape: NotchBubbleShape?
-    var background: NotchBubbleBackgroundStyle?
-    var cornerRadius: Double?
-    var glassIntensity: Double?
-    var backgroundOpacity: Double?
-    var borderOpacity: Double?
-    var contentScale: Double?
-    var verticalOffset: Double?
-    var tint: WidgetColor?
-    var tintAmount: Double?
-    var animation: NotchBubbleAnimationPreset?
-    var lifecycleDuration: Double?
+    var size: Double? = nil
+    var shape: NotchBubbleShape? = nil
+    var background: NotchBubbleBackgroundStyle? = nil
+    var cornerRadius: Double? = nil
+    var glassIntensity: Double? = nil
+    var backgroundOpacity: Double? = nil
+    var borderOpacity: Double? = nil
+    var contentScale: Double? = nil
+    var verticalOffset: Double? = nil
+    var tint: WidgetColor? = nil
+    var tintAmount: Double? = nil
+    var animation: NotchBubbleAnimationPreset? = nil
+    var lifecycleDuration: Double? = nil
 
     func normalized() -> Self {
         var value = self
