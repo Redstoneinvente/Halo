@@ -7,6 +7,7 @@ import Security
 @MainActor
 final class AppStore: ObservableObject {
     let workspace = WorkspaceStore()
+    lazy var trailerMode = TrailerModeController(store: self)
     @Published var configuration: Configuration { didSet { scheduleSave() } }
     @Published var error: String?
     @Published var files: [URL] = [] { didSet { persistFiles() } }
@@ -1945,5 +1946,280 @@ private enum HaloCommercialError: Error {
     case message(String)
     var message: String {
         switch self { case .message(let value): return value }
+    }
+}
+
+
+// MARK: - Trailer Mode
+
+/// Runtime-only showcase sequencer used to record Halo marketing footage.
+/// It never writes randomized layouts/themes back into the user's saved workspace.
+@MainActor
+final class TrailerModeController {
+    private weak var store: AppStore?
+    private var pendingChange: DispatchWorkItem?
+    private var startedAt: Date?
+    private var step = 0
+    private var baseLayout: WorkspaceLayout?
+    private var baseTheme: Theme?
+
+    init(store: AppStore) {
+        self.store = store
+    }
+
+    func toggle() {
+        guard let store else { return }
+        store.workspace.trailerModeActive ? stop() : start()
+    }
+
+    func start() {
+        guard let store, !store.workspace.trailerModeActive else { return }
+        let configuration = store.workspace.settings.trailer ?? TrailerModeSettings()
+        baseLayout = store.workspace.baseEffectiveLayout
+        baseTheme = store.configuration.theme
+        startedAt = Date()
+        step = 0
+        store.workspace.trailerModeActive = true
+        if configuration.showcaseMusic {
+            store.workspace.media.setTrailerDemoEnabled(true)
+        }
+        applyNextFrame()
+    }
+
+    func stop() {
+        guard let store else { return }
+        pendingChange?.cancel()
+        pendingChange = nil
+        startedAt = nil
+        step = 0
+        baseLayout = nil
+        baseTheme = nil
+        store.workspace.trailerLayoutOverride = nil
+        store.workspace.trailerThemeOverride = nil
+        store.workspace.trailerModeActive = false
+        store.workspace.media.setTrailerDemoEnabled(false)
+        store.workspace.refreshMediaSource()
+    }
+
+    private func applyNextFrame() {
+        guard let store,
+              store.workspace.trailerModeActive,
+              let baseLayout,
+              let baseTheme else { return }
+
+        let configuration = store.workspace.settings.trailer ?? TrailerModeSettings()
+        let expanded = requestedExpandedState(configuration.surfaceTarget, step: step)
+        let musicFrame = configuration.showcaseMusic && step % 4 == 2
+
+        var layout = baseLayout
+        if configuration.randomizeAppearance {
+            randomizeAppearance(in: &layout, configuration: configuration, expanded: expanded)
+        }
+        configureClosedShowcase(in: &layout, configuration: configuration, musicFrame: musicFrame)
+        configureOpenedShowcase(in: &layout, configuration: configuration, musicFrame: musicFrame)
+
+        var theme = baseTheme
+        if configuration.randomizeAppearance {
+            randomizeTheme(&theme)
+        }
+
+        store.workspace.trailerLayoutOverride = layout
+        store.workspace.trailerThemeOverride = theme
+
+        NotificationCenter.default.post(
+            name: .init("HaloTrailerSurfaceState"),
+            object: nil,
+            userInfo: ["expanded": expanded]
+        )
+
+        step += 1
+        scheduleNext(configuration: configuration)
+    }
+
+    private func scheduleNext(configuration: TrailerModeSettings) {
+        pendingChange?.cancel()
+        guard let store, store.workspace.trailerModeActive else { return }
+
+        let elapsed = max(0, Date().timeIntervalSince(startedAt ?? Date()))
+        let progress = min(1, elapsed / configuration.resolvedRampDuration)
+        let eased = progress * progress * (3 - 2 * progress)
+        let interval = configuration.resolvedSlowInterval +
+            (configuration.resolvedFastInterval - configuration.resolvedSlowInterval) * eased
+
+        let work = DispatchWorkItem { [weak self] in self?.applyNextFrame() }
+        pendingChange = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.12, interval), execute: work)
+    }
+
+    private func requestedExpandedState(_ target: TrailerSurfaceTarget, step: Int) -> Bool {
+        switch target {
+        case .closedOnly: return false
+        case .openedOnly: return true
+        case .alternate: return step % 2 == 1
+        }
+    }
+
+    private func randomizeTheme(_ theme: inout Theme) {
+        let styles: [SurfaceStyle] = [.notch, .pill, .island, .shelf, .menuBar, .simulated, .detached]
+        theme.style = styles.randomElement() ?? .notch
+        theme.width = Double.random(in: 360...720)
+        theme.cornerRadius = Double.random(in: 14...36)
+        theme.tint = Double.random(in: 0.28...0.82)
+        theme.opacity = Double.random(in: 0.82...1.0)
+        theme.animations = true
+    }
+
+    private func randomizeAppearance(in layout: inout WorkspaceLayout,
+                                     configuration: TrailerModeSettings,
+                                     expanded: Bool) {
+        let palettes: [(WidgetColor, WidgetColor, WidgetColor)] = [
+            (.init(red: 0.10, green: 0.15, blue: 0.30), .init(red: 0.20, green: 0.70, blue: 1.00), .init(red: 0.72, green: 0.36, blue: 1.00)),
+            (.init(red: 0.04, green: 0.22, blue: 0.18), .init(red: 0.16, green: 0.88, blue: 0.65), .init(red: 0.80, green: 1.00, blue: 0.55)),
+            (.init(red: 0.28, green: 0.08, blue: 0.13), .init(red: 1.00, green: 0.36, blue: 0.44), .init(red: 1.00, green: 0.72, blue: 0.32)),
+            (.init(red: 0.06, green: 0.08, blue: 0.12), .init(red: 0.28, green: 0.48, blue: 1.00), .init(red: 0.18, green: 0.92, blue: 0.92)),
+            (.init(red: 0.22, green: 0.10, blue: 0.28), .init(red: 0.95, green: 0.30, blue: 0.78), .init(red: 0.42, green: 0.62, blue: 1.00))
+        ]
+        let palette = palettes.randomElement() ?? palettes[0]
+
+        layout.appearance.background = [BackgroundKind.gradient, .solid, .glass].randomElement() ?? .glass
+        layout.appearance.solidColor = palette.0
+        layout.appearance.gradientStartColor = palette.1
+        layout.appearance.gradientEndColor = palette.2
+        layout.appearance.blur = Double.random(in: 0...10)
+        layout.appearance.saturation = Double.random(in: 0.85...1.25)
+        layout.appearance.brightness = Double.random(in: -0.06...0.08)
+        layout.appearance.compactWidth = Double.random(in: 170...315)
+        layout.appearance.expandedHeight = Double.random(in: 330...620)
+        layout.appearance.spacing = Double.random(in: 8...18)
+        layout.appearance.animation = [.macOS, .dynamic, .smooth, .snappy, .elastic, .minimal].randomElement() ?? .smooth
+
+        layout.appearance.surface.shape = SurfaceShapeKind.allCases.randomElement() ?? .rounded
+        layout.appearance.surface.compactHeight = Double.random(in: 28...54)
+        layout.appearance.surface.topRadius = Double.random(in: 3...22)
+        layout.appearance.surface.bottomRadius = Double.random(in: 15...38)
+        layout.appearance.surface.shoulder = Double.random(in: 8...28)
+        layout.appearance.surface.duration = configuration.resolvedSmoothing
+        let normalizedSmoothing = (configuration.resolvedSmoothing - 0.08) / (1.2 - 0.08)
+        layout.appearance.surface.damping = min(1, max(0.4, 0.58 + normalizedSmoothing * 0.34))
+        let transitions: [SurfaceTransition] = configuration.resolvedSmoothing < 0.16
+            ? [.resize, .scale, .fade, .instant]
+            : [.resize, .spring, .fade, .scale, .slide]
+        layout.appearance.surface.opening = transitions.randomElement() ?? .spring
+        layout.appearance.surface.closing = transitions.randomElement() ?? .resize
+
+        layout.appearance.skin.enabled = Bool.random()
+        layout.appearance.skin.preset = NotchSkinPreset.allCases.randomElement() ?? .haloGlow
+        layout.appearance.skin.visibility = expanded ? .opened : .closed
+        layout.appearance.skin.opacity = Double.random(in: 0.16...0.48)
+        layout.appearance.skin.blend = NotchSkinBlend.allCases.randomElement() ?? .screen
+        layout.appearance.skin.usesThemeTint = Bool.random()
+        layout.appearance.skin.tint = palette.1
+        layout.appearance.skin.scale = Double.random(in: 0.85...1.35)
+
+        var glass = layout.appearance.glass
+        glass.clarity = Double.random(in: 0.55...0.92)
+        glass.frost = Double.random(in: 0.18...0.68)
+        glass.lightAbsorption = Double.random(in: 0.06...0.28)
+        glass.refraction = Double.random(in: 0.04...0.28)
+        glass.chromaticShift = Double.random(in: 0.02...0.16)
+        glass.tint = palette.2
+        glass.tintAmount = Double.random(in: 0.02...0.14)
+        layout.appearance.glass = glass
+    }
+
+    private func configureClosedShowcase(in layout: inout WorkspaceLayout,
+                                         configuration: TrailerModeSettings,
+                                         musicFrame: Bool) {
+        var closed = layout.closedNotch ?? ClosedNotchOptions()
+        let choices: [ClosedNotchItem] = [.clock, .date, .timer, .battery, .media, .visualizer, .files]
+        closed.left = choices.randomElement() ?? .clock
+        closed.right = choices.filter { $0 != closed.left }.randomElement() ?? .visualizer
+        closed.fontSize = Double.random(in: 10...16)
+        closed.animation = PlaybackAnimation.allCases.randomElement() ?? .bars
+        closed.animate = true
+
+        if musicFrame {
+            closed.left = .media
+            closed.right = .visualizer
+            var media = closed.mediaOptions ?? ClosedMediaOptions()
+            media.textMode = .lyrics
+            media.onlineLyrics = false
+            media.lyricDisplay = LyricDisplayMode.allCases.randomElement() ?? .line
+            media.horizontalSpace = Double.random(in: 150...260)
+            media.lyricChangeAnimation = [.fade, .slide, .lift, .scale, .blur].randomElement() ?? .lift
+            media.lyricChangeAnimationDuration = configuration.resolvedSmoothing
+            media.changeAnimationDuration = configuration.resolvedSmoothing
+            closed.mediaOptions = media
+
+            var art = closed.artworkOptions ?? ClosedArtworkOptions()
+            art.enabled = true
+            art.mode = Bool.random() ? .cover : .vinyl
+            art.size = Double.random(in: 26...46)
+            art.backgroundEnabled = Bool.random()
+            art.backgroundOpacity = Double.random(in: 0.18...0.42)
+            closed.artworkOptions = art
+
+            var visualizer = closed.visualizer ?? VisualizerOptions()
+            visualizer.dynamicColors = true
+            visualizer.speed = Double.random(in: 0.75...1.6)
+            visualizer.intensity = Double.random(in: 0.55...1.0)
+            visualizer.width = Double.random(in: 56...120)
+            visualizer.height = Double.random(in: 12...28)
+            closed.visualizer = visualizer
+        }
+
+        layout.closedNotch = closed
+    }
+
+    private func configureOpenedShowcase(in layout: inout WorkspaceLayout,
+                                         configuration: TrailerModeSettings,
+                                         musicFrame: Bool) {
+        if configuration.randomizeWidgets {
+            var candidates = ModuleID.allCases.filter { $0 != .activities && $0 != .capture }
+            candidates.shuffle()
+            let count = Int.random(in: 2...min(6, candidates.count))
+            var selected = Set(candidates.prefix(count))
+            if configuration.showcaseMusic && Bool.random() { selected.insert(.media) }
+            layout.enabled = selected
+            layout.order = candidates + ModuleID.allCases.filter { !candidates.contains($0) }
+
+            for module in selected {
+                var style = layout.widgetStyle(for: module)
+                style.layoutMode = WidgetLayoutMode.allCases.randomElement() ?? .standard
+                style.cardBackgroundStyle = WidgetCardBackgroundStyle.allCases.randomElement() ?? .glass
+                style.outlineStyle = WidgetOutlineStyle.allCases.randomElement() ?? .none
+                style.fontSize = Double.random(in: 12...24)
+                style.padding = Double.random(in: 7...18)
+                style.cornerRadius = Double.random(in: 10...28)
+                style.backgroundOpacity = Double.random(in: 0.04...0.22)
+                style.showHeaderIcon = Bool.random()
+                style.gradientAngle = Double.random(in: 0...360)
+                style.glassTintOpacity = Double.random(in: 0.04...0.24)
+                layout.setWidgetStyle(style, for: module)
+            }
+        }
+
+        var music = layout.contextMusic ?? ContextMusicOptions()
+        music.enabled = musicFrame
+        if musicFrame {
+            music.showArtwork = true
+            music.showTitle = true
+            music.showArtist = true
+            music.showControls = true
+            music.showVisualizer = true
+            music.showLyrics = true
+            music.lyricsOnline = false
+            music.lyricDisplay = LyricDisplayMode.allCases.randomElement() ?? .line
+            music.lyricTransition = [.fade, .slide, .lift, .scale, .blur].randomElement() ?? .lift
+            music.lyricTransitionDuration = configuration.resolvedSmoothing
+            music.artworkBackground = Bool.random()
+            music.artworkBackgroundBlur = Double.random(in: 8...20)
+            music.songTextColors = true
+            music.songControlColors = true
+            music.songVisualizerColors = true
+            music.adaptiveElementColors = true
+            music.visualizerStyle = PlaybackAnimation.allCases.randomElement() ?? .bars
+        }
+        layout.contextMusic = music
     }
 }
