@@ -21,12 +21,11 @@ enum HaloHoverHaptics {
     static func pulse(
         id: String,
         strength: Int,
+        pattern: HaloHoverHapticPattern = .automatic,
         minimumInterval: TimeInterval = 0.16
     ) {
         let strength = min(6, max(0, strength))
 
-        // Off immediately invalidates queued taps from a previous stronger sequence.
-        // Duplicate hover events inside the cooldown leave the active sequence alone.
         if strength == 0 {
             sequenceGenerationByID[id] = (sequenceGenerationByID[id] ?? 0) + 1
             return
@@ -42,9 +41,49 @@ enum HaloHoverHaptics {
         sequenceGenerationByID[id] = generation
         lastPulseByID[id] = now
 
-        // AppKit offers semantic haptic patterns, not a true amplitude value.
-        // Levels 1...3 preserve Halo's original mappings; 4...6 create a more
-        // noticeable tactile response with a short, deliberate compound sequence.
+        if pattern == .automatic {
+            performAutomatic(
+                strength: strength,
+                id: id,
+                generation: generation
+            )
+            return
+        }
+
+        let primary = feedbackPattern(for: strength)
+        switch pattern {
+        case .automatic:
+            break
+        case .single:
+            perform(primary)
+        case .doubleTap:
+            perform(primary)
+            schedule(primary, after: 0.075, id: id, generation: generation)
+        case .tripleTap:
+            perform(primary)
+            schedule(primary, after: 0.065, id: id, generation: generation)
+            schedule(primary, after: 0.130, id: id, generation: generation)
+        case .heartbeat:
+            perform(primary)
+            schedule(.levelChange, after: 0.072, id: id, generation: generation)
+            schedule(.generic, after: 0.215, id: id, generation: generation)
+        case .rapidBurst:
+            perform(primary)
+            schedule(primary, after: 0.036, id: id, generation: generation)
+            schedule(primary, after: 0.072, id: id, generation: generation)
+            schedule(.generic, after: 0.108, id: id, generation: generation)
+        case .echo:
+            perform(primary)
+            schedule(.levelChange, after: 0.105, id: id, generation: generation)
+            schedule(.alignment, after: 0.205, id: id, generation: generation)
+        }
+    }
+
+    private static func performAutomatic(
+        strength: Int,
+        id: String,
+        generation: Int
+    ) {
         switch strength {
         case 1:
             perform(.alignment)
@@ -64,6 +103,19 @@ enum HaloHoverHaptics {
             schedule(.generic, after: 0.038, id: id, generation: generation)
             schedule(.levelChange, after: 0.078, id: id, generation: generation)
             schedule(.generic, after: 0.122, id: id, generation: generation)
+        }
+    }
+
+    private static func feedbackPattern(
+        for strength: Int
+    ) -> NSHapticFeedbackManager.FeedbackPattern {
+        switch strength {
+        case 1:
+            return .alignment
+        case 2:
+            return .levelChange
+        default:
+            return .generic
         }
     }
 

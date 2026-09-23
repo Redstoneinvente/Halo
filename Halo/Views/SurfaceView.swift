@@ -3264,7 +3264,8 @@ struct SurfaceView: View {
             if hovering {
                 HaloHoverHaptics.pulse(
                     id: "surface." + state.displayID,
-                    strength: store.configuration.resolvedHoverHapticStrength
+                    strength: store.configuration.resolvedHoverHapticStrength,
+                    pattern: store.configuration.resolvedHoverHapticPattern
                 )
             }
 

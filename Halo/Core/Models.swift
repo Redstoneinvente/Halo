@@ -30,6 +30,30 @@ struct Theme: Codable, Equatable {
     }
 }
 
+enum HaloHoverHapticPattern: String, Codable, CaseIterable, Identifiable {
+    case automatic = "Automatic"
+    case single = "Single Tap"
+    case doubleTap = "Double Tap"
+    case tripleTap = "Triple Tap"
+    case heartbeat = "Heartbeat"
+    case rapidBurst = "Rapid Burst"
+    case echo = "Echo"
+
+    var id: String { rawValue }
+
+    var detail: String {
+        switch self {
+        case .automatic: return "Uses Halo's strength-aware default rhythm."
+        case .single: return "One clean tactile tap."
+        case .doubleTap: return "Two evenly spaced taps."
+        case .tripleTap: return "Three deliberate taps."
+        case .heartbeat: return "A quick pair followed by a stronger delayed beat."
+        case .rapidBurst: return "Four fast taps for a very obvious response."
+        case .echo: return "A primary tap followed by two softer-feeling echoes."
+        }
+    }
+}
+
 struct Configuration: Codable {
     var theme = Theme()
     var hoverToExpand = true
@@ -39,6 +63,7 @@ struct Configuration: Codable {
     // Optional so existing Configuration payloads continue decoding. 1 preserves
     // the original subtle hover tick for users upgrading from earlier builds.
     var hoverHapticStrength: Int? = nil
+    var hoverHapticPattern: HaloHoverHapticPattern? = nil
     var allDisplays = false
 
     var resolvedHoverOpenDelay: Double {
@@ -51,6 +76,10 @@ struct Configuration: Codable {
 
     var resolvedHoverHapticStrength: Int {
         min(6, max(0, hoverHapticStrength ?? 1))
+    }
+
+    var resolvedHoverHapticPattern: HaloHoverHapticPattern {
+        hoverHapticPattern ?? .automatic
     }
     var simulateNotch = false
     var showClock = true

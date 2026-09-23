@@ -373,6 +373,7 @@ struct SettingsView: View {
                                 HaloHoverHaptics.pulse(
                                     id: "settings.hoverHapticPreview",
                                     strength: strength,
+                                    pattern: store.configuration.resolvedHoverHapticPattern,
                                     minimumInterval: 0.02
                                 )
                             }
@@ -394,7 +395,31 @@ struct SettingsView: View {
                         .frame(width: 88, alignment: .trailing)
                 }
             }
-            Text("Controls the tactile tick when entering the notch or a Notch Bubble. Higher levels use a short compound tap for a more noticeable response.")
+            Picker(
+                "Haptic pattern",
+                selection: Binding(
+                    get: { store.configuration.resolvedHoverHapticPattern },
+                    set: { pattern in
+                        store.configuration.hoverHapticPattern = pattern
+                        HaloHoverHaptics.pulse(
+                            id: "settings.hoverHapticPatternPreview",
+                            strength: store.configuration.resolvedHoverHapticStrength,
+                            pattern: pattern,
+                            minimumInterval: 0.02
+                        )
+                    }
+                )
+            ) {
+                ForEach(HaloHoverHapticPattern.allCases) { pattern in
+                    Text(pattern.rawValue).tag(pattern)
+                }
+            }
+
+            Text(store.configuration.resolvedHoverHapticPattern.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("Strength controls how pronounced each tap is; Pattern controls the rhythm and number of taps.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
