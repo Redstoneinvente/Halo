@@ -81,6 +81,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.setActivationPolicy(.accessory)
         NotificationCenter.default.addObserver(self, selector: #selector(openSettings), name: Notification.Name("HaloOpenSettings"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(toggle), name: Notification.Name("HaloToggle"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(toggleTrailerMode), name: Notification.Name("HaloTrailerToggle"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(applyTrailerSurfaceState(_:)), name: Notification.Name("HaloTrailerSurfaceState"), object: nil)
         configureCommercialAccessGate()
 
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -434,6 +436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         licensedServicesStarted = false
         hudController?.stop()
         hudController = nil
+        if store.workspace.trailerModeActive { store.trailerMode.stop() }
         store.workspace.stop()
     }
 
@@ -448,6 +451,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         engine?.toggleAll()
     }
+    @objc private func toggleTrailerMode() {
+        guard commercialAccessGranted else { return }
+        store.trailerMode.toggle()
+    }
+
+    @objc private func applyTrailerSurfaceState(_ notification: Notification) {
+        guard commercialAccessGranted,
+              let expanded = notification.userInfo?["expanded"] as? Bool else { return }
+        if expanded {
+            engine?.expandAll()
+        } else {
+            engine?.collapseAll()
+        }
+    }
+
     @objc private func metricKitCrashDetected() {
         guard HaloFeedbackService.shared.crashedDuringPreviousExecution else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
