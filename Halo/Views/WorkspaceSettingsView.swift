@@ -5601,7 +5601,7 @@ private struct TrailerModeSettingsView: View {
                         .font(.headline)
                     Text(workspace.trailerModeActive
                          ? "Press the shortcut or Stop to restore your normal Halo presentation."
-                         : "Cycles through Halo shapes, skins, widget combinations and a deterministic music showcase.")
+                         : "Cycles through surface shapes, colours, materials, widgets and deterministic Context Interface showcases.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -5612,7 +5612,7 @@ private struct TrailerModeSettingsView: View {
                 .buttonStyle(.borderedProminent)
             }
 
-            Text("Trailer Mode is runtime-only. Randomized layouts and themes are never written over your saved workspace or profiles.")
+            Text("Trailer Mode is runtime-only. It holds the current notch shell steady while cycling content, then changes one visual category at a time. Randomized layouts and themes are never written over your saved workspace or profiles.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
