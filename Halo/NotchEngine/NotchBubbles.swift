@@ -561,6 +561,35 @@ struct NotchBubbleSettings: Codable, Equatable {
         }
     }
 
+    func isProviderEnabled(_ kind: NotchBubbleKind) -> Bool {
+        switch kind {
+        case .music: return musicEnabled
+        case .timer: return timerEnabled
+        case .pixelPal: return pixelPalEnabled
+        case .clock: return resolvedClockEnabled
+        case .stopwatch: return resolvedStopwatchEnabled
+        case .system: return resolvedSystemEnabled
+        case .clipboard: return resolvedClipboardEnabled
+        case .calendar: return resolvedCalendarEnabled
+        case .audio: return resolvedAudioEnabled
+        case .vinyl: return resolvedVinylEnabled
+        case .files: return resolvedFilesEnabled
+        }
+    }
+
+    func requestsPinnedPresentation(_ kind: NotchBubbleKind) -> Bool {
+        switch kind {
+        case .music: return resolvedMusicVisibility == .pinned
+        case .timer: return timerPersistent
+        case .pixelPal: return pixelPalPersistent
+        case .clock, .system, .clipboard, .audio: return isProviderEnabled(kind)
+        case .stopwatch: return resolvedStopwatchPersistent
+        case .calendar: return resolvedCalendarPersistent
+        case .vinyl: return resolvedVinylPersistent
+        case .files: return resolvedFilesPersistent
+        }
+    }
+
     func styleOverride(for kind: NotchBubbleKind) -> NotchBubbleStyleOverride? {
         bubbleStyles?[kind.rawValue]?.normalized()
     }
@@ -947,10 +976,27 @@ private struct CalendarBubbleProvider: BubbleProvider {
         guard settings.resolvedCalendarEnabled else { return nil }
         let now = Date()
         let lead = settings.resolvedCalendarLeadMinutes * 60
+        let calendar = store.workspace.calendar
 
-        guard let event = store.workspace.calendar.upcomingEvents.first(where: {
-            $0.endDate > now && ($0.startDate.timeIntervalSince(now) <= lead || settings.resolvedCalendarPersistent)
-        }) else { return nil }
+        guard let event = calendar.upcomingEvents.first(where: {
+            $0.endDate > now &&
+            ($0.startDate.timeIntervalSince(now) <= lead || settings.resolvedCalendarPersistent)
+        }) else {
+            guard settings.resolvedCalendarPersistent else { return nil }
+            return NotchBubbleActivity(
+                id: "calendar.pinned",
+                kind: kind,
+                sourceIdentifier: "system.calendar",
+                mode: .pinned,
+                priority: .background,
+                title: "Calendar",
+                subtitle: calendar.hasAccess ? "No upcoming events" : "Calendar access needed",
+                icon: calendar.hasAccess ? "calendar" : "calendar.badge.exclamationmark",
+                progress: nil,
+                updatedAt: now,
+                expiresAt: nil
+            )
+        }
 
         let seconds = max(0, event.startDate.timeIntervalSince(now))
         let priority: NotchBubblePriority = seconds <= 5 * 60 ? .important : .normal
@@ -1914,6 +1960,7 @@ private final class NotchBubbleDisplayHost {
     private var controllers: [NotchBubbleKind: BubbleWindowController] = [:]
     private var subscriptions = Set<AnyCancellable>()
     private var lastCalendarActivityID: String?
+    private var lastObservedSettings: NotchBubbleSettings
 
     init(
         displayID: String,
@@ -1930,6 +1977,7 @@ private final class NotchBubbleDisplayHost {
         self.state = state
         self.store = store
         self.settingsStore = settingsStore
+        self.lastObservedSettings = settingsStore.settings.normalized()
         bind(surfacePanel: surfacePanel, state: state)
         refresh(animated: false)
     }
@@ -1985,7 +2033,23 @@ private final class NotchBubbleDisplayHost {
             .sink { [weak self] value in
                 guard let self else { return }
                 let settings = value.normalized()
-                if settings.resolvedCalendarEnabled, self.store.workspace.calendar.hasAccess {
+                let previous = self.lastObservedSettings
+                self.lastObservedSettings = settings
+
+                for kind in NotchBubbleKind.allCases {
+                    let becameEnabled =
+                        !previous.isProviderEnabled(kind) &&
+                        settings.isProviderEnabled(kind)
+                    let becamePinned =
+                        !previous.requestsPinnedPresentation(kind) &&
+                        settings.requestsPinnedPresentation(kind)
+                    if becameEnabled || becamePinned {
+                        self.activityCenter.clearDismissal(kind: kind)
+                    }
+                }
+
+                if settings.resolvedCalendarEnabled,
+                   self.store.workspace.calendar.hasAccess {
                     self.store.workspace.calendar.refresh()
                 }
                 self.refresh(animated: true)
@@ -2045,7 +2109,7 @@ private final class NotchBubbleDisplayHost {
             .store(in: &subscriptions)
 
         store.$files
-            .map(\.count)
+            .map { $0.map(\.path) }
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -2400,7 +2464,7 @@ private struct NotchBubbleView: View {
                     detailView
                     Divider()
                     HStack {
-                        Button("Hide for this session") {
+                        Button("Dismiss current activity") {
                             activityCenter.dismiss(kind: kind)
                             showingDetail = false
                         }
@@ -2420,7 +2484,7 @@ private struct NotchBubbleView: View {
                 }
             }
             .contextMenu {
-                Button("Hide for this session") {
+                Button("Dismiss current activity") {
                     activityCenter.dismiss(kind: kind)
                 }
             }
@@ -4103,7 +4167,7 @@ struct NotchBubbleSettingsView: View {
                 symbol: "calendar.badge.clock",
                 enabled: optionalBinding(\.calendarEnabled, default: false),
                 persistent: optionalBinding(\.calendarPersistent, default: false),
-                detail: "Shows the next relevant event inside the configured lead window. Persistent keeps the next event visible."
+                detail: "Shows the next relevant event inside the configured lead window. Persistent keeps Calendar available even when no event is upcoming."
             )
             providerRow(
                 title: "File Shelf",
