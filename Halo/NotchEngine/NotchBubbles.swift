@@ -2680,8 +2680,11 @@ private struct NotchBubbleGestureCapture: NSViewRepresentable {
                 verticalAccumulator = 0
             }
 
-            let dx = event.scrollingDeltaX
-            let dy = event.scrollingDeltaY
+            // Gesture mappings describe the physical finger direction, so
+            // normalize away the user's Natural Scrolling preference.
+            let inversion: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
+            let dx = event.scrollingDeltaX * inversion
+            let dy = event.scrollingDeltaY * inversion
             guard abs(dx) > 0.05 || abs(dy) > 0.05 else { return false }
 
             let precise = event.hasPreciseScrollingDeltas
@@ -2694,7 +2697,7 @@ private struct NotchBubbleGestureCapture: NSViewRepresentable {
 
                 if abs(horizontalAccumulator) >= threshold {
                     let direction: NotchBubbleGestureDirection =
-                        horizontalAccumulator < 0 ? .left : .right
+                        horizontalAccumulator > 0 ? .left : .right
                     handled = callback?(direction) ?? false
                     horizontalAccumulator = 0
                 }
