@@ -5,7 +5,7 @@ import SwiftUI
 
 // MARK: - Notch Bubble models
 
-enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable {
+enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
     case music
     case pixelPal
     case timer
@@ -29,7 +29,7 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum NotchBubblePlacement: String, Codable, CaseIterable {
+enum NotchBubblePlacement: String, Codable, CaseIterable, Hashable {
     case automatic
     case bottomLeading
     case bottom
@@ -38,7 +38,7 @@ enum NotchBubblePlacement: String, Codable, CaseIterable {
     case trailing
 }
 
-enum NotchBubbleShape: String, Codable, CaseIterable, Identifiable {
+enum NotchBubbleShape: String, Codable, CaseIterable, Identifiable, Hashable {
     case circle = "Circle"
     case capsule = "Capsule"
     case roundedSquare = "Square"
@@ -47,7 +47,7 @@ enum NotchBubbleShape: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-enum NotchBubbleLayout: String, Codable, CaseIterable, Identifiable {
+enum NotchBubbleLayout: String, Codable, CaseIterable, Identifiable, Hashable {
     case satellites = "Satellites"
     case wings = "Wings"
     case stack = "Stack"
@@ -66,7 +66,7 @@ enum NotchBubblePriority: Int, Codable, Comparable {
     }
 }
 
-enum NotchBubbleAnimationPreset: String, Codable, CaseIterable, Identifiable {
+enum NotchBubbleAnimationPreset: String, Codable, CaseIterable, Identifiable, Hashable {
     case soft = "Soft"
     case fluid = "Fluid"
     case snappy = "Snappy"
@@ -402,16 +402,16 @@ enum BubbleAnimationController {
             return
         }
 
-        NSAnimationContext.runAnimationGroup { context in
+        NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.12
             panel.animator().alphaValue = 0
-        } completionHandler: {
+        }, completionHandler: {
             Task { @MainActor in
                 panel.orderOut(nil)
                 panel.alphaValue = 1
                 completion()
             }
-        }
+        })
     }
 }
 
@@ -596,7 +596,6 @@ private final class NotchBubbleDisplayHost {
             .store(in: &subscriptions)
 
         HaloPixelPalStore.shared.$reaction
-            .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refresh(animated: true) }
             .store(in: &subscriptions)
