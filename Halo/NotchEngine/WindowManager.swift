@@ -1938,6 +1938,10 @@ final class WindowManager {
     }
 
     private func schedulePixelPalGatedCollapse(for host: Host) -> Bool {
+        if store.workspace.trailerModeActive {
+            host.state.setPixelPalCloseGateActive(false)
+            return false
+        }
         // This delay exists only for a Pixel Pal that is actually part of the visible
         // normal workspace being dismissed. When a CI owns the surface, Pixel Pal is
         // not rendered, so gating CI closure on its boot-down animation is dead time.
