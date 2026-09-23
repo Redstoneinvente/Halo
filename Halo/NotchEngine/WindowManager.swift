@@ -16,13 +16,20 @@ enum HaloSurfaceOpenDestination: String {
 @MainActor
 enum HaloHoverHaptics {
     private static var lastPulseByID: [String: TimeInterval] = [:]
+    private static var sequenceGenerationByID: [String: Int] = [:]
 
     static func pulse(
         id: String,
         strength: Int,
         minimumInterval: TimeInterval = 0.16
     ) {
-        let strength = min(3, max(0, strength))
+        let strength = min(6, max(0, strength))
+
+        // Increment first so choosing Off (or changing levels quickly) invalidates
+        // any delayed taps from an older high-intensity sequence.
+        let generation = (sequenceGenerationByID[id] ?? 0) + 1
+        sequenceGenerationByID[id] = generation
+
         guard strength > 0 else { return }
 
         let now = ProcessInfo.processInfo.systemUptime
@@ -33,23 +40,48 @@ enum HaloHoverHaptics {
 
         lastPulseByID[id] = now
 
-        // AppKit exposes semantic haptic patterns rather than analog amplitude.
-        // Map Halo's strength control to progressively more pronounced native
-        // patterns so the setting stays predictable and avoids repeated buzzing.
-        let pattern: NSHapticFeedbackManager.FeedbackPattern
+        // AppKit offers semantic haptic patterns, not a true amplitude value.
+        // Levels 1...3 preserve Halo's original mappings; 4...6 create a more
+        // noticeable tactile response with a short, deliberate compound sequence.
         switch strength {
         case 1:
-            pattern = .alignment
+            perform(.alignment)
         case 2:
-            pattern = .levelChange
+            perform(.levelChange)
+        case 3:
+            perform(.generic)
+        case 4:
+            perform(.generic)
+            schedule(.generic, after: 0.055, id: id, generation: generation)
+        case 5:
+            perform(.generic)
+            schedule(.levelChange, after: 0.045, id: id, generation: generation)
+            schedule(.generic, after: 0.095, id: id, generation: generation)
         default:
-            pattern = .generic
+            perform(.generic)
+            schedule(.generic, after: 0.038, id: id, generation: generation)
+            schedule(.levelChange, after: 0.078, id: id, generation: generation)
+            schedule(.generic, after: 0.122, id: id, generation: generation)
         }
+    }
 
+    private static func perform(_ pattern: NSHapticFeedbackManager.FeedbackPattern) {
         NSHapticFeedbackManager.defaultPerformer.perform(
             pattern,
             performanceTime: .now
         )
+    }
+
+    private static func schedule(
+        _ pattern: NSHapticFeedbackManager.FeedbackPattern,
+        after delay: TimeInterval,
+        id: String,
+        generation: Int
+    ) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            guard sequenceGenerationByID[id] == generation else { return }
+            perform(pattern)
+        }
     }
 }
 

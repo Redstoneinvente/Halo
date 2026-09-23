@@ -50,7 +50,7 @@ struct Configuration: Codable {
     }
 
     var resolvedHoverHapticStrength: Int {
-        min(3, max(0, hoverHapticStrength ?? 1))
+        min(6, max(0, hoverHapticStrength ?? 1))
     }
     var simulateNotch = false
     var showClock = true

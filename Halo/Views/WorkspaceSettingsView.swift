@@ -367,26 +367,34 @@ struct SettingsView: View {
                         value: Binding(
                             get: { Double(store.configuration.resolvedHoverHapticStrength) },
                             set: { rawValue in
-                                let strength = min(3, max(0, Int(rawValue.rounded())))
+                                let strength = min(6, max(0, Int(rawValue.rounded())))
                                 guard strength != store.configuration.resolvedHoverHapticStrength else { return }
                                 store.configuration.hoverHapticStrength = strength
                                 HaloHoverHaptics.pulse(
                                     id: "settings.hoverHapticPreview",
                                     strength: strength,
-                                    minimumInterval: 0.05
+                                    minimumInterval: 0.02
                                 )
                             }
                         ),
-                        in: 0...3,
+                        in: 0...6,
                         step: 1
                     )
                     .frame(width: 220)
 
-                    Text(["Off", "Light", "Medium", "Strong"][store.configuration.resolvedHoverHapticStrength])
-                        .frame(width: 58, alignment: .trailing)
+                    Text([
+                        "Off",
+                        "Light",
+                        "Medium",
+                        "Strong",
+                        "Very Strong",
+                        "Intense",
+                        "Maximum"
+                    ][store.configuration.resolvedHoverHapticStrength])
+                        .frame(width: 88, alignment: .trailing)
                 }
             }
-            Text("Controls the tactile tick when entering the notch or a Notch Bubble.")
+            Text("Controls the tactile tick when entering the notch or a Notch Bubble. Higher levels use a short compound tap for a more noticeable response.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
