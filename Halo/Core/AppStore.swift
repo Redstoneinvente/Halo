@@ -2020,6 +2020,9 @@ final class TrailerModeController {
         if configuration.randomizeAppearance {
             randomizeAppearance(in: &layout, configuration: configuration, expanded: expanded)
         }
+        // Trailer footage must stay locked to the display notch anchor. Never inherit a
+        // user's manual geometry offsets into the showcase sequence.
+        layout.appearance.surface.offsets = SurfaceOffsets()
         configureClosedShowcase(in: &layout, configuration: configuration, musicFrame: musicFrame)
         configureOpenedShowcase(in: &layout, configuration: configuration, musicFrame: musicFrame)
 
@@ -2065,8 +2068,11 @@ final class TrailerModeController {
     }
 
     private func randomizeTheme(_ theme: inout Theme) {
-        let styles: [SurfaceStyle] = [.notch, .pill, .island, .shelf, .menuBar, .simulated, .detached]
-        theme.style = styles.randomElement() ?? .notch
+        // Keep Trailer Mode physically anchored to the top notch position. The visual
+        // variation comes from SurfaceShapeKind, skins, glass, dimensions and widgets;
+        // placement styles such as pill/island/shelf intentionally sit lower on screen
+        // and make trailer footage look like the notch is drifting.
+        theme.style = .notch
         theme.width = Double.random(in: 360...720)
         theme.cornerRadius = Double.random(in: 14...36)
         theme.tint = Double.random(in: 0.28...0.82)
