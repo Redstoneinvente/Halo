@@ -610,6 +610,7 @@ final class WindowManager {
     private var hudMonitor: Any?
     private var lastHUDCapsLock = false
     private let store: AppStore
+    private let bubbleManager: NotchBubbleManager
     private let startupActivationContext: ActivationLaunchContext
     private var commercialAccessGranted = false
     private var initialActivationPending = false
@@ -635,6 +636,7 @@ final class WindowManager {
     init(store: AppStore,
          startupActivationContext: ActivationLaunchContext = ActivationLaunchContext(event: .manualLaunch, macJustStarted: false)) {
         self.store = store
+        self.bubbleManager = NotchBubbleManager(store: store)
         self.startupActivationContext = startupActivationContext
     }
 
@@ -648,6 +650,7 @@ final class WindowManager {
     func setCommercialAccessGranted(_ granted: Bool) {
         guard commercialAccessGranted != granted else { return }
         commercialAccessGranted = granted
+        bubbleManager.setCommercialAccessGranted(granted)
 
         hosts.values.forEach { host in
             host.refreshDropCIRegistration?()
@@ -2288,8 +2291,17 @@ final class WindowManager {
                     refreshGeometryEditorPanels()
                 }
             }
+            bubbleManager.register(
+                displayID: id,
+                screen: screen,
+                surfacePanel: host.panel,
+                state: host.state
+            )
         }
-        for id in Array(hosts.keys) where !active.contains(id) { hosts.removeValue(forKey: id)?.stop() }
+        for id in Array(hosts.keys) where !active.contains(id) {
+            bubbleManager.unregister(displayID: id)
+            hosts.removeValue(forKey: id)?.stop()
+        }
         refreshGeometryEditorPanels()
     }
 }
