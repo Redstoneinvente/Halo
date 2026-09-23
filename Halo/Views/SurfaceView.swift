@@ -2802,10 +2802,16 @@ struct SurfaceView: View {
     private var visuallyExpanded: Bool { state.expanded || state.presentationExpanded }
     private var reportsOpenedNotchVisible: Bool {
         visuallyExpanded &&
-        (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive || integrationContextActive || liveActivityContextActive)
+        (state.focusedModule != nil ||
+         activeContext == nil ||
+         transferContextActive ||
+         clipboardContextActive ||
+         customContextActive ||
+         integrationContextActive ||
+         liveActivityContextActive)
     }
     private var contextOwnsFullSurface: Bool {
-        guard visuallyExpanded else { return false }
+        guard visuallyExpanded, state.focusedModule == nil else { return false }
         switch activeContext {
         case .drop: return dropUsesFullNotchArea
         case .music: return contextMusicUsesFullNotchArea
@@ -2824,6 +2830,9 @@ struct SurfaceView: View {
         }
     }
     private var keepsClosedContentsWhileExpanded: Bool {
+        if state.focusedModule != nil {
+            return usesDefaultWorkspace && keepClosedContentsWhenOpen
+        }
         switch activeContext {
         case .drop: return dropKeepsClosedContents
         case .music: return contextMusicKeepsClosedContents
@@ -2906,7 +2915,9 @@ struct SurfaceView: View {
     private var usesVisualWorkspace: Bool { layout.resolvedUsesCustomOpenNotchWorkspace }
     private var usesDefaultWorkspace: Bool { !usesVisualWorkspace }
     private var presentsVisualWorkspaceSurface: Bool {
-        usesVisualWorkspace && activeContext == nil && (visuallyExpanded || visualWorkspaceSurfacePresented)
+        usesVisualWorkspace &&
+        (state.focusedModule != nil || activeContext == nil) &&
+        (visuallyExpanded || visualWorkspaceSurfacePresented)
     }
     private var accent: Color { Color(hue: theme.tint, saturation: 0.65, brightness: 1) }
 
@@ -2983,7 +2994,10 @@ struct SurfaceView: View {
                     .accessibilityAddTraits(.isButton)
                 }
                 if visuallyExpanded || presentsVisualWorkspaceSurface {
-                    if integrationContextActive {
+                    if let focusedModule = state.focusedModule {
+                        focusedOpenModuleContent(module: focusedModule)
+                            .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                    } else if integrationContextActive {
                         integrationSurfaceContent
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                             .transition(.opacity.combined(with: .scale(scale: 0.985)))
@@ -3430,6 +3444,7 @@ struct SurfaceView: View {
             state.activateDropOwnership()
         } else if decision.shouldCollapseSurface,
                   activeContext == nil,
+                  state.focusedModule == nil,
                   !state.pinned {
             state.expanded = false
         }
@@ -3437,7 +3452,23 @@ struct SurfaceView: View {
 
     @ViewBuilder private var surfaceBackgroundLayer: some View {
         ZStack {
-            if transferContextActive {
+            if state.focusedModule != nil {
+                if usesVisualWorkspace {
+                    OpenNotchBackgroundView(
+                        options: layout.resolvedOpenNotchLayout.appearance,
+                        fallback: layout.appearance,
+                        theme: theme,
+                        system: workspace.system
+                    )
+                } else {
+                    SurfaceBackground(
+                        appearance: layout.appearance,
+                        theme: theme,
+                        expanded: visuallyExpanded,
+                        system: workspace.system
+                    )
+                }
+            } else if transferContextActive {
                 TransferSurfaceBackground(monitor: transfer)
             } else if clipboardContextActive {
                 ClipboardSurfaceBackground(monitor: clipboardCI)
