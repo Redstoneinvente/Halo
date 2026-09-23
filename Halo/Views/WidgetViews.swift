@@ -43,13 +43,16 @@ struct HaloTimerDurationComposer: View {
     }
 
     private var startLabel: String {
-        if hours > 0 {
-            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
-        }
-        if minutes > 0 {
-            return seconds > 0 ? "\(minutes)m \(seconds)s" : "\(minutes)m"
-        }
-        return "\(seconds)s"
+        var parts: [String] = []
+        if hours > 0 { parts.append("\(hours)h") }
+        if minutes > 0 { parts.append("\(minutes)m") }
+        if seconds > 0 { parts.append("\(seconds)s") }
+        return parts.isEmpty ? "0s" : parts.joined(separator: " ")
+    }
+
+    private var uniqueQuickPresets: [Int] {
+        var seen = Set<Int>()
+        return quickPresets.filter { $0 > 0 && seen.insert($0).inserted }
     }
 
     var body: some View {
@@ -111,7 +114,7 @@ struct HaloTimerDurationComposer: View {
 
             if !quickPresets.isEmpty {
                 HStack(spacing: 6) {
-                    ForEach(Array(quickPresets.prefix(compact ? 3 : 5)), id: \.self) { preset in
+                    ForEach(Array(uniqueQuickPresets.prefix(compact ? 3 : 5)), id: \.self) { preset in
                         Button {
                             applyPreset(preset)
                         } label: {
