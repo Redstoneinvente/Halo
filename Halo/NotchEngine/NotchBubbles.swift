@@ -177,7 +177,7 @@ private struct MusicBubbleProvider: BubbleProvider {
               settings.musicPersistent || store.workspace.media.isPlaying else { return nil }
         return NotchBubble(
             kind: kind,
-            size: settings.bubbleSize,
+            size: CGFloat(settings.bubbleSize),
             shape: settings.shape,
             isPersistent: settings.musicPersistent,
             timeout: nil,
@@ -191,10 +191,16 @@ private struct PixelPalBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .pixelPal
 
     func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
-        guard settings.pixelPalEnabled else { return nil }
+        let contextual = HaloPixelPalStore.shared.reaction != nil ||
+            store.workspace.media.isPlaying ||
+            store.deadline != nil ||
+            store.pausedSeconds > 0 ||
+            store.finished
+        guard settings.pixelPalEnabled,
+              settings.pixelPalPersistent || contextual else { return nil }
         return NotchBubble(
             kind: kind,
-            size: settings.bubbleSize,
+            size: CGFloat(settings.bubbleSize),
             shape: settings.shape,
             isPersistent: settings.pixelPalPersistent,
             timeout: nil,
@@ -212,7 +218,7 @@ private struct TimerBubbleProvider: BubbleProvider {
         guard settings.timerEnabled, settings.timerPersistent || active else { return nil }
         return NotchBubble(
             kind: kind,
-            size: settings.bubbleSize,
+            size: CGFloat(settings.bubbleSize),
             shape: settings.shape,
             isPersistent: settings.timerPersistent,
             timeout: nil,
@@ -414,7 +420,7 @@ final class BubbleWindowController {
     let kind: NotchBubbleKind
 
     private let panel: NotchBubblePanel
-    private var isBeingRemoved = false
+    private var removalGeneration = 0
 
     init(kind: NotchBubbleKind, store: AppStore) {
         self.kind = kind
@@ -450,7 +456,7 @@ final class BubbleWindowController {
         settings: NotchBubbleSettings,
         animated: Bool
     ) {
-        isBeingRemoved = false
+        removalGeneration += 1
         BubbleAnimationController.move(
             panel: panel,
             to: frame,
@@ -461,10 +467,10 @@ final class BubbleWindowController {
     }
 
     func remove(animated: Bool, completion: @escaping () -> Void) {
-        guard !isBeingRemoved else { return }
-        isBeingRemoved = true
+        removalGeneration += 1
+        let generation = removalGeneration
         BubbleAnimationController.hide(panel: panel, animated: animated) { [weak self] in
-            self?.isBeingRemoved = false
+            guard let self, self.removalGeneration == generation else { return }
             completion()
         }
     }
@@ -584,6 +590,12 @@ private final class NotchBubbleDisplayHost {
             .store(in: &subscriptions)
 
         store.workspace.media.$isPlaying
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .store(in: &subscriptions)
+
+        HaloPixelPalStore.shared.$reaction
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refresh(animated: true) }
@@ -731,7 +743,7 @@ private struct NotchBubbleView: View {
 
     var body: some View {
         bubbleContent
-            .frame(width: settings.bubbleSize, height: settings.bubbleSize)
+            .frame(width: CGFloat(settings.bubbleSize), height: CGFloat(settings.bubbleSize))
             .background { bubbleBackground }
             .overlay { bubbleBorder }
             .contentShape(Rectangle())
@@ -765,11 +777,11 @@ private struct NotchBubbleView: View {
                 Image(nsImage: artwork)
                     .resizable()
                     .scaledToFill()
-                    .clipShape(RoundedRectangle(cornerRadius: max(4, settings.cornerRadius - 4), style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: max(4, CGFloat(settings.cornerRadius) - 4), style: .continuous))
                     .padding(3)
             } else {
                 Image(systemName: media.isPlaying ? "music.note" : "music.note.list")
-                    .font(.system(size: settings.bubbleSize * 0.38, weight: .semibold))
+                    .font(.system(size: CGFloat(settings.bubbleSize) * 0.38, weight: .semibold))
                     .foregroundStyle(.white)
             }
 
@@ -779,14 +791,14 @@ private struct NotchBubbleView: View {
                     timerProgressRing(at: timeline.date)
                     if timerIsActive {
                         Text(compactTimerText(at: timeline.date))
-                            .font(.system(size: max(8, settings.bubbleSize * 0.20), weight: .bold, design: .rounded))
+                            .font(.system(size: max(8, CGFloat(settings.bubbleSize) * 0.20), weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .minimumScaleFactor(0.55)
                             .lineLimit(1)
                             .padding(5)
                     } else {
                         Image(systemName: store.finished ? "checkmark" : "timer")
-                            .font(.system(size: settings.bubbleSize * 0.34, weight: .semibold))
+                            .font(.system(size: CGFloat(settings.bubbleSize) * 0.34, weight: .semibold))
                     }
                 }
                 .foregroundStyle(store.finished ? Color.green : Color.white)
@@ -810,14 +822,14 @@ private struct NotchBubbleView: View {
             Capsule(style: .continuous)
                 .fill(Color.black.opacity(0.88))
         case .roundedSquare:
-            RoundedRectangle(cornerRadius: settings.cornerRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: CGFloat(settings.cornerRadius), style: .continuous)
                 .fill(Color.black.opacity(0.88))
         case .glass:
-            RoundedRectangle(cornerRadius: settings.cornerRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: CGFloat(settings.cornerRadius), style: .continuous)
                 .fill(.ultraThinMaterial)
                 .opacity(settings.glassIntensity)
                 .overlay {
-                    RoundedRectangle(cornerRadius: settings.cornerRadius, style: .continuous)
+                    RoundedRectangle(cornerRadius: CGFloat(settings.cornerRadius), style: .continuous)
                         .fill(Color.black.opacity(0.18))
                 }
         }
@@ -831,7 +843,7 @@ private struct NotchBubbleView: View {
         case .capsule:
             Capsule(style: .continuous).stroke(Color.white.opacity(hovering ? 0.24 : 0.12), lineWidth: 1)
         case .roundedSquare, .glass:
-            RoundedRectangle(cornerRadius: settings.cornerRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: CGFloat(settings.cornerRadius), style: .continuous)
                 .stroke(Color.white.opacity(hovering ? 0.24 : 0.12), lineWidth: 1)
         }
     }
@@ -942,11 +954,12 @@ private struct NotchBubbleView: View {
     }
 
     private var pixelPalDetail: some View {
-        VStack(spacing: 12) {
-            HaloPixelPetWidget(store: store, workspace: workspace)
-                .environment(\.haloPixelPalHostExpanded, true)
-                .environment(\.haloPixelPalHostTransitionDuration, 0.16)
-                .frame(width: 154, height: 154)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Pixel Pal")
+                .font(.headline)
+            Text("Pixel Pal is already running live inside the bubble. Keep interacting with the bubble itself, or jump into its full settings.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             HStack {
                 Button("Feed Cookie") { pal.feedCookie() }
@@ -1279,10 +1292,10 @@ private struct NotchBubbleSettingsPreview: View {
             case .capsule:
                 Capsule(style: .continuous).fill(Color.black.opacity(0.88))
             case .roundedSquare:
-                RoundedRectangle(cornerRadius: min(settings.cornerRadius, 16), style: .continuous)
+                RoundedRectangle(cornerRadius: min(CGFloat(settings.cornerRadius), 16), style: .continuous)
                     .fill(Color.black.opacity(0.88))
             case .glass:
-                RoundedRectangle(cornerRadius: min(settings.cornerRadius, 16), style: .continuous)
+                RoundedRectangle(cornerRadius: min(CGFloat(settings.cornerRadius), 16), style: .continuous)
                     .fill(.ultraThinMaterial)
                     .opacity(settings.glassIntensity)
             }
