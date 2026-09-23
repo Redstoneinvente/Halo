@@ -476,11 +476,11 @@ final class AudioService: ObservableObject {
 
 @MainActor
 final class MediaService: ObservableObject {
-    static let trailerDemoTitle = "Neon Afterglow"
-    static let trailerDemoArtist = "Halo Sessions"
-    static let trailerDemoAlbum = "Ways of Seeing"
-    static let trailerDemoDuration = 104.0
-    static let trailerDemoLyrics = """
+    nonisolated static let trailerDemoTitle = "Neon Afterglow"
+    nonisolated static let trailerDemoArtist = "Halo Sessions"
+    nonisolated static let trailerDemoAlbum = "Ways of Seeing"
+    nonisolated static let trailerDemoDuration = 104.0
+    nonisolated static let trailerDemoLyrics = """
     [00:00.00]Light wakes up along the edge
     [00:06.00]A little world above the screen
     [00:12.00]Shape the space the way you want it
@@ -499,7 +499,7 @@ final class MediaService: ObservableObject {
     [01:34.00]Make it yours and let it glow
     """
 
-    static func isTrailerDemo(title: String, artist: String) -> Bool {
+    nonisolated static func isTrailerDemo(title: String, artist: String) -> Bool {
         title == trailerDemoTitle && artist == trailerDemoArtist
     }
 
