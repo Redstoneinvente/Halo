@@ -342,6 +342,18 @@ private final class NotchBubblePanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+private final class TransparentNotchBubbleHostingView<Content: View>: NSHostingView<Content> {
+    override var isOpaque: Bool { false }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.isOpaque = false
+        layer?.masksToBounds = false
+    }
+}
+
 @MainActor
 enum BubbleAnimationController {
     static func move(
@@ -447,8 +459,11 @@ final class BubbleWindowController {
             workspace: store.workspace,
             surfaceState: state
         )
-        let view = NSHostingView(rootView: root)
+        let view = TransparentNotchBubbleHostingView(rootView: root)
         view.sizingOptions = []
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        view.layer?.isOpaque = false
         panel.contentView = view
     }
 
@@ -776,11 +791,7 @@ private struct NotchBubbleView: View {
             ))
             .overlay { bubbleBorder }
             .scaleEffect(hovering ? 1.07 : 1)
-            .shadow(
-                color: .black.opacity(hovering ? 0.34 : 0.20),
-                radius: hovering ? 13 : 7,
-                y: 3
-            )
+            .compositingGroup()
             .onHover { hovering = $0 }
             .simultaneousGesture(
                 TapGesture().onEnded {
