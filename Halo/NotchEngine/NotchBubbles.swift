@@ -2180,17 +2180,70 @@ private struct NotchBubbleView: View {
     @ViewBuilder
     private var systemBubbleContent: some View {
         let metric = settings.resolvedSystemMetric
-        VStack(spacing: 1) {
+        let level = systemMetricFraction(metric)
+
+        switch settings.resolvedSystemDisplayMode {
+        case .value:
+            VStack(spacing: 1) {
+                Image(systemName: systemMetricSymbol(metric))
+                    .font(.system(size: bubbleStyle.size * 0.23, weight: .semibold))
+                    .foregroundStyle(providerAccentColor)
+                Text(systemMetricValue(metric))
+                    .font(.system(size: max(7, bubbleStyle.size * 0.14), weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+            }
+            .foregroundStyle(.white)
+            .padding(3)
+
+        case .gauge:
+            ZStack {
+                Circle()
+                    .stroke(Color.white.opacity(0.10), lineWidth: 3)
+                    .padding(3)
+                Circle()
+                    .trim(from: 0, to: level)
+                    .stroke(
+                        providerAccentColor,
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .padding(3)
+                Text(systemMetricCompactValue(metric))
+                    .font(.system(size: max(7, bubbleStyle.size * 0.15), weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+                    .foregroundStyle(.white)
+                    .padding(6)
+            }
+
+        case .bars:
+            VStack(spacing: 2) {
+                HStack(alignment: .bottom, spacing: max(1.5, bubbleStyle.size * 0.045)) {
+                    ForEach(0..<5, id: \.self) { index in
+                        let threshold = Double(index + 1) / 5.0
+                        Capsule()
+                            .fill(level >= threshold ? providerAccentColor : Color.white.opacity(0.10))
+                            .frame(
+                                width: max(2.5, bubbleStyle.size * 0.065),
+                                height: bubbleStyle.size * (0.13 + CGFloat(index) * 0.055)
+                            )
+                    }
+                }
+                Text(systemMetricCompactValue(metric))
+                    .font(.system(size: max(6, bubbleStyle.size * 0.11), weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+
+        case .icon:
             Image(systemName: systemMetricSymbol(metric))
-                .font(.system(size: bubbleStyle.size * 0.23, weight: .semibold))
-            Text(systemMetricValue(metric))
-                .font(.system(size: max(7, bubbleStyle.size * 0.14), weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
+                .font(.system(size: bubbleStyle.size * 0.39, weight: .semibold))
+                .foregroundStyle(providerAccentColor)
         }
-        .foregroundStyle(.white)
-        .padding(3)
     }
 
     private var providerAccentColor: Color {
@@ -2659,6 +2712,20 @@ private struct NotchBubbleView: View {
         return max(0, store.pausedSeconds)
     }
 
+    private func timerProgress(at date: Date) -> CGFloat {
+        if store.finished { return 1 }
+        guard timerIsActive else { return 0 }
+        let duration = max(1, store.timerDurationSeconds)
+        return CGFloat(min(1, max(0, timerRemaining(at: date) / duration)))
+    }
+
+    private func shortMinuteValue(_ interval: TimeInterval) -> String {
+        let seconds = max(0, Int(interval.rounded(.down)))
+        if seconds >= 3600 { return "\(seconds / 3600)h" }
+        if seconds >= 60 { return "\(max(1, seconds / 60))m" }
+        return "\(seconds)s"
+    }
+
     private func compactTimerText(at date: Date) -> String {
         let seconds = Int(timerRemaining(at: date).rounded(.down))
         if seconds >= 3600 {
@@ -2725,9 +2792,68 @@ private struct NotchBubbleView: View {
     private func clockTime(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = .autoupdatingCurrent
-        formatter.timeStyle = .short
-        formatter.dateStyle = .none
+        formatter.dateFormat = settings.resolvedClockUse24Hour ? "HH:mm" : "h:mm"
         return formatter.string(from: date)
+    }
+
+    private func clockTimeWithSeconds(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.dateFormat = settings.resolvedClockUse24Hour ? "HH:mm:ss" : "h:mm:ss"
+        return formatter.string(from: date)
+    }
+
+    private func eventTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.dateFormat = settings.resolvedClockUse24Hour ? "HH:mm" : "h:mm"
+        return formatter.string(from: date)
+    }
+
+    private func analogClock(date: Date) -> some View {
+        let calendar = Calendar.autoupdatingCurrent
+        let hour = Double(calendar.component(.hour, from: date) % 12)
+        let minute = Double(calendar.component(.minute, from: date))
+        let second = Double(calendar.component(.second, from: date))
+        let hourAngle = (hour + minute / 60) * 30
+        let minuteAngle = (minute + second / 60) * 6
+        let secondAngle = second * 6
+
+        return ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+
+            ForEach(0..<12, id: \.self) { index in
+                Capsule()
+                    .fill(index.isMultiple(of: 3) ? Color.white.opacity(0.72) : Color.white.opacity(0.30))
+                    .frame(width: index.isMultiple(of: 3) ? 1.8 : 1.0, height: index.isMultiple(of: 3) ? 4.5 : 3)
+                    .offset(y: -bubbleStyle.size * 0.37)
+                    .rotationEffect(.degrees(Double(index) * 30))
+            }
+
+            Capsule()
+                .fill(Color.white.opacity(0.92))
+                .frame(width: 2.2, height: bubbleStyle.size * 0.22)
+                .offset(y: -bubbleStyle.size * 0.10)
+                .rotationEffect(.degrees(hourAngle))
+
+            Capsule()
+                .fill(Color.white)
+                .frame(width: 1.7, height: bubbleStyle.size * 0.29)
+                .offset(y: -bubbleStyle.size * 0.14)
+                .rotationEffect(.degrees(minuteAngle))
+
+            Capsule()
+                .fill(providerAccentColor)
+                .frame(width: 1.0, height: bubbleStyle.size * 0.31)
+                .offset(y: -bubbleStyle.size * 0.15)
+                .rotationEffect(.degrees(secondAngle))
+
+            Circle()
+                .fill(providerAccentColor)
+                .frame(width: 4.5, height: 4.5)
+        }
+        .padding(5)
     }
 
     private func clockDay(_ date: Date) -> String {
@@ -2760,6 +2886,10 @@ private struct NotchBubbleView: View {
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
+    private var currentAudioDeviceName: String {
+        audio.devices.first(where: { $0.id == audio.selected })?.name ?? "Output"
+    }
+
     private var audioSymbol: String {
         guard audio.canSetVolume else { return "speaker.slash.fill" }
         switch audio.volume {
@@ -2778,6 +2908,39 @@ private struct NotchBubbleView: View {
         case .memory: return "memorychip"
         case .storage: return "internaldrive"
         case .network: return "network"
+        }
+    }
+
+    private func systemMetricFraction(_ metric: SystemBubbleMetric) -> Double {
+        switch metric {
+        case .battery:
+            return min(1, max(0, Double(system.battery ?? 0) / 100))
+        case .cpu:
+            return min(1, max(0, system.cpuUsage / 100))
+        case .memory:
+            return min(1, max(0, system.memoryUsage / 100))
+        case .storage:
+            return min(1, max(0, system.diskUsage / 100))
+        case .network:
+            let total = system.networkDownPerSecond + system.networkUpPerSecond
+            return min(1, max(0, total / 20_000_000))
+        }
+    }
+
+    private func systemMetricCompactValue(_ metric: SystemBubbleMetric) -> String {
+        switch metric {
+        case .battery:
+            return system.battery.map { "\($0)" } ?? "—"
+        case .cpu:
+            return String(format: "%.0f", system.cpuUsage)
+        case .memory:
+            return String(format: "%.0f", system.memoryUsage)
+        case .storage:
+            return String(format: "%.0f", system.diskUsage)
+        case .network:
+            let total = system.networkDownPerSecond + system.networkUpPerSecond
+            if total < 1_000_000 { return String(format: "%.0fK", total / 1_000) }
+            return String(format: "%.1fM", total / 1_000_000)
         }
     }
 
