@@ -609,7 +609,11 @@ struct VisualWorkspaceTimerView: View {
                     Button(role: .destructive) {
                         store.resetTimer()
                     } label: {
-                        compact ? AnyView(Image(systemName: "xmark")) : AnyView(Label("Stop", systemImage: "stop.fill"))
+                        if compact {
+                            Image(systemName: "xmark")
+                        } else {
+                            Label("Stop", systemImage: "stop.fill")
+                        }
                     }
                 }
                 .buttonStyle(.bordered)
