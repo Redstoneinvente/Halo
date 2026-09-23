@@ -1376,6 +1376,8 @@ private struct NotchBubbleView: View {
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject var surfaceState: SurfaceState
     @ObservedObject private var media: MediaService
+    @ObservedObject private var system: SystemService
+    @ObservedObject private var audio: AudioService
     @ObservedObject private var pal = HaloPixelPalStore.shared
     @ObservedObject private var settingsStore = NotchBubbleSettingsStore.shared
 
@@ -1388,6 +1390,8 @@ private struct NotchBubbleView: View {
         self.workspace = workspace
         self.surfaceState = surfaceState
         _media = ObservedObject(wrappedValue: workspace.media)
+        _system = ObservedObject(wrappedValue: workspace.system)
+        _audio = ObservedObject(wrappedValue: workspace.audio)
     }
 
     private var settings: NotchBubbleSettings {
@@ -1412,7 +1416,7 @@ private struct NotchBubbleView: View {
             .onHover { hovering = $0 }
             .simultaneousGesture(
                 TapGesture().onEnded {
-                    showingDetail.toggle()
+                    handlePrimaryTap()
                 }
             )
             .animation(hoverAnimation, value: hovering)
@@ -1429,17 +1433,7 @@ private struct NotchBubbleView: View {
     private var bubbleContent: some View {
         switch kind {
         case .music:
-            if let artwork = media.artworkImage, media.isPlaying {
-                Image(nsImage: artwork)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-            } else {
-                Image(systemName: media.isPlaying ? "music.note" : "music.note.list")
-                    .font(.system(size: CGFloat(settings.bubbleSize) * 0.38, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
+            musicBubbleContent
 
         case .timer:
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
@@ -1465,7 +1459,140 @@ private struct NotchBubbleView: View {
                 .environment(\.haloPixelPalHostExpanded, true)
                 .environment(\.haloPixelPalHostTransitionDuration, 0.16)
                 .padding(2)
+
+        case .clock:
+            TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                VStack(spacing: 0) {
+                    Text(clockTime(timeline.date))
+                        .font(.system(size: max(9, CGFloat(settings.bubbleSize) * 0.22), weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .minimumScaleFactor(0.55)
+                        .lineLimit(1)
+                    Text(clockDay(timeline.date))
+                        .font(.system(size: max(6, CGFloat(settings.bubbleSize) * 0.11), weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.white)
+                .padding(4)
+            }
+
+        case .stopwatch:
+            TimelineView(.periodic(from: .now, by: 0.2)) { timeline in
+                let elapsed = stopwatchElapsed(at: timeline.date)
+                VStack(spacing: 1) {
+                    Image(systemName: "stopwatch.fill")
+                        .font(.system(size: CGFloat(settings.bubbleSize) * 0.24, weight: .semibold))
+                    Text(shortElapsed(elapsed))
+                        .font(.system(size: max(7, CGFloat(settings.bubbleSize) * 0.15), weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.white)
+            }
+
+        case .system:
+            systemBubbleContent
+
+        case .clipboard:
+            Image(systemName: "doc.on.clipboard.fill")
+                .font(.system(size: CGFloat(settings.bubbleSize) * 0.36, weight: .semibold))
+                .foregroundStyle(.white)
+
+        case .calendar:
+            TimelineView(.periodic(from: .now, by: 60)) { timeline in
+                VStack(spacing: -1) {
+                    Text(monthAbbreviation(timeline.date))
+                        .font(.system(size: max(6, CGFloat(settings.bubbleSize) * 0.11), weight: .bold, design: .rounded))
+                        .foregroundStyle(.red)
+                    Text(dayNumber(timeline.date))
+                        .font(.system(size: max(12, CGFloat(settings.bubbleSize) * 0.34), weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                }
+            }
+
+        case .audio:
+            ZStack {
+                Circle()
+                    .trim(from: 0, to: audio.canSetVolume ? min(1, max(0, Double(audio.volume))) : 0)
+                    .stroke(.white.opacity(0.86), style: StrokeStyle(lineWidth: 2.6, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .padding(3)
+                Image(systemName: audioSymbol)
+                    .font(.system(size: CGFloat(settings.bubbleSize) * 0.28, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
         }
+    }
+
+    @ViewBuilder
+    private var musicBubbleContent: some View {
+        let mode = settings.resolvedMusicDisplayMode
+        ZStack {
+            if mode == .icon || media.artworkImage == nil || !media.isPlaying {
+                Image(systemName: media.isPlaying ? "music.note" : "music.note.list")
+                    .font(.system(size: CGFloat(settings.bubbleSize) * 0.36, weight: .semibold))
+                    .foregroundStyle(.white)
+            } else if let artwork = media.artworkImage {
+                Image(nsImage: artwork)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .scaleEffect(CGFloat(settings.resolvedMusicArtworkZoom))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+
+                if mode == .controls {
+                    Color.black.opacity(0.24)
+                    Image(systemName: media.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: CGFloat(settings.bubbleSize) * 0.28, weight: .bold))
+                        .foregroundStyle(.white)
+                        .shadow(radius: 2)
+                }
+            }
+
+            if mode == .artworkProgress {
+                musicProgressRing
+            }
+
+            if settings.resolvedMusicShowPlaybackGlyph && mode != .controls {
+                Image(systemName: media.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: CGFloat(settings.bubbleSize) * 0.20, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(5)
+                    .background(.black.opacity(0.42), in: Circle())
+            }
+        }
+    }
+
+    private var musicProgressRing: some View {
+        let duration = max(0.001, media.duration)
+        let progress = min(1, max(0, media.position / duration))
+        return ZStack {
+            Circle().stroke(.black.opacity(0.28), lineWidth: 2.4)
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(.white.opacity(0.92), style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .padding(2)
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private var systemBubbleContent: some View {
+        let metric = settings.resolvedSystemMetric
+        VStack(spacing: 1) {
+            Image(systemName: systemMetricSymbol(metric))
+                .font(.system(size: CGFloat(settings.bubbleSize) * 0.23, weight: .semibold))
+            Text(systemMetricValue(metric))
+                .font(.system(size: max(7, CGFloat(settings.bubbleSize) * 0.14), weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+        }
+        .foregroundStyle(.white)
+        .padding(3)
     }
 
     @ViewBuilder
