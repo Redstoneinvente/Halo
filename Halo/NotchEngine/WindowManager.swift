@@ -71,6 +71,10 @@ final class SurfaceState: ObservableObject {
     func openFocusedModule(_ module: ModuleID) {
         collapseTask?.cancel()
         hoverExpandTask?.cancel()
+        contextPreferredSize = nil
+        contextPreferredCompactWidth = nil
+        contextPreferredCompactHeight = nil
+        contextMinimumExpandedWidth = nil
         focusedModule = module
         expanded = true
     }
