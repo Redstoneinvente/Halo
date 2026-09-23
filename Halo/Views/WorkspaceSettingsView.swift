@@ -43,7 +43,7 @@ struct SettingsView: View {
         }
         coreItems.append("Privacy")
 
-        var designItems = ["Appearance", "Closed notch", "Notch Skins", "Notch Ambient", "Activation Sequence"]
+        var designItems = ["Appearance", "Closed notch", "Notch Bubbles", "Notch Skins", "Notch Ambient", "Activation Sequence"]
         if HaloDistribution.current.supportsSparkle {
             designItems.append("Update Animation")
         }
@@ -287,6 +287,7 @@ struct SettingsView: View {
         case "Context Notch Interface": return "rectangle.stack"
         case "HUD": return "rectangle.inset.filled.and.person.filled"
         case "Closed notch": return "rectangle.topthird.inset.filled"
+        case "Notch Bubbles": return "circle.hexagongrid.fill"
         case "Notch Ambient": return "sparkles"
         case "Media & Files": return "play.rectangle"
         case "Profiles": return "person.crop.rectangle.stack"
@@ -385,6 +386,7 @@ struct SettingsView: View {
         case "Activation Sequence": ActivationSequenceSettingsPane()
         case "Widgets": WidgetSettingsView(layout: $workspace.settings.layout)
         case "Closed notch": ClosedNotchSettingsView(layout: $workspace.settings.layout, media: workspace.media, app: workspace.settings.mediaApp)
+        case "Notch Bubbles": NotchBubbleSettingsView()
         case "Notch Ambient": NotchAmbientSettingsView(store: store, workspace: workspace)
         case "HUD": HaloHUDWorkspaceSettingsView(layout: $workspace.settings.layout, profileNames: workspace.settings.profiles.map(\.name))
         case "Modules":
