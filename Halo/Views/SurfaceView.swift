@@ -4840,6 +4840,8 @@ struct BuiltinOrIntegrationWidget: View {
     @Environment(\.widgetStyle) private var style
     @Environment(\.openNotchPresentation) private var presentation
     @Environment(\.openNotchCompressionLevel) private var compression
+    @Environment(\.openNotchAvailableWidth) private var availableWidth
+    @Environment(\.openNotchAvailableHeight) private var availableHeight
     @Environment(\.openNotchGridColumnSpan) private var gridColumnSpan
     @Environment(\.openNotchGridRowSpan) private var gridRowSpan
     @ViewBuilder var body: some View {
