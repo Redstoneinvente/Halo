@@ -3479,10 +3479,24 @@ struct SurfaceView: View {
                 ClipboardSurfaceBackground(monitor: clipboardCI)
             } else if customContextActive, let candidate = activeCustomCandidate {
                 HaloCustomCIBackgroundView(contract: candidate.package.manifest.surface.background, expanded: visuallyExpanded)
-            } else if presentsVisualWorkspaceSurface {
-                OpenNotchBackgroundView(options: layout.resolvedOpenNotchLayout.appearance, fallback: layout.appearance, theme: theme, system: workspace.system)
+            } else if usesVisualWorkspace && activeContext == nil {
+                // Visual Workspace owns the surface background in both open and closed
+                // states. Falling back to the legacy/default SurfaceBackground while
+                // collapsed can stack two different appearances (for example legacy
+                // Glass behind a black Visual Workspace) and look like a second notch.
+                OpenNotchBackgroundView(
+                    options: layout.resolvedOpenNotchLayout.appearance,
+                    fallback: layout.appearance,
+                    theme: theme,
+                    system: workspace.system
+                )
             } else {
-                SurfaceBackground(appearance: layout.appearance, theme: theme, expanded: visuallyExpanded, system: workspace.system)
+                SurfaceBackground(
+                    appearance: layout.appearance,
+                    theme: theme,
+                    expanded: visuallyExpanded,
+                    system: workspace.system
+                )
             }
             if !transferContextActive && !clipboardContextActive && !customContextActive && !integrationContextActive &&
                 ((!visuallyExpanded && !presentsVisualWorkspaceSurface) || layout.closedNotch?.applyBackgroundWhenOpened == true) {
