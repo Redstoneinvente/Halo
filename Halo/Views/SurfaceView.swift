@@ -3494,6 +3494,64 @@ struct SurfaceView: View {
         }
     }
 
+    private func focusedWidgetStyle(for module: ModuleID) -> WidgetStyle {
+        if usesVisualWorkspace,
+           let item = layout.resolvedOpenNotchLayout.resolvedGridItems.first(where: { $0.module == module }),
+           let style = item.widgetStyle {
+            return style
+        }
+        return layout.widgetStyle(for: module)
+    }
+
+    @ViewBuilder
+    private func focusedOpenModuleContent(module: ModuleID) -> some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Label(module.title, systemImage: module.symbol)
+                    .font(.headline)
+                Spacer()
+                Button {
+                    state.clearFocusedModule()
+                } label: {
+                    Image(systemName: "square.grid.2x2")
+                }
+                .help("Show full workspace")
+                .accessibilityLabel("Show full workspace")
+
+                Button {
+                    state.pinned.toggle()
+                } label: {
+                    Image(systemName: state.pinned ? "pin.fill" : "pin")
+                }
+                .help("Keep expanded")
+                .accessibilityLabel("Keep expanded")
+            }
+
+            GeometryReader { proxy in
+                WidgetCard(
+                    style: focusedWidgetStyle(for: module),
+                    availableHeight: proxy.size.height,
+                    availableWidth: proxy.size.width,
+                    fillsCell: module == .pet
+                ) {
+                    BuiltinOrIntegrationWidget(module: module, store: store)
+                }
+                .environment(\.openNotchPresentation, .expanded)
+                .environment(\.openNotchCompressionLevel, 0)
+                .environment(\.openNotchAvailableWidth, proxy.size.width)
+                .environment(\.openNotchAvailableHeight, proxy.size.height)
+                .environment(\.openNotchGridColumnSpan, module == .pet ? 4 : nil)
+                .environment(\.openNotchGridRowSpan, module == .pet ? 4 : nil)
+                .environment(\.haloPixelPalHostExpanded, state.expanded)
+                .environment(\.haloPixelPalHostTransitionDuration, layout.appearance.surface.duration)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+            }
+        }
+        .padding(.horizontal, CGFloat(layout.resolvedOpenHorizontalPadding))
+        .padding(.vertical, CGFloat(layout.resolvedOpenVerticalPadding))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
     private func legacyHorizontalWidget(_ module: ModuleID) -> some View {
         GeometryReader { proxy in
             WidgetCard(style: layout.widgetStyle(for: module), availableHeight: proxy.size.height, availableWidth: proxy.size.width) {
