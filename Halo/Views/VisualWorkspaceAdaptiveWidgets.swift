@@ -558,7 +558,12 @@ struct VisualWorkspaceTimerView: View {
             let controlSize: ControlSize = compact ? .mini : .small
             if store.deadline == nil && store.pausedSeconds <= 0 {
                 if context.shows("presets") {
-                    if compact {
+                    let roomForInlineComposer =
+                        !compact &&
+                        (availableWidth ?? 0) >= 380 &&
+                        (availableHeight ?? 0) >= 420
+
+                    if !roomForInlineComposer {
                         HaloTimerDurationPopoverButton(
                             accent: style.accentColor.color,
                             textColor: style.textColor.color,
