@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     private var visualWorkspaceActive: Bool {
-        activeLayout.resolvedUsesCustomOpenNotchWorkspace
+        workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace
     }
 
     private var sidebarGroups: [SidebarGroup] {
@@ -1354,8 +1354,8 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     }
 
     private func applyDirectGeometrySnapshot(_ snapshot: SurfaceGeometryEditSnapshot) {
-        var theme = store.configuration.theme
-        var appearance = workspace.settings.layout.appearance
+        var theme = activeTheme
+        var appearance = activeLayout.appearance
 
         theme.width = min(1200, max(340, snapshot.expandedWidth))
         theme.cornerRadius = min(48, max(0, snapshot.cornerRadius))
@@ -1593,7 +1593,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 
     @ViewBuilder private var visualWorkspaceBackground: some View {
         let kind = visualBackgroundKind.wrappedValue
-        let fallback = workspace.settings.layout.appearance
+        let fallback = activeLayout.appearance
         let openedAppearance = activeLayout.resolvedOpenNotchLayout.appearance
         Section {
             Label("Visual Workspace", systemImage: "rectangle.3.group")
