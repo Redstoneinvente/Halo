@@ -2081,28 +2081,93 @@ final class TrailerModeController {
             if !configuration.showcaseMusic { store.workspace.refreshMediaSource() }
         }
 
-        let expanded = requestedExpandedState(configuration.surfaceTarget, step: step)
-        // A 5-frame cadence means Alternate mode shows music in both closed and opened states.
-        let musicFrame = configuration.showcaseMusic && step % 5 == 2
+        let pass = showcasePass(
+            for: configuration.surfaceTarget,
+            step: step,
+            showcaseMusic: configuration.showcaseMusic
+        )
+        let expanded = requestedExpandedState(
+            configuration.surfaceTarget,
+            pass: pass,
+            step: step
+        )
 
-        var layout = baseLayout
+        // Start from the previous trailer state rather than the user's base state on every
+        // beat. This lets content change while the shell remains visually identical.
+        var layout = showcaseLayout ?? baseLayout
+        var theme = showcaseTheme ?? baseTheme
+        var contextPreview: TrailerContextPreview?
+
         if configuration.randomizeAppearance {
-            randomizeAppearance(in: &layout, configuration: configuration, expanded: expanded)
+            switch pass {
+            case .surface:
+                randomizeSurface(
+                    in: &layout,
+                    theme: &theme,
+                    configuration: configuration
+                )
+            case .color:
+                randomizeColors(in: &layout, theme: &theme)
+            case .material:
+                randomizeMaterials(in: &layout)
+            case .closedWidgets, .openWidgets, .musicCI, .retroCI:
+                break
+            }
         }
-        // Trailer footage must stay locked to the display notch anchor. Never inherit a
-        // user's manual geometry offsets into the showcase sequence.
+
+        switch pass {
+        case .closedWidgets:
+            configureClosedShowcase(
+                in: &layout,
+                configuration: configuration,
+                musicFrame: configuration.showcaseMusic && step.isMultiple(of: 3)
+            )
+
+        case .openWidgets:
+            configureOpenedShowcase(
+                in: &layout,
+                configuration: configuration,
+                musicFrame: false
+            )
+
+        case .musicCI:
+            configureOpenedShowcase(
+                in: &layout,
+                configuration: configuration,
+                musicFrame: true
+            )
+            if configuration.showcaseMusic {
+                contextPreview = .music
+            }
+
+        case .retroCI:
+            // Retro CI is self-contained, so it is safe to showcase without depending on
+            // a real external trigger, user data, Bluetooth state, or file transfer.
+            contextPreview = .retro
+
+        case .surface, .color, .material:
+            break
+        }
+
+        // A context preview should own only its own beat. When we return to widget,
+        // material, colour, or surface passes, restore the normal workspace renderer.
+        if contextPreview != .music {
+            var music = layout.contextMusic ?? ContextMusicOptions()
+            music.enabled = false
+            layout.contextMusic = music
+        }
+
+        // Trailer footage must stay locked to the display notch anchor. Appearance passes
+        // can morph the shell, but they must never inherit user positioning offsets.
         layout.appearance.surface.offsets = SurfaceOffsets()
-        configureClosedShowcase(in: &layout, configuration: configuration, musicFrame: musicFrame)
-        configureOpenedShowcase(in: &layout, configuration: configuration, musicFrame: musicFrame)
-
-        var theme = baseTheme
-        if configuration.randomizeAppearance {
-            randomizeTheme(&theme)
-        }
-        // Even with appearance randomization disabled, Trailer Mode remains a notch-anchored
-        // presentation instead of inheriting a pill/island/detached placement from the active theme.
         theme.style = .notch
+        theme.animations = true
 
+        showcaseLayout = layout
+        showcaseTheme = theme
+        lastExpandedState = expanded
+
+        store.workspace.trailerContextPreview = contextPreview
         store.workspace.trailerLayoutOverride = layout
         store.workspace.trailerThemeOverride = theme
 
@@ -2140,57 +2205,96 @@ final class TrailerModeController {
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0.05, delay), execute: work)
     }
 
-    private func requestedExpandedState(_ target: TrailerSurfaceTarget, step: Int) -> Bool {
+    private func showcasePass(
+        for target: TrailerSurfaceTarget,
+        step: Int,
+        showcaseMusic: Bool
+    ) -> TrailerShowcasePass {
+        let sequence: [TrailerShowcasePass]
         switch target {
-        case .closedOnly: return false
-        case .openedOnly: return true
-        case .alternate: return step % 2 == 1
+        case .closedOnly:
+            sequence = [
+                .surface,
+                .closedWidgets,
+                .color,
+                .closedWidgets,
+                .material,
+                .closedWidgets
+            ]
+
+        case .openedOnly:
+            sequence = showcaseMusic
+                ? [.surface, .openWidgets, .musicCI, .color, .retroCI, .material, .openWidgets]
+                : [.surface, .openWidgets, .color, .retroCI, .material, .openWidgets]
+
+        case .alternate:
+            sequence = showcaseMusic
+                ? [.surface, .closedWidgets, .openWidgets, .musicCI, .color, .retroCI, .material, .openWidgets, .closedWidgets]
+                : [.surface, .closedWidgets, .openWidgets, .color, .retroCI, .material, .openWidgets, .closedWidgets]
+        }
+
+        return sequence[step % sequence.count]
+    }
+
+    private func requestedExpandedState(
+        _ target: TrailerSurfaceTarget,
+        pass: TrailerShowcasePass,
+        step: Int
+    ) -> Bool {
+        switch target {
+        case .closedOnly:
+            return false
+        case .openedOnly:
+            return true
+        case .alternate:
+            switch pass {
+            case .closedWidgets:
+                return false
+            case .openWidgets, .musicCI, .retroCI:
+                return true
+            case .surface:
+                return step == 0 ? false : lastExpandedState
+            case .color, .material:
+                return lastExpandedState
+            }
         }
     }
 
-    private func randomizeTheme(_ theme: inout Theme) {
-        // Keep Trailer Mode physically anchored to the top notch position. The visual
-        // variation comes from SurfaceShapeKind, skins, glass, dimensions and widgets;
-        // placement styles such as pill/island/shelf intentionally sit lower on screen
-        // and make trailer footage look like the notch is drifting.
-        theme.style = .notch
-        theme.width = Double.random(in: 360...720)
-        theme.cornerRadius = Double.random(in: 14...36)
-        theme.tint = Double.random(in: 0.28...0.82)
-        theme.opacity = Double.random(in: 0.82...1.0)
-        theme.animations = true
-    }
-
-    private func randomizeAppearance(in layout: inout WorkspaceLayout,
-                                     configuration: TrailerModeSettings,
-                                     expanded: Bool) {
-        let palettes: [(WidgetColor, WidgetColor, WidgetColor)] = [
+    private var trailerPalettes: [(WidgetColor, WidgetColor, WidgetColor)] {
+        [
             (.init(red: 0.10, green: 0.15, blue: 0.30), .init(red: 0.20, green: 0.70, blue: 1.00), .init(red: 0.72, green: 0.36, blue: 1.00)),
             (.init(red: 0.04, green: 0.22, blue: 0.18), .init(red: 0.16, green: 0.88, blue: 0.65), .init(red: 0.80, green: 1.00, blue: 0.55)),
             (.init(red: 0.28, green: 0.08, blue: 0.13), .init(red: 1.00, green: 0.36, blue: 0.44), .init(red: 1.00, green: 0.72, blue: 0.32)),
             (.init(red: 0.06, green: 0.08, blue: 0.12), .init(red: 0.28, green: 0.48, blue: 1.00), .init(red: 0.18, green: 0.92, blue: 0.92)),
             (.init(red: 0.22, green: 0.10, blue: 0.28), .init(red: 0.95, green: 0.30, blue: 0.78), .init(red: 0.42, green: 0.62, blue: 1.00))
         ]
-        let palette = palettes.randomElement() ?? palettes[0]
+    }
 
-        layout.appearance.background = [BackgroundKind.gradient, .solid, .glass].randomElement() ?? .glass
-        layout.appearance.solidColor = palette.0
-        layout.appearance.gradientStartColor = palette.1
-        layout.appearance.gradientEndColor = palette.2
-        layout.appearance.blur = Double.random(in: 0...10)
-        layout.appearance.saturation = Double.random(in: 0.85...1.25)
-        layout.appearance.brightness = Double.random(in: -0.06...0.08)
+    private func randomizeSurface(
+        in layout: inout WorkspaceLayout,
+        theme: inout Theme,
+        configuration: TrailerModeSettings
+    ) {
+        theme.style = .notch
+        theme.width = Double.random(in: 360...720)
+        theme.cornerRadius = Double.random(in: 14...36)
+
         layout.appearance.compactWidth = Double.random(in: 170...315)
         layout.appearance.expandedHeight = Double.random(in: 330...620)
         layout.appearance.spacing = Double.random(in: 8...18)
         layout.appearance.animation = [.macOS, .dynamic, .smooth, .snappy, .elastic, .minimal].randomElement() ?? .smooth
 
+        // Keep the window attached to the physical notch while still demonstrating Halo's
+        // alternate contour shapes. Disabling the style contour lets the selected shape
+        // render without switching to lower-on-screen placement styles such as pill or island.
+        layout.appearance.surface.useStyleContour = Bool.random()
         layout.appearance.surface.shape = SurfaceShapeKind.allCases.randomElement() ?? .rounded
         layout.appearance.surface.compactHeight = Double.random(in: 28...54)
         layout.appearance.surface.topRadius = Double.random(in: 3...22)
         layout.appearance.surface.bottomRadius = Double.random(in: 15...38)
         layout.appearance.surface.shoulder = Double.random(in: 8...28)
         layout.appearance.surface.duration = configuration.resolvedSmoothing
+
         let normalizedSmoothing = (configuration.resolvedSmoothing - 0.08) / (1.2 - 0.08)
         layout.appearance.surface.damping = min(1, max(0.4, 0.58 + normalizedSmoothing * 0.34))
         let transitions: [SurfaceTransition] = configuration.resolvedSmoothing < 0.16
@@ -2198,24 +2302,51 @@ final class TrailerModeController {
             : [.resize, .spring, .fade, .scale, .slide]
         layout.appearance.surface.opening = transitions.randomElement() ?? .spring
         layout.appearance.surface.closing = transitions.randomElement() ?? .resize
+    }
+
+    private func randomizeColors(
+        in layout: inout WorkspaceLayout,
+        theme: inout Theme
+    ) {
+        let palette = trailerPalettes.randomElement() ?? trailerPalettes[0]
+
+        layout.appearance.solidColor = palette.0
+        layout.appearance.gradientStartColor = palette.1
+        layout.appearance.gradientEndColor = palette.2
+        layout.appearance.saturation = Double.random(in: 0.85...1.25)
+        layout.appearance.brightness = Double.random(in: -0.06...0.08)
+
+        layout.appearance.skin.tint = palette.1
+        layout.appearance.skin.usesThemeTint = Bool.random()
+
+        var glass = layout.appearance.glass
+        glass.tint = palette.2
+        glass.tintAmount = Double.random(in: 0.02...0.16)
+        layout.appearance.glass = glass
+
+        theme.tint = Double.random(in: 0.28...0.82)
+        theme.opacity = Double.random(in: 0.84...1.0)
+    }
+
+    private func randomizeMaterials(in layout: inout WorkspaceLayout) {
+        layout.appearance.background = [BackgroundKind.gradient, .solid, .glass].randomElement() ?? .glass
+        layout.appearance.blur = Double.random(in: 0...12)
 
         layout.appearance.skin.enabled = Bool.random()
         layout.appearance.skin.preset = NotchSkinPreset.allCases.randomElement() ?? .haloGlow
-        layout.appearance.skin.visibility = expanded ? .opened : .closed
-        layout.appearance.skin.opacity = Double.random(in: 0.16...0.48)
+        layout.appearance.skin.visibility = .always
+        layout.appearance.skin.opacity = Double.random(in: 0.16...0.52)
         layout.appearance.skin.blend = NotchSkinBlend.allCases.randomElement() ?? .screen
-        layout.appearance.skin.usesThemeTint = Bool.random()
-        layout.appearance.skin.tint = palette.1
         layout.appearance.skin.scale = Double.random(in: 0.85...1.35)
 
         var glass = layout.appearance.glass
-        glass.clarity = Double.random(in: 0.55...0.92)
-        glass.frost = Double.random(in: 0.18...0.68)
-        glass.lightAbsorption = Double.random(in: 0.06...0.28)
-        glass.refraction = Double.random(in: 0.04...0.28)
-        glass.chromaticShift = Double.random(in: 0.02...0.16)
-        glass.tint = palette.2
-        glass.tintAmount = Double.random(in: 0.02...0.14)
+        glass.clarity = Double.random(in: 0.50...0.94)
+        glass.frost = Double.random(in: 0.14...0.72)
+        glass.lightAbsorption = Double.random(in: 0.04...0.30)
+        glass.refraction = Double.random(in: 0.03...0.30)
+        glass.chromaticShift = Double.random(in: 0.01...0.18)
+        glass.highlight = Double.random(in: 0.06...0.24)
+        glass.edgeDepth = Double.random(in: 0.04...0.24)
         layout.appearance.glass = glass
     }
 
