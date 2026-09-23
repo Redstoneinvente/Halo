@@ -2820,7 +2820,21 @@ struct SurfaceView: View {
         guard let winner = CIArbitrationEngine.winner(in: surfaceContextCandidates.map(\.arbitration)) else { return nil }
         return surfaceContextCandidates.first(where: { $0.arbitration == winner })
     }
-    private var activeContext: ActiveContextInterface? { activeContextCandidate?.interface }
+    private var trailerContextOverride: ActiveContextInterface? {
+        guard workspace.trailerModeActive else { return nil }
+        switch workspace.trailerContextPreview {
+        case .music?: return .music
+        case .retro?: return .retro
+        case nil: return nil
+        }
+    }
+    private var activeContext: ActiveContextInterface? {
+        // Trailer footage must be deterministic: external Bluetooth/drop/clipboard/custom
+        // triggers should not steal a showcase beat. Trailer Mode either owns the CI with
+        // an explicit preview, or deliberately renders the normal workspace with no CI.
+        if workspace.trailerModeActive { return trailerContextOverride }
+        return activeContextCandidate?.interface
+    }
     private var activeIntegrationCandidate: CIEligibleCandidate? {
         guard activeContext == .integration,
               let ciID = activeContextCandidate?.arbitration.ciID else { return nil }
