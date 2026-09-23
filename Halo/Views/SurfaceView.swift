@@ -3233,6 +3233,12 @@ struct SurfaceView: View {
             }
         }
         .onHover { hovering in
+            // Trailer Mode owns open/closed state while recording. Normal hover behavior would
+            // otherwise retract an "Opened only" shot or expand a "Closed only" shot.
+            if workspace.trailerModeActive {
+                state.collapseTask?.cancel()
+                return
+            }
             if clipboardContextActive {
                 clipboardCI.setInteractionActive(hovering)
             } else {
