@@ -726,12 +726,12 @@ private struct NotchBubbleMaskShape: Shape {
         case .circle:
             return Path(ellipseIn: rect)
         case .capsule:
-            return Path(Capsule(style: .continuous).path(in: rect))
+            return Capsule(style: .continuous).path(in: rect)
         case .roundedSquare, .glass:
-            return Path(RoundedRectangle(
+            return RoundedRectangle(
                 cornerRadius: min(max(0, cornerRadius), min(rect.width, rect.height) / 2),
                 style: .continuous
-            ).path(in: rect))
+            ).path(in: rect)
         }
     }
 }
