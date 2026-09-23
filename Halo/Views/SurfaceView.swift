@@ -3519,7 +3519,11 @@ struct SurfaceView: View {
         }
 
         if presentsVisualWorkspaceSurface {
-            OpenNotchSurfaceChrome(contour: contour, options: layout.resolvedOpenNotchLayout.appearance)
+            OpenNotchSurfaceChrome(
+                contour: contour,
+                options: layout.resolvedOpenNotchLayout.appearance,
+                outlineEnabled: outlineEnabled
+            )
         }
     }
 
@@ -3973,23 +3977,49 @@ private struct OpenNotchBackgroundView: View {
 private struct OpenNotchSurfaceChrome: View {
     let contour: HaloContour
     let options: OpenNotchAppearance
+    let outlineEnabled: Bool
+
     var body: some View {
         ZStack {
-            if (options.borderWidth ?? 0) > 0 {
-                contour.stroke((options.borderColor ?? .white).color.opacity(options.borderOpacity ?? 0.2), lineWidth: options.borderWidth ?? 0)
+            // "Show outer outline" is authoritative for every contour-derived
+            // Visual Workspace effect. Previously the legacy white stroke could be
+            // disabled while the workspace border/highlight/glow/shadow strokes
+            // remained, which made the outline appear gray instead of disappearing.
+            if outlineEnabled {
+                if (options.borderWidth ?? 0) > 0 {
+                    contour.stroke(
+                        (options.borderColor ?? .white).color.opacity(options.borderOpacity ?? 0.2),
+                        lineWidth: options.borderWidth ?? 0
+                    )
+                }
+                if (options.innerHighlight ?? 0) > 0 {
+                    contour.stroke(.white.opacity(options.innerHighlight ?? 0), lineWidth: 1)
+                        .padding(1)
+                }
+                if (options.glow ?? 0) > 0 {
+                    contour.stroke(
+                        .white.opacity((options.glow ?? 0) * 0.32),
+                        lineWidth: 1.2
+                    )
+                    .shadow(
+                        color: .white.opacity(options.glow ?? 0),
+                        radius: 12
+                    )
+                }
+                if (options.shadowOpacity ?? 0) > 0 {
+                    contour.stroke(
+                        .black.opacity(options.shadowOpacity ?? 0),
+                        lineWidth: 1
+                    )
+                    .shadow(
+                        color: .black.opacity(options.shadowOpacity ?? 0),
+                        radius: options.shadowBlur ?? 12,
+                        y: 3
+                    )
+                }
             }
-            if (options.innerHighlight ?? 0) > 0 {
-                contour.stroke(.white.opacity(options.innerHighlight ?? 0), lineWidth: 1).padding(1)
-            }
-            if (options.glow ?? 0) > 0 {
-                contour.stroke(.white.opacity((options.glow ?? 0) * 0.32), lineWidth: 1.2)
-                    .shadow(color: .white.opacity(options.glow ?? 0), radius: 12)
-            }
-            if (options.shadowOpacity ?? 0) > 0 {
-                contour.stroke(.black.opacity(options.shadowOpacity ?? 0), lineWidth: 1)
-                    .shadow(color: .black.opacity(options.shadowOpacity ?? 0), radius: options.shadowBlur ?? 12, y: 3)
-            }
-        }.allowsHitTesting(false)
+        }
+        .allowsHitTesting(false)
     }
 }
 
