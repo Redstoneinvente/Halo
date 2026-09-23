@@ -3492,7 +3492,17 @@ struct SurfaceView: View {
 
     @ViewBuilder private var surfaceOverlayLayer: some View {
         let dropOverlayActive = dropCIEnabled && state.dropTargeted
-        contour.stroke(dropOverlayActive ? accent : .white.opacity(0.12), lineWidth: dropOverlayActive ? 1.6 : 1)
+        let outlineEnabled = layout.appearance.surface.outlineEnabled ?? true
+
+        // Keep the drag/drop ownership highlight even when the decorative outer
+        // outline is disabled; it communicates an active drop target.
+        if dropOverlayActive || outlineEnabled {
+            contour.stroke(
+                dropOverlayActive ? accent : .white.opacity(0.12),
+                lineWidth: dropOverlayActive ? 1.6 : 1
+            )
+        }
+
         if presentsVisualWorkspaceSurface {
             OpenNotchSurfaceChrome(contour: contour, options: layout.resolvedOpenNotchLayout.appearance)
         }

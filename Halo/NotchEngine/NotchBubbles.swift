@@ -366,6 +366,10 @@ struct NotchBubbleSettings: Codable, Equatable {
     var shape: NotchBubbleShape = .glass
     var cornerRadius = 18.0
     var glassIntensity = 0.82
+    // Optional global color keeps existing settings visually unchanged. Per-bubble
+    // tint overrides continue to take priority over these values.
+    var bubbleTint: WidgetColor?
+    var bubbleTintAmount: Double?
     var animation: NotchBubbleAnimationPreset = .soft
     // Optional so settings saved before lifecycle timing existed still decode.
     var lifecycleDuration: Double?
@@ -458,6 +462,12 @@ struct NotchBubbleSettings: Codable, Equatable {
         }
         value.cornerRadius = min(36, max(0, cornerRadius.isFinite ? cornerRadius : 18))
         value.glassIntensity = min(1, max(0.15, glassIntensity.isFinite ? glassIntensity : 0.82))
+        if let bubbleTint {
+            value.bubbleTint = (try? bubbleTint.validated()) ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0)
+        }
+        if let bubbleTintAmount {
+            value.bubbleTintAmount = min(1, max(0, bubbleTintAmount.isFinite ? bubbleTintAmount : 0.35))
+        }
         if let lifecycleDuration {
             value.lifecycleDuration = min(1.5, max(0.10, lifecycleDuration.isFinite ? lifecycleDuration : 0.28))
         }
@@ -493,6 +503,11 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedLifecycleDuration: Double {
         let value = lifecycleDuration ?? 0.22
         return value.isFinite ? min(1.5, max(0.10, value)) : 0.28
+    }
+
+    var resolvedBubbleTintAmount: Double {
+        let value = bubbleTintAmount ?? (bubbleTint == nil ? 0 : 0.35)
+        return value.isFinite ? min(1, max(0, value)) : 0.35
     }
 
     var resolvedMusicDisplayMode: MusicBubbleDisplayMode { musicDisplayMode ?? .artwork }
@@ -599,7 +614,13 @@ struct NotchBubbleSettings: Codable, Equatable {
         let resolvedShape = override?.shape ?? shape
         let resolvedBackground: NotchBubbleBackgroundStyle = override?.background
             ?? (shape == .glass ? .glass : .solid)
-        let tintColor = override?.tint?.color
+        let tintColor = override?.tint?.color ?? bubbleTint?.color
+        let tintAmount: Double = {
+            if override?.tint != nil {
+                return override?.tintAmount ?? max(0.22, resolvedBubbleTintAmount)
+            }
+            return override?.tintAmount ?? resolvedBubbleTintAmount
+        }()
         return ResolvedNotchBubbleStyle(
             design: override?.design ?? .halo,
             size: CGFloat(override?.size ?? bubbleSize),
@@ -612,7 +633,7 @@ struct NotchBubbleSettings: Codable, Equatable {
             contentScale: CGFloat(override?.contentScale ?? 1.0),
             verticalOffset: CGFloat(override?.verticalOffset ?? 0),
             tint: tintColor,
-            tintAmount: override?.tintAmount ?? 0,
+            tintAmount: tintAmount,
             animation: override?.animation ?? animation,
             lifecycleDuration: override?.lifecycleDuration ?? resolvedLifecycleDuration
         )
@@ -3329,9 +3350,9 @@ private struct NotchBubbleView: View {
             shape: bubbleStyle.shape,
             cornerRadius: bubbleStyle.cornerRadius
         )
-        let accent = providerAccentColor
-        let customTint = bubbleStyle.tint ?? accent
-        let tintAmount = max(bubbleStyle.tintAmount, bubbleStyle.tint == nil ? 0 : bubbleStyle.tintAmount)
+        let accent = bubbleStyle.tint ?? providerAccentColor
+        let customTint = accent
+        let tintAmount = bubbleStyle.tintAmount
 
         switch bubbleStyle.design {
         case .halo:
@@ -3527,7 +3548,7 @@ private struct NotchBubbleView: View {
             shape: bubbleStyle.shape,
             cornerRadius: bubbleStyle.cornerRadius
         )
-        let accent = providerAccentColor
+        let accent = bubbleStyle.tint ?? providerAccentColor
 
         switch bubbleStyle.design {
         case .halo:
@@ -4304,6 +4325,73 @@ struct NotchBubbleSettingsView: View {
                     Slider(value: binding(\.glassIntensity), in: 0.15...1, step: 0.05)
                         .frame(width: 210)
                 }
+            }
+
+            Toggle(
+                "Custom bubble color",
+                isOn: Binding(
+                    get: { settings.bubbleTint != nil },
+                    set: { enabled in
+                        var next = settingsStore.settings
+                        if enabled {
+                            if next.bubbleTint == nil {
+                                next.bubbleTint = WidgetColor(red: 0.20, green: 0.52, blue: 1.0)
+                            }
+                            if next.bubbleTintAmount == nil {
+                                next.bubbleTintAmount = 0.35
+                            }
+                        } else {
+                            next.bubbleTint = nil
+                            next.bubbleTintAmount = nil
+                        }
+                        settingsStore.settings = next.normalized()
+                    }
+                )
+            )
+
+            if settings.bubbleTint != nil {
+                ColorPicker(
+                    "Bubble color",
+                    selection: Binding(
+                        get: {
+                            settings.bubbleTint?.color
+                                ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0).color
+                        },
+                        set: { color in
+                            var next = settingsStore.settings
+                            next.bubbleTint = WidgetColor(color)
+                            if next.bubbleTintAmount == nil { next.bubbleTintAmount = 0.35 }
+                            settingsStore.settings = next.normalized()
+                        }
+                    ),
+                    supportsOpacity: false
+                )
+
+                LabeledContent("Color intensity") {
+                    HStack {
+                        Slider(
+                            value: Binding(
+                                get: { settings.resolvedBubbleTintAmount },
+                                set: { amount in
+                                    var next = settingsStore.settings
+                                    next.bubbleTintAmount = amount
+                                    settingsStore.settings = next.normalized()
+                                }
+                            ),
+                            in: 0...1,
+                            step: 0.05
+                        )
+                        .frame(width: 210)
+
+                        Text("\(Int(settings.resolvedBubbleTintAmount * 100))%")
+                            .monospacedDigit()
+                            .frame(width: 44, alignment: .trailing)
+                    }
+                }
+
+                Text("Sets the global bubble accent/tint. Individual bubble tint overrides still take priority.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
 

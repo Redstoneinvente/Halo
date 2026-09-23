@@ -330,6 +330,17 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
             Section("Shape") {
                 Toggle("Use surface style contour", isOn: Binding(get: { appearance.surface.useStyleContour ?? true }, set: { appearance.surface.useStyleContour = $0 }))
                 Text("Turn off to use a custom contour below.").font(.caption)
+
+                Toggle(
+                    "Show outer outline",
+                    isOn: Binding(
+                        get: { appearance.surface.outlineEnabled ?? true },
+                        set: { appearance.surface.outlineEnabled = $0 }
+                    )
+                )
+                Text("Disables Halo's thin outer contour. Active drag-and-drop feedback can still temporarily highlight the surface.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Picker("Contour", selection: Binding(get: { appearance.surface.shape }, set: { appearance.surface.shape = $0; appearance.surface.useStyleContour = false })) { ForEach(SurfaceShapeKind.allCases) { Text($0.rawValue).tag($0) } }
                 if appearance.surface.shape == .asymmetric {
                     PreciseSlider(title: "Top corners", value: $appearance.surface.topRadius, range: 0...64, step: 1, suffix: "pt")

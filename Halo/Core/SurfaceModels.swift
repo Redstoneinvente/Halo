@@ -249,8 +249,10 @@ enum SurfaceTransition: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 struct SurfaceOptions: Codable, Equatable {
-    // Optional for compatibility with themes/preferences saved before offsets existed.
+    // Optional fields preserve compatibility with themes/preferences saved before
+    // these surface controls existed.
     var useStyleContour: Bool?
+    var outlineEnabled: Bool?
     var offsets: SurfaceOffsets?
     var shape: SurfaceShapeKind = .rounded
     var compactHeight = 40.0
