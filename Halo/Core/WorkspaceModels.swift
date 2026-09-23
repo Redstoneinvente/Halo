@@ -1289,7 +1289,7 @@ struct AutomationRule: Codable, Identifiable {
         }
     }
 }
-enum TrailerSurfaceTarget: String, Codable, CaseIterable, Identifiable {
+enum TrailerSurfaceTarget: String, Codable, CaseIterable, Identifiable, Equatable {
     case closedOnly = "Closed only"
     case openedOnly = "Opened only"
     case alternate = "Alternate"
