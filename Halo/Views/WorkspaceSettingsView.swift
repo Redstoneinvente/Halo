@@ -940,6 +940,77 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         workspace.settings.layout = current
     }
 
+    private func updateVisualLayout(_ update: (inout OpenNotchLayout) -> Void) {
+        var current = workspace.settings.layout
+        current.materializeOpenNotchLayout()
+        var opened = current.resolvedOpenNotchLayout
+        update(&opened)
+        opened.preset = .custom
+        current.openNotch = opened
+        workspace.settings.layout = current
+    }
+
+    private var openedSidePaddingBinding: Binding<Double> {
+        if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+            return Binding(
+                get: {
+                    let padding = workspace.settings.layout.resolvedOpenNotchLayout.resolvedGridPadding
+                    return (padding.leading + padding.trailing) / 2
+                },
+                set: { value in
+                    updateVisualLayout { opened in
+                        var padding = opened.resolvedGridPadding
+                        padding.leading = value
+                        padding.trailing = value
+                        opened.gridPadding = padding
+                    }
+                }
+            )
+        }
+
+        return Binding(
+            get: { workspace.settings.layout.resolvedOpenHorizontalPadding },
+            set: { workspace.settings.layout.openHorizontalPadding = $0 }
+        )
+    }
+
+    private var openedVerticalPaddingBinding: Binding<Double> {
+        if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+            return Binding(
+                get: {
+                    let padding = workspace.settings.layout.resolvedOpenNotchLayout.resolvedGridPadding
+                    return (padding.top + padding.bottom) / 2
+                },
+                set: { value in
+                    updateVisualLayout { opened in
+                        var padding = opened.resolvedGridPadding
+                        padding.top = value
+                        padding.bottom = value
+                        opened.gridPadding = padding
+                    }
+                }
+            )
+        }
+
+        return Binding(
+            get: { workspace.settings.layout.resolvedOpenVerticalPadding },
+            set: { workspace.settings.layout.openVerticalPadding = $0 }
+        )
+    }
+
+    private var openedSpacingBinding: Binding<Double> {
+        if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+            return Binding(
+                get: { workspace.settings.layout.resolvedOpenNotchLayout.resolvedGridGap },
+                set: { value in
+                    updateVisualLayout { $0.gridGap = value }
+                }
+            )
+        }
+
+        return $workspace.settings.layout.appearance.spacing
+    }
+
     private func chooseVisualBackgroundAsset(_ kind: BackgroundKind) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
@@ -1029,21 +1100,37 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         }
 
         Section("Opened notch size & spacing") {
-            Slider(value: $store.configuration.theme.width, in: 340...1200, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Opened width") }
+            Slider(
+                value: $store.configuration.theme.width,
+                in: 340...1200,
+                onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }
+            ) { Text("Opened width") }
                 .disabled(geometryEditor.isEnabled)
-            Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 280...1100, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }) { Text("Opened height") }
+
+            Slider(
+                value: $workspace.settings.layout.appearance.expandedHeight,
+                in: 280...1100,
+                onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }
+            ) { Text("Opened height") }
                 .disabled(geometryEditor.isEnabled)
-            Slider(value: Binding(
-                get: { workspace.settings.layout.resolvedOpenHorizontalPadding },
-                set: { workspace.settings.layout.openHorizontalPadding = $0 }
-            ), in: 8...72) { Text("Side padding") }
-            Slider(value: Binding(
-                get: { workspace.settings.layout.resolvedOpenVerticalPadding },
-                set: { workspace.settings.layout.openVerticalPadding = $0 }
-            ), in: 8...72) { Text("Top & bottom padding") }
-            Slider(value: $workspace.settings.layout.appearance.spacing, in: 4...40) { Text("Module spacing") }
-            Text("Width is still limited by the display. Lower padding gives widgets more breathing room without changing the outer notch shape.")
-                .font(.caption).foregroundStyle(.secondary)
+
+            if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+                Slider(value: openedSidePaddingBinding, in: 0...72) { Text("Workspace side padding") }
+                Slider(value: openedVerticalPaddingBinding, in: 0...72) { Text("Workspace top & bottom padding") }
+                Slider(value: openedSpacingBinding, in: 0...32) { Text("Widget gap") }
+
+                Text("Visual Workspace spacing now edits its grid padding and gap directly. Opened width and height still control the outer Halo surface.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Slider(value: openedSidePaddingBinding, in: 8...72) { Text("Side padding") }
+                Slider(value: openedVerticalPaddingBinding, in: 8...72) { Text("Top & bottom padding") }
+                Slider(value: openedSpacingBinding, in: 4...40) { Text("Module spacing") }
+
+                Text("Width is still limited by the display. Lower padding gives widgets more breathing room without changing the outer notch shape.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         SurfaceAppearanceControls(
             appearance: $workspace.settings.layout.appearance,

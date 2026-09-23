@@ -338,7 +338,7 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
                         set: { appearance.surface.outlineEnabled = $0 }
                     )
                 )
-                Text("Disables Halo's thin outer contour. Active drag-and-drop feedback can still temporarily highlight the surface.")
+                Text("Disables Halo's default thin outer contour. Visual Workspace Border, Glow and Shadow remain independently configurable in its Edge & depth section.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Picker("Contour", selection: Binding(get: { appearance.surface.shape }, set: { appearance.surface.shape = $0; appearance.surface.useStyleContour = false })) { ForEach(SurfaceShapeKind.allCases) { Text($0.rawValue).tag($0) } }
