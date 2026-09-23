@@ -2282,27 +2282,51 @@ private struct NotchBubbleView: View {
 
         switch bubbleStyle.design {
         case .halo:
-            shape
-                .fill(.ultraThinMaterial)
-                .opacity(bubbleStyle.glassIntensity)
-                .overlay {
-                    shape.fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.08),
-                                Color.clear,
-                                Color.black.opacity(0.26 * bubbleStyle.backgroundOpacity)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+            switch bubbleStyle.background {
+            case .solid:
+                shape
+                    .fill(Color.black.opacity(bubbleStyle.backgroundOpacity))
+                    .overlay {
+                        shape.fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.08), Color.clear],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                }
-                .overlay {
-                    if tintAmount > 0 {
-                        shape.fill(customTint.opacity(tintAmount))
                     }
-                }
+                    .overlay {
+                        if tintAmount > 0 { shape.fill(customTint.opacity(tintAmount)) }
+                    }
+
+            case .glass:
+                shape
+                    .fill(.ultraThinMaterial)
+                    .opacity(bubbleStyle.glassIntensity)
+                    .overlay {
+                        shape.fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.08),
+                                    Color.clear,
+                                    Color.black.opacity(0.26 * bubbleStyle.backgroundOpacity)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                    }
+                    .overlay {
+                        if tintAmount > 0 { shape.fill(customTint.opacity(tintAmount)) }
+                    }
+
+            case .clear:
+                shape
+                    .fill(Color.clear)
+                    .overlay {
+                        if tintAmount > 0 { shape.fill(customTint.opacity(tintAmount)) }
+                    }
+            }
 
         case .aurora:
             shape
@@ -2473,9 +2497,15 @@ private struct NotchBubbleView: View {
         case .prism:
             shape.stroke(
                 AngularGradient(
-                    colors: [.pink, .purple, .blue, .cyan, .pink],
+                    colors: [
+                        Color.pink.opacity(hovering ? 0.72 : 0.42),
+                        Color.purple.opacity(hovering ? 0.72 : 0.42),
+                        Color.blue.opacity(hovering ? 0.72 : 0.42),
+                        Color.cyan.opacity(hovering ? 0.72 : 0.42),
+                        Color.pink.opacity(hovering ? 0.72 : 0.42)
+                    ],
                     center: .center
-                ).opacity(hovering ? 0.72 : 0.42),
+                ),
                 lineWidth: 1.2
             )
         case .ember:
@@ -3124,45 +3154,6 @@ struct NotchBubbleSettingsView: View {
             Toggle("Show while Halo is open", isOn: binding(\.showWhenOpen))
         }
 
-        Section("Music bubble") {
-            Picker("Display", selection: optionalBinding(\.musicDisplayMode, default: MusicBubbleDisplayMode.artwork)) {
-                ForEach(MusicBubbleDisplayMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
-                }
-            }
-
-            Toggle(
-                "Show playback glyph",
-                isOn: optionalBinding(\.musicShowPlaybackGlyph, default: false)
-            )
-            .disabled(settings.resolvedMusicDisplayMode == .controls)
-
-            LabeledContent("Artwork zoom") {
-                HStack {
-                    Slider(
-                        value: optionalBinding(\.musicArtworkZoom, default: 1.0),
-                        in: 1.0...1.8,
-                        step: 0.05
-                    )
-                    .frame(width: 210)
-                    Text(String(format: "%.2fx", settings.resolvedMusicArtworkZoom))
-                        .monospacedDigit()
-                        .frame(width: 48, alignment: .trailing)
-                }
-            }
-            .disabled(settings.resolvedMusicDisplayMode == .icon)
-
-            Picker("Click action", selection: optionalBinding(\.musicTapAction, default: MusicBubbleTapAction.details)) {
-                ForEach(MusicBubbleTapAction.allCases) { action in
-                    Text(action.rawValue).tag(action)
-                }
-            }
-
-            Text("Artwork + Progress wraps album art in live playback progress. Playback Control turns the bubble itself into a large play/pause surface.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-
         Section("Vinyl bubble") {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
@@ -3225,15 +3216,6 @@ struct NotchBubbleSettingsView: View {
                 detail: "Shows one live system metric directly in the bubble."
             )
 
-            if settings.resolvedSystemEnabled {
-                Picker("System metric", selection: optionalBinding(\.systemMetric, default: SystemBubbleMetric.battery)) {
-                    ForEach(SystemBubbleMetric.allCases) { metric in
-                        Text(metric.rawValue).tag(metric)
-                    }
-                }
-                .padding(.leading, 28)
-            }
-
             providerToggleRow(
                 title: "Clipboard",
                 symbol: "doc.on.clipboard.fill",
@@ -3265,15 +3247,19 @@ struct NotchBubbleSettingsView: View {
                 .foregroundStyle(.secondary)
         }
 
-        Section("Per-bubble appearance") {
+        Section("Per-bubble design & content") {
             Text("Every provider inherits the global bubble style until you override it here.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             ForEach(NotchBubbleKind.allCases) { kind in
                 DisclosureGroup {
-                    bubbleStyleEditor(kind)
-                        .padding(.top, 6)
+                    VStack(alignment: .leading, spacing: 12) {
+                        bubbleContentEditor(kind)
+                        Divider()
+                        bubbleStyleEditor(kind)
+                    }
+                    .padding(.top, 6)
                 } label: {
                     Label(kind.title, systemImage: kind.symbol)
                 }
@@ -3338,12 +3324,151 @@ struct NotchBubbleSettingsView: View {
     }
 
     @ViewBuilder
+    private func bubbleContentEditor(_ kind: NotchBubbleKind) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Content")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            switch kind {
+            case .music:
+                Picker("Display", selection: optionalBinding(\.musicDisplayMode, default: MusicBubbleDisplayMode.artwork)) {
+                    ForEach(MusicBubbleDisplayMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+
+                Toggle(
+                    "Playback glyph",
+                    isOn: optionalBinding(\.musicShowPlaybackGlyph, default: false)
+                )
+                .disabled(settings.resolvedMusicDisplayMode == .controls)
+
+                if settings.resolvedMusicDisplayMode != .icon {
+                    LabeledContent("Artwork zoom") {
+                        HStack {
+                            Slider(
+                                value: optionalBinding(\.musicArtworkZoom, default: 1.0),
+                                in: 1.0...1.8,
+                                step: 0.05
+                            )
+                            .frame(width: 180)
+                            Text(String(format: "%.2fx", settings.resolvedMusicArtworkZoom))
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 46, alignment: .trailing)
+                        }
+                    }
+                }
+
+                Picker("Click", selection: optionalBinding(\.musicTapAction, default: MusicBubbleTapAction.details)) {
+                    ForEach(MusicBubbleTapAction.allCases) { action in
+                        Text(action.rawValue).tag(action)
+                    }
+                }
+
+            case .timer:
+                Picker("Display", selection: optionalBinding(\.timerDisplayMode, default: TimerBubbleDisplayMode.ring)) {
+                    ForEach(TimerBubbleDisplayMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+
+            case .pixelPal:
+                Picker("Display", selection: optionalBinding(\.pixelPalDisplayMode, default: PixelPalBubbleDisplayMode.full)) {
+                    ForEach(PixelPalBubbleDisplayMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+
+            case .clock:
+                Picker("Display", selection: optionalBinding(\.clockDisplayMode, default: ClockBubbleDisplayMode.digital)) {
+                    ForEach(ClockBubbleDisplayMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                Toggle("24-hour time", isOn: optionalBinding(\.clockUse24Hour, default: false))
+
+            case .stopwatch:
+                Picker("Display", selection: optionalBinding(\.stopwatchDisplayMode, default: StopwatchBubbleDisplayMode.compact)) {
+                    ForEach(StopwatchBubbleDisplayMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+
+            case .system:
+                Picker("Metric", selection: optionalBinding(\.systemMetric, default: SystemBubbleMetric.battery)) {
+                    ForEach(SystemBubbleMetric.allCases) { metric in
+                        Text(metric.rawValue).tag(metric)
+                    }
+                }
+                Picker("Display", selection: optionalBinding(\.systemDisplayMode, default: SystemBubbleDisplayMode.value)) {
+                    ForEach(SystemBubbleDisplayMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+
+            case .clipboard:
+                Picker("Display", selection: optionalBinding(\.clipboardDisplayMode, default: ClipboardBubbleDisplayMode.icon)) {
+                    ForEach(ClipboardBubbleDisplayMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+
+            case .calendar:
+                Picker("Display", selection: optionalBinding(\.calendarDisplayMode, default: CalendarBubbleDisplayMode.date)) {
+                    ForEach(CalendarBubbleDisplayMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+
+            case .audio:
+                Picker("Display", selection: optionalBinding(\.audioDisplayMode, default: AudioBubbleDisplayMode.ring)) {
+                    ForEach(AudioBubbleDisplayMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+
+            case .vinyl:
+                Picker("Display", selection: optionalBinding(\.vinylDisplayMode, default: VinylBubbleDisplayMode.fullRecord)) {
+                    ForEach(VinylBubbleDisplayMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                HStack {
+                    Text("Record appearance comes from the shared Vinyl Studio.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Vinyl Studio…") { VinylStyleWindowController.shared.show() }
+                        .buttonStyle(.borderless)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private func bubbleStyleEditor(_ kind: NotchBubbleKind) -> some View {
         let override = currentStyleOverride(for: kind)
         let resolved = settings.resolvedStyle(for: kind)
         let globalBackground: NotchBubbleBackgroundStyle = settings.shape == .glass ? .glass : .solid
 
         VStack(alignment: .leading, spacing: 10) {
+            Text("Design")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Picker("Style", selection: styleOptionalBinding(kind, \.design)) {
+                Text("Default · Halo Glass")
+                    .tag(nil as NotchBubbleDesignPreset?)
+                ForEach(NotchBubbleDesignPreset.allCases) { preset in
+                    Text(preset.rawValue).tag(Optional(preset))
+                }
+            }
+
+            Text(resolved.design.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Toggle(
                 "Custom size",
                 isOn: styleOverrideEnabledBinding(kind, \.size, default: settings.bubbleSize)
