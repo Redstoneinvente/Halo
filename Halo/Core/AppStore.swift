@@ -1959,6 +1959,7 @@ private enum TrailerShowcasePass {
     case closedWidgets
     case openWidgets
     case musicCI
+    case liveActivityCI
     case retroCI
 }
 
@@ -2018,6 +2019,7 @@ final class TrailerModeController {
         showcaseTheme = nil
         lastExpandedState = false
         store.workspace.trailerContextPreview = nil
+        removeTrailerLiveActivity()
         store.workspace.trailerTransitionActive = false
         store.workspace.trailerLayoutOverride = nil
         store.workspace.trailerThemeOverride = nil
@@ -2110,7 +2112,7 @@ final class TrailerModeController {
                 randomizeColors(in: &layout, theme: &theme)
             case .material:
                 randomizeMaterials(in: &layout)
-            case .closedWidgets, .openWidgets, .musicCI, .retroCI:
+            case .closedWidgets, .openWidgets, .musicCI, .liveActivityCI, .retroCI:
                 break
             }
         }
@@ -2140,6 +2142,10 @@ final class TrailerModeController {
                 contextPreview = .music
             }
 
+        case .liveActivityCI:
+            seedTrailerLiveActivity(step: step)
+            contextPreview = .liveActivity
+
         case .retroCI:
             // Retro CI is self-contained, so it is safe to showcase without depending on
             // a real external trigger, user data, Bluetooth state, or file transfer.
@@ -2147,6 +2153,10 @@ final class TrailerModeController {
 
         case .surface, .color, .material:
             break
+        }
+
+        if !expanded {
+            ensureClosedShowcaseVisible(in: &layout, configuration: configuration)
         }
 
         // A context preview should own only its own beat. When we return to widget,
@@ -2250,7 +2260,7 @@ final class TrailerModeController {
             switch pass {
             case .closedWidgets:
                 return false
-            case .openWidgets, .musicCI, .retroCI:
+            case .openWidgets, .musicCI, .liveActivityCI, .retroCI:
                 return true
             case .surface:
                 return step == 0 ? false : lastExpandedState
