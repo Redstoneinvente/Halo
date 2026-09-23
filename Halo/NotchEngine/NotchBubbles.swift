@@ -1456,6 +1456,12 @@ private final class TransparentNotchBubbleHostingView<Content: View>: NSHostingV
 
 @MainActor
 private final class BubbleFrameAnimator {
+    private enum LifecycleMotion {
+        case emerge
+        case retract
+        case restore
+    }
+
     private let clock = DisplayClock()
 
     func cancel() {
@@ -1485,7 +1491,7 @@ private final class BubbleFrameAnimator {
         let duration: CFTimeInterval
         switch preset {
         case .soft: duration = 0.24
-        case .fluid: duration = 0.19
+        case .fluid: duration = 0.22
         case .snappy: duration = 0.12
         case .bouncy: duration = 0.27
         case .none: duration = 0
@@ -1543,10 +1549,28 @@ private final class BubbleFrameAnimator {
             return
         }
 
+        let notchDirection = fluidNotchDirection(visibleFrame: target, notchFrame: source)
+        let usesHorizontalFluid = preset == .fluid && notchDirection != 0
+
         panel.setFrame(source, display: false)
         panel.alphaValue = 1
-        view.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.18, y: 0.18))
-        view.layer?.opacity = 0.58
+
+        let startTransform: CGAffineTransform
+        let startOpacity: Double
+        if usesHorizontalFluid {
+            startTransform = fluidTransform(
+                absorption: 1,
+                notchDirection: notchDirection,
+                width: target.width
+            )
+            startOpacity = fluidOpacity(absorption: 1)
+        } else {
+            startTransform = CGAffineTransform(scaleX: 0.18, y: 0.18)
+            startOpacity = 0.58
+        }
+
+        view.layer?.setAffineTransform(startTransform)
+        view.layer?.opacity = Float(startOpacity)
         panel.orderFrontRegardless()
 
         animateLifecycle(
@@ -1556,10 +1580,12 @@ private final class BubbleFrameAnimator {
             to: target,
             preset: preset,
             duration: duration,
-            startScale: 0.18,
-            endScale: 1,
-            startOpacity: 0.58,
+            startTransform: startTransform,
+            endTransform: .identity,
+            startOpacity: startOpacity,
             endOpacity: 1,
+            motion: .emerge,
+            fluidNotchDirection: notchDirection,
             completion: completion
         )
     }
@@ -1580,7 +1606,7 @@ private final class BubbleFrameAnimator {
             return
         }
 
-        let currentScale = max(0.18, min(1, view.layer?.affineTransform().a ?? 1))
+        let currentTransform = view.layer?.affineTransform() ?? .identity
         let currentOpacity = Double(view.layer?.opacity ?? 1)
 
         guard animated,
@@ -1592,17 +1618,26 @@ private final class BubbleFrameAnimator {
             return
         }
 
+        let currentFrame = panel.frame
+        let dx = target.midX - currentFrame.midX
+        let dy = target.midY - currentFrame.midY
+        let notchDirection: CGFloat = abs(dx) > 8 && abs(dx) >= abs(dy) * 0.55
+            ? (dx > 0 ? -1 : 1)
+            : 0
+
         animateLifecycle(
             panel: panel,
             view: view,
-            from: panel.frame,
+            from: currentFrame,
             to: target,
             preset: preset,
             duration: duration,
-            startScale: currentScale,
-            endScale: 1,
+            startTransform: currentTransform,
+            endTransform: .identity,
             startOpacity: currentOpacity,
             endOpacity: 1,
+            motion: .restore,
+            fluidNotchDirection: notchDirection,
             completion: completion
         )
     }
@@ -1633,8 +1668,25 @@ private final class BubbleFrameAnimator {
         }
 
         let initial = panel.frame
-        let currentScale = max(0.18, min(1, view.layer?.affineTransform().a ?? 1))
+        let currentTransform = view.layer?.affineTransform() ?? .identity
         let currentOpacity = Double(view.layer?.opacity ?? 1)
+        let notchDirection = fluidNotchDirection(visibleFrame: initial, notchFrame: source)
+        let usesHorizontalFluid = preset == .fluid && notchDirection != 0
+
+        let endTransform: CGAffineTransform
+        let endOpacity: Double
+        if usesHorizontalFluid {
+            endTransform = fluidTransform(
+                absorption: 1,
+                notchDirection: notchDirection,
+                width: initial.width
+            )
+            endOpacity = fluidOpacity(absorption: 1)
+        } else {
+            endTransform = CGAffineTransform(scaleX: 0.18, y: 0.18)
+            endOpacity = 0.58
+        }
+
         animateLifecycle(
             panel: panel,
             view: view,
@@ -1642,10 +1694,12 @@ private final class BubbleFrameAnimator {
             to: source,
             preset: preset,
             duration: duration,
-            startScale: currentScale,
-            endScale: 0.18,
+            startTransform: currentTransform,
+            endTransform: endTransform,
             startOpacity: currentOpacity,
-            endOpacity: 0.58
+            endOpacity: endOpacity,
+            motion: .retract,
+            fluidNotchDirection: notchDirection
         ) { [weak self, weak panel] in
             guard let self, let panel else { return }
             self.resetVisuals(panel: panel)
@@ -1667,14 +1721,17 @@ private final class BubbleFrameAnimator {
         to target: CGRect,
         preset: NotchBubbleAnimationPreset,
         duration: TimeInterval,
-        startScale: CGFloat,
-        endScale: CGFloat,
+        startTransform: CGAffineTransform,
+        endTransform: CGAffineTransform,
         startOpacity: Double,
         endOpacity: Double,
-        completion: (() -> Void)?
+        motion: LifecycleMotion,
+        fluidNotchDirection: CGFloat,
+        completion: (() -> Void)? = nil
     ) {
         let start = CACurrentMediaTime()
         let duration = max(0.01, duration)
+        let horizontalFluid = preset == .fluid && fluidNotchDirection != 0
 
         clock.start(view: view) { [weak self, weak panel, weak view] timestamp in
             guard let self, let panel, let view else {
@@ -1692,20 +1749,129 @@ private final class BubbleFrameAnimator {
             )
             panel.setFrame(frame, display: false)
 
-            let scale = startScale + (endScale - startScale) * p
-            let opacity = startOpacity + (endOpacity - startOpacity) * Double(p)
-            view.layer?.setAffineTransform(CGAffineTransform(scaleX: scale, y: scale))
-            view.layer?.opacity = Float(opacity)
+            let transform: CGAffineTransform
+            let opacity: Double
+
+            if horizontalFluid {
+                switch motion {
+                case .emerge:
+                    let absorption = CGFloat(1 - t)
+                    transform = self.fluidTransform(
+                        absorption: absorption,
+                        notchDirection: fluidNotchDirection,
+                        width: max(initial.width, target.width)
+                    )
+                    opacity = self.fluidOpacity(absorption: absorption)
+
+                case .retract:
+                    let absorption = CGFloat(t)
+                    transform = self.fluidTransform(
+                        absorption: absorption,
+                        notchDirection: fluidNotchDirection,
+                        width: max(initial.width, target.width)
+                    )
+                    opacity = self.fluidOpacity(absorption: absorption)
+
+                case .restore:
+                    // Restores can begin halfway through a retract. Blend from the exact
+                    // presentation transform so reversing direction never snaps.
+                    transform = self.interpolateTransform(
+                        from: startTransform,
+                        to: .identity,
+                        progress: p
+                    )
+                    opacity = startOpacity + (1 - startOpacity) * Double(p)
+                }
+            } else {
+                transform = self.interpolateTransform(
+                    from: startTransform,
+                    to: endTransform,
+                    progress: p
+                )
+                opacity = startOpacity + (endOpacity - startOpacity) * Double(p)
+            }
+
+            view.layer?.setAffineTransform(transform)
+            view.layer?.opacity = Float(min(1, max(0, opacity)))
 
             if t >= 1 {
                 self.cancel()
                 panel.setFrame(target, display: false)
-                if endScale >= 0.999 && endOpacity >= 0.999 {
+                if endTransform.isIdentity && endOpacity >= 0.999 {
                     self.resetVisuals(panel: panel)
                 }
                 completion?()
             }
         }
+    }
+
+    /// Direction from the visible bubble toward the compact notch edge.
+    /// Fluid is intentionally horizontal: vertical/stacked layouts keep the legacy
+    /// scale motion rather than producing a sideways-looking liquid effect.
+    private func fluidNotchDirection(visibleFrame: CGRect, notchFrame: CGRect) -> CGFloat {
+        let dx = notchFrame.midX - visibleFrame.midX
+        let dy = notchFrame.midY - visibleFrame.midY
+        guard abs(dx) > 8, abs(dx) >= abs(dy) * 0.55 else { return 0 }
+        return dx > 0 ? 1 : -1
+    }
+
+    /// Metaball-inspired squash/stretch. The bubble first stretches toward the notch,
+    /// then narrows while its mass is pulled into the compact surface. Reversing
+    /// absorption produces the emergence motion.
+    private func fluidTransform(
+        absorption rawAbsorption: CGFloat,
+        notchDirection: CGFloat,
+        width: CGFloat
+    ) -> CGAffineTransform {
+        let absorption = min(1, max(0, rawAbsorption))
+
+        let stretchPhase = min(1, absorption / 0.82)
+        let stretch = sin(.pi * stretchPhase)
+        let collapse = smootherstep(min(1, max(0, (absorption - 0.48) / 0.52)))
+
+        let scaleX = 1 + 0.42 * stretch - 0.82 * collapse
+        let scaleY = 1 - 0.15 * stretch - 0.32 * collapse
+
+        // Shift the stretched mass toward the notch so the near edge visually stays
+        // attached longer instead of reading as a uniformly scaled floating circle.
+        let translation = notchDirection * width * (0.14 * stretch + 0.12 * collapse)
+
+        return CGAffineTransform(
+            a: max(0.16, scaleX),
+            b: 0,
+            c: 0,
+            d: max(0.62, scaleY),
+            tx: translation,
+            ty: 0
+        )
+    }
+
+    private func fluidOpacity(absorption: CGFloat) -> Double {
+        let value = Double(min(1, max(0, absorption)))
+        // Keep the droplet visually solid almost all the way into the notch. A heavy
+        // fade breaks the illusion that it is being absorbed by the surface.
+        return 1 - 0.08 * pow(value, 5)
+    }
+
+    private func interpolateTransform(
+        from start: CGAffineTransform,
+        to end: CGAffineTransform,
+        progress: CGFloat
+    ) -> CGAffineTransform {
+        let p = progress
+        return CGAffineTransform(
+            a: start.a + (end.a - start.a) * p,
+            b: start.b + (end.b - start.b) * p,
+            c: start.c + (end.c - start.c) * p,
+            d: start.d + (end.d - start.d) * p,
+            tx: start.tx + (end.tx - start.tx) * p,
+            ty: start.ty + (end.ty - start.ty) * p
+        )
+    }
+
+    private func smootherstep(_ x: CGFloat) -> CGFloat {
+        let value = min(1, max(0, x))
+        return value * value * value * (value * (value * 6 - 15) + 10)
     }
 
     private func progress(_ t: CFTimeInterval, preset: NotchBubbleAnimationPreset) -> CGFloat {
@@ -1715,7 +1881,9 @@ private final class BubbleFrameAnimator {
         case .soft:
             value = -(cos(.pi * t) - 1) / 2
         case .fluid:
-            value = 1 - pow(1 - t, 3)
+            // Symmetric acceleration/deceleration gives the blob enough time to form
+            // a visible neck at the surface instead of shooting through the join.
+            value = t * t * t * (t * (t * 6 - 15) + 10)
         case .snappy:
             value = 1 - pow(1 - t, 4)
         case .bouncy:
