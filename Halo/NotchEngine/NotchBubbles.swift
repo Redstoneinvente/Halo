@@ -55,7 +55,7 @@ enum NotchBubbleLayout: String, Codable, CaseIterable, Identifiable, Hashable {
     var id: String { rawValue }
 }
 
-enum NotchBubblePriority: Int, Codable, Comparable {
+enum NotchBubblePriority: Int, Codable, Comparable, Hashable {
     case background = 0
     case normal = 1
     case important = 2
