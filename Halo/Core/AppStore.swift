@@ -2159,6 +2159,10 @@ final class TrailerModeController {
             ensureClosedShowcaseVisible(in: &layout, configuration: configuration)
         }
 
+        if contextPreview != .liveActivity {
+            removeTrailerLiveActivity()
+        }
+
         // A context preview should own only its own beat. When we return to widget,
         // material, colour, or surface passes, restore the normal workspace renderer.
         if contextPreview != .music {
@@ -2234,13 +2238,31 @@ final class TrailerModeController {
 
         case .openedOnly:
             sequence = showcaseMusic
-                ? [.surface, .openWidgets, .musicCI, .color, .retroCI, .material, .openWidgets]
-                : [.surface, .openWidgets, .color, .retroCI, .material, .openWidgets]
+                ? [
+                    .surface, .openWidgets, .color, .openWidgets, .material, .openWidgets,
+                    .liveActivityCI, .openWidgets, .surface, .openWidgets, .color, .musicCI,
+                    .openWidgets, .material, .openWidgets, .retroCI, .openWidgets, .color
+                ]
+                : [
+                    .surface, .openWidgets, .color, .openWidgets, .material, .openWidgets,
+                    .liveActivityCI, .openWidgets, .surface, .openWidgets, .color, .openWidgets,
+                    .material, .openWidgets, .retroCI, .openWidgets, .color
+                ]
 
         case .alternate:
             sequence = showcaseMusic
-                ? [.surface, .closedWidgets, .openWidgets, .musicCI, .color, .retroCI, .material, .openWidgets, .closedWidgets]
-                : [.surface, .closedWidgets, .openWidgets, .color, .retroCI, .material, .openWidgets, .closedWidgets]
+                ? [
+                    .surface, .closedWidgets, .openWidgets, .color, .closedWidgets, .material,
+                    .openWidgets, .liveActivityCI, .closedWidgets, .surface, .openWidgets, .color,
+                    .closedWidgets, .musicCI, .openWidgets, .material, .closedWidgets, .retroCI,
+                    .openWidgets, .color, .closedWidgets
+                ]
+                : [
+                    .surface, .closedWidgets, .openWidgets, .color, .closedWidgets, .material,
+                    .openWidgets, .liveActivityCI, .closedWidgets, .surface, .openWidgets, .color,
+                    .closedWidgets, .openWidgets, .material, .closedWidgets, .retroCI,
+                    .openWidgets, .color, .closedWidgets
+                ]
         }
 
         return sequence[step % sequence.count]
@@ -2358,6 +2380,88 @@ final class TrailerModeController {
         glass.highlight = Double.random(in: 0.06...0.24)
         glass.edgeDepth = Double.random(in: 0.04...0.24)
         layout.appearance.glass = glass
+    }
+
+    private func ensureClosedShowcaseVisible(
+        in layout: inout WorkspaceLayout,
+        configuration: TrailerModeSettings
+    ) {
+        let closed = layout.closedNotch ?? ClosedNotchOptions()
+
+        func guaranteedVisible(_ item: ClosedNotchItem) -> Bool {
+            switch item {
+            case .none, .activity:
+                return false
+            case .media, .visualizer:
+                return configuration.showcaseMusic
+            default:
+                return true
+            }
+        }
+
+        guard !guaranteedVisible(closed.left), !guaranteedVisible(closed.right) else { return }
+        configureClosedShowcase(in: &layout, configuration: configuration, musicFrame: false)
+    }
+
+    private func seedTrailerLiveActivity(step: Int) {
+        guard let store else { return }
+        removeTrailerLiveActivity()
+
+        let variant = (step / 6) % 4
+        var activity: LiveActivity
+        switch variant {
+        case 0:
+            activity = LiveActivity(
+                sourceName: "Halo",
+                kind: .download,
+                state: .active,
+                symbolName: "arrow.down.circle.fill",
+                title: "Downloading update",
+                detail: "Halo 1.0 Preview",
+                progress: 0.72
+            )
+        case 1:
+            activity = LiveActivity(
+                sourceName: "Calendar",
+                kind: .calendar,
+                state: .active,
+                symbolName: "calendar",
+                title: "Design review",
+                detail: "Starts in 12 minutes"
+            )
+        case 2:
+            activity = LiveActivity(
+                sourceName: "Messages",
+                kind: .message,
+                state: .active,
+                symbolName: "message.fill",
+                title: "Maya",
+                detail: "The new Halo build looks amazing."
+            )
+        default:
+            activity = LiveActivity(
+                sourceName: "Halo",
+                kind: .progress,
+                state: .active,
+                symbolName: "sparkles",
+                title: "Exporting trailer",
+                detail: "Rendering showcase sequence",
+                progress: 0.46
+            )
+        }
+
+        activity.externalID = "halo.trailer.demo.live-activity"
+        activity.priority = 100
+        activity.persistent = true
+        activity.updatedAt = Date()
+        activity.expiresAt = Date().addingTimeInterval(3600)
+        store.workspace.activities.append(activity)
+    }
+
+    private func removeTrailerLiveActivity() {
+        store?.workspace.activities.removeAll {
+            $0.externalID == "halo.trailer.demo.live-activity"
+        }
     }
 
     private func configureClosedShowcase(in layout: inout WorkspaceLayout,
