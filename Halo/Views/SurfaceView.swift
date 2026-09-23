@@ -3257,6 +3257,9 @@ struct SurfaceView: View {
                 }
             }
         }
+        .environment(\.openNotchInteractionHold) { held in
+            state.setExternalInteractionHeld(held)
+        }
         .onHover { hovering in
             if clipboardContextActive {
                 clipboardCI.setInteractionActive(hovering)
@@ -4884,7 +4887,12 @@ struct BuiltinOrIntegrationWidget: View {
             if options.showControls {
                 if store.deadline == nil && store.pausedSeconds <= 0 {
                     WidgetElement(key: "presets") {
-                        if presentation == .compact {
+                        let roomForInlineComposer =
+                            presentation != .compact &&
+                            (availableWidth ?? 390) >= 320 &&
+                            (availableHeight ?? 310) >= 280
+
+                        if !roomForInlineComposer {
                             HaloTimerDurationPopoverButton(
                                 accent: style.accentColor.color,
                                 textColor: style.textColor.color,
