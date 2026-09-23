@@ -354,7 +354,7 @@ struct NotchBubble: Identifiable, Equatable {
 }
 
 struct NotchBubbleSettings: Codable, Equatable {
-    var version = 1
+    var version = 2
     var enabled = false
 
     var layout: NotchBubbleLayout = .satellites
@@ -435,7 +435,22 @@ struct NotchBubbleSettings: Codable, Equatable {
 
     func normalized() -> Self {
         var value = self
-        value.version = 1
+
+        // v2: pinned utilities use a single Enable switch. The old bubble-level
+        // "Disable" action could leave Enabled=false + Persistent=true, which made
+        // re-enabling appear broken. Restore those contradictory v1 states once.
+        if value.version < 2 {
+            if value.clipboardPersistent == true && value.clipboardEnabled == false {
+                value.clipboardEnabled = true
+            }
+            if value.systemPersistent == true && value.systemEnabled == false {
+                value.systemEnabled = true
+            }
+            if value.audioPersistent == true && value.audioEnabled == false {
+                value.audioEnabled = true
+            }
+        }
+        value.version = 2
         value.spacing = min(40, max(0, spacing.isFinite ? spacing : 10))
         value.bubbleSize = min(72, max(24, bubbleSize.isFinite ? bubbleSize : 42))
         if let verticalOffset {
@@ -1077,7 +1092,7 @@ private struct ClockBubbleProvider: BubbleProvider {
 private struct SystemBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .system
     func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
-        guard settings.resolvedSystemEnabled, settings.resolvedSystemPersistent else { return nil }
+        guard settings.resolvedSystemEnabled else { return nil }
         return NotchBubbleActivity(
             id: "system.stats",
             kind: kind,
@@ -1098,7 +1113,7 @@ private struct SystemBubbleProvider: BubbleProvider {
 private struct ClipboardBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .clipboard
     func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
-        guard settings.resolvedClipboardEnabled, settings.resolvedClipboardPersistent else { return nil }
+        guard settings.resolvedClipboardEnabled else { return nil }
         return NotchBubbleActivity(
             id: "clipboard",
             kind: kind,
@@ -1119,7 +1134,7 @@ private struct ClipboardBubbleProvider: BubbleProvider {
 private struct AudioBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .audio
     func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
-        guard settings.resolvedAudioEnabled, settings.resolvedAudioPersistent else { return nil }
+        guard settings.resolvedAudioEnabled else { return nil }
         return NotchBubbleActivity(
             id: "audio.controls",
             kind: kind,
@@ -2134,7 +2149,7 @@ private final class NotchBubbleDisplayHost {
         if settings.resolvedAudioEnabled || settings.resolvedSystemEnabled ||
             settings.resolvedAudioFeedbackEnabled || settings.resolvedBrightnessFeedbackEnabled {
             store.workspace.audio.refresh()
-            store.workspace.system.refresh(detailed: settings.resolvedSystemPersistent)
+            store.workspace.system.refresh(detailed: settings.resolvedSystemEnabled)
         }
 
         let bubbles = registry.bubbles(
@@ -2385,7 +2400,7 @@ private struct NotchBubbleView: View {
                     detailView
                     Divider()
                     HStack {
-                        Button("Dismiss for now") {
+                        Button("Hide for this session") {
                             activityCenter.dismiss(kind: kind)
                             showingDetail = false
                         }
@@ -2393,10 +2408,8 @@ private struct NotchBubbleView: View {
 
                         Spacer()
 
-                        Button("Disable \(kind.title)") {
-                            disableBubbleKind()
-                        }
-                        .buttonStyle(.borderless)
+                        Text("Turn bubbles on/off in Notch Bubbles settings")
+                            .foregroundStyle(.secondary)
                     }
                     .font(.caption)
                 }
@@ -2407,12 +2420,8 @@ private struct NotchBubbleView: View {
                 }
             }
             .contextMenu {
-                Button("Dismiss for now") {
+                Button("Hide for this session") {
                     activityCenter.dismiss(kind: kind)
-                }
-                Divider()
-                Button("Disable \(kind.title) bubble") {
-                    disableBubbleKind()
                 }
             }
             .accessibilityLabel(kind.title)
@@ -3806,41 +3815,6 @@ private struct NotchBubbleView: View {
         )
     }
 
-    private func disableBubbleKind() {
-        var next = settingsStore.settings
-        switch kind {
-        case .music:
-            next.musicEnabled = false
-        case .timer:
-            next.timerEnabled = false
-        case .pixelPal:
-            next.pixelPalEnabled = false
-        case .clock:
-            next.clockEnabled = false
-        case .stopwatch:
-            next.stopwatchEnabled = false
-        case .system:
-            next.systemEnabled = false
-            next.brightnessFeedbackEnabled = false
-            next.powerFeedbackEnabled = false
-        case .clipboard:
-            next.clipboardEnabled = false
-        case .calendar:
-            next.calendarEnabled = false
-        case .audio:
-            next.audioEnabled = false
-            next.audioFeedbackEnabled = false
-            next.deviceFeedbackEnabled = false
-        case .vinyl:
-            next.vinylEnabled = false
-        case .files:
-            next.filesEnabled = false
-        }
-        settingsStore.settings = next.normalized()
-        activityCenter.dismiss(kind: kind)
-        showingDetail = false
-    }
-
     private func mediaCommand(_ command: String) {
         guard let sourceBundleID = media.connectedApp, !sourceBundleID.isEmpty else {
             media.performSystem(command)
@@ -4154,7 +4128,7 @@ struct NotchBubbleSettingsView: View {
             )
         }
 
-        Section("On-demand & pinned tools") {
+        Section("Pinned tools") {
             providerRow(
                 title: "Pixel Pal",
                 symbol: "face.smiling",
@@ -4168,29 +4142,26 @@ struct NotchBubbleSettingsView: View {
                 enabled: optionalBinding(\.clockEnabled, default: false),
                 detail: "Pinned utility. It never auto-announces itself."
             )
-            providerRow(
+            providerToggleRow(
                 title: "System stats",
                 symbol: "gauge.with.dots.needle.67percent",
                 enabled: optionalBinding(\.systemEnabled, default: false),
-                persistent: optionalBinding(\.systemPersistent, default: false),
-                detail: "Detailed monitoring is pinned/on-demand; transient brightness feedback is controlled above."
+                detail: "Pinned utility. Brightness/power confirmations are separate and controlled above."
             )
-            providerRow(
+            providerToggleRow(
                 title: "Clipboard",
                 symbol: "doc.on.clipboard.fill",
                 enabled: optionalBinding(\.clipboardEnabled, default: false),
-                persistent: optionalBinding(\.clipboardPersistent, default: false),
-                detail: "Clipboard history is never announced for every copy. Pin it only when you want persistent access."
+                detail: "Pinned utility. Enabling it makes Clipboard eligible whenever activity capacity allows."
             )
-            providerRow(
+            providerToggleRow(
                 title: "Audio controls",
                 symbol: "speaker.wave.2.fill",
                 enabled: optionalBinding(\.audioEnabled, default: false),
-                persistent: optionalBinding(\.audioPersistent, default: false),
-                detail: "Pinned audio control is separate from transient volume feedback."
+                detail: "Pinned utility. Transient volume/mute confirmation remains a separate policy above."
             )
 
-            Text("Idle absence is a valid state. New utility bubbles remain opt-in.")
+            Text("Pinned tools stay eligible while enabled, but higher-priority active tasks and confirmations can temporarily take their slot when Maximum visible activities is full.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
