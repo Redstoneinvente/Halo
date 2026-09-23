@@ -565,60 +565,73 @@ struct BubbleLayoutEngine {
     ) -> [NotchBubbleKind: CGRect] {
         guard !bubbles.isEmpty else { return [:] }
 
-        let size = CGFloat(settings.bubbleSize)
         let spacing = CGFloat(settings.spacing)
         let gap = max(5, spacing)
-        let verticalOffset = CGFloat(settings.resolvedVerticalOffset)
+        let globalVerticalOffset = CGFloat(settings.resolvedVerticalOffset)
         var result: [NotchBubbleKind: CGRect] = [:]
 
         switch settings.layout {
         case .satellites:
-            let total = CGFloat(bubbles.count) * size + CGFloat(max(0, bubbles.count - 1)) * spacing
-            let startX = surfaceFrame.midX - total / 2
-            let y = surfaceFrame.minY - gap - size - verticalOffset
-            for (index, bubble) in bubbles.enumerated() {
-                let frame = CGRect(
-                    x: startX + CGFloat(index) * (size + spacing),
-                    y: y,
-                    width: size,
-                    height: size
-                )
+            let totalWidth = bubbles.reduce(CGFloat.zero) { $0 + $1.size }
+                + CGFloat(max(0, bubbles.count - 1)) * spacing
+            var x = surfaceFrame.midX - totalWidth / 2
+
+            for bubble in bubbles {
+                let style = settings.resolvedStyle(for: bubble.kind)
+                let size = bubble.size
+                let y = surfaceFrame.minY - gap - size - globalVerticalOffset - style.verticalOffset
+                let frame = CGRect(x: x, y: y, width: size, height: size)
                 result[bubble.kind] = clamped(frame, to: screenFrame)
+                x += size + spacing
             }
 
         case .wings:
             // Wings belong to the menu-bar band, not the expanding body of Halo.
-            // Keep their vertical center aligned to the compact notch height even while
-            // the main surface grows hundreds of points downward.
             let menuBarHeight = max(1, compactHeight)
             let menuBarCenterY = screenFrame.maxY - menuBarHeight / 2
-            let y = menuBarCenterY - size / 2 - verticalOffset
-            var leftCount = 0
-            var rightCount = 0
+            var leftOffset: CGFloat = gap
+            var rightOffset: CGFloat = gap
+
             for (index, bubble) in bubbles.enumerated() {
-                let isLeft = index.isMultiple(of: 2)
+                let style = settings.resolvedStyle(for: bubble.kind)
+                let size = bubble.size
+                let y = menuBarCenterY - size / 2 - globalVerticalOffset - style.verticalOffset
                 let frame: CGRect
-                if isLeft {
-                    let x = surfaceFrame.minX - gap - size - CGFloat(leftCount) * (size + spacing)
-                    frame = CGRect(x: x, y: y, width: size, height: size)
-                    leftCount += 1
+
+                if index.isMultiple(of: 2) {
+                    frame = CGRect(
+                        x: surfaceFrame.minX - leftOffset - size,
+                        y: y,
+                        width: size,
+                        height: size
+                    )
+                    leftOffset += size + spacing
                 } else {
-                    let x = surfaceFrame.maxX + gap + CGFloat(rightCount) * (size + spacing)
-                    frame = CGRect(x: x, y: y, width: size, height: size)
-                    rightCount += 1
+                    frame = CGRect(
+                        x: surfaceFrame.maxX + rightOffset,
+                        y: y,
+                        width: size,
+                        height: size
+                    )
+                    rightOffset += size + spacing
                 }
                 result[bubble.kind] = clamped(frame, to: screenFrame)
             }
 
         case .stack:
-            for (index, bubble) in bubbles.enumerated() {
+            var yCursor = surfaceFrame.minY - gap - globalVerticalOffset
+            for bubble in bubbles {
+                let style = settings.resolvedStyle(for: bubble.kind)
+                let size = bubble.size
+                yCursor -= size + style.verticalOffset
                 let frame = CGRect(
                     x: surfaceFrame.midX - size / 2,
-                    y: surfaceFrame.minY - gap - size - CGFloat(index) * (size + spacing) - verticalOffset,
+                    y: yCursor,
                     width: size,
                     height: size
                 )
                 result[bubble.kind] = clamped(frame, to: screenFrame)
+                yCursor -= spacing
             }
         }
 
