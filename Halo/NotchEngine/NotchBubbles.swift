@@ -1524,7 +1524,6 @@ struct BubbleLayoutEngine {
 
 // MARK: - Window and animation
 
-@MainActor
 private final class NotchBubblePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -1593,14 +1592,6 @@ private final class NotchBubblePanel: NSPanel {
         }
 
         guard let direction else { return false }
-
-        let settings = NotchBubbleSettingsStore.shared.settings.normalized()
-        let action = settings.gestureAction(for: bubbleKind, direction: direction)
-        guard action != .none else {
-            horizontalAccumulator = 0
-            verticalAccumulator = 0
-            return false
-        }
 
         horizontalAccumulator = 0
         verticalAccumulator = 0
