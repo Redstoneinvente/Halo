@@ -102,6 +102,8 @@ struct NotchBubbleSettings: Codable, Equatable {
     var cornerRadius = 18.0
     var glassIntensity = 0.82
     var animation: NotchBubbleAnimationPreset = .fluid
+    // Optional so settings saved before lifecycle timing existed still decode.
+    var lifecycleDuration: Double?
     var maximumBubbles = 3
 
     var showWhenClosed = true
@@ -124,6 +126,9 @@ struct NotchBubbleSettings: Codable, Equatable {
         }
         value.cornerRadius = min(36, max(0, cornerRadius.isFinite ? cornerRadius : 18))
         value.glassIntensity = min(1, max(0.15, glassIntensity.isFinite ? glassIntensity : 0.82))
+        if let lifecycleDuration {
+            value.lifecycleDuration = min(1.5, max(0.10, lifecycleDuration.isFinite ? lifecycleDuration : 0.28))
+        }
         value.maximumBubbles = min(99, max(1, maximumBubbles))
         return value
     }
@@ -131,6 +136,11 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedVerticalOffset: Double {
         let value = verticalOffset ?? 0
         return value.isFinite ? min(120, max(-120, value)) : 0
+    }
+
+    var resolvedLifecycleDuration: Double {
+        let value = lifecycleDuration ?? 0.28
+        return value.isFinite ? min(1.5, max(0.10, value)) : 0.28
     }
 }
 
@@ -485,7 +495,9 @@ private final class BubbleFrameAnimator {
         from source: CGRect,
         to target: CGRect,
         preset: NotchBubbleAnimationPreset,
-        animated: Bool
+        duration: TimeInterval,
+        animated: Bool,
+        completion: (() -> Void)? = nil
     ) {
         cancel()
         guard let view = panel.contentView else {
@@ -517,8 +529,55 @@ private final class BubbleFrameAnimator {
             from: source,
             to: target,
             preset: preset,
-            appearing: true,
-            completion: nil
+            duration: duration,
+            startScale: 0.18,
+            endScale: 1,
+            startOpacity: 0.58,
+            endOpacity: 1,
+            completion: completion
+        )
+    }
+
+    func restoreFromCurrent(
+        panel: NSPanel,
+        to target: CGRect,
+        preset: NotchBubbleAnimationPreset,
+        duration: TimeInterval,
+        animated: Bool,
+        completion: (() -> Void)? = nil
+    ) {
+        cancel()
+        guard let view = panel.contentView else {
+            panel.setFrame(target, display: false)
+            panel.alphaValue = 1
+            completion?()
+            return
+        }
+
+        let currentScale = max(0.18, min(1, view.layer?.affineTransform().a ?? 1))
+        let currentOpacity = Double(view.layer?.opacity ?? 1)
+
+        guard animated,
+              preset != .none,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            panel.setFrame(target, display: false)
+            resetVisuals(panel: panel)
+            completion?()
+            return
+        }
+
+        animateLifecycle(
+            panel: panel,
+            view: view,
+            from: panel.frame,
+            to: target,
+            preset: preset,
+            duration: duration,
+            startScale: currentScale,
+            endScale: 1,
+            startOpacity: currentOpacity,
+            endOpacity: 1,
+            completion: completion
         )
     }
 
@@ -526,6 +585,7 @@ private final class BubbleFrameAnimator {
         panel: NSPanel,
         to source: CGRect,
         preset: NotchBubbleAnimationPreset,
+        duration: TimeInterval,
         animated: Bool,
         completion: @escaping () -> Void
     ) {
@@ -547,13 +607,19 @@ private final class BubbleFrameAnimator {
         }
 
         let initial = panel.frame
+        let currentScale = max(0.18, min(1, view.layer?.affineTransform().a ?? 1))
+        let currentOpacity = Double(view.layer?.opacity ?? 1)
         animateLifecycle(
             panel: panel,
             view: view,
             from: initial,
             to: source,
             preset: preset,
-            appearing: false
+            duration: duration,
+            startScale: currentScale,
+            endScale: 0.18,
+            startOpacity: currentOpacity,
+            endOpacity: 0.58
         ) { [weak self, weak panel] in
             guard let self, let panel else { return }
             self.resetVisuals(panel: panel)
@@ -574,18 +640,15 @@ private final class BubbleFrameAnimator {
         from initial: CGRect,
         to target: CGRect,
         preset: NotchBubbleAnimationPreset,
-        appearing: Bool,
+        duration: TimeInterval,
+        startScale: CGFloat,
+        endScale: CGFloat,
+        startOpacity: Double,
+        endOpacity: Double,
         completion: (() -> Void)?
     ) {
         let start = CACurrentMediaTime()
-        let duration: CFTimeInterval
-        switch preset {
-        case .soft: duration = 0.34
-        case .fluid: duration = 0.28
-        case .snappy: duration = 0.20
-        case .bouncy: duration = 0.36
-        case .none: duration = 0
-        }
+        let duration = max(0.01, duration)
 
         clock.start(view: view) { [weak self, weak panel, weak view] timestamp in
             guard let self, let panel, let view else {
@@ -603,17 +666,15 @@ private final class BubbleFrameAnimator {
             )
             panel.setFrame(frame, display: false)
 
-            let visualProgress = appearing ? p : (1 - p)
-            // Start/end with a small "seed" at the notch, but never fully vanish until
-            // the final frame so the motion reads as a merge rather than a fade.
-            let scale = 0.18 + 0.82 * visualProgress
+            let scale = startScale + (endScale - startScale) * p
+            let opacity = startOpacity + (endOpacity - startOpacity) * Double(p)
             view.layer?.setAffineTransform(CGAffineTransform(scaleX: scale, y: scale))
-            view.layer?.opacity = Float(0.58 + 0.42 * visualProgress)
+            view.layer?.opacity = Float(opacity)
 
             if t >= 1 {
                 self.cancel()
-                if appearing {
-                    panel.setFrame(target, display: false)
+                panel.setFrame(target, display: false)
+                if endScale >= 0.999 && endOpacity >= 0.999 {
                     self.resetVisuals(panel: panel)
                 }
                 completion?()
@@ -686,11 +747,20 @@ enum BubbleAnimationController {
 
 @MainActor
 final class BubbleWindowController {
+    private enum LifecyclePhase {
+        case hidden
+        case emerging
+        case visible
+        case retracting
+    }
+
     let kind: NotchBubbleKind
 
     private let panel: NotchBubblePanel
     private let frameAnimator = BubbleFrameAnimator()
     private var removalGeneration = 0
+    private var lifecyclePhase: LifecyclePhase = .hidden
+    private var desiredFrame: CGRect = .zero
 
     var frame: CGRect { panel.frame }
 
@@ -734,34 +804,69 @@ final class BubbleWindowController {
         animated: Bool,
         trackingSurface: Bool = false
     ) {
+        desiredFrame = frame
         removalGeneration += 1
+        let generation = removalGeneration
+        let duration = settings.resolvedLifecycleDuration
 
-        if !panel.isVisible {
+        switch lifecyclePhase {
+        case .hidden:
+            lifecyclePhase = .emerging
             frameAnimator.emerge(
                 panel: panel,
                 from: emergenceFrame,
                 to: frame,
                 preset: settings.animation,
+                duration: duration,
                 animated: animated && !trackingSurface
-            )
-            return
-        }
-
-        if trackingSurface {
-            // SurfaceAnimator already publishes display-linked geometry every frame.
-            // A second animation here makes bubbles chase the notch and visibly lag.
-            frameAnimator.cancel()
-            frameAnimator.resetVisuals(panel: panel)
-            if panel.frame != frame {
-                panel.setFrame(frame, display: false)
+            ) { [weak self] in
+                guard let self, self.removalGeneration == generation else { return }
+                self.lifecyclePhase = .visible
+                if self.panel.frame != self.desiredFrame {
+                    self.panel.setFrame(self.desiredFrame, display: false)
+                }
             }
-        } else {
-            frameAnimator.move(
+
+        case .emerging:
+            // A provider/settings/geometry refresh can arrive one frame after creation.
+            // Keep the emergence alive instead of treating "window is visible" as "animation finished".
+            return
+
+        case .retracting:
+            // The event came back while merging into the notch. Reverse from the exact
+            // current position/scale rather than snapping or restarting from the seed.
+            lifecyclePhase = .emerging
+            frameAnimator.restoreFromCurrent(
                 panel: panel,
                 to: frame,
                 preset: settings.animation,
-                animated: animated
-            )
+                duration: duration,
+                animated: animated && !trackingSurface
+            ) { [weak self] in
+                guard let self, self.removalGeneration == generation else { return }
+                self.lifecyclePhase = .visible
+                if self.panel.frame != self.desiredFrame {
+                    self.panel.setFrame(self.desiredFrame, display: false)
+                }
+            }
+
+        case .visible:
+            if trackingSurface {
+                // SurfaceAnimator already publishes display-linked geometry every frame.
+                // Follow it directly; never stack another tween on top.
+                frameAnimator.cancel()
+                frameAnimator.resetVisuals(panel: panel)
+                if panel.frame != frame {
+                    panel.setFrame(frame, display: false)
+                }
+            } else {
+                frameAnimator.move(
+                    panel: panel,
+                    to: frame,
+                    preset: settings.animation,
+                    animated: animated
+                )
+            }
         }
     }
 
@@ -773,19 +878,32 @@ final class BubbleWindowController {
     ) {
         removalGeneration += 1
         let generation = removalGeneration
+
+        if lifecyclePhase == .hidden {
+            completion()
+            return
+        }
+        if lifecyclePhase == .retracting {
+            return
+        }
+
+        lifecyclePhase = .retracting
         frameAnimator.retract(
             panel: panel,
             to: emergenceFrame,
             preset: settings.animation,
+            duration: settings.resolvedLifecycleDuration,
             animated: animated
         ) { [weak self] in
             guard let self, self.removalGeneration == generation else { return }
+            self.lifecyclePhase = .hidden
             completion()
         }
     }
 
     func close() {
         frameAnimator.cancel()
+        lifecyclePhase = .hidden
         panel.close()
     }
 }
@@ -1578,6 +1696,31 @@ struct NotchBubbleSettingsView: View {
                     Text(preset.rawValue).tag(preset)
                 }
             }
+
+            LabeledContent("Lifecycle duration") {
+                HStack {
+                    Slider(
+                        value: Binding(
+                            get: { settings.resolvedLifecycleDuration },
+                            set: { value in
+                                var next = settingsStore.settings
+                                next.lifecycleDuration = value
+                                settingsStore.settings = next.normalized()
+                            }
+                        ),
+                        in: 0.10...1.50,
+                        step: 0.05
+                    )
+                    .frame(width: 210)
+
+                    Text(String(format: "%.2f s", settings.resolvedLifecycleDuration))
+                        .monospacedDigit()
+                        .frame(width: 54, alignment: .trailing)
+                }
+            }
+            Text("Controls how long bubbles take to emerge from and merge back into the physical notch.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Picker("Maximum bubbles", selection: binding(\.maximumBubbles)) {
                 Text("3").tag(3)
