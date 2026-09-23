@@ -95,6 +95,9 @@ struct NotchBubbleSettings: Codable, Equatable {
     var layout: NotchBubbleLayout = .satellites
     var spacing = 10.0
     var bubbleSize = 42.0
+    // Optional preserves decoding of Notch Bubble settings saved before this control existed.
+    // Positive values move bubbles down on screen.
+    var verticalOffset: Double?
     var shape: NotchBubbleShape = .glass
     var cornerRadius = 18.0
     var glassIntensity = 0.82
@@ -116,10 +119,18 @@ struct NotchBubbleSettings: Codable, Equatable {
         value.version = 1
         value.spacing = min(40, max(0, spacing.isFinite ? spacing : 10))
         value.bubbleSize = min(72, max(24, bubbleSize.isFinite ? bubbleSize : 42))
+        if let verticalOffset {
+            value.verticalOffset = min(120, max(-120, verticalOffset.isFinite ? verticalOffset : 0))
+        }
         value.cornerRadius = min(36, max(0, cornerRadius.isFinite ? cornerRadius : 18))
         value.glassIntensity = min(1, max(0.15, glassIntensity.isFinite ? glassIntensity : 0.82))
         value.maximumBubbles = min(99, max(1, maximumBubbles))
         return value
+    }
+
+    var resolvedVerticalOffset: Double {
+        let value = verticalOffset ?? 0
+        return value.isFinite ? min(120, max(-120, value)) : 0
     }
 }
 
@@ -268,6 +279,7 @@ struct BubbleLayoutEngine {
         for bubbles: [NotchBubble],
         around surfaceFrame: CGRect,
         in screenFrame: CGRect,
+        compactHeight: CGFloat,
         settings: NotchBubbleSettings
     ) -> [NotchBubbleKind: CGRect] {
         guard !bubbles.isEmpty else { return [:] }
@@ -275,13 +287,14 @@ struct BubbleLayoutEngine {
         let size = CGFloat(settings.bubbleSize)
         let spacing = CGFloat(settings.spacing)
         let gap = max(5, spacing)
+        let verticalOffset = CGFloat(settings.resolvedVerticalOffset)
         var result: [NotchBubbleKind: CGRect] = [:]
 
         switch settings.layout {
         case .satellites:
             let total = CGFloat(bubbles.count) * size + CGFloat(max(0, bubbles.count - 1)) * spacing
             let startX = surfaceFrame.midX - total / 2
-            let y = surfaceFrame.minY - gap - size
+            let y = surfaceFrame.minY - gap - size - verticalOffset
             for (index, bubble) in bubbles.enumerated() {
                 let frame = CGRect(
                     x: startX + CGFloat(index) * (size + spacing),
@@ -293,7 +306,12 @@ struct BubbleLayoutEngine {
             }
 
         case .wings:
-            let y = surfaceFrame.midY - size / 2
+            // Wings belong to the menu-bar band, not the expanding body of Halo.
+            // Keep their vertical center aligned to the compact notch height even while
+            // the main surface grows hundreds of points downward.
+            let menuBarHeight = max(1, compactHeight)
+            let menuBarCenterY = screenFrame.maxY - menuBarHeight / 2
+            let y = menuBarCenterY - size / 2 - verticalOffset
             var leftCount = 0
             var rightCount = 0
             for (index, bubble) in bubbles.enumerated() {
@@ -315,7 +333,7 @@ struct BubbleLayoutEngine {
             for (index, bubble) in bubbles.enumerated() {
                 let frame = CGRect(
                     x: surfaceFrame.midX - size / 2,
-                    y: surfaceFrame.minY - gap - size - CGFloat(index) * (size + spacing),
+                    y: surfaceFrame.minY - gap - size - CGFloat(index) * (size + spacing) - verticalOffset,
                     width: size,
                     height: size
                 )
@@ -355,46 +373,94 @@ private final class TransparentNotchBubbleHostingView<Content: View>: NSHostingV
 }
 
 @MainActor
-enum BubbleAnimationController {
-    static func move(
+private final class BubbleFrameAnimator {
+    private let clock = DisplayClock()
+
+    func cancel() {
+        clock.stop()
+    }
+
+    func move(
         panel: NSPanel,
-        to frame: CGRect,
+        to target: CGRect,
         preset: NotchBubbleAnimationPreset,
         animated: Bool
     ) {
-        guard panel.frame != frame else { return }
+        cancel()
+
+        guard panel.frame != target else { return }
         guard animated,
               preset != .none,
-              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
-            panel.setFrame(frame, display: false)
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              let view = panel.contentView else {
+            panel.setFrame(target, display: false)
             return
         }
 
-        let duration: TimeInterval
+        let initial = panel.frame
+        let start = CACurrentMediaTime()
+        let duration: CFTimeInterval
         switch preset {
-        case .soft: duration = 0.28
-        case .fluid: duration = 0.22
-        case .snappy: duration = 0.13
-        case .bouncy: duration = 0.30
+        case .soft: duration = 0.24
+        case .fluid: duration = 0.19
+        case .snappy: duration = 0.12
+        case .bouncy: duration = 0.27
         case .none: duration = 0
         }
 
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = duration
-            context.timingFunction = CAMediaTimingFunction(
-                name: preset == .snappy ? .easeOut : .easeInEaseOut
+        clock.start(view: view) { [weak self, weak panel] timestamp in
+            guard let self, let panel else {
+                self?.cancel()
+                return
+            }
+
+            let t = min(1, max(0, (timestamp - start) / max(0.01, duration)))
+            let p = self.progress(t, preset: preset)
+            let frame = CGRect(
+                x: initial.origin.x + (target.origin.x - initial.origin.x) * p,
+                y: initial.origin.y + (target.origin.y - initial.origin.y) * p,
+                width: initial.width + (target.width - initial.width) * p,
+                height: initial.height + (target.height - initial.height) * p
             )
-            panel.animator().setFrame(frame, display: false)
+            panel.setFrame(frame, display: false)
+
+            if t >= 1 {
+                panel.setFrame(target, display: false)
+                self.cancel()
+            }
         }
     }
 
+    private func progress(_ t: CFTimeInterval, preset: NotchBubbleAnimationPreset) -> CGFloat {
+        if t >= 1 { return 1 }
+        let value: Double
+        switch preset {
+        case .soft:
+            value = -(cos(.pi * t) - 1) / 2
+        case .fluid:
+            value = 1 - pow(1 - t, 3)
+        case .snappy:
+            value = 1 - pow(1 - t, 4)
+        case .bouncy:
+            // Quick response with a restrained spring overshoot.
+            value = 1 - exp(-7.5 * t) * cos(9.0 * t)
+        case .none:
+            value = 1
+        }
+        return CGFloat(value)
+    }
+}
+
+@MainActor
+enum BubbleAnimationController {
     static func show(panel: NSPanel, animated: Bool) {
         guard !panel.isVisible else { return }
         if animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             panel.alphaValue = 0
             panel.orderFrontRegardless()
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.16
+                context.duration = 0.11
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 panel.animator().alphaValue = 1
             }
         } else {
@@ -415,7 +481,8 @@ enum BubbleAnimationController {
         }
 
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.12
+            context.duration = 0.09
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             panel.animator().alphaValue = 0
         }, completionHandler: {
             Task { @MainActor in
@@ -432,6 +499,7 @@ final class BubbleWindowController {
     let kind: NotchBubbleKind
 
     private let panel: NotchBubblePanel
+    private let frameAnimator = BubbleFrameAnimator()
     private var removalGeneration = 0
 
     init(kind: NotchBubbleKind, store: AppStore, state: SurfaceState) {
@@ -470,19 +538,32 @@ final class BubbleWindowController {
     func present(
         frame: CGRect,
         settings: NotchBubbleSettings,
-        animated: Bool
+        animated: Bool,
+        trackingSurface: Bool = false
     ) {
         removalGeneration += 1
-        BubbleAnimationController.move(
-            panel: panel,
-            to: frame,
-            preset: settings.animation,
-            animated: animated
-        )
-        BubbleAnimationController.show(panel: panel, animated: animated)
+
+        if trackingSurface {
+            // SurfaceAnimator already publishes display-linked geometry every frame.
+            // A second animation here makes bubbles chase the notch and visibly lag.
+            frameAnimator.cancel()
+            if panel.frame != frame {
+                panel.setFrame(frame, display: false)
+            }
+        } else {
+            frameAnimator.move(
+                panel: panel,
+                to: frame,
+                preset: settings.animation,
+                animated: animated
+            )
+        }
+
+        BubbleAnimationController.show(panel: panel, animated: animated && !trackingSurface)
     }
 
     func remove(animated: Bool, completion: @escaping () -> Void) {
+        frameAnimator.cancel()
         removalGeneration += 1
         let generation = removalGeneration
         BubbleAnimationController.hide(panel: panel, animated: animated) { [weak self] in
@@ -492,6 +573,7 @@ final class BubbleWindowController {
     }
 
     func close() {
+        frameAnimator.cancel()
         panel.close()
     }
 }
@@ -569,7 +651,7 @@ private final class NotchBubbleDisplayHost {
             } else {
                 self.surfaceFrame = surfacePanel.frame
             }
-            self.refresh(animated: true)
+            self.refresh(animated: false, trackingSurface: true)
         }
         .store(in: &subscriptions)
 
@@ -645,6 +727,7 @@ private final class NotchBubbleDisplayHost {
             for: bubbles,
             around: surfaceFrame,
             in: screenFrame,
+            compactHeight: state.compactHeight,
             settings: settings
         )
         let activeKinds = Set(bubbles.map(\.kind))
@@ -668,7 +751,12 @@ private final class NotchBubbleDisplayHost {
                 controller = BubbleWindowController(kind: bubble.kind, store: store, state: state)
                 controllers[bubble.kind] = controller
             }
-            controller.present(frame: frame, settings: settings, animated: animated)
+            controller.present(
+                frame: frame,
+                settings: settings,
+                animated: animated,
+                trackingSurface: trackingSurface
+            )
         }
     }
 
@@ -1163,6 +1251,31 @@ struct NotchBubbleSettingsView: View {
                 }
             }
 
+            LabeledContent("Vertical offset") {
+                HStack {
+                    Slider(
+                        value: Binding(
+                            get: { settings.resolvedVerticalOffset },
+                            set: { value in
+                                var next = settingsStore.settings
+                                next.verticalOffset = value
+                                settingsStore.settings = next.normalized()
+                            }
+                        ),
+                        in: -120...120,
+                        step: 1
+                    )
+                    .frame(width: 210)
+
+                    Text(String(format: "%+.0f pt", settings.resolvedVerticalOffset))
+                        .monospacedDigit()
+                        .frame(width: 58, alignment: .trailing)
+                }
+            }
+            Text("Positive values move bubbles downward. Wings stay anchored to the menu-bar band while Halo expands.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Picker("Shape", selection: binding(\.shape)) {
                 ForEach(NotchBubbleShape.allCases) { shape in
                     Text(shape.rawValue).tag(shape)
@@ -1296,7 +1409,7 @@ private struct NotchBubbleSettingsPreview: View {
                     .frame(width: notch.width, height: notch.height)
                     .position(x: notch.midX, y: notch.midY)
 
-                ForEach(Array(previewFrames(notch: notch, size: bubble, spacing: gap).enumerated()), id: \.offset) { index, frame in
+                ForEach(Array(previewFrames(notch: notch, size: bubble, spacing: gap, verticalOffset: verticalOffset).enumerated()), id: \.offset) { index, frame in
                     previewBubble(index)
                         .frame(width: frame.width, height: frame.height)
                         .position(x: frame.midX, y: frame.midY)
@@ -1307,29 +1420,29 @@ private struct NotchBubbleSettingsPreview: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.secondary.opacity(0.12)))
     }
 
-    private func previewFrames(notch: CGRect, size: CGFloat, spacing: CGFloat) -> [CGRect] {
+    private func previewFrames(notch: CGRect, size: CGFloat, spacing: CGFloat, verticalOffset: CGFloat) -> [CGRect] {
         let count = 3
         switch settings.layout {
         case .satellites:
             let total = CGFloat(count) * size + CGFloat(count - 1) * spacing
             let x = notch.midX - total / 2
-            let y = notch.maxY + max(7, spacing)
+            let y = notch.maxY + max(7, spacing) + verticalOffset
             return (0..<count).map {
                 CGRect(x: x + CGFloat($0) * (size + spacing), y: y, width: size, height: size)
             }
 
         case .wings:
             return [
-                CGRect(x: notch.minX - spacing - size, y: notch.midY - size / 2, width: size, height: size),
-                CGRect(x: notch.maxX + spacing, y: notch.midY - size / 2, width: size, height: size),
-                CGRect(x: notch.minX - spacing * 2 - size * 2, y: notch.midY - size / 2, width: size, height: size)
+                CGRect(x: notch.minX - spacing - size, y: notch.midY - size / 2 + verticalOffset, width: size, height: size),
+                CGRect(x: notch.maxX + spacing, y: notch.midY - size / 2 + verticalOffset, width: size, height: size),
+                CGRect(x: notch.minX - spacing * 2 - size * 2, y: notch.midY - size / 2 + verticalOffset, width: size, height: size)
             ]
 
         case .stack:
             return (0..<count).map {
                 CGRect(
                     x: notch.midX - size / 2,
-                    y: notch.maxY + max(7, spacing) + CGFloat($0) * (size + spacing),
+                    y: notch.maxY + max(7, spacing) + CGFloat($0) * (size + spacing) + verticalOffset,
                     width: size,
                     height: size
                 )
