@@ -773,6 +773,10 @@ final class WindowManager {
                 self.refreshDynamicWidths()
             }.store(in: &subscriptions)
 
+        store.workspace.$trailerLayoutOverride.dropFirst().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+        store.workspace.$trailerThemeOverride.dropFirst().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.$scheduledProfileID.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         store.workspace.media.$title.removeDuplicates().receive(on: DispatchQueue.main)
@@ -1589,6 +1593,17 @@ final class WindowManager {
         }
     }
 
+    /// Closes every Halo surface without toggling already-closed surfaces open.
+    /// Trailer Mode uses this to guarantee a closed-only recording sequence.
+    func collapseAll() {
+        hosts.values.forEach { host in
+            host.state.collapseTask?.cancel()
+            if host.state.expanded {
+                host.state.expanded = false
+            }
+        }
+    }
+
     private func adjustedExpandedFrame(host: Host, requested: CGSize?) -> CGRect {
         guard let geometry = host.geometry else { return .zero }
         let base = geometry.frame(expanded: true)
@@ -1969,9 +1984,11 @@ final class WindowManager {
             active.insert(id)
             let existing = hosts[id]
             let host = existing ?? Host()
-            var theme = displayProfile?.theme ?? override?.theme ?? store.workspace.scheduledTheme ?? store.configuration.theme
+            var theme = store.workspace.trailerThemeOverride ?? displayProfile?.theme ?? override?.theme ?? store.workspace.scheduledTheme ?? store.configuration.theme
             if store.configuration.simulateNotch && theme.style == .notch { theme.style = .simulated }
-            let displayLayout = displayProfile?.layout ?? override?.layout
+            // Trailer Mode is a runtime-only presentation layer. While active it intentionally
+            // sits above profile/display layouts so the recorded sequence is deterministic.
+            let displayLayout = store.workspace.trailerLayoutOverride ?? displayProfile?.layout ?? override?.layout
             var appearance = displayLayout?.appearance ?? store.workspace.effectiveLayout.appearance
             let effectiveLayout = displayLayout ?? store.workspace.effectiveLayout
             // Preserve the old horizontal-height behavior only for layouts saved before
