@@ -2457,7 +2457,8 @@ private struct NotchBubbleView: View {
             .onHover { value in
                 if value && !hovering {
                     HaloHoverHaptics.pulse(
-                        id: "bubble." + surfaceState.displayID + "." + kind.rawValue
+                        id: "bubble." + surfaceState.displayID + "." + kind.rawValue,
+                        strength: store.configuration.resolvedHoverHapticStrength
                     )
                 }
 

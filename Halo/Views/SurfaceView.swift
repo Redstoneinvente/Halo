@@ -3262,7 +3262,10 @@ struct SurfaceView: View {
         }
         .onHover { hovering in
             if hovering {
-                HaloHoverHaptics.pulse(id: "surface." + state.displayID)
+                HaloHoverHaptics.pulse(
+                    id: "surface." + state.displayID,
+                    strength: store.configuration.resolvedHoverHapticStrength
+                )
             }
 
             if clipboardContextActive {

@@ -361,6 +361,35 @@ struct SettingsView: View {
                     }
                 }
             }
+            LabeledContent("Haptic strength") {
+                HStack(spacing: 10) {
+                    SwiftUI.Slider(
+                        value: Binding(
+                            get: { Double(store.configuration.resolvedHoverHapticStrength) },
+                            set: { rawValue in
+                                let strength = min(3, max(0, Int(rawValue.rounded())))
+                                guard strength != store.configuration.resolvedHoverHapticStrength else { return }
+                                store.configuration.hoverHapticStrength = strength
+                                HaloHoverHaptics.pulse(
+                                    id: "settings.hoverHapticPreview",
+                                    strength: strength,
+                                    minimumInterval: 0.05
+                                )
+                            }
+                        ),
+                        in: 0...3,
+                        step: 1
+                    )
+                    .frame(width: 220)
+
+                    Text(["Off", "Light", "Medium", "Strong"][store.configuration.resolvedHoverHapticStrength])
+                        .frame(width: 58, alignment: .trailing)
+                }
+            }
+            Text("Controls the tactile tick when entering the notch or a Notch Bubble.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Toggle("Show on all displays", isOn: $store.configuration.allDisplays)
             Toggle("Launch at login", isOn: $loginEnabled).onChange(of: loginEnabled) { value in
                 do { if value { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }

@@ -36,6 +36,9 @@ struct Configuration: Codable {
     // Optional delay values keep existing saved Configuration payloads backward-compatible.
     var hoverOpenDelay: Double? = nil
     var hoverCloseDelay: Double? = nil
+    // Optional so existing Configuration payloads continue decoding. 1 preserves
+    // the original subtle hover tick for users upgrading from earlier builds.
+    var hoverHapticStrength: Int? = nil
     var allDisplays = false
 
     var resolvedHoverOpenDelay: Double {
@@ -44,6 +47,10 @@ struct Configuration: Codable {
 
     var resolvedHoverCloseDelay: Double {
         min(10, max(0, hoverCloseDelay ?? 0))
+    }
+
+    var resolvedHoverHapticStrength: Int {
+        min(3, max(0, hoverHapticStrength ?? 1))
     }
     var simulateNotch = false
     var showClock = true

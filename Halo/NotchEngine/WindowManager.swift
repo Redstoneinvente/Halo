@@ -17,7 +17,14 @@ enum HaloSurfaceOpenDestination: String {
 enum HaloHoverHaptics {
     private static var lastPulseByID: [String: TimeInterval] = [:]
 
-    static func pulse(id: String, minimumInterval: TimeInterval = 0.16) {
+    static func pulse(
+        id: String,
+        strength: Int,
+        minimumInterval: TimeInterval = 0.16
+    ) {
+        let strength = min(3, max(0, strength))
+        guard strength > 0 else { return }
+
         let now = ProcessInfo.processInfo.systemUptime
         if let lastPulse = lastPulseByID[id],
            now - lastPulse < minimumInterval {
@@ -25,8 +32,22 @@ enum HaloHoverHaptics {
         }
 
         lastPulseByID[id] = now
+
+        // AppKit exposes semantic haptic patterns rather than analog amplitude.
+        // Map Halo's strength control to progressively more pronounced native
+        // patterns so the setting stays predictable and avoids repeated buzzing.
+        let pattern: NSHapticFeedbackManager.FeedbackPattern
+        switch strength {
+        case 1:
+            pattern = .alignment
+        case 2:
+            pattern = .levelChange
+        default:
+            pattern = .generic
+        }
+
         NSHapticFeedbackManager.defaultPerformer.perform(
-            .alignment,
+            pattern,
             performanceTime: .now
         )
     }
