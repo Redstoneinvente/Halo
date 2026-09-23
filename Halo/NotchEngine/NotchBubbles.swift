@@ -2111,6 +2111,7 @@ private struct NotchBubbleView: View {
     @ObservedObject private var calendar: CalendarService
     @ObservedObject private var pal = HaloPixelPalStore.shared
     @ObservedObject private var settingsStore = NotchBubbleSettingsStore.shared
+    @ObservedObject private var activityCenter = NotchBubbleActivityCenter.shared
 
     @State private var hovering = false
     @State private var showingDetail = false
@@ -2163,34 +2164,92 @@ private struct NotchBubbleView: View {
                     .padding(14)
                     .frame(minWidth: detailWidth)
             }
+            .contextMenu {
+                Button("Dismiss for now") {
+                    activityCenter.dismiss(kind: kind)
+                }
+                Divider()
+                Button("Disable \(kind.title) bubble") {
+                    disableBubbleKind()
+                }
+            }
             .accessibilityLabel(kind.title)
             .help(helpText)
     }
 
     @ViewBuilder
     private var bubbleContent: some View {
-        switch kind {
-        case .music:
-            musicBubbleContent
-        case .timer:
-            timerBubbleContent
-        case .pixelPal:
-            pixelPalBubbleContent
-        case .clock:
-            clockBubbleContent
-        case .stopwatch:
-            stopwatchBubbleContent
-        case .system:
-            systemBubbleContent
-        case .clipboard:
-            clipboardBubbleContent
-        case .calendar:
-            calendarBubbleContent
-        case .audio:
-            audioBubbleContent
-        case .vinyl:
-            vinylBubbleContent
+        if let confirmation = activityCenter.currentActivity(for: kind),
+           confirmation.mode == .confirmation {
+            confirmationBubbleContent(confirmation)
+        } else {
+            switch kind {
+            case .music:
+                musicBubbleContent
+            case .timer:
+                timerBubbleContent
+            case .pixelPal:
+                pixelPalBubbleContent
+            case .clock:
+                clockBubbleContent
+            case .stopwatch:
+                stopwatchBubbleContent
+            case .system:
+                systemBubbleContent
+            case .clipboard:
+                clipboardBubbleContent
+            case .calendar:
+                calendarBubbleContent
+            case .audio:
+                audioBubbleContent
+            case .vinyl:
+                vinylBubbleContent
+            }
         }
+    }
+
+    @ViewBuilder
+    private func confirmationBubbleContent(_ activity: NotchBubbleActivity) -> some View {
+        ZStack {
+            if let progress = activity.progress {
+                Circle()
+                    .stroke(Color.white.opacity(0.10), lineWidth: 2.8)
+                    .padding(3)
+                Circle()
+                    .trim(from: 0, to: min(1, max(0, progress)))
+                    .stroke(
+                        providerAccentColor,
+                        style: StrokeStyle(lineWidth: 2.8, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .padding(3)
+            }
+
+            VStack(spacing: 1) {
+                Image(systemName: activity.icon)
+                    .font(.system(
+                        size: bubbleStyle.size * (activity.progress == nil ? 0.34 : 0.25),
+                        weight: .semibold
+                    ))
+
+                if activity.progress == nil,
+                   let subtitle = activity.subtitle,
+                   !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(
+                            size: max(5, bubbleStyle.size * 0.09),
+                            weight: .semibold,
+                            design: .rounded
+                        ))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(4)
+        }
+        .accessibilityLabel(activity.title)
+        .accessibilityValue(activity.subtitle ?? "")
     }
 
     @ViewBuilder
@@ -3440,6 +3499,39 @@ private struct NotchBubbleView: View {
             if total < 1_000_000 { return String(format: "%.0fK", total / 1_000) }
             return String(format: "%.1fM", total / 1_000_000)
         }
+    }
+
+    private func disableBubbleKind() {
+        var next = settingsStore.settings
+        switch kind {
+        case .music:
+            next.musicEnabled = false
+        case .timer:
+            next.timerEnabled = false
+        case .pixelPal:
+            next.pixelPalEnabled = false
+        case .clock:
+            next.clockEnabled = false
+        case .stopwatch:
+            next.stopwatchEnabled = false
+        case .system:
+            next.systemEnabled = false
+            next.brightnessFeedbackEnabled = false
+            next.powerFeedbackEnabled = false
+        case .clipboard:
+            next.clipboardEnabled = false
+        case .calendar:
+            next.calendarEnabled = false
+        case .audio:
+            next.audioEnabled = false
+            next.audioFeedbackEnabled = false
+            next.deviceFeedbackEnabled = false
+        case .vinyl:
+            next.vinylEnabled = false
+        }
+        settingsStore.settings = next.normalized()
+        activityCenter.dismiss(kind: kind)
+        showingDetail = false
     }
 
     private func mediaCommand(_ command: String) {
