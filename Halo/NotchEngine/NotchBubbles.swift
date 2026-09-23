@@ -1657,6 +1657,8 @@ private struct NotchBubbleView: View {
     @ObservedObject private var media: MediaService
     @ObservedObject private var system: SystemService
     @ObservedObject private var audio: AudioService
+    @ObservedObject private var clipboard: ClipboardService
+    @ObservedObject private var calendar: CalendarService
     @ObservedObject private var pal = HaloPixelPalStore.shared
     @ObservedObject private var settingsStore = NotchBubbleSettingsStore.shared
 
@@ -1671,6 +1673,8 @@ private struct NotchBubbleView: View {
         _media = ObservedObject(wrappedValue: workspace.media)
         _system = ObservedObject(wrappedValue: workspace.system)
         _audio = ObservedObject(wrappedValue: workspace.audio)
+        _clipboard = ObservedObject(wrappedValue: workspace.clipboard)
+        _calendar = ObservedObject(wrappedValue: workspace.calendar)
     }
 
     private var settings: NotchBubbleSettings {
@@ -1890,55 +1894,245 @@ private struct NotchBubbleView: View {
         .padding(3)
     }
 
+    private var providerAccentColor: Color {
+        if let custom = bubbleStyle.tint { return custom }
+        switch kind {
+        case .music, .vinyl:
+            return media.artworkColors.first?.color ?? Color(red: 0.42, green: 0.48, blue: 1.0)
+        case .timer:
+            return store.finished ? .green : Color(red: 0.30, green: 0.62, blue: 1.0)
+        case .pixelPal:
+            return Color(red: 1.0, green: 0.42, blue: 0.66)
+        case .clock:
+            return Color(red: 0.34, green: 0.72, blue: 1.0)
+        case .stopwatch:
+            return Color(red: 1.0, green: 0.58, blue: 0.22)
+        case .system:
+            return Color(red: 0.33, green: 0.88, blue: 0.77)
+        case .clipboard:
+            return Color(red: 0.65, green: 0.46, blue: 1.0)
+        case .calendar:
+            return Color(red: 1.0, green: 0.34, blue: 0.38)
+        case .audio:
+            return Color(red: 0.26, green: 0.66, blue: 1.0)
+        }
+    }
+
     @ViewBuilder
     private var bubbleBackground: some View {
         let shape = NotchBubbleMaskShape(
             shape: bubbleStyle.shape,
             cornerRadius: bubbleStyle.cornerRadius
         )
-        let tint = bubbleStyle.tint ?? Color.clear
+        let accent = providerAccentColor
+        let customTint = bubbleStyle.tint ?? accent
+        let tintAmount = max(bubbleStyle.tintAmount, bubbleStyle.tint == nil ? 0 : bubbleStyle.tintAmount)
 
-        switch bubbleStyle.background {
-        case .solid:
-            shape
-                .fill(Color.black.opacity(bubbleStyle.backgroundOpacity))
-                .overlay {
-                    if bubbleStyle.tintAmount > 0 {
-                        shape.fill(tint.opacity(bubbleStyle.tintAmount))
-                    }
-                }
-
-        case .glass:
+        switch bubbleStyle.design {
+        case .halo:
             shape
                 .fill(.ultraThinMaterial)
                 .opacity(bubbleStyle.glassIntensity)
                 .overlay {
-                    shape.fill(Color.black.opacity(0.18 * bubbleStyle.backgroundOpacity))
+                    shape.fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.08),
+                                Color.clear,
+                                Color.black.opacity(0.26 * bubbleStyle.backgroundOpacity)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
                 }
                 .overlay {
-                    if bubbleStyle.tintAmount > 0 {
-                        shape.fill(tint.opacity(bubbleStyle.tintAmount))
+                    if tintAmount > 0 {
+                        shape.fill(customTint.opacity(tintAmount))
                     }
                 }
 
-        case .clear:
+        case .aurora:
             shape
-                .fill(Color.clear)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            accent.opacity(0.94),
+                            Color(red: 0.45, green: 0.28, blue: 0.96).opacity(0.92),
+                            Color(red: 0.16, green: 0.72, blue: 0.92).opacity(0.88)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
                 .overlay {
-                    if bubbleStyle.tintAmount > 0 {
-                        shape.fill(tint.opacity(bubbleStyle.tintAmount))
-                    }
+                    shape.fill(
+                        RadialGradient(
+                            colors: [Color.white.opacity(0.24), Color.clear],
+                            center: .topLeading,
+                            startRadius: 0,
+                            endRadius: bubbleStyle.size * 0.72
+                        )
+                    )
+                }
+
+        case .neon:
+            shape
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            accent.opacity(0.22),
+                            Color.black.opacity(0.94)
+                        ],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: bubbleStyle.size * 0.58
+                    )
+                )
+                .overlay {
+                    shape
+                        .stroke(accent.opacity(0.92), lineWidth: 1.8)
+                        .padding(1.5)
+                }
+                .overlay {
+                    shape
+                        .stroke(accent.opacity(0.28), lineWidth: 5)
+                        .blur(radius: 3)
+                        .padding(3)
+                        .clipShape(shape)
+                }
+
+        case .obsidian:
+            shape
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            Color.white.opacity(0.09),
+                            Color(red: 0.08, green: 0.085, blue: 0.10),
+                            Color.black.opacity(0.98)
+                        ],
+                        center: .topLeading,
+                        startRadius: 0,
+                        endRadius: bubbleStyle.size * 0.82
+                    )
+                )
+                .overlay {
+                    shape.fill(accent.opacity(0.08))
+                }
+
+        case .prism:
+            shape
+                .fill(.ultraThinMaterial)
+                .opacity(max(0.60, bubbleStyle.glassIntensity))
+                .overlay {
+                    shape.fill(
+                        AngularGradient(
+                            colors: [
+                                Color(red: 1.0, green: 0.34, blue: 0.65).opacity(0.36),
+                                Color(red: 0.54, green: 0.38, blue: 1.0).opacity(0.42),
+                                Color(red: 0.20, green: 0.76, blue: 1.0).opacity(0.38),
+                                Color(red: 0.22, green: 0.92, blue: 0.72).opacity(0.28),
+                                Color(red: 1.0, green: 0.34, blue: 0.65).opacity(0.36)
+                            ],
+                            center: .center
+                        )
+                    )
+                }
+                .overlay {
+                    shape.fill(Color.black.opacity(0.20))
+                }
+
+        case .ember:
+            shape
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.98, green: 0.30, blue: 0.16),
+                            Color(red: 0.72, green: 0.10, blue: 0.16),
+                            Color(red: 0.16, green: 0.035, blue: 0.055)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay {
+                    shape.fill(
+                        RadialGradient(
+                            colors: [Color.orange.opacity(0.32), Color.clear],
+                            center: .bottomTrailing,
+                            startRadius: 0,
+                            endRadius: bubbleStyle.size * 0.70
+                        )
+                    )
+                }
+
+        case .midnight:
+            shape
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.08, green: 0.18, blue: 0.38),
+                            Color(red: 0.035, green: 0.065, blue: 0.15),
+                            Color.black.opacity(0.96)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay {
+                    shape.fill(accent.opacity(0.13))
+                }
+
+        case .minimal:
+            shape
+                .fill(Color.black.opacity(0.16 * bubbleStyle.backgroundOpacity))
+                .overlay {
+                    shape.fill(accent.opacity(0.045))
                 }
         }
     }
 
     private var bubbleBorder: some View {
-        let opacity = min(1, bubbleStyle.borderOpacity * (hovering ? 1.8 : 1.0))
-        return NotchBubbleMaskShape(
+        let shape = NotchBubbleMaskShape(
             shape: bubbleStyle.shape,
             cornerRadius: bubbleStyle.cornerRadius
         )
-        .stroke(Color.white.opacity(opacity), lineWidth: opacity > 0 ? 1 : 0)
+        let accent = providerAccentColor
+
+        switch bubbleStyle.design {
+        case .halo:
+            shape.stroke(
+                Color.white.opacity(min(1, bubbleStyle.borderOpacity * (hovering ? 1.8 : 1.0))),
+                lineWidth: bubbleStyle.borderOpacity > 0 ? 1 : 0
+            )
+        case .aurora:
+            shape.stroke(Color.white.opacity(hovering ? 0.42 : 0.22), lineWidth: 1)
+        case .neon:
+            shape.stroke(accent.opacity(hovering ? 1.0 : 0.80), lineWidth: hovering ? 2.4 : 1.8)
+        case .obsidian:
+            shape.stroke(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.28), Color.white.opacity(0.03)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                lineWidth: 1
+            )
+        case .prism:
+            shape.stroke(
+                AngularGradient(
+                    colors: [.pink, .purple, .blue, .cyan, .pink],
+                    center: .center
+                ).opacity(hovering ? 0.72 : 0.42),
+                lineWidth: 1.2
+            )
+        case .ember:
+            shape.stroke(Color.orange.opacity(hovering ? 0.82 : 0.42), lineWidth: 1.1)
+        case .midnight:
+            shape.stroke(Color.blue.opacity(hovering ? 0.65 : 0.26), lineWidth: 1)
+        case .minimal:
+            shape.stroke(Color.white.opacity(hovering ? 0.38 : 0.18), lineWidth: 0.8)
+        }
     }
 
     private var hoverAnimation: Animation? {
