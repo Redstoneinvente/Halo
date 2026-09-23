@@ -450,6 +450,7 @@ struct HaloTimerHorizontalDurationComposer: View {
         .frame(maxWidth: .infinity)
         .frame(height: compact ? 44 : 50)
         .contentShape(Rectangle())
+        .animation(.spring(response: 0.20, dampingFraction: 0.86), value: activeValue)
         .background(
             HaloTimerHorizontalScrollCapture { step in
                 adjustActive(by: step)
