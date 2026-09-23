@@ -4884,25 +4884,56 @@ struct BuiltinOrIntegrationWidget: View {
             if options.showControls {
                 if store.deadline == nil && store.pausedSeconds <= 0 {
                     WidgetElement(key: "presets") {
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: options.spacing) {
-                                ForEach([options.timerPresetA, options.timerPresetB, options.timerPresetC], id: \.self) { minutes in
-                                    Button("\(minutes) min") { store.startTimer(minutes: minutes) }
-                                }
+                        if presentation == .compact {
+                            HaloTimerDurationPopoverButton(
+                                accent: style.accentColor.color,
+                                textColor: style.textColor.color,
+                                quickPresets: [options.timerPresetA, options.timerPresetB, options.timerPresetC],
+                                initialMinutes: options.timerPresetB,
+                                label: "Set timer"
+                            ) { duration in
+                                store.startTimer(duration: duration)
                             }
-                            HStack(spacing: max(4, options.spacing * 0.6)) {
-                                ForEach([options.timerPresetA, options.timerPresetB, options.timerPresetC], id: \.self) { minutes in
-                                    Button("\(minutes)m") { store.startTimer(minutes: minutes) }
-                                }
+                            .buttonStyle(.bordered)
+                        } else {
+                            HaloTimerDurationComposer(
+                                accent: style.accentColor.color,
+                                textColor: style.textColor.color,
+                                quickPresets: [options.timerPresetA, options.timerPresetB, options.timerPresetC, 45, 60],
+                                initialMinutes: options.timerPresetB,
+                                compact: false
+                            ) { duration in
+                                store.startTimer(duration: duration)
                             }
-                        }.buttonStyle(.bordered)
+                            .frame(maxWidth: 390)
+                        }
                     }
                 } else {
                     WidgetElement(key: "controls") {
-                        HStack(spacing: options.spacing) {
-                            Button(store.deadline == nil ? "Resume" : "Pause") { store.pauseResume() }
-                            Button("Reset") { store.resetTimer() }
-                        }.buttonStyle(.bordered)
+                        HStack(spacing: max(6, options.spacing)) {
+                            Button {
+                                store.pauseResume()
+                            } label: {
+                                Label(
+                                    store.deadline == nil ? "Resume" : "Pause",
+                                    systemImage: store.deadline == nil ? "play.fill" : "pause.fill"
+                                )
+                            }
+
+                            Button {
+                                store.addTimer(minutes: 1)
+                                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                            } label: {
+                                Label("+1 min", systemImage: "plus")
+                            }
+
+                            Button(role: .destructive) {
+                                store.resetTimer()
+                            } label: {
+                                Label("Reset", systemImage: "arrow.counterclockwise")
+                            }
+                        }
+                        .buttonStyle(.bordered)
                     }
                 }
             }
