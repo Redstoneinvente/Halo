@@ -188,20 +188,6 @@ enum FrameRatePolicy {
     }
 }
 
-/// Compare only render-affecting preferences; no JSON work on the slider hot path.
-struct SurfaceRenderConfiguration: Equatable {
-    var appearance: Appearance
-    var displays: [DisplayOverride]
-    var closedNotch: ClosedNotchOptions? = nil
-    var clock: WidgetStyle? = nil
-    var horizontalWidgets: Bool? = nil
-    var horizontalPages: Bool? = nil
-    var horizontalHeight: Double? = nil
-    var openNotchContentMode: OpenNotchContentMode? = nil
-    var openHorizontalPadding: Double? = nil
-    var openVerticalPadding: Double? = nil
-    var openFixedColumns: Int? = nil
-}
 enum GlassRendering {
     /// Kept for profiles/themes created before GlassOptions existed.
     static func tintOpacity(themeOpacity: Double) -> Double {

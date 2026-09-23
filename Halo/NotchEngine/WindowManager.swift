@@ -877,45 +877,18 @@ final class WindowManager {
         NotchAmbientStore.shared.$settings.dropFirst().removeDuplicates()
             .debounce(for: .milliseconds(45), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
-        store.workspace.$settings.map { [store] settings in
-            let layout = settings.profiles.first { $0.id == store.workspace.scheduledProfileID }?.layout ?? settings.layout
-            let resolvedDisplays = settings.displays.map { item -> DisplayOverride in
-                guard let profileID = item.profileID, let profile = settings.profiles.first(where: { $0.id == profileID }) else { return item }
-                var resolved = item
-                resolved.theme = profile.theme
-                resolved.layout = profile.layout
-                return resolved
-            }
-            return SurfaceRenderConfiguration(
-                appearance: layout.appearance,
-                displays: resolvedDisplays,
-                closedNotch: layout.closedNotch,
-                clock: layout.widgetStyle(for: .clock),
-                horizontalWidgets: layout.horizontalWidgets,
-                horizontalPages: layout.horizontalPages,
-                horizontalHeight: layout.horizontalHeight,
-                openNotchContentMode: layout.openNotchContentMode,
-                openHorizontalPadding: layout.openHorizontalPadding,
-                openVerticalPadding: layout.openVerticalPadding,
-                openFixedColumns: layout.openFixedColumns
-            )
-        }
-            .removeDuplicates().dropFirst()
-            .throttle(for: .milliseconds(33), scheduler: DispatchQueue.main, latest: true)
-            .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
-
-        // SurfaceRenderConfiguration intentionally contains layout/render fields but
-        // not the active scheduled profile theme. Observe that theme separately so
-        // profile width/corner/opacity changes immediately rebuild panel geometry.
+        // Workspace settings are the source of truth for both the legacy layout and
+        // Visual Workspace. Do not reduce this stream to a legacy-only fingerprint:
+        // displays/profile-backed surfaces render through state.layoutOverride, which
+        // is a snapshot refreshed by reconcile(). If openNotch/grid/appearance changes
+        // are omitted here, Settings can persist them while the live notch keeps using
+        // the stale snapshot and appears completely unresponsive.
         store.workspace.$settings
-            .map { [store] settings -> Theme? in
-                guard let profileID = store.workspace.scheduledProfileID else { return nil }
-                return settings.profiles.first(where: { $0.id == profileID })?.theme
-            }
-            .removeDuplicates()
             .dropFirst()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.reconcile() }
+            .throttle(for: .milliseconds(33), scheduler: DispatchQueue.main, latest: true)
+            .sink { [weak self] _ in
+                self?.reconcile()
+            }
             .store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloGeometryPreview"))
             .receive(on: DispatchQueue.main).sink { [weak self] note in
