@@ -3261,6 +3261,10 @@ struct SurfaceView: View {
             state.setExternalInteractionHeld(held)
         }
         .onHover { hovering in
+            if hovering {
+                HaloHoverHaptics.pulse(id: "surface." + state.displayID)
+            }
+
             if clipboardContextActive {
                 clipboardCI.setInteractionActive(hovering)
             } else {

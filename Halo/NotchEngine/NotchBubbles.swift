@@ -2455,6 +2455,12 @@ private struct NotchBubbleView: View {
             .scaleEffect(hovering ? 1.07 : 1)
             .compositingGroup()
             .onHover { value in
+                if value && !hovering {
+                    HaloHoverHaptics.pulse(
+                        id: "bubble." + surfaceState.displayID + "." + kind.rawValue
+                    )
+                }
+
                 hovering = value
                 updateInteractionProtection()
             }

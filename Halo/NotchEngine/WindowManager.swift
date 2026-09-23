@@ -14,6 +14,25 @@ enum HaloSurfaceOpenDestination: String {
 }
 
 @MainActor
+enum HaloHoverHaptics {
+    private static var lastPulseByID: [String: TimeInterval] = [:]
+
+    static func pulse(id: String, minimumInterval: TimeInterval = 0.16) {
+        let now = ProcessInfo.processInfo.systemUptime
+        if let lastPulse = lastPulseByID[id],
+           now - lastPulse < minimumInterval {
+            return
+        }
+
+        lastPulseByID[id] = now
+        NSHapticFeedbackManager.defaultPerformer.perform(
+            .alignment,
+            performanceTime: .now
+        )
+    }
+}
+
+@MainActor
 final class SurfaceState: ObservableObject {
     @Published var expanded = false {
         didSet {
