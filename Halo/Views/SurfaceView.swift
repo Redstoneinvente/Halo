@@ -2930,6 +2930,23 @@ struct SurfaceView: View {
     private var modules: [ModuleID] { layout.normalizedOrder().filter { layout.enabled.contains($0) } }
     private var usesVisualWorkspace: Bool { layout.resolvedUsesCustomOpenNotchWorkspace }
     private var usesDefaultWorkspace: Bool { !usesVisualWorkspace }
+
+    /// Closed Visual Workspace must be visually independent from the legacy/default
+    /// layout system. In particular, Default=Glass must never leak a material layer
+    /// behind a solid/image Visual Workspace while the notch is collapsed.
+    private var closedVisualWorkspaceFallback: Appearance {
+        var appearance = Appearance()
+        appearance.background = .solid
+        appearance.solidColor = WidgetColor(red: 0, green: 0, blue: 0)
+        appearance.gradientStartColor = WidgetColor(red: 0, green: 0, blue: 0)
+        appearance.gradientEndColor = WidgetColor(red: 0, green: 0, blue: 0)
+        appearance.assetPath = ""
+        appearance.blur = 0
+        appearance.saturation = 1
+        appearance.brightness = 0
+        appearance.skin = NotchSkinOptions()
+        return appearance
+    }
     private var presentsVisualWorkspaceSurface: Bool {
         usesVisualWorkspace && activeContext == nil && (visuallyExpanded || visualWorkspaceSurfacePresented)
     }
@@ -3180,7 +3197,17 @@ struct SurfaceView: View {
         .background {
             ZStack {
                 surfaceBackgroundLayer
-                NotchSkinLayer(options: layout.appearance.skin, theme: theme, expanded: visuallyExpanded)
+
+                // The Default layout's decorative skin belongs to the legacy surface.
+                // Keep it out of a closed Visual Workspace so it cannot appear as a
+                // second tinted/material notch underneath the workspace surface.
+                if !usesVisualWorkspace || visuallyExpanded {
+                    NotchSkinLayer(
+                        options: layout.appearance.skin,
+                        theme: theme,
+                        expanded: visuallyExpanded
+                    )
+                }
             }
         }
         .clipShape(contour)
@@ -3486,7 +3513,7 @@ struct SurfaceView: View {
                 // Glass behind a black Visual Workspace) and look like a second notch.
                 OpenNotchBackgroundView(
                     options: layout.resolvedOpenNotchLayout.appearance,
-                    fallback: layout.appearance,
+                    fallback: visuallyExpanded ? layout.appearance : closedVisualWorkspaceFallback,
                     theme: theme,
                     system: workspace.system
                 )
