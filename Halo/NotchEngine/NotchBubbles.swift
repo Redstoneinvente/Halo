@@ -2468,6 +2468,7 @@ private struct NotchBubbleView: View {
         }
     }
 
+    @ViewBuilder
     private var bubbleBorder: some View {
         let shape = NotchBubbleMaskShape(
             shape: bubbleStyle.shape,
