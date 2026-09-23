@@ -2008,8 +2008,13 @@ final class TrailerModeController {
               let baseTheme else { return }
 
         let configuration = store.workspace.settings.trailer ?? TrailerModeSettings()
+        if configuration.showcaseMusic != store.workspace.media.trailerDemoActive {
+            store.workspace.media.setTrailerDemoEnabled(configuration.showcaseMusic)
+            if !configuration.showcaseMusic { store.workspace.refreshMediaSource() }
+        }
         let expanded = requestedExpandedState(configuration.surfaceTarget, step: step)
-        let musicFrame = configuration.showcaseMusic && step % 4 == 2
+        // A 5-frame cadence means Alternate mode shows music in both closed and opened states.
+        let musicFrame = configuration.showcaseMusic && step % 5 == 2
 
         var layout = baseLayout
         if configuration.randomizeAppearance {
@@ -2131,7 +2136,9 @@ final class TrailerModeController {
                                          configuration: TrailerModeSettings,
                                          musicFrame: Bool) {
         var closed = layout.closedNotch ?? ClosedNotchOptions()
-        let choices: [ClosedNotchItem] = [.clock, .date, .timer, .battery, .media, .visualizer, .files]
+        let choices: [ClosedNotchItem] = configuration.showcaseMusic
+            ? [.clock, .date, .timer, .battery, .media, .visualizer, .files]
+            : [.clock, .date, .timer, .battery, .files]
         closed.left = choices.randomElement() ?? .clock
         closed.right = choices.filter { $0 != closed.left }.randomElement() ?? .visualizer
         closed.fontSize = Double.random(in: 10...16)
@@ -2175,7 +2182,10 @@ final class TrailerModeController {
                                          configuration: TrailerModeSettings,
                                          musicFrame: Bool) {
         if configuration.randomizeWidgets {
-            var candidates = ModuleID.allCases.filter { $0 != .activities && $0 != .capture }
+            var candidates = ModuleID.allCases.filter {
+                $0 != .activities && $0 != .capture &&
+                (configuration.showcaseMusic || ($0 != .media && $0 != .audio))
+            }
             candidates.shuffle()
             let count = Int.random(in: 2...min(6, candidates.count))
             var selected = Set(candidates.prefix(count))
