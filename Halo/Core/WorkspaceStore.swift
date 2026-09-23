@@ -64,6 +64,8 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     @Published var trailerLayoutOverride: WorkspaceLayout?
     @Published var trailerThemeOverride: Theme?
     @Published var trailerModeActive = false
+    @Published var trailerTransitionActive = false
+    @Published var trailerTransitionStyle: TrailerTransitionStyle = .fade
 
     var baseEffectiveLayout: WorkspaceLayout { settings.profiles.first { $0.id == scheduledProfileID }?.layout ?? settings.layout }
     var effectiveLayout: WorkspaceLayout { trailerLayoutOverride ?? baseEffectiveLayout }
