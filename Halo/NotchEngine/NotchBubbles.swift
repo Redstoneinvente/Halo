@@ -2112,6 +2112,45 @@ struct NotchBubbleSettingsView: View {
             Toggle("Show while Halo is open", isOn: binding(\.showWhenOpen))
         }
 
+        Section("Music bubble") {
+            Picker("Display", selection: optionalBinding(\.musicDisplayMode, default: MusicBubbleDisplayMode.artwork)) {
+                ForEach(MusicBubbleDisplayMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+
+            Toggle(
+                "Show playback glyph",
+                isOn: optionalBinding(\.musicShowPlaybackGlyph, default: false)
+            )
+            .disabled(settings.resolvedMusicDisplayMode == .controls)
+
+            LabeledContent("Artwork zoom") {
+                HStack {
+                    Slider(
+                        value: optionalBinding(\.musicArtworkZoom, default: 1.0),
+                        in: 1.0...1.8,
+                        step: 0.05
+                    )
+                    .frame(width: 210)
+                    Text(String(format: "%.2fx", settings.resolvedMusicArtworkZoom))
+                        .monospacedDigit()
+                        .frame(width: 48, alignment: .trailing)
+                }
+            }
+            .disabled(settings.resolvedMusicDisplayMode == .icon)
+
+            Picker("Click action", selection: optionalBinding(\.musicTapAction, default: MusicBubbleTapAction.details)) {
+                ForEach(MusicBubbleTapAction.allCases) { action in
+                    Text(action.rawValue).tag(action)
+                }
+            }
+
+            Text("Artwork + Progress wraps album art in live playback progress. Playback Control turns the bubble itself into a large play/pause surface.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
         Section("Bubble providers") {
             providerRow(
                 title: "Music",
@@ -2134,6 +2173,57 @@ struct NotchBubbleSettingsView: View {
                 persistent: binding(\.pixelPalPersistent),
                 detail: "Uses Halo's existing Pixel Pal renderer and interactions rather than a separate mascot implementation."
             )
+            providerToggleRow(
+                title: "Clock",
+                symbol: "clock.fill",
+                enabled: optionalBinding(\.clockEnabled, default: false),
+                detail: "A compact live clock bubble with the full Clock widget available on click."
+            )
+            providerRow(
+                title: "Stopwatch",
+                symbol: "stopwatch.fill",
+                enabled: optionalBinding(\.stopwatchEnabled, default: false),
+                persistent: optionalBinding(\.stopwatchPersistent, default: false),
+                detail: "Appears while the stopwatch is active or has elapsed time. Persistent keeps it ready at all times."
+            )
+            providerToggleRow(
+                title: "System",
+                symbol: "gauge.with.dots.needle.67percent",
+                enabled: optionalBinding(\.systemEnabled, default: false),
+                detail: "Shows one live system metric directly in the bubble."
+            )
+
+            if settings.resolvedSystemEnabled {
+                Picker("System metric", selection: optionalBinding(\.systemMetric, default: SystemBubbleMetric.battery)) {
+                    ForEach(SystemBubbleMetric.allCases) { metric in
+                        Text(metric.rawValue).tag(metric)
+                    }
+                }
+                .padding(.leading, 28)
+            }
+
+            providerToggleRow(
+                title: "Clipboard",
+                symbol: "doc.on.clipboard.fill",
+                enabled: optionalBinding(\.clipboardEnabled, default: false),
+                detail: "Keeps Halo's Clipboard widget one click away."
+            )
+            providerToggleRow(
+                title: "Calendar",
+                symbol: "calendar",
+                enabled: optionalBinding(\.calendarEnabled, default: false),
+                detail: "Shows today's date and opens the full Calendar widget."
+            )
+            providerToggleRow(
+                title: "Audio",
+                symbol: "speaker.wave.2.fill",
+                enabled: optionalBinding(\.audioEnabled, default: false),
+                detail: "Shows current output volume with a live radial level indicator."
+            )
+
+            Text("New bubble types are off by default so existing setups keep their current layout.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
 
         Section("Motion & capacity") {
@@ -2172,6 +2262,7 @@ struct NotchBubbleSettingsView: View {
                 Text("3").tag(3)
                 Text("5").tag(5)
                 Text("8").tag(8)
+                Text("12").tag(12)
                 Text("Unlimited").tag(99)
             }
             Text("The first version ships Music, Timer and Pixel Pal. The capacity control is already future-proofed for additional providers and integrations.")
@@ -2208,6 +2299,38 @@ struct NotchBubbleSettingsView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private func providerToggleRow(
+        title: String,
+        symbol: String,
+        enabled: Binding<Bool>,
+        detail: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Toggle(isOn: enabled) {
+                Label(title, systemImage: symbol)
+            }
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func optionalBinding<T>(
+        _ keyPath: WritableKeyPath<NotchBubbleSettings, T?>,
+        default defaultValue: T
+    ) -> Binding<T> {
+        Binding(
+            get: { settingsStore.settings[keyPath: keyPath] ?? defaultValue },
+            set: { value in
+                var next = settingsStore.settings
+                next[keyPath: keyPath] = value
+                settingsStore.settings = next.normalized()
+            }
+        )
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<NotchBubbleSettings, T>) -> Binding<T> {
