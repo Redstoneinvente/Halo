@@ -18,6 +18,13 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             oldValue.hotkeyModifiers != settings.hotkeyModifiers
         if hotkeyChanged { updateHotkey() }
 
+        let oldTrailer = oldValue.trailer ?? TrailerModeSettings()
+        let newTrailer = settings.trailer ?? TrailerModeSettings()
+        let trailerHotkeyChanged = oldTrailer.hotkeyEnabled != newTrailer.hotkeyEnabled ||
+            oldTrailer.hotkeyCode != newTrailer.hotkeyCode ||
+            oldTrailer.hotkeyModifiers != newTrailer.hotkeyModifiers
+        if trailerHotkeyChanged { updateTrailerHotkey() }
+
         let mediaSourceChanged = oldValue.mediaApp != settings.mediaApp || oldValue.automaticMedia != settings.automaticMedia
         if mediaSourceChanged { media.disconnect() }
 
@@ -54,7 +61,12 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         queueScheduleEvaluation()
     } }
     @Published private(set) var scheduledProfileID: UUID?
-    var effectiveLayout: WorkspaceLayout { settings.profiles.first { $0.id == scheduledProfileID }?.layout ?? settings.layout }
+    @Published var trailerLayoutOverride: WorkspaceLayout?
+    @Published var trailerThemeOverride: Theme?
+    @Published var trailerModeActive = false
+
+    var baseEffectiveLayout: WorkspaceLayout { settings.profiles.first { $0.id == scheduledProfileID }?.layout ?? settings.layout }
+    var effectiveLayout: WorkspaceLayout { trailerLayoutOverride ?? baseEffectiveLayout }
     var scheduledTheme: Theme? { settings.profiles.first { $0.id == scheduledProfileID }?.theme }
     private var suppressedOccurrence: String?
     private var scheduleEvaluationQueued = false
@@ -109,6 +121,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     private let hotkey = HotkeyService()
     private let retroGameHotkey = HotkeyService(identifierID: 2, notificationName: .init("HaloRetroGameToggle"))
     private let clipboardCIHotkey = HotkeyService(identifierID: 3, notificationName: .init("HaloClipboardCIToggle"))
+    private let trailerHotkey = HotkeyService(identifierID: 4, notificationName: .init("HaloTrailerToggle"))
     private let defaults: UserDefaults
     private var ticker: AnyCancellable?
     private var subscriptions = Set<AnyCancellable>()
@@ -117,6 +130,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     private var installedHotkey = ""
     private var installedRetroGameHotkey = ""
     private var installedClipboardCIHotkey = ""
+    private var installedTrailerHotkey = ""
     private var pendingSave: DispatchWorkItem?
     private var hudEngine: HaloHUDEngine?
     private var systemAudioFallback: SystemAudioMediaFallback?
@@ -209,7 +223,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         disableLegacyHUDRenderer()
         updateArtworkPreference()
         if hudEngine == nil { hudEngine = HaloHUDEngine(workspace: self); hudEngine?.start() }
-        evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey(); updateRetroGameHotkey(); updateClipboardCIHotkey()
+        evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey(); updateRetroGameHotkey(); updateClipboardCIHotkey(); updateTrailerHotkey()
         if HaloDistribution.current.supportsPartnerIntegrations {
             HaloCustomCIRuntimeStore.shared.attach(to: self)
             IntegrationCIRuntime.shared.start()
@@ -298,6 +312,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         hotkey.stop()
         retroGameHotkey.stop()
         clipboardCIHotkey.stop()
+        trailerHotkey.stop()
         clipboard.reset()
         media.disconnect()
     }
@@ -319,6 +334,20 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             DispatchQueue.main.async { [weak self] in self?.error = "The global shortcut is unavailable or already used. Choose another shortcut." }
         }
     }
+    private func updateTrailerHotkey() {
+        let configuration = settings.trailer ?? TrailerModeSettings()
+        let key = "\(configuration.hotkeyEnabled)-\(configuration.hotkeyCode)-\(configuration.hotkeyModifiers)"
+        guard key != installedTrailerHotkey else { return }
+        installedTrailerHotkey = key
+        trailerHotkey.stop()
+        guard configuration.hotkeyEnabled else { return }
+        if !trailerHotkey.register(code: configuration.hotkeyCode, modifiers: configuration.hotkeyModifiers) {
+            DispatchQueue.main.async { [weak self] in
+                self?.error = "The Trailer Mode shortcut is unavailable or already used. Choose another shortcut."
+            }
+        }
+    }
+
     private func updateRetroGameHotkey() {
         let ciEnabled = defaults.object(forKey: "HaloContextRetroEnabled") as? Bool ?? false
         let shortcutEnabled = defaults.object(forKey: "HaloContextRetroShortcutEnabled") as? Bool ?? true
