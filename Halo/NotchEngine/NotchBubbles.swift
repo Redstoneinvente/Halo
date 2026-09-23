@@ -804,8 +804,9 @@ private struct NotchBubbleView: View {
             if let artwork = media.artworkImage, media.isPlaying {
                 Image(nsImage: artwork)
                     .resizable()
-                    .scaledToFill()
-                    .padding(3)
+                    .aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
             } else {
                 Image(systemName: media.isPlaying ? "music.note" : "music.note.list")
                     .font(.system(size: CGFloat(settings.bubbleSize) * 0.38, weight: .semibold))
