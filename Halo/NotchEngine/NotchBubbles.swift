@@ -422,7 +422,7 @@ final class BubbleWindowController {
     private let panel: NotchBubblePanel
     private var removalGeneration = 0
 
-    init(kind: NotchBubbleKind, store: AppStore) {
+    init(kind: NotchBubbleKind, store: AppStore, state: SurfaceState) {
         self.kind = kind
         panel = NotchBubblePanel(
             contentRect: .zero,
@@ -444,7 +444,8 @@ final class BubbleWindowController {
         let root = NotchBubbleView(
             kind: kind,
             store: store,
-            workspace: store.workspace
+            workspace: store.workspace,
+            surfaceState: state
         )
         let view = NSHostingView(rootView: root)
         view.sizingOptions = []
@@ -649,7 +650,7 @@ private final class NotchBubbleDisplayHost {
             if let existing = controllers[bubble.kind] {
                 controller = existing
             } else {
-                controller = BubbleWindowController(kind: bubble.kind, store: store)
+                controller = BubbleWindowController(kind: bubble.kind, store: store, state: state)
                 controllers[bubble.kind] = controller
             }
             controller.present(frame: frame, settings: settings, animated: animated)
@@ -716,12 +717,32 @@ final class NotchBubbleManager {
 
 // MARK: - Bubble UI
 
+private struct NotchBubbleMaskShape: Shape {
+    let shape: NotchBubbleShape
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        switch shape {
+        case .circle:
+            return Path(ellipseIn: rect)
+        case .capsule:
+            return Path(Capsule(style: .continuous).path(in: rect))
+        case .roundedSquare, .glass:
+            return Path(RoundedRectangle(
+                cornerRadius: min(max(0, cornerRadius), min(rect.width, rect.height) / 2),
+                style: .continuous
+            ).path(in: rect))
+        }
+    }
+}
+
 @MainActor
 private struct NotchBubbleView: View {
     let kind: NotchBubbleKind
 
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
+    @ObservedObject var surfaceState: SurfaceState
     @ObservedObject private var media: MediaService
     @ObservedObject private var pal = HaloPixelPalStore.shared
     @ObservedObject private var settingsStore = NotchBubbleSettingsStore.shared
@@ -729,10 +750,11 @@ private struct NotchBubbleView: View {
     @State private var hovering = false
     @State private var showingDetail = false
 
-    init(kind: NotchBubbleKind, store: AppStore, workspace: WorkspaceStore) {
+    init(kind: NotchBubbleKind, store: AppStore, workspace: WorkspaceStore, surfaceState: SurfaceState) {
         self.kind = kind
         self.store = store
         self.workspace = workspace
+        self.surfaceState = surfaceState
         _media = ObservedObject(wrappedValue: workspace.media)
     }
 
@@ -744,8 +766,15 @@ private struct NotchBubbleView: View {
         bubbleContent
             .frame(width: CGFloat(settings.bubbleSize), height: CGFloat(settings.bubbleSize))
             .background { bubbleBackground }
+            .clipShape(NotchBubbleMaskShape(
+                shape: settings.shape,
+                cornerRadius: CGFloat(settings.cornerRadius)
+            ))
+            .contentShape(NotchBubbleMaskShape(
+                shape: settings.shape,
+                cornerRadius: CGFloat(settings.cornerRadius)
+            ))
             .overlay { bubbleBorder }
-            .contentShape(Rectangle())
             .scaleEffect(hovering ? 1.07 : 1)
             .shadow(
                 color: .black.opacity(hovering ? 0.34 : 0.20),
@@ -776,7 +805,6 @@ private struct NotchBubbleView: View {
                 Image(nsImage: artwork)
                     .resizable()
                     .scaledToFill()
-                    .clipShape(RoundedRectangle(cornerRadius: max(4, CGFloat(settings.cornerRadius) - 4), style: .continuous))
                     .padding(3)
             } else {
                 Image(systemName: media.isPlaying ? "music.note" : "music.note.list")
@@ -908,7 +936,7 @@ private struct NotchBubbleView: View {
                     Image(systemName: "forward.fill")
                 }
                 Spacer()
-                Button("Open Halo") { openHalo() }
+                Button("Open Notch") { openNotch() }
             }
             .buttonStyle(.borderless)
         }
@@ -930,7 +958,7 @@ private struct NotchBubbleView: View {
                 HStack {
                     Button("Reset") { store.resetTimer() }
                     Spacer()
-                    Button("Open Halo") { openHalo() }
+                    Button("Open Notch") { openNotch() }
                 }
             } else if timerIsActive {
                 HStack {
@@ -938,7 +966,7 @@ private struct NotchBubbleView: View {
                     Button("+5 min") { store.addTimer(minutes: 5) }
                     Button("Cancel", role: .destructive) { store.resetTimer() }
                     Spacer()
-                    Button("Open Halo") { openHalo() }
+                    Button("Open Notch") { openNotch() }
                 }
             } else {
                 HStack {
@@ -946,7 +974,7 @@ private struct NotchBubbleView: View {
                     Button("15 min") { store.startTimer(minutes: 15) }
                     Button("25 min") { store.startTimer(minutes: 25) }
                     Spacer()
-                    Button("Open Halo") { openHalo() }
+                    Button("Open Notch") { openNotch() }
                 }
             }
         }
@@ -965,7 +993,7 @@ private struct NotchBubbleView: View {
                 Button("Pixel Pal Settings…") {
                     HaloPixelPalSettingsWindowController.shared.show()
                 }
-                Button("Open Halo") { openHalo() }
+                Button("Open Notch") { openNotch() }
             }
             .buttonStyle(.borderless)
         }
@@ -1038,8 +1066,16 @@ private struct NotchBubbleView: View {
         media.perform(command, app: preferred)
     }
 
-    private func openHalo() {
-        NotificationCenter.default.post(name: .init("HaloToggle"), object: nil)
+    private var targetModule: ModuleID {
+        switch kind {
+        case .music: return .media
+        case .timer: return .timer
+        case .pixelPal: return .pet
+        }
+    }
+
+    private func openNotch() {
+        surfaceState.openFocusedModule(targetModule)
         showingDetail = false
     }
 
