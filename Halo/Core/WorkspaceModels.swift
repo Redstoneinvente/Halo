@@ -1289,9 +1289,37 @@ struct AutomationRule: Codable, Identifiable {
         }
     }
 }
+enum TrailerSurfaceTarget: String, Codable, CaseIterable, Identifiable {
+    case closedOnly = "Closed only"
+    case openedOnly = "Opened only"
+    case alternate = "Alternate"
+
+    var id: String { rawValue }
+}
+
+struct TrailerModeSettings: Codable, Equatable {
+    var hotkeyEnabled = true
+    var hotkeyCode: UInt32 = 17 // T
+    var hotkeyModifiers: UInt32 = 2304 // Option + Command
+    var surfaceTarget: TrailerSurfaceTarget = .closedOnly
+    var slowInterval = 2.8
+    var fastInterval = 0.32
+    var rampDuration = 14.0
+    var smoothing = 0.42
+    var randomizeAppearance = true
+    var randomizeWidgets = true
+    var showcaseMusic = true
+
+    var resolvedSlowInterval: Double { min(10, max(0.35, slowInterval.isFinite ? slowInterval : 2.8)) }
+    var resolvedFastInterval: Double { min(resolvedSlowInterval, max(0.12, fastInterval.isFinite ? fastInterval : 0.32)) }
+    var resolvedRampDuration: Double { min(120, max(1, rampDuration.isFinite ? rampDuration : 14)) }
+    var resolvedSmoothing: Double { min(1.2, max(0.08, smoothing.isFinite ? smoothing : 0.42)) }
+}
+
 struct WorkspaceSettings: Codable {
     var automaticMedia: Bool?
     var profileSchedules: [ProfileSchedule]?
+    var trailer: TrailerModeSettings?
     var version = 1
     var layout = WorkspaceLayout()
     var profiles = Profile.presets
