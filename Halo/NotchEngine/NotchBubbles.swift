@@ -17,6 +17,7 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
     case calendar
     case audio
     case vinyl
+    case files
 
     var id: String { rawValue }
 
@@ -32,6 +33,7 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .calendar: return "Calendar"
         case .audio: return "Audio"
         case .vinyl: return "Vinyl"
+        case .files: return "File Shelf"
         }
     }
 
@@ -47,6 +49,7 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .calendar: return "calendar"
         case .audio: return "speaker.wave.2.fill"
         case .vinyl: return "record.circle.fill"
+        case .files: return "tray.full.fill"
         }
     }
 }
@@ -258,6 +261,13 @@ enum PixelPalBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Has
     var id: String { rawValue }
 }
 
+enum FileBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case latest = "Latest File"
+    case count = "Item Count"
+    case tray = "Tray Icon"
+    var id: String { rawValue }
+}
+
 struct NotchBubbleStyleOverride: Codable, Equatable {
     var design: NotchBubbleDesignPreset? = nil
     var size: Double? = nil
@@ -399,6 +409,9 @@ struct NotchBubbleSettings: Codable, Equatable {
     var clipboardPersistent: Bool?
     var showAutomaticInFullscreen: Bool?
     var showConfirmationsInFullscreen: Bool?
+    var filesEnabled: Bool?
+    var filesPersistent: Bool?
+    var filesDisplayMode: FileBubbleDisplayMode?
 
     /// Per-provider appearance overrides. Missing entries inherit the global bubble defaults.
     var bubbleStyles: [String: NotchBubbleStyleOverride]?
@@ -495,6 +508,9 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedClipboardPersistent: Bool { clipboardPersistent ?? false }
     var resolvedShowAutomaticInFullscreen: Bool { showAutomaticInFullscreen ?? false }
     var resolvedShowConfirmationsInFullscreen: Bool { showConfirmationsInFullscreen ?? true }
+    var resolvedFilesEnabled: Bool { filesEnabled ?? false }
+    var resolvedFilesPersistent: Bool { filesPersistent ?? false }
+    var resolvedFilesDisplayMode: FileBubbleDisplayMode { filesDisplayMode ?? .latest }
 
     func acceptsHUDEvent(_ kind: HaloHUDEventKind) -> Bool {
         switch kind {
@@ -564,6 +580,42 @@ final class NotchBubbleActivityCenter: ObservableObject {
 
     func dismiss(kind: NotchBubbleKind) {
         suppressedKinds.insert(kind)
+        let ids = transientActivities.values.filter { $0.kind == kind }.map(\.id)
+        for id in ids {
+            expiryTasks[id]?.cancel()
+            expiryTasks.removeValue(forKey: id)
+            transientActivities.removeValue(forKey: id)
+        }
+    }
+
+    func publishCompletion(
+        kind: NotchBubbleKind,
+        sourceIdentifier: String,
+        title: String,
+        subtitle: String? = nil,
+        icon: String,
+        duration: TimeInterval
+    ) {
+        let now = Date()
+        let activity = NotchBubbleActivity(
+            id: "completion." + kind.rawValue,
+            kind: kind,
+            sourceIdentifier: sourceIdentifier,
+            mode: .confirmation,
+            priority: .urgent,
+            title: title,
+            subtitle: subtitle,
+            icon: icon,
+            progress: 1,
+            updatedAt: now,
+            expiresAt: now.addingTimeInterval(duration)
+        )
+        suppressedKinds.remove(kind)
+        transientActivities[activity.id] = activity
+        scheduleExpiry(for: activity)
+    }
+
+    func clearTransient(kind: NotchBubbleKind) {
         let ids = transientActivities.values.filter { $0.kind == kind }.map(\.id)
         for id in ids {
             expiryTasks[id]?.cancel()
@@ -776,22 +828,20 @@ private struct TimerBubbleProvider: BubbleProvider {
 
     func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
         let active = store.deadline != nil || store.pausedSeconds > 0
-        guard settings.timerEnabled, settings.timerPersistent || active || store.finished else { return nil }
-        let mode: NotchBubblePresentationMode = settings.timerPersistent && !active && !store.finished ? .pinned : .activeTask
+        guard settings.timerEnabled, settings.timerPersistent || active else { return nil }
+        let mode: NotchBubblePresentationMode = settings.timerPersistent && !active ? .pinned : .activeTask
         return NotchBubbleActivity(
             id: "timer.primary",
             kind: kind,
             sourceIdentifier: "halo.timer",
             mode: mode,
-            priority: store.finished ? .urgent : (active ? .important : .normal),
-            title: store.finished ? "Timer complete" : "Timer",
+            priority: active ? .important : .background,
+            title: "Timer",
             subtitle: nil,
-            icon: store.finished ? "checkmark.circle.fill" : "timer",
+            icon: "timer",
             progress: nil,
             updatedAt: Date(),
-            expiresAt: store.finished && !settings.timerPersistent
-                ? Date().addingTimeInterval(settings.resolvedCompletionDuration)
-                : nil
+            expiresAt: nil
         )
     }
 }
@@ -823,6 +873,31 @@ private struct CalendarBubbleProvider: BubbleProvider {
             progress: nil,
             updatedAt: now,
             expiresAt: event.endDate
+        )
+    }
+}
+
+@MainActor
+private struct FileShelfBubbleProvider: BubbleProvider {
+    let kind: NotchBubbleKind = .files
+
+    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
+        guard settings.resolvedFilesEnabled else { return nil }
+        let hasFiles = !store.files.isEmpty
+        guard settings.resolvedFilesPersistent || hasFiles else { return nil }
+
+        return NotchBubbleActivity(
+            id: "files.shelf",
+            kind: kind,
+            sourceIdentifier: "halo.fileShelf",
+            mode: settings.resolvedFilesPersistent ? .pinned : .activeTask,
+            priority: hasFiles ? .normal : .background,
+            title: hasFiles ? "\(store.files.count) staged item\(store.files.count == 1 ? "" : "s")" : "File Shelf",
+            subtitle: store.files.last?.lastPathComponent,
+            icon: "tray.full.fill",
+            progress: nil,
+            updatedAt: Date(),
+            expiresAt: nil
         )
     }
 }
@@ -1030,6 +1105,7 @@ struct BubbleRegistry {
         MusicBubbleProvider(),
         TimerBubbleProvider(),
         CalendarBubbleProvider(),
+        FileShelfBubbleProvider(),
         StopwatchBubbleProvider(),
         VinylBubbleProvider(),
         PixelPalBubbleProvider(),
@@ -1826,9 +1902,22 @@ private final class NotchBubbleDisplayHost {
         store.$finished
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.activityCenter.clearDismissal(kind: .timer)
-                self?.refresh(animated: true)
+            .sink { [weak self] finished in
+                guard let self else { return }
+                self.activityCenter.clearDismissal(kind: .timer)
+                if finished, self.settingsStore.settings.timerEnabled {
+                    self.activityCenter.publishCompletion(
+                        kind: .timer,
+                        sourceIdentifier: "halo.timer",
+                        title: "Timer complete",
+                        subtitle: "Focus session finished",
+                        icon: "checkmark.circle.fill",
+                        duration: self.settingsStore.settings.normalized().resolvedCompletionDuration
+                    )
+                } else if !finished {
+                    self.activityCenter.clearTransient(kind: .timer)
+                }
+                self.refresh(animated: true)
             }
             .store(in: &subscriptions)
 
@@ -1843,6 +1932,16 @@ private final class NotchBubbleDisplayHost {
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refresh(animated: true) }
+            .store(in: &subscriptions)
+
+        store.$files
+            .map(\.count)
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.activityCenter.clearDismissal(kind: .files)
+                self?.refresh(animated: true)
+            }
             .store(in: &subscriptions)
 
         store.workspace.media.$isPlaying
@@ -2204,6 +2303,8 @@ private struct NotchBubbleView: View {
                 audioBubbleContent
             case .vinyl:
                 vinylBubbleContent
+            case .files:
+                fileBubbleContent
             }
         }
     }
@@ -2633,6 +2734,49 @@ private struct NotchBubbleView: View {
     }
 
     @ViewBuilder
+    private var fileBubbleContent: some View {
+        switch settings.resolvedFilesDisplayMode {
+        case .latest:
+            if let url = store.files.last {
+                ZStack(alignment: .bottomTrailing) {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                        .resizable()
+                        .scaledToFit()
+                        .padding(bubbleStyle.size * 0.18)
+                    if store.files.count > 1 {
+                        Text("\(store.files.count)")
+                            .font(.system(size: max(7, bubbleStyle.size * 0.14), weight: .bold, design: .rounded))
+                            .padding(4)
+                            .background(providerAccentColor, in: Circle())
+                            .foregroundStyle(.white)
+                            .padding(3)
+                    }
+                }
+            } else {
+                Image(systemName: "tray")
+                    .font(.system(size: bubbleStyle.size * 0.38, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+
+        case .count:
+            VStack(spacing: 0) {
+                Image(systemName: "tray.full.fill")
+                    .font(.system(size: bubbleStyle.size * 0.20, weight: .semibold))
+                    .foregroundStyle(providerAccentColor)
+                Text("\(store.files.count)")
+                    .font(.system(size: max(12, bubbleStyle.size * 0.31), weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+            }
+
+        case .tray:
+            Image(systemName: store.files.isEmpty ? "tray" : "tray.full.fill")
+                .font(.system(size: bubbleStyle.size * 0.39, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+    }
+
+    @ViewBuilder
     private var musicBubbleContent: some View {
         let mode = settings.resolvedMusicDisplayMode
         ZStack {
@@ -2775,6 +2919,8 @@ private struct NotchBubbleView: View {
             return Color(red: 1.0, green: 0.34, blue: 0.38)
         case .audio:
             return Color(red: 0.26, green: 0.66, blue: 1.0)
+        case .files:
+            return Color(red: 0.32, green: 0.78, blue: 0.60)
         }
     }
 
@@ -3059,6 +3205,8 @@ private struct NotchBubbleView: View {
             moduleDetail(.audio)
         case .vinyl:
             vinylDetail
+        case .files:
+            moduleDetail(.shelf)
         }
     }
 
@@ -3237,6 +3385,7 @@ private struct NotchBubbleView: View {
         case .pixelPal: return 360
         case .clock, .stopwatch, .system, .clipboard, .calendar, .audio: return 354
         case .vinyl: return 360
+        case .files: return 354
         }
     }
 
@@ -3528,6 +3677,8 @@ private struct NotchBubbleView: View {
             next.deviceFeedbackEnabled = false
         case .vinyl:
             next.vinylEnabled = false
+        case .files:
+            next.filesEnabled = false
         }
         settingsStore.settings = next.normalized()
         activityCenter.dismiss(kind: kind)
@@ -3558,7 +3709,7 @@ private struct NotchBubbleView: View {
 
             surfaceState.openExplicitly(canOpenMusicCI ? .music : .normal)
 
-        case .timer, .pixelPal, .clock, .stopwatch, .system, .clipboard, .calendar, .audio:
+        case .timer, .pixelPal, .clock, .stopwatch, .system, .clipboard, .calendar, .audio, .files:
             // These bubbles are shortcuts into the user's normal opened notch.
             // They do not replace the dashboard with a focused widget.
             surfaceState.openExplicitly(.normal)
@@ -3589,6 +3740,8 @@ private struct NotchBubbleView: View {
             return audio.canSetVolume ? "Volume \(Int(audio.volume * 100))%" : "Audio"
         case .vinyl:
             return media.isPlaying ? "Vinyl · \(media.title)" : "Vinyl"
+        case .files:
+            return store.files.isEmpty ? "File Shelf" : "\(store.files.count) staged item\(store.files.count == 1 ? "" : "s")"
         }
     }
 }
@@ -3813,6 +3966,13 @@ struct NotchBubbleSettingsView: View {
                 enabled: optionalBinding(\.calendarEnabled, default: false),
                 persistent: optionalBinding(\.calendarPersistent, default: false),
                 detail: "Shows the next relevant event inside the configured lead window. Persistent keeps the next event visible."
+            )
+            providerRow(
+                title: "File Shelf",
+                symbol: "tray.full.fill",
+                enabled: optionalBinding(\.filesEnabled, default: false),
+                persistent: optionalBinding(\.filesPersistent, default: false),
+                detail: "Appears while files are staged for handoff. Pin only if you want the shelf resident."
             )
             providerRow(
                 title: "Stopwatch",
@@ -4061,6 +4221,13 @@ struct NotchBubbleSettingsView: View {
             case .audio:
                 Picker("Display", selection: optionalBinding(\.audioDisplayMode, default: AudioBubbleDisplayMode.ring)) {
                     ForEach(AudioBubbleDisplayMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+
+            case .files:
+                Picker("Display", selection: optionalBinding(\.filesDisplayMode, default: FileBubbleDisplayMode.latest)) {
+                    ForEach(FileBubbleDisplayMode.allCases) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
                 }
