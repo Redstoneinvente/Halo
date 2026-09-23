@@ -1306,6 +1306,13 @@ enum TrailerTransitionStyle: String, Codable, CaseIterable, Identifiable, Equata
     var id: String { rawValue }
 }
 
+/// Runtime-only Context Interface previews used by Trailer Mode.
+/// These bypass normal event/priority triggers so trailer footage is deterministic.
+enum TrailerContextPreview: Equatable {
+    case music
+    case retro
+}
+
 struct TrailerModeSettings: Codable, Equatable {
     var hotkeyEnabled = true
     var hotkeyCode: UInt32 = 17 // T
