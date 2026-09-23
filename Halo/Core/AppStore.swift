@@ -2182,6 +2182,12 @@ final class TrailerModeController {
                                          configuration: TrailerModeSettings,
                                          musicFrame: Bool) {
         if configuration.randomizeWidgets {
+            // Force the normal module renderer for the runtime showcase. A user's saved custom
+            // open-workspace grid remains untouched and resumes as soon as Trailer Mode stops.
+            layout.useCustomOpenNotchWorkspace = false
+            layout.openNotchContentMode = OpenNotchContentMode.allCases.randomElement() ?? .scroll
+            layout.horizontalWidgets = Bool.random()
+
             var candidates = ModuleID.allCases.filter {
                 $0 != .activities && $0 != .capture &&
                 (configuration.showcaseMusic || ($0 != .media && $0 != .audio))
