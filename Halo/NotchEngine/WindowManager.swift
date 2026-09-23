@@ -43,6 +43,9 @@ final class SurfaceState: ObservableObject {
     /// The winner selected by SurfaceView's existing CI arbiter. AppKit drag delivery reads this
     /// value but never chooses surface ownership itself.
     @Published var activeCIIdentifier: String?
+    /// A user-selected opened-notch destination, used by Notch Bubbles and other explicit
+    /// navigation affordances. This is presentation state only; it never mutates the saved layout.
+    @Published var focusedModule: ModuleID?
     @Published var theme = Theme()
     @Published var activationSurfaceOptions = SurfaceOptions()
     @Published var layoutOverride: WorkspaceLayout?
@@ -65,6 +68,17 @@ final class SurfaceState: ObservableObject {
         if !presentationExpanded { presentationExpanded = true }
     }
 
+    func openFocusedModule(_ module: ModuleID) {
+        collapseTask?.cancel()
+        hoverExpandTask?.cancel()
+        focusedModule = module
+        expanded = true
+    }
+
+    func clearFocusedModule() {
+        if focusedModule != nil { focusedModule = nil }
+    }
+
     func setPixelPalCloseGateActive(_ active: Bool) {
         if pixelPalCloseGateActive != active { pixelPalCloseGateActive = active }
     }
@@ -72,6 +86,7 @@ final class SurfaceState: ObservableObject {
     func completeCollapsedPresentation() {
         if pixelPalCloseGateActive { pixelPalCloseGateActive = false }
         if presentationExpanded { presentationExpanded = false }
+        clearFocusedModule()
     }
 
     // Hover expansion can briefly emit an exit while the NSPanel is resizing from
