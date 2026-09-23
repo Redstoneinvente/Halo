@@ -4857,97 +4857,182 @@ struct BuiltinOrIntegrationWidget: View {
         }
     }
 
+    @ViewBuilder
     private var timer: some View {
         let options = style.resolvedContent
         let remaining = max(0, store.deadline?.timeIntervalSinceNow ?? store.pausedSeconds)
         let duration = max(0, store.timerDurationSeconds)
         let progress = duration > 0 ? min(1, max(0, 1 - remaining / duration)) : (store.finished ? 1 : 0)
-        return VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
-            if style.showTitle {
-                HStack(spacing: max(4, options.spacing * 0.55)) {
-                    if style.showsHeaderIcon { Image(systemName: "timer").font(.system(size: options.iconSize)).foregroundStyle(style.accentColor.color) }
-                    Text("Focus").font(style.font())
-                }
-            }
-            WidgetElement(key: "countdown") {
-                if let deadline = store.deadline { Text(deadline, style: .timer).font(style.font(scale: 1.35)).monospacedDigit() }
-                else if store.pausedSeconds > 0 { Text(formatDuration(store.pausedSeconds)).font(style.font(scale: 1.35)).monospacedDigit() }
-                else { Text("Ready").font(style.font(scale: 1.15)) }
-            }
-            if presentation != .compact { WidgetElement(key: "progress", defaultPriority: .normal) { ProgressView(value: progress) } }
-            if presentation == .expanded { WidgetElement(key: "endTime", defaultVisible: false, defaultPriority: .low) {
-                if let deadline = store.deadline { HStack { Text("Finishes"); Spacer(); Text(deadline, style: .time) } }
-                else if store.pausedSeconds > 0 { Text("Paused with \(formatDuration(store.pausedSeconds)) remaining") }
-                else { Text("Choose a duration to begin") }
-            } }
-            if options.showSecondaryText && presentation != .compact {
-                WidgetElement(key: "status") {
-                    Label(store.finished ? "Session complete" : store.deadline != nil ? "Deep work in progress" : store.pausedSeconds > 0 ? "Session paused" : "Make room for deep work",
-                          systemImage: store.finished ? "checkmark.circle.fill" : store.deadline != nil ? "brain.head.profile" : store.pausedSeconds > 0 ? "pause.circle" : "sparkles")
-                }
-            }
-            if options.showControls {
-                if store.deadline == nil && store.pausedSeconds <= 0 {
-                    WidgetElement(key: "presets") {
-                        let roomForInlineComposer =
-                            presentation != .compact &&
-                            (availableWidth ?? 390) >= 320 &&
-                            (availableHeight ?? 310) >= 280
+        let idle = store.deadline == nil && store.pausedSeconds <= 0 && !store.finished
+        let footprintWidth = availableWidth ?? 390
+        let footprintHeight = availableHeight ?? 310
+        let horizontallyDominant =
+            footprintWidth >= 300 &&
+            footprintHeight >= 125 &&
+            footprintWidth / max(1, footprintHeight) >= 1.45
 
-                        if !roomForInlineComposer {
-                            HaloTimerDurationPopoverButton(
-                                accent: style.accentColor.color,
-                                textColor: style.textColor.color,
-                                quickPresets: [options.timerPresetA, options.timerPresetB, options.timerPresetC],
-                                initialMinutes: options.timerPresetB,
-                                label: "Set timer"
-                            ) { duration in
-                                store.startTimer(duration: duration)
+        if idle && horizontallyDominant {
+            HaloTimerHorizontalDurationComposer(
+                accent: style.accentColor.color,
+                textColor: style.textColor.color,
+                quickPresets: [
+                    options.timerPresetA,
+                    options.timerPresetB,
+                    options.timerPresetC,
+                    45,
+                    60
+                ],
+                initialMinutes: options.timerPresetB,
+                compact: footprintHeight < 185
+            ) { duration in
+                store.startTimer(duration: duration)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+
+        } else {
+            VStack(alignment: options.alignment.horizontal, spacing: options.spacing) {
+                if style.showTitle {
+                    HStack(spacing: max(4, options.spacing * 0.55)) {
+                        if style.showsHeaderIcon {
+                            Image(systemName: "timer")
+                                .font(.system(size: options.iconSize))
+                                .foregroundStyle(style.accentColor.color)
+                        }
+                        Text("Focus").font(style.font())
+                    }
+                }
+
+                WidgetElement(key: "countdown") {
+                    if let deadline = store.deadline {
+                        Text(deadline, style: .timer)
+                            .font(style.font(scale: 1.35))
+                            .monospacedDigit()
+                    } else if store.pausedSeconds > 0 {
+                        Text(formatDuration(store.pausedSeconds))
+                            .font(style.font(scale: 1.35))
+                            .monospacedDigit()
+                    } else {
+                        Text("Ready").font(style.font(scale: 1.15))
+                    }
+                }
+
+                if presentation != .compact {
+                    WidgetElement(key: "progress", defaultPriority: .normal) {
+                        ProgressView(value: progress)
+                    }
+                }
+
+                if presentation == .expanded {
+                    WidgetElement(key: "endTime", defaultVisible: false, defaultPriority: .low) {
+                        if let deadline = store.deadline {
+                            HStack {
+                                Text("Finishes")
+                                Spacer()
+                                Text(deadline, style: .time)
+                            }
+                        } else if store.pausedSeconds > 0 {
+                            Text("Paused with \(formatDuration(store.pausedSeconds)) remaining")
+                        } else {
+                            Text("Choose a duration to begin")
+                        }
+                    }
+                }
+
+                if options.showSecondaryText && presentation != .compact {
+                    WidgetElement(key: "status") {
+                        Label(
+                            store.finished
+                                ? "Session complete"
+                                : store.deadline != nil
+                                    ? "Deep work in progress"
+                                    : store.pausedSeconds > 0
+                                        ? "Session paused"
+                                        : "Make room for deep work",
+                            systemImage: store.finished
+                                ? "checkmark.circle.fill"
+                                : store.deadline != nil
+                                    ? "brain.head.profile"
+                                    : store.pausedSeconds > 0
+                                        ? "pause.circle"
+                                        : "sparkles"
+                        )
+                    }
+                }
+
+                if options.showControls {
+                    if idle {
+                        WidgetElement(key: "presets") {
+                            let roomForTallComposer =
+                                presentation != .compact &&
+                                footprintWidth >= 330 &&
+                                footprintHeight >= 360
+
+                            if roomForTallComposer {
+                                HaloTimerDurationComposer(
+                                    accent: style.accentColor.color,
+                                    textColor: style.textColor.color,
+                                    quickPresets: [
+                                        options.timerPresetA,
+                                        options.timerPresetB,
+                                        options.timerPresetC,
+                                        45,
+                                        60
+                                    ],
+                                    initialMinutes: options.timerPresetB,
+                                    compact: false
+                                ) { duration in
+                                    store.startTimer(duration: duration)
+                                }
+                                .frame(maxWidth: min(390, footprintWidth))
+                            } else {
+                                HaloTimerDurationPopoverButton(
+                                    accent: style.accentColor.color,
+                                    textColor: style.textColor.color,
+                                    quickPresets: [
+                                        options.timerPresetA,
+                                        options.timerPresetB,
+                                        options.timerPresetC
+                                    ],
+                                    initialMinutes: options.timerPresetB,
+                                    label: "Set timer"
+                                ) { duration in
+                                    store.startTimer(duration: duration)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    } else {
+                        WidgetElement(key: "controls") {
+                            HStack(spacing: max(6, options.spacing)) {
+                                Button {
+                                    store.pauseResume()
+                                } label: {
+                                    Label(
+                                        store.deadline == nil ? "Resume" : "Pause",
+                                        systemImage: store.deadline == nil ? "play.fill" : "pause.fill"
+                                    )
+                                }
+
+                                Button {
+                                    store.addTimer(minutes: 1)
+                                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                                } label: {
+                                    Label("+1 min", systemImage: "plus")
+                                }
+
+                                Button(role: .destructive) {
+                                    store.resetTimer()
+                                } label: {
+                                    Label("Reset", systemImage: "arrow.counterclockwise")
+                                }
                             }
                             .buttonStyle(.bordered)
-                        } else {
-                            HaloTimerDurationComposer(
-                                accent: style.accentColor.color,
-                                textColor: style.textColor.color,
-                                quickPresets: [options.timerPresetA, options.timerPresetB, options.timerPresetC, 45, 60],
-                                initialMinutes: options.timerPresetB,
-                                compact: false
-                            ) { duration in
-                                store.startTimer(duration: duration)
-                            }
-                            .frame(maxWidth: 390)
                         }
-                    }
-                } else {
-                    WidgetElement(key: "controls") {
-                        HStack(spacing: max(6, options.spacing)) {
-                            Button {
-                                store.pauseResume()
-                            } label: {
-                                Label(
-                                    store.deadline == nil ? "Resume" : "Pause",
-                                    systemImage: store.deadline == nil ? "play.fill" : "pause.fill"
-                                )
-                            }
-
-                            Button {
-                                store.addTimer(minutes: 1)
-                                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
-                            } label: {
-                                Label("+1 min", systemImage: "plus")
-                            }
-
-                            Button(role: .destructive) {
-                                store.resetTimer()
-                            } label: {
-                                Label("Reset", systemImage: "arrow.counterclockwise")
-                            }
-                        }
-                        .buttonStyle(.bordered)
                     }
                 }
             }
-        }.frame(maxWidth: .infinity, alignment: options.alignment.alignment)
+            .frame(maxWidth: .infinity, alignment: options.alignment.alignment)
+        }
     }
 
     private var microShelf: some View {
