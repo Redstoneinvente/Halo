@@ -15,6 +15,7 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
     case clipboard
     case calendar
     case audio
+    case vinyl
 
     var id: String { rawValue }
 
@@ -29,6 +30,7 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .clipboard: return "Clipboard"
         case .calendar: return "Calendar"
         case .audio: return "Audio"
+        case .vinyl: return "Vinyl"
         }
     }
 
@@ -43,6 +45,7 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .clipboard: return "doc.on.clipboard.fill"
         case .calendar: return "calendar"
         case .audio: return "speaker.wave.2.fill"
+        case .vinyl: return "record.circle.fill"
         }
     }
 }
@@ -119,6 +122,61 @@ enum SystemBubbleMetric: String, Codable, CaseIterable, Identifiable, Hashable {
     var id: String { rawValue }
 }
 
+enum NotchBubbleBackgroundStyle: String, Codable, CaseIterable, Identifiable, Hashable {
+    case solid = "Solid"
+    case glass = "Glass"
+    case clear = "Clear"
+    var id: String { rawValue }
+}
+
+struct NotchBubbleStyleOverride: Codable, Equatable {
+    var size: Double?
+    var shape: NotchBubbleShape?
+    var background: NotchBubbleBackgroundStyle?
+    var cornerRadius: Double?
+    var glassIntensity: Double?
+    var backgroundOpacity: Double?
+    var borderOpacity: Double?
+    var contentScale: Double?
+    var verticalOffset: Double?
+    var tint: WidgetColor?
+    var tintAmount: Double?
+
+    func normalized() -> Self {
+        var value = self
+        if let size { value.size = min(96, max(20, size.isFinite ? size : 42)) }
+        if let cornerRadius { value.cornerRadius = min(48, max(0, cornerRadius.isFinite ? cornerRadius : 18)) }
+        if let glassIntensity { value.glassIntensity = min(1, max(0.05, glassIntensity.isFinite ? glassIntensity : 0.82)) }
+        if let backgroundOpacity { value.backgroundOpacity = min(1, max(0, backgroundOpacity.isFinite ? backgroundOpacity : 0.88)) }
+        if let borderOpacity { value.borderOpacity = min(1, max(0, borderOpacity.isFinite ? borderOpacity : 0.12)) }
+        if let contentScale { value.contentScale = min(1.6, max(0.55, contentScale.isFinite ? contentScale : 1)) }
+        if let verticalOffset { value.verticalOffset = min(120, max(-120, verticalOffset.isFinite ? verticalOffset : 0)) }
+        if let tintAmount { value.tintAmount = min(1, max(0, tintAmount.isFinite ? tintAmount : 0)) }
+        if let tint { value.tint = (try? tint.validated()) ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0) }
+        return value
+    }
+
+    var isEmpty: Bool {
+        size == nil && shape == nil && background == nil && cornerRadius == nil &&
+        glassIntensity == nil && backgroundOpacity == nil && borderOpacity == nil &&
+        contentScale == nil && verticalOffset == nil && tint == nil && tintAmount == nil
+    }
+}
+
+struct ResolvedNotchBubbleStyle {
+    let size: CGFloat
+    let shape: NotchBubbleShape
+    let background: NotchBubbleBackgroundStyle
+    let cornerRadius: CGFloat
+    let glassIntensity: Double
+    let backgroundOpacity: Double
+    let borderOpacity: Double
+    let contentScale: CGFloat
+    let verticalOffset: CGFloat
+    let tint: Color?
+    let tintAmount: Double
+}
+
 struct NotchBubble: Identifiable, Equatable {
     var id: String { kind.rawValue }
 
@@ -173,6 +231,11 @@ struct NotchBubbleSettings: Codable, Equatable {
     var clipboardEnabled: Bool?
     var calendarEnabled: Bool?
     var audioEnabled: Bool?
+    var vinylEnabled: Bool?
+    var vinylPersistent: Bool?
+
+    /// Per-provider appearance overrides. Missing entries inherit the global bubble defaults.
+    var bubbleStyles: [String: NotchBubbleStyleOverride]?
 
     func normalized() -> Self {
         var value = self
@@ -191,6 +254,14 @@ struct NotchBubbleSettings: Codable, Equatable {
             value.musicArtworkZoom = min(1.8, max(1.0, musicArtworkZoom.isFinite ? musicArtworkZoom : 1.0))
         }
         value.maximumBubbles = min(99, max(1, maximumBubbles))
+        if let bubbleStyles {
+            var normalizedStyles: [String: NotchBubbleStyleOverride] = [:]
+            for (key, override) in bubbleStyles {
+                let normalized = override.normalized()
+                if !normalized.isEmpty { normalizedStyles[key] = normalized }
+            }
+            value.bubbleStyles = normalizedStyles.isEmpty ? nil : normalizedStyles
+        }
         return value
     }
 
@@ -220,6 +291,33 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedClipboardEnabled: Bool { clipboardEnabled ?? false }
     var resolvedCalendarEnabled: Bool { calendarEnabled ?? false }
     var resolvedAudioEnabled: Bool { audioEnabled ?? false }
+    var resolvedVinylEnabled: Bool { vinylEnabled ?? false }
+    var resolvedVinylPersistent: Bool { vinylPersistent ?? false }
+
+    func styleOverride(for kind: NotchBubbleKind) -> NotchBubbleStyleOverride? {
+        bubbleStyles?[kind.rawValue]?.normalized()
+    }
+
+    func resolvedStyle(for kind: NotchBubbleKind) -> ResolvedNotchBubbleStyle {
+        let override = styleOverride(for: kind)
+        let resolvedShape = override?.shape ?? shape
+        let resolvedBackground: NotchBubbleBackgroundStyle = override?.background
+            ?? (shape == .glass ? .glass : .solid)
+        let tintColor = override?.tint?.color
+        return ResolvedNotchBubbleStyle(
+            size: CGFloat(override?.size ?? bubbleSize),
+            shape: resolvedShape,
+            background: resolvedBackground,
+            cornerRadius: CGFloat(override?.cornerRadius ?? cornerRadius),
+            glassIntensity: override?.glassIntensity ?? glassIntensity,
+            backgroundOpacity: override?.backgroundOpacity ?? 0.88,
+            borderOpacity: override?.borderOpacity ?? 0.12,
+            contentScale: CGFloat(override?.contentScale ?? 1.0),
+            verticalOffset: CGFloat(override?.verticalOffset ?? 0),
+            tint: tintColor,
+            tintAmount: override?.tintAmount ?? 0
+        )
+    }
 }
 
 @MainActor
@@ -276,8 +374,8 @@ private struct MusicBubbleProvider: BubbleProvider {
               settings.musicPersistent || store.workspace.media.isPlaying else { return nil }
         return NotchBubble(
             kind: kind,
-            size: CGFloat(settings.bubbleSize),
-            shape: settings.shape,
+            size: settings.resolvedStyle(for: kind).size,
+            shape: settings.resolvedStyle(for: kind).shape,
             isPersistent: settings.musicPersistent,
             timeout: nil,
             priority: .normal
@@ -299,8 +397,8 @@ private struct PixelPalBubbleProvider: BubbleProvider {
               settings.pixelPalPersistent || contextual else { return nil }
         return NotchBubble(
             kind: kind,
-            size: CGFloat(settings.bubbleSize),
-            shape: settings.shape,
+            size: settings.resolvedStyle(for: kind).size,
+            shape: settings.resolvedStyle(for: kind).shape,
             isPersistent: settings.pixelPalPersistent,
             timeout: nil,
             priority: .background
@@ -317,8 +415,8 @@ private struct TimerBubbleProvider: BubbleProvider {
         guard settings.timerEnabled, settings.timerPersistent || active else { return nil }
         return NotchBubble(
             kind: kind,
-            size: CGFloat(settings.bubbleSize),
-            shape: settings.shape,
+            size: settings.resolvedStyle(for: kind).size,
+            shape: settings.resolvedStyle(for: kind).shape,
             isPersistent: settings.timerPersistent,
             timeout: nil,
             priority: store.finished ? .urgent : (active ? .important : .normal)
@@ -331,7 +429,7 @@ private struct ClockBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .clock
     func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
         guard settings.resolvedClockEnabled else { return nil }
-        return NotchBubble(kind: kind, size: CGFloat(settings.bubbleSize), shape: settings.shape,
+        return NotchBubble(kind: kind, size: settings.resolvedStyle(for: kind).size, shape: settings.resolvedStyle(for: kind).shape,
                            isPersistent: true, timeout: nil, priority: .background)
     }
 }
@@ -343,7 +441,7 @@ private struct StopwatchBubbleProvider: BubbleProvider {
         let active = store.workspace.stopwatchStart != nil || store.workspace.stopwatchElapsed > 0
         guard settings.resolvedStopwatchEnabled,
               settings.resolvedStopwatchPersistent || active else { return nil }
-        return NotchBubble(kind: kind, size: CGFloat(settings.bubbleSize), shape: settings.shape,
+        return NotchBubble(kind: kind, size: settings.resolvedStyle(for: kind).size, shape: settings.resolvedStyle(for: kind).shape,
                            isPersistent: settings.resolvedStopwatchPersistent, timeout: nil,
                            priority: active ? .important : .normal)
     }
@@ -354,7 +452,7 @@ private struct SystemBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .system
     func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
         guard settings.resolvedSystemEnabled else { return nil }
-        return NotchBubble(kind: kind, size: CGFloat(settings.bubbleSize), shape: settings.shape,
+        return NotchBubble(kind: kind, size: settings.resolvedStyle(for: kind).size, shape: settings.resolvedStyle(for: kind).shape,
                            isPersistent: true, timeout: nil, priority: .background)
     }
 }
@@ -364,7 +462,7 @@ private struct ClipboardBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .clipboard
     func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
         guard settings.resolvedClipboardEnabled else { return nil }
-        return NotchBubble(kind: kind, size: CGFloat(settings.bubbleSize), shape: settings.shape,
+        return NotchBubble(kind: kind, size: settings.resolvedStyle(for: kind).size, shape: settings.resolvedStyle(for: kind).shape,
                            isPersistent: true, timeout: nil, priority: .background)
     }
 }
@@ -374,7 +472,7 @@ private struct CalendarBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .calendar
     func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
         guard settings.resolvedCalendarEnabled else { return nil }
-        return NotchBubble(kind: kind, size: CGFloat(settings.bubbleSize), shape: settings.shape,
+        return NotchBubble(kind: kind, size: settings.resolvedStyle(for: kind).size, shape: settings.resolvedStyle(for: kind).shape,
                            isPersistent: true, timeout: nil, priority: .background)
     }
 }
@@ -384,8 +482,26 @@ private struct AudioBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .audio
     func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
         guard settings.resolvedAudioEnabled else { return nil }
-        return NotchBubble(kind: kind, size: CGFloat(settings.bubbleSize), shape: settings.shape,
+        return NotchBubble(kind: kind, size: settings.resolvedStyle(for: kind).size, shape: settings.resolvedStyle(for: kind).shape,
                            isPersistent: true, timeout: nil, priority: .background)
+    }
+}
+
+@MainActor
+private struct VinylBubbleProvider: BubbleProvider {
+    let kind: NotchBubbleKind = .vinyl
+    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
+        let active = store.workspace.media.isPlaying && store.workspace.media.hasNowPlayingPresentation
+        guard settings.resolvedVinylEnabled,
+              settings.resolvedVinylPersistent || active else { return nil }
+        return NotchBubble(
+            kind: kind,
+            size: settings.resolvedStyle(for: kind).size,
+            shape: settings.resolvedStyle(for: kind).shape,
+            isPersistent: settings.resolvedVinylPersistent,
+            timeout: nil,
+            priority: active ? .normal : .background
+        )
     }
 }
 
@@ -400,7 +516,8 @@ struct BubbleRegistry {
         SystemBubbleProvider(),
         ClipboardBubbleProvider(),
         CalendarBubbleProvider(),
-        AudioBubbleProvider()
+        AudioBubbleProvider(),
+        VinylBubbleProvider()
     ]
 
     func bubbles(store: AppStore, settings: NotchBubbleSettings) -> [NotchBubble] {
@@ -431,6 +548,7 @@ struct BubbleRegistry {
         case .clipboard: return 6
         case .system: return 7
         case .clock: return 8
+        case .vinyl: return 9
         }
     }
 }
