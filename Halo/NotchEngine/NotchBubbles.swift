@@ -141,6 +141,8 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
     var verticalOffset: Double?
     var tint: WidgetColor?
     var tintAmount: Double?
+    var animation: NotchBubbleAnimationPreset?
+    var lifecycleDuration: Double?
 
     func normalized() -> Self {
         var value = self
@@ -152,6 +154,7 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
         if let contentScale { value.contentScale = min(1.6, max(0.55, contentScale.isFinite ? contentScale : 1)) }
         if let verticalOffset { value.verticalOffset = min(120, max(-120, verticalOffset.isFinite ? verticalOffset : 0)) }
         if let tintAmount { value.tintAmount = min(1, max(0, tintAmount.isFinite ? tintAmount : 0)) }
+        if let lifecycleDuration { value.lifecycleDuration = min(1.5, max(0.10, lifecycleDuration.isFinite ? lifecycleDuration : 0.28)) }
         if let tint { value.tint = (try? tint.validated()) ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0) }
         return value
     }
@@ -159,7 +162,8 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
     var isEmpty: Bool {
         size == nil && shape == nil && background == nil && cornerRadius == nil &&
         glassIntensity == nil && backgroundOpacity == nil && borderOpacity == nil &&
-        contentScale == nil && verticalOffset == nil && tint == nil && tintAmount == nil
+        contentScale == nil && verticalOffset == nil && tint == nil && tintAmount == nil &&
+        animation == nil && lifecycleDuration == nil
     }
 }
 
@@ -175,6 +179,8 @@ struct ResolvedNotchBubbleStyle {
     let verticalOffset: CGFloat
     let tint: Color?
     let tintAmount: Double
+    let animation: NotchBubbleAnimationPreset
+    let lifecycleDuration: TimeInterval
 }
 
 struct NotchBubble: Identifiable, Equatable {
@@ -315,7 +321,9 @@ struct NotchBubbleSettings: Codable, Equatable {
             contentScale: CGFloat(override?.contentScale ?? 1.0),
             verticalOffset: CGFloat(override?.verticalOffset ?? 0),
             tint: tintColor,
-            tintAmount: override?.tintAmount ?? 0
+            tintAmount: override?.tintAmount ?? 0,
+            animation: override?.animation ?? animation,
+            lifecycleDuration: override?.lifecycleDuration ?? resolvedLifecycleDuration
         )
     }
 }
@@ -1091,7 +1099,8 @@ final class BubbleWindowController {
         trackingSurface: Bool = false
     ) {
         desiredFrame = frame
-        let duration = settings.resolvedLifecycleDuration
+        let style = settings.resolvedStyle(for: kind)
+        let duration = style.lifecycleDuration
 
         switch lifecyclePhase {
         case .hidden:
@@ -1102,7 +1111,7 @@ final class BubbleWindowController {
                 panel: panel,
                 from: emergenceFrame,
                 to: frame,
-                preset: settings.animation,
+                preset: style.animation,
                 duration: duration,
                 animated: animated && !trackingSurface
             ) { [weak self] in
@@ -1128,7 +1137,7 @@ final class BubbleWindowController {
             frameAnimator.restoreFromCurrent(
                 panel: panel,
                 to: frame,
-                preset: settings.animation,
+                preset: style.animation,
                 duration: duration,
                 animated: animated && !trackingSurface
             ) { [weak self] in
@@ -1152,7 +1161,7 @@ final class BubbleWindowController {
                 frameAnimator.move(
                     panel: panel,
                     to: frame,
-                    preset: settings.animation,
+                    preset: style.animation,
                     animated: animated
                 )
             }
@@ -1178,11 +1187,12 @@ final class BubbleWindowController {
         removalGeneration += 1
         let generation = removalGeneration
         lifecyclePhase = .retracting
+        let style = settings.resolvedStyle(for: kind)
         frameAnimator.retract(
             panel: panel,
             to: emergenceFrame,
-            preset: settings.animation,
-            duration: settings.resolvedLifecycleDuration,
+            preset: style.animation,
+            duration: style.lifecycleDuration,
             animated: animated
         ) { [weak self] in
             guard let self, self.removalGeneration == generation else { return }
@@ -1812,7 +1822,7 @@ private struct NotchBubbleView: View {
     }
 
     private var hoverAnimation: Animation? {
-        switch settings.animation {
+        switch bubbleStyle.animation {
         case .none: return nil
         case .soft: return .easeInOut(duration: 0.20)
         case .fluid: return .spring(response: 0.28, dampingFraction: 0.82)
