@@ -1485,6 +1485,9 @@ enum MediaAssetReader {
         }
     }
     static func lyrics(app: String?, key: String, title: String, artist: String, duration: Double?, onlineFallback: Bool) async -> String {
+        if MediaService.isTrailerDemo(title: title, artist: artist) {
+            return MediaService.trailerDemoLyrics
+        }
         let durationKey = duration.map { String(Int($0.rounded())) } ?? "unknown"
         let cacheKey = key + "|duration:" + durationKey
         lock.lock(); let cached = lyricsCache[cacheKey]; lock.unlock(); if let cached { return cached }
