@@ -1727,6 +1727,7 @@ private final class NotchBubbleDisplayHost {
 
     private let store: AppStore
     private let settingsStore: NotchBubbleSettingsStore
+    private let activityCenter = NotchBubbleActivityCenter.shared
     private let registry = BubbleRegistry()
     private let layoutEngine = BubbleLayoutEngine()
 
@@ -1825,7 +1826,10 @@ private final class NotchBubbleDisplayHost {
         store.$finished
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .sink { [weak self] _ in
+                self?.activityCenter.clearDismissal(kind: .timer)
+                self?.refresh(animated: true)
+            }
             .store(in: &subscriptions)
 
         store.workspace.$stopwatchStart
@@ -1844,12 +1848,44 @@ private final class NotchBubbleDisplayHost {
         store.workspace.media.$isPlaying
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .sink { [weak self] _ in
+                self?.activityCenter.clearDismissal(kind: .music)
+                self?.activityCenter.clearDismissal(kind: .vinyl)
+                self?.refresh(animated: true)
+            }
             .store(in: &subscriptions)
 
         HaloPixelPalStore.shared.$reaction
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refresh(animated: true) }
+            .store(in: &subscriptions)
+
+        activityCenter.$transientActivities
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .store(in: &subscriptions)
+
+        activityCenter.$suppressedKinds
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .store(in: &subscriptions)
+
+        store.workspace.calendar.$calendarRevision
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .store(in: &subscriptions)
+
+        Timer.publish(every: 30, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let settings = self.settingsStore.settings.normalized()
+                if settings.resolvedCalendarEnabled, self.store.workspace.calendar.hasAccess {
+                    self.store.workspace.calendar.refresh()
+                }
+                self.refresh(animated: false)
+            }
             .store(in: &subscriptions)
     }
 
@@ -1876,12 +1912,22 @@ private final class NotchBubbleDisplayHost {
             store.workspace.media.setArtworkEnabled(true)
         }
 
-        if settings.resolvedAudioEnabled || settings.resolvedSystemEnabled {
+        if settings.resolvedAudioEnabled || settings.resolvedSystemEnabled ||
+            settings.resolvedAudioFeedbackEnabled || settings.resolvedBrightnessFeedbackEnabled {
             store.workspace.audio.refresh()
-            store.workspace.system.refresh(detailed: false)
+            store.workspace.system.refresh(detailed: settings.resolvedSystemPersistent)
         }
 
-        let bubbles = registry.bubbles(store: store, settings: settings)
+        if settings.resolvedCalendarEnabled, store.workspace.calendar.hasAccess {
+            store.workspace.calendar.refresh()
+        }
+
+        let bubbles = registry.bubbles(
+            store: store,
+            settings: settings,
+            runtime: activityCenter,
+            surfaceExpanded: state.expanded
+        )
         let frames = layoutEngine.frames(
             for: bubbles,
             around: surfaceFrame,
@@ -1975,11 +2021,24 @@ private final class NotchBubbleDisplayHost {
 final class NotchBubbleManager {
     private let store: AppStore
     private let settingsStore = NotchBubbleSettingsStore.shared
+    private let activityCenter = NotchBubbleActivityCenter.shared
     private var hosts: [String: NotchBubbleDisplayHost] = [:]
     private var commercialAccessGranted = false
+    private var subscriptions = Set<AnyCancellable>()
 
     init(store: AppStore) {
         self.store = store
+
+        NotificationCenter.default.publisher(for: .init("HaloBubbleHUDEvent"))
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] note in
+                guard let self, let event = note.object as? HaloHUDEvent else { return }
+                self.activityCenter.publishHUD(
+                    event,
+                    settings: self.settingsStore.settings.normalized()
+                )
+            }
+            .store(in: &subscriptions)
     }
 
     func register(
