@@ -1547,17 +1547,22 @@ private struct NotchBubbleView: View {
         settingsStore.settings.normalized()
     }
 
+    private var bubbleStyle: ResolvedNotchBubbleStyle {
+        settings.resolvedStyle(for: kind)
+    }
+
     var body: some View {
         bubbleContent
-            .frame(width: CGFloat(settings.bubbleSize), height: CGFloat(settings.bubbleSize))
+            .scaleEffect(bubbleStyle.contentScale)
+            .frame(width: bubbleStyle.size, height: bubbleStyle.size)
             .background { bubbleBackground }
             .clipShape(NotchBubbleMaskShape(
-                shape: settings.shape,
-                cornerRadius: CGFloat(settings.cornerRadius)
+                shape: bubbleStyle.shape,
+                cornerRadius: bubbleStyle.cornerRadius
             ))
             .contentShape(NotchBubbleMaskShape(
-                shape: settings.shape,
-                cornerRadius: CGFloat(settings.cornerRadius)
+                shape: bubbleStyle.shape,
+                cornerRadius: bubbleStyle.cornerRadius
             ))
             .overlay { bubbleBorder }
             .scaleEffect(hovering ? 1.07 : 1)
@@ -1590,14 +1595,14 @@ private struct NotchBubbleView: View {
                     timerProgressRing(at: timeline.date)
                     if timerIsActive {
                         Text(compactTimerText(at: timeline.date))
-                            .font(.system(size: max(8, CGFloat(settings.bubbleSize) * 0.20), weight: .bold, design: .rounded))
+                            .font(.system(size: max(8, bubbleStyle.size * 0.20), weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .minimumScaleFactor(0.55)
                             .lineLimit(1)
                             .padding(5)
                     } else {
                         Image(systemName: store.finished ? "checkmark" : "timer")
-                            .font(.system(size: CGFloat(settings.bubbleSize) * 0.34, weight: .semibold))
+                            .font(.system(size: bubbleStyle.size * 0.34, weight: .semibold))
                     }
                 }
                 .foregroundStyle(store.finished ? Color.green : Color.white)
@@ -1613,12 +1618,12 @@ private struct NotchBubbleView: View {
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 VStack(spacing: 0) {
                     Text(clockTime(timeline.date))
-                        .font(.system(size: max(9, CGFloat(settings.bubbleSize) * 0.22), weight: .bold, design: .rounded))
+                        .font(.system(size: max(9, bubbleStyle.size * 0.22), weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .minimumScaleFactor(0.55)
                         .lineLimit(1)
                     Text(clockDay(timeline.date))
-                        .font(.system(size: max(6, CGFloat(settings.bubbleSize) * 0.11), weight: .semibold, design: .rounded))
+                        .font(.system(size: max(6, bubbleStyle.size * 0.11), weight: .semibold, design: .rounded))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -1631,9 +1636,9 @@ private struct NotchBubbleView: View {
                 let elapsed = stopwatchElapsed(at: timeline.date)
                 VStack(spacing: 1) {
                     Image(systemName: "stopwatch.fill")
-                        .font(.system(size: CGFloat(settings.bubbleSize) * 0.24, weight: .semibold))
+                        .font(.system(size: bubbleStyle.size * 0.24, weight: .semibold))
                     Text(shortElapsed(elapsed))
-                        .font(.system(size: max(7, CGFloat(settings.bubbleSize) * 0.15), weight: .bold, design: .rounded))
+                        .font(.system(size: max(7, bubbleStyle.size * 0.15), weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .lineLimit(1)
                 }
@@ -1645,17 +1650,17 @@ private struct NotchBubbleView: View {
 
         case .clipboard:
             Image(systemName: "doc.on.clipboard.fill")
-                .font(.system(size: CGFloat(settings.bubbleSize) * 0.36, weight: .semibold))
+                .font(.system(size: bubbleStyle.size * 0.36, weight: .semibold))
                 .foregroundStyle(.white)
 
         case .calendar:
             TimelineView(.periodic(from: .now, by: 60)) { timeline in
                 VStack(spacing: -1) {
                     Text(monthAbbreviation(timeline.date))
-                        .font(.system(size: max(6, CGFloat(settings.bubbleSize) * 0.11), weight: .bold, design: .rounded))
+                        .font(.system(size: max(6, bubbleStyle.size * 0.11), weight: .bold, design: .rounded))
                         .foregroundStyle(.red)
                     Text(dayNumber(timeline.date))
-                        .font(.system(size: max(12, CGFloat(settings.bubbleSize) * 0.34), weight: .bold, design: .rounded))
+                        .font(.system(size: max(12, bubbleStyle.size * 0.34), weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(.white)
                 }
@@ -1669,9 +1674,20 @@ private struct NotchBubbleView: View {
                     .rotationEffect(.degrees(-90))
                     .padding(3)
                 Image(systemName: audioSymbol)
-                    .font(.system(size: CGFloat(settings.bubbleSize) * 0.28, weight: .semibold))
+                    .font(.system(size: bubbleStyle.size * 0.28, weight: .semibold))
                     .foregroundStyle(.white)
             }
+
+        case .vinyl:
+            VinylRecordView(
+                artwork: media.artworkImage,
+                size: Double(max(18, bubbleStyle.size * 0.98)),
+                palette: media.artworkColors,
+                playing: media.isPlaying,
+                lowPower: system.lowPower,
+                interactive: false
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -1681,7 +1697,7 @@ private struct NotchBubbleView: View {
         ZStack {
             if mode == .icon || media.artworkImage == nil || !media.isPlaying {
                 Image(systemName: media.isPlaying ? "music.note" : "music.note.list")
-                    .font(.system(size: CGFloat(settings.bubbleSize) * 0.36, weight: .semibold))
+                    .font(.system(size: bubbleStyle.size * 0.36, weight: .semibold))
                     .foregroundStyle(.white)
             } else if let artwork = media.artworkImage {
                 Image(nsImage: artwork)
@@ -1694,7 +1710,7 @@ private struct NotchBubbleView: View {
                 if mode == .controls {
                     Color.black.opacity(0.24)
                     Image(systemName: media.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: CGFloat(settings.bubbleSize) * 0.28, weight: .bold))
+                        .font(.system(size: bubbleStyle.size * 0.28, weight: .bold))
                         .foregroundStyle(.white)
                         .shadow(radius: 2)
                 }
@@ -1706,7 +1722,7 @@ private struct NotchBubbleView: View {
 
             if settings.resolvedMusicShowPlaybackGlyph && mode != .controls {
                 Image(systemName: media.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: CGFloat(settings.bubbleSize) * 0.20, weight: .bold))
+                    .font(.system(size: bubbleStyle.size * 0.20, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(5)
                     .background(.black.opacity(0.42), in: Circle())
@@ -1733,9 +1749,9 @@ private struct NotchBubbleView: View {
         let metric = settings.resolvedSystemMetric
         VStack(spacing: 1) {
             Image(systemName: systemMetricSymbol(metric))
-                .font(.system(size: CGFloat(settings.bubbleSize) * 0.23, weight: .semibold))
+                .font(.system(size: bubbleStyle.size * 0.23, weight: .semibold))
             Text(systemMetricValue(metric))
-                .font(.system(size: max(7, CGFloat(settings.bubbleSize) * 0.14), weight: .bold, design: .rounded))
+                .font(.system(size: max(7, bubbleStyle.size * 0.14), weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
@@ -1746,38 +1762,53 @@ private struct NotchBubbleView: View {
 
     @ViewBuilder
     private var bubbleBackground: some View {
-        switch settings.shape {
-        case .circle:
-            Circle()
-                .fill(Color.black.opacity(0.88))
-        case .capsule:
-            Capsule(style: .continuous)
-                .fill(Color.black.opacity(0.88))
-        case .roundedSquare:
-            RoundedRectangle(cornerRadius: CGFloat(settings.cornerRadius), style: .continuous)
-                .fill(Color.black.opacity(0.88))
-        case .glass:
-            RoundedRectangle(cornerRadius: CGFloat(settings.cornerRadius), style: .continuous)
-                .fill(.ultraThinMaterial)
-                .opacity(settings.glassIntensity)
+        let shape = NotchBubbleMaskShape(
+            shape: bubbleStyle.shape,
+            cornerRadius: bubbleStyle.cornerRadius
+        )
+        let tint = bubbleStyle.tint ?? Color.clear
+
+        switch bubbleStyle.background {
+        case .solid:
+            shape
+                .fill(Color.black.opacity(bubbleStyle.backgroundOpacity))
                 .overlay {
-                    RoundedRectangle(cornerRadius: CGFloat(settings.cornerRadius), style: .continuous)
-                        .fill(Color.black.opacity(0.18))
+                    if bubbleStyle.tintAmount > 0 {
+                        shape.fill(tint.opacity(bubbleStyle.tintAmount))
+                    }
+                }
+
+        case .glass:
+            shape
+                .fill(.ultraThinMaterial)
+                .opacity(bubbleStyle.glassIntensity)
+                .overlay {
+                    shape.fill(Color.black.opacity(0.18 * bubbleStyle.backgroundOpacity))
+                }
+                .overlay {
+                    if bubbleStyle.tintAmount > 0 {
+                        shape.fill(tint.opacity(bubbleStyle.tintAmount))
+                    }
+                }
+
+        case .clear:
+            shape
+                .fill(Color.clear)
+                .overlay {
+                    if bubbleStyle.tintAmount > 0 {
+                        shape.fill(tint.opacity(bubbleStyle.tintAmount))
+                    }
                 }
         }
     }
 
-    @ViewBuilder
     private var bubbleBorder: some View {
-        switch settings.shape {
-        case .circle:
-            Circle().stroke(Color.white.opacity(hovering ? 0.24 : 0.12), lineWidth: 1)
-        case .capsule:
-            Capsule(style: .continuous).stroke(Color.white.opacity(hovering ? 0.24 : 0.12), lineWidth: 1)
-        case .roundedSquare, .glass:
-            RoundedRectangle(cornerRadius: CGFloat(settings.cornerRadius), style: .continuous)
-                .stroke(Color.white.opacity(hovering ? 0.24 : 0.12), lineWidth: 1)
-        }
+        let opacity = min(1, bubbleStyle.borderOpacity * (hovering ? 1.8 : 1.0))
+        return NotchBubbleMaskShape(
+            shape: bubbleStyle.shape,
+            cornerRadius: bubbleStyle.cornerRadius
+        )
+        .stroke(Color.white.opacity(opacity), lineWidth: opacity > 0 ? 1 : 0)
     }
 
     private var hoverAnimation: Animation? {
@@ -1811,6 +1842,8 @@ private struct NotchBubbleView: View {
             moduleDetail(.calendar)
         case .audio:
             moduleDetail(.audio)
+        case .vinyl:
+            vinylDetail
         }
     }
 
@@ -1856,6 +1889,47 @@ private struct NotchBubbleView: View {
                 Button("Open Notch") { openNotch() }
             }
             .buttonStyle(.borderless)
+        }
+    }
+
+    private var vinylDetail: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+                VinylRecordView(
+                    artwork: media.artworkImage,
+                    size: 92,
+                    palette: media.artworkColors,
+                    playing: media.isPlaying,
+                    lowPower: system.lowPower,
+                    interactive: true
+                )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(media.isPlaying ? media.title : "Vinyl")
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(media.isPlaying ? media.artist : "Uses Halo's shared Vinyl Studio style")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+
+            HStack {
+                Button("Vinyl Studio…") {
+                    VinylStyleWindowController.shared.show()
+                }
+                Button(media.isPlaying ? "Pause" : "Play") {
+                    mediaCommand("playpause")
+                }
+                Spacer()
+                Button("Open Notch") { openNotch() }
+            }
+            .buttonStyle(.borderless)
+
+            Text("This is the same VinylStyleStore used by Halo's Audio/Music CI and other vinyl surfaces.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -1947,6 +2021,7 @@ private struct NotchBubbleView: View {
         case .timer: return 330
         case .pixelPal: return 360
         case .clock, .stopwatch, .system, .clipboard, .calendar, .audio: return 354
+        case .vinyl: return 360
         }
     }
 
@@ -2115,7 +2190,7 @@ private struct NotchBubbleView: View {
 
     private func openNotch() {
         switch kind {
-        case .music:
+        case .music, .vinyl:
             let layout = surfaceState.layoutOverride ?? workspace.effectiveLayout
             let musicCI = layout.contextMusic ?? ContextMusicOptions()
             let canOpenMusicCI =
@@ -2154,6 +2229,8 @@ private struct NotchBubbleView: View {
             return "Calendar"
         case .audio:
             return audio.canSetVolume ? "Volume \(Int(audio.volume * 100))%" : "Audio"
+        case .vinyl:
+            return media.isPlaying ? "Vinyl · \(media.title)" : "Vinyl"
         }
     }
 }
