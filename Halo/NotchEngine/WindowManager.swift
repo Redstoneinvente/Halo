@@ -2155,10 +2155,14 @@ final class WindowManager {
             let displayLayout = displayProfile?.layout ?? override?.layout
             var appearance = displayLayout?.appearance ?? store.workspace.effectiveLayout.appearance
             let effectiveLayout = displayLayout ?? store.workspace.effectiveLayout
-            // Preserve the old horizontal-height behavior only for layouts saved before
-            // the explicit opened-notch content mode existed. New modes always use the main
-            // expanded-height control, so Fixed Canvas, Scroll and Pages get the same roomy space.
-            if effectiveLayout.openNotchContentMode == nil, effectiveLayout.horizontalWidgets ?? false {
+            // Preserve the old horizontal-height behavior only for legacy Default layouts
+            // saved before the explicit opened-notch content mode existed. Visual Workspace
+            // has its own content mode and must always honor Appearance.expandedHeight;
+            // migrated layouts can still carry horizontalWidgets = true, which previously
+            // overwrote the live opened-height slider on every reconcile.
+            if !effectiveLayout.resolvedUsesCustomOpenNotchWorkspace,
+               effectiveLayout.openNotchContentMode == nil,
+               effectiveLayout.horizontalWidgets ?? false {
                 let requested = effectiveLayout.horizontalHeight ?? 260
                 appearance.expandedHeight = requested.isFinite ? min(1100, max(200, requested)) : 260
             }
