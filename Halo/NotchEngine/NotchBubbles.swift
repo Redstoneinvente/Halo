@@ -2549,7 +2549,7 @@ struct NotchBubbleSettingsView: View {
                 Text("12").tag(12)
                 Text("Unlimited").tag(99)
             }
-            Text("The first version ships Music, Timer and Pixel Pal. The capacity control is already future-proofed for additional providers and integrations.")
+            Text("Priority decides which bubbles stay visible when more providers are active than the selected capacity.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -2659,6 +2659,42 @@ struct NotchBubbleSettingsView: View {
                 LabeledContent("Border opacity") {
                     Slider(
                         value: styleValueBinding(kind, \.borderOpacity, default: 0.12),
+                        in: 0...1,
+                        step: 0.05
+                    )
+                    .frame(width: 238)
+                }
+            }
+
+            Toggle(
+                "Custom tint",
+                isOn: styleOverrideEnabledBinding(
+                    kind,
+                    \.tint,
+                    default: WidgetColor(red: 0.20, green: 0.52, blue: 1.0)
+                )
+            )
+            if override.tint != nil {
+                ColorPicker(
+                    "Tint color",
+                    selection: Binding(
+                        get: {
+                            currentStyleOverride(for: kind).tint?.color
+                                ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0).color
+                        },
+                        set: { color in
+                            mutateStyleOverride(for: kind) {
+                                $0.tint = WidgetColor(color)
+                                if $0.tintAmount == nil { $0.tintAmount = 0.22 }
+                            }
+                        }
+                    ),
+                    supportsOpacity: false
+                )
+
+                LabeledContent("Tint strength") {
+                    Slider(
+                        value: styleValueBinding(kind, \.tintAmount, default: 0.22),
                         in: 0...1,
                         step: 0.05
                     )
