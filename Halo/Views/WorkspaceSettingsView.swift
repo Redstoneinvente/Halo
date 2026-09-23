@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     private var visualWorkspaceActive: Bool {
-        workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace
+        activeLayout.resolvedUsesCustomOpenNotchWorkspace
     }
 
     private var sidebarGroups: [SidebarGroup] {
@@ -763,6 +763,139 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     @State private var showingOpenWorkspaceEditor = false
     @ObservedObject private var geometryEditor = SurfaceGeometryEditingSession.shared
 
+    // Edit the exact layout/theme currently rendered on the selected display.
+    // Without this, scheduled profiles and display overrides make Appearance
+    // controls mutate the base layout while the live notch never changes.
+    private var activeDisplayOverrideIndex: Int? {
+        guard let screen = directEditScreen else { return nil }
+        let id = WindowManager.displayID(screen)
+        return workspace.settings.displays.firstIndex { $0.id == id && $0.enabled }
+    }
+
+    private var activeLayout: WorkspaceLayout {
+        let settings = workspace.settings
+
+        if let displayIndex = activeDisplayOverrideIndex {
+            let display = settings.displays[displayIndex]
+            if let profileID = display.profileID,
+               let profile = settings.profiles.first(where: { $0.id == profileID }) {
+                return profile.layout
+            }
+            if let layout = display.layout {
+                return layout
+            }
+        }
+
+        if let profileID = workspace.scheduledProfileID,
+           let profile = settings.profiles.first(where: { $0.id == profileID }) {
+            return profile.layout
+        }
+
+        return settings.layout
+    }
+
+    private var activeTheme: Theme {
+        let settings = workspace.settings
+
+        if let displayIndex = activeDisplayOverrideIndex {
+            let display = settings.displays[displayIndex]
+            if let profileID = display.profileID,
+               let profile = settings.profiles.first(where: { $0.id == profileID }) {
+                return profile.theme
+            }
+            return display.theme
+        }
+
+        if let profileID = workspace.scheduledProfileID,
+           let profile = settings.profiles.first(where: { $0.id == profileID }) {
+            return profile.theme
+        }
+
+        return store.configuration.theme
+    }
+
+    private func setActiveLayout(_ layout: WorkspaceLayout) {
+        var settings = workspace.settings
+
+        if let displayIndex = activeDisplayOverrideIndex {
+            if let profileID = settings.displays[displayIndex].profileID,
+               let profileIndex = settings.profiles.firstIndex(where: { $0.id == profileID }) {
+                settings.profiles[profileIndex].layout = layout
+                workspace.settings = settings
+                return
+            }
+
+            if settings.displays[displayIndex].layout != nil {
+                settings.displays[displayIndex].layout = layout
+                workspace.settings = settings
+                return
+            }
+        }
+
+        if let profileID = workspace.scheduledProfileID,
+           let profileIndex = settings.profiles.firstIndex(where: { $0.id == profileID }) {
+            settings.profiles[profileIndex].layout = layout
+            workspace.settings = settings
+            return
+        }
+
+        settings.layout = layout
+        workspace.settings = settings
+    }
+
+    private func updateActiveLayout(_ update: (inout WorkspaceLayout) -> Void) {
+        var layout = activeLayout
+        update(&layout)
+        setActiveLayout(layout)
+    }
+
+    private func setActiveTheme(_ theme: Theme) {
+        var settings = workspace.settings
+
+        if let displayIndex = activeDisplayOverrideIndex {
+            if let profileID = settings.displays[displayIndex].profileID,
+               let profileIndex = settings.profiles.firstIndex(where: { $0.id == profileID }) {
+                settings.profiles[profileIndex].theme = theme
+                workspace.settings = settings
+                return
+            }
+
+            settings.displays[displayIndex].theme = theme
+            workspace.settings = settings
+            return
+        }
+
+        if let profileID = workspace.scheduledProfileID,
+           let profileIndex = settings.profiles.firstIndex(where: { $0.id == profileID }) {
+            settings.profiles[profileIndex].theme = theme
+            workspace.settings = settings
+            return
+        }
+
+        store.configuration.theme = theme
+    }
+
+    private func updateActiveTheme(_ update: (inout Theme) -> Void) {
+        var theme = activeTheme
+        update(&theme)
+        setActiveTheme(theme)
+    }
+
+    private var activeLayoutBinding: Binding<WorkspaceLayout> {
+        Binding(get: { activeLayout }, set: { setActiveLayout($0) })
+    }
+
+    private var activeAppearanceBinding: Binding<Appearance> {
+        Binding(
+            get: { activeLayout.appearance },
+            set: { appearance in updateActiveLayout { $0.appearance = appearance } }
+        )
+    }
+
+    private var activeThemeBinding: Binding<Theme> {
+        Binding(get: { activeTheme }, set: { setActiveTheme($0) })
+    }
+
     var body: some View {
         Picker("Appearance area", selection: $page) {
             ForEach(HaloAppearancePage.allCases) { Text($0.rawValue).tag($0) }
@@ -789,39 +922,45 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     }
 
     @ViewBuilder private var openedSpace: some View {
+        let layout = activeLayout
+
         Section("Opened notch space") {
-            Picker("Layout system", selection: Binding(
-                get: { workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace ? "visual" : "default" },
-                set: { value in
-                    let useVisualWorkspace = value == "visual"
-                    workspace.settings.layout.setCustomOpenNotchWorkspaceEnabled(useVisualWorkspace)
-                    // These are alternate opened-surface systems. Visual Workspace
-                    // must never inherit the Default layout top-strip overlay.
-                    if useVisualWorkspace { keepClosedContentsWhenOpen = false }
-                }
-            )) {
+            Picker(
+                "Layout system",
+                selection: Binding(
+                    get: { layout.resolvedUsesCustomOpenNotchWorkspace ? "visual" : "default" },
+                    set: { value in
+                        let useVisualWorkspace = value == "visual"
+                        updateActiveLayout {
+                            $0.setCustomOpenNotchWorkspaceEnabled(useVisualWorkspace)
+                        }
+                        if useVisualWorkspace { keepClosedContentsWhenOpen = false }
+                    }
+                )
+            ) {
                 Text("Default").tag("default")
                 Text("Visual Workspace").tag("visual")
             }
             .pickerStyle(.segmented)
 
-            Text(workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace
+            Text(layout.resolvedUsesCustomOpenNotchWorkspace
                  ? "Visual Workspace uses your designed regions, groups and responsive widget slots. Your Default layout stays saved separately and returns unchanged when you switch back."
                  : "Default keeps Halo's classic opened-notch layout. Switching to Visual Workspace does not erase these settings.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Picker("Space behavior", selection: openedSpaceModeBinding) {
                 ForEach(OpenNotchContentMode.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
 
-            if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
-                switch workspace.settings.layout.resolvedOpenNotchLayout.resolvedContentMode {
+            if layout.resolvedUsesCustomOpenNotchWorkspace {
+                switch layout.resolvedOpenNotchLayout.resolvedContentMode {
                 case .fixed:
-                    Text("Fixed uses the region sizes and row/column proportions from the Visual Workspace Editor and keeps everything inside one designed canvas.")
+                    Text("Fixed uses the Visual Workspace grid and keeps everything inside one designed canvas.")
                         .font(.caption).foregroundStyle(.secondary)
                 case .scroll:
-                    Text("Scroll keeps your visual workspace structure while allowing its content to move inside the opened notch when it needs more room.")
+                    Text("Scroll keeps your Visual Workspace structure while allowing its content to move inside the opened notch when it needs more room.")
                         .font(.caption).foregroundStyle(.secondary)
                 case .pages:
                     Text("Pages presents the designed workspace one group at a time with previous/next navigation.")
@@ -832,31 +971,44 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
                     Label("Open Visual Workspace Editor…", systemImage: "rectangle.3.group")
                 }
                 .sheet(isPresented: $showingOpenWorkspaceEditor) {
-                    OpenedNotchWorkspaceEditor(layout: $workspace.settings.layout)
+                    OpenedNotchWorkspaceEditor(layout: activeLayoutBinding)
                         .frame(minWidth: 980, idealWidth: 1120, minHeight: 680, idealHeight: 760)
                 }
             } else {
-                switch workspace.settings.layout.resolvedOpenNotchContentMode {
+                switch layout.resolvedOpenNotchContentMode {
                 case .fixed:
-                    Picker("Fixed canvas columns", selection: Binding(
-                        get: { workspace.settings.layout.resolvedOpenFixedColumns },
-                        set: { workspace.settings.layout.openFixedColumns = $0 }
-                    )) {
+                    Picker(
+                        "Fixed canvas columns",
+                        selection: Binding(
+                            get: { activeLayout.resolvedOpenFixedColumns },
+                            set: { value in updateActiveLayout { $0.openFixedColumns = value } }
+                        )
+                    ) {
                         ForEach(1...4, id: \.self) { Text("\($0)").tag($0) }
                     }
                     Text("All enabled widgets stay inside one fixed canvas. Halo divides the available height between rows instead of scrolling.")
                         .font(.caption).foregroundStyle(.secondary)
+
                 case .scroll:
-                    Picker("Scroll direction", selection: Binding(
-                        get: { workspace.settings.layout.horizontalWidgets ?? false },
-                        set: { workspace.settings.layout.horizontalWidgets = $0; workspace.settings.layout.horizontalPages = false }
-                    )) {
+                    Picker(
+                        "Scroll direction",
+                        selection: Binding(
+                            get: { activeLayout.horizontalWidgets ?? false },
+                            set: { value in
+                                updateActiveLayout {
+                                    $0.horizontalWidgets = value
+                                    $0.horizontalPages = false
+                                }
+                            }
+                        )
+                    ) {
                         Text("Vertical").tag(false)
                         Text("Horizontal").tag(true)
                     }
                     .pickerStyle(.segmented)
                     Text("Scroll keeps the notch size fixed while letting widgets move inside it.")
                         .font(.caption).foregroundStyle(.secondary)
+
                 case .pages:
                     Text("Pages keeps one widget in focus at a time with previous/next navigation.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -864,7 +1016,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             }
         }
 
-        if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+        if layout.resolvedUsesCustomOpenNotchWorkspace {
             Section("Opened notch behavior") {
                 Label("Visual Workspace owns the opened notch", systemImage: "rectangle.3.group")
                 Text("Default-layout chrome and the closed-notch top strip are disabled while Visual Workspace is active. Switch back to Default to use those options.")
@@ -882,21 +1034,23 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     private var openedSpaceModeBinding: Binding<OpenNotchContentMode> {
         Binding(
             get: {
-                if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
-                    return workspace.settings.layout.resolvedOpenNotchLayout.resolvedContentMode
-                }
-                return workspace.settings.layout.resolvedOpenNotchContentMode
+                let layout = activeLayout
+                return layout.resolvedUsesCustomOpenNotchWorkspace
+                    ? layout.resolvedOpenNotchLayout.resolvedContentMode
+                    : layout.resolvedOpenNotchContentMode
             },
             set: { mode in
-                if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
-                    workspace.settings.layout.materializeOpenNotchLayout()
-                    var opened = workspace.settings.layout.resolvedOpenNotchLayout
-                    opened.contentMode = mode
-                    workspace.settings.layout.openNotch = opened
-                } else {
-                    workspace.settings.layout.openNotchContentMode = mode
-                    workspace.settings.layout.horizontalPages = mode == .pages
-                    if mode == .pages { workspace.settings.layout.horizontalWidgets = true }
+                updateActiveLayout { layout in
+                    if layout.resolvedUsesCustomOpenNotchWorkspace {
+                        layout.materializeOpenNotchLayout()
+                        var opened = layout.resolvedOpenNotchLayout
+                        opened.contentMode = mode
+                        layout.openNotch = opened
+                    } else {
+                        layout.openNotchContentMode = mode
+                        layout.horizontalPages = mode == .pages
+                        if mode == .pages { layout.horizontalWidgets = true }
+                    }
                 }
             }
         )
@@ -904,57 +1058,57 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 
     private var visualBackgroundKind: Binding<BackgroundKind> {
         Binding(
-            get: { workspace.settings.layout.resolvedOpenNotchLayout.appearance.background ?? workspace.settings.layout.appearance.background },
+            get: { activeLayout.resolvedOpenNotchLayout.appearance.background ?? activeLayout.appearance.background },
             set: { value in updateVisualAppearance { $0.background = value } }
         )
     }
 
     private var visualAssetPath: Binding<String> {
         Binding(
-            get: { workspace.settings.layout.resolvedOpenNotchLayout.appearance.assetPath },
+            get: { activeLayout.resolvedOpenNotchLayout.appearance.assetPath },
             set: { value in updateVisualAppearance { $0.assetPath = value } }
         )
     }
 
     private func visualDouble(_ keyPath: WritableKeyPath<OpenNotchAppearance, Double?>, fallback: Double) -> Binding<Double> {
         Binding(
-            get: { workspace.settings.layout.resolvedOpenNotchLayout.appearance[keyPath: keyPath] ?? fallback },
+            get: { activeLayout.resolvedOpenNotchLayout.appearance[keyPath: keyPath] ?? fallback },
             set: { value in updateVisualAppearance { $0[keyPath: keyPath] = value } }
         )
     }
 
     private func visualColor(_ keyPath: WritableKeyPath<OpenNotchAppearance, WidgetColor?>, fallback: WidgetColor) -> Binding<Color> {
         Binding(
-            get: { (workspace.settings.layout.resolvedOpenNotchLayout.appearance[keyPath: keyPath] ?? fallback).color },
+            get: { (activeLayout.resolvedOpenNotchLayout.appearance[keyPath: keyPath] ?? fallback).color },
             set: { value in updateVisualAppearance { $0[keyPath: keyPath] = WidgetColor(value) } }
         )
     }
 
     private func updateVisualAppearance(_ update: (inout OpenNotchAppearance) -> Void) {
-        var current = workspace.settings.layout
-        current.materializeOpenNotchLayout()
-        var opened = current.resolvedOpenNotchLayout
-        update(&opened.appearance)
-        opened.preset = .custom
-        current.openNotch = opened
-        workspace.settings.layout = current
+        updateActiveLayout { current in
+            current.materializeOpenNotchLayout()
+            var opened = current.resolvedOpenNotchLayout
+            update(&opened.appearance)
+            opened.preset = .custom
+            current.openNotch = opened
+        }
     }
 
     private func updateVisualLayout(_ update: (inout OpenNotchLayout) -> Void) {
-        var current = workspace.settings.layout
-        current.materializeOpenNotchLayout()
-        var opened = current.resolvedOpenNotchLayout
-        update(&opened)
-        opened.preset = .custom
-        current.openNotch = opened
-        workspace.settings.layout = current
+        updateActiveLayout { current in
+            current.materializeOpenNotchLayout()
+            var opened = current.resolvedOpenNotchLayout
+            update(&opened)
+            opened.preset = .custom
+            current.openNotch = opened
+        }
     }
 
     private var openedSidePaddingBinding: Binding<Double> {
-        if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+        if activeLayout.resolvedUsesCustomOpenNotchWorkspace {
             return Binding(
                 get: {
-                    let padding = workspace.settings.layout.resolvedOpenNotchLayout.resolvedGridPadding
+                    let padding = activeLayout.resolvedOpenNotchLayout.resolvedGridPadding
                     return (padding.leading + padding.trailing) / 2
                 },
                 set: { value in
@@ -969,16 +1123,16 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         }
 
         return Binding(
-            get: { workspace.settings.layout.resolvedOpenHorizontalPadding },
-            set: { workspace.settings.layout.openHorizontalPadding = $0 }
+            get: { activeLayout.resolvedOpenHorizontalPadding },
+            set: { value in updateActiveLayout { $0.openHorizontalPadding = value } }
         )
     }
 
     private var openedVerticalPaddingBinding: Binding<Double> {
-        if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+        if activeLayout.resolvedUsesCustomOpenNotchWorkspace {
             return Binding(
                 get: {
-                    let padding = workspace.settings.layout.resolvedOpenNotchLayout.resolvedGridPadding
+                    let padding = activeLayout.resolvedOpenNotchLayout.resolvedGridPadding
                     return (padding.top + padding.bottom) / 2
                 },
                 set: { value in
@@ -993,22 +1147,25 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         }
 
         return Binding(
-            get: { workspace.settings.layout.resolvedOpenVerticalPadding },
-            set: { workspace.settings.layout.openVerticalPadding = $0 }
+            get: { activeLayout.resolvedOpenVerticalPadding },
+            set: { value in updateActiveLayout { $0.openVerticalPadding = value } }
         )
     }
 
     private var openedSpacingBinding: Binding<Double> {
-        if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+        if activeLayout.resolvedUsesCustomOpenNotchWorkspace {
             return Binding(
-                get: { workspace.settings.layout.resolvedOpenNotchLayout.resolvedGridGap },
+                get: { activeLayout.resolvedOpenNotchLayout.resolvedGridGap },
                 set: { value in
                     updateVisualLayout { $0.gridGap = value }
                 }
             )
         }
 
-        return $workspace.settings.layout.appearance.spacing
+        return Binding(
+            get: { activeLayout.appearance.spacing },
+            set: { value in updateActiveLayout { $0.appearance.spacing = value } }
+        )
     }
 
     private func chooseVisualBackgroundAsset(_ kind: BackgroundKind) {
@@ -1101,20 +1258,20 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 
         Section("Opened notch size & spacing") {
             Slider(
-                value: $store.configuration.theme.width,
+                value: activeThemeBinding.width,
                 in: 340...1200,
                 onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }
             ) { Text("Opened width") }
                 .disabled(geometryEditor.isEnabled)
 
             Slider(
-                value: $workspace.settings.layout.appearance.expandedHeight,
+                value: activeAppearanceBinding.expandedHeight,
                 in: 280...1100,
                 onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }
             ) { Text("Opened height") }
                 .disabled(geometryEditor.isEnabled)
 
-            if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+            if activeLayout.resolvedUsesCustomOpenNotchWorkspace {
                 Slider(value: openedSidePaddingBinding, in: 0...72) { Text("Workspace side padding") }
                 Slider(value: openedVerticalPaddingBinding, in: 0...72) { Text("Workspace top & bottom padding") }
                 Slider(value: openedSpacingBinding, in: 0...32) { Text("Widget gap") }
@@ -1133,15 +1290,15 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             }
         }
         SurfaceAppearanceControls(
-            appearance: $workspace.settings.layout.appearance,
-            theme: store.configuration.theme,
+            appearance: activeAppearanceBinding,
+            theme: activeTheme,
             screen: directEditScreen,
             scope: .openedPosition
         )
         .disabled(geometryEditor.isEnabled)
         SurfaceAppearanceControls(
-            appearance: $workspace.settings.layout.appearance,
-            theme: store.configuration.theme,
+            appearance: activeAppearanceBinding,
+            theme: activeTheme,
             screen: directEditScreen,
             scope: .closedGeometry
         )
@@ -1158,8 +1315,8 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 
     private var directGeometrySnapshot: SurfaceGeometryEditSnapshot {
         SurfaceGeometryEditSnapshot.capture(
-            theme: store.configuration.theme,
-            appearance: workspace.settings.layout.appearance
+            theme: activeTheme,
+            appearance: activeLayout.appearance
         )
     }
 
@@ -1167,8 +1324,8 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         guard let screen = directEditScreen else { return nil }
         return WindowManager.geometry(
             screen: screen,
-            theme: store.configuration.theme,
-            appearance: workspace.settings.layout.appearance
+            theme: activeTheme,
+            appearance: activeLayout.appearance
         )
     }
 
@@ -1181,8 +1338,8 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         for snapshot: SurfaceGeometryEditSnapshot,
         on screen: NSScreen
     ) -> CGRect {
-        var theme = store.configuration.theme
-        var appearance = workspace.settings.layout.appearance
+        var theme = activeTheme
+        var appearance = activeLayout.appearance
         theme.width = snapshot.expandedWidth
         theme.cornerRadius = snapshot.cornerRadius
         appearance.compactWidth = snapshot.compactWidth
@@ -1208,8 +1365,8 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         appearance.surface.offsets = snapshot.offsets
 
         geometryEditor.previewSnapshot = nil
-        store.configuration.theme = theme
-        workspace.settings.layout.appearance = appearance
+        setActiveTheme(theme)
+        updateActiveLayout { $0.appearance = appearance }
     }
 
     private func setDirectGeometryEditing(_ enabled: Bool) {
@@ -1324,19 +1481,23 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 
     @ViewBuilder private var surface: some View {
         Section("Surface basics") {
-            Picker("Surface", selection: $store.configuration.theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
-            Slider(value: $store.configuration.theme.cornerRadius, in: 0...48) { Text("Corner radius") }
-            Slider(value: $store.configuration.theme.tint, in: 0...1) { Text("Accent hue") }
-            Slider(value: $store.configuration.theme.opacity, in: 0.5...1) { Text("Opacity") }
+            Picker("Surface", selection: activeThemeBinding.style) {
+                ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) }
+            }
+            Slider(value: activeThemeBinding.cornerRadius, in: 0...48) { Text("Corner radius") }
+            Slider(value: activeThemeBinding.tint, in: 0...1) { Text("Accent hue") }
+            Slider(value: activeThemeBinding.opacity, in: 0.5...1) { Text("Opacity") }
         }
+
         SurfaceAppearanceControls(
-            appearance: $workspace.settings.layout.appearance,
-            theme: store.configuration.theme,
-            screen: NSScreen.main ?? NSScreen.screens.first,
+            appearance: activeAppearanceBinding,
+            theme: activeTheme,
+            screen: directEditScreen,
             scope: .surfaceGeometry
         )
+
         Section("Surface background effects") {
-            if workspace.settings.layout.appearance.background == .glass {
+            if activeLayout.appearance.background == .glass {
                 Label("Glass uses Halo's native macOS material", systemImage: "square.on.square")
                     .foregroundStyle(.secondary)
                 Text("Background Blur applies to Solid, Gradient, Image, and Video surfaces. Visual Workspace glass strength remains independently configurable in its Background page.")
@@ -1344,14 +1505,16 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             } else {
                 PreciseSlider(
                     title: "Background blur",
-                    value: $workspace.settings.layout.appearance.blur,
+                    value: activeAppearanceBinding.blur,
                     range: 0...20,
                     step: 0.5,
                     suffix: "pt",
                     decimals: 1
                 )
                 HStack {
-                    Button("Reset blur") { workspace.settings.layout.appearance.blur = 0 }
+                    Button("Reset blur") {
+                        updateActiveLayout { $0.appearance.blur = 0 }
+                    }
                     Spacer()
                     Text("Affects the surface background only")
                         .font(.caption).foregroundStyle(.secondary)
@@ -1361,7 +1524,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     }
 
     @ViewBuilder private var background: some View {
-        if workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace {
+        if activeLayout.resolvedUsesCustomOpenNotchWorkspace {
             visualWorkspaceBackground
         } else {
             defaultWorkspaceBackground
@@ -1369,37 +1532,56 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     }
 
     @ViewBuilder private var defaultWorkspaceBackground: some View {
-        let kind = workspace.settings.layout.appearance.background
+        let kind = activeLayout.appearance.background
+
         Section {
             Label("Default Workspace", systemImage: "rectangle.split.3x1")
                 .font(.headline)
             Text("These controls affect Halo's standard opened-notch workspace. Switch to Visual Workspace in Opened Space to edit its independent background instead.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+
         SurfaceAppearanceControls(
-            appearance: $workspace.settings.layout.appearance,
-            theme: store.configuration.theme,
-            screen: NSScreen.main ?? NSScreen.screens.first,
+            appearance: activeAppearanceBinding,
+            theme: activeTheme,
+            screen: directEditScreen,
             scope: .background
         )
+
         Section("Background effects") {
             switch kind {
             case .glass:
                 Text("Default glass uses Halo's system material. Visual Workspace has its own adjustable glass strength when that layout system is selected.")
                     .font(.caption).foregroundStyle(.secondary)
+
             case .image, .video:
-                Slider(value: $workspace.settings.layout.appearance.blur, in: 0...20) { Text("Blur") }
-                Slider(value: $workspace.settings.layout.appearance.saturation, in: 0...2) { Text("Saturation") }
-                Slider(value: $workspace.settings.layout.appearance.brightness, in: -0.5...0.5) { Text("Brightness") }
+                Slider(value: activeAppearanceBinding.blur, in: 0...20) { Text("Blur") }
+                Slider(value: activeAppearanceBinding.saturation, in: 0...2) { Text("Saturation") }
+                Slider(value: activeAppearanceBinding.brightness, in: -0.5...0.5) { Text("Brightness") }
+
             case .gradient:
-                Slider(value: $workspace.settings.layout.appearance.saturation, in: 0...2) { Text("Saturation") }
-                Slider(value: $workspace.settings.layout.appearance.brightness, in: -0.5...0.5) { Text("Brightness") }
+                Slider(value: activeAppearanceBinding.saturation, in: 0...2) { Text("Saturation") }
+                Slider(value: activeAppearanceBinding.brightness, in: -0.5...0.5) { Text("Brightness") }
+
             case .solid:
                 EmptyView()
             }
-            GrainSettingsView(options: Binding(get: { workspace.settings.layout.appearance.grain ?? GrainOptions() }, set: { workspace.settings.layout.appearance.grain = $0 }))
+
+            GrainSettingsView(
+                options: Binding(
+                    get: { activeLayout.appearance.grain ?? GrainOptions() },
+                    set: { value in updateActiveLayout { $0.appearance.grain = value } }
+                )
+            )
+
             if kind == .video {
-                Toggle("Pause video on battery", isOn: $workspace.settings.layout.appearance.pauseVideoOnBattery)
+                Toggle(
+                    "Pause video on battery",
+                    isOn: Binding(
+                        get: { activeLayout.appearance.pauseVideoOnBattery },
+                        set: { value in updateActiveLayout { $0.appearance.pauseVideoOnBattery = value } }
+                    )
+                )
                 Text("Video is muted, loops, and pauses when collapsed. Large videos and blur increase GPU use. The file is referenced in place.")
                     .font(.caption).foregroundStyle(.secondary)
             } else if kind == .image {
@@ -1412,7 +1594,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     @ViewBuilder private var visualWorkspaceBackground: some View {
         let kind = visualBackgroundKind.wrappedValue
         let fallback = workspace.settings.layout.appearance
-        let openedAppearance = workspace.settings.layout.resolvedOpenNotchLayout.appearance
+        let openedAppearance = activeLayout.resolvedOpenNotchLayout.appearance
         Section {
             Label("Visual Workspace", systemImage: "rectangle.3.group")
                 .font(.headline)
@@ -1482,25 +1664,42 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 
     @ViewBuilder private var motion: some View {
         Section("Animation") {
-            Toggle("Animate expansion", isOn: $store.configuration.theme.animations)
-            Picker("Animation timing", selection: Binding(get: { workspace.settings.layout.appearance.animation.rawValue }, set: { if let v = AnimationPreset(rawValue: $0) { workspace.settings.layout.appearance.animation = v } })) {
-                ForEach(AnimationPreset.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0.rawValue) }
+            Toggle("Animate expansion", isOn: activeThemeBinding.animations)
+            Picker(
+                "Animation timing",
+                selection: Binding(
+                    get: { activeLayout.appearance.animation.rawValue },
+                    set: { raw in
+                        guard let value = AnimationPreset(rawValue: raw) else { return }
+                        updateActiveLayout { $0.appearance.animation = value }
+                    }
+                )
+            ) {
+                ForEach(AnimationPreset.allCases, id: \.self) {
+                    Text($0.rawValue.capitalized).tag($0.rawValue)
+                }
             }
         }
+
         SurfaceAppearanceControls(
-            appearance: $workspace.settings.layout.appearance,
-            theme: store.configuration.theme,
-            screen: NSScreen.main ?? NSScreen.screens.first,
+            appearance: activeAppearanceBinding,
+            theme: activeTheme,
+            screen: directEditScreen,
             scope: .motion
         )
+
         Section("Theme tools") {
             HStack {
                 Button("Import theme…") { store.importTheme() }
                 Button("Export theme…") { store.exportTheme() }
-                Button("Reset") { store.configuration.theme = Theme(); workspace.settings.layout.appearance = Appearance() }
+                Button("Reset") {
+                    setActiveTheme(Theme())
+                    updateActiveLayout { $0.appearance = Appearance() }
+                }
             }
         }
     }
+
 }
 
 @MainActor private struct DisplaySettingsPane: View {
