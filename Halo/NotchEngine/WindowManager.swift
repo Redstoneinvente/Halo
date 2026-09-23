@@ -25,12 +25,12 @@ enum HaloHoverHaptics {
     ) {
         let strength = min(6, max(0, strength))
 
-        // Increment first so choosing Off (or changing levels quickly) invalidates
-        // any delayed taps from an older high-intensity sequence.
-        let generation = (sequenceGenerationByID[id] ?? 0) + 1
-        sequenceGenerationByID[id] = generation
-
-        guard strength > 0 else { return }
+        // Off immediately invalidates queued taps from a previous stronger sequence.
+        // Duplicate hover events inside the cooldown leave the active sequence alone.
+        if strength == 0 {
+            sequenceGenerationByID[id] = (sequenceGenerationByID[id] ?? 0) + 1
+            return
+        }
 
         let now = ProcessInfo.processInfo.systemUptime
         if let lastPulse = lastPulseByID[id],
@@ -38,6 +38,8 @@ enum HaloHoverHaptics {
             return
         }
 
+        let generation = (sequenceGenerationByID[id] ?? 0) + 1
+        sequenceGenerationByID[id] = generation
         lastPulseByID[id] = now
 
         // AppKit offers semantic haptic patterns, not a true amplitude value.
