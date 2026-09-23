@@ -5631,10 +5631,10 @@ private struct TrailerModeSettingsView: View {
         }
 
         Section("Pacing") {
-            PreciseSlider(title: "Slow interval", value: binding(\.slowInterval), range: 0.35...10, step: 0.05, suffix: " s")
-            PreciseSlider(title: "Fast interval", value: binding(\.fastInterval), range: 0.12...3, step: 0.02, suffix: " s")
-            PreciseSlider(title: "Ramp duration", value: binding(\.rampDuration), range: 1...120, step: 0.5, suffix: " s")
-            PreciseSlider(title: "Smoothing", value: binding(\.smoothing), range: 0.08...1.2, step: 0.02, suffix: " s")
+            PreciseSlider(title: "Slow interval", value: binding(\.slowInterval), range: 0.35...10, step: 0.05, suffix: " s", decimals: 2)
+            PreciseSlider(title: "Fast interval", value: binding(\.fastInterval), range: 0.12...3, step: 0.02, suffix: " s", decimals: 2)
+            PreciseSlider(title: "Ramp duration", value: binding(\.rampDuration), range: 1...120, step: 0.5, suffix: " s", decimals: 1)
+            PreciseSlider(title: "Smoothing", value: binding(\.smoothing), range: 0.08...1.2, step: 0.02, suffix: " s", decimals: 2)
 
             Text("The sequence begins at the slow interval and eases into the fast interval over the ramp duration. Smoothing controls the transition duration used by shape, lyric and surface changes.")
                 .font(.caption)
