@@ -2387,6 +2387,26 @@ struct NotchBubbleSettingsView: View {
                 .foregroundStyle(.secondary)
         }
 
+        Section("Vinyl bubble") {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Shared Vinyl Studio")
+                        .font(.headline)
+                    Text("Uses the exact same vinyl style as Halo's Audio/Music CI and other record surfaces.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Vinyl Studio…") {
+                    VinylStyleWindowController.shared.show()
+                }
+            }
+
+            Text("Preset, disc color, album-color palette, grooves, label artwork, gloss, glow, RPM and reverse all come from VinylStyleStore.shared.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
         Section("Bubble providers") {
             providerRow(
                 title: "Music",
@@ -2456,10 +2476,38 @@ struct NotchBubbleSettingsView: View {
                 enabled: optionalBinding(\.audioEnabled, default: false),
                 detail: "Shows current output volume with a live radial level indicator."
             )
+            providerRow(
+                title: "Vinyl",
+                symbol: "record.circle.fill",
+                enabled: optionalBinding(\.vinylEnabled, default: false),
+                persistent: optionalBinding(\.vinylPersistent, default: false),
+                detail: "A live record using Halo's shared Vinyl Studio configuration. Normally appears while media is playing."
+            )
 
             Text("New bubble types are off by default so existing setups keep their current layout.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+
+        Section("Per-bubble appearance") {
+            Text("Every provider inherits the global bubble style until you override it here.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(NotchBubbleKind.allCases) { kind in
+                DisclosureGroup {
+                    bubbleStyleEditor(kind)
+                        .padding(.top, 6)
+                } label: {
+                    Label(kind.title, systemImage: kind.symbol)
+                }
+            }
+
+            Button("Reset all bubble appearance overrides") {
+                var next = settingsStore.settings
+                next.bubbleStyles = nil
+                settingsStore.settings = next.normalized()
+            }
         }
 
         Section("Motion & capacity") {
@@ -2511,6 +2559,264 @@ struct NotchBubbleSettingsView: View {
                 settingsStore.reset()
             }
         }
+    }
+
+    @ViewBuilder
+    private func bubbleStyleEditor(_ kind: NotchBubbleKind) -> some View {
+        let override = currentStyleOverride(for: kind)
+        let resolved = settings.resolvedStyle(for: kind)
+        let globalBackground: NotchBubbleBackgroundStyle = settings.shape == .glass ? .glass : .solid
+
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(
+                "Custom size",
+                isOn: styleOverrideEnabledBinding(kind, \.size, default: settings.bubbleSize)
+            )
+            if override.size != nil {
+                LabeledContent("Size") {
+                    HStack {
+                        Slider(
+                            value: styleValueBinding(kind, \.size, default: settings.bubbleSize),
+                            in: 20...96,
+                            step: 1
+                        )
+                        .frame(width: 190)
+                        Text("\(Int(resolved.size)) pt")
+                            .monospacedDigit()
+                            .frame(width: 48, alignment: .trailing)
+                    }
+                }
+            }
+
+            Picker("Shape", selection: styleOptionalBinding(kind, \.shape)) {
+                Text("Global · \(settings.shape.rawValue)")
+                    .tag(nil as NotchBubbleShape?)
+                ForEach(NotchBubbleShape.allCases) { shape in
+                    Text(shape.rawValue).tag(Optional(shape))
+                }
+            }
+
+            Picker("Background", selection: styleOptionalBinding(kind, \.background)) {
+                Text("Global · \(globalBackground.rawValue)")
+                    .tag(nil as NotchBubbleBackgroundStyle?)
+                ForEach(NotchBubbleBackgroundStyle.allCases) { style in
+                    Text(style.rawValue).tag(Optional(style))
+                }
+            }
+
+            Toggle(
+                "Custom corner radius",
+                isOn: styleOverrideEnabledBinding(kind, \.cornerRadius, default: settings.cornerRadius)
+            )
+            if override.cornerRadius != nil {
+                LabeledContent("Corner radius") {
+                    Slider(
+                        value: styleValueBinding(kind, \.cornerRadius, default: settings.cornerRadius),
+                        in: 0...48,
+                        step: 1
+                    )
+                    .frame(width: 238)
+                }
+            }
+
+            if resolved.background == .glass {
+                Toggle(
+                    "Custom glass intensity",
+                    isOn: styleOverrideEnabledBinding(kind, \.glassIntensity, default: settings.glassIntensity)
+                )
+                if override.glassIntensity != nil {
+                    LabeledContent("Glass intensity") {
+                        Slider(
+                            value: styleValueBinding(kind, \.glassIntensity, default: settings.glassIntensity),
+                            in: 0.05...1,
+                            step: 0.05
+                        )
+                        .frame(width: 238)
+                    }
+                }
+            }
+
+            Toggle(
+                "Custom background opacity",
+                isOn: styleOverrideEnabledBinding(kind, \.backgroundOpacity, default: 0.88)
+            )
+            if override.backgroundOpacity != nil {
+                LabeledContent("Background opacity") {
+                    Slider(
+                        value: styleValueBinding(kind, \.backgroundOpacity, default: 0.88),
+                        in: 0...1,
+                        step: 0.05
+                    )
+                    .frame(width: 238)
+                }
+            }
+
+            Toggle(
+                "Custom border",
+                isOn: styleOverrideEnabledBinding(kind, \.borderOpacity, default: 0.12)
+            )
+            if override.borderOpacity != nil {
+                LabeledContent("Border opacity") {
+                    Slider(
+                        value: styleValueBinding(kind, \.borderOpacity, default: 0.12),
+                        in: 0...1,
+                        step: 0.05
+                    )
+                    .frame(width: 238)
+                }
+            }
+
+            Toggle(
+                "Custom content scale",
+                isOn: styleOverrideEnabledBinding(kind, \.contentScale, default: 1.0)
+            )
+            if override.contentScale != nil {
+                LabeledContent("Content scale") {
+                    HStack {
+                        Slider(
+                            value: styleValueBinding(kind, \.contentScale, default: 1.0),
+                            in: 0.55...1.6,
+                            step: 0.05
+                        )
+                        .frame(width: 190)
+                        Text(String(format: "%.2fx", resolved.contentScale))
+                            .monospacedDigit()
+                            .frame(width: 48, alignment: .trailing)
+                    }
+                }
+            }
+
+            Toggle(
+                "Custom vertical offset",
+                isOn: styleOverrideEnabledBinding(kind, \.verticalOffset, default: 0.0)
+            )
+            if override.verticalOffset != nil {
+                LabeledContent("Vertical offset") {
+                    HStack {
+                        Slider(
+                            value: styleValueBinding(kind, \.verticalOffset, default: 0.0),
+                            in: -120...120,
+                            step: 1
+                        )
+                        .frame(width: 190)
+                        Text(String(format: "%+.0f", resolved.verticalOffset))
+                            .monospacedDigit()
+                            .frame(width: 48, alignment: .trailing)
+                    }
+                }
+            }
+
+            Picker("Motion", selection: styleOptionalBinding(kind, \.animation)) {
+                Text("Global · \(settings.animation.rawValue)")
+                    .tag(nil as NotchBubbleAnimationPreset?)
+                ForEach(NotchBubbleAnimationPreset.allCases) { preset in
+                    Text(preset.rawValue).tag(Optional(preset))
+                }
+            }
+
+            Toggle(
+                "Custom lifecycle duration",
+                isOn: styleOverrideEnabledBinding(kind, \.lifecycleDuration, default: settings.resolvedLifecycleDuration)
+            )
+            if override.lifecycleDuration != nil {
+                LabeledContent("Lifecycle duration") {
+                    HStack {
+                        Slider(
+                            value: styleValueBinding(kind, \.lifecycleDuration, default: settings.resolvedLifecycleDuration),
+                            in: 0.10...1.50,
+                            step: 0.05
+                        )
+                        .frame(width: 190)
+                        Text(String(format: "%.2f s", resolved.lifecycleDuration))
+                            .monospacedDigit()
+                            .frame(width: 48, alignment: .trailing)
+                    }
+                }
+            }
+
+            HStack {
+                Text("Resolved: \(Int(resolved.size)) pt · \(resolved.shape.rawValue) · \(resolved.background.rawValue)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Reset") {
+                    resetStyleOverride(for: kind)
+                }
+                .buttonStyle(.borderless)
+                .disabled(override.isEmpty)
+            }
+        }
+        .padding(.leading, 4)
+    }
+
+    private func currentStyleOverride(for kind: NotchBubbleKind) -> NotchBubbleStyleOverride {
+        settingsStore.settings.bubbleStyles?[kind.rawValue]?.normalized() ?? NotchBubbleStyleOverride()
+    }
+
+    private func mutateStyleOverride(
+        for kind: NotchBubbleKind,
+        _ mutation: (inout NotchBubbleStyleOverride) -> Void
+    ) {
+        var next = settingsStore.settings
+        var styles = next.bubbleStyles ?? [:]
+        var override = styles[kind.rawValue]?.normalized() ?? NotchBubbleStyleOverride()
+        mutation(&override)
+        override = override.normalized()
+        if override.isEmpty {
+            styles.removeValue(forKey: kind.rawValue)
+        } else {
+            styles[kind.rawValue] = override
+        }
+        next.bubbleStyles = styles.isEmpty ? nil : styles
+        settingsStore.settings = next.normalized()
+    }
+
+    private func resetStyleOverride(for kind: NotchBubbleKind) {
+        var next = settingsStore.settings
+        guard var styles = next.bubbleStyles else { return }
+        styles.removeValue(forKey: kind.rawValue)
+        next.bubbleStyles = styles.isEmpty ? nil : styles
+        settingsStore.settings = next.normalized()
+    }
+
+    private func styleOptionalBinding<T>(
+        _ kind: NotchBubbleKind,
+        _ keyPath: WritableKeyPath<NotchBubbleStyleOverride, T?>
+    ) -> Binding<T?> {
+        Binding(
+            get: { currentStyleOverride(for: kind)[keyPath: keyPath] },
+            set: { value in
+                mutateStyleOverride(for: kind) { $0[keyPath: keyPath] = value }
+            }
+        )
+    }
+
+    private func styleValueBinding<T>(
+        _ kind: NotchBubbleKind,
+        _ keyPath: WritableKeyPath<NotchBubbleStyleOverride, T?>,
+        default defaultValue: T
+    ) -> Binding<T> {
+        Binding(
+            get: { currentStyleOverride(for: kind)[keyPath: keyPath] ?? defaultValue },
+            set: { value in
+                mutateStyleOverride(for: kind) { $0[keyPath: keyPath] = value }
+            }
+        )
+    }
+
+    private func styleOverrideEnabledBinding<T>(
+        _ kind: NotchBubbleKind,
+        _ keyPath: WritableKeyPath<NotchBubbleStyleOverride, T?>,
+        default defaultValue: T
+    ) -> Binding<Bool> {
+        Binding(
+            get: { currentStyleOverride(for: kind)[keyPath: keyPath] != nil },
+            set: { enabled in
+                mutateStyleOverride(for: kind) {
+                    $0[keyPath: keyPath] = enabled ? defaultValue : nil
+                }
+            }
+        )
     }
 
     @ViewBuilder
