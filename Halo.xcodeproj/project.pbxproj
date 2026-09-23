@@ -11,6 +11,7 @@
 		0000000000000000000000C9 /* Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000065 /* Core/Models.swift */; };
 		0000000000000000000000CA /* Core/AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000066 /* Core/AppStore.swift */; };
 		0000000000000000000000CB /* NotchEngine/WindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000067 /* NotchEngine/WindowManager.swift */; };
+		B0BB1E000000000000000001 /* NotchEngine/NotchBubbles.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0BB1E000000000000000101 /* NotchEngine/NotchBubbles.swift */; };
 		0000000000000000000000CC /* Views/SurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000068 /* Views/SurfaceView.swift */; };
 		0000000000000000000000CD /* Views/WorkspaceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000069 /* Views/WorkspaceSettingsView.swift */; };
 		0000000000000000000000CE /* Core/WorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006A /* Core/WorkspaceModels.swift */; };
@@ -126,6 +127,7 @@
 		000000000000000000000065 /* Core/Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/Models.swift; sourceTree = "<group>"; };
 		000000000000000000000066 /* Core/AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/AppStore.swift; sourceTree = "<group>"; };
 		000000000000000000000067 /* NotchEngine/WindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchEngine/WindowManager.swift; sourceTree = "<group>"; };
+		B0BB1E000000000000000101 /* NotchEngine/NotchBubbles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchEngine/NotchBubbles.swift; sourceTree = "<group>"; };
 		000000000000000000000068 /* Views/SurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/SurfaceView.swift; sourceTree = "<group>"; };
 		000000000000000000000069 /* Views/WorkspaceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/WorkspaceSettingsView.swift; sourceTree = "<group>"; };
 		00000000000000000000006A /* Core/WorkspaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/WorkspaceModels.swift; sourceTree = "<group>"; };
@@ -310,6 +312,7 @@
 				000000000000000000000065 /* Core/Models.swift */,
 				000000000000000000000066 /* Core/AppStore.swift */,
 				000000000000000000000067 /* NotchEngine/WindowManager.swift */,
+				B0BB1E000000000000000101 /* NotchEngine/NotchBubbles.swift */,
 				000000000000000000000068 /* Views/SurfaceView.swift */,
 				000000000000000000000069 /* Views/WorkspaceSettingsView.swift */,
 				00000000000000000000006A /* Core/WorkspaceModels.swift */,
@@ -654,6 +657,7 @@
 				0000000000000000000000C9 /* Core/Models.swift in Sources */,
 				0000000000000000000000CA /* Core/AppStore.swift in Sources */,
 				0000000000000000000000CB /* NotchEngine/WindowManager.swift in Sources */,
+				B0BB1E000000000000000001 /* NotchEngine/NotchBubbles.swift in Sources */,
 				0000000000000000000000CC /* Views/SurfaceView.swift in Sources */,
 				0000000000000000000000CD /* Views/WorkspaceSettingsView.swift in Sources */,
 				0000000000000000000000CE /* Core/WorkspaceModels.swift in Sources */,
