@@ -1952,6 +1952,16 @@ private enum HaloCommercialError: Error {
 
 // MARK: - Trailer Mode
 
+private enum TrailerShowcasePass {
+    case surface
+    case color
+    case material
+    case closedWidgets
+    case openWidgets
+    case musicCI
+    case retroCI
+}
+
 /// Runtime-only showcase sequencer used to record Halo marketing footage.
 /// It never writes randomized layouts/themes back into the user's saved workspace.
 @MainActor
@@ -1963,6 +1973,9 @@ final class TrailerModeController {
     private var step = 0
     private var baseLayout: WorkspaceLayout?
     private var baseTheme: Theme?
+    private var showcaseLayout: WorkspaceLayout?
+    private var showcaseTheme: Theme?
+    private var lastExpandedState = false
 
     init(store: AppStore) {
         self.store = store
@@ -1978,8 +1991,12 @@ final class TrailerModeController {
         let configuration = store.workspace.settings.trailer ?? TrailerModeSettings()
         baseLayout = store.workspace.baseEffectiveLayout
         baseTheme = store.configuration.theme
+        showcaseLayout = baseLayout
+        showcaseTheme = baseTheme
         startedAt = Date()
         step = 0
+        lastExpandedState = false
+        store.workspace.trailerContextPreview = nil
         store.workspace.trailerModeActive = true
         if configuration.showcaseMusic {
             store.workspace.media.setTrailerDemoEnabled(true)
@@ -1997,6 +2014,10 @@ final class TrailerModeController {
         step = 0
         baseLayout = nil
         baseTheme = nil
+        showcaseLayout = nil
+        showcaseTheme = nil
+        lastExpandedState = false
+        store.workspace.trailerContextPreview = nil
         store.workspace.trailerTransitionActive = false
         store.workspace.trailerLayoutOverride = nil
         store.workspace.trailerThemeOverride = nil
