@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import EventKit
 import QuartzCore
 import SwiftUI
 
@@ -1722,10 +1723,36 @@ private struct NotchBubbleView: View {
         switch kind {
         case .music:
             musicBubbleContent
-
         case .timer:
-            TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                ZStack {
+            timerBubbleContent
+        case .pixelPal:
+            pixelPalBubbleContent
+        case .clock:
+            clockBubbleContent
+        case .stopwatch:
+            stopwatchBubbleContent
+        case .system:
+            systemBubbleContent
+        case .clipboard:
+            clipboardBubbleContent
+        case .calendar:
+            calendarBubbleContent
+        case .audio:
+            audioBubbleContent
+        case .vinyl:
+            vinylBubbleContent
+        }
+    }
+
+    @ViewBuilder
+    private var timerBubbleContent: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            let mode = settings.resolvedTimerDisplayMode
+            let remaining = timerRemaining(at: timeline.date)
+
+            ZStack {
+                switch mode {
+                case .ring:
                     timerProgressRing(at: timeline.date)
                     if timerIsActive {
                         Text(compactTimerText(at: timeline.date))
@@ -1738,90 +1765,362 @@ private struct NotchBubbleView: View {
                         Image(systemName: store.finished ? "checkmark" : "timer")
                             .font(.system(size: bubbleStyle.size * 0.34, weight: .semibold))
                     }
-                }
-                .foregroundStyle(store.finished ? Color.green : Color.white)
-            }
 
-        case .pixelPal:
+                case .digits:
+                    Text(timerIsActive ? compactTimerText(at: timeline.date) : (store.finished ? "DONE" : "—"))
+                        .font(.system(size: max(9, bubbleStyle.size * 0.25), weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                        .minimumScaleFactor(0.42)
+                        .lineLimit(1)
+                        .padding(4)
+
+                case .arc:
+                    Circle()
+                        .trim(from: 0.10, to: 0.90)
+                        .stroke(Color.white.opacity(0.10), style: StrokeStyle(lineWidth: 3.2, lineCap: .round))
+                        .rotationEffect(.degrees(108))
+                        .padding(3)
+                    Circle()
+                        .trim(
+                            from: 0.10,
+                            to: 0.10 + 0.80 * timerProgress(at: timeline.date)
+                        )
+                        .stroke(
+                            store.finished ? Color.green : providerAccentColor,
+                            style: StrokeStyle(lineWidth: 3.2, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(108))
+                        .padding(3)
+                    VStack(spacing: 0) {
+                        Image(systemName: store.finished ? "checkmark" : "timer")
+                            .font(.system(size: bubbleStyle.size * 0.20, weight: .bold))
+                        if timerIsActive {
+                            Text(shortMinuteValue(remaining))
+                                .font(.system(size: max(7, bubbleStyle.size * 0.13), weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                        }
+                    }
+
+                case .icon:
+                    Image(systemName: store.finished ? "checkmark.circle.fill" : "timer")
+                        .font(.system(size: bubbleStyle.size * 0.40, weight: .semibold))
+                }
+            }
+            .foregroundStyle(store.finished ? Color.green : Color.white)
+        }
+    }
+
+    @ViewBuilder
+    private var pixelPalBubbleContent: some View {
+        switch settings.resolvedPixelPalDisplayMode {
+        case .full:
             HaloPixelPetWidget(store: store, workspace: workspace)
                 .environment(\.haloPixelPalHostExpanded, true)
                 .environment(\.haloPixelPalHostTransitionDuration, 0.16)
                 .padding(2)
 
-        case .clock:
-            TimelineView(.periodic(from: .now, by: 1)) { timeline in
+        case .closeUp:
+            HaloPixelPetWidget(store: store, workspace: workspace)
+                .environment(\.haloPixelPalHostExpanded, true)
+                .environment(\.haloPixelPalHostTransitionDuration, 0.16)
+                .scaleEffect(1.30)
+                .padding(-3)
+
+        case .icon:
+            Image(systemName: "face.smiling.inverse")
+                .font(.system(size: bubbleStyle.size * 0.42, weight: .bold))
+                .foregroundStyle(providerAccentColor)
+        }
+    }
+
+    @ViewBuilder
+    private var clockBubbleContent: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            switch settings.resolvedClockDisplayMode {
+            case .digital:
                 VStack(spacing: 0) {
                     Text(clockTime(timeline.date))
                         .font(.system(size: max(9, bubbleStyle.size * 0.22), weight: .bold, design: .rounded))
                         .monospacedDigit()
-                        .minimumScaleFactor(0.55)
+                        .minimumScaleFactor(0.52)
                         .lineLimit(1)
                     Text(clockDay(timeline.date))
-                        .font(.system(size: max(6, bubbleStyle.size * 0.11), weight: .semibold, design: .rounded))
+                        .font(.system(size: max(6, bubbleStyle.size * 0.105), weight: .semibold, design: .rounded))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
-                .foregroundStyle(.white)
                 .padding(4)
-            }
 
-        case .stopwatch:
-            TimelineView(.periodic(from: .now, by: 0.2)) { timeline in
-                let elapsed = stopwatchElapsed(at: timeline.date)
+            case .seconds:
+                VStack(spacing: 0) {
+                    Text(clockTimeWithSeconds(timeline.date))
+                        .font(.system(size: max(8, bubbleStyle.size * 0.19), weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .minimumScaleFactor(0.42)
+                        .lineLimit(1)
+                    Text(clockDay(timeline.date))
+                        .font(.system(size: max(6, bubbleStyle.size * 0.10), weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(3)
+
+            case .analog:
+                analogClock(date: timeline.date)
+
+            case .date:
+                VStack(spacing: -1) {
+                    Text(dayNumber(timeline.date))
+                        .font(.system(size: max(13, bubbleStyle.size * 0.34), weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                    Text(monthAbbreviation(timeline.date))
+                        .font(.system(size: max(6, bubbleStyle.size * 0.105), weight: .bold, design: .rounded))
+                        .foregroundStyle(providerAccentColor)
+                    Text(clockTime(timeline.date))
+                        .font(.system(size: max(6, bubbleStyle.size * 0.095), weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .foregroundStyle(.white)
+    }
+
+    @ViewBuilder
+    private var stopwatchBubbleContent: some View {
+        TimelineView(.periodic(from: .now, by: 0.2)) { timeline in
+            let elapsed = stopwatchElapsed(at: timeline.date)
+            switch settings.resolvedStopwatchDisplayMode {
+            case .compact:
                 VStack(spacing: 1) {
                     Image(systemName: "stopwatch.fill")
-                        .font(.system(size: bubbleStyle.size * 0.24, weight: .semibold))
+                        .font(.system(size: bubbleStyle.size * 0.23, weight: .semibold))
                     Text(shortElapsed(elapsed))
-                        .font(.system(size: max(7, bubbleStyle.size * 0.15), weight: .bold, design: .rounded))
+                        .font(.system(size: max(7, bubbleStyle.size * 0.145), weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .lineLimit(1)
                 }
-                .foregroundStyle(.white)
+
+            case .digits:
+                Text(shortElapsed(elapsed))
+                    .font(.system(size: max(9, bubbleStyle.size * 0.25), weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.44)
+                    .lineLimit(1)
+                    .padding(4)
+
+            case .ring:
+                ZStack {
+                    Circle()
+                        .stroke(Color.white.opacity(0.10), lineWidth: 2.7)
+                        .padding(3)
+                    Circle()
+                        .trim(from: 0, to: (elapsed.truncatingRemainder(dividingBy: 60)) / 60)
+                        .stroke(providerAccentColor, style: StrokeStyle(lineWidth: 2.7, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .padding(3)
+                    Text(shortElapsed(elapsed))
+                        .font(.system(size: max(7, bubbleStyle.size * 0.15), weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .minimumScaleFactor(0.5)
+                }
+
+            case .laps:
+                VStack(spacing: 1) {
+                    Image(systemName: "flag.checkered")
+                        .font(.system(size: bubbleStyle.size * 0.23, weight: .semibold))
+                    Text("\(workspace.stopwatchLaps.count)")
+                        .font(.system(size: max(10, bubbleStyle.size * 0.25), weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                }
             }
+        }
+        .foregroundStyle(.white)
+    }
 
-        case .system:
-            systemBubbleContent
-
-        case .clipboard:
+    @ViewBuilder
+    private var clipboardBubbleContent: some View {
+        switch settings.resolvedClipboardDisplayMode {
+        case .icon:
             Image(systemName: "doc.on.clipboard.fill")
                 .font(.system(size: bubbleStyle.size * 0.36, weight: .semibold))
                 .foregroundStyle(.white)
 
-        case .calendar:
-            TimelineView(.periodic(from: .now, by: 60)) { timeline in
+        case .preview:
+            if let text = clipboard.entries.first?.text, !text.isEmpty {
+                Text(text)
+                    .font(.system(size: max(6, bubbleStyle.size * 0.12), weight: .semibold, design: .rounded))
+                    .lineLimit(3)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.62)
+                    .foregroundStyle(.white)
+                    .padding(5)
+            } else {
+                Image(systemName: "doc.on.clipboard")
+                    .font(.system(size: bubbleStyle.size * 0.34, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+        case .count:
+            VStack(spacing: 0) {
+                Image(systemName: "doc.on.clipboard.fill")
+                    .font(.system(size: bubbleStyle.size * 0.20, weight: .semibold))
+                Text("\(clipboard.entries.count)")
+                    .font(.system(size: max(11, bubbleStyle.size * 0.29), weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(.white)
+        }
+    }
+
+    @ViewBuilder
+    private var calendarBubbleContent: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { timeline in
+            switch settings.resolvedCalendarDisplayMode {
+            case .date:
                 VStack(spacing: -1) {
                     Text(monthAbbreviation(timeline.date))
                         .font(.system(size: max(6, bubbleStyle.size * 0.11), weight: .bold, design: .rounded))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(providerAccentColor)
                     Text(dayNumber(timeline.date))
-                        .font(.system(size: max(12, bubbleStyle.size * 0.34), weight: .bold, design: .rounded))
+                        .font(.system(size: max(12, bubbleStyle.size * 0.34), weight: .heavy, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(.white)
                 }
-            }
 
-        case .audio:
+            case .weekday:
+                VStack(spacing: -1) {
+                    Text(clockDay(timeline.date))
+                        .font(.system(size: max(6, bubbleStyle.size * 0.10), weight: .bold, design: .rounded))
+                        .foregroundStyle(providerAccentColor)
+                    Text(dayNumber(timeline.date))
+                        .font(.system(size: max(12, bubbleStyle.size * 0.33), weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                    Text(monthAbbreviation(timeline.date))
+                        .font(.system(size: max(6, bubbleStyle.size * 0.095), weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(.white)
+
+            case .nextEvent:
+                if let event = calendar.upcomingEvents.first {
+                    VStack(spacing: 1) {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: bubbleStyle.size * 0.19, weight: .semibold))
+                            .foregroundStyle(providerAccentColor)
+                        Text(eventTime(event.startDate))
+                            .font(.system(size: max(7, bubbleStyle.size * 0.14), weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                        Text(event.title ?? "Event")
+                            .font(.system(size: max(5, bubbleStyle.size * 0.09), weight: .medium, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(3)
+                } else {
+                    VStack(spacing: 1) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: bubbleStyle.size * 0.25, weight: .semibold))
+                        Text("Free")
+                            .font(.system(size: max(7, bubbleStyle.size * 0.13), weight: .bold, design: .rounded))
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var audioBubbleContent: some View {
+        let level = audio.canSetVolume ? min(1, max(0, Double(audio.volume))) : 0
+
+        switch settings.resolvedAudioDisplayMode {
+        case .ring:
             ZStack {
                 Circle()
-                    .trim(from: 0, to: audio.canSetVolume ? min(1, max(0, Double(audio.volume))) : 0)
-                    .stroke(.white.opacity(0.86), style: StrokeStyle(lineWidth: 2.6, lineCap: .round))
+                    .stroke(Color.white.opacity(0.10), lineWidth: 2.6)
+                    .padding(3)
+                Circle()
+                    .trim(from: 0, to: level)
+                    .stroke(providerAccentColor, style: StrokeStyle(lineWidth: 2.6, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .padding(3)
                 Image(systemName: audioSymbol)
-                    .font(.system(size: bubbleStyle.size * 0.28, weight: .semibold))
+                    .font(.system(size: bubbleStyle.size * 0.27, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+
+        case .percentage:
+            VStack(spacing: 0) {
+                Text("\(Int((level * 100).rounded()))")
+                    .font(.system(size: max(12, bubbleStyle.size * 0.31), weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                Text("%")
+                    .font(.system(size: max(6, bubbleStyle.size * 0.10), weight: .bold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(.white)
+
+        case .icon:
+            Image(systemName: audioSymbol)
+                .font(.system(size: bubbleStyle.size * 0.39, weight: .semibold))
+                .foregroundStyle(.white)
+
+        case .device:
+            VStack(spacing: 1) {
+                Image(systemName: "hifispeaker.fill")
+                    .font(.system(size: bubbleStyle.size * 0.20, weight: .semibold))
+                    .foregroundStyle(providerAccentColor)
+                Text(currentAudioDeviceName)
+                    .font(.system(size: max(5, bubbleStyle.size * 0.10), weight: .semibold, design: .rounded))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.52)
                     .foregroundStyle(.white)
             }
+            .padding(4)
+        }
+    }
 
-        case .vinyl:
+    @ViewBuilder
+    private var vinylBubbleContent: some View {
+        let size = Double(max(18, bubbleStyle.size * 0.98))
+
+        switch settings.resolvedVinylDisplayMode {
+        case .fullRecord:
             VinylRecordView(
                 artwork: media.artworkImage,
-                size: Double(max(18, bubbleStyle.size * 0.98)),
+                size: size,
                 palette: media.artworkColors,
                 playing: media.isPlaying,
                 lowPower: system.lowPower,
                 interactive: false
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+        case .labelFocus:
+            VinylRecordView(
+                artwork: media.artworkImage,
+                size: size * 1.52,
+                palette: media.artworkColors,
+                playing: media.isPlaying,
+                lowPower: system.lowPower,
+                interactive: false
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+
+        case .recordProgress:
+            ZStack {
+                VinylRecordView(
+                    artwork: media.artworkImage,
+                    size: size * 0.88,
+                    palette: media.artworkColors,
+                    playing: media.isPlaying,
+                    lowPower: system.lowPower,
+                    interactive: false
+                )
+                musicProgressRing
+            }
         }
     }
 
