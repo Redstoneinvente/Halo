@@ -172,6 +172,7 @@ struct HaloMicroInteractionModifier<PopoverContent: View>: ViewModifier {
     let onTap: () -> Void
     let popoverContent: () -> PopoverContent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openNotchInteractionHold) private var holdOpen
     @State private var hovering = false
     @State private var pressing = false
     @State private var suppressNextTap = false
@@ -205,6 +206,14 @@ struct HaloMicroInteractionModifier<PopoverContent: View>: ViewModifier {
             })
             .popover(isPresented: $showingPopover, arrowEdge: .bottom) {
                 popoverContent().padding(12).frame(minWidth: 220)
+            }
+            .onChange(of: showingPopover) { value in
+                holdOpen(value)
+            }
+            .onDisappear {
+                if showingPopover {
+                    holdOpen(false)
+                }
             }
             .help(helpText)
     }
@@ -471,7 +480,7 @@ struct VisualWorkspaceTimerView: View {
         let idle = store.deadline == nil && store.pausedSeconds <= 0 && !store.finished
         let width = availableWidth ?? 0
         let height = availableHeight ?? 0
-        let canInline = width >= 300 && height >= 120
+        let canInline = width >= 300 && height >= 145
 
         if idle && canInline {
             HaloTimerHorizontalDurationComposer(
@@ -624,8 +633,8 @@ struct VisualWorkspaceTimerView: View {
                     let roomForInlineComposer =
                         !compact &&
                         !horizontallyDominant &&
-                        width >= 380 &&
-                        height >= 420
+                        width >= 400 &&
+                        height >= 500
 
                     if !roomForInlineComposer {
                         HaloTimerDurationPopoverButton(
