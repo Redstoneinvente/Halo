@@ -63,14 +63,21 @@ final class AppStore: ObservableObject {
         do { defaults.set(try JSONEncoder().encode(configuration), forKey: "configuration") }
         catch { self.error = error.localizedDescription }
     }
-    func startTimer(minutes: Int) {
+    func startTimer(duration: TimeInterval) {
+        // Custom timers are first-class: support H/M/S precision while keeping an upper
+        // bound that matches the 00...99 hour composer UI.
+        let seconds = min(359_999, max(1, duration.rounded()))
         finished = false
         pausedSeconds = 0
-        timerDurationSeconds = Double(minutes * 60)
-        deadline = Date().addingTimeInterval(timerDurationSeconds)
+        timerDurationSeconds = seconds
+        deadline = Date().addingTimeInterval(seconds)
         defaults.set(deadline, forKey: "timer.deadline")
         defaults.set(timerDurationSeconds, forKey: "timer.durationSeconds")
         monitorTimer()
+    }
+
+    func startTimer(minutes: Int) {
+        startTimer(duration: TimeInterval(minutes * 60))
     }
     private func monitorTimer() {
         ticker?.cancel()
