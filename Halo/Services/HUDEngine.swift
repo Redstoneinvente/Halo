@@ -402,6 +402,20 @@ final class HaloHUDEngine {
     }
 
     func emit(_ event: HaloHUDEvent, force: Bool = false) {
+        // Notch Bubbles consume Halo HUD's verified event stream instead of re-detecting
+        // volume/brightness/device changes. That keeps source identity and coalescing intact.
+        NotificationCenter.default.post(
+            name: .init("HaloBubbleHUDEvent"),
+            object: event
+        )
+
+        let bubbleSettings = NotchBubbleSettingsStore.shared.settings.normalized()
+        if bubbleSettings.enabled,
+           bubbleSettings.resolvedReplaceHaloHUDFeedback,
+           bubbleSettings.acceptsHUDEvent(event.kind) {
+            return
+        }
+
         let settings = resolvedSettings
         guard force || settings.isEnabled(event.kind) else { return }
         let configuration = resolvedConfiguration(for: event, settings: settings)
