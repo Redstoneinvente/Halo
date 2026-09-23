@@ -480,9 +480,10 @@ struct VisualWorkspaceTimerView: View {
         let idle = store.deadline == nil && store.pausedSeconds <= 0 && !store.finished
         let width = availableWidth ?? 0
         let height = availableHeight ?? 0
-        let canInline = width >= 300 && height >= 145
+        let canInlineFullEditor = width >= 300 && height >= 145
+        let canInlineOneRowEditor = context.rows == 1 && width >= 220
 
-        if idle && canInline {
+        if idle && canInlineFullEditor {
             HaloTimerHorizontalDurationComposer(
                 accent: style.accentColor.color,
                 textColor: style.textColor.color,
@@ -495,6 +496,15 @@ struct VisualWorkspaceTimerView: View {
                 ],
                 initialMinutes: style.resolvedContent.timerPresetB,
                 compact: height < 180
+            ) { duration in
+                store.startTimer(duration: duration)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        } else if idle && canInlineOneRowEditor {
+            HaloTimerHorizontalDurationStrip(
+                accent: style.accentColor.color,
+                textColor: style.textColor.color,
+                initialMinutes: style.resolvedContent.timerPresetB
             ) { duration in
                 store.startTimer(duration: duration)
             }
@@ -522,16 +532,19 @@ struct VisualWorkspaceTimerView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+
                 primaryTime(
                     remaining: remaining,
                     elapsed: elapsed,
                     progress: progress,
                     scale: context.columns >= 6 ? 1.12 : 0.94
                 )
+
                 if context.columns >= 4 && context.shows("progress") {
                     progressTreatment(progress)
                         .frame(maxWidth: context.columns >= 7 ? 180 : 110)
                 }
+
                 Spacer(minLength: 2)
                 timerControls(compact: true)
             }
