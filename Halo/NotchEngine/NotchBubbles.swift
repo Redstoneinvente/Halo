@@ -152,6 +152,30 @@ enum NotchBubbleAnimationPreset: String, Codable, CaseIterable, Identifiable, Ha
     var id: String { rawValue }
 }
 
+enum NotchBubbleGestureAction: String, Codable, CaseIterable, Identifiable, Hashable {
+    case none = "None"
+    case primaryAction = "Primary Action"
+    case showDetails = "Show Details"
+    case openNotch = "Open Notch"
+    case dismiss = "Dismiss Bubble"
+    case playPause = "Play / Pause"
+    case previousTrack = "Previous Track"
+    case nextTrack = "Next Track"
+    case openMediaPlayer = "Open Media App"
+    case timerPauseResume = "Timer Pause / Resume"
+    case timerAddFive = "Timer +5 Minutes"
+    case feedPixelPal = "Feed Pixel Pal"
+
+    var id: String { rawValue }
+}
+
+private enum NotchBubbleGestureDirection {
+    case left
+    case right
+    case up
+    case down
+}
+
 enum MusicBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
     case artwork = "Artwork"
     case artworkProgress = "Artwork + Progress"
@@ -378,6 +402,14 @@ struct NotchBubbleSettings: Codable, Equatable {
     var showWhenClosed = true
     var showWhenOpen = true
 
+    // Optional gesture mappings keep older Notch Bubble settings decodable.
+    // Directional gestures are off by default so existing interaction remains unchanged.
+    var gestureLeftAction: NotchBubbleGestureAction?
+    var gestureRightAction: NotchBubbleGestureAction?
+    var gestureUpAction: NotchBubbleGestureAction?
+    var gestureDownAction: NotchBubbleGestureAction?
+    var doubleClickAction: NotchBubbleGestureAction?
+
     var musicEnabled = true
     var musicPersistent = false
     var timerEnabled = true
@@ -555,6 +587,22 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedClipboardPersistent: Bool { clipboardPersistent ?? false }
     var resolvedShowAutomaticInFullscreen: Bool { showAutomaticInFullscreen ?? false }
     var resolvedShowConfirmationsInFullscreen: Bool { showConfirmationsInFullscreen ?? true }
+
+    var resolvedGestureLeftAction: NotchBubbleGestureAction { gestureLeftAction ?? .none }
+    var resolvedGestureRightAction: NotchBubbleGestureAction { gestureRightAction ?? .none }
+    var resolvedGestureUpAction: NotchBubbleGestureAction { gestureUpAction ?? .none }
+    var resolvedGestureDownAction: NotchBubbleGestureAction { gestureDownAction ?? .none }
+    var resolvedDoubleClickAction: NotchBubbleGestureAction { doubleClickAction ?? .primaryAction }
+
+    func gestureAction(for direction: NotchBubbleGestureDirection) -> NotchBubbleGestureAction {
+        switch direction {
+        case .left: return resolvedGestureLeftAction
+        case .right: return resolvedGestureRightAction
+        case .up: return resolvedGestureUpAction
+        case .down: return resolvedGestureDownAction
+        }
+    }
+
     var resolvedFilesEnabled: Bool { filesEnabled ?? false }
     var resolvedFilesPersistent: Bool { filesPersistent ?? false }
     var resolvedFilesDisplayMode: FileBubbleDisplayMode { filesDisplayMode ?? .latest }
@@ -2588,6 +2636,102 @@ private struct NotchBubbleMaskShape: Shape {
     }
 }
 
+private struct NotchBubbleGestureCapture: NSViewRepresentable {
+    let onDirection: (NotchBubbleGestureDirection) -> Bool
+
+    final class View: NSView {
+        var callback: ((NotchBubbleGestureDirection) -> Bool)?
+        private var horizontalAccumulator: CGFloat = 0
+        private var verticalAccumulator: CGFloat = 0
+        private var scrollMonitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            installScrollMonitorIfNeeded()
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            nil
+        }
+
+        deinit {
+            if let scrollMonitor {
+                NSEvent.removeMonitor(scrollMonitor)
+            }
+        }
+
+        private func installScrollMonitorIfNeeded() {
+            guard scrollMonitor == nil else { return }
+
+            scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self else { return event }
+                return self.handleScroll(event) ? nil : event
+            }
+        }
+
+        private func handleScroll(_ event: NSEvent) -> Bool {
+            guard let window, event.window === window else { return false }
+
+            let point = convert(event.locationInWindow, from: nil)
+            guard bounds.contains(point) else { return false }
+
+            if event.phase == .began || event.phase == .mayBegin {
+                horizontalAccumulator = 0
+                verticalAccumulator = 0
+            }
+
+            let dx = event.scrollingDeltaX
+            let dy = event.scrollingDeltaY
+            guard abs(dx) > 0.05 || abs(dy) > 0.05 else { return false }
+
+            let precise = event.hasPreciseScrollingDeltas
+            let threshold: CGFloat = precise ? 18 : 0.5
+            var handled = false
+
+            if abs(dx) >= abs(dy) {
+                horizontalAccumulator += dx
+                verticalAccumulator = 0
+
+                if abs(horizontalAccumulator) >= threshold {
+                    let direction: NotchBubbleGestureDirection =
+                        horizontalAccumulator < 0 ? .left : .right
+                    handled = callback?(direction) ?? false
+                    horizontalAccumulator = 0
+                }
+            } else {
+                verticalAccumulator += dy
+                horizontalAccumulator = 0
+
+                if abs(verticalAccumulator) >= threshold {
+                    let direction: NotchBubbleGestureDirection =
+                        verticalAccumulator < 0 ? .down : .up
+                    handled = callback?(direction) ?? false
+                    verticalAccumulator = 0
+                }
+            }
+
+            if event.phase == .ended ||
+                event.phase == .cancelled ||
+                event.momentumPhase == .ended {
+                horizontalAccumulator = 0
+                verticalAccumulator = 0
+            }
+
+            return handled
+        }
+    }
+
+    func makeNSView(context: Context) -> View {
+        let view = View()
+        view.callback = onDirection
+        return view
+    }
+
+    func updateNSView(_ nsView: View, context: Context) {
+        nsView.callback = onDirection
+    }
+}
+
 @MainActor
 private struct NotchBubbleView: View {
     let kind: NotchBubbleKind
@@ -2641,6 +2785,11 @@ private struct NotchBubbleView: View {
                 cornerRadius: bubbleStyle.cornerRadius
             ))
             .overlay { bubbleBorder }
+            .background {
+                NotchBubbleGestureCapture { direction in
+                    performGestureAction(settings.gestureAction(for: direction))
+                }
+            }
             .scaleEffect(hovering ? 1.07 : 1)
             .compositingGroup()
             .onHover { value in
@@ -2659,9 +2808,16 @@ private struct NotchBubbleView: View {
                 updateInteractionProtection()
             }
             .simultaneousGesture(
-                TapGesture().onEnded {
-                    handlePrimaryTap()
-                }
+                TapGesture(count: 2)
+                    .exclusively(before: TapGesture(count: 1))
+                    .onEnded { result in
+                        switch result {
+                        case .first:
+                            _ = performGestureAction(settings.resolvedDoubleClickAction)
+                        case .second:
+                            handlePrimaryTap()
+                        }
+                    }
             )
             .animation(hoverAnimation, value: hovering)
             .popover(isPresented: $showingDetail, arrowEdge: .top) {
@@ -3877,6 +4033,83 @@ private struct NotchBubbleView: View {
             .animation(.linear(duration: 0.18), value: progress)
     }
 
+    @discardableResult
+    private func performGestureAction(_ action: NotchBubbleGestureAction) -> Bool {
+        let handled: Bool
+
+        switch action {
+        case .none:
+            return false
+
+        case .primaryAction:
+            handlePrimaryTap()
+            handled = true
+
+        case .showDetails:
+            showingDetail = true
+            handled = true
+
+        case .openNotch:
+            openNotch()
+            handled = true
+
+        case .dismiss:
+            activityCenter.dismiss(kind: kind)
+            showingDetail = false
+            handled = true
+
+        case .playPause:
+            guard kind == .music || kind == .vinyl else { return false }
+            mediaCommand("playpause")
+            handled = true
+
+        case .previousTrack:
+            guard kind == .music || kind == .vinyl else { return false }
+            mediaCommand("previous track")
+            handled = true
+
+        case .nextTrack:
+            guard kind == .music || kind == .vinyl else { return false }
+            mediaCommand("next track")
+            handled = true
+
+        case .openMediaPlayer:
+            guard kind == .music || kind == .vinyl else { return false }
+            openMediaPlayer()
+            handled = true
+
+        case .timerPauseResume:
+            guard kind == .timer, timerIsActive else { return false }
+            store.pauseResume()
+            handled = true
+
+        case .timerAddFive:
+            guard kind == .timer else { return false }
+            if timerIsActive {
+                store.addTimer(minutes: 5)
+            } else {
+                store.startTimer(minutes: 5)
+            }
+            handled = true
+
+        case .feedPixelPal:
+            guard kind == .pixelPal else { return false }
+            pal.feedCookie()
+            handled = true
+        }
+
+        if handled {
+            HaloHoverHaptics.pulse(
+                id: "bubble.gesture." + surfaceState.displayID + "." + kind.rawValue,
+                strength: store.configuration.resolvedHoverHapticStrength,
+                pattern: .single,
+                minimumInterval: 0.04
+            )
+        }
+
+        return handled
+    }
+
     private func handlePrimaryTap() {
         guard kind == .music else {
             showingDetail.toggle()
@@ -4399,6 +4632,61 @@ struct NotchBubbleSettingsView: View {
         Section("Visibility") {
             Toggle("Show while Halo is closed", isOn: binding(\.showWhenClosed))
             Toggle("Show while Halo is open", isOn: binding(\.showWhenOpen))
+        }
+
+        Section("Bubble gestures") {
+            Text("Trackpad gestures are recognized only while the pointer is over a bubble. Unmapped directions continue behaving like normal scrolling.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker(
+                "Swipe left",
+                selection: optionalBinding(\.gestureLeftAction, default: NotchBubbleGestureAction.none)
+            ) {
+                ForEach(NotchBubbleGestureAction.allCases) { action in
+                    Text(action.rawValue).tag(action)
+                }
+            }
+
+            Picker(
+                "Swipe right",
+                selection: optionalBinding(\.gestureRightAction, default: NotchBubbleGestureAction.none)
+            ) {
+                ForEach(NotchBubbleGestureAction.allCases) { action in
+                    Text(action.rawValue).tag(action)
+                }
+            }
+
+            Picker(
+                "Swipe up",
+                selection: optionalBinding(\.gestureUpAction, default: NotchBubbleGestureAction.none)
+            ) {
+                ForEach(NotchBubbleGestureAction.allCases) { action in
+                    Text(action.rawValue).tag(action)
+                }
+            }
+
+            Picker(
+                "Swipe down",
+                selection: optionalBinding(\.gestureDownAction, default: NotchBubbleGestureAction.none)
+            ) {
+                ForEach(NotchBubbleGestureAction.allCases) { action in
+                    Text(action.rawValue).tag(action)
+                }
+            }
+
+            Picker(
+                "Double-click",
+                selection: optionalBinding(\.doubleClickAction, default: NotchBubbleGestureAction.primaryAction)
+            ) {
+                ForEach(NotchBubbleGestureAction.allCases) { action in
+                    Text(action.rawValue).tag(action)
+                }
+            }
+
+            Text("Media, Timer, and Pixel Pal actions only run on compatible bubble types. Gesture completion uses one tactile confirmation tap when haptics are enabled.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
 
         Section("Vinyl bubble") {
