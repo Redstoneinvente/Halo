@@ -1650,6 +1650,18 @@ private struct NotchBubbleView: View {
             timerDetail
         case .pixelPal:
             pixelPalDetail
+        case .clock:
+            moduleDetail(.clock)
+        case .stopwatch:
+            moduleDetail(.stopwatch)
+        case .system:
+            moduleDetail(.system)
+        case .clipboard:
+            moduleDetail(.clipboard)
+        case .calendar:
+            moduleDetail(.calendar)
+        case .audio:
+            moduleDetail(.audio)
         }
     }
 
@@ -1755,11 +1767,37 @@ private struct NotchBubbleView: View {
         }
     }
 
+    private func moduleDetail(_ module: ModuleID) -> some View {
+        let style = workspace.effectiveLayout.widgetStyle(for: module)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(module.title, systemImage: module.symbol)
+                    .font(.headline)
+                Spacer()
+                Button("Open Notch") { openNotch() }
+                    .buttonStyle(.borderless)
+            }
+
+            WidgetCard(
+                style: style,
+                availableHeight: 220,
+                availableWidth: 330,
+                fillsCell: module == .pet
+            ) {
+                BuiltinOrIntegrationWidget(module: module, store: store)
+            }
+            .environment(\.openNotchPresentation, .expanded)
+            .environment(\.openNotchCompressionLevel, 0)
+            .frame(width: 330, height: 220)
+        }
+    }
+
     private var detailWidth: CGFloat {
         switch kind {
         case .music: return 310
         case .timer: return 330
         case .pixelPal: return 360
+        case .clock, .stopwatch, .system, .clipboard, .calendar, .audio: return 354
         }
     }
 
@@ -1810,6 +1848,110 @@ private struct NotchBubbleView: View {
             .animation(.linear(duration: 0.18), value: progress)
     }
 
+    private func handlePrimaryTap() {
+        guard kind == .music else {
+            showingDetail.toggle()
+            return
+        }
+
+        switch settings.resolvedMusicTapAction {
+        case .details:
+            showingDetail.toggle()
+        case .playPause:
+            mediaCommand("playpause")
+        case .openNotch:
+            openNotch()
+        case .openPlayer:
+            openMediaPlayer()
+        }
+    }
+
+    private func openMediaPlayer() {
+        guard let bundleID = media.connectedApp,
+              let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else {
+            showingDetail.toggle()
+            return
+        }
+        app.activate(options: .activateIgnoringOtherApps)
+    }
+
+    private func clockTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter.string(from: date)
+    }
+
+    private func clockDay(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.dateFormat = "EEE"
+        return formatter.string(from: date).uppercased()
+    }
+
+    private func monthAbbreviation(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.dateFormat = "MMM"
+        return formatter.string(from: date).uppercased()
+    }
+
+    private func dayNumber(_ date: Date) -> String {
+        String(Calendar.autoupdatingCurrent.component(.day, from: date))
+    }
+
+    private func stopwatchElapsed(at date: Date) -> TimeInterval {
+        workspace.stopwatchElapsed + (workspace.stopwatchStart.map { date.timeIntervalSince($0) } ?? 0)
+    }
+
+    private func shortElapsed(_ elapsed: TimeInterval) -> String {
+        let seconds = max(0, Int(elapsed))
+        if seconds >= 3600 {
+            return String(format: "%d:%02d", seconds / 3600, seconds / 60 % 60)
+        }
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private var audioSymbol: String {
+        guard audio.canSetVolume else { return "speaker.slash.fill" }
+        switch audio.volume {
+        case ..<0.01: return "speaker.slash.fill"
+        case ..<0.34: return "speaker.wave.1.fill"
+        case ..<0.67: return "speaker.wave.2.fill"
+        default: return "speaker.wave.3.fill"
+        }
+    }
+
+    private func systemMetricSymbol(_ metric: SystemBubbleMetric) -> String {
+        switch metric {
+        case .battery:
+            return system.charging ? "battery.100percent.bolt" : "battery.100percent"
+        case .cpu: return "cpu"
+        case .memory: return "memorychip"
+        case .storage: return "internaldrive"
+        case .network: return "network"
+        }
+    }
+
+    private func systemMetricValue(_ metric: SystemBubbleMetric) -> String {
+        switch metric {
+        case .battery:
+            return system.battery.map { "\($0)%" } ?? "—"
+        case .cpu:
+            return String(format: "%.0f%%", system.cpuUsage)
+        case .memory:
+            return String(format: "%.0f%%", system.memoryUsage)
+        case .storage:
+            return String(format: "%.0f%%", system.diskUsage)
+        case .network:
+            let total = system.networkDownPerSecond + system.networkUpPerSecond
+            if total < 1_000 { return "<1K" }
+            if total < 1_000_000 { return String(format: "%.0fK", total / 1_000) }
+            return String(format: "%.1fM", total / 1_000_000)
+        }
+    }
+
     private func mediaCommand(_ command: String) {
         if media.connectedApp == nil {
             media.performSystem(command)
@@ -1834,7 +1976,7 @@ private struct NotchBubbleView: View {
 
             surfaceState.openExplicitly(canOpenMusicCI ? .music : .normal)
 
-        case .timer, .pixelPal:
+        case .timer, .pixelPal, .clock, .stopwatch, .system, .clipboard, .calendar, .audio:
             // These bubbles are shortcuts into the user's normal opened notch.
             // They do not replace the dashboard with a focused widget.
             surfaceState.openExplicitly(.normal)
@@ -1851,6 +1993,18 @@ private struct NotchBubbleView: View {
             return store.finished ? "Timer complete" : "Timer"
         case .pixelPal:
             return "Pixel Pal"
+        case .clock:
+            return "Clock"
+        case .stopwatch:
+            return "Stopwatch · \(shortElapsed(stopwatchElapsed(at: Date())))"
+        case .system:
+            return "\(settings.resolvedSystemMetric.rawValue) · \(systemMetricValue(settings.resolvedSystemMetric))"
+        case .clipboard:
+            return "Clipboard"
+        case .calendar:
+            return "Calendar"
+        case .audio:
+            return audio.canSetVolume ? "Volume \(Int(audio.volume * 100))%" : "Audio"
         }
     }
 }
