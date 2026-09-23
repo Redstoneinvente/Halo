@@ -2161,6 +2161,20 @@ private final class NotchBubbleDisplayHost {
             }
             .store(in: &subscriptions)
 
+        Timer.publish(every: 2, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let settings = self.settingsStore.settings.normalized()
+                if settings.resolvedAudioEnabled {
+                    self.store.workspace.audio.refresh()
+                }
+                if settings.resolvedSystemEnabled {
+                    self.store.workspace.system.refresh(detailed: true)
+                }
+            }
+            .store(in: &subscriptions)
+
         Timer.publish(every: 30, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
@@ -2208,12 +2222,6 @@ private final class NotchBubbleDisplayHost {
             // music bubble it is worth requesting the same artwork source used elsewhere
             // in Halo. We never force-disable it here because other Halo surfaces may need it.
             store.workspace.media.setArtworkEnabled(true)
-        }
-
-        if settings.resolvedAudioEnabled || settings.resolvedSystemEnabled ||
-            settings.resolvedAudioFeedbackEnabled || settings.resolvedBrightnessFeedbackEnabled {
-            store.workspace.audio.refresh()
-            store.workspace.system.refresh(detailed: settings.resolvedSystemEnabled)
         }
 
         let bubbles = registry.bubbles(
@@ -3949,6 +3957,7 @@ private struct NotchBubbleView: View {
 
 @MainActor
 struct NotchBubbleSettingsView: View {
+    @ObservedObject var store: AppStore
     @ObservedObject private var settingsStore = NotchBubbleSettingsStore.shared
 
     private var settings: NotchBubbleSettings {
@@ -4165,10 +4174,23 @@ struct NotchBubbleSettingsView: View {
             providerRow(
                 title: "Calendar / next meeting",
                 symbol: "calendar.badge.clock",
-                enabled: optionalBinding(\.calendarEnabled, default: false),
+                enabled: calendarEnabledBinding,
                 persistent: optionalBinding(\.calendarPersistent, default: false),
                 detail: "Shows the next relevant event inside the configured lead window. Persistent keeps Calendar available even when no event is upcoming."
             )
+            if settings.resolvedCalendarEnabled && !store.workspace.calendar.hasAccess {
+                HStack {
+                    Text(store.workspace.calendar.status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Calendar Access…") {
+                        store.workspace.calendar.requestAccessIfNeeded()
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .padding(.leading, 28)
+            }
             providerRow(
                 title: "File Shelf",
                 symbol: "tray.full.fill",
@@ -4799,6 +4821,20 @@ struct NotchBubbleSettingsView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+    }
+
+    private var calendarEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { settingsStore.settings.calendarEnabled ?? false },
+            set: { enabled in
+                var next = settingsStore.settings
+                next.calendarEnabled = enabled
+                settingsStore.settings = next.normalized()
+                if enabled {
+                    store.workspace.calendar.requestAccessIfNeeded()
+                }
+            }
+        )
     }
 
     private func optionalBinding<T>(
