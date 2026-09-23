@@ -732,6 +732,7 @@ final class WindowManager {
         var closedWidgetRight: ClosedNotchItem?
         var subscription: AnyCancellable?
         var contextSizeSubscription: AnyCancellable?
+        var ciOwnershipSubscription: AnyCancellable?
         var contextCompactSizeSubscription: AnyCancellable?
         var contextCompactHeightSubscription: AnyCancellable?
         var refreshDropCIRegistration: (() -> Void)?
@@ -768,7 +769,7 @@ final class WindowManager {
         func stop() {
             animator.cancel(); state.hoverExpandTask?.cancel(); state.collapseTask?.cancel(); state.dropExitTask?.cancel()
             pixelPalCollapseWork?.cancel()
-            subscription?.cancel(); contextSizeSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); contextCompactHeightSubscription?.cancel()
+            subscription?.cancel(); contextSizeSubscription?.cancel(); ciOwnershipSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); contextCompactHeightSubscription?.cancel()
             panel.close(); ambientPanel.close(); geometryEditorPanel.close()
         }
     }
@@ -1774,6 +1775,14 @@ final class WindowManager {
         }
     }
 
+    private func activeExpandedContextRequest(for host: Host) -> CGSize? {
+        // Context sizing is valid only while a CI actually owns the surface.
+        // A late measurement from a dismissed CI must never override the normal
+        // workspace's configured width/height.
+        guard host.state.activeCIIdentifier != nil else { return nil }
+        return host.state.contextPreferredSize
+    }
+
     private func adjustedExpandedFrame(host: Host, requested: CGSize?) -> CGRect {
         guard let geometry = host.geometry else { return .zero }
         let base = geometry.frame(expanded: true)
@@ -1861,7 +1870,7 @@ final class WindowManager {
             return geometry.frame(expanded: expanded)
         }
         return expanded
-            ? adjustedExpandedFrame(host: host, requested: host.state.contextPreferredSize)
+            ? adjustedExpandedFrame(host: host, requested: activeExpandedContextRequest(for: host))
             : adjustedClosedFrame(host: host, requestedWidth: host.state.contextPreferredCompactWidth,
                                   requestedHeight: host.state.contextPreferredCompactHeight)
     }
@@ -2086,7 +2095,7 @@ final class WindowManager {
 
         if expanded {
             let baseWidth = geometry.frame(expanded: true).width
-            let contentWidth = host.state.contextPreferredSize != nil ? target.width : baseWidth
+            let contentWidth = activeExpandedContextRequest(for: host) != nil ? target.width : baseWidth
             if host.state.dashboardWidth != contentWidth { host.state.dashboardWidth = contentWidth }
         }
         host.targetFrame = target
@@ -2195,7 +2204,10 @@ final class WindowManager {
             if host.state.layoutOverride != displayLayout { host.state.layoutOverride = displayLayout }
             configureDynamicWidth(host)
             let baseDashboardWidth = host.geometry!.frame(expanded: true).width
-            if host.state.contextPreferredSize == nil && host.state.dashboardWidth != baseDashboardWidth { host.state.dashboardWidth = baseDashboardWidth }
+            if activeExpandedContextRequest(for: host) == nil &&
+                host.state.dashboardWidth != baseDashboardWidth {
+                host.state.dashboardWidth = baseDashboardWidth
+            }
             let animateClosedWidgetResize =
                 closedWidgetSelectionChanged &&
                 !host.state.expanded &&
@@ -2405,20 +2417,69 @@ final class WindowManager {
                     case let (a?, b?): return abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1
                     default: return false
                     }
-                }).receive(on: DispatchQueue.main).sink { [weak self, weak host] requested in
-                    guard let self, let host, let geometry = host.geometry, host.state.expanded else { return }
+                }).receive(on: DispatchQueue.main).sink { [weak self, weak host] _ in
+                    guard let self, let host, let geometry = host.geometry,
+                          host.state.expanded,
+                          host.state.activeCIIdentifier != nil else { return }
                     let target = self.targetFrame(host: host, expanded: true)
                     guard host.targetFrame != target || abs(host.state.dashboardWidth - target.width) >= 1 else { return }
-                    let baseWidth = geometry.frame(expanded: true).width
-                    let contentWidth = requested == nil ? baseWidth : target.width
-                    if host.state.dashboardWidth != contentWidth { host.state.dashboardWidth = contentWidth }
+                    if host.state.dashboardWidth != target.width { host.state.dashboardWidth = target.width }
                     host.targetFrame = target
                     var motion = geometry.appearance.surface
-                    motion.opening = .resize; motion.closing = .resize; motion.duration = min(0.32, max(0.16, motion.duration))
-                    host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
-                                       preset: .smooth, animations: host.state.theme.animations && !host.state.editingGeometry,
-                                       opening: true, style: geometry.style)
+                    motion.opening = .resize
+                    motion.closing = .resize
+                    motion.duration = min(0.32, max(0.16, motion.duration))
+                    host.animator.move(
+                        panel: host.panel,
+                        state: host.state,
+                        target: target,
+                        options: motion,
+                        preset: .smooth,
+                        animations: host.state.theme.animations && !host.state.editingGeometry,
+                        opening: true,
+                        style: geometry.style
+                    )
                 }
+
+                host.ciOwnershipSubscription = host.state.$activeCIIdentifier
+                    .dropFirst()
+                    .removeDuplicates()
+                    .receive(on: DispatchQueue.main)
+                    .sink { [weak self, weak host] owner in
+                        guard let self, let host else { return }
+                        guard owner == nil else { return }
+
+                        // Tear down all CI sizing as soon as ownership ends. This also
+                        // invalidates late measurements that arrive after dismissal.
+                        host.state.contextPreferredSize = nil
+                        host.state.contextPreferredCompactWidth = nil
+                        host.state.contextPreferredCompactHeight = nil
+                        host.state.contextMinimumExpandedWidth = nil
+
+                        guard host.state.expanded, let geometry = host.geometry else { return }
+                        let target = self.targetFrame(host: host, expanded: true)
+                        let baseWidth = geometry.frame(expanded: true).width
+                        if host.state.dashboardWidth != baseWidth {
+                            host.state.dashboardWidth = baseWidth
+                        }
+                        guard host.targetFrame != target else { return }
+
+                        host.targetFrame = target
+                        var motion = geometry.appearance.surface
+                        motion.opening = .resize
+                        motion.closing = .resize
+                        motion.duration = min(0.30, max(0.14, motion.duration))
+                        host.animator.move(
+                            panel: host.panel,
+                            state: host.state,
+                            target: target,
+                            options: motion,
+                            preset: .smooth,
+                            animations: host.state.theme.animations && !host.state.editingGeometry,
+                            opening: true,
+                            style: geometry.style
+                        )
+                    }
                 // Ambient is ordered first and is mouse-pass-through; the normal Halo panel
                 // remains the interactive/top owner of the notch.
                 host.ambientPanel.orderFrontRegardless()
