@@ -8,6 +8,11 @@ final class SurfaceViewport: ObservableObject {
     @Published var size = CGSize(width: 190, height: 40)
 }
 
+enum HaloSurfaceOpenDestination: String {
+    case normal
+    case music
+}
+
 @MainActor
 final class SurfaceState: ObservableObject {
     @Published var expanded = false {
@@ -43,9 +48,9 @@ final class SurfaceState: ObservableObject {
     /// The winner selected by SurfaceView's existing CI arbiter. AppKit drag delivery reads this
     /// value but never chooses surface ownership itself.
     @Published var activeCIIdentifier: String?
-    /// A user-selected opened-notch destination, used by Notch Bubbles and other explicit
-    /// navigation affordances. This is presentation state only; it never mutates the saved layout.
-    @Published var focusedModule: ModuleID?
+    /// Explicit user navigation target. While non-nil, SurfaceView honors this destination
+    /// instead of letting an unrelated Context Interface win the opening.
+    @Published var explicitOpenDestination: HaloSurfaceOpenDestination?
     @Published var theme = Theme()
     @Published var activationSurfaceOptions = SurfaceOptions()
     @Published var layoutOverride: WorkspaceLayout?
@@ -68,19 +73,19 @@ final class SurfaceState: ObservableObject {
         if !presentationExpanded { presentationExpanded = true }
     }
 
-    func openFocusedModule(_ module: ModuleID) {
+    func openExplicitly(_ destination: HaloSurfaceOpenDestination) {
         collapseTask?.cancel()
         hoverExpandTask?.cancel()
         contextPreferredSize = nil
         contextPreferredCompactWidth = nil
         contextPreferredCompactHeight = nil
         contextMinimumExpandedWidth = nil
-        focusedModule = module
+        explicitOpenDestination = destination
         expanded = true
     }
 
-    func clearFocusedModule() {
-        if focusedModule != nil { focusedModule = nil }
+    func clearExplicitOpenDestination() {
+        if explicitOpenDestination != nil { explicitOpenDestination = nil }
     }
 
     func setPixelPalCloseGateActive(_ active: Bool) {
@@ -90,7 +95,7 @@ final class SurfaceState: ObservableObject {
     func completeCollapsedPresentation() {
         if pixelPalCloseGateActive { pixelPalCloseGateActive = false }
         if presentationExpanded { presentationExpanded = false }
-        clearFocusedModule()
+        clearExplicitOpenDestination()
     }
 
     // Hover expansion can briefly emit an exit while the NSPanel is resizing from
