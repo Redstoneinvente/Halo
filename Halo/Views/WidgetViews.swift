@@ -300,106 +300,190 @@ struct HaloTimerHorizontalDurationComposer: View {
         String(format: "%02d:%02d:%02d", hours, minutes, seconds)
     }
 
+    private var visibleQuickPresets: [Int] {
+        Array(uniqueQuickPresets.prefix(compact ? 3 : 4))
+    }
+
+    private var panelCornerRadius: CGFloat {
+        compact ? 13 : 16
+    }
+
     var body: some View {
         VStack(spacing: compact ? 7 : 10) {
-            HStack(spacing: compact ? 5 : 7) {
-                ForEach(HaloTimerHorizontalUnit.allCases) { unit in
-                    Button {
-                        select(unit)
-                    } label: {
-                        VStack(spacing: 1) {
-                            Text(unit.rawValue)
-                                .font(.system(size: compact ? 8 : 9, weight: .bold, design: .rounded))
-                                .tracking(0.8)
-                            Text(String(format: "%02d", value(for: unit)))
-                                .font(.system(size: compact ? 13 : 15, weight: .semibold, design: .rounded))
-                                .monospacedDigit()
-                        }
-                        .foregroundStyle(unit == selectedUnit ? Color.white : textColor.opacity(0.58))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, compact ? 5 : 7)
-                        .background(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(unit == selectedUnit ? accent.opacity(0.72) : textColor.opacity(0.045))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .stroke(
-                                    unit == selectedUnit ? accent.opacity(0.82) : textColor.opacity(0.06),
-                                    lineWidth: 0.8
-                                )
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Text(durationLabel)
-                    .font(.system(size: compact ? 11 : 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(textColor.opacity(0.52))
-                    .padding(.leading, compact ? 2 : 5)
-                    .lineLimit(1)
-            }
-
+            unitSelector
             horizontalScrubber
-
-            HStack(spacing: 6) {
-                ForEach(Array(uniqueQuickPresets.prefix(compact ? 3 : 4)), id: .self) { preset in
-                    Button {
-                        applyPreset(preset)
-                    } label: {
-                        Text("\(preset)m")
-                            .font(.system(size: compact ? 8 : 9, weight: .semibold, design: .rounded))
-                            .padding(.horizontal, compact ? 7 : 9)
-                            .padding(.vertical, compact ? 4 : 5)
-                            .background(textColor.opacity(0.045), in: Capsule(style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Spacer(minLength: 6)
-
-                Button {
-                    guard duration >= 1 else { return }
-                    NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
-                    onStart(duration)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: compact ? 8 : 9, weight: .bold))
-                        Text(duration >= 1 ? "Start" : "Set time")
-                            .font(.system(size: compact ? 9 : 10, weight: .semibold, design: .rounded))
-                    }
-                    .foregroundStyle(duration >= 1 ? Color.white : textColor.opacity(0.35))
-                    .padding(.horizontal, compact ? 9 : 12)
-                    .padding(.vertical, compact ? 5 : 6)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(duration >= 1 ? accent.opacity(0.82) : textColor.opacity(0.045))
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(duration < 1)
-                .keyboardShortcut(.defaultAction)
-            }
+            actionRow
         }
         .padding(compact ? 8 : 10)
-        .background(
-            RoundedRectangle(cornerRadius: compact ? 13 : 16, style: .continuous)
-                .fill(Color.black.opacity(0.10))
-                .overlay(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.04), accent.opacity(0.02), Color.clear],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: compact ? 13 : 16, style: .continuous))
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: compact ? 13 : 16, style: .continuous)
-                .stroke(Color.white.opacity(0.07), lineWidth: 0.8)
-        )
+        .background(panelBackground)
+        .overlay(panelOutline)
         .accessibilityElement(children: .contain)
+    }
+
+    private var unitSelector: some View {
+        HStack(spacing: compact ? 5 : 7) {
+            ForEach(HaloTimerHorizontalUnit.allCases) { unit in
+                unitButton(unit)
+            }
+
+            Text(durationLabel)
+                .font(durationLabelFont)
+                .foregroundStyle(textColor.opacity(0.52))
+                .padding(.leading, compact ? 2 : 5)
+                .lineLimit(1)
+        }
+    }
+
+    private var durationLabelFont: Font {
+        .system(
+            size: compact ? 11 : 12,
+            weight: .semibold,
+            design: .monospaced
+        )
+    }
+
+    private func unitButton(_ unit: HaloTimerHorizontalUnit) -> some View {
+        let selected = unit == selectedUnit
+        let foreground = selected ? Color.white : textColor.opacity(0.58)
+        let fill = selected ? accent.opacity(0.72) : textColor.opacity(0.045)
+        let stroke = selected ? accent.opacity(0.82) : textColor.opacity(0.06)
+        let unitValue = value(for: unit)
+
+        return Button {
+            select(unit)
+        } label: {
+            VStack(spacing: 1) {
+                Text(unit.rawValue)
+                    .font(.system(
+                        size: compact ? 8 : 9,
+                        weight: .bold,
+                        design: .rounded
+                    ))
+                    .tracking(0.8)
+
+                Text(String(format: "%02d", unitValue))
+                    .font(.system(
+                        size: compact ? 13 : 15,
+                        weight: .semibold,
+                        design: .rounded
+                    ))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(foreground)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, compact ? 5 : 7)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(fill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(stroke, lineWidth: 0.8)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: 6) {
+            ForEach(visibleQuickPresets, id: \.self) { preset in
+                presetButton(preset)
+            }
+
+            Spacer(minLength: 6)
+
+            startButton
+        }
+    }
+
+    private func presetButton(_ preset: Int) -> some View {
+        Button {
+            applyPreset(preset)
+        } label: {
+            Text("\(preset)m")
+                .font(.system(
+                    size: compact ? 8 : 9,
+                    weight: .semibold,
+                    design: .rounded
+                ))
+                .padding(.horizontal, compact ? 7 : 9)
+                .padding(.vertical, compact ? 4 : 5)
+                .background(
+                    textColor.opacity(0.045),
+                    in: Capsule(style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var startButton: some View {
+        let enabled = duration >= 1
+        let foreground = enabled ? Color.white : textColor.opacity(0.35)
+        let fill = enabled ? accent.opacity(0.82) : textColor.opacity(0.045)
+
+        return Button {
+            guard enabled else { return }
+            NSHapticFeedbackManager.defaultPerformer.perform(
+                .generic,
+                performanceTime: .now
+            )
+            onStart(duration)
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "play.fill")
+                    .font(.system(
+                        size: compact ? 8 : 9,
+                        weight: .bold
+                    ))
+
+                Text(enabled ? "Start" : "Set time")
+                    .font(.system(
+                        size: compact ? 9 : 10,
+                        weight: .semibold,
+                        design: .rounded
+                    ))
+            }
+            .foregroundStyle(foreground)
+            .padding(.horizontal, compact ? 9 : 12)
+            .padding(.vertical, compact ? 5 : 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(fill)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .keyboardShortcut(.defaultAction)
+    }
+
+    private var panelBackground: some View {
+        let shape = RoundedRectangle(
+            cornerRadius: panelCornerRadius,
+            style: .continuous
+        )
+
+        return shape
+            .fill(Color.black.opacity(0.10))
+            .overlay(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.04),
+                        accent.opacity(0.02),
+                        Color.clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(shape)
+            )
+    }
+
+    private var panelOutline: some View {
+        RoundedRectangle(
+            cornerRadius: panelCornerRadius,
+            style: .continuous
+        )
+        .stroke(Color.white.opacity(0.07), lineWidth: 0.8)
     }
 
     private var horizontalScrubber: some View {
@@ -410,81 +494,108 @@ struct HaloTimerHorizontalDurationComposer: View {
 
             HStack(spacing: 0) {
                 ForEach(-4...4, id: \.self) { offset in
-                    let value = displayedValue(offset: offset)
-                    VStack(spacing: 3) {
-                        Capsule(style: .continuous)
-                            .fill(
-                                offset == 0
-                                    ? accent.opacity(0.95)
-                                    : textColor.opacity(abs(offset) == 1 ? 0.28 : 0.14)
-                            )
-                            .frame(width: offset == 0 ? 2 : 1, height: offset == 0 ? 12 : 7)
-
-                        Text(String(format: "%02d", value))
-                            .font(.system(
-                                size: offset == 0 ? (compact ? 14 : 17) : (compact ? 8 : 9),
-                                weight: offset == 0 ? .bold : .medium,
-                                design: .rounded
-                            ))
-                            .monospacedDigit()
-                            .foregroundStyle(
-                                offset == 0
-                                    ? textColor.opacity(0.98)
-                                    : textColor.opacity(abs(offset) == 1 ? 0.42 : 0.18)
-                            )
-                    }
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        guard offset != 0 else { return }
-                        setActiveValue(value)
-                    }
+                    scrubberTick(offset: offset)
                 }
             }
 
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .stroke(accent.opacity(0.28), lineWidth: 0.8)
-                .frame(width: compact ? 42 : 50, height: compact ? 38 : 44)
+                .frame(
+                    width: compact ? 42 : 50,
+                    height: compact ? 38 : 44
+                )
                 .allowsHitTesting(false)
         }
         .frame(maxWidth: .infinity)
         .frame(height: compact ? 44 : 50)
         .contentShape(Rectangle())
-        .animation(.spring(response: 0.20, dampingFraction: 0.86), value: activeValue)
-        .background(
-            HaloTimerHorizontalScrollCapture { step in
-                adjustActive(by: step)
-            }
-            .allowsHitTesting(true)
+        .animation(
+            .spring(response: 0.20, dampingFraction: 0.86),
+            value: activeValue
         )
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 3)
-                .onChanged { gesture in
-                    let delta = gesture.translation.width - lastDragTranslation
-                    lastDragTranslation = gesture.translation.width
-                    dragAccumulator += delta
-                    let threshold: CGFloat = compact ? 12 : 15
-
-                    while abs(dragAccumulator) >= threshold {
-                        adjustActive(by: dragAccumulator < 0 ? 1 : -1)
-                        dragAccumulator += dragAccumulator < 0 ? threshold : -threshold
-                    }
-                }
-                .onEnded { _ in
-                    dragAccumulator = 0
-                    lastDragTranslation = 0
-                }
-        )
+        .background(horizontalScrollCapture)
+        .simultaneousGesture(horizontalDragGesture)
         .help("Scroll sideways or drag to change \(selectedUnit.rawValue)")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(selectedUnit.rawValue) value")
         .accessibilityValue("\(activeValue)")
         .accessibilityAdjustableAction { direction in
             switch direction {
-            case .increment: adjustActive(by: 1)
-            case .decrement: adjustActive(by: -1)
-            @unknown default: break
+            case .increment:
+                adjustActive(by: 1)
+            case .decrement:
+                adjustActive(by: -1)
+            @unknown default:
+                break
             }
+        }
+    }
+
+    private func scrubberTick(offset: Int) -> some View {
+        let displayed = displayedValue(offset: offset)
+        let isCenter = offset == 0
+        let nearCenter = abs(offset) == 1
+        let tickOpacity = isCenter ? 0.95 : (nearCenter ? 0.28 : 0.14)
+        let textOpacity = isCenter ? 0.98 : (nearCenter ? 0.42 : 0.18)
+
+        return VStack(spacing: 3) {
+            Capsule(style: .continuous)
+                .fill(
+                    isCenter
+                        ? accent.opacity(tickOpacity)
+                        : textColor.opacity(tickOpacity)
+                )
+                .frame(
+                    width: isCenter ? 2 : 1,
+                    height: isCenter ? 12 : 7
+                )
+
+            Text(String(format: "%02d", displayed))
+                .font(.system(
+                    size: isCenter
+                        ? (compact ? 14 : 17)
+                        : (compact ? 8 : 9),
+                    weight: isCenter ? .bold : .medium,
+                    design: .rounded
+                ))
+                .monospacedDigit()
+                .foregroundStyle(textColor.opacity(textOpacity))
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !isCenter else { return }
+            setActiveValue(displayed)
+        }
+    }
+
+    private var horizontalScrollCapture: some View {
+        HaloTimerHorizontalScrollCapture { step in
+            adjustActive(by: step)
+        }
+        .allowsHitTesting(true)
+    }
+
+    private var horizontalDragGesture: some Gesture {
+        DragGesture(minimumDistance: 3)
+            .onChanged { gesture in
+                updateDrag(with: gesture.translation.width)
+            }
+            .onEnded { _ in
+                dragAccumulator = 0
+                lastDragTranslation = 0
+            }
+    }
+
+    private func updateDrag(with translation: CGFloat) {
+        let delta = translation - lastDragTranslation
+        lastDragTranslation = translation
+        dragAccumulator += delta
+
+        let threshold: CGFloat = compact ? 12 : 15
+        while abs(dragAccumulator) >= threshold {
+            adjustActive(by: dragAccumulator < 0 ? 1 : -1)
+            dragAccumulator += dragAccumulator < 0 ? threshold : -threshold
         }
     }
 
