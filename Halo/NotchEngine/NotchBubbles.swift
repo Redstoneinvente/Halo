@@ -88,6 +88,40 @@ enum NotchBubblePriority: Int, Codable, Comparable, Hashable {
     }
 }
 
+enum NotchBubblePresentationMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case confirmation = "Confirmation"
+    case activeTask = "While Active"
+    case onDemand = "On Demand"
+    case pinned = "Pinned"
+    var id: String { rawValue }
+}
+
+enum MusicBubbleVisibility: String, Codable, CaseIterable, Identifiable, Hashable {
+    case whilePlaying = "While Playing"
+    case trackChanges = "Track Changes Only"
+    case pinned = "Pinned"
+    var id: String { rawValue }
+}
+
+struct NotchBubbleActivity: Identifiable, Equatable {
+    let id: String
+    let kind: NotchBubbleKind
+    let sourceIdentifier: String
+    let mode: NotchBubblePresentationMode
+    let priority: NotchBubblePriority
+    var title: String
+    var subtitle: String?
+    var icon: String
+    var progress: Double?
+    var updatedAt: Date
+    var expiresAt: Date?
+
+    var isExpired: Bool {
+        if let expiresAt { return expiresAt <= Date() }
+        return false
+    }
+}
+
 enum NotchBubbleAnimationPreset: String, Codable, CaseIterable, Identifiable, Hashable {
     case soft = "Soft"
     case fluid = "Fluid"
@@ -305,10 +339,10 @@ struct NotchBubbleSettings: Codable, Equatable {
     var shape: NotchBubbleShape = .glass
     var cornerRadius = 18.0
     var glassIntensity = 0.82
-    var animation: NotchBubbleAnimationPreset = .fluid
+    var animation: NotchBubbleAnimationPreset = .soft
     // Optional so settings saved before lifecycle timing existed still decode.
     var lifecycleDuration: Double?
-    var maximumBubbles = 3
+    var maximumBubbles = 1
 
     var showWhenClosed = true
     var showWhenOpen = true
@@ -317,8 +351,8 @@ struct NotchBubbleSettings: Codable, Equatable {
     var musicPersistent = false
     var timerEnabled = true
     var timerPersistent = false
-    var pixelPalEnabled = true
-    var pixelPalPersistent = true
+    var pixelPalEnabled = false
+    var pixelPalPersistent = false
 
     // Optional fields preserve decoding for existing Notch Bubble settings.
     var musicDisplayMode: MusicBubbleDisplayMode?
@@ -349,6 +383,23 @@ struct NotchBubbleSettings: Codable, Equatable {
     var vinylDisplayMode: VinylBubbleDisplayMode?
     var pixelPalDisplayMode: PixelPalBubbleDisplayMode?
 
+    // Evidence-led behaviour/policy controls. Optional fields preserve existing settings.
+    var confirmationDuration: Double?
+    var completionDuration: Double?
+    var musicVisibility: MusicBubbleVisibility?
+    var audioFeedbackEnabled: Bool?
+    var brightnessFeedbackEnabled: Bool?
+    var powerFeedbackEnabled: Bool?
+    var deviceFeedbackEnabled: Bool?
+    var replaceHaloHUDFeedback: Bool?
+    var calendarLeadMinutes: Double?
+    var calendarPersistent: Bool?
+    var audioPersistent: Bool?
+    var systemPersistent: Bool?
+    var clipboardPersistent: Bool?
+    var showAutomaticInFullscreen: Bool?
+    var showConfirmationsInFullscreen: Bool?
+
     /// Per-provider appearance overrides. Missing entries inherit the global bubble defaults.
     var bubbleStyles: [String: NotchBubbleStyleOverride]?
 
@@ -364,6 +415,15 @@ struct NotchBubbleSettings: Codable, Equatable {
         value.glassIntensity = min(1, max(0.15, glassIntensity.isFinite ? glassIntensity : 0.82))
         if let lifecycleDuration {
             value.lifecycleDuration = min(1.5, max(0.10, lifecycleDuration.isFinite ? lifecycleDuration : 0.28))
+        }
+        if let confirmationDuration {
+            value.confirmationDuration = min(8, max(0.5, confirmationDuration.isFinite ? confirmationDuration : 1.6))
+        }
+        if let completionDuration {
+            value.completionDuration = min(10, max(1, completionDuration.isFinite ? completionDuration : 4.0))
+        }
+        if let calendarLeadMinutes {
+            value.calendarLeadMinutes = min(120, max(1, calendarLeadMinutes.isFinite ? calendarLeadMinutes : 15))
         }
         if let musicArtworkZoom {
             value.musicArtworkZoom = min(1.8, max(1.0, musicArtworkZoom.isFinite ? musicArtworkZoom : 1.0))
@@ -420,6 +480,39 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedVinylDisplayMode: VinylBubbleDisplayMode { vinylDisplayMode ?? .fullRecord }
     var resolvedPixelPalDisplayMode: PixelPalBubbleDisplayMode { pixelPalDisplayMode ?? .full }
 
+    var resolvedConfirmationDuration: Double { min(8, max(0.5, confirmationDuration ?? 1.6)) }
+    var resolvedCompletionDuration: Double { min(10, max(1, completionDuration ?? 4.0)) }
+    var resolvedMusicVisibility: MusicBubbleVisibility { musicVisibility ?? (musicPersistent ? .pinned : .whilePlaying) }
+    var resolvedAudioFeedbackEnabled: Bool { audioFeedbackEnabled ?? true }
+    var resolvedBrightnessFeedbackEnabled: Bool { brightnessFeedbackEnabled ?? true }
+    var resolvedPowerFeedbackEnabled: Bool { powerFeedbackEnabled ?? false }
+    var resolvedDeviceFeedbackEnabled: Bool { deviceFeedbackEnabled ?? false }
+    var resolvedReplaceHaloHUDFeedback: Bool { replaceHaloHUDFeedback ?? false }
+    var resolvedCalendarLeadMinutes: Double { min(120, max(1, calendarLeadMinutes ?? 15)) }
+    var resolvedCalendarPersistent: Bool { calendarPersistent ?? false }
+    var resolvedAudioPersistent: Bool { audioPersistent ?? false }
+    var resolvedSystemPersistent: Bool { systemPersistent ?? false }
+    var resolvedClipboardPersistent: Bool { clipboardPersistent ?? false }
+    var resolvedShowAutomaticInFullscreen: Bool { showAutomaticInFullscreen ?? false }
+    var resolvedShowConfirmationsInFullscreen: Bool { showConfirmationsInFullscreen ?? true }
+
+    func acceptsHUDEvent(_ kind: HaloHUDEventKind) -> Bool {
+        switch kind {
+        case .volume, .mute:
+            return resolvedAudioFeedbackEnabled
+        case .displayBrightness, .keyboardBrightness:
+            return resolvedBrightnessFeedbackEnabled
+        case .batteryStatus, .chargingState, .powerSourceChanged:
+            return resolvedPowerFeedbackEnabled
+        case .audioOutputChanged, .audioDeviceConnected:
+            return resolvedDeviceFeedbackEnabled
+        case .mediaChanged:
+            return musicEnabled && resolvedMusicVisibility == .trackChanges
+        default:
+            return false
+        }
+    }
+
     func styleOverride(for kind: NotchBubbleKind) -> NotchBubbleStyleOverride? {
         bubbleStyles?[kind.rawValue]?.normalized()
     }
@@ -446,6 +539,157 @@ struct NotchBubbleSettings: Codable, Equatable {
             animation: override?.animation ?? animation,
             lifecycleDuration: override?.lifecycleDuration ?? resolvedLifecycleDuration
         )
+    }
+}
+
+@MainActor
+final class NotchBubbleActivityCenter: ObservableObject {
+    static let shared = NotchBubbleActivityCenter()
+
+    @Published private(set) var transientActivities: [String: NotchBubbleActivity] = [:]
+    @Published private(set) var suppressedKinds: Set<NotchBubbleKind> = []
+
+    private var expiryTasks: [String: Task<Void, Never>] = [:]
+
+    private init() {}
+
+    func publishHUD(_ event: HaloHUDEvent, settings: NotchBubbleSettings) {
+        guard settings.acceptsHUDEvent(event.kind),
+              let activity = Self.activity(from: event, settings: settings) else { return }
+
+        suppressedKinds.remove(activity.kind)
+        transientActivities[activity.id] = activity
+        scheduleExpiry(for: activity)
+    }
+
+    func dismiss(kind: NotchBubbleKind) {
+        suppressedKinds.insert(kind)
+        let ids = transientActivities.values.filter { $0.kind == kind }.map(\.id)
+        for id in ids {
+            expiryTasks[id]?.cancel()
+            expiryTasks.removeValue(forKey: id)
+            transientActivities.removeValue(forKey: id)
+        }
+    }
+
+    func clearDismissal(kind: NotchBubbleKind) {
+        suppressedKinds.remove(kind)
+    }
+
+    func currentActivity(for kind: NotchBubbleKind) -> NotchBubbleActivity? {
+        transientActivities.values
+            .filter { $0.kind == kind && !$0.isExpired }
+            .sorted {
+                if $0.priority != $1.priority { return $0.priority > $1.priority }
+                return $0.updatedAt > $1.updatedAt
+            }
+            .first
+    }
+
+    func activeTransientActivities() -> [NotchBubbleActivity] {
+        transientActivities.values.filter { !$0.isExpired }
+    }
+
+    private func scheduleExpiry(for activity: NotchBubbleActivity) {
+        expiryTasks[activity.id]?.cancel()
+        guard let expiresAt = activity.expiresAt else { return }
+        let delay = max(0.05, expiresAt.timeIntervalSinceNow)
+        expiryTasks[activity.id] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self,
+                      self.transientActivities[activity.id]?.updatedAt == activity.updatedAt else { return }
+                self.transientActivities.removeValue(forKey: activity.id)
+                self.expiryTasks.removeValue(forKey: activity.id)
+            }
+        }
+    }
+
+    private static func activity(from event: HaloHUDEvent, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
+        let now = Date()
+        let duration = settings.resolvedConfirmationDuration
+        let expiry = now.addingTimeInterval(duration)
+
+        switch event.kind {
+        case .volume, .mute:
+            return NotchBubbleActivity(
+                id: "confirmation.audio",
+                kind: .audio,
+                sourceIdentifier: "system.audio",
+                mode: .confirmation,
+                priority: .urgent,
+                title: event.primaryText,
+                subtitle: event.secondaryText,
+                icon: event.icon,
+                progress: event.progress,
+                updatedAt: now,
+                expiresAt: expiry
+            )
+
+        case .displayBrightness, .keyboardBrightness:
+            return NotchBubbleActivity(
+                id: "confirmation.systemBrightness",
+                kind: .system,
+                sourceIdentifier: event.kind.rawValue,
+                mode: .confirmation,
+                priority: .urgent,
+                title: event.primaryText,
+                subtitle: event.kind == .keyboardBrightness ? "Keyboard" : "Display",
+                icon: event.icon,
+                progress: event.progress,
+                updatedAt: now,
+                expiresAt: expiry
+            )
+
+        case .batteryStatus, .chargingState, .powerSourceChanged:
+            return NotchBubbleActivity(
+                id: "confirmation.power",
+                kind: .system,
+                sourceIdentifier: "system.power",
+                mode: .confirmation,
+                priority: .important,
+                title: event.primaryText,
+                subtitle: event.secondaryText,
+                icon: event.icon,
+                progress: event.progress,
+                updatedAt: now,
+                expiresAt: expiry
+            )
+
+        case .audioOutputChanged, .audioDeviceConnected:
+            return NotchBubbleActivity(
+                id: "confirmation.audioDevice",
+                kind: .audio,
+                sourceIdentifier: "system.audioDevice",
+                mode: .confirmation,
+                priority: .important,
+                title: event.primaryText,
+                subtitle: event.secondaryText ?? event.metadata["deviceName"],
+                icon: event.icon,
+                progress: event.progress,
+                updatedAt: now,
+                expiresAt: expiry
+            )
+
+        case .mediaChanged:
+            return NotchBubbleActivity(
+                id: "confirmation.music",
+                kind: .music,
+                sourceIdentifier: "media." + (event.metadata["bundleIdentifier"] ?? "current"),
+                mode: .confirmation,
+                priority: .normal,
+                title: event.primaryText,
+                subtitle: event.secondaryText,
+                icon: event.icon,
+                progress: event.progress,
+                updatedAt: now,
+                expiresAt: expiry
+            )
+
+        default:
+            return nil
+        }
     }
 }
 
@@ -486,51 +730,42 @@ final class NotchBubbleSettingsStore: ObservableObject {
     }
 }
 
-// MARK: - Providers and registry
+// MARK: - Providers, activity state and policy
 
 @MainActor
 protocol BubbleProvider {
     var kind: NotchBubbleKind { get }
-    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble?
+    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity?
 }
 
 @MainActor
 private struct MusicBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .music
 
-    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
-        guard settings.musicEnabled,
-              settings.musicPersistent || store.workspace.media.isPlaying else { return nil }
-        return NotchBubble(
-            kind: kind,
-            size: settings.resolvedStyle(for: kind).size,
-            shape: settings.resolvedStyle(for: kind).shape,
-            isPersistent: settings.musicPersistent,
-            timeout: nil,
-            priority: .normal
-        )
-    }
-}
+    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
+        guard settings.musicEnabled else { return nil }
+        let media = store.workspace.media
+        switch settings.resolvedMusicVisibility {
+        case .trackChanges:
+            return nil
+        case .whilePlaying:
+            guard media.isPlaying else { return nil }
+        case .pinned:
+            break
+        }
 
-@MainActor
-private struct PixelPalBubbleProvider: BubbleProvider {
-    let kind: NotchBubbleKind = .pixelPal
-
-    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
-        let contextual = HaloPixelPalStore.shared.reaction != nil ||
-            store.workspace.media.isPlaying ||
-            store.deadline != nil ||
-            store.pausedSeconds > 0 ||
-            store.finished
-        guard settings.pixelPalEnabled,
-              settings.pixelPalPersistent || contextual else { return nil }
-        return NotchBubble(
+        return NotchBubbleActivity(
+            id: "media.nowPlaying",
             kind: kind,
-            size: settings.resolvedStyle(for: kind).size,
-            shape: settings.resolvedStyle(for: kind).shape,
-            isPersistent: settings.pixelPalPersistent,
-            timeout: nil,
-            priority: .background
+            sourceIdentifier: media.connectedApp ?? "system.media",
+            mode: settings.resolvedMusicVisibility == .pinned ? .pinned : .activeTask,
+            priority: media.isPlaying ? .normal : .background,
+            title: media.title,
+            subtitle: media.artist,
+            icon: "music.note",
+            progress: media.duration > 0 ? min(1, max(0, media.position / media.duration)) : nil,
+            updatedAt: Date(),
+            expiresAt: nil
         )
     }
 }
@@ -539,16 +774,124 @@ private struct PixelPalBubbleProvider: BubbleProvider {
 private struct TimerBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .timer
 
-    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
-        let active = store.deadline != nil || store.pausedSeconds > 0 || store.finished
-        guard settings.timerEnabled, settings.timerPersistent || active else { return nil }
-        return NotchBubble(
+    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
+        let active = store.deadline != nil || store.pausedSeconds > 0
+        guard settings.timerEnabled, settings.timerPersistent || active || store.finished else { return nil }
+        let mode: NotchBubblePresentationMode = settings.timerPersistent && !active && !store.finished ? .pinned : .activeTask
+        return NotchBubbleActivity(
+            id: "timer.primary",
             kind: kind,
-            size: settings.resolvedStyle(for: kind).size,
-            shape: settings.resolvedStyle(for: kind).shape,
-            isPersistent: settings.timerPersistent,
-            timeout: nil,
-            priority: store.finished ? .urgent : (active ? .important : .normal)
+            sourceIdentifier: "halo.timer",
+            mode: mode,
+            priority: store.finished ? .urgent : (active ? .important : .normal),
+            title: store.finished ? "Timer complete" : "Timer",
+            subtitle: nil,
+            icon: store.finished ? "checkmark.circle.fill" : "timer",
+            progress: nil,
+            updatedAt: Date(),
+            expiresAt: store.finished && !settings.timerPersistent
+                ? Date().addingTimeInterval(settings.resolvedCompletionDuration)
+                : nil
+        )
+    }
+}
+
+@MainActor
+private struct CalendarBubbleProvider: BubbleProvider {
+    let kind: NotchBubbleKind = .calendar
+
+    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
+        guard settings.resolvedCalendarEnabled else { return nil }
+        let now = Date()
+        let lead = settings.resolvedCalendarLeadMinutes * 60
+
+        guard let event = store.workspace.calendar.upcomingEvents.first(where: {
+            $0.endDate > now && ($0.startDate.timeIntervalSince(now) <= lead || settings.resolvedCalendarPersistent)
+        }) else { return nil }
+
+        let seconds = max(0, event.startDate.timeIntervalSince(now))
+        let priority: NotchBubblePriority = seconds <= 5 * 60 ? .important : .normal
+        return NotchBubbleActivity(
+            id: "calendar." + event.eventIdentifier,
+            kind: kind,
+            sourceIdentifier: event.calendar.calendarIdentifier,
+            mode: settings.resolvedCalendarPersistent ? .pinned : .activeTask,
+            priority: priority,
+            title: event.title ?? "Upcoming event",
+            subtitle: seconds > 0 ? "Starts in \(Int(ceil(seconds / 60))) min" : "Now",
+            icon: "calendar.badge.clock",
+            progress: nil,
+            updatedAt: now,
+            expiresAt: event.endDate
+        )
+    }
+}
+
+@MainActor
+private struct StopwatchBubbleProvider: BubbleProvider {
+    let kind: NotchBubbleKind = .stopwatch
+    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
+        let active = store.workspace.stopwatchStart != nil || store.workspace.stopwatchElapsed > 0
+        guard settings.resolvedStopwatchEnabled,
+              settings.resolvedStopwatchPersistent || active else { return nil }
+        return NotchBubbleActivity(
+            id: "stopwatch.primary",
+            kind: kind,
+            sourceIdentifier: "halo.stopwatch",
+            mode: settings.resolvedStopwatchPersistent ? .pinned : .activeTask,
+            priority: active ? .important : .background,
+            title: "Stopwatch",
+            subtitle: nil,
+            icon: "stopwatch.fill",
+            progress: nil,
+            updatedAt: Date(),
+            expiresAt: nil
+        )
+    }
+}
+
+@MainActor
+private struct VinylBubbleProvider: BubbleProvider {
+    let kind: NotchBubbleKind = .vinyl
+    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
+        let active = store.workspace.media.isPlaying && store.workspace.media.hasNowPlayingPresentation
+        guard settings.resolvedVinylEnabled,
+              settings.resolvedVinylPersistent || active else { return nil }
+        return NotchBubbleActivity(
+            id: "media.vinyl",
+            kind: kind,
+            sourceIdentifier: store.workspace.media.connectedApp ?? "system.media",
+            mode: settings.resolvedVinylPersistent ? .pinned : .activeTask,
+            priority: active ? .normal : .background,
+            title: store.workspace.media.title,
+            subtitle: store.workspace.media.artist,
+            icon: "record.circle.fill",
+            progress: nil,
+            updatedAt: Date(),
+            expiresAt: nil
+        )
+    }
+}
+
+@MainActor
+private struct PixelPalBubbleProvider: BubbleProvider {
+    let kind: NotchBubbleKind = .pixelPal
+    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
+        guard settings.pixelPalEnabled else { return nil }
+        let contextual = HaloPixelPalStore.shared.reaction != nil
+        guard settings.pixelPalPersistent || contextual else { return nil }
+        return NotchBubbleActivity(
+            id: "pixelPal",
+            kind: kind,
+            sourceIdentifier: "halo.pixelPal",
+            mode: settings.pixelPalPersistent ? .pinned : .activeTask,
+            priority: .background,
+            title: "Pixel Pal",
+            subtitle: nil,
+            icon: "face.smiling",
+            progress: nil,
+            updatedAt: Date(),
+            expiresAt: nil
         )
     }
 }
@@ -556,81 +899,128 @@ private struct TimerBubbleProvider: BubbleProvider {
 @MainActor
 private struct ClockBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .clock
-    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
+    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
         guard settings.resolvedClockEnabled else { return nil }
-        return NotchBubble(kind: kind, size: settings.resolvedStyle(for: kind).size, shape: settings.resolvedStyle(for: kind).shape,
-                           isPersistent: true, timeout: nil, priority: .background)
-    }
-}
-
-@MainActor
-private struct StopwatchBubbleProvider: BubbleProvider {
-    let kind: NotchBubbleKind = .stopwatch
-    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
-        let active = store.workspace.stopwatchStart != nil || store.workspace.stopwatchElapsed > 0
-        guard settings.resolvedStopwatchEnabled,
-              settings.resolvedStopwatchPersistent || active else { return nil }
-        return NotchBubble(kind: kind, size: settings.resolvedStyle(for: kind).size, shape: settings.resolvedStyle(for: kind).shape,
-                           isPersistent: settings.resolvedStopwatchPersistent, timeout: nil,
-                           priority: active ? .important : .normal)
+        return NotchBubbleActivity(
+            id: "clock",
+            kind: kind,
+            sourceIdentifier: "system.clock",
+            mode: .pinned,
+            priority: .background,
+            title: "Clock",
+            subtitle: nil,
+            icon: "clock.fill",
+            progress: nil,
+            updatedAt: Date(),
+            expiresAt: nil
+        )
     }
 }
 
 @MainActor
 private struct SystemBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .system
-    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
-        guard settings.resolvedSystemEnabled else { return nil }
-        return NotchBubble(kind: kind, size: settings.resolvedStyle(for: kind).size, shape: settings.resolvedStyle(for: kind).shape,
-                           isPersistent: true, timeout: nil, priority: .background)
+    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
+        guard settings.resolvedSystemEnabled, settings.resolvedSystemPersistent else { return nil }
+        return NotchBubbleActivity(
+            id: "system.stats",
+            kind: kind,
+            sourceIdentifier: "system.metrics",
+            mode: .pinned,
+            priority: .background,
+            title: settings.resolvedSystemMetric.rawValue,
+            subtitle: nil,
+            icon: kind.symbol,
+            progress: nil,
+            updatedAt: Date(),
+            expiresAt: nil
+        )
     }
 }
 
 @MainActor
 private struct ClipboardBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .clipboard
-    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
-        guard settings.resolvedClipboardEnabled else { return nil }
-        return NotchBubble(kind: kind, size: settings.resolvedStyle(for: kind).size, shape: settings.resolvedStyle(for: kind).shape,
-                           isPersistent: true, timeout: nil, priority: .background)
-    }
-}
-
-@MainActor
-private struct CalendarBubbleProvider: BubbleProvider {
-    let kind: NotchBubbleKind = .calendar
-    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
-        guard settings.resolvedCalendarEnabled else { return nil }
-        return NotchBubble(kind: kind, size: settings.resolvedStyle(for: kind).size, shape: settings.resolvedStyle(for: kind).shape,
-                           isPersistent: true, timeout: nil, priority: .background)
+    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
+        guard settings.resolvedClipboardEnabled, settings.resolvedClipboardPersistent else { return nil }
+        return NotchBubbleActivity(
+            id: "clipboard",
+            kind: kind,
+            sourceIdentifier: "system.clipboard",
+            mode: .pinned,
+            priority: .background,
+            title: "Clipboard",
+            subtitle: nil,
+            icon: kind.symbol,
+            progress: nil,
+            updatedAt: Date(),
+            expiresAt: nil
+        )
     }
 }
 
 @MainActor
 private struct AudioBubbleProvider: BubbleProvider {
     let kind: NotchBubbleKind = .audio
-    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
-        guard settings.resolvedAudioEnabled else { return nil }
-        return NotchBubble(kind: kind, size: settings.resolvedStyle(for: kind).size, shape: settings.resolvedStyle(for: kind).shape,
-                           isPersistent: true, timeout: nil, priority: .background)
+    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
+        guard settings.resolvedAudioEnabled, settings.resolvedAudioPersistent else { return nil }
+        return NotchBubbleActivity(
+            id: "audio.controls",
+            kind: kind,
+            sourceIdentifier: "system.audio",
+            mode: .pinned,
+            priority: .background,
+            title: "Audio",
+            subtitle: nil,
+            icon: kind.symbol,
+            progress: Double(store.workspace.audio.volume),
+            updatedAt: Date(),
+            expiresAt: nil
+        )
     }
 }
 
-@MainActor
-private struct VinylBubbleProvider: BubbleProvider {
-    let kind: NotchBubbleKind = .vinyl
-    func bubble(store: AppStore, settings: NotchBubbleSettings) -> NotchBubble? {
-        let active = store.workspace.media.isPlaying && store.workspace.media.hasNowPlayingPresentation
-        guard settings.resolvedVinylEnabled,
-              settings.resolvedVinylPersistent || active else { return nil }
-        return NotchBubble(
-            kind: kind,
-            size: settings.resolvedStyle(for: kind).size,
-            shape: settings.resolvedStyle(for: kind).shape,
-            isPersistent: settings.resolvedVinylPersistent,
-            timeout: nil,
-            priority: active ? .normal : .background
-        )
+struct NotchBubblePolicyEngine {
+    func select(
+        _ activities: [NotchBubbleActivity],
+        settings: NotchBubbleSettings,
+        surfaceExpanded: Bool,
+        fullscreen: Bool,
+        suppressedKinds: Set<NotchBubbleKind>
+    ) -> [NotchBubbleActivity] {
+        let now = Date()
+        let visible = activities.filter { activity in
+            guard !suppressedKinds.contains(activity.kind) else { return false }
+            if let expiresAt = activity.expiresAt, expiresAt <= now { return false }
+            if fullscreen {
+                if activity.mode == .confirmation {
+                    return settings.resolvedShowConfirmationsInFullscreen
+                }
+                return settings.resolvedShowAutomaticInFullscreen || activity.mode == .pinned
+            }
+            return true
+        }
+
+        let deduplicated = Dictionary(grouping: visible, by: \.kind).compactMap { _, values in
+            values.sorted {
+                if $0.priority != $1.priority { return $0.priority > $1.priority }
+                return $0.updatedAt > $1.updatedAt
+            }.first
+        }
+
+        return deduplicated
+            .sorted {
+                if $0.priority != $1.priority { return $0.priority > $1.priority }
+                if $0.mode != $1.mode {
+                    let rank: [NotchBubblePresentationMode: Int] = [
+                        .confirmation: 3, .activeTask: 2, .pinned: 1, .onDemand: 0
+                    ]
+                    return rank[$0.mode, default: 0] > rank[$1.mode, default: 0]
+                }
+                return $0.updatedAt > $1.updatedAt
+            }
+            .prefix(settings.maximumBubbles)
+            .map { $0 }
     }
 }
 
@@ -638,46 +1028,46 @@ private struct VinylBubbleProvider: BubbleProvider {
 struct BubbleRegistry {
     private let providers: [any BubbleProvider] = [
         MusicBubbleProvider(),
-        PixelPalBubbleProvider(),
         TimerBubbleProvider(),
-        ClockBubbleProvider(),
+        CalendarBubbleProvider(),
         StopwatchBubbleProvider(),
+        VinylBubbleProvider(),
+        PixelPalBubbleProvider(),
+        ClockBubbleProvider(),
         SystemBubbleProvider(),
         ClipboardBubbleProvider(),
-        CalendarBubbleProvider(),
-        AudioBubbleProvider(),
-        VinylBubbleProvider()
+        AudioBubbleProvider()
     ]
+    private let policy = NotchBubblePolicyEngine()
 
-    func bubbles(store: AppStore, settings: NotchBubbleSettings) -> [NotchBubble] {
-        let candidates = providers.compactMap { $0.bubble(store: store, settings: settings) }
-        let maximum = settings.maximumBubbles
-        guard candidates.count > maximum else { return candidates }
+    func bubbles(
+        store: AppStore,
+        settings: NotchBubbleSettings,
+        runtime: NotchBubbleActivityCenter,
+        surfaceExpanded: Bool
+    ) -> [NotchBubble] {
+        var activities = providers.compactMap { $0.activity(store: store, settings: settings) }
+        activities.append(contentsOf: runtime.activeTransientActivities())
 
-        let selected = Set(
-            candidates
-                .sorted {
-                    if $0.priority != $1.priority { return $0.priority > $1.priority }
-                    return providerOrder($0.kind) < providerOrder($1.kind)
-                }
-                .prefix(maximum)
-                .map(\.kind)
+        let fullscreen = NSApp.currentSystemPresentationOptions.contains(.fullScreen)
+        let selected = policy.select(
+            activities,
+            settings: settings,
+            surfaceExpanded: surfaceExpanded,
+            fullscreen: fullscreen,
+            suppressedKinds: runtime.suppressedKinds
         )
-        return candidates.filter { selected.contains($0.kind) }
-    }
 
-    private func providerOrder(_ kind: NotchBubbleKind) -> Int {
-        switch kind {
-        case .music: return 0
-        case .timer: return 1
-        case .pixelPal: return 2
-        case .stopwatch: return 3
-        case .audio: return 4
-        case .calendar: return 5
-        case .clipboard: return 6
-        case .system: return 7
-        case .clock: return 8
-        case .vinyl: return 9
+        return selected.map { activity in
+            let style = settings.resolvedStyle(for: activity.kind)
+            return NotchBubble(
+                kind: activity.kind,
+                size: style.size,
+                shape: style.shape,
+                isPersistent: activity.mode == .pinned,
+                timeout: activity.expiresAt?.timeIntervalSinceNow,
+                priority: activity.priority
+            )
         }
     }
 }
