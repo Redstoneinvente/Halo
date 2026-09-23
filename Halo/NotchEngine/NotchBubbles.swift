@@ -1066,16 +1066,24 @@ private struct NotchBubbleView: View {
         media.perform(command, app: preferred)
     }
 
-    private var targetModule: ModuleID {
-        switch kind {
-        case .music: return .media
-        case .timer: return .timer
-        case .pixelPal: return .pet
-        }
-    }
-
     private func openNotch() {
-        surfaceState.openFocusedModule(targetModule)
+        switch kind {
+        case .music:
+            let layout = surfaceState.layoutOverride ?? workspace.effectiveLayout
+            let musicCI = layout.contextMusic ?? ContextMusicOptions()
+            let canOpenMusicCI =
+                musicCI.enabled &&
+                media.isPlaying &&
+                media.hasNowPlayingPresentation
+
+            surfaceState.openExplicitly(canOpenMusicCI ? .music : .normal)
+
+        case .timer, .pixelPal:
+            // These bubbles are shortcuts into the user's normal opened notch.
+            // They do not replace the dashboard with a focused widget.
+            surfaceState.openExplicitly(.normal)
+        }
+
         showingDetail = false
     }
 
