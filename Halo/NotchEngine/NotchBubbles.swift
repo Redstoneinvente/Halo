@@ -1841,6 +1841,7 @@ private final class NotchBubbleDisplayHost {
     private var commercialAccessGranted = false
     private var controllers: [NotchBubbleKind: BubbleWindowController] = [:]
     private var subscriptions = Set<AnyCancellable>()
+    private var lastCalendarActivityID: String?
 
     init(
         displayID: String,
@@ -1909,7 +1910,14 @@ private final class NotchBubbleDisplayHost {
         settingsStore.$settings
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .sink { [weak self] value in
+                guard let self else { return }
+                let settings = value.normalized()
+                if settings.resolvedCalendarEnabled, self.store.workspace.calendar.hasAccess {
+                    self.store.workspace.calendar.refresh()
+                }
+                self.refresh(animated: true)
+            }
             .store(in: &subscriptions)
 
         store.$deadline
@@ -2006,8 +2014,14 @@ private final class NotchBubbleDisplayHost {
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.activityCenter.clearDismissal(kind: .calendar)
-                self?.refresh(animated: true)
+                guard let self else { return }
+                let nextID = self.currentCalendarActivityIdentity()
+                if let previous = self.lastCalendarActivityID,
+                   previous != nextID {
+                    self.activityCenter.clearDismissal(kind: .calendar)
+                }
+                self.lastCalendarActivityID = nextID
+                self.refresh(animated: true)
             }
             .store(in: &subscriptions)
 
@@ -2022,6 +2036,19 @@ private final class NotchBubbleDisplayHost {
                 self.refresh(animated: false)
             }
             .store(in: &subscriptions)
+    }
+
+    private func currentCalendarActivityIdentity() -> String? {
+        let settings = settingsStore.settings.normalized()
+        guard settings.resolvedCalendarEnabled else { return nil }
+        let now = Date()
+        let lead = settings.resolvedCalendarLeadMinutes * 60
+        guard let event = store.workspace.calendar.upcomingEvents.first(where: {
+            $0.endDate > now &&
+            ($0.startDate.timeIntervalSince(now) <= lead || settings.resolvedCalendarPersistent)
+        }) else { return nil }
+        return event.eventIdentifier
+            ?? "\(event.startDate.timeIntervalSinceReferenceDate)-\(event.title ?? "event")"
     }
 
     private func refresh(animated: Bool, trackingSurface: Bool = false) {
@@ -2051,10 +2078,6 @@ private final class NotchBubbleDisplayHost {
             settings.resolvedAudioFeedbackEnabled || settings.resolvedBrightnessFeedbackEnabled {
             store.workspace.audio.refresh()
             store.workspace.system.refresh(detailed: settings.resolvedSystemPersistent)
-        }
-
-        if settings.resolvedCalendarEnabled, store.workspace.calendar.hasAccess {
-            store.workspace.calendar.refresh()
         }
 
         let bubbles = registry.bubbles(
@@ -3273,6 +3296,12 @@ private struct NotchBubbleView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    if let sourceName = connectedMediaAppName, media.isPlaying {
+                        Label(sourceName, systemImage: "app.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -3725,15 +3754,20 @@ private struct NotchBubbleView: View {
     }
 
     private func mediaCommand(_ command: String) {
-        if media.connectedApp == nil {
+        guard let sourceBundleID = media.connectedApp, !sourceBundleID.isEmpty else {
             media.performSystem(command)
             return
         }
 
-        let preferred = workspace.settings.mediaApp == WorkspaceStore.systemAudioSource
-            ? "com.apple.Music"
-            : workspace.settings.mediaApp
-        media.perform(command, app: preferred)
+        // The bubble must control the source it is displaying. Never show one app's
+        // metadata while dispatching play/pause/skip to a separately preferred player.
+        media.perform(command, app: sourceBundleID)
+    }
+
+    private var connectedMediaAppName: String? {
+        guard let bundleID = media.connectedApp, !bundleID.isEmpty else { return nil }
+        return NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .first?.localizedName ?? bundleID.split(separator: ".").last.map(String.init)
     }
 
     private func openNotch() {
