@@ -2381,9 +2381,30 @@ private struct NotchBubbleView: View {
             )
             .animation(hoverAnimation, value: hovering)
             .popover(isPresented: $showingDetail, arrowEdge: .top) {
-                detailView
-                    .padding(14)
-                    .frame(minWidth: detailWidth)
+                VStack(spacing: 10) {
+                    detailView
+                    Divider()
+                    HStack {
+                        Button("Dismiss for now") {
+                            activityCenter.dismiss(kind: kind)
+                            showingDetail = false
+                        }
+                        .buttonStyle(.borderless)
+
+                        Spacer()
+
+                        Button("Disable \(kind.title)") {
+                            disableBubbleKind()
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .font(.caption)
+                }
+                .padding(14)
+                .frame(minWidth: detailWidth)
+                .onExitCommand {
+                    showingDetail = false
+                }
             }
             .contextMenu {
                 Button("Dismiss for now") {
@@ -3910,6 +3931,9 @@ struct NotchBubbleSettingsView: View {
                 Text("2").tag(2)
                 Text("3").tag(3)
                 Text("5 · Advanced").tag(5)
+                Text("8 · Experimental").tag(8)
+                Text("12 · Experimental").tag(12)
+                Text("Unlimited · Experimental").tag(99)
             }
 
             LabeledContent("Confirmation duration") {
