@@ -1176,6 +1176,19 @@ private final class NotchBubbleDisplayHost {
             .sink { [weak self] _ in self?.refresh(animated: true) }
             .store(in: &subscriptions)
 
+        store.workspace.$stopwatchStart
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .store(in: &subscriptions)
+
+        store.workspace.$stopwatchElapsed
+            .map { $0 > 0.001 }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .store(in: &subscriptions)
+
         store.workspace.media.$isPlaying
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
@@ -1209,6 +1222,11 @@ private final class NotchBubbleDisplayHost {
             // music bubble it is worth requesting the same artwork source used elsewhere
             // in Halo. We never force-disable it here because other Halo surfaces may need it.
             store.workspace.media.setArtworkEnabled(true)
+        }
+
+        if settings.resolvedAudioEnabled || settings.resolvedSystemEnabled {
+            store.workspace.audio.refresh()
+            store.workspace.system.refresh(detailed: false)
         }
 
         let bubbles = registry.bubbles(store: store, settings: settings)
