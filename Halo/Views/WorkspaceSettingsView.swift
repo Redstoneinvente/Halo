@@ -386,7 +386,7 @@ struct SettingsView: View {
         case "Activation Sequence": ActivationSequenceSettingsPane()
         case "Widgets": WidgetSettingsView(layout: $workspace.settings.layout)
         case "Closed notch": ClosedNotchSettingsView(layout: $workspace.settings.layout, media: workspace.media, app: workspace.settings.mediaApp)
-        case "Notch Bubbles": NotchBubbleSettingsView()
+        case "Notch Bubbles": NotchBubbleSettingsView(store: store)
         case "Notch Ambient": NotchAmbientSettingsView(store: store, workspace: workspace)
         case "HUD": HaloHUDWorkspaceSettingsView(layout: $workspace.settings.layout, profileNames: workspace.settings.profiles.map(\.name))
         case "Modules":
