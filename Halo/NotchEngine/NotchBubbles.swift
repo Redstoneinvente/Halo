@@ -642,6 +642,30 @@ final class NotchBubbleActivityCenter: ObservableObject {
         transientActivities.values.filter { !$0.isExpired }
     }
 
+    func setInteracting(kind: NotchBubbleKind, interacting: Bool) {
+        let ids = transientActivities.values.filter { $0.kind == kind }.map(\.id)
+        guard !ids.isEmpty else { return }
+
+        if interacting {
+            for id in ids {
+                expiryTasks[id]?.cancel()
+                expiryTasks.removeValue(forKey: id)
+            }
+            return
+        }
+
+        let now = Date()
+        for id in ids {
+            guard var activity = transientActivities[id], activity.expiresAt != nil else { continue }
+            // Interaction protects the activity instead of letting it vanish under the pointer.
+            // Resume with a short readable grace period rather than replaying its entrance.
+            activity.updatedAt = now
+            activity.expiresAt = now.addingTimeInterval(1.2)
+            transientActivities[id] = activity
+            scheduleExpiry(for: activity)
+        }
+    }
+
     private func scheduleExpiry(for activity: NotchBubbleActivity) {
         expiryTasks[activity.id]?.cancel()
         guard let expiresAt = activity.expiresAt else { return }
@@ -861,10 +885,13 @@ private struct CalendarBubbleProvider: BubbleProvider {
 
         let seconds = max(0, event.startDate.timeIntervalSince(now))
         let priority: NotchBubblePriority = seconds <= 5 * 60 ? .important : .normal
+        let eventID = event.eventIdentifier
+            ?? "\(event.startDate.timeIntervalSinceReferenceDate)-\(event.title ?? "event")"
+        let calendarID = event.calendar?.calendarIdentifier ?? "calendar"
         return NotchBubbleActivity(
-            id: "calendar." + event.eventIdentifier,
+            id: "calendar." + eventID,
             kind: kind,
-            sourceIdentifier: event.calendar.calendarIdentifier,
+            sourceIdentifier: calendarID,
             mode: settings.resolvedCalendarPersistent ? .pinned : .activeTask,
             priority: priority,
             title: event.title ?? "Upcoming event",
@@ -1924,7 +1951,10 @@ private final class NotchBubbleDisplayHost {
         store.workspace.$stopwatchStart
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .sink { [weak self] _ in
+                self?.activityCenter.clearDismissal(kind: .stopwatch)
+                self?.refresh(animated: true)
+            }
             .store(in: &subscriptions)
 
         store.workspace.$stopwatchElapsed
@@ -1956,7 +1986,10 @@ private final class NotchBubbleDisplayHost {
 
         HaloPixelPalStore.shared.$reaction
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .sink { [weak self] _ in
+                self?.activityCenter.clearDismissal(kind: .pixelPal)
+                self?.refresh(animated: true)
+            }
             .store(in: &subscriptions)
 
         activityCenter.$transientActivities
@@ -1972,7 +2005,10 @@ private final class NotchBubbleDisplayHost {
         store.workspace.calendar.$calendarRevision
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .sink { [weak self] _ in
+                self?.activityCenter.clearDismissal(kind: .calendar)
+                self?.refresh(animated: true)
+            }
             .store(in: &subscriptions)
 
         Timer.publish(every: 30, on: .main, in: .common)
@@ -2251,7 +2287,10 @@ private struct NotchBubbleView: View {
             .overlay { bubbleBorder }
             .scaleEffect(hovering ? 1.07 : 1)
             .compositingGroup()
-            .onHover { hovering = $0 }
+            .onHover { value in
+                hovering = value
+                activityCenter.setInteracting(kind: kind, interacting: value)
+            }
             .simultaneousGesture(
                 TapGesture().onEnded {
                     handlePrimaryTap()
