@@ -2665,6 +2665,7 @@ struct SurfaceView: View {
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
     @ObservedObject private var integrationCI = IntegrationCIRuntime.shared
     @ObservedObject private var commercialSurfaceGate = HaloCommercialSurfaceGate.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var clipboardOpenedNotch = false
     @State private var integrationAutoOpeningSurface = false
     @State private var teleprompterActive = false
@@ -2704,6 +2705,49 @@ struct SurfaceView: View {
     private var theme: Theme { state.theme }
     private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.effectiveLayout }
     private var contextOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
+
+    private var trailerTransitionPresented: Bool {
+        workspace.trailerModeActive && workspace.trailerTransitionActive && !reduceMotion
+    }
+
+    private var trailerTransitionOpacity: Double {
+        guard trailerTransitionPresented else { return 1 }
+        switch workspace.trailerTransitionStyle {
+        case .fade: return 0.06
+        case .scale: return 0.16
+        case .lift: return 0.14
+        case .automatic: return 0.08
+        }
+    }
+
+    private var trailerTransitionScale: CGFloat {
+        guard trailerTransitionPresented else { return 1 }
+        switch workspace.trailerTransitionStyle {
+        case .scale: return 0.92
+        case .lift: return 0.985
+        case .fade, .automatic: return 1
+        }
+    }
+
+    private var trailerTransitionYOffset: CGFloat {
+        guard trailerTransitionPresented else { return 0 }
+        return workspace.trailerTransitionStyle == .lift ? -12 : 0
+    }
+
+    private var trailerTransitionBlur: CGFloat {
+        guard trailerTransitionPresented else { return 0 }
+        switch workspace.trailerTransitionStyle {
+        case .fade: return 1.5
+        case .scale: return 1
+        case .lift: return 1.25
+        case .automatic: return 1.5
+        }
+    }
+
+    private var trailerTransitionAnimation: Animation? {
+        guard !reduceMotion else { return nil }
+        return .easeInOut(duration: max(0.04, workspace.trailerTransitionDuration))
+    }
     private var bluetoothEligible: Bool {
         guard bluetoothCIEnabled else { return false }
         return (bluetoothShowOnChanges && bluetooth.lastEvent != nil) ||
@@ -3162,6 +3206,11 @@ struct SurfaceView: View {
         .contentShape(contour)
         .overlay { surfaceOverlayLayer }
         }
+        .opacity(trailerTransitionOpacity)
+        .scaleEffect(trailerTransitionScale, anchor: .top)
+        .offset(y: trailerTransitionYOffset)
+        .blur(radius: trailerTransitionBlur)
+        .animation(trailerTransitionAnimation, value: workspace.trailerTransitionActive)
         .foregroundStyle(.white).preferredColorScheme(.dark)
         .buttonStyle(.borderless)
         .contextMenu {
