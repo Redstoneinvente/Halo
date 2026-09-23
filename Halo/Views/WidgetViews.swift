@@ -2,6 +2,438 @@ import SwiftUI
 import AppKit
 import EventKit
 
+
+struct HaloTimerDurationComposer: View {
+    let accent: Color
+    let textColor: Color
+    let quickPresets: [Int]
+    let compact: Bool
+    let onStart: (TimeInterval) -> Void
+
+    @State private var hours: Int
+    @State private var minutes: Int
+    @State private var seconds: Int
+
+    init(
+        accent: Color,
+        textColor: Color,
+        quickPresets: [Int] = [5, 15, 25, 45],
+        initialMinutes: Int = 25,
+        compact: Bool = false,
+        onStart: @escaping (TimeInterval) -> Void
+    ) {
+        self.accent = accent
+        self.textColor = textColor
+        self.quickPresets = quickPresets
+        self.compact = compact
+        self.onStart = onStart
+
+        let total = min(359_999, max(0, initialMinutes * 60))
+        _hours = State(initialValue: total / 3600)
+        _minutes = State(initialValue: total / 60 % 60)
+        _seconds = State(initialValue: total % 60)
+    }
+
+    private var duration: TimeInterval {
+        TimeInterval(hours * 3600 + minutes * 60 + seconds)
+    }
+
+    private var durationText: String {
+        String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+
+    private var startLabel: String {
+        if hours > 0 {
+            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        }
+        if minutes > 0 {
+            return seconds > 0 ? "\(minutes)m \(seconds)s" : "\(minutes)m"
+        }
+        return "\(seconds)s"
+    }
+
+    var body: some View {
+        VStack(spacing: compact ? 9 : 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("CUSTOM DURATION")
+                        .font(.system(size: compact ? 8 : 9, weight: .bold, design: .rounded))
+                        .tracking(1.25)
+                        .foregroundStyle(textColor.opacity(0.48))
+                    Text(durationText)
+                        .font(.system(size: compact ? 17 : 21, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(textColor.opacity(0.94))
+                        .contentTransition(.numericText())
+                }
+
+                Spacer(minLength: 12)
+
+                Image(systemName: "dial.medium.fill")
+                    .font(.system(size: compact ? 17 : 20, weight: .medium))
+                    .foregroundStyle(accent)
+                    .padding(compact ? 7 : 8)
+                    .background(accent.opacity(0.10), in: Circle())
+            }
+
+            HStack(spacing: compact ? 6 : 8) {
+                HaloTimerWheelColumn(
+                    title: "HRS",
+                    value: $hours,
+                    range: 0...99,
+                    accent: accent,
+                    textColor: textColor,
+                    compact: compact
+                )
+
+                timerColon
+
+                HaloTimerWheelColumn(
+                    title: "MIN",
+                    value: $minutes,
+                    range: 0...59,
+                    accent: accent,
+                    textColor: textColor,
+                    compact: compact
+                )
+
+                timerColon
+
+                HaloTimerWheelColumn(
+                    title: "SEC",
+                    value: $seconds,
+                    range: 0...59,
+                    accent: accent,
+                    textColor: textColor,
+                    compact: compact
+                )
+            }
+
+            if !quickPresets.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(Array(quickPresets.prefix(compact ? 3 : 5)), id: \.self) { preset in
+                        Button {
+                            applyPreset(preset)
+                        } label: {
+                            Text("\(preset)m")
+                                .font(.system(size: compact ? 9 : 10, weight: .semibold, design: .rounded))
+                                .padding(.horizontal, compact ? 8 : 10)
+                                .padding(.vertical, compact ? 5 : 6)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(textColor.opacity(0.055))
+                                )
+                                .overlay(
+                                    Capsule(style: .continuous)
+                                        .stroke(textColor.opacity(0.08), lineWidth: 0.8)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+            }
+
+            Button {
+                guard duration >= 1 else { return }
+                NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+                onStart(duration)
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: compact ? 9 : 10, weight: .bold))
+                    Text(duration >= 1 ? "Start \(startLabel)" : "Choose a duration")
+                        .font(.system(size: compact ? 10 : 11, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(duration >= 1 ? Color.white : textColor.opacity(0.42))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, compact ? 7 : 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(
+                            duration >= 1
+                                ? LinearGradient(
+                                    colors: [accent.opacity(0.98), accent.opacity(0.70)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                                : LinearGradient(
+                                    colors: [textColor.opacity(0.06), textColor.opacity(0.04)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .stroke(Color.white.opacity(duration >= 1 ? 0.12 : 0.04), lineWidth: 0.8)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(duration < 1)
+            .keyboardShortcut(.defaultAction)
+        }
+        .padding(compact ? 10 : 12)
+        .background(
+            RoundedRectangle(cornerRadius: compact ? 15 : 18, style: .continuous)
+                .fill(Color.black.opacity(0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: compact ? 15 : 18, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.045),
+                                    accent.opacity(0.025),
+                                    Color.clear
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: compact ? 15 : 18, style: .continuous)
+                .stroke(Color.white.opacity(0.075), lineWidth: 0.8)
+        )
+    }
+
+    private var timerColon: some View {
+        Text(":")
+            .font(.system(size: compact ? 17 : 21, weight: .medium, design: .rounded))
+            .foregroundStyle(textColor.opacity(0.34))
+            .offset(y: compact ? -3 : -5)
+    }
+
+    private func applyPreset(_ preset: Int) {
+        let total = min(359_999, max(1, preset * 60))
+        hours = total / 3600
+        minutes = total / 60 % 60
+        seconds = total % 60
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+}
+
+struct HaloTimerDurationPopoverButton: View {
+    let accent: Color
+    let textColor: Color
+    let quickPresets: [Int]
+    let initialMinutes: Int
+    let label: String
+    let onStart: (TimeInterval) -> Void
+
+    @State private var showing = false
+
+    init(
+        accent: Color,
+        textColor: Color,
+        quickPresets: [Int] = [5, 15, 25, 45],
+        initialMinutes: Int = 25,
+        label: String = "Set timer",
+        onStart: @escaping (TimeInterval) -> Void
+    ) {
+        self.accent = accent
+        self.textColor = textColor
+        self.quickPresets = quickPresets
+        self.initialMinutes = initialMinutes
+        self.label = label
+        self.onStart = onStart
+    }
+
+    var body: some View {
+        Button {
+            showing = true
+        } label: {
+            Label(label, systemImage: "dial.medium")
+        }
+        .popover(isPresented: $showing, arrowEdge: .top) {
+            HaloTimerDurationComposer(
+                accent: accent,
+                textColor: textColor,
+                quickPresets: quickPresets,
+                initialMinutes: initialMinutes,
+                compact: false
+            ) { duration in
+                showing = false
+                onStart(duration)
+            }
+            .padding(12)
+            .frame(width: 360)
+        }
+    }
+}
+
+private struct HaloTimerWheelColumn: View {
+    let title: String
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    let accent: Color
+    let textColor: Color
+    let compact: Bool
+
+    private var rowHeight: CGFloat { compact ? 24 : 29 }
+    private var width: CGFloat { compact ? 50 : 62 }
+
+    var body: some View {
+        VStack(spacing: compact ? 4 : 5) {
+            ZStack {
+                RoundedRectangle(cornerRadius: compact ? 11 : 13, style: .continuous)
+                    .fill(Color.black.opacity(0.16))
+
+                RoundedRectangle(cornerRadius: compact ? 8 : 9, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.17), accent.opacity(0.075)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: compact ? 8 : 9, style: .continuous)
+                            .stroke(accent.opacity(0.28), lineWidth: 0.8)
+                    )
+                    .frame(height: rowHeight)
+
+                VStack(spacing: 0) {
+                    ForEach(-2...2, id: \.self) { offset in
+                        let displayed = displayedValue(offset: offset)
+                        Text(String(format: "%02d", displayed))
+                            .font(.system(
+                                size: offset == 0 ? (compact ? 15 : 17) : (compact ? 11 : 12),
+                                weight: offset == 0 ? .semibold : .regular,
+                                design: .rounded
+                            ))
+                            .monospacedDigit()
+                            .foregroundStyle(
+                                offset == 0
+                                    ? textColor.opacity(0.98)
+                                    : textColor.opacity(abs(offset) == 1 ? 0.38 : 0.16)
+                            )
+                            .scaleEffect(offset == 0 ? 1 : (abs(offset) == 1 ? 0.94 : 0.88))
+                            .frame(height: rowHeight)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                guard offset != 0 else { return }
+                                set(displayed)
+                            }
+                    }
+                }
+                .animation(.spring(response: 0.20, dampingFraction: 0.86), value: value)
+
+                VStack {
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.55), Color.clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: rowHeight * 1.1)
+                    Spacer(minLength: 0)
+                    LinearGradient(
+                        colors: [Color.clear, Color.black.opacity(0.55)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: rowHeight * 1.1)
+                }
+                .allowsHitTesting(false)
+            }
+            .frame(width: width, height: rowHeight * 5)
+            .clipShape(RoundedRectangle(cornerRadius: compact ? 11 : 13, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: compact ? 11 : 13, style: .continuous)
+                    .stroke(Color.white.opacity(0.07), lineWidth: 0.8)
+            )
+            .background(
+                HaloTimerWheelScrollCapture { step in
+                    adjust(by: step)
+                }
+                .allowsHitTesting(true)
+            )
+
+            Text(title)
+                .font(.system(size: compact ? 7 : 8, weight: .bold, design: .rounded))
+                .tracking(1.1)
+                .foregroundStyle(textColor.opacity(0.38))
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue("\(value)")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: adjust(by: 1)
+            case .decrement: adjust(by: -1)
+            @unknown default: break
+            }
+        }
+    }
+
+    private func displayedValue(offset: Int) -> Int {
+        let count = range.upperBound - range.lowerBound + 1
+        guard count > 0 else { return value }
+        let raw = value - range.lowerBound + offset
+        let wrapped = ((raw % count) + count) % count
+        return range.lowerBound + wrapped
+    }
+
+    private func adjust(by step: Int) {
+        guard step != 0 else { return }
+        set(displayedValue(offset: step > 0 ? 1 : -1))
+    }
+
+    private func set(_ newValue: Int) {
+        guard newValue != value else { return }
+        value = newValue
+        NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+    }
+}
+
+private struct HaloTimerWheelScrollCapture: NSViewRepresentable {
+    let onStep: (Int) -> Void
+
+    final class View: NSView {
+        var callback: ((Int) -> Void)?
+        private var accumulator: CGFloat = 0
+
+        override var acceptsFirstResponder: Bool { true }
+
+        override func scrollWheel(with event: NSEvent) {
+            let delta = event.scrollingDeltaY == 0 ? event.scrollingDeltaX : event.scrollingDeltaY
+            guard delta != 0 else { return }
+
+            if event.phase == .began {
+                accumulator = 0
+            }
+
+            if event.hasPreciseScrollingDeltas {
+                accumulator += delta
+                let threshold: CGFloat = 10
+                while abs(accumulator) >= threshold {
+                    callback?(accumulator < 0 ? 1 : -1)
+                    accumulator += accumulator < 0 ? threshold : -threshold
+                }
+            } else {
+                callback?(delta < 0 ? 1 : -1)
+            }
+
+            if event.phase == .ended || event.phase == .cancelled || event.momentumPhase == .ended {
+                accumulator = 0
+            }
+        }
+    }
+
+    func makeNSView(context: Context) -> View {
+        let view = View()
+        view.callback = onStep
+        return view
+    }
+
+    func updateNSView(_ nsView: View, context: Context) {
+        nsView.callback = onStep
+    }
+}
+
 /// Large catalogs are built only when opened; scrolling creates visible rows lazily.
 struct SearchableStringPicker: View {
     let title: String
