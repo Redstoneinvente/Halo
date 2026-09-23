@@ -169,11 +169,15 @@ enum NotchBubbleGestureAction: String, Codable, CaseIterable, Identifiable, Hash
     var id: String { rawValue }
 }
 
-fileprivate enum NotchBubbleGestureDirection {
+fileprivate enum NotchBubbleGestureDirection: String {
     case left
     case right
     case up
     case down
+}
+
+private extension Notification.Name {
+    static let haloNotchBubbleDirectionalGesture = Notification.Name("HaloNotchBubbleDirectionalGesture")
 }
 
 enum MusicBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
@@ -325,6 +329,11 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
     var tintAmount: Double? = nil
     var animation: NotchBubbleAnimationPreset? = nil
     var lifecycleDuration: Double? = nil
+    var gestureLeftAction: NotchBubbleGestureAction? = nil
+    var gestureRightAction: NotchBubbleGestureAction? = nil
+    var gestureUpAction: NotchBubbleGestureAction? = nil
+    var gestureDownAction: NotchBubbleGestureAction? = nil
+    var doubleClickAction: NotchBubbleGestureAction? = nil
 
     func normalized() -> Self {
         var value = self
@@ -346,7 +355,9 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
         design == nil && size == nil && shape == nil && background == nil && cornerRadius == nil &&
         glassIntensity == nil && backgroundOpacity == nil && borderOpacity == nil &&
         contentScale == nil && verticalOffset == nil && tint == nil && accent == nil && tintAmount == nil &&
-        animation == nil && lifecycleDuration == nil
+        animation == nil && lifecycleDuration == nil &&
+        gestureLeftAction == nil && gestureRightAction == nil &&
+        gestureUpAction == nil && gestureDownAction == nil && doubleClickAction == nil
     }
 }
 
@@ -405,14 +416,6 @@ struct NotchBubbleSettings: Codable, Equatable {
 
     var showWhenClosed = true
     var showWhenOpen = true
-
-    // Optional gesture mappings keep older Notch Bubble settings decodable.
-    // Directional gestures are off by default so existing interaction remains unchanged.
-    var gestureLeftAction: NotchBubbleGestureAction?
-    var gestureRightAction: NotchBubbleGestureAction?
-    var gestureUpAction: NotchBubbleGestureAction?
-    var gestureDownAction: NotchBubbleGestureAction?
-    var doubleClickAction: NotchBubbleGestureAction?
 
     var musicEnabled = true
     var musicPersistent = false
@@ -595,19 +598,21 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedShowAutomaticInFullscreen: Bool { showAutomaticInFullscreen ?? false }
     var resolvedShowConfirmationsInFullscreen: Bool { showConfirmationsInFullscreen ?? true }
 
-    var resolvedGestureLeftAction: NotchBubbleGestureAction { gestureLeftAction ?? .none }
-    var resolvedGestureRightAction: NotchBubbleGestureAction { gestureRightAction ?? .none }
-    var resolvedGestureUpAction: NotchBubbleGestureAction { gestureUpAction ?? .none }
-    var resolvedGestureDownAction: NotchBubbleGestureAction { gestureDownAction ?? .none }
-    var resolvedDoubleClickAction: NotchBubbleGestureAction { doubleClickAction ?? .primaryAction }
-
-    fileprivate func gestureAction(for direction: NotchBubbleGestureDirection) -> NotchBubbleGestureAction {
+    fileprivate func gestureAction(
+        for kind: NotchBubbleKind,
+        direction: NotchBubbleGestureDirection
+    ) -> NotchBubbleGestureAction {
+        let override = styleOverride(for: kind)
         switch direction {
-        case .left: return resolvedGestureLeftAction
-        case .right: return resolvedGestureRightAction
-        case .up: return resolvedGestureUpAction
-        case .down: return resolvedGestureDownAction
+        case .left: return override?.gestureLeftAction ?? .none
+        case .right: return override?.gestureRightAction ?? .none
+        case .up: return override?.gestureUpAction ?? .none
+        case .down: return override?.gestureDownAction ?? .none
         }
+    }
+
+    func doubleClickAction(for kind: NotchBubbleKind) -> NotchBubbleGestureAction {
+        styleOverride(for: kind)?.doubleClickAction ?? .primaryAction
     }
 
     var resolvedFilesEnabled: Bool { filesEnabled ?? false }
@@ -1519,9 +1524,97 @@ struct BubbleLayoutEngine {
 
 // MARK: - Window and animation
 
+@MainActor
 private final class NotchBubblePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    var bubbleKind: NotchBubbleKind?
+
+    private var horizontalAccumulator: CGFloat = 0
+    private var verticalAccumulator: CGFloat = 0
+    private var triggeredDuringCurrentTrackpadGesture = false
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .scrollWheel,
+           handleBubbleScrollGesture(event) {
+            return
+        }
+        super.sendEvent(event)
+    }
+
+    private func handleBubbleScrollGesture(_ event: NSEvent) -> Bool {
+        guard let bubbleKind else { return false }
+
+        if event.phase == .began || event.phase == .mayBegin {
+            horizontalAccumulator = 0
+            verticalAccumulator = 0
+            triggeredDuringCurrentTrackpadGesture = false
+        }
+
+        // Ignore inertial continuation after the user's fingers leave the trackpad.
+        if event.momentumPhase != [] {
+            if event.momentumPhase == .ended {
+                horizontalAccumulator = 0
+                verticalAccumulator = 0
+                triggeredDuringCurrentTrackpadGesture = false
+            }
+            return false
+        }
+
+        if event.hasPreciseScrollingDeltas && triggeredDuringCurrentTrackpadGesture {
+            if event.phase == .ended || event.phase == .cancelled {
+                horizontalAccumulator = 0
+                verticalAccumulator = 0
+                triggeredDuringCurrentTrackpadGesture = false
+            }
+            return true
+        }
+
+        // Normalize Natural Scrolling so the setting always describes the physical
+        // two-finger direction on the trackpad.
+        let inversion: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
+        let dx = event.scrollingDeltaX * inversion
+        let dy = event.scrollingDeltaY * inversion
+        guard abs(dx) > 0.05 || abs(dy) > 0.05 else { return false }
+
+        let threshold: CGFloat = event.hasPreciseScrollingDeltas ? 10 : 0.5
+        horizontalAccumulator += dx
+        verticalAccumulator += dy
+
+        let direction: NotchBubbleGestureDirection?
+        if abs(horizontalAccumulator) >= threshold,
+           abs(horizontalAccumulator) >= abs(verticalAccumulator) {
+            direction = horizontalAccumulator > 0 ? .left : .right
+        } else if abs(verticalAccumulator) >= threshold {
+            direction = verticalAccumulator < 0 ? .down : .up
+        } else {
+            direction = nil
+        }
+
+        guard let direction else { return false }
+
+        let settings = NotchBubbleSettingsStore.shared.settings.normalized()
+        let action = settings.gestureAction(for: bubbleKind, direction: direction)
+        guard action != .none else {
+            horizontalAccumulator = 0
+            verticalAccumulator = 0
+            return false
+        }
+
+        horizontalAccumulator = 0
+        verticalAccumulator = 0
+        if event.hasPreciseScrollingDeltas {
+            triggeredDuringCurrentTrackpadGesture = true
+        }
+
+        NotificationCenter.default.post(
+            name: .haloNotchBubbleDirectionalGesture,
+            object: bubbleKind.rawValue,
+            userInfo: ["direction": direction.rawValue]
+        )
+        return true
+    }
 }
 
 private final class TransparentNotchBubbleHostingView<Content: View>: NSHostingView<Content> {
@@ -2048,6 +2141,7 @@ final class BubbleWindowController {
             backing: .buffered,
             defer: false
         )
+        panel.bubbleKind = kind
         panel.isReleasedWhenClosed = false
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -2649,105 +2743,6 @@ private struct NotchBubbleMaskShape: Shape {
     }
 }
 
-private struct NotchBubbleGestureCapture: NSViewRepresentable {
-    let onDirection: (NotchBubbleGestureDirection) -> Bool
-
-    final class View: NSView {
-        var callback: ((NotchBubbleGestureDirection) -> Bool)?
-        private var horizontalAccumulator: CGFloat = 0
-        private var verticalAccumulator: CGFloat = 0
-        private var scrollMonitor: Any?
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            installScrollMonitorIfNeeded()
-        }
-
-        override func hitTest(_ point: NSPoint) -> NSView? {
-            nil
-        }
-
-        deinit {
-            if let scrollMonitor {
-                NSEvent.removeMonitor(scrollMonitor)
-            }
-        }
-
-        private func installScrollMonitorIfNeeded() {
-            guard scrollMonitor == nil else { return }
-
-            scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-                guard let self else { return event }
-                return self.handleScroll(event) ? nil : event
-            }
-        }
-
-        private func handleScroll(_ event: NSEvent) -> Bool {
-            guard let window, event.window === window else { return false }
-
-            let point = convert(event.locationInWindow, from: nil)
-            guard bounds.contains(point) else { return false }
-
-            if event.phase == .began || event.phase == .mayBegin {
-                horizontalAccumulator = 0
-                verticalAccumulator = 0
-            }
-
-            // Gesture mappings describe the physical finger direction, so
-            // normalize away the user's Natural Scrolling preference.
-            let inversion: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
-            let dx = event.scrollingDeltaX * inversion
-            let dy = event.scrollingDeltaY * inversion
-            guard abs(dx) > 0.05 || abs(dy) > 0.05 else { return false }
-
-            let precise = event.hasPreciseScrollingDeltas
-            let threshold: CGFloat = precise ? 18 : 0.5
-            var handled = false
-
-            if abs(dx) >= abs(dy) {
-                horizontalAccumulator += dx
-                verticalAccumulator = 0
-
-                if abs(horizontalAccumulator) >= threshold {
-                    let direction: NotchBubbleGestureDirection =
-                        horizontalAccumulator > 0 ? .left : .right
-                    handled = callback?(direction) ?? false
-                    horizontalAccumulator = 0
-                }
-            } else {
-                verticalAccumulator += dy
-                horizontalAccumulator = 0
-
-                if abs(verticalAccumulator) >= threshold {
-                    let direction: NotchBubbleGestureDirection =
-                        verticalAccumulator < 0 ? .down : .up
-                    handled = callback?(direction) ?? false
-                    verticalAccumulator = 0
-                }
-            }
-
-            if event.phase == .ended ||
-                event.phase == .cancelled ||
-                event.momentumPhase == .ended {
-                horizontalAccumulator = 0
-                verticalAccumulator = 0
-            }
-
-            return handled
-        }
-    }
-
-    func makeNSView(context: Context) -> View {
-        let view = View()
-        view.callback = onDirection
-        return view
-    }
-
-    func updateNSView(_ nsView: View, context: Context) {
-        nsView.callback = onDirection
-    }
-}
-
 @MainActor
 private struct NotchBubbleView: View {
     let kind: NotchBubbleKind
@@ -2801,11 +2796,6 @@ private struct NotchBubbleView: View {
                 cornerRadius: bubbleStyle.cornerRadius
             ))
             .overlay { bubbleBorder }
-            .background {
-                NotchBubbleGestureCapture { direction in
-                    performGestureAction(settings.gestureAction(for: direction))
-                }
-            }
             .scaleEffect(hovering ? 1.07 : 1)
             .compositingGroup()
             .onHover { value in
@@ -2823,13 +2813,24 @@ private struct NotchBubbleView: View {
             .onChange(of: showingDetail) { _ in
                 updateInteractionProtection()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .haloNotchBubbleDirectionalGesture)) { note in
+                guard note.object as? String == kind.rawValue,
+                      let rawDirection = note.userInfo?["direction"] as? String,
+                      let direction = NotchBubbleGestureDirection(rawValue: rawDirection) else {
+                    return
+                }
+
+                _ = performGestureAction(
+                    settings.gestureAction(for: kind, direction: direction)
+                )
+            }
             .simultaneousGesture(
                 TapGesture(count: 2)
                     .exclusively(before: TapGesture(count: 1))
                     .onEnded { result in
                         switch result {
                         case .first:
-                            _ = performGestureAction(settings.resolvedDoubleClickAction)
+                            _ = performGestureAction(settings.doubleClickAction(for: kind))
                         case .second:
                             handlePrimaryTap()
                         }
@@ -4694,61 +4695,6 @@ struct NotchBubbleSettingsView: View {
             Toggle("Show while Halo is open", isOn: binding(\.showWhenOpen))
         }
 
-        Section("Bubble gestures") {
-            Text("Trackpad gestures are recognized only while the pointer is over a bubble. Unmapped directions continue behaving like normal scrolling.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Picker(
-                "Swipe left",
-                selection: optionalBinding(\.gestureLeftAction, default: NotchBubbleGestureAction.none)
-            ) {
-                ForEach(NotchBubbleGestureAction.allCases) { action in
-                    Text(action.rawValue).tag(action)
-                }
-            }
-
-            Picker(
-                "Swipe right",
-                selection: optionalBinding(\.gestureRightAction, default: NotchBubbleGestureAction.none)
-            ) {
-                ForEach(NotchBubbleGestureAction.allCases) { action in
-                    Text(action.rawValue).tag(action)
-                }
-            }
-
-            Picker(
-                "Swipe up",
-                selection: optionalBinding(\.gestureUpAction, default: NotchBubbleGestureAction.none)
-            ) {
-                ForEach(NotchBubbleGestureAction.allCases) { action in
-                    Text(action.rawValue).tag(action)
-                }
-            }
-
-            Picker(
-                "Swipe down",
-                selection: optionalBinding(\.gestureDownAction, default: NotchBubbleGestureAction.none)
-            ) {
-                ForEach(NotchBubbleGestureAction.allCases) { action in
-                    Text(action.rawValue).tag(action)
-                }
-            }
-
-            Picker(
-                "Double-click",
-                selection: optionalBinding(\.doubleClickAction, default: NotchBubbleGestureAction.primaryAction)
-            ) {
-                ForEach(NotchBubbleGestureAction.allCases) { action in
-                    Text(action.rawValue).tag(action)
-                }
-            }
-
-            Text("Media, Timer, and Pixel Pal actions only run on compatible bubble types. Gesture completion follows your global haptic strength and pattern when haptics are enabled.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-
         Section("Vinyl bubble") {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
@@ -5337,6 +5283,82 @@ struct NotchBubbleSettingsView: View {
                             .monospacedDigit()
                             .frame(width: 48, alignment: .trailing)
                     }
+                }
+            }
+
+            Divider()
+                .padding(.vertical, 2)
+
+            Text("Gestures")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Text("These mappings belong only to the \(kind.rawValue) bubble. Two-finger trackpad gestures are recognized while the pointer is over this bubble.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker(
+                "Swipe left",
+                selection: styleValueBinding(
+                    kind,
+                    \.gestureLeftAction,
+                    default: NotchBubbleGestureAction.none
+                )
+            ) {
+                ForEach(NotchBubbleGestureAction.allCases) { action in
+                    Text(action.rawValue).tag(action)
+                }
+            }
+
+            Picker(
+                "Swipe right",
+                selection: styleValueBinding(
+                    kind,
+                    \.gestureRightAction,
+                    default: NotchBubbleGestureAction.none
+                )
+            ) {
+                ForEach(NotchBubbleGestureAction.allCases) { action in
+                    Text(action.rawValue).tag(action)
+                }
+            }
+
+            Picker(
+                "Swipe up",
+                selection: styleValueBinding(
+                    kind,
+                    \.gestureUpAction,
+                    default: NotchBubbleGestureAction.none
+                )
+            ) {
+                ForEach(NotchBubbleGestureAction.allCases) { action in
+                    Text(action.rawValue).tag(action)
+                }
+            }
+
+            Picker(
+                "Swipe down",
+                selection: styleValueBinding(
+                    kind,
+                    \.gestureDownAction,
+                    default: NotchBubbleGestureAction.none
+                )
+            ) {
+                ForEach(NotchBubbleGestureAction.allCases) { action in
+                    Text(action.rawValue).tag(action)
+                }
+            }
+
+            Picker(
+                "Double-click",
+                selection: styleValueBinding(
+                    kind,
+                    \.doubleClickAction,
+                    default: NotchBubbleGestureAction.primaryAction
+                )
+            ) {
+                ForEach(NotchBubbleGestureAction.allCases) { action in
+                    Text(action.rawValue).tag(action)
                 }
             }
 
