@@ -56,7 +56,7 @@ struct HaloTimerDurationComposer: View {
     }
 
     var body: some View {
-        VStack(spacing: compact ? 9 : 12) {
+        VStack(spacing: compact ? 7 : 12) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("CUSTOM DURATION")
@@ -79,37 +79,9 @@ struct HaloTimerDurationComposer: View {
                     .background(accent.opacity(0.10), in: Circle())
             }
 
-            HStack(spacing: compact ? 6 : 8) {
-                HaloTimerWheelColumn(
-                    title: "HRS",
-                    value: $hours,
-                    range: 0...99,
-                    accent: accent,
-                    textColor: textColor,
-                    compact: compact
-                )
-
-                timerColon
-
-                HaloTimerWheelColumn(
-                    title: "MIN",
-                    value: $minutes,
-                    range: 0...59,
-                    accent: accent,
-                    textColor: textColor,
-                    compact: compact
-                )
-
-                timerColon
-
-                HaloTimerWheelColumn(
-                    title: "SEC",
-                    value: $seconds,
-                    range: 0...59,
-                    accent: accent,
-                    textColor: textColor,
-                    compact: compact
-                )
+            ViewThatFits(in: .horizontal) {
+                timerWheelRow(compactMode: compact)
+                timerWheelRow(compactMode: true)
             }
 
             if !quickPresets.isEmpty {
@@ -203,6 +175,47 @@ struct HaloTimerDurationComposer: View {
         )
     }
 
+    private func timerWheelRow(compactMode: Bool) -> some View {
+        HStack(spacing: compactMode ? 5 : 8) {
+            HaloTimerWheelColumn(
+                title: "HRS",
+                value: $hours,
+                range: 0...99,
+                accent: accent,
+                textColor: textColor,
+                compact: compactMode
+            )
+
+            Text(":")
+                .font(.system(size: compactMode ? 15 : 21, weight: .medium, design: .rounded))
+                .foregroundStyle(textColor.opacity(0.34))
+                .offset(y: compactMode ? -3 : -5)
+
+            HaloTimerWheelColumn(
+                title: "MIN",
+                value: $minutes,
+                range: 0...59,
+                accent: accent,
+                textColor: textColor,
+                compact: compactMode
+            )
+
+            Text(":")
+                .font(.system(size: compactMode ? 15 : 21, weight: .medium, design: .rounded))
+                .foregroundStyle(textColor.opacity(0.34))
+                .offset(y: compactMode ? -3 : -5)
+
+            HaloTimerWheelColumn(
+                title: "SEC",
+                value: $seconds,
+                range: 0...59,
+                accent: accent,
+                textColor: textColor,
+                compact: compactMode
+            )
+        }
+    }
+
     private var timerColon: some View {
         Text(":")
             .font(.system(size: compact ? 17 : 21, weight: .medium, design: .rounded))
@@ -220,6 +233,7 @@ struct HaloTimerDurationComposer: View {
 }
 
 struct HaloTimerDurationPopoverButton: View {
+    @Environment(\.openNotchInteractionHold) private var holdOpen
     let accent: Color
     let textColor: Color
     let quickPresets: [Int]
@@ -252,18 +266,36 @@ struct HaloTimerDurationPopoverButton: View {
             Label(label, systemImage: "dial.medium")
         }
         .popover(isPresented: $showing, arrowEdge: .top) {
-            HaloTimerDurationComposer(
-                accent: accent,
-                textColor: textColor,
-                quickPresets: quickPresets,
-                initialMinutes: initialMinutes,
-                compact: false
-            ) { duration in
-                showing = false
-                onStart(duration)
+            GeometryReader { proxy in
+                HaloTimerDurationComposer(
+                    accent: accent,
+                    textColor: textColor,
+                    quickPresets: quickPresets,
+                    initialMinutes: initialMinutes,
+                    compact: proxy.size.width < 300 || proxy.size.height < 270
+                ) { duration in
+                    showing = false
+                    onStart(duration)
+                }
+                .padding(proxy.size.width < 300 ? 8 : 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(12)
-            .frame(width: 360)
+            .frame(
+                minWidth: 250,
+                idealWidth: 350,
+                maxWidth: 390,
+                minHeight: 245,
+                idealHeight: 310,
+                maxHeight: 340
+            )
+        }
+        .onChange(of: showing) { value in
+            holdOpen(value)
+        }
+        .onDisappear {
+            if showing {
+                holdOpen(false)
+            }
         }
     }
 }
@@ -275,6 +307,9 @@ private struct HaloTimerWheelColumn: View {
     let accent: Color
     let textColor: Color
     let compact: Bool
+
+    @State private var dragAccumulator: CGFloat = 0
+    @State private var lastDragTranslation: CGFloat = 0
 
     private var rowHeight: CGFloat { compact ? 24 : 29 }
     private var width: CGFloat { compact ? 50 : 62 }
@@ -353,6 +388,24 @@ private struct HaloTimerWheelColumn: View {
                     adjust(by: step)
                 }
                 .allowsHitTesting(true)
+            )
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 3)
+                    .onChanged { gesture in
+                        let delta = gesture.translation.height - lastDragTranslation
+                        lastDragTranslation = gesture.translation.height
+                        dragAccumulator += delta
+                        let threshold: CGFloat = compact ? 13 : 16
+
+                        while abs(dragAccumulator) >= threshold {
+                            adjust(by: dragAccumulator < 0 ? 1 : -1)
+                            dragAccumulator += dragAccumulator < 0 ? threshold : -threshold
+                        }
+                    }
+                    .onEnded { _ in
+                        dragAccumulator = 0
+                        lastDragTranslation = 0
+                    }
             )
 
             Text(title)
@@ -522,6 +575,16 @@ extension EnvironmentValues {
     }
 }
 
+
+private struct OpenNotchInteractionHoldEnvironmentKey: EnvironmentKey {
+    static let defaultValue: (Bool) -> Void = { _ in }
+}
+extension EnvironmentValues {
+    var openNotchInteractionHold: (Bool) -> Void {
+        get { self[OpenNotchInteractionHoldEnvironmentKey.self] }
+        set { self[OpenNotchInteractionHoldEnvironmentKey.self] = newValue }
+    }
+}
 
 private struct OpenNotchPresentationEnvironmentKey: EnvironmentKey { static let defaultValue: OpenNotchPresentation = .regular }
 private struct OpenNotchCompressionEnvironmentKey: EnvironmentKey { static let defaultValue = 0 }
