@@ -94,7 +94,7 @@ enum NotchBubbleAnimationPreset: String, Codable, CaseIterable, Identifiable, Ha
     var id: String { rawValue }
 }
 
-enum MusicBubbleDisplayMode: String, Codable, CaseIterable, Identifiable {
+enum MusicBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
     case artwork = "Artwork"
     case artworkProgress = "Artwork + Progress"
     case controls = "Playback Control"
@@ -102,7 +102,7 @@ enum MusicBubbleDisplayMode: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-enum MusicBubbleTapAction: String, Codable, CaseIterable, Identifiable {
+enum MusicBubbleTapAction: String, Codable, CaseIterable, Identifiable, Hashable {
     case details = "Show Details"
     case playPause = "Play / Pause"
     case openNotch = "Open Notch"
@@ -110,7 +110,7 @@ enum MusicBubbleTapAction: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-enum SystemBubbleMetric: String, Codable, CaseIterable, Identifiable {
+enum SystemBubbleMetric: String, Codable, CaseIterable, Identifiable, Hashable {
     case battery = "Battery"
     case cpu = "CPU"
     case memory = "Memory"
