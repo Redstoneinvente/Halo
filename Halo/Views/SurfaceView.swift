@@ -2754,6 +2754,12 @@ struct SurfaceView: View {
             (bluetoothShowWhileConnected && !bluetooth.connectedDevices.isEmpty)
     }
     private var liveActivityCandidate: LiveActivity? {
+        if workspace.trailerModeActive,
+           workspace.trailerContextPreview == .liveActivity {
+            return workspace.activities.first {
+                $0.externalID == "halo.trailer.demo.live-activity"
+            }
+        }
         guard liveActivitiesEnabled else { return nil }
         return LiveActivitySelection.primary(in: workspace.activities, excluding: [.bluetooth])
     }
@@ -2824,6 +2830,7 @@ struct SurfaceView: View {
         guard workspace.trailerModeActive else { return nil }
         switch workspace.trailerContextPreview {
         case .some(.music): return .music
+        case .some(.liveActivity): return .liveActivity
         case .some(.retro): return .retro
         case .none: return nil
         }
