@@ -504,6 +504,7 @@ private final class BubbleFrameAnimator {
             panel.setFrame(target, display: false)
             panel.alphaValue = 1
             panel.orderFrontRegardless()
+            completion?()
             return
         }
 
@@ -514,6 +515,7 @@ private final class BubbleFrameAnimator {
             panel.setFrame(target, display: false)
             panel.alphaValue = 1
             panel.orderFrontRegardless()
+            completion?()
             return
         }
 
@@ -747,7 +749,7 @@ enum BubbleAnimationController {
 
 @MainActor
 final class BubbleWindowController {
-    private enum LifecyclePhase {
+    private enum LifecyclePhase: Equatable {
         case hidden
         case emerging
         case visible
@@ -805,12 +807,12 @@ final class BubbleWindowController {
         trackingSurface: Bool = false
     ) {
         desiredFrame = frame
-        removalGeneration += 1
-        let generation = removalGeneration
         let duration = settings.resolvedLifecycleDuration
 
         switch lifecyclePhase {
         case .hidden:
+            removalGeneration += 1
+            let generation = removalGeneration
             lifecyclePhase = .emerging
             frameAnimator.emerge(
                 panel: panel,
@@ -828,13 +830,16 @@ final class BubbleWindowController {
             }
 
         case .emerging:
-            // A provider/settings/geometry refresh can arrive one frame after creation.
-            // Keep the emergence alive instead of treating "window is visible" as "animation finished".
+            // Geometry/provider refreshes are expected while the window is already ordered
+            // onscreen. Do not cancel or invalidate the lifecycle animation just because
+            // another refresh arrived.
             return
 
         case .retracting:
-            // The event came back while merging into the notch. Reverse from the exact
-            // current position/scale rather than snapping or restarting from the seed.
+            // The event came back while merging into the notch. This is a real transition
+            // change, so invalidate the retraction and smoothly reverse from its current state.
+            removalGeneration += 1
+            let generation = removalGeneration
             lifecyclePhase = .emerging
             frameAnimator.restoreFromCurrent(
                 panel: panel,
@@ -876,17 +881,18 @@ final class BubbleWindowController {
         settings: NotchBubbleSettings,
         completion: @escaping () -> Void
     ) {
-        removalGeneration += 1
-        let generation = removalGeneration
-
         if lifecyclePhase == .hidden {
             completion()
             return
         }
         if lifecyclePhase == .retracting {
+            // The existing retraction owns its completion. A repeated provider/settings
+            // refresh must not invalidate it.
             return
         }
 
+        removalGeneration += 1
+        let generation = removalGeneration
         lifecyclePhase = .retracting
         frameAnimator.retract(
             panel: panel,
@@ -1068,8 +1074,8 @@ private final class NotchBubbleDisplayHost {
                 for: controller.frame,
                 around: surfaceFrame,
                 in: screenFrame,
-                compactWidth: state.compactWidth,
-                compactHeight: state.compactHeight
+                compactWidth: state.physicalNotchWidth > 1 ? state.physicalNotchWidth : state.compactWidth,
+                compactHeight: state.physicalNotchHeight > 1 ? state.physicalNotchHeight : state.compactHeight
             )
             controller.remove(
                 animated: animated,
@@ -1096,8 +1102,8 @@ private final class NotchBubbleDisplayHost {
                 for: frame,
                 around: surfaceFrame,
                 in: screenFrame,
-                compactWidth: state.compactWidth,
-                compactHeight: state.compactHeight
+                compactWidth: state.physicalNotchWidth > 1 ? state.physicalNotchWidth : state.compactWidth,
+                compactHeight: state.physicalNotchHeight > 1 ? state.physicalNotchHeight : state.compactHeight
             )
             controller.present(
                 frame: frame,
@@ -1111,8 +1117,14 @@ private final class NotchBubbleDisplayHost {
 
     private func removeAll(animated: Bool) {
         let settings = settingsStore.settings.normalized()
-        let compactWidth = state?.compactWidth ?? 190
-        let compactHeight = state?.compactHeight ?? 40
+        let compactWidth: CGFloat = {
+            guard let state else { return 190 }
+            return state.physicalNotchWidth > 1 ? state.physicalNotchWidth : state.compactWidth
+        }()
+        let compactHeight: CGFloat = {
+            guard let state else { return 40 }
+            return state.physicalNotchHeight > 1 ? state.physicalNotchHeight : state.compactHeight
+        }()
 
         for (kind, controller) in controllers {
             let emergenceFrame = layoutEngine.emergenceFrame(
