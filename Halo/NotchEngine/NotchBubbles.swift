@@ -169,7 +169,7 @@ enum NotchBubbleGestureAction: String, Codable, CaseIterable, Identifiable, Hash
     var id: String { rawValue }
 }
 
-private enum NotchBubbleGestureDirection {
+fileprivate enum NotchBubbleGestureDirection {
     case left
     case right
     case up
@@ -594,7 +594,7 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedGestureDownAction: NotchBubbleGestureAction { gestureDownAction ?? .none }
     var resolvedDoubleClickAction: NotchBubbleGestureAction { doubleClickAction ?? .primaryAction }
 
-    func gestureAction(for direction: NotchBubbleGestureDirection) -> NotchBubbleGestureAction {
+    fileprivate func gestureAction(for direction: NotchBubbleGestureDirection) -> NotchBubbleGestureAction {
         switch direction {
         case .left: return resolvedGestureLeftAction
         case .right: return resolvedGestureRightAction
@@ -4102,7 +4102,7 @@ private struct NotchBubbleView: View {
             HaloHoverHaptics.pulse(
                 id: "bubble.gesture." + surfaceState.displayID + "." + kind.rawValue,
                 strength: store.configuration.resolvedHoverHapticStrength,
-                pattern: .single,
+                pattern: store.configuration.resolvedHoverHapticPattern,
                 minimumInterval: 0.04
             )
         }
@@ -4684,7 +4684,7 @@ struct NotchBubbleSettingsView: View {
                 }
             }
 
-            Text("Media, Timer, and Pixel Pal actions only run on compatible bubble types. Gesture completion uses one tactile confirmation tap when haptics are enabled.")
+            Text("Media, Timer, and Pixel Pal actions only run on compatible bubble types. Gesture completion follows your global haptic strength and pattern when haptics are enabled.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
