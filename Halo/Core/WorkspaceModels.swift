@@ -1297,6 +1297,15 @@ enum TrailerSurfaceTarget: String, Codable, CaseIterable, Identifiable, Equatabl
     var id: String { rawValue }
 }
 
+enum TrailerTransitionStyle: String, Codable, CaseIterable, Identifiable, Equatable {
+    case automatic = "Automatic"
+    case fade = "Fade"
+    case scale = "Scale"
+    case lift = "Lift"
+
+    var id: String { rawValue }
+}
+
 struct TrailerModeSettings: Codable, Equatable {
     var hotkeyEnabled = true
     var hotkeyCode: UInt32 = 17 // T
@@ -1306,6 +1315,8 @@ struct TrailerModeSettings: Codable, Equatable {
     var fastInterval = 0.32
     var rampDuration = 14.0
     var smoothing = 0.42
+    var transitionsEnabled = true
+    var transitionStyle: TrailerTransitionStyle = .automatic
     var randomizeAppearance = true
     var randomizeWidgets = true
     var showcaseMusic = true
