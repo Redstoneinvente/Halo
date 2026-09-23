@@ -158,15 +158,87 @@ enum NotchBubbleGestureAction: String, Codable, CaseIterable, Identifiable, Hash
     case showDetails = "Show Details"
     case openNotch = "Open Notch"
     case dismiss = "Dismiss Bubble"
+
     case playPause = "Play / Pause"
     case previousTrack = "Previous Track"
     case nextTrack = "Next Track"
     case openMediaPlayer = "Open Media App"
+
     case timerPauseResume = "Timer Pause / Resume"
     case timerAddFive = "Timer +5 Minutes"
+
+    case stopwatchToggle = "Stopwatch Start / Pause"
+    case stopwatchLap = "Stopwatch Lap"
+    case stopwatchReset = "Stopwatch Reset"
+
+    case audioVolumeUp = "Volume Up"
+    case audioVolumeDown = "Volume Down"
+    case audioMuteRestore = "Mute / Restore Volume"
+    case openSoundSettings = "Open Sound Settings"
+
+    case refreshSystem = "Refresh System Stats"
     case feedPixelPal = "Feed Pixel Pal"
 
     var id: String { rawValue }
+
+    static func availableActions(for kind: NotchBubbleKind) -> [NotchBubbleGestureAction] {
+        let common: [NotchBubbleGestureAction] = [
+            .none,
+            .primaryAction,
+            .showDetails,
+            .openNotch,
+            .dismiss
+        ]
+
+        switch kind {
+        case .music, .vinyl:
+            return common + [
+                .playPause,
+                .previousTrack,
+                .nextTrack,
+                .openMediaPlayer
+            ]
+
+        case .timer:
+            return common + [
+                .timerPauseResume,
+                .timerAddFive
+            ]
+
+        case .stopwatch:
+            return common + [
+                .stopwatchToggle,
+                .stopwatchLap,
+                .stopwatchReset
+            ]
+
+        case .audio:
+            return common + [
+                .audioVolumeUp,
+                .audioVolumeDown,
+                .audioMuteRestore,
+                .openSoundSettings
+            ]
+
+        case .system:
+            return common + [.refreshSystem]
+
+        case .pixelPal:
+            return common + [.feedPixelPal]
+
+        case .clock, .clipboard, .calendar, .files:
+            return common
+        }
+    }
+
+    static func sanitized(
+        _ action: NotchBubbleGestureAction?,
+        for kind: NotchBubbleKind,
+        default defaultAction: NotchBubbleGestureAction
+    ) -> NotchBubbleGestureAction {
+        guard let action else { return defaultAction }
+        return availableActions(for: kind).contains(action) ? action : defaultAction
+    }
 }
 
 fileprivate enum NotchBubbleGestureDirection: String {
@@ -603,16 +675,22 @@ struct NotchBubbleSettings: Codable, Equatable {
         direction: NotchBubbleGestureDirection
     ) -> NotchBubbleGestureAction {
         let override = styleOverride(for: kind)
+        let stored: NotchBubbleGestureAction?
         switch direction {
-        case .left: return override?.gestureLeftAction ?? .none
-        case .right: return override?.gestureRightAction ?? .none
-        case .up: return override?.gestureUpAction ?? .none
-        case .down: return override?.gestureDownAction ?? .none
+        case .left: stored = override?.gestureLeftAction
+        case .right: stored = override?.gestureRightAction
+        case .up: stored = override?.gestureUpAction
+        case .down: stored = override?.gestureDownAction
         }
+        return NotchBubbleGestureAction.sanitized(stored, for: kind, default: .none)
     }
 
     func doubleClickAction(for kind: NotchBubbleKind) -> NotchBubbleGestureAction {
-        styleOverride(for: kind)?.doubleClickAction ?? .primaryAction
+        NotchBubbleGestureAction.sanitized(
+            styleOverride(for: kind)?.doubleClickAction,
+            for: kind,
+            default: .primaryAction
+        )
     }
 
     var resolvedFilesEnabled: Bool { filesEnabled ?? false }
@@ -2752,6 +2830,7 @@ private struct NotchBubbleView: View {
 
     @State private var hovering = false
     @State private var showingDetail = false
+    @State private var lastNonZeroAudioVolume: Float = 0.5
 
     init(kind: NotchBubbleKind, store: AppStore, workspace: WorkspaceStore, surfaceState: SurfaceState) {
         self.kind = kind
@@ -4103,6 +4182,56 @@ private struct NotchBubbleView: View {
             }
             handled = true
 
+        case .stopwatchToggle:
+            guard kind == .stopwatch else { return false }
+            workspace.toggleStopwatch()
+            handled = true
+
+        case .stopwatchLap:
+            guard kind == .stopwatch, workspace.stopwatchStart != nil else { return false }
+            workspace.lapStopwatch()
+            handled = true
+
+        case .stopwatchReset:
+            guard kind == .stopwatch else { return false }
+            workspace.resetStopwatch()
+            handled = true
+
+        case .audioVolumeUp:
+            guard kind == .audio, audio.canSetVolume else { return false }
+            let next = min(1, Float(audio.volume) + 0.05)
+            if next > 0.001 { lastNonZeroAudioVolume = next }
+            audio.setVolume(next)
+            handled = true
+
+        case .audioVolumeDown:
+            guard kind == .audio, audio.canSetVolume else { return false }
+            let current = Float(audio.volume)
+            if current > 0.001 { lastNonZeroAudioVolume = current }
+            audio.setVolume(max(0, current - 0.05))
+            handled = true
+
+        case .audioMuteRestore:
+            guard kind == .audio, audio.canSetVolume else { return false }
+            let current = Float(audio.volume)
+            if current > 0.001 {
+                lastNonZeroAudioVolume = current
+                audio.setVolume(0)
+            } else {
+                audio.setVolume(max(0.05, lastNonZeroAudioVolume))
+            }
+            handled = true
+
+        case .openSoundSettings:
+            guard kind == .audio else { return false }
+            openSoundSettings()
+            handled = true
+
+        case .refreshSystem:
+            guard kind == .system else { return false }
+            system.refresh(detailed: true)
+            handled = true
+
         case .feedPixelPal:
             guard kind == .pixelPal else { return false }
             pal.feedCookie()
@@ -4146,6 +4275,19 @@ private struct NotchBubbleView: View {
             return
         }
         app.activate(options: .activateIgnoringOtherApps)
+    }
+
+    private func openSoundSettings() {
+        let urls = [
+            URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension"),
+            URL(string: "x-apple.systempreferences:com.apple.preference.sound")
+        ].compactMap { $0 }
+
+        for url in urls where NSWorkspace.shared.open(url) {
+            return
+        }
+
+        showingDetail = true
     }
 
     private func clockTime(_ date: Date) -> String {
@@ -5284,7 +5426,7 @@ struct NotchBubbleSettingsView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            Text("These mappings belong only to the \(kind.rawValue) bubble. Two-finger trackpad gestures are recognized while the pointer is over this bubble.")
+            Text("These mappings belong only to the \(kind.rawValue) bubble. Halo only shows actions that make sense for this bubble, and two-finger trackpad gestures are recognized while the pointer is over it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -5296,7 +5438,7 @@ struct NotchBubbleSettingsView: View {
                     default: NotchBubbleGestureAction.none
                 )
             ) {
-                ForEach(NotchBubbleGestureAction.allCases) { action in
+                ForEach(NotchBubbleGestureAction.availableActions(for: kind)) { action in
                     Text(action.rawValue).tag(action)
                 }
             }
@@ -5309,7 +5451,7 @@ struct NotchBubbleSettingsView: View {
                     default: NotchBubbleGestureAction.none
                 )
             ) {
-                ForEach(NotchBubbleGestureAction.allCases) { action in
+                ForEach(NotchBubbleGestureAction.availableActions(for: kind)) { action in
                     Text(action.rawValue).tag(action)
                 }
             }
@@ -5322,7 +5464,7 @@ struct NotchBubbleSettingsView: View {
                     default: NotchBubbleGestureAction.none
                 )
             ) {
-                ForEach(NotchBubbleGestureAction.allCases) { action in
+                ForEach(NotchBubbleGestureAction.availableActions(for: kind)) { action in
                     Text(action.rawValue).tag(action)
                 }
             }
@@ -5335,7 +5477,7 @@ struct NotchBubbleSettingsView: View {
                     default: NotchBubbleGestureAction.none
                 )
             ) {
-                ForEach(NotchBubbleGestureAction.allCases) { action in
+                ForEach(NotchBubbleGestureAction.availableActions(for: kind)) { action in
                     Text(action.rawValue).tag(action)
                 }
             }
@@ -5348,7 +5490,7 @@ struct NotchBubbleSettingsView: View {
                     default: NotchBubbleGestureAction.primaryAction
                 )
             ) {
-                ForEach(NotchBubbleGestureAction.allCases) { action in
+                ForEach(NotchBubbleGestureAction.availableActions(for: kind)) { action in
                     Text(action.rawValue).tag(action)
                 }
             }
