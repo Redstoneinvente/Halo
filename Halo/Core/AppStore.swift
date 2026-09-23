@@ -2030,6 +2030,9 @@ final class TrailerModeController {
         if configuration.randomizeAppearance {
             randomizeTheme(&theme)
         }
+        // Even with appearance randomization disabled, Trailer Mode remains a notch-anchored
+        // presentation instead of inheriting a pill/island/detached placement from the active theme.
+        theme.style = .notch
 
         store.workspace.trailerLayoutOverride = layout
         store.workspace.trailerThemeOverride = theme
