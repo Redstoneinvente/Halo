@@ -1310,6 +1310,7 @@ enum TrailerTransitionStyle: String, Codable, CaseIterable, Identifiable, Equata
 /// These bypass normal event/priority triggers so trailer footage is deterministic.
 enum TrailerContextPreview: Equatable {
     case music
+    case liveActivity
     case retro
 }
 
