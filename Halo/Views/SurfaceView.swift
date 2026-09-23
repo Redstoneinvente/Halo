@@ -4868,7 +4868,7 @@ struct BuiltinOrIntegrationWidget: View {
         let footprintHeight = availableHeight ?? 310
         let horizontallyDominant =
             footprintWidth >= 300 &&
-            footprintHeight >= 125 &&
+            footprintHeight >= 145 &&
             footprintWidth / max(1, footprintHeight) >= 1.45
 
         if idle && horizontallyDominant {
@@ -4964,8 +4964,8 @@ struct BuiltinOrIntegrationWidget: View {
                         WidgetElement(key: "presets") {
                             let roomForTallComposer =
                                 presentation != .compact &&
-                                footprintWidth >= 330 &&
-                                footprintHeight >= 360
+                                footprintWidth >= 400 &&
+                                footprintHeight >= 500
 
                             if roomForTallComposer {
                                 HaloTimerDurationComposer(
