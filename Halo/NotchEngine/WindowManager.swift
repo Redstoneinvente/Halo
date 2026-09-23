@@ -2188,7 +2188,13 @@ final class WindowManager {
             if host.state.physicalNotchHeight != ambientPhysicalHeight { host.state.physicalNotchHeight = ambientPhysicalHeight }
             updateAmbientPanelFrame(host: host, geometry: host.geometry!)
             if host.state.theme != theme { host.state.theme = theme }
-            if host.state.layoutOverride != displayLayout { host.state.layoutOverride = displayLayout }
+            // SurfaceView should always render from the exact layout used to build
+            // this host's geometry. Keeping only displayLayout here left global and
+            // scheduled layouts on a separate fallback path and made live geometry
+            // edits vulnerable to stale/competing configuration.
+            if host.state.layoutOverride != effectiveLayout {
+                host.state.layoutOverride = effectiveLayout
+            }
             configureDynamicWidth(host)
             let baseDashboardWidth = host.geometry!.frame(expanded: true).width
             if activeExpandedContextRequest(for: host) == nil &&

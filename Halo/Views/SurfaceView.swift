@@ -2316,10 +2316,105 @@ struct SurfaceGeometryEditorPanelView: View {
 
     private let metrics = SurfaceGeometryEditorChromeMetrics.self
 
+    // Direct geometry editing must target the same configuration source that
+    // WindowManager resolves for this physical surface. Editing the base
+    // theme/layout while a display override or scheduled profile is active
+    // makes the handles appear broken because reconcile immediately restores
+    // the live override.
+    private var editedDisplayOverrideIndex: Int? {
+        workspace.settings.displays.firstIndex {
+            $0.id == state.displayID && $0.enabled
+        }
+    }
+
+    private var editedLayout: WorkspaceLayout {
+        let settings = workspace.settings
+
+        if let displayIndex = editedDisplayOverrideIndex {
+            let display = settings.displays[displayIndex]
+            if let profileID = display.profileID,
+               let profile = settings.profiles.first(where: { $0.id == profileID }) {
+                return profile.layout
+            }
+            if let layout = display.layout {
+                return layout
+            }
+        }
+
+        if let profileID = workspace.scheduledProfileID,
+           let profile = settings.profiles.first(where: { $0.id == profileID }) {
+            return profile.layout
+        }
+
+        return settings.layout
+    }
+
+    private var editedTheme: Theme {
+        let settings = workspace.settings
+
+        if let displayIndex = editedDisplayOverrideIndex {
+            let display = settings.displays[displayIndex]
+            if let profileID = display.profileID,
+               let profile = settings.profiles.first(where: { $0.id == profileID }) {
+                return profile.theme
+            }
+            return display.theme
+        }
+
+        if let profileID = workspace.scheduledProfileID,
+           let profile = settings.profiles.first(where: { $0.id == profileID }) {
+            return profile.theme
+        }
+
+        return store.configuration.theme
+    }
+
+    private func persistEditedGeometry(theme: Theme, layout: WorkspaceLayout) {
+        var settings = workspace.settings
+
+        if let displayIndex = editedDisplayOverrideIndex {
+            if let profileID = settings.displays[displayIndex].profileID,
+               let profileIndex = settings.profiles.firstIndex(where: { $0.id == profileID }) {
+                settings.profiles[profileIndex].theme = theme
+                settings.profiles[profileIndex].layout = layout
+                workspace.settings = settings
+                return
+            }
+
+            // A display override always owns its Theme at runtime.
+            settings.displays[displayIndex].theme = theme
+
+            if settings.displays[displayIndex].layout != nil {
+                settings.displays[displayIndex].layout = layout
+            } else if let profileID = workspace.scheduledProfileID,
+                      let profileIndex = settings.profiles.firstIndex(where: { $0.id == profileID }) {
+                // No display-specific layout: the surface inherits the scheduled layout.
+                settings.profiles[profileIndex].layout = layout
+            } else {
+                settings.layout = layout
+            }
+
+            workspace.settings = settings
+            return
+        }
+
+        if let profileID = workspace.scheduledProfileID,
+           let profileIndex = settings.profiles.firstIndex(where: { $0.id == profileID }) {
+            settings.profiles[profileIndex].theme = theme
+            settings.profiles[profileIndex].layout = layout
+            workspace.settings = settings
+            return
+        }
+
+        store.configuration.theme = theme
+        settings.layout = layout
+        workspace.settings = settings
+    }
+
     private var persistedSnapshot: SurfaceGeometryEditSnapshot {
         SurfaceGeometryEditSnapshot.capture(
-            theme: store.configuration.theme,
-            appearance: workspace.settings.layout.appearance
+            theme: editedTheme,
+            appearance: editedLayout.appearance
         )
     }
 
@@ -2530,21 +2625,20 @@ struct SurfaceGeometryEditorPanelView: View {
     }
 
     private func applyPersisted(_ snapshot: SurfaceGeometryEditSnapshot) {
-        var theme = store.configuration.theme
-        var appearance = workspace.settings.layout.appearance
+        var theme = editedTheme
+        var layout = editedLayout
         theme.width = snapshot.expandedWidth
         theme.cornerRadius = snapshot.cornerRadius
-        appearance.compactWidth = snapshot.compactWidth
-        appearance.surface.compactHeight = snapshot.compactHeight
-        appearance.expandedHeight = snapshot.expandedHeight
-        appearance.surface.offsets = snapshot.offsets
-        store.configuration.theme = theme
-        workspace.settings.layout.appearance = appearance
+        layout.appearance.compactWidth = snapshot.compactWidth
+        layout.appearance.surface.compactHeight = snapshot.compactHeight
+        layout.appearance.expandedHeight = snapshot.expandedHeight
+        layout.appearance.surface.offsets = snapshot.offsets
+        persistEditedGeometry(theme: theme, layout: layout)
     }
 
     private func geometryFrame(for snapshot: SurfaceGeometryEditSnapshot, on screen: NSScreen) -> CGRect {
-        var theme = store.configuration.theme
-        var appearance = workspace.settings.layout.appearance
+        var theme = editedTheme
+        var appearance = editedLayout.appearance
         theme.width = snapshot.expandedWidth
         theme.cornerRadius = snapshot.cornerRadius
         appearance.compactWidth = snapshot.compactWidth
