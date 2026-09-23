@@ -106,6 +106,29 @@ final class SurfaceState: ObservableObject {
     private var hoverOpeningGuardActive = false
     private var hoverExitPendingDuringOpening = false
     private var hoverCloseDelay: Double = 0
+    private var externalInteractionHeld = false
+
+    /// Keeps Halo expanded while the user is interacting with a child window/popover
+    /// that lives outside the physical NSPanel hover bounds.
+    func setExternalInteractionHeld(_ held: Bool) {
+        guard externalInteractionHeld != held else { return }
+        externalInteractionHeld = held
+
+        if held {
+            collapseTask?.cancel()
+            collapseTask = nil
+            hoverExpandTask?.cancel()
+            hoverExpandTask = nil
+            if !expanded { expanded = true }
+            return
+        }
+
+        // Once the external interaction ends, normal hover policy resumes. If the
+        // pointer is already back over Halo, the next hover event will keep it open.
+        if !hoverInside && !pinned && !editingGeometry && !dropTargeted {
+            scheduleHoverCollapse(after: hoverCloseDelay)
+        }
+    }
 
     func cancelFileDrop() {
         dropExitTask?.cancel()
@@ -178,7 +201,8 @@ final class SurfaceState: ObservableObject {
             !cursorInsidePanel &&
             !pinned &&
             !editingGeometry &&
-            !dropTargeted
+            !dropTargeted &&
+            !externalInteractionHeld
 
         hoverExitPendingDuringOpening = false
         if shouldCollapse && expanded {
@@ -188,11 +212,13 @@ final class SurfaceState: ObservableObject {
 
     private func scheduleHoverCollapse(after delay: Double) {
         collapseTask?.cancel()
+        collapseTask = nil
+        guard !externalInteractionHeld else { return }
         let delay = min(10, max(0, delay))
 
         guard delay > 0.001 else {
             collapseTask = nil
-            if !hoverInside && !pinned && !editingGeometry && !dropTargeted {
+            if !hoverInside && !pinned && !editingGeometry && !dropTargeted && !externalInteractionHeld {
                 expanded = false
             }
             return
@@ -205,7 +231,8 @@ final class SurfaceState: ObservableObject {
                   !self.hoverInside,
                   !self.pinned,
                   !self.editingGeometry,
-                  !self.dropTargeted else { return }
+                  !self.dropTargeted,
+                  !self.externalInteractionHeld else { return }
             self.collapseTask = nil
             self.expanded = false
         }
@@ -265,6 +292,11 @@ final class SurfaceState: ObservableObject {
                 self.expanded = true
             }
         } else if !pinned {
+            if externalInteractionHeld {
+                collapseTask?.cancel()
+                collapseTask = nil
+                return
+            }
             if hoverOpeningGuardActive {
                 // A resize can temporarily move SwiftUI's hover boundary underneath
                 // the stationary cursor. Finish opening first, then verify the actual
