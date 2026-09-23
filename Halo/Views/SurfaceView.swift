@@ -2823,9 +2823,9 @@ struct SurfaceView: View {
     private var trailerContextOverride: ActiveContextInterface? {
         guard workspace.trailerModeActive else { return nil }
         switch workspace.trailerContextPreview {
-        case .music?: return .music
-        case .retro?: return .retro
-        case nil: return nil
+        case .some(.music): return .music
+        case .some(.retro): return .retro
+        case .none: return nil
         }
     }
     private var activeContext: ActiveContextInterface? {
