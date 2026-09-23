@@ -321,6 +321,7 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
     var contentScale: Double? = nil
     var verticalOffset: Double? = nil
     var tint: WidgetColor? = nil
+    var accent: WidgetColor? = nil
     var tintAmount: Double? = nil
     var animation: NotchBubbleAnimationPreset? = nil
     var lifecycleDuration: Double? = nil
@@ -337,13 +338,14 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
         if let tintAmount { value.tintAmount = min(1, max(0, tintAmount.isFinite ? tintAmount : 0)) }
         if let lifecycleDuration { value.lifecycleDuration = min(1.5, max(0.10, lifecycleDuration.isFinite ? lifecycleDuration : 0.22)) }
         if let tint { value.tint = (try? tint.validated()) ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0) }
+        if let accent { value.accent = (try? accent.validated()) ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0) }
         return value
     }
 
     var isEmpty: Bool {
         design == nil && size == nil && shape == nil && background == nil && cornerRadius == nil &&
         glassIntensity == nil && backgroundOpacity == nil && borderOpacity == nil &&
-        contentScale == nil && verticalOffset == nil && tint == nil && tintAmount == nil &&
+        contentScale == nil && verticalOffset == nil && tint == nil && accent == nil && tintAmount == nil &&
         animation == nil && lifecycleDuration == nil
     }
 }
@@ -360,6 +362,7 @@ struct ResolvedNotchBubbleStyle {
     let contentScale: CGFloat
     let verticalOffset: CGFloat
     let tint: Color?
+    let accent: Color?
     let tintAmount: Double
     let animation: NotchBubbleAnimationPreset
     let lifecycleDuration: TimeInterval
@@ -393,6 +396,7 @@ struct NotchBubbleSettings: Codable, Equatable {
     // Optional global color keeps existing settings visually unchanged. Per-bubble
     // tint overrides continue to take priority over these values.
     var bubbleTint: WidgetColor?
+    var bubbleAccent: WidgetColor?
     var bubbleTintAmount: Double?
     var animation: NotchBubbleAnimationPreset = .soft
     // Optional so settings saved before lifecycle timing existed still decode.
@@ -496,6 +500,9 @@ struct NotchBubbleSettings: Codable, Equatable {
         value.glassIntensity = min(1, max(0.15, glassIntensity.isFinite ? glassIntensity : 0.82))
         if let bubbleTint {
             value.bubbleTint = (try? bubbleTint.validated()) ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0)
+        }
+        if let bubbleAccent {
+            value.bubbleAccent = (try? bubbleAccent.validated()) ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0)
         }
         if let bubbleTintAmount {
             value.bubbleTintAmount = min(1, max(0, bubbleTintAmount.isFinite ? bubbleTintAmount : 0.35))
@@ -663,6 +670,11 @@ struct NotchBubbleSettings: Codable, Equatable {
         let resolvedBackground: NotchBubbleBackgroundStyle = override?.background
             ?? (shape == .glass ? .glass : .solid)
         let tintColor = override?.tint?.color ?? bubbleTint?.color
+        // Accent is independent when customized. If not explicitly set, preserve
+        // Halo's previous behavior where a custom tint also became the accent.
+        let accentColor = override?.accent?.color
+            ?? bubbleAccent?.color
+            ?? tintColor
         let tintAmount: Double = {
             if override?.tint != nil {
                 return override?.tintAmount ?? max(0.22, resolvedBubbleTintAmount)
@@ -681,6 +693,7 @@ struct NotchBubbleSettings: Codable, Equatable {
             contentScale: CGFloat(override?.contentScale ?? 1.0),
             verticalOffset: CGFloat(override?.verticalOffset ?? 0),
             tint: tintColor,
+            accent: accentColor,
             tintAmount: tintAmount,
             animation: override?.animation ?? animation,
             lifecycleDuration: override?.lifecycleDuration ?? resolvedLifecycleDuration
@@ -3479,7 +3492,10 @@ private struct NotchBubbleView: View {
     }
 
     private var providerAccentColor: Color {
-        if let custom = bubbleStyle.tint { return custom }
+        bubbleStyle.accent ?? defaultProviderAccentColor
+    }
+
+    private var defaultProviderAccentColor: Color {
         switch kind {
         case .music, .vinyl:
             return media.artworkColors.first?.color ?? Color(red: 0.42, green: 0.48, blue: 1.0)
@@ -3510,8 +3526,8 @@ private struct NotchBubbleView: View {
             shape: bubbleStyle.shape,
             cornerRadius: bubbleStyle.cornerRadius
         )
-        let accent = bubbleStyle.tint ?? providerAccentColor
-        let customTint = accent
+        let accent = providerAccentColor
+        let customTint = bubbleStyle.tint ?? accent
         let tintAmount = bubbleStyle.tintAmount
 
         switch bubbleStyle.design {
@@ -3708,7 +3724,7 @@ private struct NotchBubbleView: View {
             shape: bubbleStyle.shape,
             cornerRadius: bubbleStyle.cornerRadius
         )
-        let accent = bubbleStyle.tint ?? providerAccentColor
+        let accent = providerAccentColor
 
         switch bubbleStyle.design {
         case .halo:
@@ -4626,7 +4642,48 @@ struct NotchBubbleSettingsView: View {
                     }
                 }
 
-                Text("Sets the global bubble accent/tint. Individual bubble tint overrides still take priority.")
+                Text("Sets the global bubble background tint. Individual bubble tint overrides still take priority.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Toggle(
+                "Custom bubble accent",
+                isOn: Binding(
+                    get: { settings.bubbleAccent != nil },
+                    set: { enabled in
+                        var next = settingsStore.settings
+                        if enabled {
+                            next.bubbleAccent = next.bubbleAccent
+                                ?? next.bubbleTint
+                                ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0)
+                        } else {
+                            next.bubbleAccent = nil
+                        }
+                        settingsStore.settings = next.normalized()
+                    }
+                )
+            )
+
+            if settings.bubbleAccent != nil {
+                ColorPicker(
+                    "Accent color",
+                    selection: Binding(
+                        get: {
+                            settings.bubbleAccent?.color
+                                ?? settings.bubbleTint?.color
+                                ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0).color
+                        },
+                        set: { color in
+                            var next = settingsStore.settings
+                            next.bubbleAccent = WidgetColor(color)
+                            settingsStore.settings = next.normalized()
+                        }
+                    ),
+                    supportsOpacity: false
+                )
+
+                Text("Controls rings, progress, icons, gauges and accent-driven bubble styles independently from the background tint.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -5181,6 +5238,38 @@ struct NotchBubbleSettingsView: View {
                     )
                     .frame(width: 238)
                 }
+            }
+
+            Toggle(
+                "Custom accent",
+                isOn: styleOverrideEnabledBinding(
+                    kind,
+                    \.accent,
+                    default: WidgetColor(red: 0.20, green: 0.52, blue: 1.0)
+                )
+            )
+            if override.accent != nil {
+                ColorPicker(
+                    "Accent color",
+                    selection: Binding(
+                        get: {
+                            currentStyleOverride(for: kind).accent?.color
+                                ?? resolved.accent
+                                ?? resolved.tint
+                                ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0).color
+                        },
+                        set: { color in
+                            mutateStyleOverride(for: kind) {
+                                $0.accent = WidgetColor(color)
+                            }
+                        }
+                    ),
+                    supportsOpacity: false
+                )
+
+                Text("Overrides this bubble's rings, icons, gauges, progress and accent-driven edges.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Toggle(

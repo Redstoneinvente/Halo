@@ -2076,6 +2076,11 @@ final class WindowManager {
         guard let geometry = host.geometry else { return }
         if expanded { host.state.beginExpandedPresentation() }
 
+        // A native NSWindow shadow around a collapsed, notch-attached panel reads like
+        // a second/lighter notch behind a black Halo surface. Keep depth for expanded
+        // and detached surfaces, but make the closed physical/simulated notch exact.
+        host.panel.hasShadow = expanded || !geometry.attachedToNotch
+
         var target = targetFrame(host: host, expanded: expanded)
         if geometry.style == .detached {
             let oldOffset = geometry.offset(expanded: !expanded)
@@ -2184,6 +2189,7 @@ final class WindowManager {
             host.closedWidgetRight = closedOptions.right
 
             host.geometry = Self.geometry(screen: screen, theme: theme, appearance: appearance)
+            host.panel.hasShadow = host.state.expanded || !host.geometry!.attachedToNotch
             if host.state.screenFrame != screen.frame { host.state.screenFrame = screen.frame }
             if host.state.displayID != id { host.state.displayID = id }
             let ambientPhysicalWidth = host.geometry!.physicalNotchWidth > 0 ? host.geometry!.physicalNotchWidth : min(190, host.geometry!.compactWidth)
