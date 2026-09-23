@@ -37,7 +37,7 @@ struct SettingsView: View {
         if visualWorkspaceActive {
             workspaceItems.insert("Visual Workspace Editor", at: 0)
         }
-        var coreItems = ["General"]
+        var coreItems = ["General", "Trailer Mode"]
         if HaloDistribution.current.supportsExternalLicensing || HaloDistribution.current.supportsAppStoreLicensing {
             coreItems.append("Account & License")
         }
@@ -277,6 +277,7 @@ struct SettingsView: View {
     private func sectionIcon(_ name: String) -> String {
         switch name {
         case "General": return "gearshape"
+        case "Trailer Mode": return "movieclapper"
         case "Account & License": return "person.crop.circle.badge.checkmark"
         case "Appearance": return "paintpalette"
         case "Notch Skins": return "square.3.layers.3d"
@@ -372,6 +373,8 @@ struct SettingsView: View {
                     Text("Option + Command").tag(UInt32(2304)); Text("Control + Option").tag(UInt32(6144)); Text("Control + Shift").tag(UInt32(4608))
                 }
             }
+        case "Trailer Mode":
+            TrailerModeSettingsView(store: store, workspace: workspace)
         case "Account & License":
             if HaloDistribution.current.supportsAppStoreLicensing {
                 HaloAppStoreAccountLicenseSettingsView()
@@ -5570,5 +5573,100 @@ private struct LauncherFavoriteApplicationsSheet: View {
         }.value
         applications = discovered
         isLoading = false
+    }
+}
+
+
+@MainActor
+private struct TrailerModeSettingsView: View {
+    @ObservedObject var store: AppStore
+    @ObservedObject var workspace: WorkspaceStore
+
+    private func binding<Value>(_ keyPath: WritableKeyPath<TrailerModeSettings, Value>) -> Binding<Value> {
+        Binding(
+            get: { (workspace.settings.trailer ?? TrailerModeSettings())[keyPath: keyPath] },
+            set: { newValue in
+                var settings = workspace.settings.trailer ?? TrailerModeSettings()
+                settings[keyPath: keyPath] = newValue
+                workspace.settings.trailer = settings
+            }
+        )
+    }
+
+    var body: some View {
+        Section("Trailer Mode") {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(workspace.trailerModeActive ? "Showcase running" : "Ready to record")
+                        .font(.headline)
+                    Text(workspace.trailerModeActive
+                         ? "Press the shortcut or Stop to restore your normal Halo presentation."
+                         : "Cycles through Halo shapes, skins, widget combinations and a deterministic music showcase.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(workspace.trailerModeActive ? "Stop" : "Start") {
+                    store.trailerMode.toggle()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            Text("Trailer Mode is runtime-only. Randomized layouts and themes are never written over your saved workspace or profiles.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Recording surface") {
+            Picker("Target", selection: binding(\.surfaceTarget)) {
+                ForEach(TrailerSurfaceTarget.allCases) { target in
+                    Text(target.rawValue).tag(target)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text("Closed only keeps Halo compact for rapid closed-notch variations. Opened only showcases the full workspace. Alternate switches between both while the sequence runs.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Pacing") {
+            PreciseSlider(title: "Slow interval", value: binding(\.slowInterval), range: 0.35...10, step: 0.05, suffix: " s")
+            PreciseSlider(title: "Fast interval", value: binding(\.fastInterval), range: 0.12...3, step: 0.02, suffix: " s")
+            PreciseSlider(title: "Ramp duration", value: binding(\.rampDuration), range: 1...120, step: 0.5, suffix: " s")
+            PreciseSlider(title: "Smoothing", value: binding(\.smoothing), range: 0.08...1.2, step: 0.02, suffix: " s")
+
+            Text("The sequence begins at the slow interval and eases into the fast interval over the ramp duration. Smoothing controls the transition duration used by shape, lyric and surface changes.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Showcase") {
+            Toggle("Randomize appearance and notch styles", isOn: binding(\.randomizeAppearance))
+            Toggle("Randomize opened widgets and widget styles", isOn: binding(\.randomizeWidgets))
+            Toggle("Include built-in music + synced lyrics", isOn: binding(\.showcaseMusic))
+            Text("The built-in track uses original Halo demo lyrics and generated album art, so recording does not depend on Apple Music, Spotify, networking or your personal media library.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Trailer shortcut") {
+            Toggle("Enable global Trailer Mode shortcut", isOn: binding(\.hotkeyEnabled))
+            Picker("Key", selection: binding(\.hotkeyCode)) {
+                Text("T").tag(UInt32(17))
+                Text("R").tag(UInt32(15))
+                Text("H").tag(UInt32(4))
+                Text("D").tag(UInt32(2))
+                Text("Space").tag(UInt32(49))
+            }
+            Picker("Modifiers", selection: binding(\.hotkeyModifiers)) {
+                Text("Option + Command").tag(UInt32(2304))
+                Text("Control + Option").tag(UInt32(6144))
+                Text("Control + Shift").tag(UInt32(4608))
+            }
+            Text("Default: Option–Command–T. Press once to start the sequence and again to stop it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
