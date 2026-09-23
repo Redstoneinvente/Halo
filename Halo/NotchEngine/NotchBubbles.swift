@@ -284,7 +284,7 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
         if let contentScale { value.contentScale = min(1.6, max(0.55, contentScale.isFinite ? contentScale : 1)) }
         if let verticalOffset { value.verticalOffset = min(120, max(-120, verticalOffset.isFinite ? verticalOffset : 0)) }
         if let tintAmount { value.tintAmount = min(1, max(0, tintAmount.isFinite ? tintAmount : 0)) }
-        if let lifecycleDuration { value.lifecycleDuration = min(1.5, max(0.10, lifecycleDuration.isFinite ? lifecycleDuration : 0.28)) }
+        if let lifecycleDuration { value.lifecycleDuration = min(1.5, max(0.10, lifecycleDuration.isFinite ? lifecycleDuration : 0.22)) }
         if let tint { value.tint = (try? tint.validated()) ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0) }
         return value
     }
@@ -446,7 +446,7 @@ struct NotchBubbleSettings: Codable, Equatable {
     }
 
     var resolvedLifecycleDuration: Double {
-        let value = lifecycleDuration ?? 0.28
+        let value = lifecycleDuration ?? 0.22
         return value.isFinite ? min(1.5, max(0.10, value)) : 0.28
     }
 
@@ -475,7 +475,7 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedStopwatchDisplayMode: StopwatchBubbleDisplayMode { stopwatchDisplayMode ?? .compact }
     var resolvedSystemDisplayMode: SystemBubbleDisplayMode { systemDisplayMode ?? .value }
     var resolvedClipboardDisplayMode: ClipboardBubbleDisplayMode { clipboardDisplayMode ?? .icon }
-    var resolvedCalendarDisplayMode: CalendarBubbleDisplayMode { calendarDisplayMode ?? .date }
+    var resolvedCalendarDisplayMode: CalendarBubbleDisplayMode { calendarDisplayMode ?? .nextEvent }
     var resolvedAudioDisplayMode: AudioBubbleDisplayMode { audioDisplayMode ?? .ring }
     var resolvedVinylDisplayMode: VinylBubbleDisplayMode { vinylDisplayMode ?? .fullRecord }
     var resolvedPixelPalDisplayMode: PixelPalBubbleDisplayMode { pixelPalDisplayMode ?? .full }
@@ -3606,7 +3606,84 @@ struct NotchBubbleSettingsView: View {
     var body: some View {
         Section("Notch Bubbles") {
             Toggle("Enable Notch Bubbles", isOn: binding(\.enabled))
-            Text("Small Halo surfaces stay anchored to the notch for glanceable context and actions without opening the whole workspace.")
+            Text("A selective activity surface for useful state and actions — not a second notification centre.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Activity policy") {
+            Picker("Maximum visible activities", selection: binding(\.maximumBubbles)) {
+                Text("1 · Quiet").tag(1)
+                Text("2").tag(2)
+                Text("3").tag(3)
+                Text("5 · Advanced").tag(5)
+            }
+
+            LabeledContent("Confirmation duration") {
+                HStack {
+                    Slider(
+                        value: optionalBinding(\.confirmationDuration, default: 1.6),
+                        in: 0.5...8,
+                        step: 0.1
+                    )
+                    .frame(width: 200)
+                    Text(String(format: "%.1f s", settings.resolvedConfirmationDuration))
+                        .monospacedDigit()
+                        .frame(width: 52, alignment: .trailing)
+                }
+            }
+
+            LabeledContent("Completion summary") {
+                HStack {
+                    Slider(
+                        value: optionalBinding(\.completionDuration, default: 4.0),
+                        in: 1...10,
+                        step: 0.5
+                    )
+                    .frame(width: 200)
+                    Text(String(format: "%.1f s", settings.resolvedCompletionDuration))
+                        .monospacedDigit()
+                        .frame(width: 52, alignment: .trailing)
+                }
+            }
+
+            Toggle(
+                "Allow confirmations in fullscreen",
+                isOn: optionalBinding(\.showConfirmationsInFullscreen, default: true)
+            )
+            Toggle(
+                "Allow automatic/persistent activities in fullscreen",
+                isOn: optionalBinding(\.showAutomaticInFullscreen, default: false)
+            )
+
+            Toggle(
+                "Use Bubbles instead of Halo HUD for accepted system feedback",
+                isOn: optionalBinding(\.replaceHaloHUDFeedback, default: false)
+            )
+            Text("When enabled, accepted volume/brightness/device feedback is shown by Bubbles only, avoiding duplicate Halo HUD presentation.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("System confirmations") {
+            Toggle(
+                "Volume / mute",
+                isOn: optionalBinding(\.audioFeedbackEnabled, default: true)
+            )
+            Toggle(
+                "Display / keyboard brightness",
+                isOn: optionalBinding(\.brightnessFeedbackEnabled, default: true)
+            )
+            Toggle(
+                "Power and charging transitions",
+                isOn: optionalBinding(\.powerFeedbackEnabled, default: false)
+            )
+            Toggle(
+                "Audio output / device changes",
+                isOn: optionalBinding(\.deviceFeedbackEnabled, default: false)
+            )
+
+            Text("Repeated changes coalesce into one updating confirmation bubble instead of replaying the entrance animation.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -3716,75 +3793,80 @@ struct NotchBubbleSettingsView: View {
                 .foregroundStyle(.secondary)
         }
 
-        Section("Bubble providers") {
-            providerRow(
+        Section("Automatic & ongoing activities") {
+            providerToggleRow(
                 title: "Music",
                 symbol: "music.note",
                 enabled: binding(\.musicEnabled),
-                persistent: binding(\.musicPersistent),
-                detail: "Shows while media is playing, or stays pinned when Persistent is enabled."
+                detail: "Source-aware Now Playing. Choose while-playing, track-change-only or pinned behaviour in Content."
             )
             providerRow(
                 title: "Timer",
                 symbol: "timer",
                 enabled: binding(\.timerEnabled),
                 persistent: binding(\.timerPersistent),
-                detail: "Shows for active, paused and completed timers, or stays available as a quick-start action."
+                detail: "An active task: stays visible while timing, then uses the completion-summary duration."
             )
             providerRow(
-                title: "Pixel Pal",
-                symbol: "face.smiling",
-                enabled: binding(\.pixelPalEnabled),
-                persistent: binding(\.pixelPalPersistent),
-                detail: "Uses Halo's existing Pixel Pal renderer and interactions rather than a separate mascot implementation."
-            )
-            providerToggleRow(
-                title: "Clock",
-                symbol: "clock.fill",
-                enabled: optionalBinding(\.clockEnabled, default: false),
-                detail: "A compact live clock bubble with the full Clock widget available on click."
+                title: "Calendar / next meeting",
+                symbol: "calendar.badge.clock",
+                enabled: optionalBinding(\.calendarEnabled, default: false),
+                persistent: optionalBinding(\.calendarPersistent, default: false),
+                detail: "Shows the next relevant event inside the configured lead window. Persistent keeps the next event visible."
             )
             providerRow(
                 title: "Stopwatch",
                 symbol: "stopwatch.fill",
                 enabled: optionalBinding(\.stopwatchEnabled, default: false),
                 persistent: optionalBinding(\.stopwatchPersistent, default: false),
-                detail: "Appears while the stopwatch is active or has elapsed time. Persistent keeps it ready at all times."
-            )
-            providerToggleRow(
-                title: "System",
-                symbol: "gauge.with.dots.needle.67percent",
-                enabled: optionalBinding(\.systemEnabled, default: false),
-                detail: "Shows one live system metric directly in the bubble."
-            )
-
-            providerToggleRow(
-                title: "Clipboard",
-                symbol: "doc.on.clipboard.fill",
-                enabled: optionalBinding(\.clipboardEnabled, default: false),
-                detail: "Keeps Halo's Clipboard widget one click away."
-            )
-            providerToggleRow(
-                title: "Calendar",
-                symbol: "calendar",
-                enabled: optionalBinding(\.calendarEnabled, default: false),
-                detail: "Shows today's date and opens the full Calendar widget."
-            )
-            providerToggleRow(
-                title: "Audio",
-                symbol: "speaker.wave.2.fill",
-                enabled: optionalBinding(\.audioEnabled, default: false),
-                detail: "Shows current output volume with a live radial level indicator."
+                detail: "Visible while active; pin only if you deliberately want it resident."
             )
             providerRow(
                 title: "Vinyl",
                 symbol: "record.circle.fill",
                 enabled: optionalBinding(\.vinylEnabled, default: false),
                 persistent: optionalBinding(\.vinylPersistent, default: false),
-                detail: "A live record using Halo's shared Vinyl Studio configuration. Normally appears while media is playing."
+                detail: "Optional music personality using the shared Vinyl Studio configuration."
+            )
+        }
+
+        Section("On-demand & pinned tools") {
+            providerRow(
+                title: "Pixel Pal",
+                symbol: "face.smiling",
+                enabled: binding(\.pixelPalEnabled),
+                persistent: binding(\.pixelPalPersistent),
+                detail: "Off by default. Show only for Pixel Pal activity, or pin it deliberately."
+            )
+            providerToggleRow(
+                title: "Clock",
+                symbol: "clock.fill",
+                enabled: optionalBinding(\.clockEnabled, default: false),
+                detail: "Pinned utility. It never auto-announces itself."
+            )
+            providerRow(
+                title: "System stats",
+                symbol: "gauge.with.dots.needle.67percent",
+                enabled: optionalBinding(\.systemEnabled, default: false),
+                persistent: optionalBinding(\.systemPersistent, default: false),
+                detail: "Detailed monitoring is pinned/on-demand; transient brightness feedback is controlled above."
+            )
+            providerRow(
+                title: "Clipboard",
+                symbol: "doc.on.clipboard.fill",
+                enabled: optionalBinding(\.clipboardEnabled, default: false),
+                persistent: optionalBinding(\.clipboardPersistent, default: false),
+                detail: "Clipboard history is never announced for every copy. Pin it only when you want persistent access."
+            )
+            providerRow(
+                title: "Audio controls",
+                symbol: "speaker.wave.2.fill",
+                enabled: optionalBinding(\.audioEnabled, default: false),
+                persistent: optionalBinding(\.audioPersistent, default: false),
+                detail: "Pinned audio control is separate from transient volume feedback."
             )
 
-            Text("New bubble types are off by default so existing setups keep their current layout.")
+            Text("Idle absence is a valid state. New utility bubbles remain opt-in.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -3846,14 +3928,7 @@ struct NotchBubbleSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Picker("Maximum bubbles", selection: binding(\.maximumBubbles)) {
-                Text("3").tag(3)
-                Text("5").tag(5)
-                Text("8").tag(8)
-                Text("12").tag(12)
-                Text("Unlimited").tag(99)
-            }
-            Text("Priority decides which bubbles stay visible when more providers are active than the selected capacity.")
+            Text("Motion controls how an activity enters and returns to the notch. Confirmation dwell time is configured in Activity policy.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -3874,6 +3949,12 @@ struct NotchBubbleSettingsView: View {
 
             switch kind {
             case .music:
+                Picker("Visibility", selection: optionalBinding(\.musicVisibility, default: MusicBubbleVisibility.whilePlaying)) {
+                    ForEach(MusicBubbleVisibility.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+
                 Picker("Display", selection: optionalBinding(\.musicDisplayMode, default: MusicBubbleDisplayMode.artwork)) {
                     ForEach(MusicBubbleDisplayMode.allCases) { mode in
                         Text(mode.rawValue).tag(mode)
@@ -3957,7 +4038,21 @@ struct NotchBubbleSettingsView: View {
                 }
 
             case .calendar:
-                Picker("Display", selection: optionalBinding(\.calendarDisplayMode, default: CalendarBubbleDisplayMode.date)) {
+                LabeledContent("Meeting lead time") {
+                    HStack {
+                        Slider(
+                            value: optionalBinding(\.calendarLeadMinutes, default: 15.0),
+                            in: 1...120,
+                            step: 1
+                        )
+                        .frame(width: 175)
+                        Text("\(Int(settings.resolvedCalendarLeadMinutes)) min")
+                            .monospacedDigit()
+                            .frame(width: 54, alignment: .trailing)
+                    }
+                }
+
+                Picker("Display", selection: optionalBinding(\.calendarDisplayMode, default: CalendarBubbleDisplayMode.nextEvent)) {
                     ForEach(CalendarBubbleDisplayMode.allCases) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
