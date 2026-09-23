@@ -583,25 +583,38 @@ final class NotchBubbleActivityCenter: ObservableObject {
     @Published private(set) var suppressedKinds: Set<NotchBubbleKind> = []
 
     private var expiryTasks: [String: Task<Void, Never>] = [:]
+    private var interactingKinds = Set<NotchBubbleKind>()
+    private var pausedExpiryRemaining: [String: TimeInterval] = [:]
 
     private init() {}
 
     func publishHUD(_ event: HaloHUDEvent, settings: NotchBubbleSettings) {
         guard settings.enabled,
               settings.acceptsHUDEvent(event.kind),
-              let activity = Self.activity(from: event, settings: settings) else { return }
+              var activity = Self.activity(from: event, settings: settings) else { return }
 
         suppressedKinds.remove(activity.kind)
+
+        if interactingKinds.contains(activity.kind), let expiresAt = activity.expiresAt {
+            pausedExpiryRemaining[activity.id] = max(
+                settings.resolvedConfirmationDuration,
+                expiresAt.timeIntervalSinceNow
+            )
+            activity.expiresAt = nil
+        }
+
         transientActivities[activity.id] = activity
         scheduleExpiry(for: activity)
     }
 
     func dismiss(kind: NotchBubbleKind) {
         suppressedKinds.insert(kind)
+        interactingKinds.remove(kind)
         let ids = transientActivities.values.filter { $0.kind == kind }.map(\.id)
         for id in ids {
             expiryTasks[id]?.cancel()
             expiryTasks.removeValue(forKey: id)
+            pausedExpiryRemaining.removeValue(forKey: id)
             transientActivities.removeValue(forKey: id)
         }
     }
@@ -629,8 +642,16 @@ final class NotchBubbleActivityCenter: ObservableObject {
             expiresAt: now.addingTimeInterval(duration)
         )
         suppressedKinds.remove(kind)
-        transientActivities[activity.id] = activity
-        scheduleExpiry(for: activity)
+        var resolvedActivity = activity
+        if interactingKinds.contains(kind), let expiresAt = resolvedActivity.expiresAt {
+            pausedExpiryRemaining[resolvedActivity.id] = max(
+                duration,
+                expiresAt.timeIntervalSinceNow
+            )
+            resolvedActivity.expiresAt = nil
+        }
+        transientActivities[resolvedActivity.id] = resolvedActivity
+        scheduleExpiry(for: resolvedActivity)
     }
 
     func clearTransient(kind: NotchBubbleKind) {
@@ -638,6 +659,7 @@ final class NotchBubbleActivityCenter: ObservableObject {
         for id in ids {
             expiryTasks[id]?.cancel()
             expiryTasks.removeValue(forKey: id)
+            pausedExpiryRemaining.removeValue(forKey: id)
             transientActivities.removeValue(forKey: id)
         }
     }
@@ -662,23 +684,37 @@ final class NotchBubbleActivityCenter: ObservableObject {
 
     func setInteracting(kind: NotchBubbleKind, interacting: Bool) {
         let ids = transientActivities.values.filter { $0.kind == kind }.map(\.id)
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty else {
+            if interacting { interactingKinds.insert(kind) }
+            else { interactingKinds.remove(kind) }
+            return
+        }
 
         if interacting {
+            interactingKinds.insert(kind)
+            let now = Date()
             for id in ids {
+                guard var activity = transientActivities[id] else { continue }
+                if let expiresAt = activity.expiresAt {
+                    pausedExpiryRemaining[id] = max(0.05, expiresAt.timeIntervalSince(now))
+                    activity.expiresAt = nil
+                    transientActivities[id] = activity
+                }
                 expiryTasks[id]?.cancel()
                 expiryTasks.removeValue(forKey: id)
             }
             return
         }
 
+        interactingKinds.remove(kind)
         let now = Date()
         for id in ids {
-            guard var activity = transientActivities[id], activity.expiresAt != nil else { continue }
-            // Interaction protects the activity instead of letting it vanish under the pointer.
-            // Resume with a short readable grace period rather than replaying its entrance.
+            guard var activity = transientActivities[id] else { continue }
+            let remaining = pausedExpiryRemaining.removeValue(forKey: id) ?? 0
+            guard remaining > 0 else { continue }
+            // Give the user enough time to visually reacquire the bubble after leaving it.
             activity.updatedAt = now
-            activity.expiresAt = now.addingTimeInterval(1.2)
+            activity.expiresAt = now.addingTimeInterval(max(1.2, remaining))
             transientActivities[id] = activity
             scheduleExpiry(for: activity)
         }
