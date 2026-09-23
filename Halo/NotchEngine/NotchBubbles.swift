@@ -699,7 +699,7 @@ private final class NotchBubbleDisplayHost {
             .store(in: &subscriptions)
     }
 
-    private func refresh(animated: Bool) {
+    private func refresh(animated: Bool, trackingSurface: Bool = false) {
         guard let state else {
             removeAll(animated: false)
             return
@@ -1396,6 +1396,7 @@ private struct NotchBubbleSettingsPreview: View {
             let notchHeight: CGFloat = 34
             let bubble = min(CGFloat(settings.bubbleSize), 46)
             let gap = min(CGFloat(settings.spacing), 18)
+            let verticalOffset = CGFloat(settings.resolvedVerticalOffset)
             let notch = CGRect(
                 x: (proxy.size.width - notchWidth) / 2,
                 y: 10,
