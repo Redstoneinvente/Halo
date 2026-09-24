@@ -616,8 +616,8 @@ struct ClosedNotchSlot: View {
                 compact: true,
                 compactShowsConfiguredSeconds: true
             )
-            .environment(\.openNotchAvailableWidth, max(72, innerWidth))
-            .environment(\.openNotchAvailableHeight, max(44, innerHeight))
+            .environment(\.openNotchAvailableWidth, CGFloat(max(72, innerWidth)))
+            .environment(\.openNotchAvailableHeight, CGFloat(max(44, innerHeight)))
         case .date: TimelineView(.periodic(from: .now, by: 60)) { context in Text(context.date, format: .dateTime.month().day()).lineLimit(1) }
         case .timer:
             if let deadline = store.deadline { Text(deadline, style: .timer).monospacedDigit().lineLimit(1) }
