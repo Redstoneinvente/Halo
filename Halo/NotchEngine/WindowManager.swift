@@ -996,6 +996,15 @@ final class WindowManager {
         store.workspace.$activities.receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
 
+        // Closed-notch clock width can change when a 12-hour clock crosses between
+        // one- and two-digit hours. Re-measure periodically so the surface hugs the
+        // rendered clock instead of permanently reserving room for "12".
+        Timer.publish(every: 60, on: .main, in: .common)
+            .autoconnect()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }
+            .store(in: &subscriptions)
+
         let shouldHideInitialFrame = ActivationSequenceCoordinator.shared.shouldPlay(startupActivationContext)
         initialActivationPending = shouldHideInitialFrame
         reconcile()
@@ -1644,8 +1653,22 @@ final class WindowManager {
 
                 let digitSpacing = max(0, style.clock.resolvedDigitSpacing)
                 let tracking = style.clock.resolvedTracking
+
+                // Match the hour's real rendered character count. In 12-hour mode
+                // "2:56 PM" should not reserve the width of "12:56 PM". The minute
+                // and optional seconds stay at two digits, so their width is stable.
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(identifier: style.clock.timeZone) ?? .current
+                let hour24 = calendar.component(.hour, from: Date())
+                let displayHour = style.clock.twentyFourHour
+                    ? hour24
+                    : (hour24 % 12 == 0 ? 12 : hour24 % 12)
+                let hourText = style.clock.resolvedLeadingZero
+                    ? String(format: "%02d", displayHour)
+                    : String(displayHour)
+
                 var pieces: [Double] = [
-                    glyphWidth("88", font: clockFont(clockSize * style.clock.resolvedHourEmphasis, digits: true), tracking: tracking),
+                    glyphWidth(hourText, font: clockFont(clockSize * style.clock.resolvedHourEmphasis, digits: true), tracking: tracking),
                     glyphWidth(style.clock.resolvedSeparator.glyph, font: clockFont(clockSize * 0.86, weight: .regular)),
                     glyphWidth("88", font: clockFont(clockSize * style.clock.resolvedMinuteEmphasis, digits: true), tracking: tracking)
                 ]
@@ -1658,8 +1681,9 @@ final class WindowManager {
                 if !style.clock.twentyFourHour && style.clock.resolvedShowAMPM {
                     let ampmSize = max(8, clockSize * 0.23)
                     let leadingInset = max(1, clockSize * 0.02)
+                    let ampm = hour24 < 12 ? "AM" : "PM"
                     pieces.append(
-                        glyphWidth("PM", font: clockFont(ampmSize, weight: .semibold))
+                        glyphWidth(ampm, font: clockFont(ampmSize, weight: .semibold))
                         + leadingInset
                     )
                 }
@@ -1679,8 +1703,9 @@ final class WindowManager {
                         + glyphWidth("Wed, Sep 28", font: clockFont(secondarySize, weight: .medium))
                 }
 
-                // Small final cushion for fractional SwiftUI glyph/shadow rendering.
-                return contentWidth + 8
+                // Keep only a tight cushion here; the closed-surface sizing path
+                // already adds its own rendering allowance outside the widget width.
+                return contentWidth + 4
             case .date:
                 return textWidth("Sep 28", font: font)
             case .timer:
