@@ -428,6 +428,16 @@ struct SettingsView: View {
                 do { if value { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
                 catch { store.error = error.localizedDescription; loginEnabled = SMAppService.mainApp.status == .enabled }
             }
+            Section("Web representation") {
+                Button {
+                    AppDelegate.exportWebRepresentationFromSettings()
+                } label: {
+                    Label("Export Web Representation…", systemImage: "square.and.arrow.up")
+                }
+                Text("Exports Halo's real rendered closed, open, and music surfaces plus manifest.json for the website. The exported folder is revealed in Finder when complete.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("Global shortcut") {
                 Toggle("Enable global shortcut", isOn: $workspace.settings.hotkeyEnabled)
                 Picker("Key", selection: $workspace.settings.hotkeyCode) { Text("Space").tag(UInt32(49)); Text("H").tag(UInt32(4)); Text("D").tag(UInt32(2)) }
