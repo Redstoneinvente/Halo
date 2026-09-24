@@ -1,3 +1,76 @@
+import Foundation
+import Combine
+
+enum HaloAccessLevel: String, Equatable, Sendable {
+    case lite
+    case full
+}
+
+/// Authoritative runtime source of truth for Halo Lite vs Halo Full.
+///
+/// Entitlement providers decide whether Full is available. Feature code should
+/// consult this object instead of querying StoreKit, LicenseSeat, or account state.
+@MainActor
+final class HaloFeatureAccess: ObservableObject {
+    static let shared = HaloFeatureAccess()
+
+    @Published private(set) var accessLevel: HaloAccessLevel = .lite
+
+    private enum Keys {
+        static let choseLite = "HaloHasChosenLite"
+        static let hadFullAccess = "HaloHasHadFullAccess"
+    }
+
+    private let defaults: UserDefaults
+
+    private init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    var isFull: Bool { accessLevel == .full }
+    var hasChosenLite: Bool { defaults.bool(forKey: Keys.choseLite) }
+    var hasHadFullAccess: Bool { defaults.bool(forKey: Keys.hadFullAccess) }
+
+    /// A returning Lite user, or a customer who previously had Full, should not
+    /// be forced back through access selection when a Full entitlement is absent.
+    var shouldAutomaticallyStartLite: Bool {
+        hasChosenLite || hasHadFullAccess
+    }
+
+    func chooseLite() {
+        defaults.set(true, forKey: Keys.choseLite)
+        setFullAccess(false)
+    }
+
+    func setFullAccess(_ enabled: Bool) {
+        let next: HaloAccessLevel = enabled ? .full : .lite
+        if enabled {
+            defaults.set(true, forKey: Keys.hadFullAccess)
+        }
+        guard accessLevel != next else { return }
+        accessLevel = next
+    }
+}
+
+extension Notification.Name {
+    static let haloPresentUpgrade = Notification.Name("HaloPresentUpgrade")
+}
+
+/// Reusable entry point for premium controls that need to present Halo's upgrade UI.
+///
+/// Feature-specific buttons can call this later without knowing whether the running
+/// binary uses StoreKit or Direct licensing.
+@MainActor
+final class HaloUpgradeCoordinator {
+    static let shared = HaloUpgradeCoordinator()
+
+    private init() {}
+
+    func present() {
+        NotificationCenter.default.post(name: .haloPresentUpgrade, object: nil)
+    }
+}
+
 /// Describes how this Halo binary is distributed.
 ///
 /// Keep compile-condition checks in this file. The rest of Halo should ask for
