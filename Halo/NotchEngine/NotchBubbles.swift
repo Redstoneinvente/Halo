@@ -190,6 +190,15 @@ enum NotchBubbleGestureAction: String, Codable, CaseIterable, Identifiable, Hash
 
     var id: String { rawValue }
 
+    var gestureTitle: String {
+        switch self {
+        case .timerAddFive:
+            return "Add Timer Time"
+        default:
+            return rawValue
+        }
+    }
+
     var supportsContinuousGesture: Bool {
         switch self {
         case .audioVolumeUp, .audioVolumeDown, .seekBackward, .seekForward:
@@ -536,6 +545,9 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
     var gestureUpHapticPattern: HaloHoverHapticPattern? = nil
     var gestureDownHapticPattern: HaloHoverHapticPattern? = nil
 
+    var tapHapticStrength: Int? = nil
+    var tapHapticPattern: HaloHoverHapticPattern? = nil
+
     var doubleClickAction: NotchBubbleGestureAction? = nil
     var doubleClickAmount: Double? = nil
     var doubleClickHapticStrength: Int? = nil
@@ -563,6 +575,7 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
         if let gestureRightHapticStrength { value.gestureRightHapticStrength = min(6, max(0, gestureRightHapticStrength)) }
         if let gestureUpHapticStrength { value.gestureUpHapticStrength = min(6, max(0, gestureUpHapticStrength)) }
         if let gestureDownHapticStrength { value.gestureDownHapticStrength = min(6, max(0, gestureDownHapticStrength)) }
+        if let tapHapticStrength { value.tapHapticStrength = min(6, max(0, tapHapticStrength)) }
         if let doubleClickHapticStrength { value.doubleClickHapticStrength = min(6, max(0, doubleClickHapticStrength)) }
 
         if let tint { value.tint = (try? tint.validated()) ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0) }
@@ -585,6 +598,7 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
         gestureUpHapticStrength == nil && gestureDownHapticStrength == nil &&
         gestureLeftHapticPattern == nil && gestureRightHapticPattern == nil &&
         gestureUpHapticPattern == nil && gestureDownHapticPattern == nil &&
+        tapHapticStrength == nil && tapHapticPattern == nil &&
         doubleClickAction == nil && doubleClickAmount == nil &&
         doubleClickHapticStrength == nil && doubleClickHapticPattern == nil
     }
@@ -891,7 +905,7 @@ struct NotchBubbleSettings: Codable, Equatable {
             action: action,
             mode: .once,
             amount: action.normalizedGestureAmount(override?.doubleClickAmount),
-            hapticStrength: override?.doubleClickHapticStrength.map { min(6, max(0, $0)) },
+            hapticStrength: (override?.doubleClickHapticStrength).map { min(6, max(0, $0)) },
             hapticPattern: override?.doubleClickHapticPattern
         )
     }
@@ -3127,6 +3141,15 @@ private struct NotchBubbleView: View {
                             )
                         case .second:
                             handlePrimaryTap()
+                            let override = settings.styleOverride(for: kind)
+                            HaloHoverHaptics.pulse(
+                                id: "bubble.gesture.tap." + surfaceState.displayID + "." + kind.rawValue,
+                                strength: override?.tapHapticStrength
+                                    ?? store.configuration.resolvedHoverHapticStrength,
+                                pattern: override?.tapHapticPattern
+                                    ?? store.configuration.resolvedHoverHapticPattern,
+                                minimumInterval: 0.04
+                            )
                         }
                     }
             )
@@ -5712,6 +5735,19 @@ struct NotchBubbleSettingsView: View {
                 hapticPattern: \.gestureDownHapticPattern
             )
 
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Single-click haptics")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+
+                gestureHapticControls(
+                    kind: kind,
+                    strength: \.tapHapticStrength,
+                    pattern: \.tapHapticPattern
+                )
+            }
+            .padding(.vertical, 2)
+
             doubleClickGestureEditor(kind: kind)
 
             HStack {
@@ -5756,7 +5792,7 @@ struct NotchBubbleSettingsView: View {
                 )
             ) {
                 ForEach(NotchBubbleGestureAction.availableActions(for: kind)) { option in
-                    Text(option.rawValue).tag(option)
+                    Text(option.gestureTitle).tag(option)
                 }
             }
 
@@ -5817,7 +5853,7 @@ struct NotchBubbleSettingsView: View {
                 )
             ) {
                 ForEach(NotchBubbleGestureAction.availableActions(for: kind)) { option in
-                    Text(option.rawValue).tag(option)
+                    Text(option.gestureTitle).tag(option)
                 }
             }
 
