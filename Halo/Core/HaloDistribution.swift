@@ -166,6 +166,16 @@ final class HaloFeatureAccess: ObservableObject {
         value.useCustomOpenNotchWorkspace = false
         value.openNotch = nil
 
+        // Lite uses the normal/default workspace renderer. Legacy page/axis/grid
+        // tuning remains saved for Full but cannot shape the Lite workspace.
+        value.horizontalWidgets = nil
+        value.horizontalPages = nil
+        value.horizontalHeight = nil
+        value.openNotchContentMode = nil
+        value.openHorizontalPadding = nil
+        value.openVerticalPadding = nil
+        value.openFixedColumns = nil
+
         // Filter runtime modules without rewriting the saved enabled/order sets.
         value.enabled = Set(saved.enabled.filter { allows(module: $0) })
         value.order = saved.normalizedOrder().filter { allows(module: $0) }
@@ -220,6 +230,7 @@ final class HaloFeatureAccess: ObservableObject {
         appearance.blur = 0
         appearance.saturation = 1
         appearance.brightness = 0
+        appearance.compactWidth = Appearance().compactWidth
         appearance.skin = NotchSkinOptions()
         appearance.animation = .smooth
         appearance.surface = SurfaceOptions()
