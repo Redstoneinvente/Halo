@@ -152,6 +152,13 @@ enum NotchBubbleAnimationPreset: String, Codable, CaseIterable, Identifiable, Ha
     var id: String { rawValue }
 }
 
+enum NotchBubbleGestureMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case once = "Once per Gesture"
+    case continuous = "Continuous"
+
+    var id: String { rawValue }
+}
+
 enum NotchBubbleGestureAction: String, Codable, CaseIterable, Identifiable, Hashable {
     case none = "None"
     case primaryAction = "Primary Action"
@@ -163,6 +170,8 @@ enum NotchBubbleGestureAction: String, Codable, CaseIterable, Identifiable, Hash
     case previousTrack = "Previous Track"
     case nextTrack = "Next Track"
     case openMediaPlayer = "Open Media App"
+    case seekBackward = "Seek Backward"
+    case seekForward = "Seek Forward"
 
     case timerPauseResume = "Timer Pause / Resume"
     case timerAddFive = "Timer +5 Minutes"
@@ -181,6 +190,93 @@ enum NotchBubbleGestureAction: String, Codable, CaseIterable, Identifiable, Hash
 
     var id: String { rawValue }
 
+    var supportsContinuousGesture: Bool {
+        switch self {
+        case .audioVolumeUp, .audioVolumeDown, .seekBackward, .seekForward:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var supportsGestureAmount: Bool {
+        switch self {
+        case .audioVolumeUp, .audioVolumeDown, .seekBackward, .seekForward, .timerAddFive:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var defaultGestureAmount: Double {
+        switch self {
+        case .audioVolumeUp, .audioVolumeDown:
+            return 5
+        case .seekBackward, .seekForward:
+            return 5
+        case .timerAddFive:
+            return 5
+        default:
+            return 1
+        }
+    }
+
+    var gestureAmountRange: ClosedRange<Double> {
+        switch self {
+        case .audioVolumeUp, .audioVolumeDown:
+            return 1...25
+        case .seekBackward, .seekForward:
+            return 1...60
+        case .timerAddFive:
+            return 1...60
+        default:
+            return 1...1
+        }
+    }
+
+    var gestureAmountStep: Double {
+        switch self {
+        case .audioVolumeUp, .audioVolumeDown, .seekBackward, .seekForward, .timerAddFive:
+            return 1
+        default:
+            return 1
+        }
+    }
+
+    var gestureAmountLabel: String {
+        switch self {
+        case .audioVolumeUp, .audioVolumeDown:
+            return "Change per step"
+        case .seekBackward, .seekForward:
+            return "Seek per step"
+        case .timerAddFive:
+            return "Minutes to add"
+        default:
+            return "Amount"
+        }
+    }
+
+    func normalizedGestureAmount(_ amount: Double?) -> Double {
+        let fallback = defaultGestureAmount
+        let raw = amount ?? fallback
+        let finite = raw.isFinite ? raw : fallback
+        return min(gestureAmountRange.upperBound, max(gestureAmountRange.lowerBound, finite))
+    }
+
+    func formattedGestureAmount(_ amount: Double) -> String {
+        let value = normalizedGestureAmount(amount)
+        switch self {
+        case .audioVolumeUp, .audioVolumeDown:
+            return "\(Int(value.rounded()))%"
+        case .seekBackward, .seekForward:
+            return "\(Int(value.rounded())) s"
+        case .timerAddFive:
+            return "\(Int(value.rounded())) min"
+        default:
+            return String(format: "%.0f", value)
+        }
+    }
+
     static func availableActions(for kind: NotchBubbleKind) -> [NotchBubbleGestureAction] {
         let common: [NotchBubbleGestureAction] = [
             .none,
@@ -196,7 +292,9 @@ enum NotchBubbleGestureAction: String, Codable, CaseIterable, Identifiable, Hash
                 .playPause,
                 .previousTrack,
                 .nextTrack,
-                .openMediaPlayer
+                .openMediaPlayer,
+                .seekBackward,
+                .seekForward
             ]
 
         case .timer:
@@ -238,6 +336,18 @@ enum NotchBubbleGestureAction: String, Codable, CaseIterable, Identifiable, Hash
     ) -> NotchBubbleGestureAction {
         guard let action else { return defaultAction }
         return availableActions(for: kind).contains(action) ? action : defaultAction
+    }
+}
+
+struct NotchBubbleGestureConfiguration {
+    let action: NotchBubbleGestureAction
+    let mode: NotchBubbleGestureMode
+    let amount: Double
+    let hapticStrength: Int?
+    let hapticPattern: HaloHoverHapticPattern?
+
+    var shouldRepeat: Bool {
+        mode == .continuous && action.supportsContinuousGesture
     }
 }
 
@@ -405,7 +515,31 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
     var gestureRightAction: NotchBubbleGestureAction? = nil
     var gestureUpAction: NotchBubbleGestureAction? = nil
     var gestureDownAction: NotchBubbleGestureAction? = nil
+
+    var gestureLeftMode: NotchBubbleGestureMode? = nil
+    var gestureRightMode: NotchBubbleGestureMode? = nil
+    var gestureUpMode: NotchBubbleGestureMode? = nil
+    var gestureDownMode: NotchBubbleGestureMode? = nil
+
+    var gestureLeftAmount: Double? = nil
+    var gestureRightAmount: Double? = nil
+    var gestureUpAmount: Double? = nil
+    var gestureDownAmount: Double? = nil
+
+    var gestureLeftHapticStrength: Int? = nil
+    var gestureRightHapticStrength: Int? = nil
+    var gestureUpHapticStrength: Int? = nil
+    var gestureDownHapticStrength: Int? = nil
+
+    var gestureLeftHapticPattern: HaloHoverHapticPattern? = nil
+    var gestureRightHapticPattern: HaloHoverHapticPattern? = nil
+    var gestureUpHapticPattern: HaloHoverHapticPattern? = nil
+    var gestureDownHapticPattern: HaloHoverHapticPattern? = nil
+
     var doubleClickAction: NotchBubbleGestureAction? = nil
+    var doubleClickAmount: Double? = nil
+    var doubleClickHapticStrength: Int? = nil
+    var doubleClickHapticPattern: HaloHoverHapticPattern? = nil
 
     func normalized() -> Self {
         var value = self
@@ -418,6 +552,19 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
         if let verticalOffset { value.verticalOffset = min(120, max(-120, verticalOffset.isFinite ? verticalOffset : 0)) }
         if let tintAmount { value.tintAmount = min(1, max(0, tintAmount.isFinite ? tintAmount : 0)) }
         if let lifecycleDuration { value.lifecycleDuration = min(1.5, max(0.10, lifecycleDuration.isFinite ? lifecycleDuration : 0.22)) }
+
+        if let gestureLeftAmount { value.gestureLeftAmount = min(300, max(0.1, gestureLeftAmount.isFinite ? gestureLeftAmount : 5)) }
+        if let gestureRightAmount { value.gestureRightAmount = min(300, max(0.1, gestureRightAmount.isFinite ? gestureRightAmount : 5)) }
+        if let gestureUpAmount { value.gestureUpAmount = min(300, max(0.1, gestureUpAmount.isFinite ? gestureUpAmount : 5)) }
+        if let gestureDownAmount { value.gestureDownAmount = min(300, max(0.1, gestureDownAmount.isFinite ? gestureDownAmount : 5)) }
+        if let doubleClickAmount { value.doubleClickAmount = min(300, max(0.1, doubleClickAmount.isFinite ? doubleClickAmount : 5)) }
+
+        if let gestureLeftHapticStrength { value.gestureLeftHapticStrength = min(6, max(0, gestureLeftHapticStrength)) }
+        if let gestureRightHapticStrength { value.gestureRightHapticStrength = min(6, max(0, gestureRightHapticStrength)) }
+        if let gestureUpHapticStrength { value.gestureUpHapticStrength = min(6, max(0, gestureUpHapticStrength)) }
+        if let gestureDownHapticStrength { value.gestureDownHapticStrength = min(6, max(0, gestureDownHapticStrength)) }
+        if let doubleClickHapticStrength { value.doubleClickHapticStrength = min(6, max(0, doubleClickHapticStrength)) }
+
         if let tint { value.tint = (try? tint.validated()) ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0) }
         if let accent { value.accent = (try? accent.validated()) ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0) }
         return value
@@ -429,7 +576,17 @@ struct NotchBubbleStyleOverride: Codable, Equatable {
         contentScale == nil && verticalOffset == nil && tint == nil && accent == nil && tintAmount == nil &&
         animation == nil && lifecycleDuration == nil &&
         gestureLeftAction == nil && gestureRightAction == nil &&
-        gestureUpAction == nil && gestureDownAction == nil && doubleClickAction == nil
+        gestureUpAction == nil && gestureDownAction == nil &&
+        gestureLeftMode == nil && gestureRightMode == nil &&
+        gestureUpMode == nil && gestureDownMode == nil &&
+        gestureLeftAmount == nil && gestureRightAmount == nil &&
+        gestureUpAmount == nil && gestureDownAmount == nil &&
+        gestureLeftHapticStrength == nil && gestureRightHapticStrength == nil &&
+        gestureUpHapticStrength == nil && gestureDownHapticStrength == nil &&
+        gestureLeftHapticPattern == nil && gestureRightHapticPattern == nil &&
+        gestureUpHapticPattern == nil && gestureDownHapticPattern == nil &&
+        doubleClickAction == nil && doubleClickAmount == nil &&
+        doubleClickHapticStrength == nil && doubleClickHapticPattern == nil
     }
 }
 
@@ -670,26 +827,72 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedShowAutomaticInFullscreen: Bool { showAutomaticInFullscreen ?? false }
     var resolvedShowConfirmationsInFullscreen: Bool { showConfirmationsInFullscreen ?? true }
 
-    fileprivate func gestureAction(
+    fileprivate func gestureConfiguration(
         for kind: NotchBubbleKind,
         direction: NotchBubbleGestureDirection
-    ) -> NotchBubbleGestureAction {
+    ) -> NotchBubbleGestureConfiguration {
         let override = styleOverride(for: kind)
-        let stored: NotchBubbleGestureAction?
+
+        let storedAction: NotchBubbleGestureAction?
+        let storedMode: NotchBubbleGestureMode?
+        let storedAmount: Double?
+        let storedHapticStrength: Int?
+        let storedHapticPattern: HaloHoverHapticPattern?
+
         switch direction {
-        case .left: stored = override?.gestureLeftAction
-        case .right: stored = override?.gestureRightAction
-        case .up: stored = override?.gestureUpAction
-        case .down: stored = override?.gestureDownAction
+        case .left:
+            storedAction = override?.gestureLeftAction
+            storedMode = override?.gestureLeftMode
+            storedAmount = override?.gestureLeftAmount
+            storedHapticStrength = override?.gestureLeftHapticStrength
+            storedHapticPattern = override?.gestureLeftHapticPattern
+        case .right:
+            storedAction = override?.gestureRightAction
+            storedMode = override?.gestureRightMode
+            storedAmount = override?.gestureRightAmount
+            storedHapticStrength = override?.gestureRightHapticStrength
+            storedHapticPattern = override?.gestureRightHapticPattern
+        case .up:
+            storedAction = override?.gestureUpAction
+            storedMode = override?.gestureUpMode
+            storedAmount = override?.gestureUpAmount
+            storedHapticStrength = override?.gestureUpHapticStrength
+            storedHapticPattern = override?.gestureUpHapticPattern
+        case .down:
+            storedAction = override?.gestureDownAction
+            storedMode = override?.gestureDownMode
+            storedAmount = override?.gestureDownAmount
+            storedHapticStrength = override?.gestureDownHapticStrength
+            storedHapticPattern = override?.gestureDownHapticPattern
         }
-        return NotchBubbleGestureAction.sanitized(stored, for: kind, default: .none)
+
+        let action = NotchBubbleGestureAction.sanitized(storedAction, for: kind, default: .none)
+        let mode: NotchBubbleGestureMode =
+            action.supportsContinuousGesture ? (storedMode ?? .once) : .once
+
+        return NotchBubbleGestureConfiguration(
+            action: action,
+            mode: mode,
+            amount: action.normalizedGestureAmount(storedAmount),
+            hapticStrength: storedHapticStrength.map { min(6, max(0, $0)) },
+            hapticPattern: storedHapticPattern
+        )
     }
 
-    func doubleClickAction(for kind: NotchBubbleKind) -> NotchBubbleGestureAction {
-        NotchBubbleGestureAction.sanitized(
-            styleOverride(for: kind)?.doubleClickAction,
+    func doubleClickConfiguration(for kind: NotchBubbleKind) -> NotchBubbleGestureConfiguration {
+        let override = styleOverride(for: kind)
+        let action = NotchBubbleGestureAction.sanitized(
+            override?.doubleClickAction,
             for: kind,
             default: .primaryAction
+        )
+
+        return NotchBubbleGestureConfiguration(
+            action: action,
+            mode: .once,
+            amount: action.normalizedGestureAmount(override?.doubleClickAmount),
+            hapticStrength: override?.doubleClickHapticStrength.map { min(6, max(0, $0)) },
+            hapticPattern: override?.doubleClickHapticPattern
         )
     }
 
