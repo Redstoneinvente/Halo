@@ -121,6 +121,8 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     private var hudEngine: HaloHUDEngine?
     private var systemAudioFallback: SystemAudioMediaFallback?
     private var systemLiveActivitySource: SystemLiveActivitySource?
+    private var runtimeStarted = false
+    private var premiumServicesEnabled = false
     var applyTheme: ((Theme) -> Void)?
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -205,16 +207,17 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             defaults.set(false, forKey: HaloHUDKeys.enabled)
         }
     }
-    func start() {
+    func start(premiumServicesEnabled: Bool = true) {
+        if runtimeStarted {
+            setPremiumServicesEnabled(premiumServicesEnabled)
+            return
+        }
+        runtimeStarted = true
         disableLegacyHUDRenderer()
         updateArtworkPreference()
         if hudEngine == nil { hudEngine = HaloHUDEngine(workspace: self); hudEngine?.start() }
         evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey(); updateRetroGameHotkey(); updateClipboardCIHotkey()
-        if HaloDistribution.current.supportsPartnerIntegrations {
-            HaloCustomCIRuntimeStore.shared.attach(to: self)
-            IntegrationCIRuntime.shared.start()
-            IntegrationShortcutManager.shared.start()
-        }
+        setPremiumServicesEnabled(premiumServicesEnabled)
         pollMedia()
         if systemLiveActivitySource == nil {
             systemLiveActivitySource = SystemLiveActivitySource(workspace: self, defaults: defaults)
@@ -256,7 +259,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
                 self?.refreshApps(); self?.evaluateRules(); self?.evaluateSchedules(); self?.hudEngine?.configurationDidChange()
                 self?.pollMedia(); self?.bluetooth.refresh()
                 if notification.name == NSWorkspace.didWakeNotification,
-                   HaloDistribution.current.supportsPartnerIntegrations {
+                   self.premiumServicesEnabled {
                     IntegrationCIRuntime.shared.cleanupForSleepOrWake()
                     IntegrationCIRuntime.shared.refresh()
                     IntegrationShortcutManager.shared.sync()
@@ -265,8 +268,8 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)
             .receive(on: RunLoop.main)
-            .sink { _ in
-                guard HaloDistribution.current.supportsPartnerIntegrations else { return }
+            .sink { [weak self] _ in
+                guard self?.premiumServicesEnabled == true else { return }
                 IntegrationCIRuntime.shared.cleanupForSleepOrWake()
             }
             .store(in: &subscriptions)
@@ -278,12 +281,25 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.evaluateRules(); self?.hudEngine?.configurationDidChange() }.store(in: &subscriptions)
     }
-    func stop() {
-        if HaloDistribution.current.supportsPartnerIntegrations {
+    func setPremiumServicesEnabled(_ enabled: Bool) {
+        let shouldEnable = enabled && HaloDistribution.current.supportsPartnerIntegrations
+        guard premiumServicesEnabled != shouldEnable else { return }
+        premiumServicesEnabled = shouldEnable
+
+        if shouldEnable {
+            HaloCustomCIRuntimeStore.shared.attach(to: self)
+            IntegrationCIRuntime.shared.start()
+            IntegrationShortcutManager.shared.start()
+        } else {
+            IntegrationCIRuntime.shared.cleanupForSleepOrWake()
             HaloCustomCIRuntimeStore.shared.detach()
             IntegrationShortcutManager.shared.stop()
             IntegrationCIRuntime.shared.stop()
         }
+    }
+
+    func stop() {
+        setPremiumServicesEnabled(false)
         systemLiveActivitySource?.stop()
         systemLiveActivitySource = nil
         pendingSave?.cancel()
@@ -300,6 +316,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         clipboardCIHotkey.stop()
         clipboard.reset()
         media.disconnect()
+        runtimeStarted = false
     }
     private func schedulePersistence() {
         pendingSave?.cancel()
