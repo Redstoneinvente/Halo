@@ -11,6 +11,7 @@ struct SettingsView: View {
 @MainActor struct WorkspaceSettingsView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
+    @ObservedObject private var featureAccess = HaloFeatureAccess.shared
     @AppStorage("onboarded") private var onboarded = false
     @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
     @State private var section: String? = "General"
@@ -159,7 +160,23 @@ struct SettingsView: View {
                 HStack(spacing: 10) {
                     Image(nsImage: NSApp.applicationIconImage).resizable().scaledToFit().frame(width: 44, height: 44).accessibilityLabel("Halo app icon")
                     VStack(alignment: .leading) {
-                        Text("Halo").font(.headline)
+                        HStack(spacing: 6) {
+                            Text("Halo").font(.headline)
+                            if !featureAccess.isFull {
+                                Text("LITE")
+                                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                                    .tracking(0.4)
+                                    .foregroundStyle(Color.accentColor)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.accentColor.opacity(0.12), in: Capsule())
+                                    .overlay {
+                                        Capsule()
+                                            .stroke(Color.accentColor.opacity(0.28), lineWidth: 0.5)
+                                    }
+                                    .accessibilityLabel("Halo Lite")
+                            }
+                        }
                         Text("Make it yours").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
