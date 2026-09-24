@@ -101,6 +101,28 @@ final class HaloFeatureAccess: ObservableObject {
         }
     }
 
+    func allows(hudEvent: HaloHUDEventKind) -> Bool {
+        if isFull { return true }
+        switch hudEvent {
+        case .volume, .mute, .displayBrightness, .keyboardBrightness:
+            return true
+        default:
+            return false
+        }
+    }
+
+    func effectiveHUDSettings(_ saved: HaloHUDSettings) -> HaloHUDSettings {
+        guard !isFull else { return saved }
+
+        var value = HaloHUDSettings()
+        for kind in HaloHUDEventKind.allCases {
+            var item = HaloHUDEventOverride()
+            item.enabled = allows(hudEvent: kind)
+            value.setOverride(item, for: kind)
+        }
+        return value
+    }
+
     /// Resolve a runtime-safe theme without changing the user's saved Full
     /// theme. Lite keeps its useful basic appearance controls while advanced
     /// surface styles remain dormant until Full returns.
@@ -134,7 +156,7 @@ final class HaloFeatureAccess: ObservableObject {
 
         // Context Interfaces and advanced HUD customization are Full features.
         value.contextMusic = nil
-        value.hud = HaloHUDSettings()
+        value.hud = effectiveHUDSettings(saved.hud ?? HaloHUDSettings())
 
         // Closed-notch deep customization is Full. Lite keeps Halo's polished
         // default closed surface while the saved Full configuration is dormant.
