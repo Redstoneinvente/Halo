@@ -5451,26 +5451,6 @@ struct NotchBubbleSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Toggle(
-                "Custom size",
-                isOn: styleOverrideEnabledBinding(kind, \.size, default: settings.bubbleSize)
-            )
-            if override.size != nil {
-                LabeledContent("Size") {
-                    HStack {
-                        Slider(
-                            value: styleValueBinding(kind, \.size, default: settings.bubbleSize),
-                            in: 20...96,
-                            step: 1
-                        )
-                        .frame(width: 190)
-                        Text("\(Int(resolved.size)) pt")
-                            .monospacedDigit()
-                            .frame(width: 48, alignment: .trailing)
-                    }
-                }
-            }
-
             Picker("Shape", selection: styleOptionalBinding(kind, \.shape)) {
                 Text("Global · \(settings.shape.rawValue)")
                     .tag(nil as NotchBubbleShape?)
@@ -5487,202 +5467,304 @@ struct NotchBubbleSettingsView: View {
                 }
             }
 
-            Toggle(
-                "Custom corner radius",
-                isOn: styleOverrideEnabledBinding(kind, \.cornerRadius, default: settings.cornerRadius)
-            )
-            if override.cornerRadius != nil {
-                LabeledContent("Corner radius") {
-                    Slider(
-                        value: styleValueBinding(kind, \.cornerRadius, default: settings.cornerRadius),
-                        in: 0...48,
-                        step: 1
+            DisclosureGroup(
+                isExpanded: gestureEditorBinding(kind.rawValue + ".appearance-fine-tune")
+            ) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Size & Geometry")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+
+                    Toggle(
+                        "Override size",
+                        isOn: styleOverrideEnabledBinding(kind, \.size, default: settings.bubbleSize)
                     )
-                    .frame(width: 238)
-                }
-            }
+                    if override.size != nil {
+                        LabeledContent("Size") {
+                            HStack {
+                                Slider(
+                                    value: styleValueBinding(kind, \.size, default: settings.bubbleSize),
+                                    in: 20...96,
+                                    step: 1
+                                )
+                                .frame(width: 170)
 
-            if resolved.background == .glass {
-                Toggle(
-                    "Custom glass intensity",
-                    isOn: styleOverrideEnabledBinding(kind, \.glassIntensity, default: settings.glassIntensity)
-                )
-                if override.glassIntensity != nil {
-                    LabeledContent("Glass intensity") {
-                        Slider(
-                            value: styleValueBinding(kind, \.glassIntensity, default: settings.glassIntensity),
-                            in: 0.05...1,
-                            step: 0.05
-                        )
-                        .frame(width: 238)
-                    }
-                }
-            }
-
-            Toggle(
-                "Custom background opacity",
-                isOn: styleOverrideEnabledBinding(kind, \.backgroundOpacity, default: 0.88)
-            )
-            if override.backgroundOpacity != nil {
-                LabeledContent("Background opacity") {
-                    Slider(
-                        value: styleValueBinding(kind, \.backgroundOpacity, default: 0.88),
-                        in: 0...1,
-                        step: 0.05
-                    )
-                    .frame(width: 238)
-                }
-            }
-
-            Toggle(
-                "Custom border",
-                isOn: styleOverrideEnabledBinding(kind, \.borderOpacity, default: 0.12)
-            )
-            if override.borderOpacity != nil {
-                LabeledContent("Border opacity") {
-                    Slider(
-                        value: styleValueBinding(kind, \.borderOpacity, default: 0.12),
-                        in: 0...1,
-                        step: 0.05
-                    )
-                    .frame(width: 238)
-                }
-            }
-
-            Toggle(
-                "Custom tint",
-                isOn: styleOverrideEnabledBinding(
-                    kind,
-                    \.tint,
-                    default: WidgetColor(red: 0.20, green: 0.52, blue: 1.0)
-                )
-            )
-            if override.tint != nil {
-                ColorPicker(
-                    "Tint color",
-                    selection: Binding(
-                        get: {
-                            currentStyleOverride(for: kind).tint?.color
-                                ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0).color
-                        },
-                        set: { color in
-                            mutateStyleOverride(for: kind) {
-                                $0.tint = WidgetColor(color)
-                                if $0.tintAmount == nil { $0.tintAmount = 0.22 }
+                                Text("\(Int(resolved.size)) pt")
+                                    .monospacedDigit()
+                                    .frame(width: 58, alignment: .trailing)
                             }
                         }
-                    ),
-                    supportsOpacity: false
-                )
+                    }
 
-                LabeledContent("Tint strength") {
-                    Slider(
-                        value: styleValueBinding(kind, \.tintAmount, default: 0.22),
-                        in: 0...1,
-                        step: 0.05
+                    Toggle(
+                        "Override corner radius",
+                        isOn: styleOverrideEnabledBinding(kind, \.cornerRadius, default: settings.cornerRadius)
                     )
-                    .frame(width: 238)
-                }
-            }
+                    if override.cornerRadius != nil {
+                        LabeledContent("Corner radius") {
+                            HStack {
+                                Slider(
+                                    value: styleValueBinding(kind, \.cornerRadius, default: settings.cornerRadius),
+                                    in: 0...48,
+                                    step: 1
+                                )
+                                .frame(width: 170)
 
-            Toggle(
-                "Custom accent",
-                isOn: styleOverrideEnabledBinding(
-                    kind,
-                    \.accent,
-                    default: WidgetColor(red: 0.20, green: 0.52, blue: 1.0)
-                )
-            )
-            if override.accent != nil {
-                ColorPicker(
-                    "Accent color",
-                    selection: Binding(
-                        get: {
-                            currentStyleOverride(for: kind).accent?.color
-                                ?? resolved.accent
-                                ?? resolved.tint
-                                ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0).color
-                        },
-                        set: { color in
-                            mutateStyleOverride(for: kind) {
-                                $0.accent = WidgetColor(color)
+                                Text("\(Int(resolved.cornerRadius)) pt")
+                                    .monospacedDigit()
+                                    .frame(width: 58, alignment: .trailing)
                             }
                         }
-                    ),
-                    supportsOpacity: false
-                )
+                    }
 
-                Text("Overrides this bubble's rings, icons, gauges, progress and accent-driven edges.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                    Toggle(
+                        "Override content scale",
+                        isOn: styleOverrideEnabledBinding(kind, \.contentScale, default: 1.0)
+                    )
+                    if override.contentScale != nil {
+                        LabeledContent("Content scale") {
+                            HStack {
+                                Slider(
+                                    value: styleValueBinding(kind, \.contentScale, default: 1.0),
+                                    in: 0.55...1.6,
+                                    step: 0.05
+                                )
+                                .frame(width: 170)
 
-            Toggle(
-                "Custom content scale",
-                isOn: styleOverrideEnabledBinding(kind, \.contentScale, default: 1.0)
-            )
-            if override.contentScale != nil {
-                LabeledContent("Content scale") {
-                    HStack {
-                        Slider(
-                            value: styleValueBinding(kind, \.contentScale, default: 1.0),
-                            in: 0.55...1.6,
-                            step: 0.05
+                                Text(String(format: "%.2fx", resolved.contentScale))
+                                    .monospacedDigit()
+                                    .frame(width: 58, alignment: .trailing)
+                            }
+                        }
+                    }
+
+                    Toggle(
+                        "Override vertical offset",
+                        isOn: styleOverrideEnabledBinding(kind, \.verticalOffset, default: 0.0)
+                    )
+                    if override.verticalOffset != nil {
+                        LabeledContent("Vertical offset") {
+                            HStack {
+                                Slider(
+                                    value: styleValueBinding(kind, \.verticalOffset, default: 0.0),
+                                    in: -120...120,
+                                    step: 1
+                                )
+                                .frame(width: 170)
+
+                                Text(String(format: "%+.0f pt", resolved.verticalOffset))
+                                    .monospacedDigit()
+                                    .frame(width: 58, alignment: .trailing)
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    Text("Surface")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+
+                    if resolved.background == .glass {
+                        Toggle(
+                            "Override glass intensity",
+                            isOn: styleOverrideEnabledBinding(kind, \.glassIntensity, default: settings.glassIntensity)
                         )
-                        .frame(width: 190)
-                        Text(String(format: "%.2fx", resolved.contentScale))
-                            .monospacedDigit()
-                            .frame(width: 48, alignment: .trailing)
+                        if override.glassIntensity != nil {
+                            LabeledContent("Glass intensity") {
+                                HStack {
+                                    Slider(
+                                        value: styleValueBinding(kind, \.glassIntensity, default: settings.glassIntensity),
+                                        in: 0.05...1,
+                                        step: 0.05
+                                    )
+                                    .frame(width: 170)
+
+                                    Text("\(Int(resolved.glassIntensity * 100))%")
+                                        .monospacedDigit()
+                                        .frame(width: 58, alignment: .trailing)
+                                }
+                            }
+                        }
+                    }
+
+                    Toggle(
+                        "Override background opacity",
+                        isOn: styleOverrideEnabledBinding(kind, \.backgroundOpacity, default: 0.88)
+                    )
+                    if override.backgroundOpacity != nil {
+                        LabeledContent("Background opacity") {
+                            HStack {
+                                Slider(
+                                    value: styleValueBinding(kind, \.backgroundOpacity, default: 0.88),
+                                    in: 0...1,
+                                    step: 0.05
+                                )
+                                .frame(width: 170)
+
+                                Text("\(Int(resolved.backgroundOpacity * 100))%")
+                                    .monospacedDigit()
+                                    .frame(width: 58, alignment: .trailing)
+                            }
+                        }
+                    }
+
+                    Toggle(
+                        "Override border",
+                        isOn: styleOverrideEnabledBinding(kind, \.borderOpacity, default: 0.12)
+                    )
+                    if override.borderOpacity != nil {
+                        LabeledContent("Border opacity") {
+                            HStack {
+                                Slider(
+                                    value: styleValueBinding(kind, \.borderOpacity, default: 0.12),
+                                    in: 0...1,
+                                    step: 0.05
+                                )
+                                .frame(width: 170)
+
+                                Text("\(Int(resolved.borderOpacity * 100))%")
+                                    .monospacedDigit()
+                                    .frame(width: 58, alignment: .trailing)
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    Text("Color")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+
+                    Toggle(
+                        "Custom tint",
+                        isOn: styleOverrideEnabledBinding(
+                            kind,
+                            \.tint,
+                            default: WidgetColor(red: 0.20, green: 0.52, blue: 1.0)
+                        )
+                    )
+                    if override.tint != nil {
+                        ColorPicker(
+                            "Tint color",
+                            selection: Binding(
+                                get: {
+                                    currentStyleOverride(for: kind).tint?.color
+                                        ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0).color
+                                },
+                                set: { color in
+                                    mutateStyleOverride(for: kind) {
+                                        $0.tint = WidgetColor(color)
+                                        if $0.tintAmount == nil { $0.tintAmount = 0.22 }
+                                    }
+                                }
+                            ),
+                            supportsOpacity: false
+                        )
+
+                        LabeledContent("Tint strength") {
+                            HStack {
+                                Slider(
+                                    value: styleValueBinding(kind, \.tintAmount, default: 0.22),
+                                    in: 0...1,
+                                    step: 0.05
+                                )
+                                .frame(width: 170)
+
+                                Text("\(Int(resolved.tintAmount * 100))%")
+                                    .monospacedDigit()
+                                    .frame(width: 58, alignment: .trailing)
+                            }
+                        }
+                    }
+
+                    Toggle(
+                        "Custom accent",
+                        isOn: styleOverrideEnabledBinding(
+                            kind,
+                            \.accent,
+                            default: WidgetColor(red: 0.20, green: 0.52, blue: 1.0)
+                        )
+                    )
+                    if override.accent != nil {
+                        ColorPicker(
+                            "Accent color",
+                            selection: Binding(
+                                get: {
+                                    currentStyleOverride(for: kind).accent?.color
+                                        ?? resolved.accent
+                                        ?? resolved.tint
+                                        ?? WidgetColor(red: 0.20, green: 0.52, blue: 1.0).color
+                                },
+                                set: { color in
+                                    mutateStyleOverride(for: kind) {
+                                        $0.accent = WidgetColor(color)
+                                    }
+                                }
+                            ),
+                            supportsOpacity: false
+                        )
+
+                        Text("Accent affects rings, icons, gauges, progress and accent-driven edges.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
+                    Text("Motion")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+
+                    Picker("Animation", selection: styleOptionalBinding(kind, \.animation)) {
+                        Text("Global · \(settings.animation.rawValue)")
+                            .tag(nil as NotchBubbleAnimationPreset?)
+                        ForEach(NotchBubbleAnimationPreset.allCases) { preset in
+                            Text(preset.rawValue).tag(Optional(preset))
+                        }
+                    }
+
+                    Toggle(
+                        "Override transition duration",
+                        isOn: styleOverrideEnabledBinding(
+                            kind,
+                            \.lifecycleDuration,
+                            default: settings.resolvedLifecycleDuration
+                        )
+                    )
+                    if override.lifecycleDuration != nil {
+                        LabeledContent("Transition duration") {
+                            HStack {
+                                Slider(
+                                    value: styleValueBinding(
+                                        kind,
+                                        \.lifecycleDuration,
+                                        default: settings.resolvedLifecycleDuration
+                                    ),
+                                    in: 0.10...1.50,
+                                    step: 0.05
+                                )
+                                .frame(width: 170)
+
+                                Text(String(format: "%.2f s", resolved.lifecycleDuration))
+                                    .monospacedDigit()
+                                    .frame(width: 58, alignment: .trailing)
+                            }
+                        }
                     }
                 }
-            }
+                .padding(.top, 8)
+                .padding(.leading, 12)
+            } label: {
+                HStack(spacing: 8) {
+                    Text("Fine tune appearance")
 
-            Toggle(
-                "Custom vertical offset",
-                isOn: styleOverrideEnabledBinding(kind, \.verticalOffset, default: 0.0)
-            )
-            if override.verticalOffset != nil {
-                LabeledContent("Vertical offset") {
-                    HStack {
-                        Slider(
-                            value: styleValueBinding(kind, \.verticalOffset, default: 0.0),
-                            in: -120...120,
-                            step: 1
-                        )
-                        .frame(width: 190)
-                        Text(String(format: "%+.0f", resolved.verticalOffset))
-                            .monospacedDigit()
-                            .frame(width: 48, alignment: .trailing)
-                    }
-                }
-            }
+                    Spacer()
 
-            Picker("Motion", selection: styleOptionalBinding(kind, \.animation)) {
-                Text("Global · \(settings.animation.rawValue)")
-                    .tag(nil as NotchBubbleAnimationPreset?)
-                ForEach(NotchBubbleAnimationPreset.allCases) { preset in
-                    Text(preset.rawValue).tag(Optional(preset))
+                    Text(appearanceOverrideSummary(override))
+                        .foregroundStyle(.secondary)
                 }
-            }
-
-            Toggle(
-                "Custom lifecycle duration",
-                isOn: styleOverrideEnabledBinding(kind, \.lifecycleDuration, default: settings.resolvedLifecycleDuration)
-            )
-            if override.lifecycleDuration != nil {
-                LabeledContent("Lifecycle duration") {
-                    HStack {
-                        Slider(
-                            value: styleValueBinding(kind, \.lifecycleDuration, default: settings.resolvedLifecycleDuration),
-                            in: 0.10...1.50,
-                            step: 0.05
-                        )
-                        .frame(width: 190)
-                        Text(String(format: "%.2f s", resolved.lifecycleDuration))
-                            .monospacedDigit()
-                            .frame(width: 48, alignment: .trailing)
-                    }
-                }
+                .font(.caption)
             }
 
             Divider()
@@ -6081,6 +6163,28 @@ struct NotchBubbleSettingsView: View {
                 Text(pattern.rawValue).tag(Optional(pattern))
             }
         }
+    }
+
+    private func appearanceOverrideSummary(_ override: NotchBubbleStyleOverride) -> String {
+        var count = 0
+
+        if override.size != nil { count += 1 }
+        if override.cornerRadius != nil { count += 1 }
+        if override.glassIntensity != nil { count += 1 }
+        if override.backgroundOpacity != nil { count += 1 }
+        if override.borderOpacity != nil { count += 1 }
+        if override.tint != nil || override.tintAmount != nil { count += 1 }
+        if override.accent != nil { count += 1 }
+        if override.contentScale != nil { count += 1 }
+        if override.verticalOffset != nil { count += 1 }
+        if override.animation != nil { count += 1 }
+        if override.lifecycleDuration != nil { count += 1 }
+
+        if count == 0 {
+            return "Using defaults"
+        }
+
+        return count == 1 ? "1 override" : "\(count) overrides"
     }
 
     private func gestureSummary(
