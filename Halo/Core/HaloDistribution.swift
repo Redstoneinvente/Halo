@@ -167,6 +167,11 @@ final class HaloFeatureAccess: ObservableObject {
         if appearance.background == .image || appearance.background == .video {
             appearance.background = .gradient
         }
+        // Lite exposes Halo Black, the default Gradient and default Glass. Custom
+        // color recipes remain saved for Full but do not leak into the Lite runtime.
+        appearance.solidColor = .black
+        appearance.gradientStartColor = nil
+        appearance.gradientEndColor = nil
         appearance.assetPath = ""
         appearance.grain = nil
         appearance.backgroundSchedule = nil
