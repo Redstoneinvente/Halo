@@ -16,6 +16,10 @@ final class CaptureService: ObservableObject {
     }
 
     func capture(completion: @escaping (URL) -> Void) {
+        guard HaloFeatureAccess.shared.allows(.captureWidget) else {
+            error = "Capture & OCR is available with Halo Full."
+            return
+        }
         guard !busy else { return }
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
             error = "Allow Screen Recording in System Settings, then relaunch Halo if macOS requests it."; return
@@ -76,6 +80,10 @@ final class CaptureService: ObservableObject {
     }
 
     func recognize(_ url: URL) {
+        guard HaloFeatureAccess.shared.allows(.captureWidget) else {
+            error = "Capture & OCR is available with Halo Full."
+            return
+        }
         guard !busy else { return }; busy = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
@@ -88,6 +96,11 @@ final class CaptureService: ObservableObject {
     }
 
     func chooseImage() {
+        guard HaloFeatureAccess.shared.allows(.captureWidget) else {
+            error = "Capture & OCR is available with Halo Full."
+            HaloUpgradeCoordinator.shared.present()
+            return
+        }
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.image]
         if panel.runModal() == .OK, let url = panel.url { recognize(url) }
     }
