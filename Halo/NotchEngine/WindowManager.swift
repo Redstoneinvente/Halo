@@ -453,8 +453,9 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     var dragLocationHandler: ((CGPoint?) -> Void)?
     var dropHandler: (([URL]) -> Bool)?
 
-    /// Commercial access remains the hard outer boundary for Halo's surface-wide drag source.
-    var commercialAccessAllowed: (() -> Bool)? {
+    /// The normal Halo runtime remains the outer boundary for Halo's surface-wide drag source.
+    /// Edition-specific drag restrictions, if any, belong in HaloFeatureAccess later.
+    var surfaceRuntimeAllowed: (() -> Bool)? {
         didSet { refreshDropRegistration() }
     }
 
@@ -462,9 +463,9 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     /// This closure is evaluated after the normal SurfaceView arbiter has selected a winner.
     var dropZoneOverlayAllowed: (() -> Bool)?
 
-    var permitsGlobalFileDrag: Bool { hasCommercialAccess }
+    var permitsGlobalFileDrag: Bool { hasSurfaceRuntimeAccess }
     var permitsDropZoneOverlay: Bool {
-        hasCommercialAccess && (dropZoneOverlayAllowed?() ?? false)
+        hasSurfaceRuntimeAccess && (dropZoneOverlayAllowed?() ?? false)
     }
 
     private var fileDragRegistered = false
@@ -478,19 +479,19 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private var hasCommercialAccess: Bool { commercialAccessAllowed?() ?? false }
+    private var hasSurfaceRuntimeAccess: Bool { surfaceRuntimeAllowed?() ?? false }
 
-    /// Prevent SwiftUI descendants from creating an unlicensed drag path. Once unlocked,
-    /// descendants (File Shelf, etc.) may register normally alongside Halo's shared source.
+    /// Prevent SwiftUI descendants from registering drag handlers before Halo's surface
+    /// runtime is ready. Lite/Full capability rules are intentionally handled elsewhere.
     override func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {
-        guard hasCommercialAccess else { return }
+        guard hasSurfaceRuntimeAccess else { return }
         super.registerForDraggedTypes(newTypes)
     }
 
     /// Halo owns one surface-wide file-drag source. Registration is intentionally independent of
     /// the Drop CI preference: Drop CI and partner CIs are consumers of the same source.
     func refreshDropRegistration() {
-        guard hasCommercialAccess else {
+        guard hasSurfaceRuntimeAccess else {
             unregisterDraggedTypes()
             fileDragRegistered = false
             rejectSurfaceDrag()
@@ -527,7 +528,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard hasCommercialAccess else { rejectSurfaceDrag(); return [] }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return [] }
         let urls = fileURLs(sender)
         guard !urls.isEmpty else { return super.draggingEntered(sender) }
 
@@ -541,7 +542,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard hasCommercialAccess else { rejectSurfaceDrag(); return [] }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return [] }
         if surfaceDragActive {
             dragLocationHandler?(dragScreenPoint(sender))
             return .copy
@@ -550,7 +551,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        guard hasCommercialAccess else { rejectSurfaceDrag(); return }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return }
         if surfaceDragActive {
             dragLocationHandler?(nil)
             _ = dragStateHandler?(false, [])
@@ -561,7 +562,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard hasCommercialAccess else { rejectSurfaceDrag(); return false }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return false }
         guard surfaceDragActive else { return super.performDragOperation(sender) }
         let urls = fileURLs(sender)
         guard !urls.isEmpty else {
@@ -574,7 +575,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func concludeDragOperation(_ sender: NSDraggingInfo?) {
-        guard hasCommercialAccess else { rejectSurfaceDrag(); return }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return }
         if surfaceDragActive {
             dragLocationHandler?(nil)
             _ = dragStateHandler?(false, [])
@@ -795,7 +796,7 @@ final class WindowManager {
     private let store: AppStore
     private let bubbleManager: NotchBubbleManager
     private let startupActivationContext: ActivationLaunchContext
-    private var commercialAccessGranted = false
+    private var surfaceRuntimeEnabled = false
     private var initialActivationPending = false
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
@@ -830,10 +831,10 @@ final class WindowManager {
             : defaults.bool(forKey: "HaloContextDropEnabled")
     }
 
-    func setCommercialAccessGranted(_ granted: Bool) {
-        guard commercialAccessGranted != granted else { return }
-        commercialAccessGranted = granted
-        bubbleManager.setCommercialAccessGranted(granted)
+    func setSurfaceRuntimeEnabled(_ granted: Bool) {
+        guard surfaceRuntimeEnabled != granted else { return }
+        surfaceRuntimeEnabled = granted
+        bubbleManager.setSurfaceRuntimeEnabled(granted)
 
         hosts.values.forEach { host in
             host.refreshDropCIRegistration?()
@@ -2290,8 +2291,8 @@ final class WindowManager {
                 .environment(\.haloScreenFrame, screen.frame)
                 let view = HaloDropHostingView(rootView: root)
                 view.sizingOptions = []
-                view.commercialAccessAllowed = { [weak self] in
-                    self?.commercialAccessGranted ?? false
+                view.surfaceRuntimeAllowed = { [weak self] in
+                    self?.surfaceRuntimeEnabled ?? false
                 }
                 view.dropZoneOverlayAllowed = { [weak self, weak host] in
                     guard let self, let host else { return false }
@@ -2302,7 +2303,7 @@ final class WindowManager {
                 }
                 view.dragStateHandler = { [weak self, weak host] active, urls in
                     guard let self, let host else { return false }
-                    guard self.commercialAccessGranted else {
+                    guard self.surfaceRuntimeEnabled else {
                         host.state.cancelFileDrop()
                         return false
                     }
@@ -2333,7 +2334,7 @@ final class WindowManager {
                     )
                 }
                 view.dropHandler = { [weak self, weak host] urls in
-                    guard let self, let host, self.commercialAccessGranted else { return false }
+                    guard let self, let host, self.surfaceRuntimeEnabled else { return false }
                     let runtime = IntegrationCIRuntime.shared
 
                     if let winner = runtime.currentWinnerCIID(displayID: id),
