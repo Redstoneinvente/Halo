@@ -95,7 +95,6 @@ struct SettingsView: View {
         case "Profiles": return .profiles
         case "Schedules": return .schedules
         case "Automation": return .profileAutomation
-        case "Displays": return .multiDisplayCustomization
         case "Plugins": return .plugins
         default: return nil
         }
@@ -685,11 +684,7 @@ struct SettingsView: View {
             if featureAccess.allows(.multiDisplayCustomization) {
                 DisplaySettingsPane(store: store, workspace: workspace)
             } else {
-                HaloFullLockedPage(
-                    title: "Display Customization",
-                    description: "Halo Lite follows Halo's normal display behaviour. Halo Full lets each display become its own workspace.",
-                    bullets: ["Independent display layouts", "Per-display profiles", "Separate themes and snapshots"]
-                )
+                HaloLiteDisplaySettingsPane(store: store)
             }
         case "Plugins":
             if featureAccess.allows(.plugins) {
@@ -985,6 +980,27 @@ private struct HaloLiteAppearanceSettingsPane: View {
 }
 
 @MainActor
+private struct HaloLiteDisplaySettingsPane: View {
+    @ObservedObject var store: AppStore
+
+    var body: some View {
+        Section("Displays") {
+            Toggle("Show Halo on all displays", isOn: $store.configuration.allDisplays)
+            Text("Halo Lite uses the same global Halo setup everywhere it appears.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section {
+            HaloUpgradeCard(
+                title: "Independent display setups",
+                detail: "Halo Full unlocks separate layouts, themes, profiles and saved display-specific configurations."
+            )
+        }
+    }
+}
+
+@MainActor
 private struct HaloLiteHUDSettingsView: View {
     @Binding var layout: WorkspaceLayout
 
@@ -1141,10 +1157,19 @@ private struct HaloLiteWidgetSettingsView: View {
                 .foregroundStyle(.secondary)
         }
 
+        Section("With Halo Full") {
+            HStack { Label("Clipboard", systemImage: ModuleID.clipboard.symbol); Spacer(); HaloFullBadge() }
+            HStack { Label("Launcher", systemImage: ModuleID.launcher.symbol); Spacer(); HaloFullBadge() }
+            HStack { Label("Live Activities", systemImage: ModuleID.activities.symbol); Spacer(); HaloFullBadge() }
+            HStack { Label("Notes", systemImage: ModuleID.notes.symbol); Spacer(); HaloFullBadge() }
+            HStack { Label("Capture & OCR", systemImage: ModuleID.capture.symbol); Spacer(); HaloFullBadge() }
+            HStack { Label("Pixel Pal", systemImage: ModuleID.pet.symbol); Spacer(); HaloFullBadge() }
+        }
+
         Section {
             HaloUpgradeCard(
                 title: "Advanced widget studio",
-                detail: "Halo Full adds deeper per-widget styling, adaptive footprint configuration, advanced media and calendar presentation, and additional widgets including Pixel Pal."
+                detail: "Halo Full adds deeper per-widget styling, adaptive footprint configuration, advanced media and calendar presentation, and the additional widgets above."
             )
         }
     }
