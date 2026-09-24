@@ -2868,7 +2868,7 @@ private final class NotchBubbleDisplayHost {
     private weak var state: SurfaceState?
     private var screenFrame: CGRect
     private var surfaceFrame: CGRect
-    private var commercialAccessGranted = false
+    private var surfaceRuntimeEnabled = false
     private var controllers: [NotchBubbleKind: BubbleWindowController] = [:]
     // Side ownership is intentionally stateful. Auto placement assigns a side when
     // a bubble first appears and never moves an existing bubble across the notch
@@ -2906,9 +2906,9 @@ private final class NotchBubbleDisplayHost {
         refresh(animated: false)
     }
 
-    func setCommercialAccessGranted(_ granted: Bool) {
-        guard commercialAccessGranted != granted else { return }
-        commercialAccessGranted = granted
+    func setSurfaceRuntimeEnabled(_ granted: Bool) {
+        guard surfaceRuntimeEnabled != granted else { return }
+        surfaceRuntimeEnabled = granted
         refresh(animated: true)
     }
 
@@ -3127,7 +3127,7 @@ private final class NotchBubbleDisplayHost {
         let settings = settingsStore.settings.normalized()
         let allowedBySurfaceState = state.expanded ? settings.showWhenOpen : settings.showWhenClosed
 
-        guard commercialAccessGranted,
+        guard surfaceRuntimeEnabled,
               settings.enabled,
               allowedBySurfaceState else {
             removeAll(animated: animated)
@@ -3304,7 +3304,7 @@ final class NotchBubbleManager {
     private let settingsStore = NotchBubbleSettingsStore.shared
     private let activityCenter = NotchBubbleActivityCenter.shared
     private var hosts: [String: NotchBubbleDisplayHost] = [:]
-    private var commercialAccessGranted = false
+    private var surfaceRuntimeEnabled = false
     private var subscriptions = Set<AnyCancellable>()
 
     init(store: AppStore) {
@@ -3341,7 +3341,7 @@ final class NotchBubbleManager {
             store: store,
             settingsStore: settingsStore
         )
-        host.setCommercialAccessGranted(commercialAccessGranted)
+        host.setSurfaceRuntimeEnabled(surfaceRuntimeEnabled)
         hosts[displayID] = host
     }
 
@@ -3349,10 +3349,10 @@ final class NotchBubbleManager {
         hosts.removeValue(forKey: displayID)?.stop()
     }
 
-    func setCommercialAccessGranted(_ granted: Bool) {
-        commercialAccessGranted = granted
+    func setSurfaceRuntimeEnabled(_ granted: Bool) {
+        surfaceRuntimeEnabled = granted
         for host in hosts.values {
-            host.setCommercialAccessGranted(granted)
+            host.setSurfaceRuntimeEnabled(granted)
         }
     }
 }
