@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		EWEB00000000000000000102 /* WebRepresentationExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = EWEB00000000000000000101 /* Services/WebRepresentationExporter.swift */; };
 		0000000000000000000000C8 /* App/HaloApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000064 /* App/HaloApp.swift */; };
 		0000000000000000000000C9 /* Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000065 /* Core/Models.swift */; };
 		0000000000000000000000CA /* Core/AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000066 /* Core/AppStore.swift */; };
@@ -228,6 +229,7 @@
 		F8AFA0D23061155D004D7B68 /* Halo 2.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Halo 2.storekit"; sourceTree = "<group>"; };
 		FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HaloFeedbackService.swift; sourceTree = "<group>"; };
 		FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HaloFeedbackCenterView.swift; sourceTree = "<group>"; };
+		EWEB00000000000000000101 /* Services/WebRepresentationExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/WebRepresentationExporter.swift; sourceTree = "<group>"; };
 		FBAC00000000000000000300 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -326,6 +328,7 @@
 				00000000000000000000006E /* Services/CaptureService.swift */,
 				FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */,
 				FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */,
+				EWEB00000000000000000101 /* Services/WebRepresentationExporter.swift */,
 				00000000000000000000006F /* Core/ExtensionContracts.swift */,
 				A57A00000000000000000101 /* Core/AppStoreLicensing.swift */,
 				D15700000000000000000101 /* Core/HaloDistribution.swift */,
@@ -634,6 +637,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EWEB00000000000000000102 /* WebRepresentationExporter.swift in Sources */,
 				0000000000000000000002C6 /* NotchEngine/DisplayClock.swift in Sources */,
 				0000000000000000000002D1 /* Services/AudioSpectrumService.swift in Sources */,
 				B1A0D1000000000000000001 /* Services/AudioSpectrumModels.swift in Sources */,
