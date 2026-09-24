@@ -5,12 +5,13 @@ import CoreGraphics
 import IOKit
 import Combine
 
-/// Premium-runtime readiness gate for services that must only run with Halo Full.
+/// Readiness gate for Halo's normal surface runtime.
 /// HaloFeatureAccess is the authoritative source of truth for the active Lite/Full edition.
-/// This gate intentionally starts false so premium services cannot race entitlement restore.
+/// The surface runtime is ready in both Lite and Full, but remains unavailable while access
+/// verification/selection is still in progress. Premium services are controlled separately.
 @MainActor
-final class HaloCommercialSurfaceGate: ObservableObject {
-    static let shared = HaloCommercialSurfaceGate()
+final class HaloRuntimeGate: ObservableObject {
+    static let shared = HaloRuntimeGate()
 
     @Published private(set) var isReady = false
 
@@ -147,7 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func configureCommercialAccessGate() {
         startupAccessState = .verifyingAccess
-        HaloCommercialSurfaceGate.shared.setReady(false)
+        HaloRuntimeGate.shared.setReady(false)
         featureAccess.setFullAccess(false)
         initialAccessVerificationCompleted = false
 
@@ -201,15 +202,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private func startSurfaceEngine(fullAccess: Bool) {
+    private func startSurfaceEngine() {
         if let engine {
-            engine.setCommercialAccessGranted(fullAccess)
+            engine.setSurfaceRuntimeEnabled(true)
             return
         }
 
         let activationContext = ActivationSequenceCoordinator.shared.classifyStartup()
         let manager = WindowManager(store: store, startupActivationContext: activationContext)
-        manager.setCommercialAccessGranted(fullAccess)
+        manager.setSurfaceRuntimeEnabled(true)
         engine = manager
 
         // Give AppKit one complete main-run-loop turn after access resolution before
@@ -245,18 +246,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func transitionStartupAccess(to nextState: StartupAccessState) {
-        // The commercial surface gate now represents premium runtime readiness only.
-        // HaloFeatureAccess is the authoritative edition state for feature code.
-        HaloCommercialSurfaceGate.shared.setReady(nextState == .full)
+        // Edition and runtime readiness are deliberately separate: both Lite and Full
+        // can run Halo's normal surface, while premium service startup remains Full-only.
+        let surfaceRuntimeReady = nextState == .lite || nextState == .full
+        HaloRuntimeGate.shared.setReady(surfaceRuntimeReady)
         featureAccess.setFullAccess(nextState == .full)
 
         if startupAccessState == nextState {
             switch nextState {
             case .full:
-                engine?.setCommercialAccessGranted(true)
+                engine?.setSurfaceRuntimeEnabled(true)
                 startRuntimeServices(premiumServicesEnabled: true)
             case .lite:
-                engine?.setCommercialAccessGranted(false)
+                engine?.setSurfaceRuntimeEnabled(true)
                 startRuntimeServices(premiumServicesEnabled: false)
             case .accessSelection:
                 presentAccessScreen(allowsLiteEntry: true)
@@ -293,14 +295,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .lite:
             stopLicenseClipboardWatcher()
             dismissAccessScreen()
-            startSurfaceEngine(fullAccess: false)
+            startSurfaceEngine()
             startRuntimeServices(premiumServicesEnabled: false)
             presentPostAccessOnboardingIfNeeded()
 
         case .full:
             stopLicenseClipboardWatcher()
             dismissAccessScreen()
-            startSurfaceEngine(fullAccess: true)
+            startSurfaceEngine()
             startRuntimeServices(premiumServicesEnabled: true)
             presentPostAccessOnboardingIfNeeded()
         }
@@ -566,7 +568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        HaloCommercialSurfaceGate.shared.setReady(false)
+        HaloRuntimeGate.shared.setReady(false)
         ActivationSequenceCoordinator.shared.markQuit()
         appStoreLicensing.stop()
         stopRuntimeServices()
