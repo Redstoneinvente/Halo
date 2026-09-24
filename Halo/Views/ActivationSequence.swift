@@ -4,6 +4,7 @@ import AVFoundation
 import CoreAudio
 import ServiceManagement
 import UniformTypeIdentifiers
+import Combine
 
 // MARK: - Activation Sequence model
 
@@ -233,6 +234,22 @@ struct ActivationSequenceSettings: Codable, Equatable {
         case .wake: return playAfterWake
         case .preview: return true
         }
+    }
+
+    /// Lite keeps Halo's normal polished activation sequence. Deep visual,
+    /// sound, color and display customization stays saved but dormant.
+    func effective(for access: HaloFeatureAccess) -> ActivationSequenceSettings {
+        let saved = normalized()
+        guard !access.allows(.activationSequenceCustomization) else { return saved }
+
+        var lite = ActivationSequenceSettings()
+        lite.enabled = saved.enabled
+        lite.playManualLaunch = saved.playManualLaunch
+        lite.playLoginLaunch = saved.playLoginLaunch
+        lite.playMacStartup = saved.playMacStartup
+        lite.playRelaunchAfterQuit = saved.playRelaunchAfterQuit
+        lite.playAfterWake = saved.playAfterWake
+        return lite.normalized()
     }
 }
 
@@ -482,12 +499,27 @@ final class ActivationSequenceCoordinator: ObservableObject {
     private var soundTask: Task<Void, Never>?
     private var lastPlayDate = Date.distantPast
     private var wallpaperCache: [String: ActivationRGBA] = [:]
+    private var accessCancellable: AnyCancellable?
 
     private let quitBootKey = "HaloActivationLastQuitBoot.v1"
     private let loginBootKey = "HaloActivationLoginBoot.v1"
 
     private init() {
-        soundPlayer.prewarmCustom(path: settingsStore.settings.customSoundPath)
+        if HaloFeatureAccess.shared.allows(.activationSequenceCustomization) {
+            soundPlayer.prewarmCustom(path: settingsStore.settings.customSoundPath)
+        }
+        accessCancellable = HaloFeatureAccess.shared.$accessLevel
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] level in
+                guard level == .lite else { return }
+                self?.cancelForInteraction()
+            }
+    }
+
+    private var effectiveSettings: ActivationSequenceSettings {
+        settingsStore.settings.effective(for: HaloFeatureAccess.shared)
     }
 
     func classifyStartup() -> ActivationLaunchContext {
@@ -514,26 +546,29 @@ final class ActivationSequenceCoordinator: ObservableObject {
     }
 
     func shouldPlay(_ context: ActivationLaunchContext) -> Bool {
-        settingsStore.settings.normalized().allows(context)
+        effectiveSettings.allows(context)
     }
 
-    func prewarmCustomSound(path: String) { soundPlayer.prewarmCustom(path: path) }
+    func prewarmCustomSound(path: String) {
+        guard HaloFeatureAccess.shared.allows(.activationSequenceCustomization) else { return }
+        soundPlayer.prewarmCustom(path: path)
+    }
 
     func previewSound() {
-        let settings = settingsStore.settings.normalized()
+        let settings = effectiveSettings
         soundPlayer.play(sound: settings.sound, volume: settings.soundVolume, customPath: settings.customSoundPath)
     }
 
     func play(context: ActivationLaunchContext,
               displays: [ActivationDisplayDescriptor],
               systemVolume: Float32?) {
-        let settings = settingsStore.settings.normalized()
+        let settings = effectiveSettings
         guard settings.allows(context), !displays.isEmpty else { return }
         begin(event: context.event, settings: settings, displays: displays, systemVolume: systemVolume)
     }
 
     func preview(displays: [ActivationDisplayDescriptor], systemVolume: Float32?) {
-        var settings = settingsStore.settings.normalized()
+        var settings = effectiveSettings
         guard settings.enabled, settings.preset != .none, !displays.isEmpty else { return }
         settings.randomFavorite = false
         begin(event: .preview, settings: settings, displays: displays, systemVolume: systemVolume)
