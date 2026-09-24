@@ -259,7 +259,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
                 self?.refreshApps(); self?.evaluateRules(); self?.evaluateSchedules(); self?.hudEngine?.configurationDidChange()
                 self?.pollMedia(); self?.bluetooth.refresh()
                 if notification.name == NSWorkspace.didWakeNotification,
-                   self.premiumServicesEnabled {
+                   self?.premiumServicesEnabled == true {
                     IntegrationCIRuntime.shared.cleanupForSleepOrWake()
                     IntegrationCIRuntime.shared.refresh()
                     IntegrationShortcutManager.shared.sync()
