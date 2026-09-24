@@ -1308,6 +1308,16 @@ extension HaloFeatureAccess {
         value.systemPersistent = false
         value.clipboardPersistent = false
 
+        // Lite Bubbles use Halo's normal visibility behavior rather than
+        // retaining Full-only visibility/persistence policies.
+        value.showWhenClosed = true
+        value.showWhenOpen = true
+        value.musicVisibility = .whilePlaying
+        value.audioFeedbackEnabled = true
+        value.brightnessFeedbackEnabled = false
+        value.powerFeedbackEnabled = false
+        value.deviceFeedbackEnabled = false
+
         // One automatic/default Bubble with Halo Glass and Fluid motion.
         value.maximumBubbles = 1
         value.layout = .satellites
