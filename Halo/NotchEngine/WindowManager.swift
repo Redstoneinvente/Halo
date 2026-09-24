@@ -2199,6 +2199,13 @@ final class WindowManager {
             if host.state.layoutOverride != effectiveLayout {
                 host.state.layoutOverride = effectiveLayout
             }
+
+            // Visual Workspace draws its own contour/chrome. The native NSPanel shadow
+            // is rectangular/window-level and can bleed through the transparent surface,
+            // which reads as a muddy inner shadow around bright workspaces. Disable the
+            // native shadow there; Default workspace keeps the normal macOS panel shadow.
+            host.panel.hasShadow = !effectiveLayout.resolvedUsesCustomOpenNotchWorkspace
+
             configureDynamicWidth(host)
             let baseDashboardWidth = host.geometry!.frame(expanded: true).width
             if activeExpandedContextRequest(for: host) == nil &&
