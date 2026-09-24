@@ -1842,13 +1842,12 @@ private final class NotchBubblePanel: NSPanel {
             return false
         }
 
-        if event.hasPreciseScrollingDeltas && triggeredDuringCurrentTrackpadGesture {
-            if event.phase == .ended || event.phase == .cancelled {
-                horizontalAccumulator = 0
-                verticalAccumulator = 0
-                triggeredDuringCurrentTrackpadGesture = false
-            }
-            return true
+        if event.phase == .ended || event.phase == .cancelled {
+            let consumed = event.hasPreciseScrollingDeltas && triggeredDuringCurrentTrackpadGesture
+            horizontalAccumulator = 0
+            verticalAccumulator = 0
+            triggeredDuringCurrentTrackpadGesture = false
+            return consumed
         }
 
         // Normalize Natural Scrolling so the setting always describes the physical
@@ -1876,6 +1875,8 @@ private final class NotchBubblePanel: NSPanel {
 
         horizontalAccumulator = 0
         verticalAccumulator = 0
+
+        let isRepeat = event.hasPreciseScrollingDeltas && triggeredDuringCurrentTrackpadGesture
         if event.hasPreciseScrollingDeltas {
             triggeredDuringCurrentTrackpadGesture = true
         }
@@ -1883,7 +1884,10 @@ private final class NotchBubblePanel: NSPanel {
         NotificationCenter.default.post(
             name: .haloNotchBubbleDirectionalGesture,
             object: bubbleKind.rawValue,
-            userInfo: ["direction": direction.rawValue]
+            userInfo: [
+                "direction": direction.rawValue,
+                "repeat": isRepeat
+            ]
         )
         return true
     }
@@ -3093,8 +3097,19 @@ private struct NotchBubbleView: View {
                     return
                 }
 
+                let configuration = settings.gestureConfiguration(
+                    for: kind,
+                    direction: direction
+                )
+                let isRepeat = note.userInfo?["repeat"] as? Bool ?? false
+
+                guard !isRepeat || configuration.shouldRepeat else { return }
+
                 _ = performGestureAction(
-                    settings.gestureAction(for: kind, direction: direction)
+                    configuration.action,
+                    amount: configuration.amount,
+                    hapticStrength: configuration.hapticStrength,
+                    hapticPattern: configuration.hapticPattern
                 )
             }
             .simultaneousGesture(
@@ -3103,7 +3118,13 @@ private struct NotchBubbleView: View {
                     .onEnded { result in
                         switch result {
                         case .first:
-                            _ = performGestureAction(settings.doubleClickAction(for: kind))
+                            let configuration = settings.doubleClickConfiguration(for: kind)
+                            _ = performGestureAction(
+                                configuration.action,
+                                amount: configuration.amount,
+                                hapticStrength: configuration.hapticStrength,
+                                hapticPattern: configuration.hapticPattern
+                            )
                         case .second:
                             handlePrimaryTap()
                         }
@@ -4327,7 +4348,12 @@ private struct NotchBubbleView: View {
     }
 
     @discardableResult
-    private func performGestureAction(_ action: NotchBubbleGestureAction) -> Bool {
+    private func performGestureAction(
+        _ action: NotchBubbleGestureAction,
+        amount: Double,
+        hapticStrength: Int?,
+        hapticPattern: HaloHoverHapticPattern?
+    ) -> Bool {
         let handled: Bool
 
         switch action {
@@ -4371,6 +4397,16 @@ private struct NotchBubbleView: View {
             openMediaPlayer()
             handled = true
 
+        case .seekBackward:
+            guard (kind == .music || kind == .vinyl), media.duration > 0 else { return false }
+            media.seek(to: media.position - action.normalizedGestureAmount(amount))
+            handled = true
+
+        case .seekForward:
+            guard (kind == .music || kind == .vinyl), media.duration > 0 else { return false }
+            media.seek(to: media.position + action.normalizedGestureAmount(amount))
+            handled = true
+
         case .timerPauseResume:
             guard kind == .timer, timerIsActive else { return false }
             store.pauseResume()
@@ -4378,10 +4414,11 @@ private struct NotchBubbleView: View {
 
         case .timerAddFive:
             guard kind == .timer else { return false }
+            let minutes = max(1, Int(action.normalizedGestureAmount(amount).rounded()))
             if timerIsActive {
-                store.addTimer(minutes: 5)
+                store.addTimer(minutes: minutes)
             } else {
-                store.startTimer(minutes: 5)
+                store.startTimer(minutes: minutes)
             }
             handled = true
 
@@ -4402,16 +4439,18 @@ private struct NotchBubbleView: View {
 
         case .audioVolumeUp:
             guard kind == .audio, audio.canSetVolume else { return false }
-            let next = min(1, Float(audio.volume) + 0.05)
+            let delta = Float(action.normalizedGestureAmount(amount) / 100)
+            let next = min(1, Float(audio.volume) + delta)
             if next > 0.001 { lastNonZeroAudioVolume = next }
             audio.setVolume(next)
             handled = true
 
         case .audioVolumeDown:
             guard kind == .audio, audio.canSetVolume else { return false }
+            let delta = Float(action.normalizedGestureAmount(amount) / 100)
             let current = Float(audio.volume)
             if current > 0.001 { lastNonZeroAudioVolume = current }
-            audio.setVolume(max(0, current - 0.05))
+            audio.setVolume(max(0, current - delta))
             handled = true
 
         case .audioMuteRestore:
@@ -4444,8 +4483,8 @@ private struct NotchBubbleView: View {
         if handled {
             HaloHoverHaptics.pulse(
                 id: "bubble.gesture." + surfaceState.displayID + "." + kind.rawValue,
-                strength: store.configuration.resolvedHoverHapticStrength,
-                pattern: store.configuration.resolvedHoverHapticPattern,
+                strength: hapticStrength ?? store.configuration.resolvedHoverHapticStrength,
+                pattern: hapticPattern ?? store.configuration.resolvedHoverHapticPattern,
                 minimumInterval: 0.04
             )
         }
