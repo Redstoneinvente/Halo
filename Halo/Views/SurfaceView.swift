@@ -2759,6 +2759,7 @@ struct SurfaceView: View {
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
     @ObservedObject private var integrationCI = IntegrationCIRuntime.shared
     @ObservedObject private var runtimeGate = HaloRuntimeGate.shared
+    @ObservedObject private var featureAccess = HaloFeatureAccess.shared
     @State private var clipboardOpenedNotch = false
     @State private var integrationAutoOpeningSurface = false
     @State private var teleprompterActive = false
@@ -2795,8 +2796,10 @@ struct SurfaceView: View {
     @AppStorage("HaloLiveActivitiesUseFullNotchArea") private var liveActivitiesUseFullNotchArea = false
     @AppStorage("HaloLiveActivitiesKeepClosedNotchContents") private var liveActivitiesKeepClosedContents = false
     @State private var retroGameRequested = false
-    private var theme: Theme { state.theme }
-    private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.effectiveLayout }
+    private var theme: Theme { featureAccess.effectiveTheme(state.theme) }
+    private var layout: WorkspaceLayout {
+        featureAccess.effectiveLayout(state.layoutOverride ?? workspace.effectiveLayout)
+    }
     private var contextOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
     private var bluetoothEligible: Bool {
         guard bluetoothCIEnabled else { return false }
@@ -2808,6 +2811,7 @@ struct SurfaceView: View {
         return LiveActivitySelection.primary(in: workspace.activities, excluding: [.bluetooth])
     }
     private var builtInContextCandidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] {
+        guard featureAccess.allows(.contextInterfaces) else { return [] }
         var candidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] = []
         if dropCIEnabled && state.dropTargeted { candidates.append((.drop, dropPriority, 4)) }
         if retroCIEnabled && retroGameRequested { candidates.append((.retro, retroPriority, 4)) }
@@ -2820,12 +2824,14 @@ struct SurfaceView: View {
         return candidates
     }
     private var activeCustomCandidate: HaloCustomCICandidate? {
-        customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI, blockingPriority: nil)
+        guard featureAccess.allows(.customCI) else { return nil }
+        return customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI, blockingPriority: nil)
     }
     private var surfaceContextCandidates: [SurfaceContextCandidate] {
-        // Do not arbitrate Context Interfaces before the normal Halo surface runtime exists.
-        // Lite vs Full capability rules are intentionally not decided at this foundation stage.
-        guard runtimeGate.isReady else { return [] }
+        // Context Interfaces are a Halo Full capability. The normal Halo surface
+        // itself remains available in both Lite and Full.
+        guard runtimeGate.isReady,
+              featureAccess.allows(.contextInterfaces) else { return [] }
 
         // Notch Bubble "Open Notch" is an explicit user navigation action.
         // .normal bypasses every CI for this opening. .music forces Music CI only when
@@ -2876,18 +2882,20 @@ struct SurfaceView: View {
                 )
             )
         }
-        for candidate in integrationCI.eligibleCandidates(displayID: state.displayID) {
-            result.append(
-                SurfaceContextCandidate(
-                    interface: .integration,
-                    arbitration: CIArbitrationCandidate(
-                        owner: .integration(candidate.registration.id),
-                        ciID: candidate.registration.id,
-                        priority: candidate.priority,
-                        tieRank: 3
+        if featureAccess.allows(.integrations) {
+            for candidate in integrationCI.eligibleCandidates(displayID: state.displayID) {
+                result.append(
+                    SurfaceContextCandidate(
+                        interface: .integration,
+                        arbitration: CIArbitrationCandidate(
+                            owner: .integration(candidate.registration.id),
+                            ciID: candidate.registration.id,
+                            priority: candidate.priority,
+                            tieRank: 3
+                        )
                     )
                 )
-            )
+            }
         }
         return result
     }
