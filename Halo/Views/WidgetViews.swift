@@ -1970,6 +1970,9 @@ private struct ClockDotMatrixBackdrop: View {
 struct WidgetClock: View {
     let style: WidgetStyle
     var compact = false
+    /// Closed-notch clocks should honor the configured seconds option even at
+    /// compact widths; the surrounding notch geometry grows to fit them.
+    var compactShowsConfiguredSeconds = false
     var workspace: WorkspaceStore? = nil
     var store: AppStore? = nil
     var weatherSummary: String? = nil
@@ -2166,10 +2169,14 @@ struct WidgetClock: View {
     private func shouldShowSeconds(in family: ClockLayoutFamily) -> Bool {
         guard clock.showSeconds else { return false }
         switch family {
-        case .micro: return false
-        case .horizontalCompact: return width >= 300
-        case .verticalCompact: return height >= 220
-        default: return true
+        case .micro:
+            return false
+        case .horizontalCompact:
+            return compactShowsConfiguredSeconds || width >= 300
+        case .verticalCompact:
+            return height >= 220
+        default:
+            return true
         }
     }
 
