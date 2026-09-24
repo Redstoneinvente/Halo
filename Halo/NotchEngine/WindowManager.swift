@@ -875,6 +875,12 @@ final class WindowManager {
             .store(in: &subscriptions)
         store.$configuration.dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+        HaloFeatureAccess.shared.$accessLevel
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reconcile() }
+            .store(in: &subscriptions)
         NotchAmbientStore.shared.$settings.dropFirst().removeDuplicates()
             .debounce(for: .milliseconds(45), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
@@ -2142,20 +2148,31 @@ final class WindowManager {
         let screens = store.configuration.allDisplays ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
         var active = Set<String>()
         for screen in screens {
+            let access = HaloFeatureAccess.shared
             let id = Self.displayID(screen)
             let override = store.workspace.settings.displays.first { $0.id == id }
             guard override?.enabled != false else { continue }
-            let displayProfile = override?.profileID.flatMap { profileID in
-                store.workspace.settings.profiles.first { $0.id == profileID }
-            }
+
+            let usesDisplayCustomization = access.allows(.multiDisplayCustomization)
+            let displayProfile = usesDisplayCustomization
+                ? override?.profileID.flatMap { profileID in
+                    store.workspace.settings.profiles.first { $0.id == profileID }
+                }
+                : nil
+
             active.insert(id)
             let existing = hosts[id]
             let host = existing ?? Host()
-            var theme = displayProfile?.theme ?? override?.theme ?? store.workspace.scheduledTheme ?? store.configuration.theme
+
+            let savedTheme: Theme = usesDisplayCustomization
+                ? (displayProfile?.theme ?? override?.theme ?? store.workspace.scheduledTheme ?? store.configuration.theme)
+                : (store.workspace.scheduledTheme ?? store.configuration.theme)
+            var theme = access.effectiveTheme(savedTheme)
             if store.configuration.simulateNotch && theme.style == .notch { theme.style = .simulated }
-            let displayLayout = displayProfile?.layout ?? override?.layout
-            var appearance = displayLayout?.appearance ?? store.workspace.effectiveLayout.appearance
-            let effectiveLayout = displayLayout ?? store.workspace.effectiveLayout
+
+            let displayLayout = usesDisplayCustomization ? (displayProfile?.layout ?? override?.layout) : nil
+            let effectiveLayout = access.effectiveLayout(displayLayout ?? store.workspace.effectiveLayout)
+            var appearance = effectiveLayout.appearance
             // Preserve the old horizontal-height behavior only for legacy Default layouts
             // saved before the explicit opened-notch content mode existed. Visual Workspace
             // has its own content mode and must always honor Appearance.expandedHeight;
@@ -2532,6 +2549,12 @@ final class WindowManager {
                     refreshGeometryEditorPanels()
                 }
             }
+            if access.allows(.notchAmbient) {
+                host.ambientPanel.order(.below, relativeTo: host.panel.windowNumber)
+            } else if host.ambientPanel.isVisible {
+                host.ambientPanel.orderOut(nil)
+            }
+
             bubbleManager.register(
                 displayID: id,
                 screen: screen,
