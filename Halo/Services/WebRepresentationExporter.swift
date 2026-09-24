@@ -53,12 +53,11 @@ final class HaloWebRepresentationExporter {
             return
         }
 
-        var manifestCaptures: [HaloWebRepresentationManifest.Capture] = []
-        exportSequentially(captures, index: 0, rootURL: rootURL, manifestCaptures: &manifestCaptures) { result in
+        exportSequentially(captures, index: 0, rootURL: rootURL, manifestCaptures: []) { result in
             switch result {
             case .failure(let error):
                 completion(.failure(error))
-            case .success:
+            case .success(let manifestCaptures):
                 do {
                     let info = Bundle.main.infoDictionary ?? [:]
                     let manifest = HaloWebRepresentationManifest(
@@ -84,11 +83,11 @@ final class HaloWebRepresentationExporter {
         _ captures: [WindowManager.WebRepresentationCaptureTarget],
         index: Int,
         rootURL: URL,
-        manifestCaptures: inout [HaloWebRepresentationManifest.Capture],
-        completion: @escaping (Result<Void, Error>) -> Void
+        manifestCaptures: [HaloWebRepresentationManifest.Capture],
+        completion: @escaping (Result<[HaloWebRepresentationManifest.Capture], Error>) -> Void
     ) {
         guard captures.indices.contains(index) else {
-            completion(.success(()))
+            completion(.success(manifestCaptures))
             return
         }
 
@@ -97,12 +96,13 @@ final class HaloWebRepresentationExporter {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             do {
                 let capture = try self.capture(target: target, rootURL: rootURL)
-                manifestCaptures.append(capture)
+                var updatedCaptures = manifestCaptures
+                updatedCaptures.append(capture)
                 self.exportSequentially(
                     captures,
                     index: index + 1,
                     rootURL: rootURL,
-                    manifestCaptures: &manifestCaptures,
+                    manifestCaptures: updatedCaptures,
                     completion: completion
                 )
             } catch {
