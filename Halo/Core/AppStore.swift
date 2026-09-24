@@ -164,6 +164,10 @@ final class AppStore: ObservableObject {
         if panel.runModal() == .OK { addFiles(panel.urls) }
     }
     func importTheme() {
+        guard HaloFeatureAccess.shared.allows(.themeImportExport) else {
+            HaloUpgradeCoordinator.shared.present()
+            return
+        }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -178,6 +182,10 @@ final class AppStore: ObservableObject {
         } catch { self.error = "Theme import failed: \(error.localizedDescription)" }
     }
     func exportTheme() {
+        guard HaloFeatureAccess.shared.allows(.themeImportExport) else {
+            HaloUpgradeCoordinator.shared.present()
+            return
+        }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "MyTheme.haloTheme"
         guard panel.runModal() == .OK, let url = panel.url else { return }
