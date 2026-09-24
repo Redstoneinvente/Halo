@@ -238,6 +238,7 @@ struct ActivationSequenceSettings: Codable, Equatable {
 
     /// Lite keeps Halo's normal polished activation sequence. Deep visual,
     /// sound, color and display customization stays saved but dormant.
+    @MainActor
     func effective(for access: HaloFeatureAccess) -> ActivationSequenceSettings {
         let saved = normalized()
         guard !access.allows(.activationSequenceCustomization) else { return saved }
