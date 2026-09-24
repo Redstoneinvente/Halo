@@ -3321,10 +3321,16 @@ struct SurfaceView: View {
         .contextMenu {
             Button(state.pinned ? "Unpin" : "Keep open") { state.pinned.toggle() }
             Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
-            ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
+            if featureAccess.allows(.profiles) {
+                ForEach(workspace.settings.profiles) { profile in
+                    Button(profile.name) { workspace.apply(profile) }
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { note in
-            guard !disableCustomCI, let requestedID = note.object as? String else { return }
+            guard featureAccess.allows(.customCI),
+                  !disableCustomCI,
+                  let requestedID = note.object as? String else { return }
             guard customContextActive, activeCustomCandidate?.package.manifest.id == requestedID else {
                 customCI.clearManualActivation()
                 customCI.notice = "Custom CI did not open because a higher-priority CI currently owns the notch."
@@ -3334,6 +3340,7 @@ struct SurfaceView: View {
             state.expanded = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCICloseRequested"))) { _ in
+            guard featureAccess.allows(.customCI) else { return }
             state.contextPreferredSize = nil
             state.contextPreferredCompactWidth = nil
             state.contextPreferredCompactHeight = nil
@@ -3341,7 +3348,9 @@ struct SurfaceView: View {
             if !state.pinned { state.expanded = false }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloClipboardCIToggle"))) { _ in
-            guard clipboardCIEnabled else { return }
+            guard featureAccess.allows(.contextInterfaces),
+                  featureAccess.allows(.clipboardWidget),
+                  clipboardCIEnabled else { return }
             if clipboardContextActive && state.expanded {
                 clipboardCI.dismiss()
                 clipboardOpenedNotch = false
