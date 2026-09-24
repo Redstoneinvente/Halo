@@ -58,16 +58,31 @@ final class HaloFeatureAccess: ObservableObject {
     static let shared = HaloFeatureAccess()
 
     @Published private(set) var accessLevel: HaloAccessLevel = .lite
+    @Published private(set) var liteBackgroundOverride: BackgroundKind?
 
     private enum Keys {
         static let choseLite = "HaloHasChosenLite"
         static let hadFullAccess = "HaloHasHadFullAccess"
+        static let liteBackground = "HaloLiteBackground"
     }
 
     private let defaults: UserDefaults
 
     private init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        if let raw = defaults.string(forKey: Keys.liteBackground),
+           let background = BackgroundKind(rawValue: raw),
+           [.solid, .gradient, .glass].contains(background) {
+            liteBackgroundOverride = background
+        }
+    }
+
+    func setLiteBackground(_ background: BackgroundKind) {
+        guard [.solid, .gradient, .glass].contains(background) else { return }
+        defaults.set(background.rawValue, forKey: Keys.liteBackground)
+        if liteBackgroundOverride != background {
+            liteBackgroundOverride = background
+        }
     }
 
     var isFull: Bool { accessLevel == .full }
@@ -115,9 +130,10 @@ final class HaloFeatureAccess: ObservableObject {
         guard !isFull else { return saved }
 
         var value = HaloHUDSettings()
+        value.enabled = saved.enabled
         for kind in HaloHUDEventKind.allCases {
             var item = HaloHUDEventOverride()
-            item.enabled = allows(hudEvent: kind)
+            item.enabled = allows(hudEvent: kind) && saved.override(for: kind).enabled
             value.setOverride(item, for: kind)
         }
         return value
@@ -170,12 +186,13 @@ final class HaloFeatureAccess: ObservableObject {
             for (rawID, style) in savedWidgets {
                 guard let module = ModuleID(rawValue: rawID), allows(module: module) else { continue }
                 var basic = WidgetStyle()
-                basic.fontFamily = style.fontFamily
-                basic.weight = style.weight
-                basic.fontSize = style.fontSize
-                basic.showTitle = style.showTitle
 
+                // Clock intentionally keeps a small typography/date surface in
+                // Lite. Every other supported widget resolves to Halo's useful
+                // default presentation; advanced saved styling remains dormant.
                 if module == .clock {
+                    basic.fontFamily = style.fontFamily == .custom ? .rounded : style.fontFamily
+                    basic.weight = style.weight
                     basic.clock.twentyFourHour = style.clock.twentyFourHour
                     basic.clock.showSeconds = style.clock.showSeconds
                     basic.clock.showDate = style.clock.showDate
@@ -186,7 +203,9 @@ final class HaloFeatureAccess: ObservableObject {
         }
 
         var appearance = saved.appearance
-        if appearance.background == .image || appearance.background == .video {
+        if let liteBackgroundOverride {
+            appearance.background = liteBackgroundOverride
+        } else if appearance.background == .image || appearance.background == .video {
             appearance.background = .gradient
         }
         // Lite exposes Halo Black, the default Gradient and default Glass. Custom
