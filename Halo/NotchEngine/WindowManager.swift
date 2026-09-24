@@ -1599,11 +1599,23 @@ final class WindowManager {
             case .none: return 0
             case .clock:
                 let style = layout.widgetStyle(for: .clock)
-                // ClosedNotchView normalizes WidgetClock's compact base typography
-                // so its rendered time point size matches size * timeScale.
-                // Measure that same effective size here; otherwise formats such as
-                // 24-hour time or seconds can outgrow the NSPanel and get clipped.
-                let clockSize = max(8, size * style.clock.resolvedTimeScale)
+
+                // IMPORTANT: do not resize the closed-notch WidgetClock here.
+                // ClosedNotchView still renders the original compact clock unchanged.
+                // Instead, measure the size that compact WidgetClock actually uses
+                // and grow the surrounding closed surface to contain it.
+                let compactReferenceWidth = 220.0
+                let compactReferenceHeight = 58.0
+                let clockSize: Double
+                if style.clock.usesAutomaticTypography {
+                    let automatic = min(compactReferenceHeight * 0.46, compactReferenceWidth * 0.17)
+                    clockSize = max(18, automatic * style.clock.resolvedTimeScale)
+                } else {
+                    // ClosedNotchView sets the compact style fontSize to this same `size`.
+                    // WidgetClock applies the horizontalCompact 1.55x multiplier.
+                    clockSize = max(8, size * 1.55 * style.clock.resolvedTimeScale)
+                }
+
                 let clockFont = style.fontFamily == .custom
                     ? NSFont(name: style.customFont, size: clockSize) ?? NSFont.monospacedDigitSystemFont(ofSize: clockSize, weight: .medium)
                     : NSFont.monospacedDigitSystemFont(ofSize: clockSize, weight: .medium)
@@ -1617,7 +1629,7 @@ final class WindowManager {
                 let trackingAllowance = max(0, style.clock.resolvedTracking) * Double(characterCount)
 
                 var elementCount = 3 // hour, separator, minute
-                if style.clock.showSeconds { elementCount += 2 } // separator + seconds
+                if style.clock.showSeconds { elementCount += 2 }
                 if showsAMPM { elementCount += 1 }
                 let digitSpacingAllowance = max(0, style.clock.resolvedDigitSpacing) * Double(max(0, elementCount - 1))
 
@@ -1629,12 +1641,11 @@ final class WindowManager {
                 case .expanded: widthScale = 1.14
                 }
 
-                // Keep a small fractional-rendering cushion for SwiftUI's glyph
-                // layout, shadows and antialiasing. The panel should expand rather
-                // than relying on Text.minimumScaleFactor to hide an undersized fit.
+                // Extra allowance is deliberately on the panel, not the widget.
+                // This protects against fractional SwiftUI glyph/shadow overflow.
                 return (textWidth(template, font: clockFont)
                         + trackingAllowance
-                        + digitSpacingAllowance) * widthScale + 8
+                        + digitSpacingAllowance) * widthScale + 10
             case .date:
                 return textWidth("Sep 28", font: font)
             case .timer:
