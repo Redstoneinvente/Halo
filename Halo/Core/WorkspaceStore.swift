@@ -140,11 +140,17 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
     }
     private func updateArtworkPreference() {
-        let displayLayouts = settings.displays.compactMap { item -> WorkspaceLayout? in
-            guard item.enabled else { return nil }
-            if let profileID = item.profileID, let profile = settings.profiles.first(where: { $0.id == profileID }) { return profile.layout }
-            return item.layout
-        }
+        let access = HaloFeatureAccess.shared
+        let displayLayouts: [WorkspaceLayout] = access.allows(.multiDisplayCustomization)
+            ? settings.displays.compactMap { item -> WorkspaceLayout? in
+                guard item.enabled else { return nil }
+                if let profileID = item.profileID,
+                   let profile = settings.profiles.first(where: { $0.id == profileID }) {
+                    return access.effectiveLayout(profile.layout)
+                }
+                return item.layout.map(access.effectiveLayout)
+            }
+            : []
         let layouts = [effectiveLayout] + displayLayouts
         media.setArtworkEnabled(layouts.contains { layout in
             let context = layout.contextMusic
@@ -475,8 +481,28 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     }
     func moveModule(_ module: ModuleID, by delta: Int) {
         var order = settings.layout.normalizedOrder()
-        guard let index = order.firstIndex(of: module), order.indices.contains(index + delta) else { return }
-        order.swapAt(index, index + delta); settings.layout.order = order
+        let access = HaloFeatureAccess.shared
+
+        if !access.isFull {
+            // Lite only shows supported modules. Reorder that visible subsequence
+            // while leaving dormant Full-only module slots/configuration intact.
+            var visible = order.filter { access.allows(module: $0) }
+            guard let index = visible.firstIndex(of: module),
+                  visible.indices.contains(index + delta) else { return }
+
+            visible.swapAt(index, index + delta)
+            var iterator = visible.makeIterator()
+            order = order.map { current in
+                access.allows(module: current) ? (iterator.next() ?? current) : current
+            }
+            settings.layout.order = order
+            return
+        }
+
+        guard let index = order.firstIndex(of: module),
+              order.indices.contains(index + delta) else { return }
+        order.swapAt(index, index + delta)
+        settings.layout.order = order
     }
     func evaluateRules() {
         guard HaloFeatureAccess.shared.allows(.profileAutomation) else {
