@@ -168,6 +168,12 @@ struct HaloAccessView: View {
                 appStoreModel.refresh()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloLicenseClipboardDetected"))) { _ in
+            guard HaloDistribution.current == .direct else { return }
+            withAnimation(.easeInOut(duration: 0.18)) {
+                directLicenseExpanded = true
+            }
+        }
     }
 
     @ViewBuilder
