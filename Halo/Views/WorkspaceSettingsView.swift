@@ -1077,6 +1077,13 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         )
     }
 
+    private func visualBool(_ keyPath: WritableKeyPath<OpenNotchAppearance, Bool?>, fallback: Bool) -> Binding<Bool> {
+        Binding(
+            get: { activeLayout.resolvedOpenNotchLayout.appearance[keyPath: keyPath] ?? fallback },
+            set: { value in updateVisualAppearance { $0[keyPath: keyPath] = value } }
+        )
+    }
+
     private func visualColor(_ keyPath: WritableKeyPath<OpenNotchAppearance, WidgetColor?>, fallback: WidgetColor) -> Binding<Color> {
         Binding(
             get: { (activeLayout.resolvedOpenNotchLayout.appearance[keyPath: keyPath] ?? fallback).color },
@@ -1653,11 +1660,28 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
                 Slider(value: visualDouble(\.innerHighlight, fallback: openedAppearance.innerHighlight ?? 0), in: 0...0.5) { Text("Inner highlight") }
             }
 
-            let shadowOpacity = visualDouble(\.shadowOpacity, fallback: openedAppearance.shadowOpacity ?? 0)
-            Slider(value: shadowOpacity, in: 0...0.7) { Text("Shadow opacity") }
-            if shadowOpacity.wrappedValue > 0.001 {
-                Slider(value: visualDouble(\.shadowBlur, fallback: openedAppearance.shadowBlur ?? 12), in: 0...50) { Text("Shadow blur") }
+            let shadowEnabled = visualBool(\.shadowEnabled, fallback: false)
+            Toggle("Surface shadow", isOn: Binding(
+                get: { shadowEnabled.wrappedValue },
+                set: { enabled in
+                    updateVisualAppearance { appearance in
+                        appearance.shadowEnabled = enabled
+                        if enabled, (appearance.shadowOpacity ?? 0) <= 0.001 {
+                            appearance.shadowOpacity = 0.18
+                            appearance.shadowBlur = appearance.shadowBlur ?? 12
+                        }
+                    }
+                }
+            ))
+            if shadowEnabled.wrappedValue {
+                let shadowOpacity = visualDouble(\.shadowOpacity, fallback: openedAppearance.shadowOpacity ?? 0.18)
+                Slider(value: shadowOpacity, in: 0...0.7) { Text("Shadow opacity") }
+                if shadowOpacity.wrappedValue > 0.001 {
+                    Slider(value: visualDouble(\.shadowBlur, fallback: openedAppearance.shadowBlur ?? 12), in: 0...50) { Text("Shadow blur") }
+                }
             }
+            Text("Surface shadow is off by default so the Visual Workspace stays flat and clean. Enable it only when you want extra edge depth.")
+                .font(.caption).foregroundStyle(.secondary)
             Slider(value: visualDouble(\.glow, fallback: openedAppearance.glow ?? 0), in: 0...0.5) { Text("Subtle glow") }
         }
     }
