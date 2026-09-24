@@ -92,7 +92,6 @@ struct SettingsView: View {
         case "Update Animation": return .advancedTransitions
         case "Visual Workspace Editor": return .visualWorkspace
         case "Context Notch Interface": return .contextInterfaces
-        case "HUD": return .advancedHUD
         case "Profiles": return .profiles
         case "Schedules": return .schedules
         case "Automation": return .profileAutomation
@@ -557,11 +556,7 @@ struct SettingsView: View {
             if featureAccess.allows(.advancedHUD) {
                 HaloHUDWorkspaceSettingsView(layout: $workspace.settings.layout, profileNames: workspace.settings.profiles.map(\.name))
             } else {
-                HaloFullLockedPage(
-                    title: "HUD Studio",
-                    description: "Halo Lite already includes Halo's polished default HUD for volume and brightness. Halo Full lets you redesign it.",
-                    bullets: ["Layouts and positioning", "Custom progress and backgrounds", "Per-event styling", "Detailed dimensions, offsets and timing"]
-                )
+                HaloLiteHUDSettingsView(layout: $workspace.settings.layout)
             }
         case "Modules":
             Text("Drag a module row to reorder it, or use the arrow buttons.")
@@ -709,11 +704,20 @@ struct SettingsView: View {
                 )
             }
         case "Privacy":
-            Section("Clipboard — optional") {
-                Text("Halo samples text every two seconds when enabled. History stays in memory and clears on quit. Sensitive clipboard markers and listed apps are excluded; exclusions cannot guarantee detection of all secrets.")
-                Toggle("Enable text clipboard history", isOn: $workspace.settings.clipboardEnabled).onChange(of: workspace.settings.clipboardEnabled) { _ in workspace.clipboard.reset() }
-                InstalledAppExclusionPicker(bundleIDs: $workspace.settings.clipboardExcludedApps)
-                Button("Clear history now") { workspace.clipboard.reset() }
+            if featureAccess.allows(.clipboardWidget) {
+                Section("Clipboard — optional") {
+                    Text("Halo samples text every two seconds when enabled. History stays in memory and clears on quit. Sensitive clipboard markers and listed apps are excluded; exclusions cannot guarantee detection of all secrets.")
+                    Toggle("Enable text clipboard history", isOn: $workspace.settings.clipboardEnabled).onChange(of: workspace.settings.clipboardEnabled) { _ in workspace.clipboard.reset() }
+                    InstalledAppExclusionPicker(bundleIDs: $workspace.settings.clipboardExcludedApps)
+                    Button("Clear history now") { workspace.clipboard.reset() }
+                }
+            } else {
+                Section("Clipboard") {
+                    Label("Clipboard history is not active in Halo Lite", systemImage: "hand.raised.fill")
+                    Text("Halo Lite does not sample clipboard text. Clipboard history, the Clipboard widget and Clipboard Context Interface are available with Halo Full.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Section("Optional permissions") {
                 Button("Allow Calendar (today's events)") { workspace.calendar.requestAccess() }
@@ -896,10 +900,20 @@ struct HaloFullLockedPage: View {
 private struct HaloLiteAppearanceSettingsPane: View {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
+    @ObservedObject private var featureAccess = HaloFeatureAccess.shared
+
+    private var liteBackground: Binding<BackgroundKind> {
+        Binding(
+            get: {
+                featureAccess.effectiveLayout(workspace.settings.layout).appearance.background
+            },
+            set: { featureAccess.setLiteBackground($0) }
+        )
+    }
 
     var body: some View {
         Section("Background") {
-            Picker("Style", selection: $workspace.settings.layout.appearance.background) {
+            Picker("Style", selection: liteBackground) {
                 Text("Halo Black").tag(BackgroundKind.solid)
                 Text("Gradient").tag(BackgroundKind.gradient)
                 Text("Glass").tag(BackgroundKind.glass)
@@ -965,6 +979,47 @@ private struct HaloLiteAppearanceSettingsPane: View {
             HaloUpgradeCard(
                 title: "Deep appearance customization",
                 detail: "Halo Full adds image and video backgrounds, advanced Glass, grain, edge/depth, custom shapes, offsets, transitions, schedules and theme import/export."
+            )
+        }
+    }
+}
+
+@MainActor
+private struct HaloLiteHUDSettingsView: View {
+    @Binding var layout: WorkspaceLayout
+
+    private var hudEnabled: Binding<Bool> {
+        Binding(
+            get: { layout.hud?.enabled ?? true },
+            set: { enabled in
+                var next = layout
+                var hud = next.hud ?? HaloHUDSettings()
+                hud.enabled = enabled
+                next.hud = hud
+                layout = next
+            }
+        )
+    }
+
+    var body: some View {
+        Section("Halo HUD") {
+            Toggle("Enable Halo HUD", isOn: hudEnabled)
+            Text("Halo Lite uses Halo's polished default HUD design.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Included HUD events") {
+            Label("Volume", systemImage: HaloHUDEventKind.volume.symbol)
+            Label("Mute / Unmute", systemImage: HaloHUDEventKind.mute.symbol)
+            Label("Display Brightness", systemImage: HaloHUDEventKind.displayBrightness.symbol)
+            Label("Keyboard Brightness", systemImage: HaloHUDEventKind.keyboardBrightness.symbol)
+        }
+
+        Section {
+            HaloUpgradeCard(
+                title: "Redesign the HUD",
+                detail: "Halo Full unlocks layout, positioning, progress styles, dimensions, custom colors, dynamic accents, shadows, offsets, timeouts and per-event presentation."
             )
         }
     }
@@ -1135,7 +1190,7 @@ private struct HaloLiteBubbleSettingsView: View {
         Section("Lite Bubble providers") {
             Toggle("Music", isOn: boolBinding(\.musicEnabled))
             Toggle("Timer", isOn: boolBinding(\.timerEnabled))
-            Toggle("Audio / Volume", isOn: optionalBoolBinding(\.audioEnabled, default: false))
+            Toggle("Audio / Volume", isOn: optionalBoolBinding(\.audioFeedbackEnabled, default: true))
 
             Text("Halo chooses the most relevant active Bubble and shows one at a time.")
                 .font(.caption)
