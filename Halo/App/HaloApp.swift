@@ -5,9 +5,9 @@ import CoreGraphics
 import IOKit
 import Combine
 
-/// Single source of truth for whether commercial Halo surfaces and Context Interfaces
-/// are allowed to activate. It intentionally starts locked so services constructed
-/// during AppStore/WorkspaceStore initialization cannot race account/license restore.
+/// Premium-runtime readiness gate for services that must only run with Halo Full.
+/// HaloFeatureAccess is the authoritative source of truth for the active Lite/Full edition.
+/// This gate intentionally starts false so premium services cannot race entitlement restore.
 @MainActor
 final class HaloCommercialSurfaceGate: ObservableObject {
     static let shared = HaloCommercialSurfaceGate()
@@ -331,6 +331,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         accessWindow?.title = allowsLiteEntry ? "Halo" : "Halo · Upgrade to Full"
+        // First-run access selection must end with an explicit choice. Upgrade windows,
+        // however, are optional and should remain dismissible while Halo Lite keeps running.
+        accessWindow?.standardWindowButton(.closeButton)?.isEnabled = !allowsLiteEntry
         accessWindow?.contentView = NSHostingView(
             rootView: HaloAccessView(
                 allowsLiteEntry: allowsLiteEntry,
