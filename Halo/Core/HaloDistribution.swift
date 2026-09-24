@@ -6,6 +6,49 @@ enum HaloAccessLevel: String, Equatable, Sendable {
     case full
 }
 
+/// Product-level features that distinguish Halo Full from Halo Lite.
+///
+/// Feature code should ask HaloFeatureAccess for capabilities instead of
+/// checking StoreKit, LicenseSeat, account state, or ad-hoc purchase flags.
+enum HaloCapability: String, CaseIterable, Sendable {
+    case visualWorkspace
+    case profiles
+    case profileAutomation
+    case schedules
+
+    case contextInterfaces
+    case integrations
+    case customCI
+    case plugins
+
+    case pixelPal
+
+    case advancedBubbles
+    case multipleBubbles
+    case advancedBubbleGestures
+
+    case notchSkins
+    case notchAmbient
+
+    case advancedAppearance
+    case customBackgrounds
+    case advancedClosedNotch
+    case advancedTransitions
+
+    case advancedHUD
+    case advancedWidgetCustomization
+
+    case multiDisplayCustomization
+    case themeImportExport
+    case activationSequenceCustomization
+
+    case clipboardWidget
+    case launcherWidget
+    case liveActivitiesWidget
+    case notesWidget
+    case captureWidget
+}
+
 /// Authoritative runtime source of truth for Halo Lite vs Halo Full.
 ///
 /// Entitlement providers decide whether Full is available. Feature code should
@@ -28,6 +71,116 @@ final class HaloFeatureAccess: ObservableObject {
     }
 
     var isFull: Bool { accessLevel == .full }
+
+    /// Full enables every product capability. Lite deliberately exposes only
+    /// the core experience; the enum above therefore represents Full features.
+    func allows(_ capability: HaloCapability) -> Bool {
+        isFull
+    }
+
+    /// Runtime widget boundary. This is intentionally independent from the
+    /// Settings UI so an old/imported Full layout cannot render paid widgets.
+    func allows(module: ModuleID) -> Bool {
+        if isFull { return module != .developer }
+        switch module {
+        case .clock, .media, .timer, .stopwatch, .shelf, .calendar, .system, .audio:
+            return true
+        case .clipboard, .launcher, .activities, .pet, .notes, .capture, .developer:
+            return false
+        }
+    }
+
+    /// Runtime Bubble provider boundary.
+    func allows(bubble: NotchBubbleKind) -> Bool {
+        if isFull { return true }
+        switch bubble {
+        case .music, .timer, .audio:
+            return true
+        case .pixelPal, .clock, .stopwatch, .system, .clipboard, .calendar, .vinyl, .files:
+            return false
+        }
+    }
+
+    /// Resolve a runtime-safe theme without changing the user's saved Full
+    /// theme. Lite keeps its useful basic appearance controls while advanced
+    /// surface styles remain dormant until Full returns.
+    func effectiveTheme(_ saved: Theme) -> Theme {
+        guard !isFull else { return saved }
+        var value = Theme()
+        value.width = saved.width
+        value.cornerRadius = saved.cornerRadius
+        value.tint = saved.tint
+        value.opacity = saved.opacity
+        value.animations = saved.animations
+        value.style = .notch
+        return value
+    }
+
+    /// Produce the layout Halo is allowed to render right now. This is a copy;
+    /// premium values in WorkspaceSettings remain untouched on disk.
+    func effectiveLayout(_ saved: WorkspaceLayout) -> WorkspaceLayout {
+        guard !isFull else { return saved }
+
+        var value = saved
+
+        // Visual Workspace is preserved in the saved layout, but Lite always
+        // renders the classic/default workspace.
+        value.useCustomOpenNotchWorkspace = false
+        value.openNotch = nil
+
+        // Filter runtime modules without rewriting the saved enabled/order sets.
+        value.enabled = Set(saved.enabled.filter { allows(module: $0) })
+        value.order = saved.normalizedOrder().filter { allows(module: $0) }
+
+        // Context Interfaces and advanced HUD customization are Full features.
+        value.contextMusic = nil
+        value.hud = HaloHUDSettings()
+
+        // Closed-notch deep customization is Full. Lite keeps Halo's polished
+        // default closed surface while the saved Full configuration is dormant.
+        value.closedNotch = ClosedNotchOptions()
+
+        // Retain only intentionally basic widget styling. Deeper per-widget
+        // chrome, adaptive footprints and element overrides stay saved but do
+        // not affect Lite rendering.
+        if let savedWidgets = saved.widgets {
+            var basicWidgets: [String: WidgetStyle] = [:]
+            for (rawID, style) in savedWidgets {
+                guard let module = ModuleID(rawValue: rawID), allows(module: module) else { continue }
+                var basic = WidgetStyle()
+                basic.fontFamily = style.fontFamily
+                basic.weight = style.weight
+                basic.fontSize = style.fontSize
+                basic.showTitle = style.showTitle
+
+                if module == .clock {
+                    basic.clock.twentyFourHour = style.clock.twentyFourHour
+                    basic.clock.showSeconds = style.clock.showSeconds
+                    basic.clock.showDate = style.clock.showDate
+                }
+                basicWidgets[rawID] = basic
+            }
+            value.widgets = basicWidgets.isEmpty ? nil : basicWidgets
+        }
+
+        var appearance = saved.appearance
+        if appearance.background == .image || appearance.background == .video {
+            appearance.background = .gradient
+        }
+        appearance.assetPath = ""
+        appearance.grain = nil
+        appearance.backgroundSchedule = nil
+        appearance.glass = GlassOptions()
+        appearance.blur = 0
+        appearance.saturation = 1
+        appearance.brightness = 0
+        appearance.skin = NotchSkinOptions()
+        appearance.animation = .smooth
+        appearance.surface = SurfaceOptions()
+        value.appearance = appearance
+
+        return value
+    }
     var hasChosenLite: Bool { defaults.bool(forKey: Keys.choseLite) }
     var hasHadFullAccess: Bool { defaults.bool(forKey: Keys.hadFullAccess) }
 
