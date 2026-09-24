@@ -135,6 +135,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(quitItem)
         status?.menu = menu
 
+
+        if let outputURL = HaloWebRepresentationExporter.requestedOutputURL() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self, let engine = self.engine else { return }
+                HaloWebRepresentationExporter.shared.export(to: outputURL, engine: engine) { result in
+                    switch result {
+                    case .success(let url):
+                        NSLog("Halo web representation exported to %@", url.path)
+                    case .failure(let error):
+                        NSLog("Halo web representation export failed: %@", error.localizedDescription)
+                    }
+                }
+            }
+        }
+
         if HaloFeedbackService.shared.crashedDuringPreviousExecution {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 self?.presentPreviousCrashPromptIfNeeded()
