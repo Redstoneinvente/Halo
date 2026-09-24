@@ -825,6 +825,7 @@ final class WindowManager {
     }
 
     private var dropCISettingEnabled: Bool {
+        guard HaloFeatureAccess.shared.allows(.contextInterfaces) else { return false }
         let defaults = UserDefaults.standard
         return defaults.object(forKey: "HaloContextDropEnabled") == nil
             ? true
@@ -879,7 +880,19 @@ final class WindowManager {
             .dropFirst()
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.reconcile() }
+            .sink { [weak self] level in
+                if level == .lite {
+                    let session = SurfaceGeometryEditingSession.shared
+                    if session.isEnabled {
+                        session.cancelTransaction()
+                        session.previewSnapshot = nil
+                        session.isEnabled = false
+                        session.displayID = nil
+                    }
+                }
+                self?.reconcile()
+                self?.refreshGeometryEditorPanels()
+            }
             .store(in: &subscriptions)
         NotchAmbientStore.shared.$settings.dropFirst().removeDuplicates()
             .debounce(for: .milliseconds(45), scheduler: RunLoop.main)
@@ -2329,7 +2342,10 @@ final class WindowManager {
                     if active {
                         ActivationSequenceCoordinator.shared.cancelForInteraction()
                         host.state.beginFileDrop(count: urls.count)
-                        let partnerEligible = runtime.fileDragEntered(files: urls, displayID: id)
+                        let integrationsAllowed = HaloFeatureAccess.shared.allows(.integrations)
+                        let partnerEligible = integrationsAllowed
+                            ? runtime.fileDragEntered(files: urls, displayID: id)
+                            : false
                         let claimed = self.dropCISettingEnabled || partnerEligible
                         if !claimed {
                             host.state.cancelFileDrop()
@@ -2339,12 +2355,15 @@ final class WindowManager {
                     }
 
                     host.state.endFileDrop()
-                    let shouldCollapse = runtime.fileDragExited(displayID: id, pinned: host.state.pinned)
+                    let shouldCollapse = HaloFeatureAccess.shared.allows(.integrations)
+                        ? runtime.fileDragExited(displayID: id, pinned: host.state.pinned)
+                        : false
                     if shouldCollapse && !host.state.pinned { host.state.expanded = false }
                     return false
                 }
                 view.dragLocationHandler = { [weak host] screenPoint in
-                    guard host != nil else { return }
+                    guard host != nil,
+                          HaloFeatureAccess.shared.allows(.integrations) else { return }
                     _ = IntegrationCIRuntime.shared.updateFileDragLocation(
                         displayID: id,
                         screenPoint: screenPoint
@@ -2354,7 +2373,8 @@ final class WindowManager {
                     guard let self, let host, self.surfaceRuntimeEnabled else { return false }
                     let runtime = IntegrationCIRuntime.shared
 
-                    if let winner = runtime.currentWinnerCIID(displayID: id),
+                    if HaloFeatureAccess.shared.allows(.integrations),
+                       let winner = runtime.currentWinnerCIID(displayID: id),
                        host.state.activeCIIdentifier == winner {
                         guard let commit = runtime.commitFileDragAtHoveredAction(displayID: id) else {
                             return false
