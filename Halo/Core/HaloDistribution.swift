@@ -133,7 +133,7 @@ final class HaloFeatureAccess: ObservableObject {
         value.enabled = saved.enabled
         for kind in HaloHUDEventKind.allCases {
             var item = HaloHUDEventOverride()
-            item.enabled = allows(hudEvent: kind) && saved.override(for: kind).enabled
+            item.enabled = allows(hudEvent: kind)
             value.setOverride(item, for: kind)
         }
         return value
