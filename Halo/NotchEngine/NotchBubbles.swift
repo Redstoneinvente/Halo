@@ -97,6 +97,21 @@ enum NotchBubbleLayout: String, Codable, CaseIterable, Identifiable, Hashable {
     var id: String { rawValue }
 }
 
+enum NotchBubbleSide: String, Codable, CaseIterable, Identifiable, Hashable {
+    case left = "Left"
+    case right = "Right"
+
+    var id: String { rawValue }
+}
+
+enum NotchBubbleSideMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case automatic = "Auto"
+    case left = "Left"
+    case right = "Right"
+
+    var id: String { rawValue }
+}
+
 enum NotchBubblePriority: Int, Codable, Comparable, Hashable {
     case background = 0
     case normal = 1
@@ -639,6 +654,10 @@ struct NotchBubbleSettings: Codable, Equatable {
     var enabled = false
 
     var layout: NotchBubbleLayout = .satellites
+    // Optional keeps settings saved before side placement existed decodable.
+    // Side placement is used by Wings, where bubbles live beside the notch.
+    var bubbleSideMode: NotchBubbleSideMode?
+    var automaticPrioritySide: NotchBubbleSide?
     var spacing = 10.0
     var bubbleSize = 42.0
     // Optional preserves decoding of Notch Bubble settings saved before this control existed.
@@ -778,6 +797,14 @@ struct NotchBubbleSettings: Codable, Equatable {
             value.bubbleStyles = normalizedStyles.isEmpty ? nil : normalizedStyles
         }
         return value
+    }
+
+    var resolvedBubbleSideMode: NotchBubbleSideMode {
+        bubbleSideMode ?? .automatic
+    }
+
+    var resolvedAutomaticPrioritySide: NotchBubbleSide {
+        automaticPrioritySide ?? .left
     }
 
     var resolvedVerticalOffset: Double {
@@ -1683,7 +1710,8 @@ struct BubbleLayoutEngine {
         around surfaceFrame: CGRect,
         in screenFrame: CGRect,
         compactHeight: CGFloat,
-        settings: NotchBubbleSettings
+        settings: NotchBubbleSettings,
+        sideAssignments: [NotchBubbleKind: NotchBubbleSide] = [:]
     ) -> [NotchBubbleKind: CGRect] {
         guard !bubbles.isEmpty else { return [:] }
 
@@ -1714,13 +1742,16 @@ struct BubbleLayoutEngine {
             var leftOffset: CGFloat = gap
             var rightOffset: CGFloat = gap
 
-            for (index, bubble) in bubbles.enumerated() {
+            for bubble in bubbles {
                 let style = settings.resolvedStyle(for: bubble.kind)
                 let size = bubble.size
                 let y = menuBarCenterY - size / 2 - globalVerticalOffset - style.verticalOffset
+                let side = sideAssignments[bubble.kind]
+                    ?? fallbackSide(for: settings.resolvedBubbleSideMode)
                 let frame: CGRect
 
-                if index.isMultiple(of: 2) {
+                switch side {
+                case .left:
                     frame = CGRect(
                         x: surfaceFrame.minX - leftOffset - size,
                         y: y,
@@ -1728,7 +1759,8 @@ struct BubbleLayoutEngine {
                         height: size
                     )
                     leftOffset += size + spacing
-                } else {
+
+                case .right:
                     frame = CGRect(
                         x: surfaceFrame.maxX + rightOffset,
                         y: y,
@@ -1737,6 +1769,7 @@ struct BubbleLayoutEngine {
                     )
                     rightOffset += size + spacing
                 }
+
                 result[bubble.kind] = clamped(frame, to: screenFrame)
             }
 
@@ -1758,6 +1791,15 @@ struct BubbleLayoutEngine {
         }
 
         return result
+    }
+
+    private func fallbackSide(for mode: NotchBubbleSideMode) -> NotchBubbleSide {
+        switch mode {
+        case .automatic, .left:
+            return .left
+        case .right:
+            return .right
+        }
     }
 
     func emergenceFrame(
@@ -2592,6 +2634,10 @@ private final class NotchBubbleDisplayHost {
     private var surfaceFrame: CGRect
     private var commercialAccessGranted = false
     private var controllers: [NotchBubbleKind: BubbleWindowController] = [:]
+    // Side ownership is intentionally stateful. Auto placement assigns a side when
+    // a bubble first appears and never moves an existing bubble across the notch
+    // just to rebalance the layout.
+    private var bubbleSideAssignments: [NotchBubbleKind: NotchBubbleSide] = [:]
     private var subscriptions = Set<AnyCancellable>()
     private var lastCalendarActivityID: String?
     private var lastObservedSettings: NotchBubbleSettings
@@ -2636,6 +2682,7 @@ private final class NotchBubbleDisplayHost {
             controller.close()
         }
         controllers.removeAll()
+        bubbleSideAssignments.removeAll()
     }
 
     private func bind(surfacePanel: HaloPanel, state: SurfaceState) {
@@ -2864,12 +2911,17 @@ private final class NotchBubbleDisplayHost {
             runtime: activityCenter,
             surfaceExpanded: state.expanded
         )
+        let sideAssignments = resolvedSideAssignments(
+            for: bubbles,
+            settings: settings
+        )
         let frames = layoutEngine.frames(
             for: bubbles,
             around: surfaceFrame,
             in: screenFrame,
             compactHeight: state.compactHeight,
-            settings: settings
+            settings: settings,
+            sideAssignments: sideAssignments
         )
         let activeKinds = Set(bubbles.map(\.kind))
 
@@ -2891,6 +2943,7 @@ private final class NotchBubbleDisplayHost {
                       self.controllers[kind] === controller else { return }
                 controller.close()
                 self.controllers.removeValue(forKey: kind)
+                self.bubbleSideAssignments.removeValue(forKey: kind)
             }
         }
 
@@ -2918,6 +2971,61 @@ private final class NotchBubbleDisplayHost {
                 trackingSurface: trackingSurface
             )
         }
+    }
+
+    private func resolvedSideAssignments(
+        for bubbles: [NotchBubble],
+        settings: NotchBubbleSettings
+    ) -> [NotchBubbleKind: NotchBubbleSide] {
+        guard settings.layout == .wings else { return [:] }
+
+        let activeKinds = Set(bubbles.map(\.kind))
+        let retainedKinds = Set(controllers.keys).union(activeKinds)
+        bubbleSideAssignments = bubbleSideAssignments.filter {
+            retainedKinds.contains($0.key)
+        }
+
+        switch settings.resolvedBubbleSideMode {
+        case .left:
+            for kind in activeKinds {
+                bubbleSideAssignments[kind] = .left
+            }
+
+        case .right:
+            for kind in activeKinds {
+                bubbleSideAssignments[kind] = .right
+            }
+
+        case .automatic:
+            // Count currently-owned sides first. Existing bubbles keep their side.
+            // Only bubbles without an assignment participate in balancing.
+            var leftCount = bubbleSideAssignments.values.reduce(into: 0) { count, side in
+                if side == .left { count += 1 }
+            }
+            var rightCount = bubbleSideAssignments.values.reduce(into: 0) { count, side in
+                if side == .right { count += 1 }
+            }
+
+            for bubble in bubbles where bubbleSideAssignments[bubble.kind] == nil {
+                let side: NotchBubbleSide
+                if leftCount == rightCount {
+                    side = settings.resolvedAutomaticPrioritySide
+                } else if leftCount < rightCount {
+                    side = .left
+                } else {
+                    side = .right
+                }
+
+                bubbleSideAssignments[bubble.kind] = side
+                if side == .left {
+                    leftCount += 1
+                } else {
+                    rightCount += 1
+                }
+            }
+        }
+
+        return bubbleSideAssignments
     }
 
     private func removeAll(animated: Bool) {
@@ -2948,6 +3056,7 @@ private final class NotchBubbleDisplayHost {
                       self.controllers[kind] === controller else { return }
                 controller.close()
                 self.controllers.removeValue(forKey: kind)
+                self.bubbleSideAssignments.removeValue(forKey: kind)
             }
         }
     }
@@ -4914,6 +5023,44 @@ struct NotchBubbleSettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
+
+            if settings.layout == .wings {
+                Picker(
+                    "Bubble side",
+                    selection: optionalBinding(
+                        \.bubbleSideMode,
+                        default: NotchBubbleSideMode.automatic
+                    )
+                ) {
+                    ForEach(NotchBubbleSideMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if settings.resolvedBubbleSideMode == .automatic {
+                    Picker(
+                        "Priority side",
+                        selection: optionalBinding(
+                            \.automaticPrioritySide,
+                            default: NotchBubbleSide.left
+                        )
+                    ) {
+                        ForEach(NotchBubbleSide.allCases) { side in
+                            Text(side.rawValue).tag(side)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text("Auto puts the first new bubble on the priority side, then assigns later bubbles to the side with fewer bubbles. Existing bubbles keep their side until they disappear.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("All wing bubbles stay on the selected side of the notch.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             LabeledContent("Spacing") {
                 HStack {
