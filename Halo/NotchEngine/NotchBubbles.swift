@@ -2019,7 +2019,9 @@ private final class FluidNotchBridgePanel {
 
         let notchX = notchSource.midX
         let notchY = notchSource.midY
-        let bubbleNearX = direction > 0 ? bubbleFrame.minX : bubbleFrame.maxX
+        // fluidNotchDirection points from the bubble toward the notch. Attach the
+        // connector to the bubble edge facing that notch.
+        let bubbleNearX = direction > 0 ? bubbleFrame.maxX : bubbleFrame.minX
         let distance = abs(bubbleNearX - notchX)
 
         guard distance > 0.5 else {
@@ -2089,7 +2091,8 @@ private final class FluidNotchBridgePanel {
         // rather than a pill simply sliding away from it.
         let neckPinch = max(2.0, bubbleHalf * (0.34 + 0.36 * strength))
         let control = min(distance * 0.52, max(12, bubbleHeight * 0.95))
-        let signedControl = direction * control
+        let towardBubble: CGFloat = bubble.x >= notch.x ? 1 : -1
+        let signedControl = towardBubble * control
 
         let topNotch = CGPoint(x: notch.x, y: notch.y + notchHalf)
         let bottomNotch = CGPoint(x: notch.x, y: notch.y - notchHalf)
