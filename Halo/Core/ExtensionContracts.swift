@@ -89,7 +89,7 @@ struct HaloSurfaceRouter: View {
     private var accessLocked: Bool {
         // Access selection is handled before WindowManager is created. Once a Halo surface
         // exists, both Lite and Full are valid runnable editions; premium behavior is gated
-        // separately through HaloFeatureAccess / HaloCommercialSurfaceGate.
+        // separately through HaloFeatureAccess / HaloRuntimeGate.
         switch featureAccess.accessLevel {
         case .lite, .full:
             return false
