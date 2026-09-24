@@ -89,7 +89,6 @@ struct SettingsView: View {
         switch name {
         case "Notch Skins": return .notchSkins
         case "Notch Ambient": return .notchAmbient
-        case "Activation Sequence": return .activationSequenceCustomization
         case "Update Animation": return .advancedTransitions
         case "Visual Workspace Editor": return .visualWorkspace
         case "Context Notch Interface": return .contextInterfaces
@@ -524,11 +523,7 @@ struct SettingsView: View {
             if featureAccess.allows(.activationSequenceCustomization) {
                 ActivationSequenceSettingsPane()
             } else {
-                HaloFullLockedPage(
-                    title: "Activation Sequence",
-                    description: "Halo Lite keeps the polished default opening experience. Halo Full lets you redesign the sequence.",
-                    bullets: ["Custom activation timing", "Advanced opening presentation", "Deeper sequence customization"]
-                )
+                HaloLiteActivationSequenceSettingsPane()
             }
         case "Widgets":
             if featureAccess.allows(.advancedWidgetCustomization) {
@@ -970,6 +965,38 @@ private struct HaloLiteAppearanceSettingsPane: View {
             HaloUpgradeCard(
                 title: "Deep appearance customization",
                 detail: "Halo Full adds image and video backgrounds, advanced Glass, grain, edge/depth, custom shapes, offsets, transitions, schedules and theme import/export."
+            )
+        }
+    }
+}
+
+@MainActor
+private struct HaloLiteActivationSequenceSettingsPane: View {
+    @ObservedObject private var activation = ActivationSequenceStore.shared
+
+    var body: some View {
+        Section("Activation Sequence") {
+            Toggle("Use Halo's default activation sequence", isOn: $activation.settings.enabled)
+
+            LabeledContent("Preset") { Text("Halo Reveal") }
+            LabeledContent("Motion") { Text("Fluid") }
+
+            Text("Halo Lite keeps the same polished activation quality. Your custom Full sequence remains saved and returns automatically when Halo Full is active again.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button("Preview default sequence") {
+                NotificationCenter.default.post(
+                    name: .init("HaloPreviewActivationSequence"),
+                    object: nil
+                )
+            }
+        }
+
+        Section {
+            HaloUpgradeCard(
+                title: "Customize the sequence",
+                detail: "Halo Full adds custom presets, timing, particles, colors, sounds, motion tuning and display targeting."
             )
         }
     }
