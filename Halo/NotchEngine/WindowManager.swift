@@ -1599,11 +1599,42 @@ final class WindowManager {
             case .none: return 0
             case .clock:
                 let style = layout.widgetStyle(for: .clock)
+                // ClosedNotchView normalizes WidgetClock's compact base typography
+                // so its rendered time point size matches size * timeScale.
+                // Measure that same effective size here; otherwise formats such as
+                // 24-hour time or seconds can outgrow the NSPanel and get clipped.
+                let clockSize = max(8, size * style.clock.resolvedTimeScale)
                 let clockFont = style.fontFamily == .custom
-                    ? NSFont(name: style.customFont, size: size) ?? font
-                    : NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
-                let template = "88:88" + (style.clock.showSeconds ? ":88" : "") + (style.clock.twentyFourHour ? "" : " PM")
-                return textWidth(template, font: clockFont) * 1.04
+                    ? NSFont(name: style.customFont, size: clockSize) ?? NSFont.monospacedDigitSystemFont(ofSize: clockSize, weight: .medium)
+                    : NSFont.monospacedDigitSystemFont(ofSize: clockSize, weight: .medium)
+
+                let showsAMPM = !style.clock.twentyFourHour && style.clock.resolvedShowAMPM
+                let template = "88:88"
+                    + (style.clock.showSeconds ? ":88" : "")
+                    + (showsAMPM ? " PM" : "")
+
+                let characterCount = max(0, template.count - 1)
+                let trackingAllowance = max(0, style.clock.resolvedTracking) * Double(characterCount)
+
+                var elementCount = 3 // hour, separator, minute
+                if style.clock.showSeconds { elementCount += 2 } // separator + seconds
+                if showsAMPM { elementCount += 1 }
+                let digitSpacingAllowance = max(0, style.clock.resolvedDigitSpacing) * Double(max(0, elementCount - 1))
+
+                let widthScale: Double
+                switch style.clock.resolvedFontWidth {
+                case .compressed: widthScale = 0.86
+                case .condensed: widthScale = 0.93
+                case .standard: widthScale = 1.0
+                case .expanded: widthScale = 1.14
+                }
+
+                // Keep a small fractional-rendering cushion for SwiftUI's glyph
+                // layout, shadows and antialiasing. The panel should expand rather
+                // than relying on Text.minimumScaleFactor to hide an undersized fit.
+                return (textWidth(template, font: clockFont)
+                        + trackingAllowance
+                        + digitSpacingAllowance) * widthScale + 8
             case .date:
                 return textWidth("Sep 28", font: font)
             case .timer:
