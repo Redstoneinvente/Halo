@@ -616,6 +616,10 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         if runningApps.map(\.processIdentifier) != updated.map(\.processIdentifier) { runningApps = updated }
     }
     func chooseBackground() {
+        guard HaloFeatureAccess.shared.allows(.customBackgrounds) else {
+            HaloUpgradeCoordinator.shared.present()
+            return
+        }
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.image, .movie]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         settings.layout.appearance.assetPath = url.path
@@ -2028,6 +2032,10 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     }
 
     func attach(to workspace: WorkspaceStore) {
+        guard HaloFeatureAccess.shared.allows(.customCI) else {
+            detach()
+            return
+        }
         if self.workspace === workspace, !subscriptions.isEmpty { return }
         self.workspace = workspace
         subscriptions.removeAll()
@@ -2163,6 +2171,11 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     }
 
     func chooseAndImportPackage() {
+        guard HaloFeatureAccess.shared.allows(.customCI) else {
+            errorMessage = "Custom Context Interfaces are available with Halo Full."
+            HaloUpgradeCoordinator.shared.present()
+            return
+        }
         let panel = NSOpenPanel()
         panel.title = "Import Custom CI"
         panel.message = "Choose an unpacked .haloCI package directory. Halo validates it before installation."
@@ -2175,6 +2188,11 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     }
 
     func importPackage(from source: URL) {
+        guard HaloFeatureAccess.shared.allows(.customCI) else {
+            notice = nil
+            errorMessage = "Custom Context Interfaces are available with Halo Full."
+            return
+        }
         notice = nil; errorMessage = nil
         let sourceReport = HaloCIPackageValidator.validatePackage(at: source)
         guard let sourcePackage = sourceReport.package else {
@@ -2235,6 +2253,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     func hasPermission(_ id: String, _ permission: String) -> Bool { grantedPermissions(id).contains(permission) }
 
     func setEnabled(_ enabled: Bool, packageID: String) {
+        guard HaloFeatureAccess.shared.allows(.customCI) else { return }
         mutatePreferences(packageID) { $0.enabled = enabled }
         if !enabled {
             if manualActivationID == packageID { manualActivationID = nil }
@@ -2244,11 +2263,13 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     }
 
     func setPriority(_ priority: Double, packageID: String) {
+        guard HaloFeatureAccess.shared.allows(.customCI) else { return }
         mutatePreferences(packageID) { $0.priority = min(100, max(0, priority)) }
         contextDidChange()
     }
 
     func setPermission(_ permission: String, granted: Bool, packageID: String) {
+        guard HaloFeatureAccess.shared.allows(.customCI) else { return }
         guard let package = package(id: packageID), requestedPermissions(package).contains(permission), HaloCISDK.supportedPermissions.contains(permission) else { return }
         mutatePreferences(packageID) { prefs in
             if granted { prefs.grantedPermissions.insert(permission) } else { prefs.grantedPermissions.remove(permission) }
@@ -2257,7 +2278,9 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     }
 
     func requestManualActivation(_ id: String) {
-        guard package(id: id) != nil, isEnabled(id) else { return }
+        guard HaloFeatureAccess.shared.allows(.customCI),
+              package(id: id) != nil,
+              isEnabled(id) else { return }
         suppressedPackageIDs.remove(id)
         manualActivationID = id
         contextRevision &+= 1
@@ -2279,7 +2302,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
 
     func activeCandidate(workspace: WorkspaceStore, globalDisabled: Bool,
                          blockingPriority: Double? = nil) -> HaloCustomCICandidate? {
-        guard !globalDisabled else { return nil }
+        guard HaloFeatureAccess.shared.allows(.customCI), !globalDisabled else { return nil }
         let floor = blockingPriority ?? -Double.infinity
         let snapshot = triggerSnapshot(workspace: workspace)
         let ordered = packages.filter { package in
@@ -2310,6 +2333,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     }
 
     func dataBus(for package: HaloCIParsedPackage, workspace: WorkspaceStore, expanded: Bool) -> [String: String] {
+        guard HaloFeatureAccess.shared.allows(.customCI) else { return [:] }
         let grants = grantedPermissions(package.manifest.id)
         var data: [String: String] = [
             "halo.surface.state": expanded ? "expanded" : "closed",
@@ -2339,18 +2363,21 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
         preferences[packageID]?.state.boolValues[key] ?? defaultValue
     }
     func setBoolState(_ value: Bool, packageID: String, key: String) {
+        guard HaloFeatureAccess.shared.allows(.customCI) else { return }
         mutateState(packageID) { $0.boolValues[key] = value }
     }
     func numberState(packageID: String, key: String, default defaultValue: Double) -> Double {
         preferences[packageID]?.state.numberValues[key] ?? defaultValue
     }
     func setNumberState(_ value: Double, packageID: String, key: String) {
-        guard value.isFinite else { return }
+        guard HaloFeatureAccess.shared.allows(.customCI), value.isFinite else { return }
         mutateState(packageID) { $0.numberValues[key] = value }
     }
 
     func assetURL(packageID: String, source: String) -> URL? {
-        guard source.hasPrefix("asset:"), let package = package(id: packageID) else { return nil }
+        guard HaloFeatureAccess.shared.allows(.customCI),
+              source.hasPrefix("asset:"),
+              let package = package(id: packageID) else { return nil }
         let relative = String(source.dropFirst("asset:".count))
         guard !relative.hasPrefix("/"), !relative.contains("..") else { return nil }
         let url = package.rootURL.appendingPathComponent(relative).standardizedFileURL
@@ -2359,6 +2386,7 @@ final class HaloCustomCIRuntimeStore: ObservableObject {
     }
 
     func perform(_ action: HaloCIActionDescriptor, package: HaloCIParsedPackage, workspace: WorkspaceStore, data: [String: String]) {
+        guard HaloFeatureAccess.shared.allows(.customCI) else { return }
         let id = package.manifest.id
         if let permission = HaloCISDK.permissionForAction(action.id), !hasPermission(id, permission) {
             errorMessage = "\(package.manifest.name) needs \(permission) before it can perform \(action.id)."
