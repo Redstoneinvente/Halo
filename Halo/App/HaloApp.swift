@@ -35,8 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private enum StartupAccessState: Equatable {
         case launching
         case verifyingAccess
-        case locked
-        case ready
+        case accessSelection
+        case lite
+        case full
     }
 
     let store = AppStore()
@@ -46,22 +47,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var settings: NSWindow?
     private var hudSettings: NSWindow?
     private var setupWindow: NSWindow?
-    private var appStoreGateWindow: NSWindow?
+    private var accessWindow: NSWindow?
     private var commercialBag = Set<AnyCancellable>()
     private var licenseClipboardTimer: Timer?
     private var licenseClipboardChangeCount = NSPasteboard.general.changeCount
-    private var licensedServicesStarted = false
+    private var runtimeServicesStarted = false
     private var setupShownThisLaunch = false
     private var startupAccessState: StartupAccessState = .launching
     private var initialAccessVerificationCompleted = false
     private let updater = HaloUpdateController.shared
     private let appStoreLicensing: any AppStoreLicensing = AppStoreLicensingProvider.shared
+    private let featureAccess = HaloFeatureAccess.shared
     private let whatsNew = HaloWhatsNewCoordinator.shared
     private let setupCompletedKey = "HaloSetupCompletedV1"
     // Development switch: keep this true while we iterate on onboarding.
     private let forceSetupEveryLaunch = false
 
-    private var commercialAccessGranted: Bool {
+    private var fullEntitlementAvailable: Bool {
         if HaloDistribution.current.supportsAppStoreLicensing {
             return appStoreLicensing.state.grantsAccess
         }
@@ -81,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.setActivationPolicy(.accessory)
         NotificationCenter.default.addObserver(self, selector: #selector(openSettings), name: Notification.Name("HaloOpenSettings"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(toggle), name: Notification.Name("HaloToggle"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(presentUpgrade), name: .haloPresentUpgrade, object: nil)
         configureCommercialAccessGate()
 
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -145,17 +148,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func configureCommercialAccessGate() {
         startupAccessState = .verifyingAccess
         HaloCommercialSurfaceGate.shared.setReady(false)
+        featureAccess.setFullAccess(false)
         initialAccessVerificationCompleted = false
 
         if HaloDistribution.current.supportsAppStoreLicensing {
-            // StoreKit starts listening for transaction updates immediately, but surface
-            // creation stays blocked until an explicit entitlement refresh completes.
             appStoreLicensing.statePublisher
                 .removeDuplicates()
                 .receive(on: RunLoop.main)
                 .sink { [weak self] _ in
                     guard let self, self.initialAccessVerificationCompleted else { return }
-                    self.refreshCommercialAccess()
+                    self.refreshAccessState()
                 }
                 .store(in: &commercialBag)
 
@@ -165,20 +167,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 guard let self else { return }
                 await self.appStoreLicensing.refresh()
                 self.initialAccessVerificationCompleted = true
-                self.refreshCommercialAccess()
+                self.refreshAccessState()
             }
             return
         }
 
         guard HaloDistribution.current.supportsExternalLicensing else {
             initialAccessVerificationCompleted = true
-            refreshCommercialAccess()
+            refreshAccessState()
             return
         }
 
-        // Ignore the managers' initial published values while Keychain/account restoration
-        // is still in flight. Otherwise the first "signed out / inactive" values can create
-        // the notch and restore CI state before entitlement is actually known.
+        // Ignore the managers' initial values until account + license restoration finishes.
+        // After that, entitlement changes can upgrade/downgrade the running edition live.
         Publishers.CombineLatest3(
             HaloAccountManager.shared.$isSignedIn.removeDuplicates(),
             HaloAccountManager.shared.$userID.removeDuplicates(),
@@ -187,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         .receive(on: RunLoop.main)
         .sink { [weak self] _, _, _ in
             guard let self, self.initialAccessVerificationCompleted else { return }
-            self.refreshCommercialAccess()
+            self.refreshAccessState()
         }
         .store(in: &commercialBag)
 
@@ -196,50 +197,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             await HaloAccountManager.shared.restore()
             await HaloLicenseManager.shared.restoreAndValidate()
             self.initialAccessVerificationCompleted = true
-            self.refreshCommercialAccess()
+            self.refreshAccessState()
         }
     }
 
-    private func startSurfaceEngine(commercialAccessGranted granted: Bool) {
+    private func startSurfaceEngine(fullAccess: Bool) {
         if let engine {
-            engine.setCommercialAccessGranted(granted)
+            engine.setCommercialAccessGranted(fullAccess)
             return
         }
 
         let activationContext = ActivationSequenceCoordinator.shared.classifyStartup()
         let manager = WindowManager(store: store, startupActivationContext: activationContext)
-        manager.setCommercialAccessGranted(granted)
+        manager.setCommercialAccessGranted(fullAccess)
         engine = manager
 
-        // Give AppKit one complete main-run-loop turn after access verification before
-        // resolving NSScreen/safe-area geometry. This removes the launch-time race that could
-        // place the notch using a transient screen frame.
+        // Give AppKit one complete main-run-loop turn after access resolution before
+        // resolving NSScreen/safe-area geometry.
         DispatchQueue.main.async { [weak self] in
             guard let self, self.engine === manager else { return }
             manager.start()
         }
     }
 
-    private func refreshCommercialAccess() {
+    private func refreshAccessState() {
         guard initialAccessVerificationCompleted else {
             transitionStartupAccess(to: .verifyingAccess)
             return
         }
 
-        transitionStartupAccess(to: commercialAccessGranted ? .ready : .locked)
+        if fullEntitlementAvailable {
+            transitionStartupAccess(to: .full)
+        } else if featureAccess.shouldAutomaticallyStartLite {
+            transitionStartupAccess(to: .lite)
+        } else {
+            transitionStartupAccess(to: .accessSelection)
+        }
+    }
+
+    private func startLite() {
+        if fullEntitlementAvailable {
+            transitionStartupAccess(to: .full)
+            return
+        }
+        featureAccess.chooseLite()
+        transitionStartupAccess(to: .lite)
     }
 
     private func transitionStartupAccess(to nextState: StartupAccessState) {
-        // Publish the lifecycle state before any surface/runtime work. All CIs use this
-        // shared gate, so a locked Direct surface can exist without restoring paid UI.
-        HaloCommercialSurfaceGate.shared.setReady(nextState == .ready)
+        // The commercial surface gate now represents premium runtime readiness only.
+        // HaloFeatureAccess is the authoritative edition state for feature code.
+        HaloCommercialSurfaceGate.shared.setReady(nextState == .full)
+        featureAccess.setFullAccess(nextState == .full)
 
         if startupAccessState == nextState {
             switch nextState {
-            case .ready:
+            case .full:
                 engine?.setCommercialAccessGranted(true)
-            case .locked:
+                startRuntimeServices(premiumServicesEnabled: true)
+            case .lite:
                 engine?.setCommercialAccessGranted(false)
+                startRuntimeServices(premiumServicesEnabled: false)
+            case .accessSelection:
+                presentAccessScreen(allowsLiteEntry: true)
             case .launching, .verifyingAccess:
                 break
             }
@@ -250,78 +270,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         switch nextState {
         case .launching, .verifyingAccess:
-            // Nothing that can restore or activate a CI is allowed to exist while entitlement
-            // is unknown. In particular, do not construct WindowManager here.
             stopLicenseClipboardWatcher()
-            stopLicensedServices()
+            stopRuntimeServices()
             engine?.stop()
             engine = nil
-            dismissAppStoreSubscriptionGate()
+            dismissAccessScreen()
 
-        case .locked:
-            stopLicensedServices()
+        case .accessSelection:
+            stopRuntimeServices()
+            engine?.stop()
+            engine = nil
             setupWindow?.orderOut(nil)
             setupWindow = nil
             setupShownThisLaunch = false
-
-            if HaloDistribution.current.supportsAppStoreLicensing {
-                stopLicenseClipboardWatcher()
-                engine?.stop()
-                engine = nil
-                settings?.orderOut(nil)
-                hudSettings?.orderOut(nil)
-                presentAppStoreSubscriptionGate()
-            } else {
-                // The Direct build still needs its locked notch for account/license activation,
-                // but it is created only after the initial restore/validation has completed.
-                // Recreate it when falling back from ready so an already-open CI cannot survive
-                // an entitlement loss.
-                engine?.stop()
-                engine = nil
-                startSurfaceEngine(commercialAccessGranted: false)
+            settings?.orderOut(nil)
+            hudSettings?.orderOut(nil)
+            presentAccessScreen(allowsLiteEntry: true)
+            if HaloDistribution.current.supportsExternalLicensing {
                 startLicenseClipboardWatcher()
             }
 
-        case .ready:
+        case .lite:
             stopLicenseClipboardWatcher()
-            dismissAppStoreSubscriptionGate()
-            startSurfaceEngine(commercialAccessGranted: true)
-            startLicensedServices()
+            dismissAccessScreen()
+            startSurfaceEngine(fullAccess: false)
+            startRuntimeServices(premiumServicesEnabled: false)
+            presentPostAccessOnboardingIfNeeded()
 
-            let defaults = UserDefaults.standard
-            let setupCompleted = defaults.bool(forKey: setupCompletedKey) || defaults.bool(forKey: "onboarded")
-            if setupCompleted {
-                whatsNew.presentIfNeeded()
-            } else {
-                presentSetupIfNeeded()
-            }
+        case .full:
+            stopLicenseClipboardWatcher()
+            dismissAccessScreen()
+            startSurfaceEngine(fullAccess: true)
+            startRuntimeServices(premiumServicesEnabled: true)
+            presentPostAccessOnboardingIfNeeded()
         }
     }
 
-    private func presentAppStoreSubscriptionGate() {
-        guard HaloDistribution.current.supportsAppStoreLicensing else { return }
+    private func presentPostAccessOnboardingIfNeeded() {
+        let defaults = UserDefaults.standard
+        let setupCompleted = defaults.bool(forKey: setupCompletedKey) || defaults.bool(forKey: "onboarded")
+        if setupCompleted {
+            whatsNew.presentIfNeeded()
+        } else {
+            presentSetupIfNeeded()
+        }
+    }
 
-        if appStoreGateWindow == nil {
+    private func presentAccessScreen(allowsLiteEntry: Bool) {
+        if accessWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 620, height: 540),
-                styleMask: [.titled, .closable],
+                contentRect: NSRect(x: 0, y: 0, width: 640, height: 620),
+                styleMask: [.titled, .closable, .resizable],
                 backing: .buffered,
                 defer: false
             )
-            window.title = "Halo · App Store Subscription"
             window.titlebarAppearsTransparent = true
+            window.contentMinSize = NSSize(width: 580, height: 520)
             window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: AppStoreSubscriptionGateView())
-            window.center()
-            appStoreGateWindow = window
+            accessWindow = window
         }
 
+        accessWindow?.title = allowsLiteEntry ? "Halo" : "Halo · Upgrade to Full"
+        accessWindow?.contentView = NSHostingView(
+            rootView: HaloAccessView(
+                allowsLiteEntry: allowsLiteEntry,
+                onStartLite: { [weak self] in self?.startLite() }
+            )
+        )
+        accessWindow?.center()
         NSApp.activate(ignoringOtherApps: true)
-        appStoreGateWindow?.makeKeyAndOrderFront(nil)
+        accessWindow?.makeKeyAndOrderFront(nil)
     }
 
-    private func dismissAppStoreSubscriptionGate() {
-        appStoreGateWindow?.orderOut(nil)
+    private func dismissAccessScreen() {
+        accessWindow?.orderOut(nil)
     }
 
     private func startLicenseClipboardWatcher() {
@@ -353,7 +375,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             stopLicenseClipboardWatcher()
             return
         }
-        guard !commercialAccessGranted else {
+        guard !fullEntitlementAvailable else {
             stopLicenseClipboardWatcher()
             return
         }
@@ -369,13 +391,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         guard Self.looksLikeHaloLicenseKey(candidate) else { return }
 
-        // Tell the locked activation surface why it is about to open. Do not include the
-        // clipboard contents in the notification; the UI only needs the detection event.
+        // Preserve the existing clipboard affordance without exposing clipboard contents.
+        // Licensing now lives in the access window rather than replacing the Halo surface.
+        presentAccessScreen(allowsLiteEntry: startupAccessState == .accessSelection)
         NotificationCenter.default.post(
             name: .init("HaloLicenseClipboardDetected"),
             object: nil
         )
-        engine?.expandAll()
     }
 
     private static func looksLikeHaloLicenseKey(_ value: String) -> Bool {
@@ -390,7 +412,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func presentSetupIfNeeded() {
-        guard commercialAccessGranted, !setupShownThisLaunch else { return }
+        guard !setupShownThisLaunch else { return }
         let completed = UserDefaults.standard.bool(forKey: setupCompletedKey)
         guard forceSetupEveryLaunch || !completed else { return }
         setupShownThisLaunch = true
@@ -420,33 +442,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
     }
 
-    private func startLicensedServices() {
-        guard !licensedServicesStarted else { return }
-        licensedServicesStarted = true
-        store.workspace.start()
+    private func startRuntimeServices(premiumServicesEnabled: Bool) {
+        if runtimeServicesStarted {
+            store.workspace.setPremiumServicesEnabled(premiumServicesEnabled)
+            return
+        }
+
+        runtimeServicesStarted = true
+        store.workspace.start(premiumServicesEnabled: premiumServicesEnabled)
         let hud = HaloHUDController(audio: store.workspace.audio)
         hudController = hud
         hud.start()
     }
 
-    private func stopLicensedServices() {
-        guard licensedServicesStarted else { return }
-        licensedServicesStarted = false
+    private func stopRuntimeServices() {
+        guard runtimeServicesStarted else { return }
+        runtimeServicesStarted = false
         hudController?.stop()
         hudController = nil
         store.workspace.stop()
     }
 
     @objc private func toggle() {
-        guard commercialAccessGranted else {
-            if HaloDistribution.current.supportsAppStoreLicensing {
-                presentAppStoreSubscriptionGate()
-            } else {
-                engine?.toggleAll()
-            }
-            return
-        }
         engine?.toggleAll()
+    }
+
+    @objc private func presentUpgrade() {
+        presentAccessScreen(allowsLiteEntry: false)
     }
     @objc private func metricKitCrashDetected() {
         guard HaloFeedbackService.shared.crashedDuringPreviousExecution else { return }
@@ -489,15 +511,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func openSettings() {
-        guard commercialAccessGranted else {
-            if HaloDistribution.current.supportsAppStoreLicensing {
-                presentAppStoreSubscriptionGate()
-            } else {
-                engine?.toggleAll()
-            }
-            return
-        }
-
         if settings == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 640), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = "Halo · Settings"
@@ -536,14 +549,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func openHUDSettings() {
-        guard commercialAccessGranted else {
-            if HaloDistribution.current.supportsAppStoreLicensing {
-                presentAppStoreSubscriptionGate()
-            } else {
-                engine?.toggleAll()
-            }
-            return
-        }
         if hudSettings == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 790), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = "Halo · HUD"
@@ -561,7 +566,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         HaloCommercialSurfaceGate.shared.setReady(false)
         ActivationSequenceCoordinator.shared.markQuit()
         appStoreLicensing.stop()
-        stopLicensedServices()
+        stopRuntimeServices()
         engine?.stop()
         engine = nil
         store.flushConfiguration()
