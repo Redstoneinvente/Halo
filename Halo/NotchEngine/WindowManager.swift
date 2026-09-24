@@ -1600,10 +1600,11 @@ final class WindowManager {
             case .clock:
                 let style = layout.widgetStyle(for: .clock)
 
-                // IMPORTANT: do not resize the closed-notch WidgetClock here.
-                // ClosedNotchView still renders the original compact clock unchanged.
-                // Instead, measure the size that compact WidgetClock actually uses
-                // and grow the surrounding closed surface to contain it.
+                // ClosedNotchView renders WidgetClock at its normal compact size.
+                // Measure that exact compact typography here and grow the surface
+                // around it. In particular, AM/PM is deliberately much smaller
+                // than the hour/minute glyphs, so measuring "PM" at the full time
+                // size creates a large empty wing in 12-hour mode.
                 let compactReferenceWidth = 220.0
                 let compactReferenceHeight = 58.0
                 let clockSize: Double
@@ -1611,27 +1612,10 @@ final class WindowManager {
                     let automatic = min(compactReferenceHeight * 0.46, compactReferenceWidth * 0.17)
                     clockSize = max(18, automatic * style.clock.resolvedTimeScale)
                 } else {
-                    // ClosedNotchView sets the compact style fontSize to this same `size`.
-                    // WidgetClock applies the horizontalCompact 1.55x multiplier.
+                    // ClosedNotchView sets compactClock.fontSize to this same `size`,
+                    // then WidgetClock applies the horizontalCompact 1.55x multiplier.
                     clockSize = max(8, size * 1.55 * style.clock.resolvedTimeScale)
                 }
-
-                let clockFont = style.fontFamily == .custom
-                    ? NSFont(name: style.customFont, size: clockSize) ?? NSFont.monospacedDigitSystemFont(ofSize: clockSize, weight: .medium)
-                    : NSFont.monospacedDigitSystemFont(ofSize: clockSize, weight: .medium)
-
-                let showsAMPM = !style.clock.twentyFourHour && style.clock.resolvedShowAMPM
-                let template = "88:88"
-                    + (style.clock.showSeconds ? ":88" : "")
-                    + (showsAMPM ? " PM" : "")
-
-                let characterCount = max(0, template.count - 1)
-                let trackingAllowance = max(0, style.clock.resolvedTracking) * Double(characterCount)
-
-                var elementCount = 3 // hour, separator, minute
-                if style.clock.showSeconds { elementCount += 2 }
-                if showsAMPM { elementCount += 1 }
-                let digitSpacingAllowance = max(0, style.clock.resolvedDigitSpacing) * Double(max(0, elementCount - 1))
 
                 let widthScale: Double
                 switch style.clock.resolvedFontWidth {
@@ -1641,11 +1625,62 @@ final class WindowManager {
                 case .expanded: widthScale = 1.14
                 }
 
-                // Extra allowance is deliberately on the panel, not the widget.
-                // This protects against fractional SwiftUI glyph/shadow overflow.
-                return (textWidth(template, font: clockFont)
-                        + trackingAllowance
-                        + digitSpacingAllowance) * widthScale + 10
+                func clockFont(_ pointSize: Double, weight: NSFont.Weight = .medium, digits: Bool = false) -> NSFont {
+                    if style.fontFamily == .custom {
+                        return NSFont(name: style.customFont, size: pointSize)
+                            ?? NSFont.systemFont(ofSize: pointSize, weight: weight)
+                    }
+                    if digits && style.clock.usesMonospacedDigits {
+                        return NSFont.monospacedDigitSystemFont(ofSize: pointSize, weight: weight)
+                    }
+                    return NSFont.systemFont(ofSize: pointSize, weight: weight)
+                }
+
+                func glyphWidth(_ text: String, font: NSFont, tracking: Double = 0) -> Double {
+                    let base = ceil((text as NSString).size(withAttributes: [.font: font]).width)
+                    let tracked = base + max(0, tracking) * Double(max(0, text.count - 1))
+                    return tracked * widthScale
+                }
+
+                let digitSpacing = max(0, style.clock.resolvedDigitSpacing)
+                let tracking = style.clock.resolvedTracking
+                var pieces: [Double] = [
+                    glyphWidth("88", font: clockFont(clockSize * style.clock.resolvedHourEmphasis, digits: true), tracking: tracking),
+                    glyphWidth(style.clock.resolvedSeparator.glyph, font: clockFont(clockSize * 0.86, weight: .regular)),
+                    glyphWidth("88", font: clockFont(clockSize * style.clock.resolvedMinuteEmphasis, digits: true), tracking: tracking)
+                ]
+
+                if style.clock.showSeconds {
+                    pieces.append(glyphWidth(style.clock.resolvedSeparator.glyph, font: clockFont(clockSize * 0.54, weight: .regular)))
+                    pieces.append(glyphWidth("88", font: clockFont(clockSize * style.clock.resolvedSecondsEmphasis, digits: true), tracking: tracking))
+                }
+
+                if !style.clock.twentyFourHour && style.clock.resolvedShowAMPM {
+                    let ampmSize = max(8, clockSize * 0.23)
+                    let leadingInset = max(1, clockSize * 0.02)
+                    pieces.append(
+                        glyphWidth("PM", font: clockFont(ampmSize, weight: .semibold))
+                        + leadingInset
+                    )
+                }
+
+                var contentWidth = pieces.reduce(0, +)
+                    + digitSpacing * Double(max(0, pieces.count - 1))
+
+                // The compact closed-notch presentation shows the short date inline
+                // when Show Date is enabled. Reserve its natural width as well so
+                // the date never gets clipped or silently hidden.
+                if style.clock.showDate {
+                    let dateBase = clockSize / style.clock.resolvedTimeDateRatio * style.clock.resolvedDateScale
+                    let dateSize = min(24, max(9, dateBase))
+                    let secondarySize = min(18, max(8, dateSize * 0.88 * style.clock.resolvedSecondaryScale))
+                    let dateGap = max(6, style.resolvedContent.spacing * 0.50)
+                    contentWidth += dateGap
+                        + glyphWidth("Wed, Sep 28", font: clockFont(secondarySize, weight: .medium))
+                }
+
+                // Small final cushion for fractional SwiftUI glyph/shadow rendering.
+                return contentWidth + 8
             case .date:
                 return textWidth("Sep 28", font: font)
             case .timer:

@@ -2031,9 +2031,21 @@ struct WidgetClock: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         case .horizontalCompact:
             if compact {
-                primaryClock(date: date, family: .horizontalCompact)
-                    .matchedGeometryEffect(id: "clock-primary", in: clockNamespace)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: style.resolvedContent.alignment.alignment)
+                HStack(alignment: .center, spacing: max(6, style.resolvedContent.spacing * 0.50)) {
+                    primaryClock(date: date, family: .horizontalCompact)
+                        .matchedGeometryEffect(id: "clock-primary", in: clockNamespace)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    if clock.showDate {
+                        Text(adaptiveDate(date, detail: .short))
+                            .font(clockFont(size: secondaryFontSize(for: .horizontalCompact), weight: .medium))
+                            .foregroundStyle(secondaryColor.opacity(0.92))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: style.resolvedContent.alignment.alignment)
             } else {
                 HStack(spacing: max(8, style.resolvedContent.spacing * 0.65)) {
                     primaryClock(date: date, family: .horizontalCompact)
@@ -2167,7 +2179,11 @@ struct WidgetClock: View {
         guard clock.showSeconds else { return false }
         switch family {
         case .micro: return false
-        case .horizontalCompact: return width >= 300
+        // The closed-notch clock is intentionally compact, but its surrounding
+        // surface is dynamically widened by WindowManager when seconds are enabled.
+        // Do not suppress seconds merely because WidgetClock's compact reference
+        // width is 220pt.
+        case .horizontalCompact: return compact || width >= 300
         case .verticalCompact: return height >= 220
         default: return true
         }
