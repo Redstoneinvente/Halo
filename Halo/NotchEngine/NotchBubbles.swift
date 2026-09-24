@@ -1313,7 +1313,9 @@ extension HaloFeatureAccess {
         value.showWhenClosed = true
         value.showWhenOpen = true
         value.musicVisibility = .whilePlaying
-        value.audioFeedbackEnabled = true
+        // Volume is a transient confirmation in Lite, not a pinned Audio utility.
+        value.audioEnabled = false
+        value.audioFeedbackEnabled = saved.audioFeedbackEnabled ?? true
         value.brightnessFeedbackEnabled = false
         value.powerFeedbackEnabled = false
         value.deviceFeedbackEnabled = false
