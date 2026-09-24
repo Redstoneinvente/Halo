@@ -261,7 +261,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 engine?.setSurfaceRuntimeEnabled(true)
                 startRuntimeServices(premiumServicesEnabled: false)
             case .accessSelection:
-                presentAccessScreen(allowsLiteEntry: true)
+                // The existing access view observes account/licensing state directly.
+                // Do not rebuild it on every entitlement publisher tick.
+                break
             case .launching, .verifyingAccess:
                 break
             }
