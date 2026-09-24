@@ -2137,6 +2137,61 @@ final class WindowManager {
         return true
     }
 
+    struct WebRepresentationCaptureTarget {
+        let id: String
+        let displayID: String
+        let expanded: Bool
+        let panel: HaloPanel
+        let prepare: () -> Void
+    }
+
+    func webRepresentationCaptureTargets() -> [WebRepresentationCaptureTarget] {
+        let sortedHosts = hosts.keys.sorted().compactMap { id -> (String, Host)? in
+            guard let host = hosts[id] else { return nil }
+            return (id, host)
+        }
+        guard let (displayID, host) = sortedHosts.first else { return [] }
+
+        return [
+            WebRepresentationCaptureTarget(
+                id: "closed",
+                displayID: displayID,
+                expanded: false,
+                panel: host.panel,
+                prepare: { [weak self, weak host] in
+                    guard let self, let host else { return }
+                    host.state.pinned = false
+                    host.state.expanded = false
+                    self.applyExpandedState(false, to: host)
+                }
+            ),
+            WebRepresentationCaptureTarget(
+                id: "open",
+                displayID: displayID,
+                expanded: true,
+                panel: host.panel,
+                prepare: { [weak self, weak host] in
+                    guard let self, let host else { return }
+                    host.state.pinned = true
+                    host.state.openExplicitly(.normal)
+                    self.applyExpandedState(true, to: host)
+                }
+            ),
+            WebRepresentationCaptureTarget(
+                id: "music",
+                displayID: displayID,
+                expanded: true,
+                panel: host.panel,
+                prepare: { [weak self, weak host] in
+                    guard let self, let host else { return }
+                    host.state.pinned = true
+                    host.state.openExplicitly(.music)
+                    self.applyExpandedState(true, to: host)
+                }
+            )
+        ]
+    }
+
     private func reconcile() {
         let screens = store.configuration.allDisplays ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
         var active = Set<String>()
