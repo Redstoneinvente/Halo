@@ -4807,6 +4807,7 @@ private struct NotchBubbleView: View {
 struct NotchBubbleSettingsView: View {
     @ObservedObject var store: AppStore
     @ObservedObject private var settingsStore = NotchBubbleSettingsStore.shared
+    @State private var expandedGestureEditors = Set<String>()
 
     private var settings: NotchBubbleSettings {
         settingsStore.settings.normalized()
@@ -5691,12 +5692,19 @@ struct NotchBubbleSettingsView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            Text("These mappings belong only to the \(kind.rawValue) bubble. Halo only shows actions that make sense for this bubble, and two-finger trackpad gestures are recognized while the pointer is over it.")
+            Text("Choose what each gesture does. The common controls stay simple; open Fine tune only for repeat behavior, step size, or custom haptics.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            Text("Swipe")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
+
             swipeGestureEditor(
-                "Swipe left",
+                "Left",
+                icon: "arrow.left",
+                editorID: "swipe-left",
                 kind: kind,
                 action: \.gestureLeftAction,
                 mode: \.gestureLeftMode,
@@ -5706,7 +5714,9 @@ struct NotchBubbleSettingsView: View {
             )
 
             swipeGestureEditor(
-                "Swipe right",
+                "Right",
+                icon: "arrow.right",
+                editorID: "swipe-right",
                 kind: kind,
                 action: \.gestureRightAction,
                 mode: \.gestureRightMode,
@@ -5716,7 +5726,9 @@ struct NotchBubbleSettingsView: View {
             )
 
             swipeGestureEditor(
-                "Swipe up",
+                "Up",
+                icon: "arrow.up",
+                editorID: "swipe-up",
                 kind: kind,
                 action: \.gestureUpAction,
                 mode: \.gestureUpMode,
@@ -5726,7 +5738,9 @@ struct NotchBubbleSettingsView: View {
             )
 
             swipeGestureEditor(
-                "Swipe down",
+                "Down",
+                icon: "arrow.down",
+                editorID: "swipe-down",
                 kind: kind,
                 action: \.gestureDownAction,
                 mode: \.gestureDownMode,
@@ -5735,19 +5749,14 @@ struct NotchBubbleSettingsView: View {
                 hapticPattern: \.gestureDownHapticPattern
             )
 
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Single-click haptics")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+            Divider()
+                .padding(.vertical, 2)
 
-                gestureHapticControls(
-                    kind: kind,
-                    strength: \.tapHapticStrength,
-                    pattern: \.tapHapticPattern
-                )
-            }
-            .padding(.vertical, 2)
+            Text("Click")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
 
+            singleClickGestureEditor(kind: kind)
             doubleClickGestureEditor(kind: kind)
 
             HStack {
@@ -5768,6 +5777,8 @@ struct NotchBubbleSettingsView: View {
     @ViewBuilder
     private func swipeGestureEditor(
         _ title: String,
+        icon: String,
+        editorID: String,
         kind: NotchBubbleKind,
         action actionKeyPath: WritableKeyPath<NotchBubbleStyleOverride, NotchBubbleGestureAction?>,
         mode modeKeyPath: WritableKeyPath<NotchBubbleStyleOverride, NotchBubbleGestureMode?>,
@@ -5775,109 +5786,250 @@ struct NotchBubbleSettingsView: View {
         hapticStrength hapticStrengthKeyPath: WritableKeyPath<NotchBubbleStyleOverride, Int?>,
         hapticPattern hapticPatternKeyPath: WritableKeyPath<NotchBubbleStyleOverride, HaloHoverHapticPattern?>
     ) -> some View {
-        let storedAction = currentStyleOverride(for: kind)[keyPath: actionKeyPath]
+        let override = currentStyleOverride(for: kind)
         let action = NotchBubbleGestureAction.sanitized(
-            storedAction,
+            override[keyPath: actionKeyPath],
             for: kind,
             default: .none
         )
+        let mode = override[keyPath: modeKeyPath] ?? .once
+        let amount = action.normalizedGestureAmount(override[keyPath: amountKeyPath])
+        let editorKey = kind.rawValue + "." + editorID
 
-        VStack(alignment: .leading, spacing: 7) {
-            Picker(
-                title,
-                selection: styleValueBinding(
-                    kind,
-                    actionKeyPath,
-                    default: NotchBubbleGestureAction.none
-                )
-            ) {
-                ForEach(NotchBubbleGestureAction.availableActions(for: kind)) { option in
-                    Text(option.gestureTitle).tag(option)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+
+                Text(title)
+                    .frame(width: 48, alignment: .leading)
+
+                Spacer(minLength: 12)
+
+                Picker(
+                    "",
+                    selection: styleValueBinding(
+                        kind,
+                        actionKeyPath,
+                        default: NotchBubbleGestureAction.none
+                    )
+                ) {
+                    ForEach(NotchBubbleGestureAction.availableActions(for: kind)) { option in
+                        Text(option.gestureTitle).tag(option)
+                    }
                 }
+                .labelsHidden()
+                .frame(width: 210)
             }
 
             if action != .none {
-                if action.supportsContinuousGesture {
-                    Picker(
-                        "Behavior",
-                        selection: styleValueBinding(
-                            kind,
-                            modeKeyPath,
-                            default: NotchBubbleGestureMode.once
-                        )
-                    ) {
-                        ForEach(NotchBubbleGestureMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
+                DisclosureGroup(isExpanded: gestureEditorBinding(editorKey)) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if action.supportsContinuousGesture {
+                            LabeledContent("Response") {
+                                Picker(
+                                    "",
+                                    selection: styleValueBinding(
+                                        kind,
+                                        modeKeyPath,
+                                        default: NotchBubbleGestureMode.once
+                                    )
+                                ) {
+                                    Text("Once").tag(NotchBubbleGestureMode.once)
+                                    Text("Continuous").tag(NotchBubbleGestureMode.continuous)
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.segmented)
+                                .frame(width: 210)
+                            }
+
+                            Text(
+                                mode == .continuous
+                                    ? "Repeats while the same swipe keeps travelling."
+                                    : "Triggers once, then waits for the next swipe."
+                            )
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                         }
+
+                        if action.supportsGestureAmount {
+                            compactGestureAmountControl(
+                                action: action,
+                                kind: kind,
+                                keyPath: amountKeyPath
+                            )
+                        }
+
+                        gestureHapticControls(
+                            kind: kind,
+                            strength: hapticStrengthKeyPath,
+                            pattern: hapticPatternKeyPath
+                        )
                     }
-
-                    Text("Continuous keeps applying the configured amount as the same swipe travels farther. Once per Gesture fires only once until your fingers lift.")
-                        .font(.caption2)
+                    .padding(.top, 6)
+                    .padding(.leading, 26)
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(
+                            gestureSummary(
+                                action: action,
+                                mode: mode,
+                                amount: amount,
+                                hapticStrength: override[keyPath: hapticStrengthKeyPath],
+                                hapticPattern: override[keyPath: hapticPatternKeyPath]
+                            )
+                        )
                         .foregroundStyle(.secondary)
-                }
 
-                if action.supportsGestureAmount {
-                    gestureAmountControl(
-                        action: action,
-                        kind: kind,
-                        keyPath: amountKeyPath
-                    )
-                }
+                        Spacer()
 
-                gestureHapticControls(
-                    kind: kind,
-                    strength: hapticStrengthKeyPath,
-                    pattern: hapticPatternKeyPath
-                )
+                        Text("Fine tune")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .font(.caption)
+                }
+                .padding(.leading, 26)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
+    }
+
+    @ViewBuilder
+    private func singleClickGestureEditor(kind: NotchBubbleKind) -> some View {
+        let override = currentStyleOverride(for: kind)
+        let editorKey = kind.rawValue + ".single-click"
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Image(systemName: "hand.tap")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+
+                Text("Single")
+                    .frame(width: 48, alignment: .leading)
+
+                Spacer(minLength: 12)
+
+                Text("Default action")
+                    .foregroundStyle(.secondary)
+            }
+
+            DisclosureGroup(isExpanded: gestureEditorBinding(editorKey)) {
+                gestureHapticControls(
+                    kind: kind,
+                    strength: \.tapHapticStrength,
+                    pattern: \.tapHapticPattern
+                )
+                .padding(.top, 6)
+                .padding(.leading, 26)
+            } label: {
+                HStack(spacing: 8) {
+                    Text(
+                        hapticSummary(
+                            strength: override.tapHapticStrength,
+                            pattern: override.tapHapticPattern
+                        )
+                    )
+                    .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Text("Fine tune")
+                        .foregroundStyle(.tertiary)
+                }
+                .font(.caption)
+            }
+            .padding(.leading, 26)
+        }
+        .padding(.vertical, 3)
     }
 
     @ViewBuilder
     private func doubleClickGestureEditor(kind: NotchBubbleKind) -> some View {
-        let storedAction = currentStyleOverride(for: kind).doubleClickAction
+        let override = currentStyleOverride(for: kind)
         let action = NotchBubbleGestureAction.sanitized(
-            storedAction,
+            override.doubleClickAction,
             for: kind,
             default: .primaryAction
         )
+        let amount = action.normalizedGestureAmount(override.doubleClickAmount)
+        let editorKey = kind.rawValue + ".double-click"
 
-        VStack(alignment: .leading, spacing: 7) {
-            Picker(
-                "Double-click",
-                selection: styleValueBinding(
-                    kind,
-                    \.doubleClickAction,
-                    default: NotchBubbleGestureAction.primaryAction
-                )
-            ) {
-                ForEach(NotchBubbleGestureAction.availableActions(for: kind)) { option in
-                    Text(option.gestureTitle).tag(option)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Image(systemName: "hand.tap.fill")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+
+                Text("Double")
+                    .frame(width: 48, alignment: .leading)
+
+                Spacer(minLength: 12)
+
+                Picker(
+                    "",
+                    selection: styleValueBinding(
+                        kind,
+                        \.doubleClickAction,
+                        default: NotchBubbleGestureAction.primaryAction
+                    )
+                ) {
+                    ForEach(NotchBubbleGestureAction.availableActions(for: kind)) { option in
+                        Text(option.gestureTitle).tag(option)
+                    }
                 }
+                .labelsHidden()
+                .frame(width: 210)
             }
 
             if action != .none {
-                if action.supportsGestureAmount {
-                    gestureAmountControl(
-                        action: action,
-                        kind: kind,
-                        keyPath: \.doubleClickAmount
-                    )
-                }
+                DisclosureGroup(isExpanded: gestureEditorBinding(editorKey)) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if action.supportsGestureAmount {
+                            compactGestureAmountControl(
+                                action: action,
+                                kind: kind,
+                                keyPath: \.doubleClickAmount
+                            )
+                        }
 
-                gestureHapticControls(
-                    kind: kind,
-                    strength: \.doubleClickHapticStrength,
-                    pattern: \.doubleClickHapticPattern
-                )
+                        gestureHapticControls(
+                            kind: kind,
+                            strength: \.doubleClickHapticStrength,
+                            pattern: \.doubleClickHapticPattern
+                        )
+                    }
+                    .padding(.top, 6)
+                    .padding(.leading, 26)
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(
+                            gestureSummary(
+                                action: action,
+                                mode: .once,
+                                amount: amount,
+                                hapticStrength: override.doubleClickHapticStrength,
+                                hapticPattern: override.doubleClickHapticPattern
+                            )
+                        )
+                        .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Text("Fine tune")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .font(.caption)
+                }
+                .padding(.leading, 26)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 
     @ViewBuilder
-    private func gestureAmountControl(
+    private func compactGestureAmountControl(
         action: NotchBubbleGestureAction,
         kind: NotchBubbleKind,
         keyPath: WritableKeyPath<NotchBubbleStyleOverride, Double?>
@@ -5887,21 +6039,18 @@ struct NotchBubbleSettingsView: View {
         )
 
         LabeledContent(action.gestureAmountLabel) {
-            HStack {
-                Slider(
-                    value: styleValueBinding(
-                        kind,
-                        keyPath,
-                        default: action.defaultGestureAmount
-                    ),
-                    in: action.gestureAmountRange,
-                    step: action.gestureAmountStep
-                )
-                .frame(width: 170)
-
+            Stepper(
+                value: styleValueBinding(
+                    kind,
+                    keyPath,
+                    default: action.defaultGestureAmount
+                ),
+                in: action.gestureAmountRange,
+                step: action.gestureAmountStep
+            ) {
                 Text(action.formattedGestureAmount(amount))
                     .monospacedDigit()
-                    .frame(width: 58, alignment: .trailing)
+                    .frame(minWidth: 64, alignment: .trailing)
             }
         }
     }
@@ -5916,7 +6065,7 @@ struct NotchBubbleSettingsView: View {
             "Haptic strength",
             selection: styleOptionalBinding(kind, strengthKeyPath)
         ) {
-            Text("Global").tag(nil as Int?)
+            Text("Use global").tag(nil as Int?)
             Text("Off").tag(Optional(0))
             ForEach(1...6, id: \.self) { strength in
                 Text("Level \(strength)").tag(Optional(strength))
@@ -5927,11 +6076,66 @@ struct NotchBubbleSettingsView: View {
             "Haptic pattern",
             selection: styleOptionalBinding(kind, patternKeyPath)
         ) {
-            Text("Global").tag(nil as HaloHoverHapticPattern?)
+            Text("Use global").tag(nil as HaloHoverHapticPattern?)
             ForEach(HaloHoverHapticPattern.allCases) { pattern in
                 Text(pattern.rawValue).tag(Optional(pattern))
             }
         }
+    }
+
+    private func gestureSummary(
+        action: NotchBubbleGestureAction,
+        mode: NotchBubbleGestureMode,
+        amount: Double,
+        hapticStrength: Int?,
+        hapticPattern: HaloHoverHapticPattern?
+    ) -> String {
+        var parts: [String] = []
+
+        if action.supportsContinuousGesture {
+            parts.append(mode == .continuous ? "Continuous" : "Once")
+        }
+
+        if action.supportsGestureAmount {
+            parts.append(action.formattedGestureAmount(amount))
+        }
+
+        parts.append(
+            hapticSummary(
+                strength: hapticStrength,
+                pattern: hapticPattern
+            )
+        )
+
+        return parts.joined(separator: " · ")
+    }
+
+    private func hapticSummary(
+        strength: Int?,
+        pattern: HaloHoverHapticPattern?
+    ) -> String {
+        if strength == 0 {
+            return "Haptics off"
+        }
+
+        if strength == nil && pattern == nil {
+            return "Global haptics"
+        }
+
+        return "Custom haptics"
+    }
+
+    private func gestureEditorBinding(_ key: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedGestureEditors.contains(key) },
+            set: { expanded in
+                if expanded {
+                    expandedGestureEditors.insert(key)
+                } else {
+                    expandedGestureEditors.remove(key)
+                }
+            }
+        )
     }
 
     private func currentStyleOverride(for kind: NotchBubbleKind) -> NotchBubbleStyleOverride {
