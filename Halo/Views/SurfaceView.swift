@@ -4067,7 +4067,19 @@ private struct OpenNotchBackgroundView: View {
     let theme: Theme
     @ObservedObject var system: SystemService
 
-    private var effectiveAppearance: Appearance { options.baseAppearance(fallback) }
+    private var effectiveAppearance: Appearance {
+        var appearance = options.baseAppearance(fallback)
+
+        // Visual Workspace glass has its own edge-depth vignette in SurfaceBackground.
+        // That vignette is literally a black radial gradient around the inside edge and
+        // visually reads as the same "surface shadow" as the chrome shadow below.
+        // When Surface shadow is off, remove *all* dark edge depth so the surface is flat.
+        if appearance.background == .glass, options.shadowEnabled != true {
+            appearance.glass.edgeDepth = 0
+        }
+
+        return appearance
+    }
 
     var body: some View {
         filteredBackground
