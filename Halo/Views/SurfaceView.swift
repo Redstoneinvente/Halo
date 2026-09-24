@@ -4078,6 +4078,14 @@ private struct OpenNotchBackgroundView: View {
             appearance.glass.edgeDepth = 0
         }
 
+        // Solid and gradient Visual Workspace backgrounds must never inherit a stale
+        // blur value from the Default workspace or from a previously selected image/video.
+        // Blurring an opaque surface against the transparent NSPanel feathers its alpha
+        // at the contour, producing the wide grey "inner shadow" visible on bright surfaces.
+        if appearance.background == .solid || appearance.background == .gradient {
+            appearance.blur = 0
+        }
+
         return appearance
     }
 
