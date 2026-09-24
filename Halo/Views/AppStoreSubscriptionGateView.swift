@@ -260,12 +260,16 @@ struct HaloAccessView: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
 
+            Text("Already purchased?")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Button(directLicenseExpanded ? "Hide License Entry" : "Enter License Key") {
                 withAnimation(.easeInOut(duration: 0.18)) {
                     directLicenseExpanded.toggle()
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
 
             if directLicenseExpanded {
                 directActivationContent
