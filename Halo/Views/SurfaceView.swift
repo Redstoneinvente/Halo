@@ -4141,7 +4141,10 @@ private struct OpenNotchSurfaceChrome: View {
                 )
             }
 
-            if (options.shadowOpacity ?? 0) > 0 {
+            // The old slider-only shadow could remain active in saved layouts and,
+            // because this chrome is drawn over the clipped surface, its blur reads like
+            // an unintended inner shadow. Require an explicit opt-in before rendering it.
+            if options.shadowEnabled == true, (options.shadowOpacity ?? 0) > 0 {
                 contour.stroke(
                     .black.opacity(options.shadowOpacity ?? 0),
                     lineWidth: 1
