@@ -2758,7 +2758,7 @@ struct SurfaceView: View {
     @ObservedObject private var clipboardCI = ClipboardContextMonitor.shared
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
     @ObservedObject private var integrationCI = IntegrationCIRuntime.shared
-    @ObservedObject private var commercialSurfaceGate = HaloCommercialSurfaceGate.shared
+    @ObservedObject private var runtimeGate = HaloRuntimeGate.shared
     @State private var clipboardOpenedNotch = false
     @State private var integrationAutoOpeningSurface = false
     @State private var teleprompterActive = false
@@ -2823,9 +2823,9 @@ struct SurfaceView: View {
         customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI, blockingPriority: nil)
     }
     private var surfaceContextCandidates: [SurfaceContextCandidate] {
-        // Locked Direct surfaces are activation/account UI only. No built-in, custom, or
-        // partner CI is allowed to win arbitration until commercial startup reaches ready.
-        guard commercialSurfaceGate.isReady else { return [] }
+        // Do not arbitrate Context Interfaces before the normal Halo surface runtime exists.
+        // Lite vs Full capability rules are intentionally not decided at this foundation stage.
+        guard runtimeGate.isReady else { return [] }
 
         // Notch Bubble "Open Notch" is an explicit user navigation action.
         // .normal bypasses every CI for this opening. .music forces Music CI only when
@@ -3361,11 +3361,11 @@ struct SurfaceView: View {
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloTeleprompterVisibilityChanged"))) { note in
             let requestedActive = (note.userInfo?["active"] as? Bool) ?? false
-            let active = requestedActive && commercialSurfaceGate.isReady
+            let active = requestedActive && runtimeGate.isReady
             teleprompterActive = active
 
-            if requestedActive && !commercialSurfaceGate.isReady {
-                // Defensive backstop for any stale/late trigger emitted while Halo is locked.
+            if requestedActive && !runtimeGate.isReady {
+                // Defensive backstop for any stale/late trigger emitted before Halo's runtime is ready.
                 TeleprompterCoordinator.shared.hidePrompt()
             }
 
@@ -3415,14 +3415,14 @@ struct SurfaceView: View {
             }
         }
         .onAppear {
-            if !commercialSurfaceGate.isReady {
+            if !runtimeGate.isReady {
                 teleprompterActive = false
                 TeleprompterCoordinator.shared.hidePrompt()
             }
             workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
             visualWorkspaceSurfacePresented = visuallyExpanded && usesVisualWorkspace && activeContext == nil
         }
-        .onChange(of: commercialSurfaceGate.isReady) { ready in
+        .onChange(of: runtimeGate.isReady) { ready in
             if !ready {
                 teleprompterActive = false
                 clipboardOpenedNotch = false
