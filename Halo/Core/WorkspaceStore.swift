@@ -54,8 +54,14 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         queueScheduleEvaluation()
     } }
     @Published private(set) var scheduledProfileID: UUID?
-    var effectiveLayout: WorkspaceLayout { settings.profiles.first { $0.id == scheduledProfileID }?.layout ?? settings.layout }
-    var scheduledTheme: Theme? { settings.profiles.first { $0.id == scheduledProfileID }?.theme }
+    var effectiveLayout: WorkspaceLayout {
+        let saved = settings.profiles.first { $0.id == scheduledProfileID }?.layout ?? settings.layout
+        return HaloFeatureAccess.shared.effectiveLayout(saved)
+    }
+    var scheduledTheme: Theme? {
+        guard HaloFeatureAccess.shared.allows(.profiles) else { return nil }
+        return settings.profiles.first { $0.id == scheduledProfileID }?.theme
+    }
     private var suppressedOccurrence: String?
     private var scheduleEvaluationQueued = false
     private var lastScheduleMinute: Int?
@@ -218,6 +224,21 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         if hudEngine == nil { hudEngine = HaloHUDEngine(workspace: self); hudEngine?.start() }
         evaluateSchedules(); system.refresh(); audio.refresh(); refreshApps(); updateHotkey(); updateRetroGameHotkey(); updateClipboardCIHotkey()
         setPremiumServicesEnabled(premiumServicesEnabled)
+
+        HaloFeatureAccess.shared.$accessLevel
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.evaluateSchedules()
+                self.evaluateRules()
+                self.updateRetroGameHotkey()
+                self.updateClipboardCIHotkey()
+                self.updateArtworkPreference()
+                self.hudEngine?.configurationDidChange()
+            }
+            .store(in: &subscriptions)
+
         pollMedia()
         if systemLiveActivitySource == nil {
             systemLiveActivitySource = SystemLiveActivitySource(workspace: self, defaults: defaults)
@@ -282,7 +303,11 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.evaluateRules(); self?.hudEngine?.configurationDidChange() }.store(in: &subscriptions)
     }
     func setPremiumServicesEnabled(_ enabled: Bool) {
-        let shouldEnable = enabled && HaloDistribution.current.supportsPartnerIntegrations
+        let access = HaloFeatureAccess.shared
+        let shouldEnable = enabled &&
+            access.allows(.integrations) &&
+            access.allows(.customCI) &&
+            HaloDistribution.current.supportsPartnerIntegrations
         guard premiumServicesEnabled != shouldEnable else { return }
         premiumServicesEnabled = shouldEnable
 
@@ -337,6 +362,11 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
     }
     private func updateRetroGameHotkey() {
+        guard HaloFeatureAccess.shared.allows(.contextInterfaces) else {
+            installedRetroGameHotkey = ""
+            retroGameHotkey.stop()
+            return
+        }
         let ciEnabled = defaults.object(forKey: "HaloContextRetroEnabled") as? Bool ?? false
         let shortcutEnabled = defaults.object(forKey: "HaloContextRetroShortcutEnabled") as? Bool ?? true
         let code = defaults.object(forKey: "HaloContextRetroShortcutCode") == nil ? 5 : defaults.integer(forKey: "HaloContextRetroShortcutCode")
@@ -353,6 +383,11 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
     }
     private func updateClipboardCIHotkey() {
+        guard HaloFeatureAccess.shared.allows(.contextInterfaces) else {
+            installedClipboardCIHotkey = ""
+            clipboardCIHotkey.stop()
+            return
+        }
         let ciEnabled = defaults.object(forKey: "HaloContextClipboardEnabled") as? Bool ?? true
         let shortcutEnabled = defaults.object(forKey: "HaloContextClipboardShortcutEnabled") as? Bool ?? true
         let code = defaults.object(forKey: "HaloContextClipboardShortcutCode") == nil ? 9 : defaults.integer(forKey: "HaloContextClipboardShortcutCode")
@@ -369,6 +404,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
     }
     private func scheduleWinner(at date: Date) -> (UUID, String)? {
+        guard HaloFeatureAccess.shared.allows(.schedules) else { return nil }
         for entry in settings.profileSchedules ?? [] where entry.enabled {
             guard settings.profiles.contains(where: { $0.id == entry.profileID }),
                   let day = entry.window.occurrence(at: date) else { continue }
@@ -383,25 +419,37 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
     }
     func evaluateSchedules() {
+        guard HaloFeatureAccess.shared.allows(.schedules) else {
+            if scheduledProfileID != nil {
+                scheduledProfileID = nil
+                updateArtworkPreference()
+                hudEngine?.configurationDidChange()
+            }
+            return
+        }
         let winner = scheduleWinner(at: Date())
         let selected = winner?.1 == suppressedOccurrence ? nil : winner?.0
         if scheduledProfileID != selected { scheduledProfileID = selected; updateArtworkPreference(); hudEngine?.configurationDidChange() }
     }
     func resumeSchedules() { suppressedOccurrence = nil; evaluateSchedules() }
     func apply(_ profile: Profile) {
+        guard HaloFeatureAccess.shared.allows(.profiles) else { return }
         suppressedOccurrence = scheduleWinner(at: Date())?.1
         scheduledProfileID = nil
         settings.layout = profile.layout; applyTheme?(profile.theme)
     }
     func saveProfile(name: String, theme: Theme) {
+        guard HaloFeatureAccess.shared.allows(.profiles) else { return }
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         settings.profiles.append(Profile(name: name, theme: theme, layout: settings.layout))
     }
     func deleteProfile(_ id: UUID) {
+        guard HaloFeatureAccess.shared.allows(.profiles) else { return }
         settings.profiles.removeAll { $0.id == id }; settings.rules.removeAll { $0.profileID == id }; settings.profileSchedules?.removeAll { $0.profileID == id }
     }
     func renameProfile(_ id: UUID, to name: String) {
+        guard HaloFeatureAccess.shared.allows(.profiles) else { return }
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, let index = settings.profiles.firstIndex(where: { $0.id == id }) else { return }
         settings.profiles[index].name = String(name.prefix(80))
@@ -412,6 +460,10 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         order.swapAt(index, index + delta); settings.layout.order = order
     }
     func evaluateRules() {
+        guard HaloFeatureAccess.shared.allows(.profileAutomation) else {
+            matchedRules.removeAll()
+            return
+        }
         var current = Set<UUID>()
         var selected: Profile?
         for rule in settings.rules where rule.matches(app: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "", battery: system.battery, charging: system.charging, displays: NSScreen.screens.count, hour: Calendar.current.component(.hour, from: Date())) {
@@ -551,6 +603,10 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         settings.layout.appearance.background = ["mp4", "mov", "m4v"].contains(url.pathExtension.lowercased()) ? .video : .image
     }
     func importPlugin() {
+        guard HaloFeatureAccess.shared.allows(.plugins) else {
+            HaloUpgradeCoordinator.shared.present()
+            return
+        }
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
@@ -563,12 +619,17 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             plugins.removeAll { $0.id == manifest.id }; plugins.append(manifest); savePlugins()
         } catch { self.error = "Plugin rejected: \(error.localizedDescription)" }
     }
-    func removePlugin(_ id: String) { plugins.removeAll { $0.id == id }; savePlugins() }
+    func removePlugin(_ id: String) {
+        guard HaloFeatureAccess.shared.allows(.plugins) else { return }
+        plugins.removeAll { $0.id == id }
+        savePlugins()
+    }
     private func savePlugins() {
         do { defaults.set(try JSONEncoder().encode(plugins), forKey: "plugins.v1") }
         catch { self.error = error.localizedDescription }
     }
     func run(_ command: PluginCommand) {
+        guard HaloFeatureAccess.shared.allows(.plugins) else { return }
         guard let url = URL(string: command.url) else { return }
         let alert = NSAlert(); alert.messageText = command.title
         alert.informativeText = "Open this URL? Shortcuts may perform actions configured in the Shortcuts app.\n\n\(command.url)"
