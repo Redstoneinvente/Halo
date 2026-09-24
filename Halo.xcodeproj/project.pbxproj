@@ -11,7 +11,6 @@
 		0000000000000000000000C9 /* Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000065 /* Core/Models.swift */; };
 		0000000000000000000000CA /* Core/AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000066 /* Core/AppStore.swift */; };
 		0000000000000000000000CB /* NotchEngine/WindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000067 /* NotchEngine/WindowManager.swift */; };
-		B0BB1E000000000000000001 /* NotchEngine/NotchBubbles.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0BB1E000000000000000101 /* NotchEngine/NotchBubbles.swift */; };
 		0000000000000000000000CC /* Views/SurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000068 /* Views/SurfaceView.swift */; };
 		0000000000000000000000CD /* Views/WorkspaceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000069 /* Views/WorkspaceSettingsView.swift */; };
 		0000000000000000000000CE /* Core/WorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006A /* Core/WorkspaceModels.swift */; };
@@ -55,6 +54,7 @@
 		A11C0F1A0000000000000371 /* Views/PixelPetWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */; };
 		A57A00000000000000000001 /* Core/AppStoreLicensing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000101 /* Core/AppStoreLicensing.swift */; };
 		A57A00000000000000000011 /* Views/AppStoreSubscriptionGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */; };
+		B0BB1E000000000000000001 /* NotchEngine/NotchBubbles.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0BB1E000000000000000101 /* NotchEngine/NotchBubbles.swift */; };
 		B1A0D1000000000000000001 /* Services/AudioSpectrumModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A0D1000000000000000101 /* Services/AudioSpectrumModels.swift */; };
 		B1A0D1000000000000000002 /* Services/AudioSpectrumProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A0D1000000000000000102 /* Services/AudioSpectrumProviding.swift */; };
 		B1A0D1000000000000000003 /* Services/DisabledAudioSpectrumService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A0D1000000000000000103 /* Services/DisabledAudioSpectrumService.swift */; };
@@ -127,7 +127,6 @@
 		000000000000000000000065 /* Core/Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/Models.swift; sourceTree = "<group>"; };
 		000000000000000000000066 /* Core/AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/AppStore.swift; sourceTree = "<group>"; };
 		000000000000000000000067 /* NotchEngine/WindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchEngine/WindowManager.swift; sourceTree = "<group>"; };
-		B0BB1E000000000000000101 /* NotchEngine/NotchBubbles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchEngine/NotchBubbles.swift; sourceTree = "<group>"; };
 		000000000000000000000068 /* Views/SurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/SurfaceView.swift; sourceTree = "<group>"; };
 		000000000000000000000069 /* Views/WorkspaceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/WorkspaceSettingsView.swift; sourceTree = "<group>"; };
 		00000000000000000000006A /* Core/WorkspaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/WorkspaceModels.swift; sourceTree = "<group>"; };
@@ -172,6 +171,7 @@
 		A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PixelPetWidget.swift; sourceTree = "<group>"; };
 		A57A00000000000000000101 /* Core/AppStoreLicensing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/AppStoreLicensing.swift; sourceTree = "<group>"; };
 		A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/AppStoreSubscriptionGateView.swift; sourceTree = "<group>"; };
+		B0BB1E000000000000000101 /* NotchEngine/NotchBubbles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchEngine/NotchBubbles.swift; sourceTree = "<group>"; };
 		B1A0D1000000000000000101 /* Services/AudioSpectrumModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/AudioSpectrumModels.swift; sourceTree = "<group>"; };
 		B1A0D1000000000000000102 /* Services/AudioSpectrumProviding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/AudioSpectrumProviding.swift; sourceTree = "<group>"; };
 		B1A0D1000000000000000103 /* Services/DisabledAudioSpectrumService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/DisabledAudioSpectrumService.swift; sourceTree = "<group>"; };
@@ -755,7 +755,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 208;
+				CURRENT_PROJECT_VERSION = 209;
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -776,7 +776,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.6;
+				MARKETING_VERSION = 0.2.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -794,7 +794,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 208;
+				CURRENT_PROJECT_VERSION = 209;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
@@ -816,7 +816,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.6;
+				MARKETING_VERSION = 0.2.7;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -1044,7 +1044,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 208;
+				CURRENT_PROJECT_VERSION = 209;
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1065,7 +1065,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.6;
+				MARKETING_VERSION = 0.2.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1083,7 +1083,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 208;
+				CURRENT_PROJECT_VERSION = 209;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
@@ -1105,7 +1105,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.6;
+				MARKETING_VERSION = 0.2.7;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -1127,7 +1127,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/HaloAppStore.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 208;
+				CURRENT_PROJECT_VERSION = 209;
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1147,7 +1147,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.6;
+				MARKETING_VERSION = 0.2.7;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-dead_strip_dylibs",
@@ -1169,7 +1169,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/HaloAppStore.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 208;
+				CURRENT_PROJECT_VERSION = 209;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = YES;
@@ -1190,7 +1190,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.6;
+				MARKETING_VERSION = 0.2.7;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-dead_strip_dylibs",
