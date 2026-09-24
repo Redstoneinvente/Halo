@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     let store = AppStore()
     private var engine: WindowManager?
+    private static weak var sharedDelegate: AppDelegate?
     private var hudController: HaloHUDController?
     private var status: NSStatusItem?
     private var settings: NSWindow?
@@ -71,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.sharedDelegate = self
         HaloFeedbackService.shared.start()
         NotificationCenter.default.addObserver(
             self,
@@ -501,6 +503,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         HaloFeedbackService.shared.select(.crash)
         openSettings()
         NotificationCenter.default.post(name: .init("HaloOpenFeedback"), object: nil)
+    }
+
+    static func exportWebRepresentationFromSettings() {
+        guard let delegate = sharedDelegate else { return }
+        delegate.exportWebRepresentationFromSettings()
+    }
+
+    private func exportWebRepresentationFromSettings() {
+        guard let engine else {
+            store.error = "Halo's surface engine is not running yet."
+            return
+        }
+
+        let panel = NSOpenPanel()
+        panel.title = "Export Halo Web Representation"
+        panel.prompt = "Export Here"
+        panel.message = "Choose a folder. Halo will create a Halo-Web-Representation folder inside it."
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let parentURL = panel.url else { return }
+        let outputURL = parentURL.appendingPathComponent("Halo-Web-Representation", isDirectory: true)
+
+        HaloWebRepresentationExporter.shared.export(to: outputURL, engine: engine) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let url):
+                self.store.error = nil
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            case .failure(let error):
+                self.store.error = "Web representation export failed: \(error.localizedDescription)"
+            }
+        }
     }
 
     @objc func openSettings() {
