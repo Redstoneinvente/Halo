@@ -235,15 +235,13 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
                 self.updateRetroGameHotkey()
                 self.updateClipboardCIHotkey()
                 self.updateArtworkPreference()
+                self.updateFullOnlyBackgroundServices()
                 self.hudEngine?.configurationDidChange()
             }
             .store(in: &subscriptions)
 
         pollMedia()
-        if systemLiveActivitySource == nil {
-            systemLiveActivitySource = SystemLiveActivitySource(workspace: self, defaults: defaults)
-        }
-        systemLiveActivitySource?.start()
+        updateFullOnlyBackgroundServices()
 
         bluetooth.$lastEvent
             .compactMap { $0 }
@@ -261,7 +259,10 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             self.pruneLiveActivities()
             let minute = Int(Date().timeIntervalSince1970 / 60)
             if self.lastScheduleMinute != minute { self.lastScheduleMinute = minute; self.evaluateSchedules() }
-            self.clipboard.poll(enabled: self.settings.clipboardEnabled, excluded: self.settings.clipboardExcludedApps)
+            self.clipboard.poll(
+                enabled: HaloFeatureAccess.shared.allows(.clipboardWidget) && self.settings.clipboardEnabled,
+                excluded: self.settings.clipboardExcludedApps
+            )
             if self.openedNotchVisible { self.system.refresh(detailed: true) }
             else if self.tick % 5 == 0 { self.system.refresh() }
             if self.tick % 5 == 0 { self.evaluateRules() }
@@ -320,6 +321,24 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             HaloCustomCIRuntimeStore.shared.detach()
             IntegrationShortcutManager.shared.stop()
             IntegrationCIRuntime.shared.stop()
+        }
+    }
+
+    private func updateFullOnlyBackgroundServices() {
+        let access = HaloFeatureAccess.shared
+        if access.allows(.liveActivitiesWidget) {
+            if systemLiveActivitySource == nil {
+                systemLiveActivitySource = SystemLiveActivitySource(workspace: self, defaults: defaults)
+            }
+            systemLiveActivitySource?.start()
+        } else {
+            systemLiveActivitySource?.stop()
+            systemLiveActivitySource = nil
+            if !activities.isEmpty { activities.removeAll() }
+        }
+
+        if !access.allows(.clipboardWidget) {
+            clipboard.reset()
         }
     }
 
