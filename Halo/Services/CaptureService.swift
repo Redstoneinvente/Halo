@@ -405,13 +405,13 @@ final class TeleprompterCoordinator: NSObject {
     private var installed = false
 
     private var commercialSurfaceAccessReady: Bool {
-        HaloCommercialSurfaceGate.shared.isReady
+        HaloRuntimeGate.shared.isReady
     }
 
     func install() {
         guard !installed else { return }; installed = true
 
-        commercialAccessCancellable = HaloCommercialSurfaceGate.shared.$isReady
+        commercialAccessCancellable = HaloRuntimeGate.shared.$isReady
             .removeDuplicates()
             .receive(on: RunLoop.main)
             .sink { [weak self] ready in
