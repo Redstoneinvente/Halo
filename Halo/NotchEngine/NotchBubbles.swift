@@ -1962,6 +1962,183 @@ private final class TransparentNotchBubbleHostingView<Content: View>: NSHostingV
 }
 
 @MainActor
+private final class FluidNotchBridgePanel {
+    private let panel: NSPanel
+    private let shapeLayer = CAShapeLayer()
+
+    init() {
+        panel = NSPanel(
+            contentRect: .zero,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isReleasedWhenClosed = false
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = false
+        panel.hidesOnDeactivate = false
+        panel.ignoresMouseEvents = true
+        panel.animationBehavior = .none
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+
+        let view = NSView(frame: .zero)
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        view.layer?.isOpaque = false
+        view.layer?.masksToBounds = false
+
+        shapeLayer.fillColor = NSColor.black.withAlphaComponent(0.985).cgColor
+        shapeLayer.strokeColor = NSColor.white.withAlphaComponent(0.035).cgColor
+        shapeLayer.lineWidth = 0.7
+        shapeLayer.actions = [
+            "path": NSNull(),
+            "opacity": NSNull(),
+            "bounds": NSNull(),
+            "position": NSNull()
+        ]
+        view.layer?.addSublayer(shapeLayer)
+        panel.contentView = view
+    }
+
+    func update(
+        notchSource: CGRect,
+        bubbleFrame: CGRect,
+        direction: CGFloat,
+        strength rawStrength: CGFloat,
+        bubblePanel: NSPanel
+    ) {
+        let strength = min(1, max(0, rawStrength))
+        guard strength > 0.015,
+              direction != 0,
+              bubblePanel.isVisible else {
+            hide()
+            return
+        }
+
+        let notchX = notchSource.midX
+        let notchY = notchSource.midY
+        let bubbleNearX = direction > 0 ? bubbleFrame.minX : bubbleFrame.maxX
+        let distance = abs(bubbleNearX - notchX)
+
+        guard distance > 0.5 else {
+            hide()
+            return
+        }
+
+        let padding: CGFloat = 12
+        let minX = min(notchX, bubbleNearX) - padding
+        let maxX = max(notchX, bubbleNearX) + padding
+        let verticalExtent = max(notchSource.height, bubbleFrame.height) * 0.65 + padding
+        let frame = CGRect(
+            x: minX,
+            y: min(notchY, bubbleFrame.midY) - verticalExtent,
+            width: max(1, maxX - minX),
+            height: max(1, abs(bubbleFrame.midY - notchY) + verticalExtent * 2)
+        )
+
+        panel.setFrame(frame, display: false)
+        guard let view = panel.contentView else { return }
+        view.frame = CGRect(origin: .zero, size: frame.size)
+        shapeLayer.frame = view.bounds
+
+        let localNotch = CGPoint(
+            x: notchX - frame.minX,
+            y: notchY - frame.minY
+        )
+        let localBubble = CGPoint(
+            x: bubbleNearX - frame.minX,
+            y: bubbleFrame.midY - frame.minY
+        )
+
+        shapeLayer.path = bridgePath(
+            notch: localNotch,
+            bubble: localBubble,
+            bubbleHeight: bubbleFrame.height,
+            direction: direction,
+            strength: strength
+        )
+        shapeLayer.opacity = Float(min(0.995, 0.76 + 0.24 * strength))
+
+        if !panel.isVisible {
+            panel.orderFrontRegardless()
+        }
+        panel.order(.below, relativeTo: bubblePanel.windowNumber)
+    }
+
+    func hide() {
+        guard panel.isVisible else { return }
+        panel.orderOut(nil)
+    }
+
+    private func bridgePath(
+        notch: CGPoint,
+        bubble: CGPoint,
+        bubbleHeight: CGFloat,
+        direction: CGFloat,
+        strength: CGFloat
+    ) -> CGPath {
+        let distance = max(1, abs(bubble.x - notch.x))
+        let verticalDelta = bubble.y - notch.y
+        let bubbleHalf = max(2.5, min(bubbleHeight * 0.38, 4 + bubbleHeight * 0.30 * strength))
+        let notchHalf = max(3.5, min(bubbleHeight * 0.34, 5 + bubbleHeight * 0.24 * strength))
+
+        // The neck stays broad near the notch, then pinches closer to the bubble.
+        // That asymmetry is what makes the surface read as if it is stretching out
+        // rather than a pill simply sliding away from it.
+        let neckPinch = max(2.0, bubbleHalf * (0.34 + 0.36 * strength))
+        let control = min(distance * 0.52, max(12, bubbleHeight * 0.95))
+        let signedControl = direction * control
+
+        let topNotch = CGPoint(x: notch.x, y: notch.y + notchHalf)
+        let bottomNotch = CGPoint(x: notch.x, y: notch.y - notchHalf)
+        let topBubble = CGPoint(x: bubble.x, y: bubble.y + neckPinch)
+        let bottomBubble = CGPoint(x: bubble.x, y: bubble.y - neckPinch)
+
+        let path = CGMutablePath()
+        path.move(to: topNotch)
+        path.addCurve(
+            to: topBubble,
+            control1: CGPoint(
+                x: notch.x + signedControl * 0.34,
+                y: notch.y + notchHalf + verticalDelta * 0.14
+            ),
+            control2: CGPoint(
+                x: bubble.x - signedControl * 0.58,
+                y: bubble.y + bubbleHalf
+            )
+        )
+        path.addLine(to: bottomBubble)
+        path.addCurve(
+            to: bottomNotch,
+            control1: CGPoint(
+                x: bubble.x - signedControl * 0.58,
+                y: bubble.y - bubbleHalf
+            ),
+            control2: CGPoint(
+                x: notch.x + signedControl * 0.34,
+                y: notch.y - notchHalf + verticalDelta * 0.14
+            )
+        )
+        path.closeSubpath()
+
+        // A small lobe at the notch edge makes the bridge visually deform the
+        // notch instead of looking like a separate rectangle placed behind it.
+        let lobeRadius = max(4, notchHalf * (0.78 + 0.28 * strength))
+        path.addEllipse(
+            in: CGRect(
+                x: notch.x - lobeRadius,
+                y: notch.y - lobeRadius,
+                width: lobeRadius * 2,
+                height: lobeRadius * 2
+            )
+        )
+        return path
+    }
+}
+
+@MainActor
 private final class BubbleFrameAnimator {
     private enum LifecycleMotion {
         case emerge
@@ -1970,9 +2147,13 @@ private final class BubbleFrameAnimator {
     }
 
     private let clock = DisplayClock()
+    private let fluidBridge = FluidNotchBridgePanel()
 
-    func cancel() {
+    func cancel(hideFluidBridge: Bool = true) {
         clock.stop()
+        if hideFluidBridge {
+            fluidBridge.hide()
+        }
     }
 
     func move(
@@ -2093,6 +2274,7 @@ private final class BubbleFrameAnimator {
             endOpacity: 1,
             motion: .emerge,
             fluidNotchDirection: notchDirection,
+            fluidSourceFrame: source,
             completion: completion
         )
     }
@@ -2100,12 +2282,13 @@ private final class BubbleFrameAnimator {
     func restoreFromCurrent(
         panel: NSPanel,
         to target: CGRect,
+        notchSource: CGRect,
         preset: NotchBubbleAnimationPreset,
         duration: TimeInterval,
         animated: Bool,
         completion: (() -> Void)? = nil
     ) {
-        cancel()
+        cancel(hideFluidBridge: false)
         guard let view = panel.contentView else {
             panel.setFrame(target, display: false)
             panel.alphaValue = 1
@@ -2145,6 +2328,7 @@ private final class BubbleFrameAnimator {
             endOpacity: 1,
             motion: .restore,
             fluidNotchDirection: notchDirection,
+            fluidSourceFrame: notchSource,
             completion: completion
         )
     }
@@ -2206,7 +2390,8 @@ private final class BubbleFrameAnimator {
             startOpacity: currentOpacity,
             endOpacity: endOpacity,
             motion: .retract,
-            fluidNotchDirection: notchDirection
+            fluidNotchDirection: notchDirection,
+            fluidSourceFrame: source
         ) { [weak self, weak panel] in
             guard let self, let panel else { return }
             self.resetVisuals(panel: panel)
@@ -2234,6 +2419,7 @@ private final class BubbleFrameAnimator {
         endOpacity: Double,
         motion: LifecycleMotion,
         fluidNotchDirection: CGFloat,
+        fluidSourceFrame: CGRect?,
         completion: (() -> Void)? = nil
     ) {
         let start = CACurrentMediaTime()
@@ -2255,6 +2441,23 @@ private final class BubbleFrameAnimator {
                 height: initial.height + (target.height - initial.height) * p
             )
             panel.setFrame(frame, display: false)
+
+            if horizontalFluid, let fluidSourceFrame {
+                self.fluidBridge.update(
+                    notchSource: fluidSourceFrame,
+                    bubbleFrame: frame,
+                    direction: fluidNotchDirection,
+                    strength: self.fluidBridgeStrength(
+                        t: CGFloat(t),
+                        motion: motion,
+                        bubbleFrame: frame,
+                        notchSource: fluidSourceFrame
+                    ),
+                    bubblePanel: panel
+                )
+            } else {
+                self.fluidBridge.hide()
+            }
 
             let transform: CGAffineTransform
             let opacity: Double
@@ -2303,6 +2506,7 @@ private final class BubbleFrameAnimator {
 
             if t >= 1 {
                 self.cancel()
+                self.fluidBridge.hide()
                 panel.setFrame(target, display: false)
                 if endTransform.isIdentity && endOpacity >= 0.999 {
                     self.resetVisuals(panel: panel)
@@ -2310,6 +2514,34 @@ private final class BubbleFrameAnimator {
                 completion?()
             }
         }
+    }
+
+    private func fluidBridgeStrength(
+        t: CGFloat,
+        motion: LifecycleMotion,
+        bubbleFrame: CGRect,
+        notchSource: CGRect
+    ) -> CGFloat {
+        let normalized = min(1, max(0, t))
+        let base: CGFloat
+
+        switch motion {
+        case .emerge, .retract:
+            // Form the neck quickly, keep it through the middle of the travel,
+            // then pinch it away before the bubble fully settles.
+            let sine = sin(.pi * normalized)
+            base = pow(max(0, sine), 0.58)
+
+        case .restore:
+            // Reversing a retract should peel the bubble back away from the notch
+            // without snapping the connector out on the first frame.
+            base = pow(max(0, 1 - normalized), 0.72)
+        }
+
+        let distance = abs(bubbleFrame.midX - notchSource.midX)
+        let scale = max(1, max(bubbleFrame.width, notchSource.width))
+        let separation = min(1, distance / (scale * 0.92))
+        return min(1, max(0, base * (0.38 + 0.62 * separation)))
     }
 
     /// Direction from the visible bubble toward the compact notch edge.
@@ -2545,6 +2777,7 @@ final class BubbleWindowController {
             frameAnimator.restoreFromCurrent(
                 panel: panel,
                 to: frame,
+                notchSource: emergenceFrame,
                 preset: style.animation,
                 duration: duration,
                 animated: animated && !trackingSurface
