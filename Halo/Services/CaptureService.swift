@@ -405,13 +405,20 @@ final class TeleprompterCoordinator: NSObject {
     private var installed = false
 
     private var commercialSurfaceAccessReady: Bool {
-        HaloRuntimeGate.shared.isReady
+        HaloRuntimeGate.shared.isReady &&
+            HaloFeatureAccess.shared.allows(.contextInterfaces)
     }
 
     func install() {
         guard !installed else { return }; installed = true
 
-        commercialAccessCancellable = HaloRuntimeGate.shared.$isReady
+        commercialAccessCancellable = Publishers.CombineLatest(
+            HaloRuntimeGate.shared.$isReady,
+            HaloFeatureAccess.shared.$accessLevel
+        )
+            .map { ready, _ in
+                ready && HaloFeatureAccess.shared.allows(.contextInterfaces)
+            }
             .removeDuplicates()
             .receive(on: RunLoop.main)
             .sink { [weak self] ready in
@@ -448,6 +455,9 @@ final class TeleprompterCoordinator: NSObject {
         contextOwnedProfileID = nil
         if promptPanel?.isVisible == true {
             hidePrompt()
+        }
+        if settingsWindow?.isVisible == true {
+            settingsWindow?.orderOut(nil)
         }
     }
 
