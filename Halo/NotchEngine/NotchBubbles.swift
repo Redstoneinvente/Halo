@@ -6587,11 +6587,66 @@ private struct NotchBubbleSettingsPreview: View {
             }
 
         case .wings:
-            return [
-                CGRect(x: notch.minX - spacing - size, y: notch.midY - size / 2 + verticalOffset, width: size, height: size),
-                CGRect(x: notch.maxX + spacing, y: notch.midY - size / 2 + verticalOffset, width: size, height: size),
-                CGRect(x: notch.minX - spacing * 2 - size * 2, y: notch.midY - size / 2 + verticalOffset, width: size, height: size)
-            ]
+            let sides: [NotchBubbleSide] = {
+                switch settings.resolvedBubbleSideMode {
+                case .left:
+                    return Array(repeating: .left, count: count)
+                case .right:
+                    return Array(repeating: .right, count: count)
+                case .automatic:
+                    var result: [NotchBubbleSide] = []
+                    var leftCount = 0
+                    var rightCount = 0
+
+                    for _ in 0..<count {
+                        let side: NotchBubbleSide
+                        if leftCount == rightCount {
+                            side = settings.resolvedAutomaticPrioritySide
+                        } else if leftCount < rightCount {
+                            side = .left
+                        } else {
+                            side = .right
+                        }
+
+                        result.append(side)
+                        if side == .left {
+                            leftCount += 1
+                        } else {
+                            rightCount += 1
+                        }
+                    }
+
+                    return result
+                }
+            }()
+
+            var leftOffset = spacing
+            var rightOffset = spacing
+            let y = notch.midY - size / 2 + verticalOffset
+
+            return sides.map { side in
+                switch side {
+                case .left:
+                    let frame = CGRect(
+                        x: notch.minX - leftOffset - size,
+                        y: y,
+                        width: size,
+                        height: size
+                    )
+                    leftOffset += size + spacing
+                    return frame
+
+                case .right:
+                    let frame = CGRect(
+                        x: notch.maxX + rightOffset,
+                        y: y,
+                        width: size,
+                        height: size
+                    )
+                    rightOffset += size + spacing
+                    return frame
+                }
+            }
 
         case .stack:
             return (0..<count).map {
