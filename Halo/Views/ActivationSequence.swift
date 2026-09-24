@@ -244,12 +244,9 @@ struct ActivationSequenceSettings: Codable, Equatable {
         guard !access.allows(.activationSequenceCustomization) else { return saved }
 
         var lite = ActivationSequenceSettings()
+        // Global enablement is a basic preference. Full-only event/preset details
+        // remain saved but Lite uses Halo's normal default launch matrix.
         lite.enabled = saved.enabled
-        lite.playManualLaunch = saved.playManualLaunch
-        lite.playLoginLaunch = saved.playLoginLaunch
-        lite.playMacStartup = saved.playMacStartup
-        lite.playRelaunchAfterQuit = saved.playRelaunchAfterQuit
-        lite.playAfterWake = saved.playAfterWake
         return lite.normalized()
     }
 }
