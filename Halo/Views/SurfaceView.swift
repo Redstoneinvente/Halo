@@ -2801,7 +2801,6 @@ struct SurfaceView: View {
         featureAccess.effectiveLayout(state.layoutOverride ?? workspace.effectiveLayout)
     }
     private var simpleMode: Bool { workspace.settings.resolvedNotchMode == .simple }
-    private var simpleSettings: SimpleNotchSettings { workspace.settings.resolvedSimpleNotch }
     private var contextOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
     private var bluetoothEligible: Bool {
         guard bluetoothCIEnabled else { return false }
