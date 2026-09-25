@@ -1335,4 +1335,21 @@ final class SimpleNotchLayoutTests: XCTestCase {
         settings.widgets = []
         XCTAssertEqual(SimpleNotchMetrics.arrangement(settings: settings, availableWidth: 1000).rows, [[.clock]])
     }
+
+    func testClockExclusiveSimpleStylesDoNotLeakToOtherWidgets() {
+        var settings = SimpleNotchSettings()
+        settings.widgets = [.clock, .timer, .media]
+        settings.styles = [
+            ModuleID.clock.rawValue: .flipClock,
+            ModuleID.timer.rawValue: .romanDial,
+            ModuleID.media.rawValue: .stackedDigital
+        ]
+
+        let normalized = settings.normalized()
+        XCTAssertEqual(normalized.style(for: .clock), .flipClock)
+        XCTAssertEqual(normalized.style(for: .timer), .clean)
+        XCTAssertEqual(normalized.style(for: .media), .clean)
+        XCTAssertEqual(SimpleNotchWidgetStyle.clockCases.count, 7)
+        XCTAssertEqual(SimpleNotchWidgetStyle.coreCases, [.clean, .glass, .vibrant])
+    }
 }
