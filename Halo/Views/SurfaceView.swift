@@ -3804,30 +3804,34 @@ private struct SimpleNotchWorkspaceView: View {
     private var size: SimpleNotchSize { settings.resolvedSize }
 
     var body: some View {
-        HStack(spacing: CGFloat(SimpleNotchMetrics.widgetSpacing(size))) {
-            ForEach(settings.widgets) { widget in
-                simpleCard(widget)
-                    .opacity(dragging == widget ? 0.50 : 1)
-                    .scaleEffect(dragging == widget ? 0.975 : 1)
-                    .onDrag {
-                        dragging = widget
-                        let provider = NSItemProvider()
-                        provider.registerDataRepresentation(
-                            forTypeIdentifier: Self.dragType,
-                            visibility: .ownProcess
-                        ) { completion in
-                            completion(Data(widget.rawValue.utf8), nil)
-                            return nil
+        ScrollView(.horizontal) {
+            HStack(spacing: CGFloat(SimpleNotchMetrics.widgetSpacing(size))) {
+                ForEach(settings.widgets) { widget in
+                    simpleCard(widget)
+                        .opacity(dragging == widget ? 0.50 : 1)
+                        .scaleEffect(dragging == widget ? 0.975 : 1)
+                        .onDrag {
+                            dragging = widget
+                            let provider = NSItemProvider()
+                            provider.registerDataRepresentation(
+                                forTypeIdentifier: Self.dragType,
+                                visibility: .ownProcess
+                            ) { completion in
+                                completion(Data(widget.rawValue.utf8), nil)
+                                return nil
+                            }
+                            return provider
                         }
-                        return provider
-                    }
-                    .onDrop(of: [Self.dragType], isTargeted: nil) { providers in
-                        acceptDrop(providers, before: widget)
-                    }
+                        .onDrop(of: [Self.dragType], isTargeted: nil) { providers in
+                            acceptDrop(providers, before: widget)
+                        }
+                }
             }
+            .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
+            .padding(.vertical, CGFloat(SimpleNotchMetrics.verticalPadding(size)))
+            .frame(minWidth: 1, maxHeight: .infinity, alignment: .top)
         }
-        .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
-        .padding(.vertical, CGFloat(SimpleNotchMetrics.verticalPadding(size)))
+        .scrollIndicators(.hidden)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.easeInOut(duration: 0.22), value: settings.widgets)
         .animation(.easeInOut(duration: 0.22), value: size)
