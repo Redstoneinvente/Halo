@@ -103,6 +103,7 @@ struct SimpleNotchSettings: Codable, Equatable {
     ) -> [ModuleID] {
         let state = normalized()
         return Array(state.closedWidgets.filter { widget in
+            guard state.widgets.contains(widget) else { return false }
             switch widget {
             case .timer: return timerActive
             case .stopwatch: return stopwatchActive
