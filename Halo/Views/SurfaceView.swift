@@ -6537,18 +6537,138 @@ private enum ContextMusicArtworkReader {
         } }
     }
 
-    private static func onlineLyrics(title: String, artist: String, duration: Double?) async -> String {
-        guard !title.isEmpty, !artist.isEmpty else { return "" }
+    private static func normalizedLyricsTitle(_ title: String, artist: String) -> String {
+        var result = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !cleanArtist.isEmpty {
+            for separator in [" - ", " – ", " — "] {
+                let prefix = cleanArtist + separator
+                if result.lowercased().hasPrefix(prefix.lowercased()) {
+                    result = String(result.dropFirst(prefix.count))
+                    break
+                }
+            }
+        }
+
+        let suffixPatterns = [
+            #"\s*\((?:official\s+)?(?:music\s+)?video\)\s*$"#,
+            #"\s*\((?:official\s+)?audio\)\s*$"#,
+            #"\s*\((?:official\s+)?lyric\s+video\)\s*$"#,
+            #"\s*\((?:lyrics?)\)\s*$"#,
+            #"\s*\[(?:official\s+)?(?:music\s+)?video\]\s*$"#,
+            #"\s*\[(?:official\s+)?audio\]\s*$"#
+        ]
+        for pattern in suffixPatterns {
+            result = result.replacingOccurrences(
+                of: pattern,
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+
+        result = result.replacingOccurrences(
+            of: #"\s*\((?:feat\.?|ft\.?)\s+[^)]*\)\s*$"#,
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func lyricsRequest(title: String, artist: String, duration: Double?) async -> LRCLyrics? {
         var components = URLComponents(string: "https://lrclib.net/api/get")!
-        components.queryItems = [URLQueryItem(name: "track_name", value: title), URLQueryItem(name: "artist_name", value: artist)]
-        if let duration, duration >= 1, duration <= 3600 { components.queryItems?.append(URLQueryItem(name: "duration", value: String(Int(duration.rounded())))) }
-        guard let url = components.url else { return "" }
+        components.queryItems = [
+            URLQueryItem(name: "track_name", value: title),
+            URLQueryItem(name: "artist_name", value: artist)
+        ]
+        if let duration, duration >= 1, duration <= 3600 {
+            components.queryItems?.append(
+                URLQueryItem(name: "duration", value: String(Int(duration.rounded())))
+            )
+        }
+        guard let url = components.url else { return nil }
+
         var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
         request.setValue("Halo/1.0 (https://github.com/Redstoneinvente/Halo)", forHTTPHeaderField: "User-Agent")
-        guard let (data, response) = try? await URLSession.shared.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200,
-              data.count <= 1_000_000, let result = try? JSONDecoder().decode(LRCLyrics.self, from: data) else { return "" }
-        if let requested = duration, let returned = result.duration, abs(requested - returned) > 2.5 { return "" }
-        return result.syncedLyrics ?? ""
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              data.count <= 1_000_000 else { return nil }
+        return try? JSONDecoder().decode(LRCLyrics.self, from: data)
+    }
+
+    private static func lyricsSearch(title: String, artist: String, duration: Double?) async -> String {
+        var components = URLComponents(string: "https://lrclib.net/api/search")!
+        components.queryItems = [
+            URLQueryItem(name: "track_name", value: title),
+            URLQueryItem(name: "artist_name", value: artist)
+        ]
+        guard let url = components.url else { return "" }
+
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+        request.setValue("Halo/1.0 (https://github.com/Redstoneinvente/Halo)", forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              data.count <= 2_000_000,
+              let results = try? JSONDecoder().decode([LRCLyrics].self, from: data) else { return "" }
+
+        let withSynced = results.filter {
+            !($0.syncedLyrics ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard !withSynced.isEmpty else { return "" }
+
+        let best: LRCLyrics
+        if let duration {
+            best = withSynced.min {
+                abs(($0.duration ?? duration) - duration) < abs(($1.duration ?? duration) - duration)
+            } ?? withSynced[0]
+        } else {
+            best = withSynced[0]
+        }
+        return best.syncedLyrics ?? ""
+    }
+
+    private static func onlineLyrics(title: String, artist: String, duration: Double?) async -> String {
+        let rawTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawTitle.isEmpty, !rawArtist.isEmpty else { return "" }
+
+        let normalizedTitle = normalizedLyricsTitle(rawTitle, artist: rawArtist)
+        let titleChanged = normalizedTitle.caseInsensitiveCompare(rawTitle) != .orderedSame
+
+        var attempts: [(String, Double?)] = [(rawTitle, duration)]
+        if titleChanged && !normalizedTitle.isEmpty { attempts.append((normalizedTitle, duration)) }
+        if duration != nil {
+            attempts.append((rawTitle, nil))
+            if titleChanged && !normalizedTitle.isEmpty { attempts.append((normalizedTitle, nil)) }
+        }
+
+        var seen = Set<String>()
+        for (candidateTitle, candidateDuration) in attempts {
+            let attemptKey = candidateTitle.lowercased() + "|" +
+                (candidateDuration.map { String(Int($0.rounded())) } ?? "no-duration")
+            guard seen.insert(attemptKey).inserted else { continue }
+
+            guard let result = await lyricsRequest(
+                title: candidateTitle,
+                artist: rawArtist,
+                duration: candidateDuration
+            ) else { continue }
+
+            if let requested = candidateDuration,
+               let returned = result.duration,
+               abs(requested - returned) > 2.5 {
+                continue
+            }
+
+            if let synced = result.syncedLyrics,
+               !synced.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return synced
+            }
+        }
+
+        let searchTitle = normalizedTitle.isEmpty ? rawTitle : normalizedTitle
+        return await lyricsSearch(title: searchTitle, artist: rawArtist, duration: duration)
     }
 }
 
