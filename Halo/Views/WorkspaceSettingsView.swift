@@ -919,6 +919,26 @@ private struct NotchModeSettingsPane: View {
         }
 
         if mode == .simple {
+            Section("Notch size") {
+                Picker("Size", selection: Binding(
+                    get: { workspace.settings.resolvedSimpleNotch.resolvedSize },
+                    set: { size in
+                        var value = workspace.settings.resolvedSimpleNotch
+                        value.size = size
+                        workspace.settings.simpleNotch = value.normalized()
+                    }
+                )) {
+                    ForEach(SimpleNotchSize.allCases) { size in
+                        Text(size.rawValue).tag(size)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("Standard stays closest to the hardware notch. Medium and Big scale the opened notch and its fixed widgets. On notched Macs, Halo will never shrink below the real camera notch.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Simple widgets") {
                 Text("Fixed-size widgets, horizontal expansion and drag-to-reorder. Context Interfaces and advanced workspace layers stay out of the way.")
                     .font(.caption)
@@ -934,12 +954,19 @@ private struct NotchModeSettingsPane: View {
                             if simple.widgets.contains(widget) {
                                 Picker("Style", selection: styleBinding(widget)) {
                                     ForEach(SimpleNotchWidgetStyle.allCases) { style in
-                                        Label(style.rawValue, systemImage: style.symbol).tag(style)
+                                        Label(style.title, systemImage: style.symbol).tag(style)
                                     }
                                 }
                                 .labelsHidden()
-                                .frame(width: 132)
+                                .frame(width: 144)
                             }
+                        }
+
+                        if simple.widgets.contains(widget) {
+                            Text(simple.style(for: widget).detail)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .padding(.leading, 26)
                         }
 
                         if SimpleNotchSettings.closedEligibleWidgets.contains(widget),
