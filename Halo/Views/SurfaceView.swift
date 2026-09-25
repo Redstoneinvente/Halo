@@ -3804,34 +3804,44 @@ private struct SimpleNotchWorkspaceView: View {
     private var size: SimpleNotchSize { settings.resolvedSize }
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: CGFloat(SimpleNotchMetrics.widgetSpacing(size))) {
-                ForEach(settings.widgets) { widget in
-                    simpleCard(widget)
-                        .opacity(dragging == widget ? 0.50 : 1)
-                        .scaleEffect(dragging == widget ? 0.975 : 1)
-                        .onDrag {
-                            dragging = widget
-                            let provider = NSItemProvider()
-                            provider.registerDataRepresentation(
-                                forTypeIdentifier: Self.dragType,
-                                visibility: .ownProcess
-                            ) { completion in
-                                completion(Data(widget.rawValue.utf8), nil)
-                                return nil
+        GeometryReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: CGFloat(SimpleNotchMetrics.widgetSpacing(size))) {
+                    ForEach(Array(settings.widgets.enumerated()), id: \.element) { index, widget in
+                        simpleCard(widget)
+                            .overlay(alignment: .trailing) {
+                                if index < settings.widgets.count - 1 {
+                                    Rectangle()
+                                        .fill(Color.white.opacity(0.09))
+                                        .frame(width: 1)
+                                        .padding(.vertical, 7)
+                                }
                             }
-                            return provider
-                        }
-                        .onDrop(of: [Self.dragType], isTargeted: nil) { providers in
-                            acceptDrop(providers, before: widget)
-                        }
+                            .opacity(dragging == widget ? 0.50 : 1)
+                            .scaleEffect(dragging == widget ? 0.975 : 1)
+                            .onDrag {
+                                dragging = widget
+                                let provider = NSItemProvider()
+                                provider.registerDataRepresentation(
+                                    forTypeIdentifier: Self.dragType,
+                                    visibility: .ownProcess
+                                ) { completion in
+                                    completion(Data(widget.rawValue.utf8), nil)
+                                    return nil
+                                }
+                                return provider
+                            }
+                            .onDrop(of: [Self.dragType], isTargeted: nil) { providers in
+                                acceptDrop(providers, before: widget)
+                            }
+                    }
                 }
+                .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
+                .padding(.vertical, CGFloat(SimpleNotchMetrics.verticalPadding(size)))
+                .frame(minWidth: proxy.size.width, minHeight: proxy.size.height, alignment: .center)
             }
-            .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
-            .padding(.vertical, CGFloat(SimpleNotchMetrics.verticalPadding(size)))
-            .frame(minWidth: 1, maxHeight: .infinity, alignment: .top)
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.easeInOut(duration: 0.22), value: settings.widgets)
         .animation(.easeInOut(duration: 0.22), value: size)
@@ -3919,68 +3929,36 @@ private struct SimpleNotchWidgetView: View {
             switch preset {
             case .clean:
                 compactContent
-                    .padding(10 * scale)
+                    .padding(.horizontal, 9 * scale)
+                    .padding(.vertical, 4 * scale)
+            case .glass:
+                focusContent
+                    .padding(.horizontal, 8 * scale)
+                    .padding(.vertical, 4 * scale)
                     .background {
-                        RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
-                            .fill(Color.white.opacity(0.055))
+                        RoundedRectangle(cornerRadius: 13 * scale, style: .continuous)
+                            .fill(Color.white.opacity(0.045))
                             .overlay {
-                                RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+                                RoundedRectangle(cornerRadius: 13 * scale, style: .continuous)
                                     .stroke(Color.white.opacity(0.08), lineWidth: 1)
                             }
                     }
-            case .glass:
-                focusContent
-                    .padding(10 * scale)
-                    .background {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 21 * scale, style: .continuous)
-                                .fill(.ultraThinMaterial)
-                                .opacity(0.76)
-                            RoundedRectangle(cornerRadius: 21 * scale, style: .continuous)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [accent.opacity(0.20), .clear, Color.white.opacity(0.04)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                            Circle()
-                                .fill(accent.opacity(0.14))
-                                .frame(width: 90 * scale, height: 90 * scale)
-                                .blur(radius: 22 * scale)
-                                .offset(x: 48 * scale, y: -44 * scale)
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 21 * scale, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 21 * scale, style: .continuous)
-                                .stroke(Color.white.opacity(0.14), lineWidth: 1)
-                        }
-                    }
+                    .padding(.horizontal, 3 * scale)
             case .vibrant:
                 dashboardContent
-                    .padding(10 * scale)
+                    .padding(.horizontal, 8 * scale)
+                    .padding(.vertical, 4 * scale)
                     .background {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
-                                .fill(Color.black.opacity(0.72))
-                            RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [accent.opacity(0.22), .clear, accent.opacity(0.08)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                        }
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
-                                .stroke(accent.opacity(0.28), lineWidth: 1)
-                        }
+                        LinearGradient(
+                            colors: [accent.opacity(0.09), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
                     }
             }
         }
         .foregroundStyle(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 21 * scale, style: .continuous))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
