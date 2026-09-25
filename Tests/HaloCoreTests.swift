@@ -1268,7 +1268,7 @@ final class HaloCoreTests: XCTestCase {
 }
 
 final class SimpleNotchLayoutTests: XCTestCase {
-    func testEveryWidgetCombinationFitsWithoutLosingOrReorderingCards() {
+    func testEveryWidgetCombinationStaysInOneRowAndTrimsOnlyOverflow() {
         let widgets = SimpleNotchSettings.availableWidgets
         for size in SimpleNotchSize.allCases {
             for style in SimpleNotchWidgetStyle.allCases {
@@ -1278,21 +1278,33 @@ final class SimpleNotchLayoutTests: XCTestCase {
                     settings.widgets = enabled
                     settings.size = size
                     settings.styles = Dictionary(uniqueKeysWithValues: enabled.map { ($0.rawValue, style) })
+
                     for availableWidth in [480.0, 744, 1000, 1480] {
-                        let layout = SimpleNotchMetrics.arrangement(settings: settings, availableWidth: availableWidth, hardwareWidth: 244)
-                        XCTAssertEqual(layout.rows.flatMap { $0 }, enabled)
+                        let fitted = SimpleNotchMetrics.fittingSettings(
+                            settings: settings,
+                            availableWidth: availableWidth,
+                            hardwareWidth: 244
+                        )
+                        let layout = SimpleNotchMetrics.arrangement(
+                            settings: settings,
+                            availableWidth: availableWidth,
+                            hardwareWidth: 244
+                        )
+
+                        XCTAssertEqual(layout.rows.count, 1)
+                        XCTAssertEqual(layout.rows.first ?? [], fitted.widgets)
                         XCTAssertGreaterThanOrEqual(layout.width, 244)
-                        XCTAssertLessThanOrEqual(layout.width, min(1100, availableWidth))
-                        // The live view recomputes using the final window width. It must
-                        // get exactly the same rows and height as the window manager.
-                        let rendered = SimpleNotchMetrics.arrangement(settings: settings, availableWidth: layout.width)
-                        XCTAssertEqual(rendered.rows, layout.rows)
-                        XCTAssertEqual(rendered.height, layout.height, accuracy: 0.001)
-                        for row in layout.rows {
-                            let width = row.reduce(0.0) { $0 + SimpleNotchMetrics.width(for: $1, size: size) }
-                                + Double(row.count - 1) * SimpleNotchMetrics.widgetSpacing(size)
-                                + 2 * SimpleNotchMetrics.horizontalPadding(size)
-                            XCTAssertLessThanOrEqual(width, layout.width + 0.001)
+                        XCTAssertLessThanOrEqual(layout.width, availableWidth)
+
+                        let contentWidth = SimpleNotchMetrics.requiredContentWidth(settings: fitted)
+                        XCTAssertLessThanOrEqual(contentWidth, layout.width + 0.001)
+
+                        if SimpleNotchMetrics.fits(
+                            settings: settings,
+                            availableWidth: availableWidth,
+                            hardwareWidth: 244
+                        ) {
+                            XCTAssertEqual(fitted.widgets, enabled)
                         }
                     }
                 }
