@@ -3808,32 +3808,46 @@ private struct SimpleNotchWorkspaceView: View {
             ScrollView(.horizontal) {
                 HStack(spacing: CGFloat(SimpleNotchMetrics.widgetSpacing(size))) {
                     ForEach(Array(settings.widgets.enumerated()), id: \.offset) { index, widget in
-                        simpleCard(widget)
-                            .overlay(alignment: .trailing) {
-                                if index < settings.widgets.count - 1 {
-                                    Rectangle()
-                                        .fill(Color.white.opacity(0.09))
-                                        .frame(width: 1)
-                                        .padding(.vertical, 7)
-                                }
+                        Group {
+                            if widget == .pet {
+                                simpleCard(widget)
+                                    // Pixel Pal owns click/double-click/long-press gestures.
+                                    // Do not put the reorder drag recognizer over its full hit area.
+                                    .overlay(alignment: .topTrailing) {
+                                        Image(systemName: "line.3.horizontal")
+                                            .font(.system(size: 8, weight: .bold))
+                                            .foregroundStyle(.white.opacity(0.42))
+                                            .frame(width: 22, height: 18)
+                                            .contentShape(Rectangle())
+                                            .background(.black.opacity(0.001))
+                                            .onDrag {
+                                                dragProvider(for: widget)
+                                            }
+                                            .help("Drag to reorder Pixel Pal")
+                                            .padding(.top, 2)
+                                            .padding(.trailing, 3)
+                                    }
+                            } else {
+                                simpleCard(widget)
+                                    .onDrag {
+                                        dragProvider(for: widget)
+                                    }
                             }
-                            .opacity(dragging == widget ? 0.50 : 1)
-                            .scaleEffect(dragging == widget ? 0.975 : 1)
-                            .onDrag {
-                                dragging = widget
-                                let provider = NSItemProvider()
-                                provider.registerDataRepresentation(
-                                    forTypeIdentifier: Self.dragType,
-                                    visibility: .ownProcess
-                                ) { completion in
-                                    completion(Data(widget.rawValue.utf8), nil)
-                                    return nil
-                                }
-                                return provider
+                        }
+                        .overlay(alignment: .trailing) {
+                            if index < settings.widgets.count - 1 {
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.09))
+                                    .frame(width: 1)
+                                    .padding(.vertical, 7)
+                                    .allowsHitTesting(false)
                             }
-                            .onDrop(of: [Self.dragType], isTargeted: nil) { providers in
-                                acceptDrop(providers, before: widget)
-                            }
+                        }
+                        .opacity(dragging == widget ? 0.50 : 1)
+                        .scaleEffect(dragging == widget ? 0.975 : 1)
+                        .onDrop(of: [Self.dragType], isTargeted: nil) { providers in
+                            acceptDrop(providers, before: widget)
+                        }
                     }
                 }
                 .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
@@ -3865,6 +3879,19 @@ private struct SimpleNotchWorkspaceView: View {
         .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .help("Drag to reorder · \(preset.title) style")
         .accessibilityLabel("\(simpleTitle(widget)) widget")
+    }
+
+    private func dragProvider(for widget: ModuleID) -> NSItemProvider {
+        dragging = widget
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(
+            forTypeIdentifier: Self.dragType,
+            visibility: .ownProcess
+        ) { completion in
+            completion(Data(widget.rawValue.utf8), nil)
+            return nil
+        }
+        return provider
     }
 
     private func acceptDrop(_ providers: [NSItemProvider], before target: ModuleID) -> Bool {
