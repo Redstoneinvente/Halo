@@ -4012,9 +4012,20 @@ private struct SimpleNotchWidgetView: View {
     private var shell: some View {
         Group {
             switch preset {
-            case .clean: compactContent
-            case .glass: focusContent
-            case .vibrant: dashboardContent
+            case .clean:
+                compactContent
+            case .glass:
+                focusContent
+            case .vibrant:
+                dashboardContent
+            case .stackedDigital:
+                if widget == .clock { stackedDigitalClock } else { compactContent }
+            case .flipClock:
+                if widget == .clock { flipClock } else { compactContent }
+            case .minimalDial:
+                if widget == .clock { minimalDialClock } else { compactContent }
+            case .romanDial:
+                if widget == .clock { romanDialClock } else { compactContent }
             }
         }
         .padding(12 * scale)
@@ -4192,6 +4203,225 @@ private struct SimpleNotchWidgetView: View {
                     .frame(height: 2 * scale)
             }
         }
+    }
+
+    private var stackedDigitalClock: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let parts = clockDisplayParts(context.date)
+            HStack(spacing: 10 * scale) {
+                VStack(spacing: -5 * scale) {
+                    Text(parts.hour)
+                        .font(.system(size: 34 * scale, weight: .light, design: .monospaced))
+                        .monospacedDigit()
+                    Rectangle()
+                        .fill(Color.white.opacity(0.14))
+                        .frame(width: 55 * scale, height: 1)
+                    Text(parts.minute)
+                        .font(.system(size: 34 * scale, weight: .light, design: .monospaced))
+                        .monospacedDigit()
+                }
+                .frame(width: 74 * scale)
+
+                Rectangle()
+                    .fill(accent.opacity(0.55))
+                    .frame(width: 1.5 * scale, height: 62 * scale)
+
+                VStack(alignment: .leading, spacing: 4 * scale) {
+                    Text(context.date.formatted(.dateTime.weekday(.abbreviated)).uppercased())
+                        .font(.system(size: 8 * scale, weight: .bold, design: .rounded))
+                        .tracking(1)
+                        .foregroundStyle(accent)
+                    Text(context.date.formatted(.dateTime.month(.abbreviated).day()))
+                        .font(.system(size: 11 * scale, weight: .semibold, design: .rounded))
+                    if !parts.meridiem.isEmpty {
+                        Text(parts.meridiem)
+                            .font(.system(size: 7.5 * scale, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Text(context.date.formatted(.dateTime.year()))
+                        .font(.system(size: 7 * scale, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxHeight: 66 * scale, alignment: .topLeading)
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var flipClock: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let parts = clockDisplayParts(context.date)
+            HStack(spacing: 10 * scale) {
+                HStack(spacing: 5 * scale) {
+                    flipTile(parts.hour, label: "H")
+                    flipTile(parts.minute, label: "M")
+                }
+
+                VStack(alignment: .leading, spacing: 4 * scale) {
+                    Text(context.date.formatted(.dateTime.weekday(.wide)).uppercased())
+                        .font(.system(size: 7.5 * scale, weight: .bold, design: .rounded))
+                        .tracking(0.8)
+                        .foregroundStyle(accent)
+                    Text(context.date.formatted(.dateTime.month(.abbreviated).day()))
+                        .font(.system(size: 11 * scale, weight: .semibold, design: .rounded))
+                    if !parts.meridiem.isEmpty {
+                        Text(parts.meridiem)
+                            .font(.system(size: 8 * scale, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    HStack(spacing: 4 * scale) {
+                        Circle()
+                            .fill(accent)
+                            .frame(width: 4 * scale, height: 4 * scale)
+                        Text("LOCAL")
+                            .font(.system(size: 6.5 * scale, weight: .bold, design: .rounded))
+                            .tracking(0.9)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxHeight: 62 * scale, alignment: .topLeading)
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func flipTile(_ value: String, label: String) -> some View {
+        VStack(spacing: 3 * scale) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
+                    .fill(Color.white.opacity(0.10))
+                RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8 * scale)
+                Rectangle()
+                    .fill(Color.black.opacity(0.32))
+                    .frame(height: 1 * scale)
+                Text(value)
+                    .font(.system(size: 25 * scale, weight: .bold, design: .monospaced))
+                    .monospacedDigit()
+            }
+            .frame(width: 54 * scale, height: 54 * scale)
+
+            Text(label)
+                .font(.system(size: 6 * scale, weight: .bold, design: .rounded))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var minimalDialClock: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 12 * scale) {
+                simpleAnalogFace(context.date, roman: false, sparse: true)
+                    .frame(width: 78 * scale, height: 78 * scale)
+
+                VStack(alignment: .leading, spacing: 4 * scale) {
+                    Text(context.date.formatted(.dateTime.weekday(.abbreviated)).uppercased())
+                        .font(.system(size: 8 * scale, weight: .bold, design: .rounded))
+                        .tracking(1.2)
+                        .foregroundStyle(accent)
+                    Text(context.date, style: .time)
+                        .font(.system(size: 19 * scale, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                    Text(context.date.formatted(.dateTime.month(.wide).day()))
+                        .font(.system(size: 9 * scale, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var romanDialClock: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 12 * scale) {
+                simpleAnalogFace(context.date, roman: true, sparse: false)
+                    .frame(width: 80 * scale, height: 80 * scale)
+
+                VStack(alignment: .leading, spacing: 4 * scale) {
+                    Text(context.date.formatted(.dateTime.weekday(.wide)).uppercased())
+                        .font(.system(size: 7.5 * scale, weight: .bold, design: .serif))
+                        .tracking(0.9)
+                        .foregroundStyle(accent)
+                    Text(context.date, style: .time)
+                        .font(.system(size: 18 * scale, weight: .medium, design: .serif))
+                        .monospacedDigit()
+                    Text(context.date.formatted(.dateTime.month(.abbreviated).day().year()))
+                        .font(.system(size: 8 * scale, weight: .medium, design: .serif))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func simpleAnalogFace(_ date: Date, roman: Bool, sparse: Bool) -> some View {
+        let components = Calendar.current.dateComponents([.hour, .minute, .second], from: date)
+        return ZStack {
+            Circle()
+                .stroke(Color.white.opacity(roman ? 0.22 : 0.15), lineWidth: 1 * scale)
+
+            ForEach(0..<12, id: \.self) { tick in
+                if !sparse || tick % 3 == 0 {
+                    Capsule()
+                        .fill(Color.white.opacity(tick % 3 == 0 ? 0.75 : 0.24))
+                        .frame(width: 1.2 * scale, height: (tick % 3 == 0 ? 5 : 3) * scale)
+                        .offset(y: -31 * scale)
+                        .rotationEffect(.degrees(Double(tick) * 30))
+                }
+            }
+
+            if roman {
+                Text("XII")
+                    .font(.system(size: 6.5 * scale, weight: .semibold, design: .serif))
+                    .offset(y: -22 * scale)
+                Text("III")
+                    .font(.system(size: 6.5 * scale, weight: .semibold, design: .serif))
+                    .offset(x: 23 * scale)
+                Text("VI")
+                    .font(.system(size: 6.5 * scale, weight: .semibold, design: .serif))
+                    .offset(y: 22 * scale)
+                Text("IX")
+                    .font(.system(size: 6.5 * scale, weight: .semibold, design: .serif))
+                    .offset(x: -23 * scale)
+            }
+
+            clockHand(
+                length: roman ? 20 : 19,
+                width: 2.6,
+                angle: Double((components.hour ?? 0) % 12) * 30 + Double(components.minute ?? 0) / 2
+            )
+            clockHand(length: roman ? 29 : 28, width: 1.8, angle: Double(components.minute ?? 0) * 6)
+
+            Capsule()
+                .fill(accent)
+                .frame(width: 0.9 * scale, height: 30 * scale)
+                .offset(y: -11 * scale)
+                .rotationEffect(.degrees(Double(components.second ?? 0) * 6))
+
+            Circle()
+                .fill(accent)
+                .frame(width: 5 * scale, height: 5 * scale)
+        }
+    }
+
+    private func clockDisplayParts(_ date: Date) -> (hour: String, minute: String, meridiem: String) {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        let hour24 = components.hour ?? 0
+        let minute = components.minute ?? 0
+        let format = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: Locale.current) ?? "HH"
+        let usesTwelveHourClock = format.contains("a")
+        let hour = usesTwelveHourClock ? (hour24 % 12 == 0 ? 12 : hour24 % 12) : hour24
+        let meridiem = usesTwelveHourClock ? (hour24 < 12 ? "AM" : "PM") : ""
+        return (String(format: "%02d", hour), String(format: "%02d", minute), meridiem)
     }
 
     private var compactStopwatch: some View {
@@ -5152,7 +5382,7 @@ private struct SimpleClosedNotchView: View {
     private func closedSlot(_ widget: ModuleID) -> some View {
         let preset = settings.style(for: widget)
         switch preset {
-        case .clean:
+        case .clean, .stackedDigital, .flipClock, .minimalDial, .romanDial:
             closedCore(widget)
                 .padding(.horizontal, 6 * scale)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
