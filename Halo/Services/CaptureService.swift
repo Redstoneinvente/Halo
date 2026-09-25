@@ -16,6 +16,10 @@ final class CaptureService: ObservableObject {
     }
 
     func capture(completion: @escaping (URL) -> Void) {
+        guard HaloFeatureAccess.shared.allows(.captureWidget) else {
+            error = "Capture & OCR is available with Halo Full."
+            return
+        }
         guard !busy else { return }
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
             error = "Allow Screen Recording in System Settings, then relaunch Halo if macOS requests it."; return
@@ -76,6 +80,10 @@ final class CaptureService: ObservableObject {
     }
 
     func recognize(_ url: URL) {
+        guard HaloFeatureAccess.shared.allows(.captureWidget) else {
+            error = "Capture & OCR is available with Halo Full."
+            return
+        }
         guard !busy else { return }; busy = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
@@ -88,6 +96,11 @@ final class CaptureService: ObservableObject {
     }
 
     func chooseImage() {
+        guard HaloFeatureAccess.shared.allows(.captureWidget) else {
+            error = "Capture & OCR is available with Halo Full."
+            HaloUpgradeCoordinator.shared.present()
+            return
+        }
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.image]
         if panel.runModal() == .OK, let url = panel.url { recognize(url) }
     }
@@ -403,40 +416,117 @@ final class TeleprompterCoordinator: NSObject {
     private var contextMatchState: [UUID: Bool] = [:]
     private var contextOwnedProfileID: UUID?
     private var installed = false
+    private var runtimeInstalled = false
 
     private var commercialSurfaceAccessReady: Bool {
-        HaloCommercialSurfaceGate.shared.isReady
+        HaloRuntimeGate.shared.isReady &&
+            HaloFeatureAccess.shared.allows(.contextInterfaces)
     }
 
     func install() {
-        guard !installed else { return }; installed = true
+        guard !installed else { return }
+        installed = true
 
-        commercialAccessCancellable = HaloCommercialSurfaceGate.shared.$isReady
+        commercialAccessCancellable = Publishers.CombineLatest(
+            HaloRuntimeGate.shared.$isReady,
+            HaloFeatureAccess.shared.$accessLevel
+        )
+            .map { ready, _ in
+                ready && HaloFeatureAccess.shared.allows(.contextInterfaces)
+            }
             .removeDuplicates()
             .receive(on: RunLoop.main)
             .sink { [weak self] ready in
-                guard !ready else { return }
                 Task { @MainActor [weak self] in
-                    self?.resetForCommercialLock()
+                    self?.setRuntimeInstalled(ready)
                 }
             }
 
-        installInputMonitors(); installWorkspaceObservers(); installRecordingPolling(); installContextAutomation()
-        NotificationCenter.default.addObserver(self, selector: #selector(openSettingsNotification), name: .init("HaloOpenTeleprompterSettings"), object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(toggleNotification), name: .init("HaloToggleTeleprompter"), object: nil)
-        observers.append(NotificationCenter.default.addObserver(forName: .init("HaloTeleprompterCIOwnershipChanged"), object: nil, queue: .main) { [weak self] note in
-            let owns = (note.userInfo?["owns"] as? Bool) ?? false
-            Task { @MainActor in
-                guard let self else { return }
-                if !owns, self.promptPanel?.isVisible == true { self.hidePrompt() }
+        setRuntimeInstalled(commercialSurfaceAccessReady)
+    }
+
+    private func setRuntimeInstalled(_ enabled: Bool) {
+        if enabled {
+            guard !runtimeInstalled else { return }
+            runtimeInstalled = true
+
+            installInputMonitors()
+            installWorkspaceObservers()
+            installRecordingPolling()
+            installContextAutomation()
+
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(openSettingsNotification),
+                name: .init("HaloOpenTeleprompterSettings"),
+                object: nil
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(toggleNotification),
+                name: .init("HaloToggleTeleprompter"),
+                object: nil
+            )
+            observers.append(
+                NotificationCenter.default.addObserver(
+                    forName: .init("HaloTeleprompterCIOwnershipChanged"),
+                    object: nil,
+                    queue: .main
+                ) { [weak self] note in
+                    let owns = (note.userInfo?["owns"] as? Bool) ?? false
+                    Task { @MainActor in
+                        guard let self else { return }
+                        if !owns, self.promptPanel?.isVisible == true { self.hidePrompt() }
+                    }
+                }
+            )
+            for name in ["HaloScreenRecordingStateChanged", "HaloHUDScreenRecordingStateChanged"] {
+                observers.append(
+                    NotificationCenter.default.addObserver(
+                        forName: .init(name),
+                        object: nil,
+                        queue: .main
+                    ) { [weak self] note in
+                        let active = (note.userInfo?["active"] as? Bool)
+                            ?? (note.userInfo?["recording"] as? Bool)
+                            ?? false
+                        Task { @MainActor in self?.recordingStateChanged(active) }
+                    }
+                )
             }
-        })
-        for name in ["HaloScreenRecordingStateChanged", "HaloHUDScreenRecordingStateChanged"] {
-            observers.append(NotificationCenter.default.addObserver(forName: .init(name), object: nil, queue: .main) { [weak self] note in
-                let active = (note.userInfo?["active"] as? Bool) ?? (note.userInfo?["recording"] as? Bool) ?? false
-                Task { @MainActor in self?.recordingStateChanged(active) }
-            })
+            return
         }
+
+        resetForCommercialLock()
+        guard runtimeInstalled else { return }
+        runtimeInstalled = false
+
+        for monitor in monitors {
+            NSEvent.removeMonitor(monitor)
+        }
+        monitors.removeAll()
+
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        observers.removeAll()
+
+        NotificationCenter.default.removeObserver(
+            self,
+            name: .init("HaloOpenTeleprompterSettings"),
+            object: nil
+        )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: .init("HaloToggleTeleprompter"),
+            object: nil
+        )
+
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        contextTimer?.invalidate()
+        contextTimer = nil
     }
 
     @objc private func openSettingsNotification() { showSettings() }
@@ -448,6 +538,9 @@ final class TeleprompterCoordinator: NSObject {
         contextOwnedProfileID = nil
         if promptPanel?.isVisible == true {
             hidePrompt()
+        }
+        if settingsWindow?.isVisible == true {
+            settingsWindow?.orderOut(nil)
         }
     }
 

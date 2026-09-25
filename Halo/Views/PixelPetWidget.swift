@@ -1024,12 +1024,14 @@ final class HaloPixelPalStore: ObservableObject {
     }
 
     func update<T>(_ keyPath: WritableKeyPath<HaloPixelPalPreferences, T>, _ value: T) {
+        guard HaloFeatureAccess.shared.allows(.pixelPal) else { return }
         var next = preferences
         next[keyPath: keyPath] = value
         preferences = next.normalized()
     }
 
     func react(_ expression: HaloPixelPalExpression, seconds: Double = 1.7) {
+        guard HaloFeatureAccess.shared.allows(.pixelPal) else { return }
         clearReactionWork?.cancel()
         if expression != .furious {
             cookieRescueWork?.cancel()
@@ -1043,7 +1045,9 @@ final class HaloPixelPalStore: ObservableObject {
     }
 
     func tapped() {
-        guard preferences.tapReaction, reaction != .furious else { return }
+        guard HaloFeatureAccess.shared.allows(.pixelPal),
+              preferences.tapReaction,
+              reaction != .furious else { return }
         if let escalation = escalatedTapReaction(forPhysicalTapCount: 1) {
             recordIrritation(escalation == .furious ? 1.4 : 0.75)
             react(escalation, seconds: escalation == .furious ? 2.82 : 3.4)
@@ -1060,7 +1064,9 @@ final class HaloPixelPalStore: ObservableObject {
     }
 
     func doubleTapped() {
-        guard preferences.doubleTapReaction, reaction != .furious else { return }
+        guard HaloFeatureAccess.shared.allows(.pixelPal),
+              preferences.doubleTapReaction,
+              reaction != .furious else { return }
         if let escalation = escalatedTapReaction(forPhysicalTapCount: 2) {
             react(escalation, seconds: escalation == .furious ? 2.82 : 3.4)
             return
@@ -1078,7 +1084,9 @@ final class HaloPixelPalStore: ObservableObject {
     }
 
     func feedFuryCookie() {
-        guard reaction == .furious, cookieRescueStarted == nil else { return }
+        guard HaloFeatureAccess.shared.allows(.pixelPal),
+              reaction == .furious,
+              cookieRescueStarted == nil else { return }
         clearReactionWork?.cancel()
         cancelCookieSequence()
 
@@ -1112,6 +1120,7 @@ final class HaloPixelPalStore: ObservableObject {
     }
 
     func feedCookie() {
+        guard HaloFeatureAccess.shared.allows(.pixelPal) else { return }
         if reaction == .furious {
             feedFuryCookie()
             return
@@ -1161,18 +1170,24 @@ final class HaloPixelPalStore: ObservableObject {
     }
 
     func petted() {
-        guard preferences.pettingReaction, reaction != .furious else { return }
+        guard HaloFeatureAccess.shared.allows(.pixelPal),
+              preferences.pettingReaction,
+              reaction != .furious else { return }
         recordAffection(0.68)
         react(.petting, seconds: 1.15)
     }
 
     func peeked() {
-        guard preferences.peekReaction, reaction == nil else { return }
+        guard HaloFeatureAccess.shared.allows(.pixelPal),
+              preferences.peekReaction,
+              reaction == nil else { return }
         react(.peek, seconds: 0.92)
     }
 
     func fileCuriosity(dropped: Bool) {
-        guard preferences.fileCuriosityReaction, reaction != .furious else { return }
+        guard HaloFeatureAccess.shared.allows(.pixelPal),
+              preferences.fileCuriosityReaction,
+              reaction != .furious else { return }
         recordAffection(dropped ? 0.18 : 0.05)
         if dropped {
             react(.proud, seconds: 1.15)
@@ -1180,7 +1195,8 @@ final class HaloPixelPalStore: ObservableObject {
     }
 
     func considerChase(at now: Date) {
-        guard preferences.chaseReaction,
+        guard HaloFeatureAccess.shared.allows(.pixelPal),
+              preferences.chaseReaction,
               reaction == nil,
               now.timeIntervalSince(lastChaseRoll) >= 4.2 else { return }
         lastChaseRoll = now
@@ -1230,7 +1246,8 @@ final class HaloPixelPalStore: ObservableObject {
     }
 
     func longPressed() {
-        guard preferences.longPressReaction else { return }
+        guard HaloFeatureAccess.shared.allows(.pixelPal),
+              preferences.longPressReaction else { return }
         let sequence: [HaloPixelPalExpression] = [.sleepy, .shy, .smug]
         recordAffection(0.24)
         react(sequence[pressIndex % sequence.count], seconds: 2.4)

@@ -402,6 +402,8 @@ final class HaloHUDEngine {
     }
 
     func emit(_ event: HaloHUDEvent, force: Bool = false) {
+        guard HaloFeatureAccess.shared.allows(hudEvent: event.kind) else { return }
+
         // Notch Bubbles consume Halo HUD's verified event stream instead of re-detecting
         // volume/brightness/device changes. That keeps source identity and coalescing intact.
         NotificationCenter.default.post(
@@ -409,7 +411,9 @@ final class HaloHUDEngine {
             object: event
         )
 
-        let bubbleSettings = NotchBubbleSettingsStore.shared.settings.normalized()
+        let bubbleSettings = HaloFeatureAccess.shared.effectiveBubbleSettings(
+            NotchBubbleSettingsStore.shared.settings.normalized()
+        )
         if bubbleSettings.enabled,
            bubbleSettings.resolvedReplaceHaloHUDFeedback,
            bubbleSettings.acceptsHUDEvent(event.kind) {
@@ -620,10 +624,12 @@ final class HaloHUDEngine {
     }
 
     private func closedNotchAppearance(for screen: NSScreen) -> Appearance {
+        let access = HaloFeatureAccess.shared
         let id = WindowManager.displayID(screen)
-        if let override = workspace.settings.displays.first(where: { $0.id == id && $0.enabled }),
+        if access.allows(.multiDisplayCustomization),
+           let override = workspace.settings.displays.first(where: { $0.id == id && $0.enabled }),
            let layout = override.layout {
-            return layout.appearance
+            return access.effectiveLayout(layout).appearance
         }
         return workspace.effectiveLayout.appearance
     }

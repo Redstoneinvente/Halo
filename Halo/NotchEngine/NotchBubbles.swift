@@ -1277,6 +1277,87 @@ final class NotchBubbleActivityCenter: ObservableObject {
 }
 
 @MainActor
+extension HaloFeatureAccess {
+    /// Bubble settings used for presentation right now. Lite restrictions are
+    /// applied to a copy so the user's advanced Full setup stays untouched.
+    func effectiveBubbleSettings(_ saved: NotchBubbleSettings) -> NotchBubbleSettings {
+        let saved = saved.normalized()
+        guard !isFull else { return saved }
+
+        var value = saved
+
+        // Lite keeps the three core providers only.
+        value.pixelPalEnabled = false
+        value.clockEnabled = false
+        value.stopwatchEnabled = false
+        value.systemEnabled = false
+        value.clipboardEnabled = false
+        value.calendarEnabled = false
+        value.vinylEnabled = false
+        value.filesEnabled = false
+
+        // Persistent/pinned provider behavior is part of advanced Bubbles.
+        value.musicPersistent = false
+        value.timerPersistent = false
+        value.pixelPalPersistent = false
+        value.stopwatchPersistent = false
+        value.calendarPersistent = false
+        value.vinylPersistent = false
+        value.filesPersistent = false
+        value.audioPersistent = false
+        value.systemPersistent = false
+        value.clipboardPersistent = false
+
+        // Lite Bubbles use Halo's normal visibility behavior rather than
+        // retaining Full-only visibility/persistence policies.
+        value.showWhenClosed = true
+        value.showWhenOpen = true
+        value.musicVisibility = .whilePlaying
+        // Volume is a transient confirmation in Lite, not a pinned Audio utility.
+        value.audioEnabled = false
+        value.audioFeedbackEnabled = saved.audioFeedbackEnabled ?? true
+        value.brightnessFeedbackEnabled = false
+        value.powerFeedbackEnabled = false
+        value.deviceFeedbackEnabled = false
+
+        // One automatic/default Bubble with Halo Glass and Fluid motion.
+        value.maximumBubbles = 1
+        value.layout = .satellites
+        value.bubbleSideMode = .automatic
+        value.automaticPrioritySide = nil
+        value.spacing = 10
+        value.bubbleSize = 42
+        value.verticalOffset = 0
+        value.shape = .glass
+        value.cornerRadius = 18
+        value.glassIntensity = 0.82
+        value.bubbleTint = nil
+        value.bubbleAccent = nil
+        value.bubbleTintAmount = nil
+        value.animation = .fluid
+        value.lifecycleDuration = nil
+
+        // Provider-specific display/appearance/gesture customization is Full.
+        value.musicDisplayMode = nil
+        value.musicShowPlaybackGlyph = nil
+        value.musicArtworkZoom = nil
+        value.musicTapAction = nil
+        value.timerDisplayMode = nil
+        value.audioDisplayMode = nil
+        value.bubbleStyles = nil
+
+        // Advanced activity-policy knobs fall back to Halo's defaults.
+        value.confirmationDuration = nil
+        value.completionDuration = nil
+        value.showAutomaticInFullscreen = nil
+        value.showConfirmationsInFullscreen = nil
+        value.replaceHaloHUDFeedback = false
+
+        return value.normalized()
+    }
+}
+
+@MainActor
 final class NotchBubbleSettingsStore: ObservableObject {
     static let shared = NotchBubbleSettingsStore()
 
@@ -1676,20 +1757,27 @@ struct BubbleRegistry {
         runtime: NotchBubbleActivityCenter,
         surfaceExpanded: Bool
     ) -> [NotchBubble] {
-        var activities = providers.compactMap { $0.activity(store: store, settings: settings) }
-        activities.append(contentsOf: runtime.activeTransientActivities())
+        let access = HaloFeatureAccess.shared
+        let effectiveSettings = access.effectiveBubbleSettings(settings)
+
+        var activities = providers
+            .filter { access.allows(bubble: $0.kind) }
+            .compactMap { $0.activity(store: store, settings: effectiveSettings) }
+        activities.append(contentsOf: runtime.activeTransientActivities().filter {
+            access.allows(bubble: $0.kind)
+        })
 
         let fullscreen = NSApp.currentSystemPresentationOptions.contains(.fullScreen)
         let selected = policy.select(
             activities,
-            settings: settings,
+            settings: effectiveSettings,
             surfaceExpanded: surfaceExpanded,
             fullscreen: fullscreen,
             suppressedKinds: runtime.suppressedKinds
         )
 
         return selected.map { activity in
-            let style = settings.resolvedStyle(for: activity.kind)
+            let style = effectiveSettings.resolvedStyle(for: activity.kind)
             return NotchBubble(
                 kind: activity.kind,
                 size: style.size,
@@ -2868,7 +2956,7 @@ private final class NotchBubbleDisplayHost {
     private weak var state: SurfaceState?
     private var screenFrame: CGRect
     private var surfaceFrame: CGRect
-    private var commercialAccessGranted = false
+    private var surfaceRuntimeEnabled = false
     private var controllers: [NotchBubbleKind: BubbleWindowController] = [:]
     // Side ownership is intentionally stateful. Auto placement assigns a side when
     // a bubble first appears and never moves an existing bubble across the notch
@@ -2906,9 +2994,9 @@ private final class NotchBubbleDisplayHost {
         refresh(animated: false)
     }
 
-    func setCommercialAccessGranted(_ granted: Bool) {
-        guard commercialAccessGranted != granted else { return }
-        commercialAccessGranted = granted
+    func setSurfaceRuntimeEnabled(_ granted: Bool) {
+        guard surfaceRuntimeEnabled != granted else { return }
+        surfaceRuntimeEnabled = granted
         refresh(animated: true)
     }
 
@@ -2971,6 +3059,12 @@ private final class NotchBubbleDisplayHost {
                 }
                 self.refresh(animated: true)
             }
+            .store(in: &subscriptions)
+
+        HaloFeatureAccess.shared.$accessLevel
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refresh(animated: true) }
             .store(in: &subscriptions)
 
         store.$deadline
@@ -3124,10 +3218,12 @@ private final class NotchBubbleDisplayHost {
             return
         }
 
-        let settings = settingsStore.settings.normalized()
+        let settings = HaloFeatureAccess.shared.effectiveBubbleSettings(
+            settingsStore.settings.normalized()
+        )
         let allowedBySurfaceState = state.expanded ? settings.showWhenOpen : settings.showWhenClosed
 
-        guard commercialAccessGranted,
+        guard surfaceRuntimeEnabled,
               settings.enabled,
               allowedBySurfaceState else {
             removeAll(animated: animated)
@@ -3265,7 +3361,9 @@ private final class NotchBubbleDisplayHost {
     }
 
     private func removeAll(animated: Bool) {
-        let settings = settingsStore.settings.normalized()
+        let settings = HaloFeatureAccess.shared.effectiveBubbleSettings(
+            settingsStore.settings.normalized()
+        )
         let compactWidth: CGFloat = {
             guard let state else { return 190 }
             return state.physicalNotchWidth > 1 ? state.physicalNotchWidth : state.compactWidth
@@ -3304,7 +3402,7 @@ final class NotchBubbleManager {
     private let settingsStore = NotchBubbleSettingsStore.shared
     private let activityCenter = NotchBubbleActivityCenter.shared
     private var hosts: [String: NotchBubbleDisplayHost] = [:]
-    private var commercialAccessGranted = false
+    private var surfaceRuntimeEnabled = false
     private var subscriptions = Set<AnyCancellable>()
 
     init(store: AppStore) {
@@ -3316,7 +3414,9 @@ final class NotchBubbleManager {
                 guard let self, let event = note.object as? HaloHUDEvent else { return }
                 self.activityCenter.publishHUD(
                     event,
-                    settings: self.settingsStore.settings.normalized()
+                    settings: HaloFeatureAccess.shared.effectiveBubbleSettings(
+                        self.settingsStore.settings.normalized()
+                    )
                 )
             }
             .store(in: &subscriptions)
@@ -3341,7 +3441,7 @@ final class NotchBubbleManager {
             store: store,
             settingsStore: settingsStore
         )
-        host.setCommercialAccessGranted(commercialAccessGranted)
+        host.setSurfaceRuntimeEnabled(surfaceRuntimeEnabled)
         hosts[displayID] = host
     }
 
@@ -3349,10 +3449,10 @@ final class NotchBubbleManager {
         hosts.removeValue(forKey: displayID)?.stop()
     }
 
-    func setCommercialAccessGranted(_ granted: Bool) {
-        commercialAccessGranted = granted
+    func setSurfaceRuntimeEnabled(_ granted: Bool) {
+        surfaceRuntimeEnabled = granted
         for host in hosts.values {
-            host.setCommercialAccessGranted(granted)
+            host.setSurfaceRuntimeEnabled(granted)
         }
     }
 }
@@ -3411,7 +3511,7 @@ private struct NotchBubbleView: View {
     }
 
     private var settings: NotchBubbleSettings {
-        settingsStore.settings.normalized()
+        HaloFeatureAccess.shared.effectiveBubbleSettings(settingsStore.settings.normalized())
     }
 
     private var bubbleStyle: ResolvedNotchBubbleStyle {

@@ -462,8 +462,9 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     var dragLocationHandler: ((CGPoint?) -> Void)?
     var dropHandler: (([URL]) -> Bool)?
 
-    /// Commercial access remains the hard outer boundary for Halo's surface-wide drag source.
-    var commercialAccessAllowed: (() -> Bool)? {
+    /// The normal Halo runtime remains the outer boundary for Halo's surface-wide drag source.
+    /// Edition-specific drag restrictions, if any, belong in HaloFeatureAccess later.
+    var surfaceRuntimeAllowed: (() -> Bool)? {
         didSet { refreshDropRegistration() }
     }
 
@@ -471,9 +472,9 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     /// This closure is evaluated after the normal SurfaceView arbiter has selected a winner.
     var dropZoneOverlayAllowed: (() -> Bool)?
 
-    var permitsGlobalFileDrag: Bool { hasCommercialAccess }
+    var permitsGlobalFileDrag: Bool { hasSurfaceRuntimeAccess }
     var permitsDropZoneOverlay: Bool {
-        hasCommercialAccess && (dropZoneOverlayAllowed?() ?? false)
+        hasSurfaceRuntimeAccess && (dropZoneOverlayAllowed?() ?? false)
     }
 
     private var fileDragRegistered = false
@@ -487,19 +488,19 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private var hasCommercialAccess: Bool { commercialAccessAllowed?() ?? false }
+    private var hasSurfaceRuntimeAccess: Bool { surfaceRuntimeAllowed?() ?? false }
 
-    /// Prevent SwiftUI descendants from creating an unlicensed drag path. Once unlocked,
-    /// descendants (File Shelf, etc.) may register normally alongside Halo's shared source.
+    /// Prevent SwiftUI descendants from registering drag handlers before Halo's surface
+    /// runtime is ready. Lite/Full capability rules are intentionally handled elsewhere.
     override func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {
-        guard hasCommercialAccess else { return }
+        guard hasSurfaceRuntimeAccess else { return }
         super.registerForDraggedTypes(newTypes)
     }
 
     /// Halo owns one surface-wide file-drag source. Registration is intentionally independent of
     /// the Drop CI preference: Drop CI and partner CIs are consumers of the same source.
     func refreshDropRegistration() {
-        guard hasCommercialAccess else {
+        guard hasSurfaceRuntimeAccess else {
             unregisterDraggedTypes()
             fileDragRegistered = false
             rejectSurfaceDrag()
@@ -536,7 +537,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard hasCommercialAccess else { rejectSurfaceDrag(); return [] }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return [] }
         let urls = fileURLs(sender)
         guard !urls.isEmpty else { return super.draggingEntered(sender) }
 
@@ -550,7 +551,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard hasCommercialAccess else { rejectSurfaceDrag(); return [] }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return [] }
         if surfaceDragActive {
             dragLocationHandler?(dragScreenPoint(sender))
             return .copy
@@ -559,7 +560,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        guard hasCommercialAccess else { rejectSurfaceDrag(); return }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return }
         if surfaceDragActive {
             dragLocationHandler?(nil)
             _ = dragStateHandler?(false, [])
@@ -570,7 +571,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard hasCommercialAccess else { rejectSurfaceDrag(); return false }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return false }
         guard surfaceDragActive else { return super.performDragOperation(sender) }
         let urls = fileURLs(sender)
         guard !urls.isEmpty else {
@@ -583,7 +584,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func concludeDragOperation(_ sender: NSDraggingInfo?) {
-        guard hasCommercialAccess else { rejectSurfaceDrag(); return }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return }
         if surfaceDragActive {
             dragLocationHandler?(nil)
             _ = dragStateHandler?(false, [])
@@ -804,7 +805,7 @@ final class WindowManager {
     private let store: AppStore
     private let bubbleManager: NotchBubbleManager
     private let startupActivationContext: ActivationLaunchContext
-    private var commercialAccessGranted = false
+    private var surfaceRuntimeEnabled = false
     private var initialActivationPending = false
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
@@ -833,16 +834,17 @@ final class WindowManager {
     }
 
     private var dropCISettingEnabled: Bool {
+        guard HaloFeatureAccess.shared.allows(.contextInterfaces) else { return false }
         let defaults = UserDefaults.standard
         return defaults.object(forKey: "HaloContextDropEnabled") == nil
             ? true
             : defaults.bool(forKey: "HaloContextDropEnabled")
     }
 
-    func setCommercialAccessGranted(_ granted: Bool) {
-        guard commercialAccessGranted != granted else { return }
-        commercialAccessGranted = granted
-        bubbleManager.setCommercialAccessGranted(granted)
+    func setSurfaceRuntimeEnabled(_ granted: Bool) {
+        guard surfaceRuntimeEnabled != granted else { return }
+        surfaceRuntimeEnabled = granted
+        bubbleManager.setSurfaceRuntimeEnabled(granted)
 
         hosts.values.forEach { host in
             host.refreshDropCIRegistration?()
@@ -883,6 +885,24 @@ final class WindowManager {
             .store(in: &subscriptions)
         store.$configuration.dropFirst().receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+        HaloFeatureAccess.shared.$accessLevel
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] level in
+                if level == .lite {
+                    let session = SurfaceGeometryEditingSession.shared
+                    if session.isEnabled {
+                        session.cancelTransaction()
+                        session.previewSnapshot = nil
+                        session.isEnabled = false
+                        session.displayID = nil
+                    }
+                }
+                self?.reconcile()
+                self?.refreshGeometryEditorPanels()
+            }
+            .store(in: &subscriptions)
         NotchAmbientStore.shared.$settings.dropFirst().removeDuplicates()
             .debounce(for: .milliseconds(45), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
@@ -984,6 +1004,15 @@ final class WindowManager {
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.$activities.receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+
+        // Closed-notch clock width can change when a 12-hour clock crosses between
+        // one- and two-digit hours. Re-measure periodically so the surface hugs the
+        // rendered clock instead of permanently reserving room for "12".
+        Timer.publish(every: 60, on: .main, in: .common)
+            .autoconnect()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }
+            .store(in: &subscriptions)
 
         let shouldHideInitialFrame = ActivationSequenceCoordinator.shared.shouldPlay(startupActivationContext)
         initialActivationPending = shouldHideInitialFrame
@@ -1588,11 +1617,104 @@ final class WindowManager {
             case .none: return 0
             case .clock:
                 let style = layout.widgetStyle(for: .clock)
-                let clockFont = style.fontFamily == .custom
-                    ? NSFont(name: style.customFont, size: size) ?? font
-                    : NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
-                let template = "88:88" + (style.clock.showSeconds ? ":88" : "") + (style.clock.twentyFourHour ? "" : " PM")
-                return textWidth(template, font: clockFont) * 1.04
+
+                // ClosedNotchView renders WidgetClock at its normal compact size.
+                // Measure that exact compact typography here and grow the surface
+                // around it. In particular, AM/PM is deliberately much smaller
+                // than the hour/minute glyphs, so measuring "PM" at the full time
+                // size creates a large empty wing in 12-hour mode.
+                let compactReferenceWidth = 220.0
+                let compactReferenceHeight = 58.0
+                let clockSize: Double
+                if style.clock.usesAutomaticTypography {
+                    let automatic = min(compactReferenceHeight * 0.46, compactReferenceWidth * 0.17)
+                    clockSize = max(18, automatic * style.clock.resolvedTimeScale)
+                } else {
+                    // ClosedNotchView sets compactClock.fontSize to this same `size`,
+                    // then WidgetClock applies the horizontalCompact 1.55x multiplier.
+                    clockSize = max(8, size * 1.55 * style.clock.resolvedTimeScale)
+                }
+
+                let widthScale: Double
+                switch style.clock.resolvedFontWidth {
+                case .compressed: widthScale = 0.86
+                case .condensed: widthScale = 0.93
+                case .standard: widthScale = 1.0
+                case .expanded: widthScale = 1.14
+                }
+
+                func clockFont(_ pointSize: Double, weight: NSFont.Weight = .medium, digits: Bool = false) -> NSFont {
+                    if style.fontFamily == .custom {
+                        return NSFont(name: style.customFont, size: pointSize)
+                            ?? NSFont.systemFont(ofSize: pointSize, weight: weight)
+                    }
+                    if digits && style.clock.usesMonospacedDigits {
+                        return NSFont.monospacedDigitSystemFont(ofSize: pointSize, weight: weight)
+                    }
+                    return NSFont.systemFont(ofSize: pointSize, weight: weight)
+                }
+
+                func glyphWidth(_ text: String, font: NSFont, tracking: Double = 0) -> Double {
+                    let base = ceil((text as NSString).size(withAttributes: [.font: font]).width)
+                    let tracked = base + max(0, tracking) * Double(max(0, text.count - 1))
+                    return tracked * widthScale
+                }
+
+                let digitSpacing = max(0, style.clock.resolvedDigitSpacing)
+                let tracking = style.clock.resolvedTracking
+
+                // Match the hour's real rendered character count. In 12-hour mode
+                // "2:56 PM" should not reserve the width of "12:56 PM". The minute
+                // and optional seconds stay at two digits, so their width is stable.
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(identifier: style.clock.timeZone) ?? .current
+                let hour24 = calendar.component(.hour, from: Date())
+                let displayHour = style.clock.twentyFourHour
+                    ? hour24
+                    : (hour24 % 12 == 0 ? 12 : hour24 % 12)
+                let hourText = style.clock.resolvedLeadingZero
+                    ? String(format: "%02d", displayHour)
+                    : String(displayHour)
+
+                var pieces: [Double] = [
+                    glyphWidth(hourText, font: clockFont(clockSize * style.clock.resolvedHourEmphasis, digits: true), tracking: tracking),
+                    glyphWidth(style.clock.resolvedSeparator.glyph, font: clockFont(clockSize * 0.86, weight: .regular)),
+                    glyphWidth("88", font: clockFont(clockSize * style.clock.resolvedMinuteEmphasis, digits: true), tracking: tracking)
+                ]
+
+                if style.clock.showSeconds {
+                    pieces.append(glyphWidth(style.clock.resolvedSeparator.glyph, font: clockFont(clockSize * 0.54, weight: .regular)))
+                    pieces.append(glyphWidth("88", font: clockFont(clockSize * style.clock.resolvedSecondsEmphasis, digits: true), tracking: tracking))
+                }
+
+                if !style.clock.twentyFourHour && style.clock.resolvedShowAMPM {
+                    let ampmSize = max(8, clockSize * 0.23)
+                    let leadingInset = max(1, clockSize * 0.02)
+                    let ampm = hour24 < 12 ? "AM" : "PM"
+                    pieces.append(
+                        glyphWidth(ampm, font: clockFont(ampmSize, weight: .semibold))
+                        + leadingInset
+                    )
+                }
+
+                var contentWidth = pieces.reduce(0, +)
+                    + digitSpacing * Double(max(0, pieces.count - 1))
+
+                // The compact closed-notch presentation shows the short date inline
+                // when Show Date is enabled. Reserve its natural width as well so
+                // the date never gets clipped or silently hidden.
+                if style.clock.showDate {
+                    let dateBase = clockSize / style.clock.resolvedTimeDateRatio * style.clock.resolvedDateScale
+                    let dateSize = min(24, max(9, dateBase))
+                    let secondarySize = min(18, max(8, dateSize * 0.88 * style.clock.resolvedSecondaryScale))
+                    let dateGap = max(6, style.resolvedContent.spacing * 0.50)
+                    contentWidth += dateGap
+                        + glyphWidth("Wed, Sep 28", font: clockFont(secondarySize, weight: .medium))
+                }
+
+                // Keep only a tight cushion here; the closed-surface sizing path
+                // already adds its own rendering allowance outside the widget width.
+                return contentWidth + 4
             case .date:
                 return textWidth("Sep 28", font: font)
             case .timer:
@@ -2113,6 +2235,11 @@ final class WindowManager {
     }
 
     private func schedulePixelPalGatedCollapse(for host: Host) -> Bool {
+        guard HaloFeatureAccess.shared.allows(.pixelPal) else {
+            host.state.setPixelPalCloseGateActive(false)
+            return false
+        }
+
         // This delay exists only for a Pixel Pal that is actually part of the visible
         // normal workspace being dismissed. When a CI owns the surface, Pixel Pal is
         // not rendered, so gating CI closure on its boot-down animation is dead time.
@@ -2150,20 +2277,31 @@ final class WindowManager {
         let screens = store.configuration.allDisplays ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
         var active = Set<String>()
         for screen in screens {
+            let access = HaloFeatureAccess.shared
             let id = Self.displayID(screen)
             let override = store.workspace.settings.displays.first { $0.id == id }
             guard override?.enabled != false else { continue }
-            let displayProfile = override?.profileID.flatMap { profileID in
-                store.workspace.settings.profiles.first { $0.id == profileID }
-            }
+
+            let usesDisplayCustomization = access.allows(.multiDisplayCustomization)
+            let displayProfile = usesDisplayCustomization
+                ? override?.profileID.flatMap { profileID in
+                    store.workspace.settings.profiles.first { $0.id == profileID }
+                }
+                : nil
+
             active.insert(id)
             let existing = hosts[id]
             let host = existing ?? Host()
-            var theme = displayProfile?.theme ?? override?.theme ?? store.workspace.scheduledTheme ?? store.configuration.theme
+
+            let savedTheme: Theme = usesDisplayCustomization
+                ? (displayProfile?.theme ?? override?.theme ?? store.workspace.scheduledTheme ?? store.configuration.theme)
+                : (store.workspace.scheduledTheme ?? store.configuration.theme)
+            var theme = access.effectiveTheme(savedTheme)
             if store.configuration.simulateNotch && theme.style == .notch { theme.style = .simulated }
-            let displayLayout = displayProfile?.layout ?? override?.layout
-            var appearance = displayLayout?.appearance ?? store.workspace.effectiveLayout.appearance
-            let effectiveLayout = displayLayout ?? store.workspace.effectiveLayout
+
+            let displayLayout = usesDisplayCustomization ? (displayProfile?.layout ?? override?.layout) : nil
+            let effectiveLayout = access.effectiveLayout(displayLayout ?? store.workspace.effectiveLayout)
+            var appearance = effectiveLayout.appearance
             // Preserve the old horizontal-height behavior only for legacy Default layouts
             // saved before the explicit opened-notch content mode existed. Visual Workspace
             // has its own content mode and must always honor Appearance.expandedHeight;
@@ -2306,8 +2444,8 @@ final class WindowManager {
                 .environment(\.haloScreenFrame, screen.frame)
                 let view = HaloDropHostingView(rootView: root)
                 view.sizingOptions = []
-                view.commercialAccessAllowed = { [weak self] in
-                    self?.commercialAccessGranted ?? false
+                view.surfaceRuntimeAllowed = { [weak self] in
+                    self?.surfaceRuntimeEnabled ?? false
                 }
                 view.dropZoneOverlayAllowed = { [weak self, weak host] in
                     guard let self, let host else { return false }
@@ -2318,7 +2456,7 @@ final class WindowManager {
                 }
                 view.dragStateHandler = { [weak self, weak host] active, urls in
                     guard let self, let host else { return false }
-                    guard self.commercialAccessGranted else {
+                    guard self.surfaceRuntimeEnabled else {
                         host.state.cancelFileDrop()
                         return false
                     }
@@ -2327,7 +2465,10 @@ final class WindowManager {
                     if active {
                         ActivationSequenceCoordinator.shared.cancelForInteraction()
                         host.state.beginFileDrop(count: urls.count)
-                        let partnerEligible = runtime.fileDragEntered(files: urls, displayID: id)
+                        let integrationsAllowed = HaloFeatureAccess.shared.allows(.integrations)
+                        let partnerEligible = integrationsAllowed
+                            ? runtime.fileDragEntered(files: urls, displayID: id)
+                            : false
                         let claimed = self.dropCISettingEnabled || partnerEligible
                         if !claimed {
                             host.state.cancelFileDrop()
@@ -2337,22 +2478,26 @@ final class WindowManager {
                     }
 
                     host.state.endFileDrop()
-                    let shouldCollapse = runtime.fileDragExited(displayID: id, pinned: host.state.pinned)
+                    let shouldCollapse = HaloFeatureAccess.shared.allows(.integrations)
+                        ? runtime.fileDragExited(displayID: id, pinned: host.state.pinned)
+                        : false
                     if shouldCollapse && !host.state.pinned { host.state.expanded = false }
                     return false
                 }
                 view.dragLocationHandler = { [weak host] screenPoint in
-                    guard host != nil else { return }
+                    guard host != nil,
+                          HaloFeatureAccess.shared.allows(.integrations) else { return }
                     _ = IntegrationCIRuntime.shared.updateFileDragLocation(
                         displayID: id,
                         screenPoint: screenPoint
                     )
                 }
                 view.dropHandler = { [weak self, weak host] urls in
-                    guard let self, let host, self.commercialAccessGranted else { return false }
+                    guard let self, let host, self.surfaceRuntimeEnabled else { return false }
                     let runtime = IntegrationCIRuntime.shared
 
-                    if let winner = runtime.currentWinnerCIID(displayID: id),
+                    if HaloFeatureAccess.shared.allows(.integrations),
+                       let winner = runtime.currentWinnerCIID(displayID: id),
                        host.state.activeCIIdentifier == winner {
                         guard let commit = runtime.commitFileDragAtHoveredAction(displayID: id) else {
                             return false
@@ -2547,6 +2692,12 @@ final class WindowManager {
                     refreshGeometryEditorPanels()
                 }
             }
+            if access.allows(.notchAmbient) {
+                host.ambientPanel.order(.below, relativeTo: host.panel.windowNumber)
+            } else if host.ambientPanel.isVisible {
+                host.ambientPanel.orderOut(nil)
+            }
+
             bubbleManager.register(
                 displayID: id,
                 screen: screen,

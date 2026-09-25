@@ -11,6 +11,7 @@ struct SettingsView: View {
 @MainActor struct WorkspaceSettingsView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
+    @ObservedObject private var featureAccess = HaloFeatureAccess.shared
     @AppStorage("onboarded") private var onboarded = false
     @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
     @State private var section: String? = "General"
@@ -29,14 +30,12 @@ struct SettingsView: View {
     }
 
     private var visualWorkspaceActive: Bool {
-        workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace
+        featureAccess.allows(.visualWorkspace) &&
+            workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace
     }
 
     private var sidebarGroups: [SidebarGroup] {
-        var workspaceItems = ["Modules", "Widgets", "Media & Files"]
-        if visualWorkspaceActive {
-            workspaceItems.insert("Visual Workspace Editor", at: 0)
-        }
+        let workspaceItems = ["Visual Workspace Editor", "Modules", "Widgets", "Media & Files"]
         var coreItems = ["General"]
         if HaloDistribution.current.supportsExternalLicensing || HaloDistribution.current.supportsAppStoreLicensing {
             coreItems.append("Account & License")
@@ -86,6 +85,26 @@ struct SettingsView: View {
         sidebarGroups.flatMap(\.items)
     }
 
+    private func fullCapability(forSection name: String) -> HaloCapability? {
+        switch name {
+        case "Notch Skins": return .notchSkins
+        case "Notch Ambient": return .notchAmbient
+        case "Update Animation": return .advancedTransitions
+        case "Visual Workspace Editor": return .visualWorkspace
+        case "Context Notch Interface": return .contextInterfaces
+        case "Profiles": return .profiles
+        case "Schedules": return .schedules
+        case "Automation": return .profileAutomation
+        case "Plugins": return .plugins
+        default: return nil
+        }
+    }
+
+    private func isFullOnlySection(_ name: String) -> Bool {
+        guard let capability = fullCapability(forSection: name) else { return false }
+        return !featureAccess.allows(capability)
+    }
+
     private func sidebarGroupExpansion(_ group: SidebarGroup) -> Binding<Bool> {
         Binding(
             get: { expandedSidebarGroups.contains(group.id) },
@@ -113,6 +132,9 @@ struct SettingsView: View {
     }
 
     private func sectionHelp(_ name: String) -> String {
+        if isFullOnlySection(name) {
+            return "\(name) is available with Halo Full. Open it to learn what it adds."
+        }
         guard isSectionUnavailable(name) else { return name }
         return "\(name) is locked while Visual Workspace is active. Configure these controls in Visual Workspace Editor, or switch Appearance → Opened Space → Layout System to Default."
     }
@@ -134,7 +156,9 @@ struct SettingsView: View {
             Label(name, systemImage: sectionIcon(name))
                 .labelStyle(.titleAndIcon)
             Spacer(minLength: 4)
-            if isSectionUnavailable(name) {
+            if isFullOnlySection(name) {
+                HaloFullBadge()
+            } else if isSectionUnavailable(name) {
                 HStack(spacing: 3) {
                     Text("Default only")
                         .font(.caption2)
@@ -159,7 +183,23 @@ struct SettingsView: View {
                 HStack(spacing: 10) {
                     Image(nsImage: NSApp.applicationIconImage).resizable().scaledToFit().frame(width: 44, height: 44).accessibilityLabel("Halo app icon")
                     VStack(alignment: .leading) {
-                        Text("Halo").font(.headline)
+                        HStack(spacing: 6) {
+                            Text("Halo").font(.headline)
+                            if !featureAccess.isFull {
+                                Text("LITE")
+                                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                                    .tracking(0.4)
+                                    .foregroundStyle(Color.accentColor)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.accentColor.opacity(0.12), in: Capsule())
+                                    .overlay {
+                                        Capsule()
+                                            .stroke(Color.accentColor.opacity(0.28), lineWidth: 0.5)
+                                    }
+                                    .accessibilityLabel("Halo Lite")
+                            }
+                        }
                         Text("Make it yours").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -212,11 +252,17 @@ struct SettingsView: View {
                         .frame(width: 40, height: 40).background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
                     VStack(alignment: .leading, spacing: 4) {
                         Text(section ?? "General").font(.title2.bold())
-                        Text(section == "Visual Workspace Editor" ? "Design the active Visual Workspace" : "Changes are saved automatically").font(.caption).foregroundStyle(.secondary)
+                        Text(isFullOnlySection(section ?? "")
+                             ? "Available with Halo Full"
+                             : (section == "Visual Workspace Editor" ? "Design the active Visual Workspace" : "Changes are saved automatically"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }.padding(20)
                 Divider()
-                if section == "Visual Workspace Editor", visualWorkspaceActive {
+                if section == "Visual Workspace Editor",
+                   featureAccess.allows(.visualWorkspace),
+                   visualWorkspaceActive {
                     OpenedNotchWorkspaceEditor(layout: $workspace.settings.layout, showsCloseButton: false)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)
@@ -230,7 +276,7 @@ struct SettingsView: View {
         .onChange(of: visualWorkspaceActive) { active in
             if active && (section == "Modules" || section == "Widgets") {
                 section = "Visual Workspace Editor"
-            } else if !active && section == "Visual Workspace Editor" {
+            } else if !active && section == "Visual Workspace Editor" && featureAccess.isFull {
                 section = "Appearance"
             }
         }
@@ -307,7 +353,9 @@ struct SettingsView: View {
         case "General":
             Section("Welcome to Halo") {
                 Text("Your workspace, within reach.").font(.title2.bold())
-                Text("Hover to expand, click the top strip to toggle, right-click for profiles, and drag files onto the surface. Option–Command–Space toggles Halo by default.")
+                Text(featureAccess.isFull
+                     ? "Hover to expand, click the top strip to toggle, right-click for profiles, and drag files onto the surface. Option–Command–Space toggles Halo by default."
+                     : "Hover to expand, click the top strip to toggle, and use Option–Command–Space to toggle Halo by default.")
                 Text("Detected \(NSScreen.screens.count) display(s); \(NSScreen.screens.filter { $0.safeAreaInsets.top > 0 }.count) with a notch.")
                 ForEach(NSScreen.screens, id: \.localizedName) { screen in
                     Text("\(screen.localizedName): animation target up to \(FrameRatePolicy.target(maximum: screen.maximumFramesPerSecond, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)) fps").font(.caption)
@@ -441,19 +489,77 @@ struct SettingsView: View {
             } else {
                 HaloAccountLicenseSettingsView()
             }
-        case "Feedback & Support": HaloFeedbackCenterView()
-        case "Schedules": ScheduleSettingsView(workspace: workspace)
-        case "Appearance": AppearanceSettingsPane(store: store, workspace: workspace)
-        case "Notch Skins": NotchSkinSettingsPane(appearance: $workspace.settings.layout.appearance, theme: store.configuration.theme)
-        case "Activation Sequence": ActivationSequenceSettingsPane()
-        case "Widgets": WidgetSettingsView(layout: $workspace.settings.layout)
-        case "Closed notch": ClosedNotchSettingsView(layout: $workspace.settings.layout, media: workspace.media, app: workspace.settings.mediaApp)
-        case "Notch Bubbles": NotchBubbleSettingsView(store: store)
-        case "Notch Ambient": NotchAmbientSettingsView(store: store, workspace: workspace)
-        case "HUD": HaloHUDWorkspaceSettingsView(layout: $workspace.settings.layout, profileNames: workspace.settings.profiles.map(\.name))
+        case "Feedback & Support":
+            HaloFeedbackCenterView()
+        case "Schedules":
+            if featureAccess.allows(.schedules) {
+                ScheduleSettingsView(workspace: workspace)
+            } else {
+                HaloFullLockedPage(
+                    title: "Schedules",
+                    description: "Change Halo automatically at the times that suit you.",
+                    bullets: ["Timed profiles", "Timed backgrounds", "Scheduled workspace changes", "Schedule restoration behaviour"]
+                )
+            }
+        case "Appearance":
+            if featureAccess.allows(.advancedAppearance) {
+                AppearanceSettingsPane(store: store, workspace: workspace)
+            } else {
+                HaloLiteAppearanceSettingsPane(store: store, workspace: workspace)
+            }
+        case "Notch Skins":
+            if featureAccess.allows(.notchSkins) {
+                NotchSkinSettingsPane(appearance: $workspace.settings.layout.appearance, theme: store.configuration.theme)
+            } else {
+                HaloFullLockedPage(
+                    title: "Notch Skins",
+                    description: "Give Halo a completely different visual identity without covering its content.",
+                    bullets: ["Procedural skin library", "Blend and intensity controls", "Custom skin tinting"]
+                )
+            }
+        case "Activation Sequence":
+            if featureAccess.allows(.activationSequenceCustomization) {
+                ActivationSequenceSettingsPane()
+            } else {
+                HaloLiteActivationSequenceSettingsPane()
+            }
+        case "Widgets":
+            if featureAccess.allows(.advancedWidgetCustomization) {
+                WidgetSettingsView(layout: $workspace.settings.layout)
+            } else {
+                HaloLiteWidgetSettingsView(layout: $workspace.settings.layout)
+            }
+        case "Closed notch":
+            if featureAccess.allows(.advancedClosedNotch) {
+                ClosedNotchSettingsView(layout: $workspace.settings.layout, media: workspace.media, app: workspace.settings.mediaApp)
+            } else {
+                HaloLiteClosedNotchSettingsView()
+            }
+        case "Notch Bubbles":
+            if featureAccess.allows(.advancedBubbles) {
+                NotchBubbleSettingsView(store: store)
+            } else {
+                HaloLiteBubbleSettingsView()
+            }
+        case "Notch Ambient":
+            if featureAccess.allows(.notchAmbient) {
+                NotchAmbientSettingsView(store: store, workspace: workspace)
+            } else {
+                HaloFullLockedPage(
+                    title: "Notch Ambient",
+                    description: "Extend Halo's visual atmosphere around the physical notch.",
+                    bullets: ["Ambient effects", "Custom extents and styling", "Advanced visual presentation"]
+                )
+            }
+        case "HUD":
+            if featureAccess.allows(.advancedHUD) {
+                HaloHUDWorkspaceSettingsView(layout: $workspace.settings.layout, profileNames: workspace.settings.profiles.map(\.name))
+            } else {
+                HaloLiteHUDSettingsView(layout: $workspace.settings.layout)
+            }
         case "Modules":
             Text("Drag a module row to reorder it, or use the arrow buttons.")
-            ForEach(workspace.settings.layout.normalizedOrder()) { module in
+            ForEach(workspace.settings.layout.normalizedOrder().filter { featureAccess.allows(module: $0) }) { module in
                 HStack {
                     Toggle(isOn: Binding(get: { workspace.settings.layout.enabled.contains(module) }, set: { value in if value { workspace.settings.layout.enabled.insert(module) } else { workspace.settings.layout.enabled.remove(module) } })) { Label(module.title, systemImage: module.symbol) }
                     Button { workspace.moveModule(module, by: -1) } label: { Image(systemName: "arrow.up") }.accessibilityLabel("Move \(module.title) up")
@@ -473,7 +579,22 @@ struct SettingsView: View {
                     return true
                 }
             }
-        case "Context Notch Interface": ContextInterfaceLibraryView(layout: $workspace.settings.layout, workspace: workspace)
+            if !featureAccess.isFull {
+                HaloUpgradeCard(
+                    title: "More widgets with Halo Full",
+                    detail: "Unlock Clipboard, Launcher, Live Activities, Notes, Capture & OCR and Pixel Pal, plus their deeper customization."
+                )
+            }
+        case "Context Notch Interface":
+            if featureAccess.allows(.contextInterfaces) {
+                ContextInterfaceLibraryView(layout: $workspace.settings.layout, workspace: workspace)
+            } else {
+                HaloFullLockedPage(
+                    title: "Context Interfaces",
+                    description: "Let Halo temporarily transform itself around what you're doing.",
+                    bullets: ["Drop, Music, Teleprompter and Clipboard CIs", "Transfer, Bluetooth, Live Activities and Retro Game CIs", "Custom CI SDK packages", "Third-party Halo Integrations"]
+                )
+            }
         case "Media & Files":
             Section("Media source") {
                 Picker("Source", selection: Binding(
@@ -528,8 +649,24 @@ struct SettingsView: View {
             Picker("Remove shelf references after", selection: $workspace.settings.shelfRetentionMinutes) { Text("Manually").tag(0); Text("5 minutes").tag(5); Text("30 minutes").tag(30); Text("1 hour").tag(60) }
             Text("Up to 100 references. Pinned items do not expire. Saved references keep their original retention age after relaunch. Removing a shelf item never deletes its original.").font(.caption)
             Button("Clear shelf references") { store.clearShelf() }
-        case "Profiles": ProfileLibraryView(store: store, workspace: workspace)
+        case "Profiles":
+            if featureAccess.allows(.profiles) {
+                ProfileLibraryView(store: store, workspace: workspace)
+            } else {
+                HaloFullLockedPage(
+                    title: "Profiles",
+                    description: "Save different Halo setups and switch between them whenever your workflow changes.",
+                    bullets: ["Multiple named profiles", "Workspace snapshots", "Profile-specific appearance", "Duplicate and customize configurations"]
+                )
+            }
         case "Automation":
+            if !featureAccess.allows(.profileAutomation) {
+                HaloFullLockedPage(
+                    title: "Automation",
+                    description: "Automatically switch Halo when your context changes.",
+                    bullets: ["Application rules", "Battery and charging rules", "Display-count rules", "Time and context triggers"]
+                )
+            } else {
             Text("Rules apply a profile when a condition becomes true. The first newly matching rule wins. No scripts or shell commands run.")
             ForEach($workspace.settings.rules) { $rule in
                 VStack(alignment: .leading) {
@@ -542,25 +679,561 @@ struct SettingsView: View {
             }
             Button("Add rule") { if let profile = workspace.settings.profiles.first { workspace.settings.rules.append(AutomationRule(profileID: profile.id)) } }.disabled(workspace.settings.profiles.isEmpty)
             Text("Values: app bundle ID; battery percentage; charging true/false; display count; local hour 0–23. Rules do not restore the previous profile.").font(.caption)
-        case "Displays": DisplaySettingsPane(store: store, workspace: workspace)
+            }
+        case "Displays":
+            if featureAccess.allows(.multiDisplayCustomization) {
+                DisplaySettingsPane(store: store, workspace: workspace)
+            } else {
+                HaloLiteDisplaySettingsPane(store: store)
+            }
         case "Plugins":
-            Text("Declarative plugins add URL commands to the launcher. Each command requires confirmation. Native executable plugins are not loaded.")
-            Button("Import plugin manifest…") { workspace.importPlugin() }
-            ForEach(workspace.plugins) { plugin in HStack { Text(plugin.name); Spacer(); Text("\(plugin.commands.count) commands"); Button("Remove") { workspace.removePlugin(plugin.id) } } }
+            if featureAccess.allows(.plugins) {
+                Text("Declarative plugins add URL commands to the launcher. Each command requires confirmation. Native executable plugins are not loaded.")
+                Button("Import plugin manifest…") { workspace.importPlugin() }
+                ForEach(workspace.plugins) { plugin in HStack { Text(plugin.name); Spacer(); Text("\(plugin.commands.count) commands"); Button("Remove") { workspace.removePlugin(plugin.id) } } }
+            } else {
+                HaloFullLockedPage(
+                    title: "Plugins",
+                    description: "Extend Halo with installed plugin manifests and their actions.",
+                    bullets: ["Plugin manifests", "Plugin actions", "Launcher extensions"]
+                )
+            }
         case "Privacy":
-            Section("Clipboard — optional") {
-                Text("Halo samples text every two seconds when enabled. History stays in memory and clears on quit. Sensitive clipboard markers and listed apps are excluded; exclusions cannot guarantee detection of all secrets.")
-                Toggle("Enable text clipboard history", isOn: $workspace.settings.clipboardEnabled).onChange(of: workspace.settings.clipboardEnabled) { _ in workspace.clipboard.reset() }
-                InstalledAppExclusionPicker(bundleIDs: $workspace.settings.clipboardExcludedApps)
-                Button("Clear history now") { workspace.clipboard.reset() }
+            if featureAccess.allows(.clipboardWidget) {
+                Section("Clipboard — optional") {
+                    Text("Halo samples text every two seconds when enabled. History stays in memory and clears on quit. Sensitive clipboard markers and listed apps are excluded; exclusions cannot guarantee detection of all secrets.")
+                    Toggle("Enable text clipboard history", isOn: $workspace.settings.clipboardEnabled).onChange(of: workspace.settings.clipboardEnabled) { _ in workspace.clipboard.reset() }
+                    InstalledAppExclusionPicker(bundleIDs: $workspace.settings.clipboardExcludedApps)
+                    Button("Clear history now") { workspace.clipboard.reset() }
+                }
+            } else {
+                Section("Clipboard") {
+                    Label("Clipboard history is not active in Halo Lite", systemImage: "hand.raised.fill")
+                    Text("Halo Lite does not sample clipboard text. Clipboard history, the Clipboard widget and Clipboard Context Interface are available with Halo Full.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Section("Optional permissions") {
                 Button("Allow Calendar (today's events)") { workspace.calendar.requestAccess() }
                 Button("Allow Notifications (timer completion)") { workspace.enableNotifications() }
             }
         case "Update Animation":
-            UpdateAnimationSettingsView()
+            if featureAccess.allows(.advancedTransitions) {
+                UpdateAnimationSettingsView()
+            } else {
+                HaloFullLockedPage(
+                    title: "Update Animation",
+                    description: "Regular Halo updates remain available in Lite. Halo Full unlocks the custom update presentation.",
+                    bullets: ["Custom update animation", "Advanced transition styling"]
+                )
+            }
+        case "Visual Workspace Editor":
+            if featureAccess.allows(.visualWorkspace) {
+                Section("Visual Workspace") {
+                    Text("Design the opened Halo surface with a responsive grid, custom widget placement and adaptive layouts.")
+                    Button("Enable Visual Workspace") {
+                        workspace.settings.layout.setCustomOpenNotchWorkspaceEnabled(true)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            } else {
+                HaloFullLockedPage(
+                    title: "Visual Workspace",
+                    description: "Design your Halo exactly the way you want.",
+                    bullets: ["Position and resize widgets", "Build custom grid layouts", "Create adaptive widget arrangements", "Configure individual widget behaviour"]
+                )
+            }
         default: HaloAboutView()
+        }
+    }
+}
+
+// MARK: - Halo Lite / Full presentation
+
+@MainActor
+struct HaloFullBadge: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 8, weight: .semibold))
+            Text("FULL")
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .tracking(0.35)
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(Color.accentColor.opacity(0.10), in: Capsule())
+        .overlay {
+            Capsule().stroke(Color.accentColor.opacity(0.24), lineWidth: 0.5)
+        }
+        .accessibilityLabel("Halo Full")
+    }
+}
+
+@MainActor
+struct HaloUpgradeCard: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
+                    Text(title).font(.headline)
+                    HaloFullBadge()
+                }
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            Button("Unlock Halo Full") {
+                HaloUpgradeCoordinator.shared.present()
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(14)
+        .background(Color.accentColor.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.14), lineWidth: 1)
+        }
+    }
+}
+
+@MainActor
+struct HaloLockedSetting: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        Button {
+            HaloUpgradeCoordinator.shared.present()
+        } label: {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).foregroundStyle(.primary)
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                HaloFullBadge()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+@MainActor
+struct HaloLockedSection: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Text(title).font(.headline)
+                HaloFullBadge()
+            }
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Unlock Halo Full") {
+                HaloUpgradeCoordinator.shared.present()
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+@MainActor
+struct HaloFullLockedPage: View {
+    let title: String
+    let description: String
+    let bullets: [String]
+
+    var body: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .font(.title2)
+                        .foregroundStyle(Color.accentColor)
+                    Text(title)
+                        .font(.title3.bold())
+                    HaloFullBadge()
+                }
+
+                Text(description)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(bullets, id: \.self) { item in
+                        Label(item, systemImage: "checkmark")
+                            .font(.callout)
+                    }
+                }
+            }
+            .padding(.vertical, 6)
+        }
+
+        Section {
+            HaloUpgradeCard(
+                title: "Unlock Halo Full",
+                detail: "Get the complete Halo experience with Visual Workspace, advanced Bubbles, Pixel Pal, Profiles, Context Interfaces, deeper customization and more."
+            )
+        }
+    }
+}
+
+@MainActor
+private struct HaloLiteAppearanceSettingsPane: View {
+    @ObservedObject var store: AppStore
+    @ObservedObject var workspace: WorkspaceStore
+    @ObservedObject private var featureAccess = HaloFeatureAccess.shared
+
+    private var liteBackground: Binding<BackgroundKind> {
+        Binding(
+            get: {
+                featureAccess.effectiveLayout(workspace.settings.layout).appearance.background
+            },
+            set: { featureAccess.setLiteBackground($0) }
+        )
+    }
+
+    var body: some View {
+        Section("Background") {
+            Picker("Style", selection: liteBackground) {
+                Text("Halo Black").tag(BackgroundKind.solid)
+                Text("Gradient").tag(BackgroundKind.gradient)
+                Text("Glass").tag(BackgroundKind.glass)
+            }
+            .pickerStyle(.segmented)
+
+            Text("Lite keeps Halo's core appearance editor intentionally simple. Image and video backgrounds, advanced Glass and surface effects stay preserved for Halo Full.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Basic appearance") {
+            LabeledContent("Accent hue") {
+                Slider(value: $store.configuration.theme.tint, in: 0...1)
+                    .frame(width: 220)
+            }
+            LabeledContent("Opacity") {
+                Slider(value: $store.configuration.theme.opacity, in: 0.5...1)
+                    .frame(width: 220)
+            }
+            LabeledContent("Corner radius") {
+                HStack {
+                    Slider(value: $store.configuration.theme.cornerRadius, in: 0...48, step: 1)
+                        .frame(width: 190)
+                    Text("\(Int(store.configuration.theme.cornerRadius)) pt")
+                        .monospacedDigit()
+                        .frame(width: 48, alignment: .trailing)
+                }
+            }
+        }
+
+        Section("Opened Halo") {
+            LabeledContent("Width") {
+                HStack {
+                    Slider(value: $store.configuration.theme.width, in: 340...900, step: 1)
+                        .frame(width: 190)
+                    Text("\(Int(store.configuration.theme.width)) pt")
+                        .monospacedDigit()
+                        .frame(width: 58, alignment: .trailing)
+                }
+            }
+            LabeledContent("Height") {
+                HStack {
+                    Slider(value: $workspace.settings.layout.appearance.expandedHeight, in: 200...1100, step: 1)
+                        .frame(width: 190)
+                    Text("\(Int(workspace.settings.layout.appearance.expandedHeight)) pt")
+                        .monospacedDigit()
+                        .frame(width: 58, alignment: .trailing)
+                }
+            }
+            LabeledContent("Spacing") {
+                HStack {
+                    Slider(value: $workspace.settings.layout.appearance.spacing, in: 0...40, step: 1)
+                        .frame(width: 190)
+                    Text("\(Int(workspace.settings.layout.appearance.spacing)) pt")
+                        .monospacedDigit()
+                        .frame(width: 58, alignment: .trailing)
+                }
+            }
+        }
+
+        Section {
+            HaloUpgradeCard(
+                title: "Deep appearance customization",
+                detail: "Halo Full adds image and video backgrounds, advanced Glass, grain, edge/depth, custom shapes, offsets, transitions, schedules and theme import/export."
+            )
+        }
+    }
+}
+
+@MainActor
+private struct HaloLiteDisplaySettingsPane: View {
+    @ObservedObject var store: AppStore
+
+    var body: some View {
+        Section("Displays") {
+            Toggle("Show Halo on all displays", isOn: $store.configuration.allDisplays)
+            Text("Halo Lite uses the same global Halo setup everywhere it appears.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section {
+            HaloUpgradeCard(
+                title: "Independent display setups",
+                detail: "Halo Full unlocks separate layouts, themes, profiles and saved display-specific configurations."
+            )
+        }
+    }
+}
+
+@MainActor
+private struct HaloLiteHUDSettingsView: View {
+    @Binding var layout: WorkspaceLayout
+
+    private var hudEnabled: Binding<Bool> {
+        Binding(
+            get: { layout.hud?.enabled ?? true },
+            set: { enabled in
+                var next = layout
+                var hud = next.hud ?? HaloHUDSettings()
+                hud.enabled = enabled
+                next.hud = hud
+                layout = next
+            }
+        )
+    }
+
+    var body: some View {
+        Section("Halo HUD") {
+            Toggle("Enable Halo HUD", isOn: hudEnabled)
+            Text("Halo Lite uses Halo's polished default HUD design.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Included HUD events") {
+            Label("Volume", systemImage: HaloHUDEventKind.volume.symbol)
+            Label("Mute / Unmute", systemImage: HaloHUDEventKind.mute.symbol)
+            Label("Display Brightness", systemImage: HaloHUDEventKind.displayBrightness.symbol)
+            Label("Keyboard Brightness", systemImage: HaloHUDEventKind.keyboardBrightness.symbol)
+        }
+
+        Section {
+            HaloUpgradeCard(
+                title: "Redesign the HUD",
+                detail: "Halo Full unlocks layout, positioning, progress styles, dimensions, custom colors, dynamic accents, shadows, offsets, timeouts and per-event presentation."
+            )
+        }
+    }
+}
+
+@MainActor
+private struct HaloLiteActivationSequenceSettingsPane: View {
+    @ObservedObject private var activation = ActivationSequenceStore.shared
+
+    var body: some View {
+        Section("Activation Sequence") {
+            Toggle("Use Halo's default activation sequence", isOn: $activation.settings.enabled)
+
+            LabeledContent("Preset") { Text("Halo Reveal") }
+            LabeledContent("Motion") { Text("Fluid") }
+
+            Text("Halo Lite keeps the same polished activation quality. Your custom Full sequence remains saved and returns automatically when Halo Full is active again.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button("Preview default sequence") {
+                NotificationCenter.default.post(
+                    name: .init("HaloPreviewActivationSequence"),
+                    object: nil
+                )
+            }
+        }
+
+        Section {
+            HaloUpgradeCard(
+                title: "Customize the sequence",
+                detail: "Halo Full adds custom presets, timing, particles, colors, sounds, motion tuning and display targeting."
+            )
+        }
+    }
+}
+
+@MainActor
+private struct HaloLiteClosedNotchSettingsView: View {
+    @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
+
+    var body: some View {
+        Section("Closed notch") {
+            Label("Standard Halo closed notch", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.primary)
+            Text("Halo Lite uses the polished default closed-notch presentation with the same normal animation quality and interaction behaviour.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle("Keep closed contents visible when Halo opens", isOn: $keepClosedContentsWhenOpen)
+        }
+
+        Section("Customization") {
+            HaloLockedSetting(
+                title: "Advanced closed-notch design",
+                detail: "Geometry, artwork layers, visualizers, media presentation and deeper closed-notch styling are available with Halo Full."
+            )
+        }
+    }
+}
+
+@MainActor
+private struct HaloLiteWidgetSettingsView: View {
+    @Binding var layout: WorkspaceLayout
+
+    private func updateClockStyle(_ update: (inout WidgetStyle) -> Void) {
+        var next = layout
+        var style = next.widgetStyle(for: .clock)
+        update(&style)
+        next.setWidgetStyle(style, for: .clock)
+        layout = next
+    }
+
+    private func styleBinding<Value>(_ keyPath: WritableKeyPath<WidgetStyle, Value>) -> Binding<Value> {
+        Binding(
+            get: { layout.widgetStyle(for: .clock)[keyPath: keyPath] },
+            set: { value in updateClockStyle { $0[keyPath: keyPath] = value } }
+        )
+    }
+
+    private func clockBinding<Value>(_ keyPath: WritableKeyPath<ClockOptions, Value>) -> Binding<Value> {
+        Binding(
+            get: { layout.widgetStyle(for: .clock).clock[keyPath: keyPath] },
+            set: { value in updateClockStyle { $0.clock[keyPath: keyPath] = value } }
+        )
+    }
+
+    var body: some View {
+        Section("Clock") {
+            Toggle("Show date", isOn: clockBinding(\.showDate))
+            Toggle("Show seconds", isOn: clockBinding(\.showSeconds))
+            Toggle("24-hour time", isOn: clockBinding(\.twentyFourHour))
+
+            Picker("Typeface", selection: styleBinding(\.fontFamily)) {
+                Text("System").tag(WidgetFontFamily.system)
+                Text("Rounded").tag(WidgetFontFamily.rounded)
+                Text("Serif").tag(WidgetFontFamily.serif)
+                Text("Monospaced").tag(WidgetFontFamily.monospaced)
+            }
+            Picker("Weight", selection: styleBinding(\.weight)) {
+                ForEach(WidgetFontWeight.allCases, id: \.self) { weight in
+                    Text(weight.rawValue.capitalized).tag(weight)
+                }
+            }
+        }
+
+        Section("Included in Halo Lite") {
+            Label("Clock", systemImage: ModuleID.clock.symbol)
+            Label("Media", systemImage: ModuleID.media.symbol)
+            Label("Focus Timer", systemImage: ModuleID.timer.symbol)
+            Label("Stopwatch", systemImage: ModuleID.stopwatch.symbol)
+            Label("File Shelf", systemImage: ModuleID.shelf.symbol)
+            Label("Calendar", systemImage: ModuleID.calendar.symbol)
+            Label("System", systemImage: ModuleID.system.symbol)
+            Label("Audio", systemImage: ModuleID.audio.symbol)
+
+            Text("Timer durations, media playback, File Shelf actions, Stopwatch controls and the other core interactions stay fully usable directly in their widgets.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("With Halo Full") {
+            HStack { Label("Clipboard", systemImage: ModuleID.clipboard.symbol); Spacer(); HaloFullBadge() }
+            HStack { Label("Launcher", systemImage: ModuleID.launcher.symbol); Spacer(); HaloFullBadge() }
+            HStack { Label("Live Activities", systemImage: ModuleID.activities.symbol); Spacer(); HaloFullBadge() }
+            HStack { Label("Notes", systemImage: ModuleID.notes.symbol); Spacer(); HaloFullBadge() }
+            HStack { Label("Capture & OCR", systemImage: ModuleID.capture.symbol); Spacer(); HaloFullBadge() }
+            HStack { Label("Pixel Pal", systemImage: ModuleID.pet.symbol); Spacer(); HaloFullBadge() }
+        }
+
+        Section {
+            HaloUpgradeCard(
+                title: "Advanced widget studio",
+                detail: "Halo Full adds deeper per-widget styling, adaptive footprint configuration, advanced media and calendar presentation, and the additional widgets above."
+            )
+        }
+    }
+}
+
+@MainActor
+private struct HaloLiteBubbleSettingsView: View {
+    @ObservedObject private var settingsStore = NotchBubbleSettingsStore.shared
+
+    private func boolBinding(_ keyPath: WritableKeyPath<NotchBubbleSettings, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { settingsStore.settings.normalized()[keyPath: keyPath] },
+            set: { value in
+                var next = settingsStore.settings
+                next[keyPath: keyPath] = value
+                settingsStore.settings = next.normalized()
+            }
+        )
+    }
+
+    private func optionalBoolBinding(
+        _ keyPath: WritableKeyPath<NotchBubbleSettings, Bool?>,
+        default fallback: Bool
+    ) -> Binding<Bool> {
+        Binding(
+            get: { settingsStore.settings.normalized()[keyPath: keyPath] ?? fallback },
+            set: { value in
+                var next = settingsStore.settings
+                next[keyPath: keyPath] = value
+                settingsStore.settings = next.normalized()
+            }
+        )
+    }
+
+    var body: some View {
+        Section("Notch Bubbles") {
+            Toggle("Enable Notch Bubbles", isOn: boolBinding(\.enabled))
+            Text("Halo Lite includes the core Bubble experience with the same polished rendering and Fluid animation.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Lite Bubble providers") {
+            Toggle("Music", isOn: boolBinding(\.musicEnabled))
+            Toggle("Timer", isOn: boolBinding(\.timerEnabled))
+            Toggle("Audio / Volume", isOn: optionalBoolBinding(\.audioFeedbackEnabled, default: true))
+
+            Text("Halo chooses the most relevant active Bubble and shows one at a time.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Lite Bubble style") {
+            LabeledContent("Maximum visible") { Text("1") }
+            LabeledContent("Placement") { Text("Automatic") }
+            LabeledContent("Appearance") { Text("Halo Glass") }
+            LabeledContent("Animation") { Text("Fluid") }
+        }
+
+        Section {
+            HaloLockedSection(
+                title: "Advanced Bubbles",
+                detail: "Multiple Bubbles, Wings and Stack layouts, manual sides, provider-specific designs, persistent behaviour and custom gestures are available with Halo Full."
+            )
         }
     }
 }

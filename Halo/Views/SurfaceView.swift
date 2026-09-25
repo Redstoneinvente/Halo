@@ -2758,7 +2758,8 @@ struct SurfaceView: View {
     @ObservedObject private var clipboardCI = ClipboardContextMonitor.shared
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
     @ObservedObject private var integrationCI = IntegrationCIRuntime.shared
-    @ObservedObject private var commercialSurfaceGate = HaloCommercialSurfaceGate.shared
+    @ObservedObject private var runtimeGate = HaloRuntimeGate.shared
+    @ObservedObject private var featureAccess = HaloFeatureAccess.shared
     @State private var clipboardOpenedNotch = false
     @State private var integrationAutoOpeningSurface = false
     @State private var teleprompterActive = false
@@ -2795,8 +2796,10 @@ struct SurfaceView: View {
     @AppStorage("HaloLiveActivitiesUseFullNotchArea") private var liveActivitiesUseFullNotchArea = false
     @AppStorage("HaloLiveActivitiesKeepClosedNotchContents") private var liveActivitiesKeepClosedContents = false
     @State private var retroGameRequested = false
-    private var theme: Theme { state.theme }
-    private var layout: WorkspaceLayout { state.layoutOverride ?? workspace.effectiveLayout }
+    private var theme: Theme { featureAccess.effectiveTheme(state.theme) }
+    private var layout: WorkspaceLayout {
+        featureAccess.effectiveLayout(state.layoutOverride ?? workspace.effectiveLayout)
+    }
     private var contextOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
     private var bluetoothEligible: Bool {
         guard bluetoothCIEnabled else { return false }
@@ -2808,6 +2811,7 @@ struct SurfaceView: View {
         return LiveActivitySelection.primary(in: workspace.activities, excluding: [.bluetooth])
     }
     private var builtInContextCandidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] {
+        guard featureAccess.allows(.contextInterfaces) else { return [] }
         var candidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] = []
         if dropCIEnabled && state.dropTargeted { candidates.append((.drop, dropPriority, 4)) }
         if retroCIEnabled && retroGameRequested { candidates.append((.retro, retroPriority, 4)) }
@@ -2820,12 +2824,14 @@ struct SurfaceView: View {
         return candidates
     }
     private var activeCustomCandidate: HaloCustomCICandidate? {
-        customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI, blockingPriority: nil)
+        guard featureAccess.allows(.customCI) else { return nil }
+        return customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI, blockingPriority: nil)
     }
     private var surfaceContextCandidates: [SurfaceContextCandidate] {
-        // Locked Direct surfaces are activation/account UI only. No built-in, custom, or
-        // partner CI is allowed to win arbitration until commercial startup reaches ready.
-        guard commercialSurfaceGate.isReady else { return [] }
+        // Context Interfaces are a Halo Full capability. The normal Halo surface
+        // itself remains available in both Lite and Full.
+        guard runtimeGate.isReady,
+              featureAccess.allows(.contextInterfaces) else { return [] }
 
         // Notch Bubble "Open Notch" is an explicit user navigation action.
         // .normal bypasses every CI for this opening. .music forces Music CI only when
@@ -2876,18 +2882,20 @@ struct SurfaceView: View {
                 )
             )
         }
-        for candidate in integrationCI.eligibleCandidates(displayID: state.displayID) {
-            result.append(
-                SurfaceContextCandidate(
-                    interface: .integration,
-                    arbitration: CIArbitrationCandidate(
-                        owner: .integration(candidate.registration.id),
-                        ciID: candidate.registration.id,
-                        priority: candidate.priority,
-                        tieRank: 3
+        if featureAccess.allows(.integrations) {
+            for candidate in integrationCI.eligibleCandidates(displayID: state.displayID) {
+                result.append(
+                    SurfaceContextCandidate(
+                        interface: .integration,
+                        arbitration: CIArbitrationCandidate(
+                            owner: .integration(candidate.registration.id),
+                            ciID: candidate.registration.id,
+                            priority: candidate.priority,
+                            tieRank: 3
+                        )
                     )
                 )
-            )
+            }
         }
         return result
     }
@@ -3313,10 +3321,16 @@ struct SurfaceView: View {
         .contextMenu {
             Button(state.pinned ? "Unpin" : "Keep open") { state.pinned.toggle() }
             Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
-            ForEach(workspace.settings.profiles) { profile in Button(profile.name) { workspace.apply(profile) } }
+            if featureAccess.allows(.profiles) {
+                ForEach(workspace.settings.profiles) { profile in
+                    Button(profile.name) { workspace.apply(profile) }
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { note in
-            guard !disableCustomCI, let requestedID = note.object as? String else { return }
+            guard featureAccess.allows(.customCI),
+                  !disableCustomCI,
+                  let requestedID = note.object as? String else { return }
             guard customContextActive, activeCustomCandidate?.package.manifest.id == requestedID else {
                 customCI.clearManualActivation()
                 customCI.notice = "Custom CI did not open because a higher-priority CI currently owns the notch."
@@ -3326,6 +3340,7 @@ struct SurfaceView: View {
             state.expanded = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCICloseRequested"))) { _ in
+            guard featureAccess.allows(.customCI) else { return }
             state.contextPreferredSize = nil
             state.contextPreferredCompactWidth = nil
             state.contextPreferredCompactHeight = nil
@@ -3333,7 +3348,9 @@ struct SurfaceView: View {
             if !state.pinned { state.expanded = false }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloClipboardCIToggle"))) { _ in
-            guard clipboardCIEnabled else { return }
+            guard featureAccess.allows(.contextInterfaces),
+                  featureAccess.allows(.clipboardWidget),
+                  clipboardCIEnabled else { return }
             if clipboardContextActive && state.expanded {
                 clipboardCI.dismiss()
                 clipboardOpenedNotch = false
@@ -3361,11 +3378,11 @@ struct SurfaceView: View {
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in store.expireFiles() }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloTeleprompterVisibilityChanged"))) { note in
             let requestedActive = (note.userInfo?["active"] as? Bool) ?? false
-            let active = requestedActive && commercialSurfaceGate.isReady
+            let active = requestedActive && runtimeGate.isReady
             teleprompterActive = active
 
-            if requestedActive && !commercialSurfaceGate.isReady {
-                // Defensive backstop for any stale/late trigger emitted while Halo is locked.
+            if requestedActive && !runtimeGate.isReady {
+                // Defensive backstop for any stale/late trigger emitted before Halo's runtime is ready.
                 TeleprompterCoordinator.shared.hidePrompt()
             }
 
@@ -3416,14 +3433,14 @@ struct SurfaceView: View {
             synchronizeSurfaceCIOwnership()
         }
         .onAppear {
-            if !commercialSurfaceGate.isReady {
+            if !runtimeGate.isReady {
                 teleprompterActive = false
                 TeleprompterCoordinator.shared.hidePrompt()
             }
             workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
             visualWorkspaceSurfacePresented = visuallyExpanded && usesVisualWorkspace && activeContext == nil
         }
-        .onChange(of: commercialSurfaceGate.isReady) { ready in
+        .onChange(of: runtimeGate.isReady) { ready in
             if !ready {
                 teleprompterActive = false
                 clipboardOpenedNotch = false

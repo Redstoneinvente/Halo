@@ -54,8 +54,7 @@ struct HaloSurfaceRouter: View {
     @ObservedObject private var eiSettings = EISettingsStore.shared
     @ObservedObject private var engine = EnvironmentalInterfaceEngine.shared
     @ObservedObject private var bluetooth = BluetoothStateService.shared
-    @ObservedObject private var account = HaloAccountManager.shared
-    @ObservedObject private var license = HaloLicenseManager.shared
+    @ObservedObject private var featureAccess = HaloFeatureAccess.shared
 
     @AppStorage("HaloContextMusicPriority") private var musicPriority = 60.0
     @AppStorage("HaloContextDropEnabled") private var dropEnabled = true
@@ -88,8 +87,13 @@ struct HaloSurfaceRouter: View {
     }
 
     private var accessLocked: Bool {
-        guard HaloDistribution.current.supportsExternalLicensing else { return false }
-        return !account.isSignedIn || !license.accessValid(for: account.userID)
+        // Access selection is handled before WindowManager is created. Once a Halo surface
+        // exists, both Lite and Full are valid runnable editions; premium behavior is gated
+        // separately through HaloFeatureAccess / HaloRuntimeGate.
+        switch featureAccess.accessLevel {
+        case .lite, .full:
+            return false
+        }
     }
 
     private var eiOwnsSurface: Bool {

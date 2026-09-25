@@ -66,6 +66,10 @@ final class IntegrationCIRuntime: ObservableObject {
     }
 
     func start() {
+        guard HaloFeatureAccess.shared.allows(.integrations) else {
+            stop()
+            return
+        }
         guard !started else { return }
         started = true
         catalog.$integrations
@@ -95,9 +99,16 @@ final class IntegrationCIRuntime: ObservableObject {
         cleanupForSleepOrWake()
     }
 
-    func refresh() { catalog.refresh() }
+    func refresh() {
+        guard HaloFeatureAccess.shared.allows(.integrations) else { return }
+        catalog.refresh()
+    }
 
     func addIntegrationApplications() {
+        guard HaloFeatureAccess.shared.allows(.integrations) else {
+            HaloUpgradeCoordinator.shared.present()
+            return
+        }
         catalog.authorizeIntegrationApplications()
     }
 
@@ -137,15 +148,18 @@ final class IntegrationCIRuntime: ObservableObject {
     }
 
     func eligibleCandidates(displayID: String) -> [CIEligibleCandidate] {
-        eligibleByDisplay[displayID] ?? []
+        guard HaloFeatureAccess.shared.allows(.integrations) else { return [] }
+        return eligibleByDisplay[displayID] ?? []
     }
 
     func candidate(ciID: String, displayID: String) -> CIEligibleCandidate? {
-        eligibleByDisplay[displayID]?.first(where: { $0.registration.id == ciID })
+        guard HaloFeatureAccess.shared.allows(.integrations) else { return nil }
+        return eligibleByDisplay[displayID]?.first(where: { $0.registration.id == ciID })
     }
 
     func currentSession(displayID: String) -> CIActivationSession? {
-        activationCoordinator.currentSession(displayID: displayID)
+        guard HaloFeatureAccess.shared.allows(.integrations) else { return nil }
+        return activationCoordinator.currentSession(displayID: displayID)
     }
 
     func isCurrent(sessionID: UUID, ciID: String, displayID: String) -> Bool {
@@ -157,10 +171,14 @@ final class IntegrationCIRuntime: ObservableObject {
         return payloadStore.isCommitted(handle, activationSessionID: session.id, ciID: session.ciID)
     }
 
-    func currentWinnerCIID(displayID: String) -> String? { winnerCIByDisplay[displayID] }
+    func currentWinnerCIID(displayID: String) -> String? {
+        guard HaloFeatureAccess.shared.allows(.integrations) else { return nil }
+        return winnerCIByDisplay[displayID]
+    }
 
     @discardableResult
     func fileDragEntered(files: [URL], displayID: String) -> Bool {
+        guard HaloFeatureAccess.shared.allows(.integrations) else { return false }
         lastError = nil
         guard eventsByDisplay[displayID]?.kind != .fileDrag,
               let metadata = FileDragClassifier.classify(files) else {
@@ -182,6 +200,7 @@ final class IntegrationCIRuntime: ObservableObject {
     }
 
     func manualActivate(ciID: String, displayID: String) {
+        guard HaloFeatureAccess.shared.allows(.integrations) else { return }
         let event = TriggerEvent(kind: .manual, displayID: displayID, targetedCIID: ciID, targetedTriggerID: "manual")
         eventsByDisplay[displayID] = event
         eligibleByDisplay[displayID] = route(event)
@@ -189,6 +208,7 @@ final class IntegrationCIRuntime: ObservableObject {
     }
 
     func keyboardShortcutActivate(ciID: String, triggerID: String, displayID: String) {
+        guard HaloFeatureAccess.shared.allows(.integrations) else { return }
         let event = TriggerEvent(
             kind: .keyboardShortcut,
             displayID: displayID,
@@ -220,6 +240,10 @@ final class IntegrationCIRuntime: ObservableObject {
     /// No payload data is exposed to the renderer.
     @discardableResult
     func updateFileDragLocation(displayID: String, screenPoint: CGPoint?) -> String? {
+        guard HaloFeatureAccess.shared.allows(.integrations) else {
+            actionDropTargets.clear(displayID: displayID)
+            return nil
+        }
         guard let winner = winnerCIByDisplay[displayID],
               let session = activationCoordinator.currentSession(displayID: displayID),
               session.ciID == winner,
@@ -238,6 +262,7 @@ final class IntegrationCIRuntime: ObservableObject {
     /// Commits the privileged drag payload to the action card currently under the cursor.
     /// The action identity becomes part of the activation session and cannot be retargeted.
     func commitFileDragAtHoveredAction(displayID: String) -> IntegrationFileDropCommit? {
+        guard HaloFeatureAccess.shared.allows(.integrations) else { return nil }
         guard let winner = winnerCIByDisplay[displayID],
               let session = activationCoordinator.currentSession(displayID: displayID),
               session.ciID == winner,
@@ -282,6 +307,10 @@ final class IntegrationCIRuntime: ObservableObject {
         surfaceExpanded: Bool,
         pinned: Bool
     ) -> CISurfaceOwnershipDecision {
+        guard HaloFeatureAccess.shared.allows(.integrations) else {
+            cleanupForSleepOrWake()
+            return CISurfaceOwnershipDecision()
+        }
         var decision = CISurfaceOwnershipDecision()
         let previousWinner = winnerCIByDisplay[displayID]
         if previousWinner == ciID,
@@ -354,6 +383,10 @@ final class IntegrationCIRuntime: ObservableObject {
         parentWindow: NSWindow?,
         pinned: Bool
     ) async throws -> Bool {
+        guard HaloFeatureAccess.shared.allows(.integrations) else {
+            cleanupForSleepOrWake()
+            return false
+        }
         do {
             _ = try await actionBroker.execute(
                 ciID: ciID,
