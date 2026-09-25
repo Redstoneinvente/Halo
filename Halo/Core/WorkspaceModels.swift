@@ -50,15 +50,22 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
     case flipClock = "Flip Clock"
     case minimalDial = "Minimal Dial"
     case romanDial = "Roman Dial"
+    case eventCard = "Event Card"
+    case yearOverview = "Year Overview"
     var id: String { rawValue }
 
     static let coreCases: [SimpleNotchWidgetStyle] = [.clean, .glass, .vibrant]
     static let clockCases: [SimpleNotchWidgetStyle] = coreCases + [.stackedDigital, .flipClock, .minimalDial, .romanDial]
+    static let calendarCases: [SimpleNotchWidgetStyle] = coreCases + [.eventCard, .yearOverview]
 
-    var isClockExclusive: Bool {
+    func supports(widget: ModuleID) -> Bool {
         switch self {
-        case .stackedDigital, .flipClock, .minimalDial, .romanDial: return true
-        case .clean, .glass, .vibrant: return false
+        case .stackedDigital, .flipClock, .minimalDial, .romanDial:
+            return widget == .clock
+        case .eventCard, .yearOverview:
+            return widget == .calendar
+        case .clean, .glass, .vibrant:
+            return true
         }
     }
 
@@ -71,6 +78,8 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
         case .flipClock: return "Flip Clock"
         case .minimalDial: return "Minimal Dial"
         case .romanDial: return "Roman Dial"
+        case .eventCard: return "Event Card"
+        case .yearOverview: return "Year Overview"
         }
     }
 
@@ -83,6 +92,8 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
         case .flipClock: return "Mechanical flip-style hour and minute tiles with compact date details."
         case .minimalDial: return "A restrained analog face with sparse markers and lightweight date information."
         case .romanDial: return "A classic analog face using Roman quarter-hour markers."
+        case .eventCard: return "A date-led agenda card that gives the next event visual priority."
+        case .yearOverview: return "A compact twelve-month overview designed for Halo's wider Simple layout."
         }
     }
 
@@ -95,6 +106,8 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
         case .flipClock: return "rectangle.split.2x1"
         case .minimalDial: return "clock"
         case .romanDial: return "clock.fill"
+        case .eventCard: return "calendar.badge.clock"
+        case .yearOverview: return "calendar"
         }
     }
 }
@@ -148,9 +161,9 @@ struct SimpleNotchSettings: Codable, Equatable {
         value.styles = styles.filter { key, style in
             guard let module = ModuleID(rawValue: key),
                   Self.availableWidgets.contains(module) else { return false }
-            // New face families belong only to Clock. If an imported/hand-edited
-            // settings file assigns one elsewhere, gracefully fall back to Inline.
-            return module == .clock || !style.isClockExclusive
+            // Specialized faces belong only to their intended widget. Imported or
+            // hand-edited settings that assign one elsewhere fall back to Inline.
+            return style.supports(widget: module)
         }
         return value
     }
@@ -240,7 +253,7 @@ enum SimpleNotchMetrics {
         let size = settings.resolvedSize
         let widgets = settings.widgets
         return widgets.reduce(0.0) {
-            $0 + width(for: $1, size: size)
+            $0 + width(for: $1, style: settings.style(for: $1), size: size)
         } + Double(max(0, widgets.count - 1)) * widgetSpacing(size)
           + horizontalPadding(size) * 2
     }
@@ -306,6 +319,14 @@ enum SimpleNotchMetrics {
         switch size { case .standard: return 148; case .medium: return 166; case .big: return 188 }
     }
 
+    static func calendarYearWidth(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 328; case .medium: return 370; case .big: return 414 }
+    }
+
+    static func calendarYearHeight(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 184; case .medium: return 206; case .big: return 230 }
+    }
+
     static func mediaWidth(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 264; case .medium: return 300; case .big: return 336 }
     }
@@ -314,9 +335,10 @@ enum SimpleNotchMetrics {
         switch size { case .standard: return 220; case .medium: return 248; case .big: return 278 }
     }
 
-    static func width(for widget: ModuleID, size: SimpleNotchSize) -> Double {
+    static func width(for widget: ModuleID, style: SimpleNotchWidgetStyle, size: SimpleNotchSize) -> Double {
         switch widget {
-        case .calendar: return calendarWidth(size)
+        case .calendar:
+            return style == .yearOverview ? calendarYearWidth(size) : calendarWidth(size)
         case .media: return mediaWidth(size)
         case .clock: return clockWidth(size)
         case .pet: return pixelPalWidth(size)
@@ -324,8 +346,19 @@ enum SimpleNotchMetrics {
         }
     }
 
+    static func width(for widget: ModuleID, size: SimpleNotchSize) -> Double {
+        width(for: widget, style: .clean, size: size)
+    }
+
     static func height(for widget: ModuleID, style: SimpleNotchWidgetStyle, size: SimpleNotchSize) -> Double {
-        if widget == .calendar && style == .glass { return calendarMonthHeight(size) }
+        if widget == .calendar {
+            switch style {
+            case .glass: return calendarMonthHeight(size)
+            case .yearOverview: return calendarYearHeight(size)
+            case .vibrant: return widgetHeight(size) + 24 * size.scale
+            default: return widgetHeight(size)
+            }
+        }
         return widgetHeight(size) + (style == .vibrant ? 24 * size.scale : 0)
     }
 
