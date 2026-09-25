@@ -42,7 +42,7 @@ enum HaloNotchMode: String, Codable, CaseIterable, Identifiable {
 
 enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
     // Keep the original raw values stable so settings saved by earlier Simple Mode
-    // builds continue to decode. The additional cases are clock-only face families.
+    // builds continue to decode. Specialized cases are scoped to their intended widget.
     case clean = "Clean"
     case glass = "Glass"
     case vibrant = "Vibrant"
@@ -122,7 +122,7 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
         case .yearOverview: return "calendar"
         case .pomodoroRing: return "circle.dashed.inset.filled"
         case .deadlineTimer: return "hourglass"
-        case .segmentDisplay: return "digitalcrown.horizontal.arrow.clockwise"
+        case .segmentDisplay: return "numbers.rectangle"
         }
     }
 }
