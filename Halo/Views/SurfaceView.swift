@@ -3953,45 +3953,18 @@ private struct SimpleNotchWidgetView: View {
     }
 
     private var shell: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
-                .fill(cardFill)
-            if preset == .glass {
-                RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(colors: [.white.opacity(0.24), .white.opacity(0.03)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing),
-                        lineWidth: 0.75
-                    )
+        Group {
+            switch preset {
+            case .clean: compactContent
+            case .glass: focusContent
+            case .vibrant: dashboardContent
             }
-            Group {
-                switch preset {
-                case .clean: compactContent
-                case .glass: focusContent
-                case .vibrant: dashboardContent
-                }
-            }
-            .padding(12 * scale)
         }
+        .padding(12 * scale)
         .foregroundStyle(.white)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 18 * scale, style: .continuous))
-    }
-
-    private var cardFill: LinearGradient {
-        switch preset {
-        case .clean:
-            return LinearGradient(colors: [Color(white: 0.075), Color(white: 0.055)],
-                                  startPoint: .top, endPoint: .bottom)
-        case .glass:
-            return LinearGradient(colors: [Color(white: 0.19), Color(white: 0.085), accent.opacity(0.10)],
-                                  startPoint: .topLeading, endPoint: .bottomTrailing)
-        case .vibrant:
-            return LinearGradient(colors: [accent.opacity(0.30), accent.opacity(0.12)],
-                                  startPoint: .topLeading, endPoint: .bottomTrailing)
-        }
     }
 
     @ViewBuilder
@@ -5135,12 +5108,6 @@ private struct SimpleClosedNotchView: View {
             }
             .padding(.horizontal, 7 * scale)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background {
-                RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .opacity(0.42)
-                    .padding(.vertical, 3)
-            }
         case .vibrant:
             HStack(spacing: 5 * scale) {
                 Image(systemName: widget.symbol)
@@ -5150,15 +5117,6 @@ private struct SimpleClosedNotchView: View {
             }
             .padding(.horizontal, 7 * scale)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background {
-                RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.18))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
-                            .stroke(Color.accentColor.opacity(0.28), lineWidth: 1)
-                    }
-                    .padding(.vertical, 3)
-            }
         }
     }
 
