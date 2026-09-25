@@ -3,6 +3,7 @@ import SwiftUI
 import Vision
 import CoreGraphics
 import Combine
+import UniformTypeIdentifiers
 
 @MainActor
 final class CaptureService: ObservableObject {
@@ -10,6 +11,9 @@ final class CaptureService: ObservableObject {
     @Published var recognizedText = ""
     @Published var error: String?
     @Published var recentCaptures: [URL] = []
+
+    private var activeRegionSelector: CaptureRegionSelector?
+    private var activeSavePanel: NSSavePanel?
 
     init() {
         TeleprompterCoordinator.shared.install()
@@ -21,61 +25,142 @@ final class CaptureService: ObservableObject {
             return
         }
         guard !busy else { return }
-        guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
-            error = "Allow Screen Recording in System Settings, then relaunch Halo if macOS requests it."; return
-        }
-        let panel = NSSavePanel(); panel.allowedContentTypes = [.png]; panel.nameFieldStringValue = "Halo-\(Int(Date().timeIntervalSince1970)).png"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
 
+        // Never continue directly from a fresh TCC grant. macOS can report the
+        // user's choice before the current process is actually capture-authorized.
+        guard CGPreflightScreenCaptureAccess() else {
+            let granted = CGRequestScreenCaptureAccess()
+            if granted {
+                error = "Screen Recording access was granted. Quit and reopen Halo, then try Capture Region again."
+            } else {
+                error = "Allow Screen Recording for Halo in System Settings, then quit and reopen Halo."
+            }
+            return
+        }
+
+        error = nil
         busy = true
-        let temporaryURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Halo-Capture-\(UUID().uuidString).png", isDirectory: false)
-        try? FileManager.default.removeItem(at: temporaryURL)
 
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        // Keep the child process inside Halo's sandbox container. The selected save URL is
-        // written by Halo itself after capture so the Powerbox grant remains authoritative.
-        task.arguments = ["-i", "-x", "-t", "png", temporaryURL.path]
-        task.terminationHandler = { [weak self] task in
-            var exportSucceeded = false
-            var exportError: String?
+        let selector = CaptureRegionSelector()
+        activeRegionSelector = selector
+        selector.begin { [weak self] result in
+            guard let self else { return }
+            self.activeRegionSelector = nil
 
-            if task.terminationStatus == 0,
-               FileManager.default.fileExists(atPath: temporaryURL.path) {
+            switch result {
+            case .cancelled:
+                self.busy = false
+
+            case .failed(let message):
+                self.busy = false
+                self.error = message
+
+            case .selected(let screen, let rect):
                 do {
-                    let data = try Data(contentsOf: temporaryURL)
-                    let scoped = url.startAccessingSecurityScopedResource()
-                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                    try data.write(to: url)
-                    exportSucceeded = true
+                    let pngData = try Self.capturePNG(screen: screen, appKitRect: rect)
+                    self.presentSavePanel(pngData: pngData, completion: completion)
                 } catch {
-                    exportError = error.localizedDescription
-                }
-            }
-
-            try? FileManager.default.removeItem(at: temporaryURL)
-
-            Task { @MainActor in
-                self?.busy = false
-                if exportSucceeded {
-                    self?.recentCaptures.removeAll { $0 == url }
-                    self?.recentCaptures.insert(url, at: 0)
-                    if let count = self?.recentCaptures.count, count > 8 {
-                        self?.recentCaptures.removeLast(count - 8)
-                    }
-                    completion(url)
-                } else if let exportError {
-                    self?.error = "Capture export failed: \(exportError)"
+                    self.busy = false
+                    self.error = "Capture failed: \(error.localizedDescription)"
                 }
             }
         }
-        do {
-            try task.run()
-        } catch {
-            busy = false
-            try? FileManager.default.removeItem(at: temporaryURL)
-            self.error = error.localizedDescription
+    }
+
+    private static func capturePNG(screen: NSScreen, appKitRect: CGRect) throws -> Data {
+        guard
+            let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        else {
+            throw CaptureRegionError.displayUnavailable
+        }
+
+        let displayID = CGDirectDisplayID(screenNumber.uint32Value)
+        let displayBounds = CGDisplayBounds(displayID)
+        let screenFrame = screen.frame
+
+        guard screenFrame.width > 0, screenFrame.height > 0 else {
+            throw CaptureRegionError.displayUnavailable
+        }
+
+        // NSScreen uses a bottom-left origin while Core Graphics screen capture
+        // uses a top-left origin. Ratios keep this correct on Retina and scaled
+        // displays whether the two coordinate spaces are 1:1 or pixel-scaled.
+        let scaleX = displayBounds.width / screenFrame.width
+        let scaleY = displayBounds.height / screenFrame.height
+        let localX = appKitRect.minX - screenFrame.minX
+        let localTop = screenFrame.maxY - appKitRect.maxY
+
+        let captureRect = CGRect(
+            x: displayBounds.minX + localX * scaleX,
+            y: displayBounds.minY + localTop * scaleY,
+            width: appKitRect.width * scaleX,
+            height: appKitRect.height * scaleY
+        ).integral
+
+        guard captureRect.width >= 1, captureRect.height >= 1 else {
+            throw CaptureRegionError.emptySelection
+        }
+
+        guard let image = CGWindowListCreateImage(
+            captureRect,
+            .optionOnScreenOnly,
+            kCGNullWindowID,
+            [.bestResolution]
+        ) else {
+            throw CaptureRegionError.captureUnavailable
+        }
+
+        let representation = NSBitmapImageRep(cgImage: image)
+        guard let data = representation.representation(using: .png, properties: [:]) else {
+            throw CaptureRegionError.encodingFailed
+        }
+        return data
+    }
+
+    private func presentSavePanel(pngData: Data, completion: @escaping (URL) -> Void) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "Halo-\(Int(Date().timeIntervalSince1970)).png"
+
+        activeSavePanel = panel
+        NSApp.activate(ignoringOtherApps: true)
+
+        // Modeless presentation is deliberate. runModal() can make an LSUIElement
+        // accessory app appear frozen if the panel does not become visibly active.
+        panel.begin { [weak self, weak panel] response in
+            Task { @MainActor in
+                guard let self else { return }
+                self.activeSavePanel = nil
+
+                guard response == .OK, let url = panel?.url else {
+                    self.busy = false
+                    return
+                }
+
+                do {
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if scoped {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+
+                    try pngData.write(to: url, options: .atomic)
+
+                    self.recentCaptures.removeAll { $0 == url }
+                    self.recentCaptures.insert(url, at: 0)
+                    if self.recentCaptures.count > 8 {
+                        self.recentCaptures.removeLast(self.recentCaptures.count - 8)
+                    }
+
+                    self.busy = false
+                    completion(url)
+                } catch {
+                    self.busy = false
+                    self.error = "Capture export failed: \(error.localizedDescription)"
+                }
+            }
         }
     }
 
@@ -103,6 +188,261 @@ final class CaptureService: ObservableObject {
         }
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.image]
         if panel.runModal() == .OK, let url = panel.url { recognize(url) }
+    }
+}
+
+private enum CaptureRegionError: LocalizedError {
+    case displayUnavailable
+    case emptySelection
+    case captureUnavailable
+    case encodingFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .displayUnavailable:
+            return "Halo could not resolve the selected display."
+        case .emptySelection:
+            return "The selected region was too small to capture."
+        case .captureUnavailable:
+            return "macOS did not return an image for the selected region."
+        case .encodingFailed:
+            return "Halo could not encode the captured region as PNG."
+        }
+    }
+}
+
+private enum CaptureRegionSelectionResult {
+    case selected(screen: NSScreen, rect: CGRect)
+    case cancelled
+    case failed(String)
+}
+
+@MainActor
+private final class CaptureRegionSelector {
+    private var windows: [CaptureOverlayWindow] = []
+    private var completion: ((CaptureRegionSelectionResult) -> Void)?
+    private var finished = false
+
+    func begin(completion: @escaping (CaptureRegionSelectionResult) -> Void) {
+        guard self.completion == nil else { return }
+        self.completion = completion
+
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else {
+            finish(.failed("Halo could not find a display to capture."))
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        for screen in screens {
+            let window = CaptureOverlayWindow(
+                contentRect: screen.frame,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false,
+                screen: screen
+            )
+            window.setFrame(screen.frame, display: false)
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = false
+            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)))
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+            window.ignoresMouseEvents = false
+            window.acceptsMouseMovedEvents = true
+            window.isReleasedWhenClosed = false
+
+            let view = CaptureRegionSelectionView(
+                frame: CGRect(origin: .zero, size: screen.frame.size),
+                onSelect: { [weak self, weak window] localRect in
+                    guard let self, let window else { return }
+                    let globalRect = localRect.offsetBy(dx: window.frame.minX, dy: window.frame.minY)
+                    self.finish(.selected(screen: screen, rect: globalRect))
+                },
+                onCancel: { [weak self] in
+                    self?.finish(.cancelled)
+                }
+            )
+            window.contentView = view
+            window.makeFirstResponder(view)
+            windows.append(window)
+            window.orderFrontRegardless()
+        }
+
+        let mouseLocation = NSEvent.mouseLocation
+        let keyWindow = windows.first { $0.frame.contains(mouseLocation) } ?? windows.first
+        keyWindow?.makeKeyAndOrderFront(nil)
+        keyWindow?.makeFirstResponder(keyWindow?.contentView)
+    }
+
+    private func finish(_ result: CaptureRegionSelectionResult) {
+        guard !finished else { return }
+        finished = true
+
+        windows.forEach {
+            $0.orderOut(nil)
+            $0.close()
+        }
+        windows.removeAll()
+        NSCursor.arrow.set()
+
+        let callback = completion
+        completion = nil
+
+        // Give WindowServer one frame to remove Halo's selector overlays before
+        // reading the screen, otherwise the dimming layer can appear in the image.
+        switch result {
+        case .selected:
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                callback?(result)
+            }
+        case .cancelled, .failed:
+            callback?(result)
+        }
+    }
+}
+
+private final class CaptureOverlayWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+private final class CaptureRegionSelectionView: NSView {
+    private let onSelect: (CGRect) -> Void
+    private let onCancel: () -> Void
+    private var dragStart: CGPoint?
+    private var dragCurrent: CGPoint?
+
+    init(
+        frame frameRect: NSRect,
+        onSelect: @escaping (CGRect) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.onSelect = onSelect
+        self.onCancel = onCancel
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .crosshair)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeKey()
+        window?.makeFirstResponder(self)
+
+        let point = clampedPoint(convert(event.locationInWindow, from: nil))
+        dragStart = point
+        dragCurrent = point
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard dragStart != nil else { return }
+        dragCurrent = clampedPoint(convert(event.locationInWindow, from: nil))
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let start = dragStart else { return }
+        let end = clampedPoint(convert(event.locationInWindow, from: nil))
+        dragCurrent = end
+
+        let rect = CGRect(
+            x: min(start.x, end.x),
+            y: min(start.y, end.y),
+            width: abs(end.x - start.x),
+            height: abs(end.y - start.y)
+        ).intersection(bounds)
+
+        if rect.width >= 4, rect.height >= 4 {
+            onSelect(rect)
+        } else {
+            dragStart = nil
+            dragCurrent = nil
+            NSSound.beep()
+            needsDisplay = true
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onCancel()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        NSColor.black.withAlphaComponent(0.32).setFill()
+        NSBezierPath(rect: bounds).fill()
+
+        if let selectionRect {
+            NSColor.white.withAlphaComponent(0.08).setFill()
+            NSBezierPath(rect: selectionRect).fill()
+
+            NSColor.controlAccentColor.setStroke()
+            let border = NSBezierPath(rect: selectionRect.insetBy(dx: 0.5, dy: 0.5))
+            border.lineWidth = 2
+            border.stroke()
+
+            let sizeText = "\(Int(selectionRect.width)) × \(Int(selectionRect.height))"
+            drawBadge(sizeText, centeredAt: CGPoint(x: selectionRect.midX, y: max(24, selectionRect.minY - 18)))
+        } else {
+            drawBadge("Drag to capture  •  Esc to cancel", centeredAt: CGPoint(x: bounds.midX, y: bounds.midY))
+        }
+    }
+
+    private var selectionRect: CGRect? {
+        guard let start = dragStart, let current = dragCurrent else { return nil }
+        return CGRect(
+            x: min(start.x, current.x),
+            y: min(start.y, current.y),
+            width: abs(current.x - start.x),
+            height: abs(current.y - start.y)
+        ).intersection(bounds)
+    }
+
+    private func clampedPoint(_ point: CGPoint) -> CGPoint {
+        CGPoint(
+            x: min(max(bounds.minX, point.x), bounds.maxX),
+            y: min(max(bounds.minY, point.y), bounds.maxY)
+        )
+    }
+
+    private func drawBadge(_ text: String, centeredAt point: CGPoint) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+            .foregroundColor: NSColor.white
+        ]
+        let size = (text as NSString).size(withAttributes: attributes)
+        let padding = CGSize(width: 20, height: 10)
+        let rect = CGRect(
+            x: point.x - (size.width + padding.width) / 2,
+            y: point.y - (size.height + padding.height) / 2,
+            width: size.width + padding.width,
+            height: size.height + padding.height
+        )
+
+        NSColor.black.withAlphaComponent(0.72).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8).fill()
+
+        (text as NSString).draw(
+            at: CGPoint(x: rect.minX + padding.width / 2, y: rect.minY + padding.height / 2),
+            withAttributes: attributes
+        )
     }
 }
 
