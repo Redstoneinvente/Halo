@@ -1614,15 +1614,29 @@ private final class SystemAudioMediaFallback {
         // This path works in both Halo Direct and Halo App Store and does not depend on MediaRemote.
         if let safari = SafariMediaBridge.shared.currentState(maxAge: 3.5), safari.playing {
             if media.connectedApp != nil { media.disconnect() }
+
             lastSafariOutput = now
             lastHeard = now
-            lastRemoteMetadata = now
             ownsFallback = true
 
-            let displayArtist = safari.artist.isEmpty ? safari.sourceLabel : safari.artist
-            let sourceKey = ["safari-extension", safari.pageURL, safari.title, safari.artist]
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-                .joined(separator: "|")
+            let safariHasRealArtist = !safari.artist
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+
+            let displayArtist = safariHasRealArtist
+                ? safari.artist
+                : safari.sourceLabel
+
+            let sourceKey = [
+                "safari-extension",
+                safari.pageURL,
+                safari.title,
+                safari.artist
+            ]
+            .map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }
+            .joined(separator: "|")
 
             media.acceptExternalMedia(
                 title: safari.title.isEmpty ? "Safari Media" : safari.title,
@@ -1634,6 +1648,26 @@ private final class SystemAudioMediaFallback {
                 artworkURL: safari.artworkURL,
                 sourceKey: sourceKey
             )
+
+            // IMPORTANT:
+            // Safari owns playback/timing, but MediaRemote is still allowed
+            // to enrich missing artist/album/artwork metadata.
+            requestMediaRemoteMetadata()
+
+            let needsEnrichment =
+                !safariHasRealArtist ||
+                safari.artworkURL == nil ||
+                safari.artworkURL?.isEmpty == true
+
+            if needsEnrichment {
+                requestRecognitionIfNeeded(
+                    media: media,
+                    safariLikely: true,
+                    audibleNow: true,
+                    now: now
+                )
+            }
+
             scheduleFastRefresh()
             return
         }
@@ -1789,15 +1823,52 @@ private final class SystemAudioMediaFallback {
                 let sourceKey = [snapshot.bundleIdentifier ?? "", snapshot.title, snapshot.artist, snapshot.album]
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
                     .joined(separator: "|")
-                media.acceptExternalMedia(title: snapshot.title,
-                                          artist: displayArtist,
-                                          album: snapshot.album,
-                                          duration: snapshot.duration,
-                                          position: snapshot.currentElapsed,
-                                          playing: shouldPresentPlaying,
-                                          artworkData: snapshot.artworkData,
-                                          artworkURL: snapshot.artworkURL,
-                                          sourceKey: sourceKey)
+                let safari = SafariMediaBridge.shared.currentState(maxAge: 3.5)
+
+                let preferredTitle: String
+                let preferredArtist: String
+                let preferredAlbum: String
+
+                if let safari, safari.playing {
+                    preferredTitle = safari.title.isEmpty
+                        ? snapshot.title
+                        : safari.title
+
+                    preferredArtist = safari.artist.isEmpty
+                        ? displayArtist
+                        : safari.artist
+
+                    preferredAlbum = safari.album.isEmpty
+                        ? snapshot.album
+                        : safari.album
+                } else {
+                    preferredTitle = snapshot.title
+                    preferredArtist = displayArtist
+                    preferredAlbum = snapshot.album
+                }
+
+                let mergedSourceKey = [
+                    snapshot.bundleIdentifier ?? "",
+                    preferredTitle,
+                    preferredArtist,
+                    preferredAlbum
+                ]
+                .map {
+                    $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                }
+                .joined(separator: "|")
+
+                media.acceptExternalMedia(
+                    title: preferredTitle,
+                    artist: preferredArtist,
+                    album: preferredAlbum,
+                    duration: safari?.duration ?? snapshot.duration,
+                    position: safari?.position ?? snapshot.currentElapsed,
+                    playing: shouldPresentPlaying,
+                    artworkData: snapshot.artworkData,
+                    artworkURL: snapshot.artworkURL ?? safari?.artworkURL,
+                    sourceKey: mergedSourceKey
+                )
             }
         }
     }
