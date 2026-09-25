@@ -4037,6 +4037,12 @@ private struct SimpleNotchWidgetView: View {
                 if widget == .timer { deadlineTimer } else { compactContent }
             case .segmentDisplay:
                 if widget == .timer { segmentDisplayTimer } else { compactContent }
+            case .vinylDeck:
+                if widget == .media { vinylDeckMedia } else { compactContent }
+            case .cassette:
+                if widget == .media { cassetteMedia } else { compactContent }
+            case .streamBar:
+                if widget == .media { streamBarMedia } else { compactContent }
             }
         }
         .padding(12 * scale)
@@ -5520,6 +5526,225 @@ private struct SimpleNotchWidgetView: View {
         }
     }
 
+    private var vinylDeckMedia: some View {
+        HStack(spacing: 13 * scale) {
+            ZStack {
+                Circle()
+                    .fill(Color.black.opacity(0.82))
+                Circle()
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1 * scale)
+                Circle()
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1 * scale)
+                    .padding(6 * scale)
+                Circle()
+                    .stroke(Color.white.opacity(0.07), lineWidth: 1 * scale)
+                    .padding(12 * scale)
+
+                if let image = workspace.media.artworkImage {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 38 * scale, height: 38 * scale)
+                        .clipShape(Circle())
+                } else {
+                    Circle()
+                        .fill(accent.opacity(0.18))
+                        .frame(width: 38 * scale, height: 38 * scale)
+                        .overlay {
+                            Image(systemName: "music.note")
+                                .font(.system(size: 12 * scale, weight: .semibold))
+                                .foregroundStyle(accent)
+                        }
+                }
+
+                Circle()
+                    .fill(Color.black.opacity(0.85))
+                    .frame(width: 7 * scale, height: 7 * scale)
+                Circle()
+                    .fill(Color.white.opacity(0.65))
+                    .frame(width: 2 * scale, height: 2 * scale)
+            }
+            .frame(width: 82 * scale, height: 82 * scale)
+            .rotationEffect(.degrees(workspace.media.position * 14))
+
+            VStack(alignment: .leading, spacing: 5 * scale) {
+                HStack(spacing: 5 * scale) {
+                    Text("VINYL DECK")
+                        .font(.system(size: 6.5 * scale, weight: .bold, design: .rounded))
+                        .tracking(0.9)
+                        .foregroundStyle(accent)
+                    if workspace.media.isPlaying {
+                        Circle()
+                            .fill(accent)
+                            .frame(width: 4 * scale, height: 4 * scale)
+                    }
+                }
+
+                Text(mediaTitle)
+                    .font(.system(size: 11 * scale, weight: .bold))
+                    .lineLimit(1)
+                Text(mediaSubtitle)
+                    .font(.system(size: 8 * scale, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                if workspace.media.duration > 0 {
+                    HStack(spacing: 6 * scale) {
+                        Text(Self.simpleMediaTime(workspace.media.position))
+                            .font(.system(size: 6 * scale, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        progressTrack(mediaProgress)
+                        Text(Self.simpleMediaTime(max(0, workspace.media.duration - workspace.media.position)))
+                            .font(.system(size: 6 * scale, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                HStack(spacing: 12 * scale) {
+                    mediaButton("backward.end.fill", action: "previous track")
+                    mediaButton(workspace.media.isPlaying ? "pause.fill" : "play.fill", action: "playpause")
+                    mediaButton("forward.end.fill", action: "next track")
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var cassetteMedia: some View {
+        HStack(spacing: 12 * scale) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+                RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8 * scale)
+
+                VStack(spacing: 5 * scale) {
+                    HStack {
+                        Text("NOW PLAYING")
+                            .font(.system(size: 5.5 * scale, weight: .bold, design: .monospaced))
+                            .tracking(0.8)
+                            .foregroundStyle(accent)
+                        Spacer()
+                        Text(mediaSourceName.uppercased())
+                            .font(.system(size: 5 * scale, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 7 * scale, style: .continuous)
+                            .fill(Color.black.opacity(0.32))
+                        HStack(spacing: 18 * scale) {
+                            cassetteReel(progress: workspace.media.position * 0.18)
+                            Capsule()
+                                .fill(Color.white.opacity(0.10))
+                                .frame(width: 25 * scale, height: 4 * scale)
+                            cassetteReel(progress: -workspace.media.position * 0.18)
+                        }
+                    }
+                    .frame(height: 36 * scale)
+
+                    HStack(spacing: 6 * scale) {
+                        Capsule().fill(Color.white.opacity(0.12)).frame(height: 2 * scale)
+                        Text(workspace.media.isPlaying ? "PLAY" : "PAUSE")
+                            .font(.system(size: 5 * scale, weight: .bold, design: .monospaced))
+                            .foregroundStyle(accent)
+                        Capsule().fill(Color.white.opacity(0.12)).frame(height: 2 * scale)
+                    }
+                }
+                .padding(8 * scale)
+            }
+            .frame(width: 118 * scale, height: 72 * scale)
+
+            VStack(alignment: .leading, spacing: 5 * scale) {
+                Text(mediaTitle)
+                    .font(.system(size: 10.5 * scale, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                Text(mediaSubtitle)
+                    .font(.system(size: 8 * scale, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                if workspace.media.duration > 0 {
+                    progressTrack(mediaProgress)
+                } else {
+                    Capsule()
+                        .fill(Color.white.opacity(0.07))
+                        .frame(height: 3 * scale)
+                }
+
+                HStack(spacing: 10 * scale) {
+                    mediaButton("backward.end.fill", action: "previous track")
+                    mediaButton(workspace.media.isPlaying ? "pause.fill" : "play.fill", action: "playpause")
+                    mediaButton("forward.end.fill", action: "next track")
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func cassetteReel(progress: Double) -> some View {
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.45), lineWidth: 1.3 * scale)
+            ForEach(0..<4, id: \.self) { spoke in
+                Capsule()
+                    .fill(Color.white.opacity(0.45))
+                    .frame(width: 1 * scale, height: 10 * scale)
+                    .rotationEffect(.degrees(Double(spoke) * 45))
+            }
+            Circle()
+                .fill(Color.black.opacity(0.70))
+                .frame(width: 5 * scale, height: 5 * scale)
+        }
+        .frame(width: 22 * scale, height: 22 * scale)
+        .rotationEffect(.degrees(progress))
+    }
+
+    private var streamBarMedia: some View {
+        HStack(spacing: 9 * scale) {
+            mediaArtwork(size: 48 * scale, radius: 10 * scale)
+
+            VStack(alignment: .leading, spacing: 3 * scale) {
+                HStack(spacing: 5 * scale) {
+                    Text(mediaTitle)
+                        .font(.system(size: 9.5 * scale, weight: .bold))
+                        .lineLimit(1)
+                    if workspace.media.isPlaying {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 6.5 * scale, weight: .bold))
+                            .foregroundStyle(accent)
+                    }
+                }
+
+                Text(mediaSubtitle)
+                    .font(.system(size: 7.5 * scale, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                if workspace.media.duration > 0 {
+                    HStack(spacing: 5 * scale) {
+                        progressTrack(mediaProgress)
+                        Text(Self.simpleMediaTime(max(0, workspace.media.duration - workspace.media.position)))
+                            .font(.system(size: 6 * scale, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            HStack(spacing: 3 * scale) {
+                mediaButton("backward.end.fill", action: "previous track")
+                mediaButton(workspace.media.isPlaying ? "pause.fill" : "play.fill", action: "playpause")
+                mediaButton("forward.end.fill", action: "next track")
+            }
+        }
+        .padding(.horizontal, 4 * scale)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var simpleCalendar: Calendar { Calendar.autoupdatingCurrent }
 
     private var simpleMonthAnchor: Date {
@@ -5754,7 +5979,7 @@ private struct SimpleClosedNotchView: View {
     private func closedSlot(_ widget: ModuleID) -> some View {
         let preset = settings.style(for: widget)
         switch preset {
-        case .clean, .stackedDigital, .flipClock, .minimalDial, .romanDial, .eventCard, .yearOverview, .pomodoroRing, .deadlineTimer, .segmentDisplay:
+        case .clean, .stackedDigital, .flipClock, .minimalDial, .romanDial, .eventCard, .yearOverview, .pomodoroRing, .deadlineTimer, .segmentDisplay, .vinylDeck, .cassette, .streamBar:
             closedCore(widget)
                 .padding(.horizontal, 6 * scale)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
