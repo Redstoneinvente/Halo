@@ -60,6 +60,7 @@
     let artist = "";
     let album = "";
     let artworkURL = "";
+    let allowGenericArtwork = true;
 
     if (host === "music.youtube.com") {
       title = text("ytmusic-player-bar .title") || text("ytmusic-player-bar .content-info-wrapper .title");
@@ -76,6 +77,11 @@
         meta('meta[itemprop="author"]') ||
         attribute('link[itemprop="name"]', "content") ||
         text("#owner #channel-name");
+
+      // Normal YouTube's og:image/twitter:image can lag behind SPA navigation or resolve to
+      // generic YouTube/channel artwork. Halo enriches music video artwork through MediaRemote
+      // and Shazam instead, so do not advertise generic page artwork as album art here.
+      allowGenericArtwork = false;
     } else if (host === "open.spotify.com") {
       const pageTitle = cleanPageTitle(document.title);
       const pieces = pageTitle.split(" • ").map((part) => part.trim()).filter(Boolean);
@@ -100,10 +106,14 @@
 
     artworkURL =
       artworkURL ||
-      meta('meta[property="og:image"]') ||
-      meta('meta[name="twitter:image"]') ||
-      media?.poster ||
-      "";
+      (allowGenericArtwork
+        ? (
+            meta('meta[property="og:image"]') ||
+            meta('meta[name="twitter:image"]') ||
+            media?.poster ||
+            ""
+          )
+        : "");
 
     try {
       if (artworkURL) artworkURL = new URL(artworkURL, location.href).href;
