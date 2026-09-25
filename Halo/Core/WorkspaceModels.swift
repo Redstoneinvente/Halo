@@ -41,26 +41,48 @@ enum HaloNotchMode: String, Codable, CaseIterable, Identifiable {
 }
 
 enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
-    // Keep the raw values stable so Simple settings saved by earlier branch builds
-    // continue to decode, while the visible names now describe true layout families.
+    // Keep the original raw values stable so settings saved by earlier Simple Mode
+    // builds continue to decode. The additional cases are clock-only face families.
     case clean = "Clean"
     case glass = "Glass"
     case vibrant = "Vibrant"
+    case stackedDigital = "Stacked Digital"
+    case flipClock = "Flip Clock"
+    case minimalDial = "Minimal Dial"
+    case romanDial = "Roman Dial"
     var id: String { rawValue }
+
+    static let coreCases: [SimpleNotchWidgetStyle] = [.clean, .glass, .vibrant]
+    static let clockCases: [SimpleNotchWidgetStyle] = coreCases + [.stackedDigital, .flipClock, .minimalDial, .romanDial]
+
+    var isClockExclusive: Bool {
+        switch self {
+        case .stackedDigital, .flipClock, .minimalDial, .romanDial: return true
+        case .clean, .glass, .vibrant: return false
+        }
+    }
 
     var title: String {
         switch self {
-        case .clean: return "Compact"
-        case .glass: return "Focus"
-        case .vibrant: return "Dashboard"
+        case .clean: return "Inline"
+        case .glass: return "Spotlight"
+        case .vibrant: return "Info Panel"
+        case .stackedDigital: return "Stacked Digital"
+        case .flipClock: return "Flip Clock"
+        case .minimalDial: return "Minimal Dial"
+        case .romanDial: return "Roman Dial"
         }
     }
 
     var detail: String {
         switch self {
-        case .clean: return "Dense, glanceable information with the primary action close at hand."
-        case .glass: return "A hero treatment built around the widget's most important content."
-        case .vibrant: return "A richer mini-dashboard with secondary information and controls."
+        case .clean: return "A compact inline layout that keeps the key information immediately readable."
+        case .glass: return "A larger focal layout built around the widget's primary content."
+        case .vibrant: return "A structured information panel with secondary details and controls."
+        case .stackedDigital: return "Large stacked hour and minute digits inspired by segmented digital clocks."
+        case .flipClock: return "Mechanical flip-style hour and minute tiles with compact date details."
+        case .minimalDial: return "A restrained analog face with sparse markers and lightweight date information."
+        case .romanDial: return "A classic analog face using Roman quarter-hour markers."
         }
     }
 
@@ -69,6 +91,10 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
         case .clean: return "rectangle.compress.vertical"
         case .glass: return "viewfinder"
         case .vibrant: return "rectangle.3.group"
+        case .stackedDigital: return "textformat.123"
+        case .flipClock: return "rectangle.split.2x1"
+        case .minimalDial: return "clock"
+        case .romanDial: return "clock.fill"
         }
     }
 }
@@ -119,9 +145,12 @@ struct SimpleNotchSettings: Codable, Equatable {
         value.closedWidgets = closedWidgets.filter {
             Self.closedEligibleWidgets.contains($0) && closedSeen.insert($0).inserted
         }
-        value.styles = styles.filter { key, _ in
-            guard let module = ModuleID(rawValue: key) else { return false }
-            return Self.availableWidgets.contains(module)
+        value.styles = styles.filter { key, style in
+            guard let module = ModuleID(rawValue: key),
+                  Self.availableWidgets.contains(module) else { return false }
+            // New face families belong only to Clock. If an imported/hand-edited
+            // settings file assigns one elsewhere, gracefully fall back to Inline.
+            return module == .clock || !style.isClockExclusive
         }
         return value
     }
