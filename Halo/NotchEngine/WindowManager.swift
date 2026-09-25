@@ -2197,6 +2197,9 @@ final class WindowManager {
     }
 
     private func layoutContainsVisualWorkspacePixelPal(_ host: Host) -> Bool {
+        if store.workspace.settings.resolvedNotchMode == .simple {
+            return store.workspace.settings.resolvedSimpleNotch.widgets.contains(.pet)
+        }
         let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
         guard layout.resolvedUsesCustomOpenNotchWorkspace else { return false }
         return layout.resolvedOpenNotchLayout.resolvedGridItems.contains {
@@ -2331,6 +2334,17 @@ final class WindowManager {
     }
 
     private func reconcile() {
+        let simpleMode = store.workspace.settings.resolvedNotchMode == .simple
+        if simpleMode {
+            let session = SurfaceGeometryEditingSession.shared
+            if session.isEnabled {
+                session.cancelTransaction()
+                session.previewSnapshot = nil
+                session.isEnabled = false
+                session.displayID = nil
+            }
+        }
+
         let screens = store.configuration.allDisplays ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
         var active = Set<String>()
         for screen in screens {
@@ -2349,6 +2363,17 @@ final class WindowManager {
             active.insert(id)
             let existing = hosts[id]
             let host = existing ?? Host()
+
+            if simpleMode {
+                if host.state.pinned { host.state.pinned = false }
+                if host.state.activeCIIdentifier != nil { host.state.activeCIIdentifier = nil }
+                host.state.contextPreferredSize = nil
+                host.state.contextPreferredCompactWidth = nil
+                host.state.contextPreferredCompactHeight = nil
+                host.state.contextMinimumExpandedWidth = nil
+                host.state.editingGeometry = false
+                host.state.cancelFileDrop()
+            }
 
             let savedTheme: Theme = usesDisplayCustomization
                 ? (displayProfile?.theme ?? override?.theme ?? store.workspace.scheduledTheme ?? store.configuration.theme)
@@ -2791,18 +2816,22 @@ final class WindowManager {
                     refreshGeometryEditorPanels()
                 }
             }
-            if access.allows(.notchAmbient) {
+            if !simpleMode && access.allows(.notchAmbient) {
                 host.ambientPanel.order(.below, relativeTo: host.panel.windowNumber)
             } else if host.ambientPanel.isVisible {
                 host.ambientPanel.orderOut(nil)
             }
 
-            bubbleManager.register(
-                displayID: id,
-                screen: screen,
-                surfacePanel: host.panel,
-                state: host.state
-            )
+            if simpleMode {
+                bubbleManager.unregister(displayID: id)
+            } else {
+                bubbleManager.register(
+                    displayID: id,
+                    screen: screen,
+                    surfacePanel: host.panel,
+                    state: host.state
+                )
+            }
         }
         for id in Array(hosts.keys) where !active.contains(id) {
             bubbleManager.unregister(displayID: id)
