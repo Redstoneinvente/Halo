@@ -778,6 +778,10 @@ struct OpenNotchAppearance: Codable, Equatable {
     var borderWidth: Double?
     var borderOpacity: Double?
     var innerHighlight: Double?
+    // Explicit opt-in. Older layouts may contain shadow tuning values from the
+    // previous slider-only UI; keeping this nil/false prevents that shadow from
+    // unexpectedly appearing inside the Visual Workspace surface.
+    var shadowEnabled: Bool?
     var shadowBlur: Double?
     var shadowOpacity: Double?
     var glow: Double?

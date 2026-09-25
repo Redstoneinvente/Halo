@@ -20,7 +20,16 @@
 
   function mediaElements() {
     return Array.from(document.querySelectorAll("video, audio")).filter((element) => {
-      return Number.isFinite(element.duration) || element.readyState > 0 || !element.paused;
+      const hasMedia = Number.isFinite(element.duration) || element.readyState > 0 || !element.paused;
+      if (!hasMedia) return false;
+
+      // Ignore background/autoplay media that cannot currently produce audible output.
+      // Large muted hero videos otherwise beat a real audio element in mediaScore() and
+      // make Halo open Audio CI with the page title instead of actual media metadata.
+      const effectivelyMuted = element.muted || Number(element.volume) <= 0.001;
+      if (!element.paused && effectivelyMuted) return false;
+
+      return true;
     });
   }
 
@@ -60,6 +69,7 @@
     let artist = "";
     let album = "";
     let artworkURL = "";
+    let allowGenericArtwork = true;
 
     if (host === "music.youtube.com") {
       title = text("ytmusic-player-bar .title") || text("ytmusic-player-bar .content-info-wrapper .title");
@@ -76,6 +86,15 @@
         meta('meta[itemprop="author"]') ||
         attribute('link[itemprop="name"]', "content") ||
         text("#owner #channel-name");
+
+      // Do not fall back to YouTube's site/channel icon. Use the current video's thumbnail
+      // as a deterministic fallback while Halo's audio recognition resolves canonical song art.
+      // Deriving it from the current video ID also avoids stale og:image values after SPA navigation.
+      artworkURL =
+        youtubeThumbnailURL() ||
+        meta('meta[itemprop="thumbnailUrl"]') ||
+        attribute('link[itemprop="thumbnailUrl"]', "href");
+      allowGenericArtwork = false;
     } else if (host === "open.spotify.com") {
       const pageTitle = cleanPageTitle(document.title);
       const pieces = pageTitle.split(" • ").map((part) => part.trim()).filter(Boolean);
@@ -100,10 +119,14 @@
 
     artworkURL =
       artworkURL ||
-      meta('meta[property="og:image"]') ||
-      meta('meta[name="twitter:image"]') ||
-      media?.poster ||
-      "";
+      (allowGenericArtwork
+        ? (
+            meta('meta[property="og:image"]') ||
+            meta('meta[name="twitter:image"]') ||
+            media?.poster ||
+            ""
+          )
+        : "");
 
     try {
       if (artworkURL) artworkURL = new URL(artworkURL, location.href).href;
@@ -112,6 +135,27 @@
     }
 
     return { host, title, artist, album, artworkURL };
+  }
+
+  function youtubeThumbnailURL() {
+    const host = location.hostname.toLowerCase();
+    if (!host.endsWith("youtube.com") || host === "music.youtube.com") return "";
+
+    try {
+      const url = new URL(location.href);
+      let videoID = url.searchParams.get("v") || "";
+
+      if (!videoID) {
+        const match = url.pathname.match(/^\/(?:shorts|embed|live)\/([^/?#]+)/i);
+        videoID = match?.[1] || "";
+      }
+
+      return videoID
+        ? `https://i.ytimg.com/vi/${encodeURIComponent(videoID)}/hqdefault.jpg`
+        : "";
+    } catch {
+      return "";
+    }
   }
 
   function siteButton(direction) {
@@ -163,7 +207,7 @@
       album: metadata.album,
       artworkURL: metadata.artworkURL || null,
       sourceLabel: sourceLabel(metadata.host),
-      playing: hasMedia ? (!media.paused && !media.ended) : false,
+      playing: hasMedia ? (!media.paused && !media.ended && !media.muted && Number(media.volume) > 0.001) : false,
       duration,
       position,
       playbackRate: hasMedia && Number.isFinite(media.playbackRate) ? media.playbackRate : 1,
@@ -247,7 +291,7 @@
 
   for (const eventName of [
     "play", "pause", "ended", "loadedmetadata", "durationchange",
-    "ratechange", "seeked", "emptied"
+    "ratechange", "seeked", "emptied", "volumechange"
   ]) {
     document.addEventListener(eventName, () => sendState(true), true);
   }
@@ -259,7 +303,7 @@
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ["src", "poster", "title"]
+    attributeFilter: ["src", "poster", "title", "muted"]
   });
 
   setInterval(() => sendState(false), SEND_INTERVAL_MS);
