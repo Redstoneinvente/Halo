@@ -2800,6 +2800,8 @@ struct SurfaceView: View {
     private var layout: WorkspaceLayout {
         featureAccess.effectiveLayout(state.layoutOverride ?? workspace.effectiveLayout)
     }
+    private var simpleMode: Bool { workspace.settings.resolvedNotchMode == .simple }
+    private var simpleSettings: SimpleNotchSettings { workspace.settings.resolvedSimpleNotch }
     private var contextOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
     private var bluetoothEligible: Bool {
         guard bluetoothCIEnabled else { return false }
@@ -2811,7 +2813,7 @@ struct SurfaceView: View {
         return LiveActivitySelection.primary(in: workspace.activities, excluding: [.bluetooth])
     }
     private var builtInContextCandidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] {
-        guard featureAccess.allows(.contextInterfaces) else { return [] }
+        guard !simpleMode, featureAccess.allows(.contextInterfaces) else { return [] }
         var candidates: [(interface: ActiveContextInterface, priority: Double, tieRank: Int)] = []
         if dropCIEnabled && state.dropTargeted { candidates.append((.drop, dropPriority, 4)) }
         if retroCIEnabled && retroGameRequested { candidates.append((.retro, retroPriority, 4)) }
@@ -2824,13 +2826,14 @@ struct SurfaceView: View {
         return candidates
     }
     private var activeCustomCandidate: HaloCustomCICandidate? {
-        guard featureAccess.allows(.customCI) else { return nil }
+        guard !simpleMode, featureAccess.allows(.customCI) else { return nil }
         return customCI.activeCandidate(workspace: workspace, globalDisabled: disableCustomCI, blockingPriority: nil)
     }
     private var surfaceContextCandidates: [SurfaceContextCandidate] {
         // Context Interfaces are a Halo Full capability. The normal Halo surface
         // itself remains available in both Lite and Full.
-        guard runtimeGate.isReady,
+        guard !simpleMode,
+              runtimeGate.isReady,
               featureAccess.allows(.contextInterfaces) else { return [] }
 
         // Notch Bubble "Open Notch" is an explicit user navigation action.
@@ -3030,7 +3033,7 @@ struct SurfaceView: View {
     @State private var page = 0
     @State private var openVisibilityToken = UUID()
     private var modules: [ModuleID] { layout.normalizedOrder().filter { layout.enabled.contains($0) } }
-    private var usesVisualWorkspace: Bool { layout.resolvedUsesCustomOpenNotchWorkspace }
+    private var usesVisualWorkspace: Bool { !simpleMode && layout.resolvedUsesCustomOpenNotchWorkspace }
     private var usesDefaultWorkspace: Bool { !usesVisualWorkspace }
 
     /// Closed Visual Workspace must be visually independent from the legacy/default
@@ -3080,6 +3083,9 @@ struct SurfaceView: View {
         GeometryReader { surfaceProxy in
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
+                if simpleMode {
+                    simpleSurfaceContent
+                } else {
                 if !contextOwnsFullSurface &&
                     !presentsVisualWorkspaceSurface {
                     Group {
@@ -3249,9 +3255,10 @@ struct SurfaceView: View {
                         .transition(.opacity)
                     }
                 }
+                }
             }
 
-            if contextOwnsFullSurface {
+            if !simpleMode && contextOwnsFullSurface {
                 Group {
                     if integrationContextActive {
                         integrationSurfaceContent
@@ -3303,7 +3310,7 @@ struct SurfaceView: View {
                 // The Default layout's decorative skin belongs to the legacy surface.
                 // Keep it out of a closed Visual Workspace so it cannot appear as a
                 // second tinted/material notch underneath the workspace surface.
-                if !usesVisualWorkspace || visuallyExpanded {
+                if !simpleMode && (!usesVisualWorkspace || visuallyExpanded) {
                     NotchSkinLayer(
                         options: layout.appearance.skin,
                         theme: theme,
@@ -3319,11 +3326,17 @@ struct SurfaceView: View {
         .foregroundStyle(.white).preferredColorScheme(.dark)
         .buttonStyle(.borderless)
         .contextMenu {
-            Button(state.pinned ? "Unpin" : "Keep open") { state.pinned.toggle() }
-            Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
-            if featureAccess.allows(.profiles) {
-                ForEach(workspace.settings.profiles) { profile in
-                    Button(profile.name) { workspace.apply(profile) }
+            if simpleMode {
+                Button("Notch Mode Settings…") {
+                    NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil)
+                }
+            } else {
+                Button(state.pinned ? "Unpin" : "Keep open") { state.pinned.toggle() }
+                Toggle("Keep closed-notch contents when opened", isOn: $keepClosedContentsWhenOpen)
+                if featureAccess.allows(.profiles) {
+                    ForEach(workspace.settings.profiles) { profile in
+                        Button(profile.name) { workspace.apply(profile) }
+                    }
                 }
             }
         }
@@ -3348,7 +3361,8 @@ struct SurfaceView: View {
             if !state.pinned { state.expanded = false }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloClipboardCIToggle"))) { _ in
-            guard featureAccess.allows(.contextInterfaces),
+            guard !simpleMode,
+                  featureAccess.allows(.contextInterfaces),
                   featureAccess.allows(.clipboardWidget),
                   clipboardCIEnabled else { return }
             if clipboardContextActive && state.expanded {
@@ -3366,7 +3380,7 @@ struct SurfaceView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloRetroGameToggle"))) { _ in
-            guard retroCIEnabled else { return }
+            guard !simpleMode, retroCIEnabled else { return }
             retroGameRequested.toggle()
             state.collapseTask?.cancel()
             if retroGameRequested {
@@ -3580,6 +3594,38 @@ struct SurfaceView: View {
         }
     }
 
+    @ViewBuilder
+    private var simpleSurfaceContent: some View {
+        if visuallyExpanded {
+            VStack(spacing: 0) {
+                Color.clear
+                    .frame(height: max(40, state.compactHeight))
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard !state.pinned else { return }
+                        state.expanded = false
+                    }
+
+                SimpleNotchWorkspaceView(store: store, workspace: workspace)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .top)))
+        } else {
+            SimpleClosedNotchView(
+                store: store,
+                workspace: workspace,
+                occlusion: state.closedOcclusion
+            )
+            .frame(width: state.compactWidth, height: state.compactHeight)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                state.collapseTask?.cancel()
+                state.expanded = true
+            }
+            .transition(.opacity)
+        }
+    }
+
     private func synchronizeSurfaceCIOwnership() {
         let winnerID = activeContextCandidate?.arbitration.ciID
         if state.activeCIIdentifier != winnerID {
@@ -3618,7 +3664,9 @@ struct SurfaceView: View {
 
     @ViewBuilder private var surfaceBackgroundLayer: some View {
         ZStack {
-            if transferContextActive {
+            if simpleMode {
+                Color.black
+            } else if transferContextActive {
                 TransferSurfaceBackground(monitor: transfer)
             } else if clipboardContextActive {
                 ClipboardSurfaceBackground(monitor: clipboardCI)
@@ -3643,7 +3691,8 @@ struct SurfaceView: View {
                     system: workspace.system
                 )
             }
-            if !transferContextActive &&
+            if !simpleMode &&
+                !transferContextActive &&
                 !clipboardContextActive &&
                 !customContextActive &&
                 !integrationContextActive &&
@@ -3659,11 +3708,11 @@ struct SurfaceView: View {
     }
 
     @ViewBuilder private var surfaceOverlayLayer: some View {
-        let dropOverlayActive = dropCIEnabled && state.dropTargeted
-        let outlineEnabled = layout.appearance.surface.outlineEnabled ?? true
+        let dropOverlayActive = !simpleMode && dropCIEnabled && state.dropTargeted
+        let outlineEnabled = !simpleMode && (layout.appearance.surface.outlineEnabled ?? true)
 
-        // Keep the drag/drop ownership highlight even when the decorative outer
-        // outline is disabled; it communicates an active drop target.
+        // Simple mode intentionally has no decorative shell chrome. Advanced keeps
+        // the existing outline/drop ownership treatment exactly as before.
         if dropOverlayActive || outlineEnabled {
             contour.stroke(
                 dropOverlayActive ? accent : .white.opacity(0.12),
@@ -3740,6 +3789,289 @@ struct SurfaceView: View {
 }
 
 
+
+// MARK: - Simple Notch Mode
+
+private struct SimpleNotchWorkspaceView: View {
+    static let dragType = "com.redstoneinvente.halo.simple-widget"
+
+    @ObservedObject var store: AppStore
+    @ObservedObject var workspace: WorkspaceStore
+    @State private var dragging: ModuleID?
+
+    private var settings: SimpleNotchSettings { workspace.settings.resolvedSimpleNotch }
+
+    var body: some View {
+        HStack(spacing: CGFloat(SimpleNotchMetrics.widgetSpacing)) {
+            ForEach(settings.widgets) { widget in
+                simpleCard(widget)
+                    .opacity(dragging == widget ? 0.52 : 1)
+                    .scaleEffect(dragging == widget ? 0.98 : 1)
+                    .onDrag {
+                        dragging = widget
+                        let provider = NSItemProvider()
+                        provider.registerDataRepresentation(
+                            forTypeIdentifier: Self.dragType,
+                            visibility: .ownProcess
+                        ) { completion in
+                            completion(Data(widget.rawValue.utf8), nil)
+                            return nil
+                        }
+                        return provider
+                    }
+                    .onDrop(of: [Self.dragType], isTargeted: nil) { providers in
+                        acceptDrop(providers, before: widget)
+                    }
+            }
+        }
+        .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding))
+        .padding(.vertical, CGFloat(SimpleNotchMetrics.verticalPadding))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .animation(.easeInOut(duration: 0.20), value: settings.widgets)
+    }
+
+    @ViewBuilder
+    private func simpleCard(_ widget: ModuleID) -> some View {
+        let width = CGFloat(SimpleNotchMetrics.width(for: widget))
+        let height = CGFloat(SimpleNotchMetrics.widgetHeight)
+        let preset = settings.style(for: widget)
+        let style = simpleWidgetStyle(widget: widget, preset: preset)
+
+        WidgetCard(
+            style: style,
+            availableHeight: height,
+            availableWidth: width
+        ) {
+            BuiltinOrIntegrationWidget(module: widget, store: store)
+                .environment(\.openNotchPresentation, .compact)
+        }
+        .frame(width: width, height: height)
+        .contentShape(RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous))
+        .help("Drag to reorder · \(preset.rawValue) style")
+        .accessibilityLabel("\(simpleTitle(widget)) widget")
+    }
+
+    private func simpleWidgetStyle(widget: ModuleID, preset: SimpleNotchWidgetStyle) -> WidgetStyle {
+        var style = WidgetStyle()
+        style.width = 0
+        style.minimumHeight = 0
+        style.showTitle = false
+        style.showHeaderIcon = false
+        style.fontSize = 13
+        style.padding = widget == .pet ? 4 : 9
+        style.cornerRadius = 18
+        style.layoutMode = .compact
+
+        var content = style.resolvedContent
+        content.maxItems = 2
+        content.controlSize = .mini
+        content.spacing = 6
+        content.showSecondaryText = true
+        content.showFooter = false
+        content.showQuickActions = false
+        style.content = content
+
+        switch preset {
+        case .clean:
+            style.cardBackgroundStyle = .solid
+            style.backgroundColor = .white
+            style.backgroundOpacity = 0.055
+            style.outlineStyle = .none
+        case .glass:
+            style.cardBackgroundStyle = .glass
+            style.backgroundColor = .white
+            style.backgroundOpacity = 0.72
+            style.glassTintOpacity = 0.10
+            style.outlineStyle = .solid
+        case .vibrant:
+            style.cardBackgroundStyle = .accent
+            style.backgroundOpacity = 0.18
+            style.outlineStyle = .solid
+        }
+
+        return style
+    }
+
+    private func acceptDrop(_ providers: [NSItemProvider], before target: ModuleID) -> Bool {
+        guard let provider = providers.first else { return false }
+        provider.loadDataRepresentation(forTypeIdentifier: Self.dragType) { data, _ in
+            guard let data,
+                  let raw = String(data: data, encoding: .utf8),
+                  let source = ModuleID(rawValue: raw) else { return }
+            Task { @MainActor in
+                var value = workspace.settings.resolvedSimpleNotch
+                guard source != target,
+                      let sourceIndex = value.widgets.firstIndex(of: source),
+                      let targetIndex = value.widgets.firstIndex(of: target) else {
+                    dragging = nil
+                    return
+                }
+
+                value.widgets.remove(at: sourceIndex)
+                let adjustedTarget = sourceIndex < targetIndex ? max(0, targetIndex - 1) : targetIndex
+                value.widgets.insert(source, at: min(adjustedTarget, value.widgets.count))
+                workspace.settings.simpleNotch = value.normalized()
+                dragging = nil
+            }
+        }
+        return true
+    }
+
+    private func simpleTitle(_ widget: ModuleID) -> String {
+        widget == .shelf ? "File Tray" : widget.title
+    }
+}
+
+private struct SimpleClosedNotchView: View {
+    @ObservedObject var store: AppStore
+    @ObservedObject var workspace: WorkspaceStore
+    let occlusion: CGRect?
+
+    private var settings: SimpleNotchSettings { workspace.settings.resolvedSimpleNotch }
+
+    private var activeWidgets: [ModuleID] {
+        settings.activeClosedWidgets(
+            timerActive: store.deadline != nil || store.pausedSeconds > 0 || store.finished,
+            stopwatchActive: workspace.stopwatchStart != nil || workspace.stopwatchElapsed > 0,
+            mediaActive: workspace.media.hasNowPlayingPresentation,
+            calendarActive: workspace.calendar.upcomingEvents.contains { $0.endDate > Date() }
+        )
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let occlusion, occlusion.width > 0 {
+                HStack(spacing: 0) {
+                    if let left = activeWidgets.dropFirst().first {
+                        closedSlot(left)
+                            .frame(width: max(0, occlusion.minX), height: proxy.size.height)
+                    } else {
+                        Color.clear.frame(width: max(0, occlusion.minX))
+                    }
+
+                    Color.clear
+                        .frame(width: max(0, occlusion.width), height: proxy.size.height)
+
+                    if let right = activeWidgets.first {
+                        closedSlot(right)
+                            .frame(width: max(0, proxy.size.width - occlusion.maxX), height: proxy.size.height)
+                    } else {
+                        Color.clear.frame(width: max(0, proxy.size.width - occlusion.maxX))
+                    }
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height)
+            } else {
+                HStack(spacing: CGFloat(SimpleNotchMetrics.closedSlotGap)) {
+                    ForEach(activeWidgets) { widget in
+                        closedSlot(widget)
+                            .frame(width: CGFloat(SimpleNotchMetrics.closedSlotWidth))
+                    }
+                }
+                .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding))
+                .frame(width: proxy.size.width, height: proxy.size.height)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func closedSlot(_ widget: ModuleID) -> some View {
+        let preset = settings.style(for: widget)
+        Group {
+            switch widget {
+            case .clock:
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(context.date, style: .time)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+            case .stopwatch:
+                TimelineView(.periodic(from: .now, by: 0.2)) { context in
+                    let elapsed = workspace.stopwatchElapsed +
+                        (workspace.stopwatchStart.map { context.date.timeIntervalSince($0) } ?? 0)
+                    Text(Self.stopwatchString(elapsed))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .lineLimit(1)
+                }
+            case .timer:
+                if let deadline = store.deadline {
+                    Text(deadline, style: .timer)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                } else if store.pausedSeconds > 0 {
+                    Text(Self.timerString(store.pausedSeconds))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                } else {
+                    Image(systemName: "timer")
+                }
+            case .media:
+                HStack(spacing: 6) {
+                    if let image = workspace.media.artworkImage {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 20, height: 20)
+                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    } else {
+                        Image(systemName: workspace.media.isPlaying ? "waveform" : "music.note")
+                    }
+                    Text(workspace.media.title.isEmpty ? "Media" : workspace.media.title)
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(1)
+                }
+            case .calendar:
+                if let event = workspace.calendar.upcomingEvents.first(where: { $0.endDate > Date() }) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "calendar")
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(event.title ?? "Event").lineLimit(1)
+                            Text(event.isAllDay ? "All day" : event.startDate.formatted(date: .omitted, time: .shortened))
+                                .font(.system(size: 8))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.system(size: 9, weight: .semibold))
+                } else {
+                    Label(Date.now.formatted(.dateTime.day().month(.abbreviated)), systemImage: "calendar")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+            default:
+                EmptyView()
+            }
+        }
+        .padding(.horizontal, 7)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background { closedBackground(preset) }
+        .foregroundStyle(.white)
+        .clipped()
+    }
+
+    @ViewBuilder
+    private func closedBackground(_ preset: SimpleNotchWidgetStyle) -> some View {
+        switch preset {
+        case .clean:
+            Color.clear
+        case .glass:
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .opacity(0.38)
+                .padding(.vertical, 3)
+        case .vibrant:
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.accentColor.opacity(0.18))
+                .padding(.vertical, 3)
+        }
+    }
+
+    private static func stopwatchString(_ elapsed: TimeInterval) -> String {
+        let whole = max(0, Int(elapsed))
+        return String(format: "%02d:%02d:%02d", whole / 3600, whole / 60 % 60, whole % 60)
+    }
+
+    private static func timerString(_ seconds: TimeInterval) -> String {
+        let whole = max(0, Int(seconds.rounded()))
+        return String(format: "%02d:%02d", whole / 60, whole % 60)
+    }
+}
 
 // MARK: - Notch skins
 
