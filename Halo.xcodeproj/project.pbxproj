@@ -1143,6 +1143,7 @@
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Halo shows today's schedule and meeting links. It does not modify events.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Halo reads today's calendar events when you enable Calendar.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
+				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo captures only the screen region you select when you use Capture Region. Captures stay on your Mac and are not transmitted.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -1186,6 +1187,7 @@
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Halo shows today's schedule and meeting links. It does not modify events.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Halo reads today's calendar events when you enable Calendar.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Halo uses the camera only when you enable the Mirror widget. Camera frames stay on your Mac and are not saved or transmitted.";
+				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Halo captures only the screen region you select when you use Capture Region. Captures stay on your Mac and are not transmitted.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
