@@ -1331,7 +1331,7 @@ private struct NotchModeSettingsPane: View {
         case .media:
             switch style {
             case .clean: return "Compact now-playing information with fast playback access."
-            case .glass: return "Album artwork and the current track become the visual focus."
+            case .glass: return "A wide artwork-first player with full-bleed cover art, overlaid metadata, progress, and a slim vertical transport rail."
             case .vibrant: return "A fuller playback panel with track details, progress and controls."
             case .vinylDeck: return "A circular record-player treatment built from the current artwork, with track progress and transport controls."
             case .cassette: return "A retro cassette-style transport with twin reels, title and artist metadata, plus playback controls."
