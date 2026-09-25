@@ -1491,7 +1491,13 @@ enum MediaAssetReader {
         var value = ""
         if onlineFallback { value = await onlineLyrics(title: title, artist: artist, duration: duration) }
         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, app == "com.apple.Music" { value = await embeddedAppleMusicLyrics() }
-        let bounded = String(value.prefix(20_000)); lock.lock(); lyricsCache[cacheKey] = bounded; lock.unlock(); return bounded
+        let bounded = String(value.prefix(20_000))
+        // Do not cache misses. Browser metadata can settle a moment after playback starts and
+        // a transient LRCLIB/network miss must not pin "Synced lyrics unavailable" forever.
+        if !bounded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lock.lock(); lyricsCache[cacheKey] = bounded; lock.unlock()
+        }
+        return bounded
     }
     private static func embeddedAppleMusicLyrics() async -> String {
         await withCheckedContinuation { continuation in queue.async {
@@ -1551,6 +1557,48 @@ enum MediaAssetReader {
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private static func lyricsCandidates(title: String, artist: String) -> [(title: String, artist: String)] {
+        let rawTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawTitle.isEmpty else { return [] }
+
+        var candidates: [(title: String, artist: String)] = []
+        func append(_ candidateTitle: String, _ candidateArtist: String) {
+            let cleanTitle = candidateTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanArtist = candidateArtist.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleanTitle.isEmpty, !cleanArtist.isEmpty else { return }
+            let key = cleanTitle.lowercased() + "|" + cleanArtist.lowercased()
+            guard !candidates.contains(where: {
+                $0.title.lowercased() + "|" + $0.artist.lowercased() == key
+            }) else { return }
+            candidates.append((cleanTitle, cleanArtist))
+        }
+
+        if !rawArtist.isEmpty {
+            append(rawTitle, rawArtist)
+            let normalized = normalizedLyricsTitle(rawTitle, artist: rawArtist)
+            if !normalized.isEmpty { append(normalized, rawArtist) }
+        }
+
+        // YouTube commonly exposes "Artist - Song" in the video title while the channel/author
+        // can be decorated, truncated, or otherwise unsuitable for a lyrics provider. Derive a
+        // canonical pair directly from the title so Safari metadata does not have to be perfect.
+        for separator in [" - ", " – ", " — "] {
+            guard let range = rawTitle.range(of: separator) else { continue }
+            let inferredArtist = String(rawTitle[..<range.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let inferredTitle = String(rawTitle[range.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !inferredArtist.isEmpty, !inferredTitle.isEmpty else { continue }
+            append(inferredTitle, inferredArtist)
+            let normalized = normalizedLyricsTitle(inferredTitle, artist: inferredArtist)
+            if !normalized.isEmpty { append(normalized, inferredArtist) }
+            break
+        }
+
+        return candidates
+    }
+
     private static func lyricsRequest(title: String, artist: String, duration: Double?) async -> LRCLyrics? {
         var components = URLComponents(string: "https://lrclib.net/api/get")!
         components.queryItems = [
@@ -1604,46 +1652,50 @@ enum MediaAssetReader {
     }
 
     private static func onlineLyrics(title: String, artist: String, duration: Double?) async -> String {
-        let rawTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rawArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !rawTitle.isEmpty, !rawArtist.isEmpty else { return "" }
-
-        let normalizedTitle = normalizedLyricsTitle(rawTitle, artist: rawArtist)
-        let titleChanged = normalizedTitle.caseInsensitiveCompare(rawTitle) != .orderedSame
-
-        var attempts: [(String, Double?)] = [(rawTitle, duration)]
-        if titleChanged && !normalizedTitle.isEmpty { attempts.append((normalizedTitle, duration)) }
-        if duration != nil {
-            attempts.append((rawTitle, nil))
-            if titleChanged && !normalizedTitle.isEmpty { attempts.append((normalizedTitle, nil)) }
-        }
+        let candidates = lyricsCandidates(title: title, artist: artist)
+        guard !candidates.isEmpty else { return "" }
 
         var seen = Set<String>()
-        for (candidateTitle, candidateDuration) in attempts {
-            let attemptKey = candidateTitle.lowercased() + "|" +
-                (candidateDuration.map { String(Int($0.rounded())) } ?? "no-duration")
-            guard seen.insert(attemptKey).inserted else { continue }
+        for candidate in candidates {
+            let durations: [Double?] = duration == nil ? [nil] : [duration, nil]
+            for candidateDuration in durations {
+                let attemptKey = candidate.title.lowercased() + "|" +
+                    candidate.artist.lowercased() + "|" +
+                    (candidateDuration.map { String(Int($0.rounded())) } ?? "no-duration")
+                guard seen.insert(attemptKey).inserted else { continue }
 
-            guard let result = await lyricsRequest(
-                title: candidateTitle,
-                artist: rawArtist,
-                duration: candidateDuration
-            ) else { continue }
+                guard let result = await lyricsRequest(
+                    title: candidate.title,
+                    artist: candidate.artist,
+                    duration: candidateDuration
+                ) else { continue }
 
-            if let requested = candidateDuration,
-               let returned = result.duration,
-               abs(requested - returned) > 2.5 {
-                continue
-            }
+                if let requested = candidateDuration,
+                   let returned = result.duration,
+                   abs(requested - returned) > 2.5 {
+                    continue
+                }
 
-            if let synced = result.syncedLyrics,
-               !synced.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return synced
+                if let synced = result.syncedLyrics,
+                   !synced.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return synced
+                }
             }
         }
 
-        let searchTitle = normalizedTitle.isEmpty ? rawTitle : normalizedTitle
-        return await lyricsSearch(title: searchTitle, artist: rawArtist, duration: duration)
+        // Exact /api/get can miss browser-style metadata. Search every canonical candidate and
+        // return the first synced result instead of betting everything on Safari's artist field.
+        for candidate in candidates {
+            let searched = await lyricsSearch(
+                title: candidate.title,
+                artist: candidate.artist,
+                duration: duration
+            )
+            if !searched.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return searched
+            }
+        }
+        return ""
     }
 }
 
