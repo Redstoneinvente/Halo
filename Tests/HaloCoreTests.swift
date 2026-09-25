@@ -1374,6 +1374,13 @@ final class SimpleNotchLayoutTests: XCTestCase {
         }
     }
 
+    func testSimpleSharedHeightStaysCompact() {
+        XCTAssertEqual(SimpleNotchMetrics.widgetHeight(.standard), 112)
+        XCTAssertEqual(SimpleNotchMetrics.widgetHeight(.medium), 126)
+        XCTAssertEqual(SimpleNotchMetrics.widgetHeight(.big), 144)
+        XCTAssertEqual(SimpleNotchMetrics.openTopPadding(.standard), 0)
+    }
+
     func testSpecializedSimpleStylesStayOnTheirIntendedWidgets() {
         var settings = SimpleNotchSettings()
         settings.widgets = [.clock, .calendar, .timer, .media]
