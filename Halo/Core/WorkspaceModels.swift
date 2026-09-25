@@ -52,11 +52,15 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
     case romanDial = "Roman Dial"
     case eventCard = "Event Card"
     case yearOverview = "Year Overview"
+    case pomodoroRing = "Pomodoro Ring"
+    case deadlineTimer = "Deadline"
+    case segmentDisplay = "Segment Display"
     var id: String { rawValue }
 
     static let coreCases: [SimpleNotchWidgetStyle] = [.clean, .glass, .vibrant]
     static let clockCases: [SimpleNotchWidgetStyle] = coreCases + [.stackedDigital, .flipClock, .minimalDial, .romanDial]
     static let calendarCases: [SimpleNotchWidgetStyle] = coreCases + [.eventCard, .yearOverview]
+    static let timerCases: [SimpleNotchWidgetStyle] = coreCases + [.pomodoroRing, .deadlineTimer, .segmentDisplay]
 
     func supports(widget: ModuleID) -> Bool {
         switch self {
@@ -64,6 +68,8 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
             return widget == .clock
         case .eventCard, .yearOverview:
             return widget == .calendar
+        case .pomodoroRing, .deadlineTimer, .segmentDisplay:
+            return widget == .timer
         case .clean, .glass, .vibrant:
             return true
         }
@@ -80,6 +86,9 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
         case .romanDial: return "Roman Dial"
         case .eventCard: return "Event Card"
         case .yearOverview: return "Year Overview"
+        case .pomodoroRing: return "Pomodoro Ring"
+        case .deadlineTimer: return "Deadline"
+        case .segmentDisplay: return "Segment Display"
         }
     }
 
@@ -94,6 +103,9 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
         case .romanDial: return "A classic analog face using Roman quarter-hour markers."
         case .eventCard: return "A date-led agenda card that gives the next event visual priority."
         case .yearOverview: return "A compact twelve-month overview designed for Halo's wider Simple layout."
+        case .pomodoroRing: return "A focused circular countdown inspired by dedicated Pomodoro timers."
+        case .deadlineTimer: return "A minimal deadline treatment showing how long remains and when the timer ends."
+        case .segmentDisplay: return "A bold segmented-style digital countdown with compact playback controls."
         }
     }
 
@@ -108,6 +120,9 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
         case .romanDial: return "clock.fill"
         case .eventCard: return "calendar.badge.clock"
         case .yearOverview: return "calendar"
+        case .pomodoroRing: return "circle.dashed.inset.filled"
+        case .deadlineTimer: return "hourglass"
+        case .segmentDisplay: return "digitalcrown.horizontal.arrow.clockwise"
         }
     }
 }
@@ -327,6 +342,10 @@ enum SimpleNotchMetrics {
         switch size { case .standard: return 184; case .medium: return 206; case .big: return 230 }
     }
 
+    static func timerFeatureWidth(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 232; case .medium: return 260; case .big: return 292 }
+    }
+
     static func mediaWidth(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 264; case .medium: return 300; case .big: return 336 }
     }
@@ -339,6 +358,11 @@ enum SimpleNotchMetrics {
         switch widget {
         case .calendar:
             return style == .yearOverview ? calendarYearWidth(size) : calendarWidth(size)
+        case .timer:
+            switch style {
+            case .pomodoroRing, .deadlineTimer, .segmentDisplay: return timerFeatureWidth(size)
+            default: return widgetWidth(size)
+            }
         case .media: return mediaWidth(size)
         case .clock: return clockWidth(size)
         case .pet: return pixelPalWidth(size)
