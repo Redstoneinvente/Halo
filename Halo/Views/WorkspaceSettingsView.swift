@@ -944,6 +944,10 @@ private struct NotchModeSettingsPane: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                Text("Simple always keeps at least one widget enabled, so the opened notch never becomes an empty black surface.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+
                 ForEach(SimpleNotchSettings.availableWidgets) { widget in
                     VStack(alignment: .leading, spacing: 9) {
                         HStack(spacing: 10) {
@@ -1009,6 +1013,8 @@ private struct NotchModeSettingsPane: View {
                 if enabled {
                     if !value.widgets.contains(widget) { value.widgets.append(widget) }
                 } else {
+                    // The Simple shelf must always have something meaningful to show.
+                    guard value.widgets.count > 1 else { return }
                     value.widgets.removeAll { $0 == widget }
                 }
                 workspace.settings.simpleNotch = value.normalized()
