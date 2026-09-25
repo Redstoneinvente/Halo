@@ -26,7 +26,7 @@ old_script = '''    private var perlScriptPath: String? {
 '''
 new_script = '''    private var perlScriptPath: String? {
         guard let path = Bundle.main.path(forResource: "run", ofType: "pl") else {
-            assertionFailure("run.pl script not found in Halo resources.")
+            Self.logBridgeUnavailable("run.pl script is missing from Halo resources.")
             return nil
         }
         return path
@@ -46,14 +46,19 @@ old_library_start = s.find('    private var libraryPath: String? {')
 old_library_end = s.find('\n    @discardableResult', old_library_start)
 if old_library_start < 0 or old_library_end < 0:
     raise SystemExit('MediaController libraryPath block not found')
-new_library = '''    private var libraryPath: String? {
+new_library = '''    private static func logBridgeUnavailable(_ message: String) {
+        fputs("[Halo MediaRemote] \\(message) Continuing without native MediaRemote.\\n", stderr)
+    }
+
+    private var libraryPath: String? {
         guard let frameworksURL = Bundle.main.privateFrameworksURL else {
-            assertionFailure("Could not locate Halo's Frameworks directory.")
+            Self.logBridgeUnavailable("Could not locate Halo's Frameworks directory.")
             return nil
         }
+
         let url = frameworksURL.appendingPathComponent("libHaloMediaRemoteBridge.dylib")
         guard FileManager.default.fileExists(atPath: url.path) else {
-            assertionFailure("Halo MediaRemote bridge dylib is missing at \\(url.path).")
+            Self.logBridgeUnavailable("Native bridge dylib is missing at \\(url.path).")
             return nil
         }
         return url.path
