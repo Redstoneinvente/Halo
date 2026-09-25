@@ -285,9 +285,18 @@ final class SurfaceState: ObservableObject {
         dropExitTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 120_000_000)
             guard !Task.isCancelled, let self else { return }
+
+            // Only retract Halo if Drop CI was the thing that expanded it. If Halo was
+            // already open (manual open, hover, pin, another owner), leave that state alone.
+            let shouldCollapse = self.dropOpenedSurfaceAutomatically
             self.dropTargeted = false
             self.dropItemCount = 0
             self.dropOpenedSurfaceAutomatically = false
+
+            guard shouldCollapse, !self.pinned, !self.editingGeometry else { return }
+            self.collapseTask?.cancel()
+            self.collapseTask = nil
+            self.expanded = false
         }
     }
 
