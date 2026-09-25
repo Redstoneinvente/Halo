@@ -5049,7 +5049,7 @@ private struct SimpleNotchWidgetView: View {
                                 day: day
                             )
                         )
-                        let today = date.map(simpleCalendar.isDateInToday) ?? false
+                        let today = date.map { simpleCalendar.isDateInToday($0) } ?? false
                         Text(String(day))
                             .font(.system(size: 4.2 * scale, weight: today ? .bold : .medium, design: .rounded))
                             .monospacedDigit()
