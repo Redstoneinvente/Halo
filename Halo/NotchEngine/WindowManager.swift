@@ -285,9 +285,18 @@ final class SurfaceState: ObservableObject {
         dropExitTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 120_000_000)
             guard !Task.isCancelled, let self else { return }
+
+            // Only retract Halo if Drop CI was the thing that expanded it. If Halo was
+            // already open (manual open, hover, pin, another owner), leave that state alone.
+            let shouldCollapse = self.dropOpenedSurfaceAutomatically
             self.dropTargeted = false
             self.dropItemCount = 0
             self.dropOpenedSurfaceAutomatically = false
+
+            guard shouldCollapse, !self.pinned, !self.editingGeometry else { return }
+            self.collapseTask?.cancel()
+            self.collapseTask = nil
+            self.expanded = false
         }
     }
 
@@ -2337,6 +2346,13 @@ final class WindowManager {
             if host.state.layoutOverride != effectiveLayout {
                 host.state.layoutOverride = effectiveLayout
             }
+
+            // Visual Workspace draws its own contour/chrome. The native NSPanel shadow
+            // is rectangular/window-level and can bleed through the transparent surface,
+            // which reads as a muddy inner shadow around bright workspaces. Disable the
+            // native shadow there; Default workspace keeps the normal macOS panel shadow.
+            host.panel.hasShadow = !effectiveLayout.resolvedUsesCustomOpenNotchWorkspace
+
             configureDynamicWidth(host)
             let baseDashboardWidth = host.geometry!.frame(expanded: true).width
             if activeExpandedContextRequest(for: host) == nil &&
