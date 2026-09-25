@@ -3913,8 +3913,8 @@ private struct SimpleNotchWorkspaceView: View {
             .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
             .padding(.top, CGFloat(SimpleNotchMetrics.openTopPadding(size)))
             .padding(.bottom, CGFloat(SimpleNotchMetrics.openBottomPadding(size)))
-            .frame(width: arrangement.width, height: arrangement.height, alignment: .center)
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
+            .frame(width: arrangement.width, height: arrangement.height, alignment: .top)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             .clipped()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -3992,8 +3992,6 @@ private struct SimpleNotchWidgetView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject var surfaceState: SurfaceState
-    @State private var mediaSpinBase: Double = 0
-    @State private var mediaSpinStartedAt = Date()
 
     private var scale: CGFloat { CGFloat(sizePreset.scale) }
     private var accent: Color {
@@ -4025,26 +4023,6 @@ private struct SimpleNotchWidgetView: View {
 
     private var shellWithMediaMotion: some View {
         shell
-            .onAppear {
-                guard widget == .media else { return }
-                mediaSpinBase = (workspace.media.position * 22).truncatingRemainder(dividingBy: 360)
-                mediaSpinStartedAt = Date()
-            }
-            .onChange(of: workspace.media.isPlaying) { playing in
-                guard widget == .media else { return }
-                let now = Date()
-                if playing {
-                    mediaSpinStartedAt = now
-                } else {
-                    let elapsed = max(0, now.timeIntervalSince(mediaSpinStartedAt))
-                    mediaSpinBase = (mediaSpinBase + elapsed * 42).truncatingRemainder(dividingBy: 360)
-                }
-            }
-            .onChange(of: workspace.media.title) { _ in
-                guard widget == .media else { return }
-                mediaSpinBase = 0
-                mediaSpinStartedAt = Date()
-            }
     }
 
     private var shell: some View {
@@ -4082,11 +4060,13 @@ private struct SimpleNotchWidgetView: View {
                 if widget == .media { streamBarMedia } else { compactContent }
             }
         }
-        .padding(12 * scale)
+        .padding(.horizontal, 12 * scale)
+        .padding(.top, 3 * scale)
+        .padding(.bottom, 7 * scale)
         .foregroundStyle(.white)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     @ViewBuilder
@@ -4362,7 +4342,7 @@ private struct SimpleNotchWidgetView: View {
             .frame(width: 54 * scale, height: 54 * scale)
 
             Text(label)
-                .font(.system(size: 6 * scale, weight: .bold, design: .rounded))
+                .font(.system(size: 5.4 * scale, weight: .bold, design: .rounded))
                 .foregroundStyle(.tertiary)
         }
     }
@@ -5117,8 +5097,8 @@ private struct SimpleNotchWidgetView: View {
             }
 
             LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 1.5 * scale), count: 7),
-                spacing: 1.5 * scale
+                columns: Array(repeating: GridItem(.flexible(), spacing: 1.0 * scale), count: 7),
+                spacing: 0.8 * scale
             ) {
                 ForEach(Array(simpleWeekdaySymbols.enumerated()), id: \.offset) { _, symbol in
                     Text(symbol.uppercased())
@@ -5895,12 +5875,9 @@ private struct SimpleNotchWidgetView: View {
     }
 
     private func mediaSpinAngle(at date: Date) -> Double {
-        guard workspace.media.isPlaying,
-              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
-            return mediaSpinBase.truncatingRemainder(dividingBy: 360)
-        }
-        let elapsed = max(0, date.timeIntervalSince(mediaSpinStartedAt))
-        return (mediaSpinBase + elapsed * 42).truncatingRemainder(dividingBy: 360)
+        // Pure rendering: TimelineView supplies time and its paused schedule freezes the
+        // frame. No @State/@Published writes happen from the render/update cycle.
+        (date.timeIntervalSinceReferenceDate * 42).truncatingRemainder(dividingBy: 360)
     }
 
     private func vinylRecord(angle: Double) -> some View {
