@@ -2,6 +2,9 @@ import AppKit
 import SwiftUI
 import Vision
 import CoreGraphics
+import CoreMedia
+import CoreImage
+import ScreenCaptureKit
 import Combine
 import UniformTypeIdentifiers
 
@@ -56,18 +59,21 @@ final class CaptureService: ObservableObject {
                 self.error = message
 
             case .selected(let screen, let rect):
-                do {
-                    let pngData = try Self.capturePNG(screen: screen, appKitRect: rect)
-                    self.presentSavePanel(pngData: pngData, completion: completion)
-                } catch {
-                    self.busy = false
-                    self.error = "Capture failed: \(error.localizedDescription)"
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    do {
+                        let pngData = try await Self.capturePNG(screen: screen, appKitRect: rect)
+                        self.presentSavePanel(pngData: pngData, completion: completion)
+                    } catch {
+                        self.busy = false
+                        self.error = "Capture failed: \(error.localizedDescription)"
+                    }
                 }
             }
         }
     }
 
-    private static func capturePNG(screen: NSScreen, appKitRect: CGRect) throws -> Data {
+    private static func capturePNG(screen: NSScreen, appKitRect: CGRect) async throws -> Data {
         guard
             let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
         else {
@@ -75,46 +81,55 @@ final class CaptureService: ObservableObject {
         }
 
         let displayID = CGDirectDisplayID(screenNumber.uint32Value)
-        let displayBounds = CGDisplayBounds(displayID)
-        let screenFrame = screen.frame
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
 
+        guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
+            throw CaptureRegionError.displayUnavailable
+        }
+
+        let screenFrame = screen.frame
         guard screenFrame.width > 0, screenFrame.height > 0 else {
             throw CaptureRegionError.displayUnavailable
         }
 
-        // NSScreen uses a bottom-left origin while Core Graphics screen capture
-        // uses a top-left origin. Ratios keep this correct on Retina and scaled
-        // displays whether the two coordinate spaces are 1:1 or pixel-scaled.
-        let scaleX = displayBounds.width / screenFrame.width
-        let scaleY = displayBounds.height / screenFrame.height
-        let localX = appKitRect.minX - screenFrame.minX
-        let localTop = screenFrame.maxY - appKitRect.maxY
-
-        let captureRect = CGRect(
-            x: displayBounds.minX + localX * scaleX,
-            y: displayBounds.minY + localTop * scaleY,
-            width: appKitRect.width * scaleX,
-            height: appKitRect.height * scaleY
+        // ScreenCaptureKit sourceRect is expressed in points in the selected
+        // display's logical coordinate system with its origin at the top-left.
+        let sourceRect = CGRect(
+            x: appKitRect.minX - screenFrame.minX,
+            y: screenFrame.maxY - appKitRect.maxY,
+            width: appKitRect.width,
+            height: appKitRect.height
         ).integral
 
-        guard captureRect.width >= 1, captureRect.height >= 1 else {
+        guard sourceRect.width >= 1, sourceRect.height >= 1 else {
             throw CaptureRegionError.emptySelection
         }
 
-        guard let image = CGWindowListCreateImage(
-            captureRect,
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            [.bestResolution]
-        ) else {
-            throw CaptureRegionError.captureUnavailable
-        }
+        let pixelScaleX = max(1, CGFloat(display.width) / screenFrame.width)
+        let pixelScaleY = max(1, CGFloat(display.height) / screenFrame.height)
 
-        let representation = NSBitmapImageRep(cgImage: image)
-        guard let data = representation.representation(using: .png, properties: [:]) else {
-            throw CaptureRegionError.encodingFailed
+        let configuration = SCStreamConfiguration()
+        configuration.sourceRect = sourceRect
+        configuration.width = max(1, Int((sourceRect.width * pixelScaleX).rounded()))
+        configuration.height = max(1, Int((sourceRect.height * pixelScaleY).rounded()))
+        configuration.queueDepth = 1
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        configuration.showsCursor = false
+
+        let ownApplications = content.applications.filter {
+            $0.bundleIdentifier == Bundle.main.bundleIdentifier
         }
-        return data
+        let filter = SCContentFilter(
+            display: display,
+            excludingApplications: ownApplications,
+            exceptingWindows: []
+        )
+
+        let receiver = CaptureFrameReceiver()
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+        try stream.addStreamOutput(receiver, type: .screen, sampleHandlerQueue: receiver.sampleQueue)
+
+        return try await receiver.captureSingleFrame(from: stream)
     }
 
     private func presentSavePanel(pngData: Data, completion: @escaping (URL) -> Void) {
@@ -196,6 +211,7 @@ private enum CaptureRegionError: LocalizedError {
     case emptySelection
     case captureUnavailable
     case encodingFailed
+    case timedOut
 
     var errorDescription: String? {
         switch self {
@@ -207,6 +223,8 @@ private enum CaptureRegionError: LocalizedError {
             return "macOS did not return an image for the selected region."
         case .encodingFailed:
             return "Halo could not encode the captured region as PNG."
+        case .timedOut:
+            return "macOS did not return a screen frame in time. Try Capture Region again."
         }
     }
 }
@@ -215,6 +233,86 @@ private enum CaptureRegionSelectionResult {
     case selected(screen: NSScreen, rect: CGRect)
     case cancelled
     case failed(String)
+}
+
+
+private final class CaptureFrameReceiver: NSObject, SCStreamOutput, @unchecked Sendable {
+    let sampleQueue = DispatchQueue(label: "Halo.Capture.RegionFrame", qos: .userInitiated)
+
+    private let stateQueue = DispatchQueue(label: "Halo.Capture.RegionFrame.State")
+    private let imageContext = CIContext()
+    private var continuation: CheckedContinuation<Data, Error>?
+    private var stream: SCStream?
+    private var finished = false
+
+    func captureSingleFrame(from stream: SCStream) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            stateQueue.sync {
+                self.continuation = continuation
+                self.stream = stream
+                self.finished = false
+            }
+
+            stateQueue.asyncAfter(deadline: .now() + 4) { [weak self] in
+                self?.finish(.failure(CaptureRegionError.timedOut))
+            }
+
+            Task { [weak self] in
+                do {
+                    try await stream.startCapture()
+                } catch {
+                    self?.finish(.failure(error))
+                }
+            }
+        }
+    }
+
+    func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of outputType: SCStreamOutputType
+    ) {
+        guard outputType == .screen,
+              sampleBuffer.isValid,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
+        else {
+            return
+        }
+
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let cgImage = imageContext.createCGImage(image, from: image.extent) else {
+            finish(.failure(CaptureRegionError.captureUnavailable))
+            return
+        }
+
+        let representation = NSBitmapImageRep(cgImage: cgImage)
+        guard let data = representation.representation(using: .png, properties: [:]) else {
+            finish(.failure(CaptureRegionError.encodingFailed))
+            return
+        }
+
+        finish(.success(data))
+    }
+
+    private func finish(_ result: Result<Data, Error>) {
+        stateQueue.async { [weak self] in
+            guard let self, !self.finished else { return }
+            self.finished = true
+
+            let continuation = self.continuation
+            let stream = self.stream
+            self.continuation = nil
+            self.stream = nil
+
+            continuation?.resume(with: result)
+
+            if let stream {
+                Task {
+                    try? await stream.stopCapture()
+                }
+            }
+        }
+    }
 }
 
 @MainActor
