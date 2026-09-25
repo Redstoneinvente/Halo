@@ -3606,7 +3606,7 @@ struct SurfaceView: View {
                         state.expanded = false
                     }
 
-                SimpleNotchWorkspaceView(store: store, workspace: workspace)
+                SimpleNotchWorkspaceView(store: store, workspace: workspace, surfaceState: state)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .top)))
@@ -3797,6 +3797,7 @@ private struct SimpleNotchWorkspaceView: View {
 
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
+    @ObservedObject var surfaceState: SurfaceState
     @State private var dragging: ModuleID?
 
     private var settings: SimpleNotchSettings { workspace.settings.resolvedSimpleNotch }
@@ -3844,6 +3845,8 @@ private struct SimpleNotchWorkspaceView: View {
         ) {
             BuiltinOrIntegrationWidget(module: widget, store: store)
                 .environment(\.openNotchPresentation, .compact)
+                .environment(\.haloPixelPalHostExpanded, surfaceState.expanded)
+                .environment(\.haloPixelPalHostTransitionDuration, 0.28)
         }
         .frame(width: width, height: height)
         .contentShape(RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous))
