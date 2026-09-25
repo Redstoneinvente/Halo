@@ -1645,7 +1645,6 @@ enum MediaAssetReader {
         let searchTitle = normalizedTitle.isEmpty ? rawTitle : normalizedTitle
         return await lyricsSearch(title: searchTitle, artist: rawArtist, duration: duration)
     }
-    }
 }
 
 struct AlbumNotchBackground: View {
