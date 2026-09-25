@@ -3800,13 +3800,14 @@ private struct SimpleNotchWorkspaceView: View {
     @State private var dragging: ModuleID?
 
     private var settings: SimpleNotchSettings { workspace.settings.resolvedSimpleNotch }
+    private var size: SimpleNotchSize { settings.resolvedSize }
 
     var body: some View {
-        HStack(spacing: CGFloat(SimpleNotchMetrics.widgetSpacing)) {
+        HStack(spacing: CGFloat(SimpleNotchMetrics.widgetSpacing(size))) {
             ForEach(settings.widgets) { widget in
                 simpleCard(widget)
-                    .opacity(dragging == widget ? 0.52 : 1)
-                    .scaleEffect(dragging == widget ? 0.98 : 1)
+                    .opacity(dragging == widget ? 0.50 : 1)
+                    .scaleEffect(dragging == widget ? 0.975 : 1)
                     .onDrag {
                         dragging = widget
                         let provider = NSItemProvider()
@@ -3824,74 +3825,31 @@ private struct SimpleNotchWorkspaceView: View {
                     }
             }
         }
-        .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding))
-        .padding(.vertical, CGFloat(SimpleNotchMetrics.verticalPadding))
+        .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
+        .padding(.vertical, CGFloat(SimpleNotchMetrics.verticalPadding(size)))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .animation(.easeInOut(duration: 0.20), value: settings.widgets)
+        .animation(.snappy(duration: 0.22), value: settings.widgets)
+        .animation(.snappy(duration: 0.22), value: size)
     }
 
     @ViewBuilder
     private func simpleCard(_ widget: ModuleID) -> some View {
-        let width = CGFloat(SimpleNotchMetrics.width(for: widget))
-        let height = CGFloat(SimpleNotchMetrics.widgetHeight)
+        let width = CGFloat(SimpleNotchMetrics.width(for: widget, size: size))
+        let height = CGFloat(SimpleNotchMetrics.widgetHeight(size))
         let preset = settings.style(for: widget)
-        let style = simpleWidgetStyle(widget: widget, preset: preset)
 
-        WidgetCard(
-            style: style,
-            availableHeight: height,
-            availableWidth: width
-        ) {
-            BuiltinOrIntegrationWidget(module: widget, store: store)
-                .environment(\.openNotchPresentation, .compact)
-                .environment(\.haloPixelPalHostExpanded, surfaceState.expanded)
-                .environment(\.haloPixelPalHostTransitionDuration, 0.28)
-        }
+        SimpleNotchWidgetView(
+            widget: widget,
+            preset: preset,
+            sizePreset: size,
+            store: store,
+            workspace: workspace,
+            surfaceState: surfaceState
+        )
         .frame(width: width, height: height)
-        .contentShape(RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous))
-        .help("Drag to reorder · \(preset.rawValue) style")
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .help("Drag to reorder · \(preset.title) style")
         .accessibilityLabel("\(simpleTitle(widget)) widget")
-    }
-
-    private func simpleWidgetStyle(widget: ModuleID, preset: SimpleNotchWidgetStyle) -> WidgetStyle {
-        var style = WidgetStyle()
-        style.width = 0
-        style.minimumHeight = 0
-        style.showTitle = false
-        style.showHeaderIcon = false
-        style.fontSize = 13
-        style.padding = widget == .pet ? 4 : 9
-        style.cornerRadius = 18
-        style.layoutMode = .compact
-
-        var content = style.resolvedContent
-        content.maxItems = 2
-        content.controlSize = .mini
-        content.spacing = 6
-        content.showSecondaryText = true
-        content.showFooter = false
-        content.showQuickActions = false
-        style.content = content
-
-        switch preset {
-        case .clean:
-            style.cardBackgroundStyle = .solid
-            style.backgroundColor = .white
-            style.backgroundOpacity = 0.055
-            style.outlineStyle = .none
-        case .glass:
-            style.cardBackgroundStyle = .glass
-            style.backgroundColor = .white
-            style.backgroundOpacity = 0.72
-            style.glassTintOpacity = 0.10
-            style.outlineStyle = .solid
-        case .vibrant:
-            style.cardBackgroundStyle = .accent
-            style.backgroundOpacity = 0.18
-            style.outlineStyle = .solid
-        }
-
-        return style
     }
 
     private func acceptDrop(_ providers: [NSItemProvider], before target: ModuleID) -> Bool {
@@ -3910,9 +3868,6 @@ private struct SimpleNotchWorkspaceView: View {
                 }
 
                 value.widgets.remove(at: sourceIndex)
-                // Dropping forward places the source after the target's new position;
-                // dropping backward places it before the target. This makes the whole
-                // row reachable, including moving a widget all the way to the end.
                 let insertionIndex = min(targetIndex, value.widgets.count)
                 value.widgets.insert(source, at: insertionIndex)
                 workspace.settings.simpleNotch = value.normalized()
@@ -3924,6 +3879,691 @@ private struct SimpleNotchWorkspaceView: View {
 
     private func simpleTitle(_ widget: ModuleID) -> String {
         widget == .shelf ? "File Tray" : widget.title
+    }
+}
+
+private struct SimpleNotchWidgetView: View {
+    let widget: ModuleID
+    let preset: SimpleNotchWidgetStyle
+    let sizePreset: SimpleNotchSize
+    @ObservedObject var store: AppStore
+    @ObservedObject var workspace: WorkspaceStore
+    @ObservedObject var surfaceState: SurfaceState
+
+    private var scale: CGFloat { CGFloat(sizePreset.scale) }
+    private var accent: Color { .accentColor }
+    private var title: String { widget == .shelf ? "File Tray" : widget.title }
+
+    @ViewBuilder
+    var body: some View {
+        if widget == .shelf {
+            shell
+                .dropDestination(for: URL.self) { urls, _ in
+                    let files = urls.filter(\.isFileURL)
+                    guard !files.isEmpty else { return false }
+                    store.addFiles(files)
+                    return true
+                }
+        } else {
+            shell
+        }
+    }
+
+    private var shell: some View {
+        Group {
+            switch preset {
+            case .clean:
+                compactContent
+                    .padding(10 * scale)
+                    .background {
+                        RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+                            .fill(Color.white.opacity(0.055))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+                                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            }
+                    }
+            case .glass:
+                focusContent
+                    .padding(10 * scale)
+                    .background {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 21 * scale, style: .continuous)
+                                .fill(.ultraThinMaterial)
+                                .opacity(0.76)
+                            RoundedRectangle(cornerRadius: 21 * scale, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [accent.opacity(0.20), .clear, Color.white.opacity(0.04)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                            Circle()
+                                .fill(accent.opacity(0.14))
+                                .frame(width: 90 * scale, height: 90 * scale)
+                                .blur(radius: 22 * scale)
+                                .offset(x: 48 * scale, y: -44 * scale)
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 21 * scale, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 21 * scale, style: .continuous)
+                                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                        }
+                    }
+            case .vibrant:
+                dashboardContent
+                    .padding(10 * scale)
+                    .background {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+                                .fill(Color.black.opacity(0.72))
+                            RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [accent.opacity(0.22), .clear, accent.opacity(0.08)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                        }
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+                                .stroke(accent.opacity(0.28), lineWidth: 1)
+                        }
+                    }
+            }
+        }
+        .foregroundStyle(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 21 * scale, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var compactContent: some View {
+        switch widget {
+        case .clock: compactClock
+        case .stopwatch: compactStopwatch
+        case .timer: compactTimer
+        case .shelf: compactFiles
+        case .calendar: compactCalendar
+        case .pet: compactPixelPal
+        case .media: compactMedia
+        default: EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var focusContent: some View {
+        switch widget {
+        case .clock: focusClock
+        case .stopwatch: focusStopwatch
+        case .timer: focusTimer
+        case .shelf: focusFiles
+        case .calendar: focusCalendar
+        case .pet: focusPixelPal
+        case .media: focusMedia
+        default: EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var dashboardContent: some View {
+        VStack(alignment: .leading, spacing: 7 * scale) {
+            HStack(spacing: 6 * scale) {
+                Image(systemName: widget.symbol)
+                    .font(.system(size: 10 * scale, weight: .bold))
+                    .foregroundStyle(accent)
+                Text(title.uppercased())
+                    .font(.system(size: 8.5 * scale, weight: .bold, design: .rounded))
+                    .tracking(0.7)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Circle().fill(accent).frame(width: 4.5 * scale, height: 4.5 * scale)
+            }
+
+            switch widget {
+            case .clock: dashboardClock
+            case .stopwatch: dashboardStopwatch
+            case .timer: dashboardTimer
+            case .shelf: dashboardFiles
+            case .calendar: dashboardCalendar
+            case .pet: dashboardPixelPal
+            case .media: dashboardMedia
+            default: EmptyView()
+            }
+        }
+    }
+
+    private var compactClock: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 9 * scale) {
+                heroIcon("clock.fill")
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(context.date, style: .time)
+                        .font(.system(size: 20 * scale, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text(context.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                        .font(.system(size: 8.5 * scale, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private var focusClock: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            VStack(spacing: 5 * scale) {
+                Text(context.date.formatted(.dateTime.weekday(.wide)).uppercased())
+                    .font(.system(size: 8 * scale, weight: .bold, design: .rounded))
+                    .tracking(1.1)
+                    .foregroundStyle(accent)
+                Text(context.date, style: .time)
+                    .font(.system(size: 28 * scale, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.68)
+                    .lineLimit(1)
+                Text(context.date.formatted(.dateTime.month(.wide).day()))
+                    .font(.system(size: 9.5 * scale, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var dashboardClock: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(alignment: .bottom, spacing: 8 * scale) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(context.date.formatted(.dateTime.day()))
+                        .font(.system(size: 32 * scale, weight: .black, design: .rounded))
+                    Text(context.date.formatted(.dateTime.month(.abbreviated)).uppercased())
+                        .font(.system(size: 8 * scale, weight: .bold))
+                        .foregroundStyle(accent)
+                }
+                Spacer(minLength: 0)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(context.date, style: .time)
+                        .font(.system(size: 19 * scale, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text(context.date.formatted(.dateTime.weekday(.wide)))
+                        .font(.system(size: 8 * scale))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var compactStopwatch: some View {
+        TimelineView(.periodic(from: .now, by: 0.1)) { context in
+            HStack(spacing: 8 * scale) {
+                heroIcon("stopwatch.fill")
+                Text(stopwatchText(at: context.date))
+                    .font(.system(size: 15 * scale, weight: .bold, design: .monospaced))
+                    .minimumScaleFactor(0.72)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                roundButton(workspace.stopwatchStart == nil ? "play.fill" : "pause.fill") {
+                    workspace.toggleStopwatch()
+                }
+            }
+        }
+    }
+
+    private var focusStopwatch: some View {
+        TimelineView(.periodic(from: .now, by: 0.1)) { context in
+            VStack(spacing: 7 * scale) {
+                ZStack {
+                    Circle().stroke(Color.white.opacity(0.10), lineWidth: 4 * scale)
+                    Circle()
+                        .trim(from: 0, to: CGFloat((stopwatchElapsed(at: context.date).truncatingRemainder(dividingBy: 60)) / 60))
+                        .stroke(accent, style: StrokeStyle(lineWidth: 4 * scale, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    Text(stopwatchText(at: context.date))
+                        .font(.system(size: 12 * scale, weight: .bold, design: .monospaced))
+                        .minimumScaleFactor(0.65)
+                }
+                .frame(width: 76 * scale, height: 76 * scale)
+
+                roundButton(workspace.stopwatchStart == nil ? "play.fill" : "pause.fill") {
+                    workspace.toggleStopwatch()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var dashboardStopwatch: some View {
+        TimelineView(.periodic(from: .now, by: 0.1)) { context in
+            VStack(alignment: .leading, spacing: 7 * scale) {
+                Text(stopwatchText(at: context.date))
+                    .font(.system(size: 21 * scale, weight: .bold, design: .monospaced))
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                HStack {
+                    Label(workspace.stopwatchStart == nil ? "Paused" : "Running",
+                          systemImage: workspace.stopwatchStart == nil ? "pause.circle" : "record.circle")
+                        .font(.system(size: 8.5 * scale, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    roundButton(workspace.stopwatchStart == nil ? "play.fill" : "pause.fill") { workspace.toggleStopwatch() }
+                    roundButton("arrow.counterclockwise") {
+                        workspace.stopwatchStart = nil
+                        workspace.stopwatchElapsed = 0
+                    }
+                }
+            }
+        }
+    }
+
+    private var compactTimer: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            HStack(spacing: 8 * scale) {
+                heroIcon("timer")
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(timerText)
+                        .font(.system(size: 18 * scale, weight: .bold, design: .monospaced))
+                    Text(timerIsIdle ? "25 minute quick timer" : "Timer active")
+                        .font(.system(size: 8 * scale))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                roundButton(timerIsIdle ? "play.fill" : "pause.fill") {
+                    if timerIsIdle { store.startTimer(minutes: 25) } else { store.pauseResume() }
+                }
+            }
+        }
+    }
+
+    private var focusTimer: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            VStack(spacing: 6 * scale) {
+                ZStack {
+                    Circle().stroke(Color.white.opacity(0.10), lineWidth: 5 * scale)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(timerProgress))
+                        .stroke(accent, style: StrokeStyle(lineWidth: 5 * scale, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    Text(timerText)
+                        .font(.system(size: 14 * scale, weight: .bold, design: .monospaced))
+                }
+                .frame(width: 80 * scale, height: 80 * scale)
+                Text(timerIsIdle ? "Ready" : "Focus")
+                    .font(.system(size: 8.5 * scale, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var dashboardTimer: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            VStack(alignment: .leading, spacing: 7 * scale) {
+                Text(timerText)
+                    .font(.system(size: 22 * scale, weight: .bold, design: .monospaced))
+                if timerIsIdle {
+                    HStack(spacing: 5 * scale) {
+                        timerPresetButton("5m", minutes: 5)
+                        timerPresetButton("15m", minutes: 15)
+                        timerPresetButton("25m", minutes: 25)
+                    }
+                } else {
+                    HStack {
+                        ProgressView(value: timerProgress)
+                            .progressViewStyle(.linear)
+                        roundButton("pause.fill") { store.pauseResume() }
+                    }
+                }
+            }
+        }
+    }
+
+    private var compactFiles: some View {
+        HStack(spacing: 9 * scale) {
+            heroIcon(store.files.isEmpty ? "tray" : "tray.full.fill")
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(store.files.count) item\(store.files.count == 1 ? "" : "s")")
+                    .font(.system(size: 14 * scale, weight: .bold, design: .rounded))
+                Text("Drop or add files")
+                    .font(.system(size: 8.5 * scale))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            roundButton("plus") { store.chooseFiles() }
+        }
+    }
+
+    private var focusFiles: some View {
+        VStack(spacing: 7 * scale) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 16 * scale, style: .continuous)
+                    .fill(accent.opacity(0.15))
+                    .frame(width: 72 * scale, height: 62 * scale)
+                Image(systemName: store.files.isEmpty ? "tray" : "doc.on.doc.fill")
+                    .font(.system(size: 26 * scale, weight: .medium))
+                    .foregroundStyle(accent)
+            }
+            Text(store.files.isEmpty ? "Drop files here" : "\(store.files.count) in tray")
+                .font(.system(size: 10 * scale, weight: .semibold))
+            Text("Originals stay untouched")
+                .font(.system(size: 7.5 * scale))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var dashboardFiles: some View {
+        VStack(alignment: .leading, spacing: 5 * scale) {
+            if store.files.isEmpty {
+                Label("Drop files anywhere on this card", systemImage: "arrow.down.doc")
+                    .font(.system(size: 9 * scale, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            } else {
+                ForEach(Array(store.files.prefix(2)), id: \.self) { url in
+                    HStack(spacing: 5 * scale) {
+                        Image(systemName: "doc.fill").foregroundStyle(accent)
+                        Text(url.lastPathComponent)
+                            .font(.system(size: 8.5 * scale, weight: .medium))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+            HStack {
+                Text("\(store.files.count) total")
+                    .font(.system(size: 8 * scale))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                roundButton("plus") { store.chooseFiles() }
+            }
+        }
+    }
+
+    private var compactCalendar: some View {
+        HStack(spacing: 9 * scale) {
+            VStack(spacing: -2) {
+                Text(Date.now.formatted(.dateTime.month(.abbreviated)).uppercased())
+                    .font(.system(size: 7.5 * scale, weight: .bold))
+                    .foregroundStyle(accent)
+                Text(Date.now.formatted(.dateTime.day()))
+                    .font(.system(size: 25 * scale, weight: .black, design: .rounded))
+            }
+            if let event = nextEvent {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(event.title ?? "Event")
+                        .font(.system(size: 9 * scale, weight: .semibold))
+                        .lineLimit(2)
+                    Text(event.isAllDay ? "All day" : event.startDate.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 7.5 * scale))
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Nothing scheduled")
+                    .font(.system(size: 9 * scale, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var focusCalendar: some View {
+        VStack(spacing: 1 * scale) {
+            Text(Date.now.formatted(.dateTime.weekday(.wide)).uppercased())
+                .font(.system(size: 8 * scale, weight: .bold))
+                .foregroundStyle(accent)
+            Text(Date.now.formatted(.dateTime.day()))
+                .font(.system(size: 44 * scale, weight: .black, design: .rounded))
+                .minimumScaleFactor(0.7)
+            Text(Date.now.formatted(.dateTime.month(.wide)))
+                .font(.system(size: 10 * scale, weight: .semibold))
+            if let event = nextEvent {
+                Text(event.title ?? "Event")
+                    .font(.system(size: 7.5 * scale, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.top, 3 * scale)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var dashboardCalendar: some View {
+        VStack(alignment: .leading, spacing: 6 * scale) {
+            HStack {
+                Text(Date.now.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                    .font(.system(size: 10 * scale, weight: .bold))
+                Spacer()
+                Text("\(workspace.calendar.upcomingEvents.count)")
+                    .font(.system(size: 8 * scale, weight: .bold))
+                    .padding(.horizontal, 6 * scale)
+                    .padding(.vertical, 2 * scale)
+                    .background(accent.opacity(0.16), in: Capsule())
+            }
+            if let event = nextEvent {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(event.title ?? "Event")
+                        .font(.system(size: 10 * scale, weight: .semibold))
+                        .lineLimit(2)
+                    Text(event.isAllDay ? "All day" : event.startDate.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 8 * scale))
+                        .foregroundStyle(accent)
+                }
+            } else {
+                Label("Your day is clear", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 9 * scale, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var compactPixelPal: some View {
+        HStack(spacing: 6 * scale) {
+            pixelPal
+                .frame(width: 62 * scale, height: 62 * scale)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("PIXEL PAL")
+                    .font(.system(size: 8 * scale, weight: .bold, design: .monospaced))
+                    .foregroundStyle(accent)
+                Text("Your tiny notch companion")
+                    .font(.system(size: 8 * scale, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var focusPixelPal: some View {
+        pixelPal
+            .frame(width: 96 * scale, height: 96 * scale)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var dashboardPixelPal: some View {
+        HStack(spacing: 7 * scale) {
+            pixelPal
+                .frame(width: 74 * scale, height: 74 * scale)
+            VStack(alignment: .leading, spacing: 4 * scale) {
+                Text("Online")
+                    .font(.system(size: 9 * scale, weight: .bold))
+                    .foregroundStyle(accent)
+                Label("Interactive", systemImage: "hand.tap.fill")
+                    .font(.system(size: 7.5 * scale))
+                    .foregroundStyle(.secondary)
+                Label("Living in your notch", systemImage: "sparkles")
+                    .font(.system(size: 7.5 * scale))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var pixelPal: some View {
+        HaloPixelPetWidget(store: store, workspace: workspace)
+            .environment(\.haloPixelPalHostExpanded, surfaceState.expanded)
+            .environment(\.haloPixelPalHostTransitionDuration, 0.28)
+    }
+
+    private var compactMedia: some View {
+        HStack(spacing: 8 * scale) {
+            mediaArtwork(size: 46 * scale, radius: 10 * scale)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(mediaTitle)
+                    .font(.system(size: 10 * scale, weight: .bold))
+                    .lineLimit(1)
+                Text(workspace.media.artist.isEmpty ? "Media" : workspace.media.artist)
+                    .font(.system(size: 8 * scale))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            roundButton(workspace.media.isPlaying ? "pause.fill" : "play.fill") {
+                workspace.media.perform("playpause", app: workspace.settings.mediaApp)
+            }
+        }
+    }
+
+    private var focusMedia: some View {
+        VStack(spacing: 6 * scale) {
+            mediaArtwork(size: 72 * scale, radius: 16 * scale)
+            Text(mediaTitle)
+                .font(.system(size: 9.5 * scale, weight: .bold))
+                .lineLimit(1)
+            HStack(spacing: 12 * scale) {
+                mediaButton("backward.end.fill", action: "previous track")
+                mediaButton(workspace.media.isPlaying ? "pause.fill" : "play.fill", action: "playpause")
+                mediaButton("forward.end.fill", action: "next track")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var dashboardMedia: some View {
+        VStack(alignment: .leading, spacing: 6 * scale) {
+            HStack(spacing: 7 * scale) {
+                mediaArtwork(size: 44 * scale, radius: 9 * scale)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(mediaTitle)
+                        .font(.system(size: 9.5 * scale, weight: .bold))
+                        .lineLimit(1)
+                    Text(workspace.media.artist)
+                        .font(.system(size: 7.5 * scale))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            if workspace.media.duration > 0 {
+                ProgressView(value: min(1, max(0, workspace.media.position / max(1, workspace.media.duration))))
+                    .progressViewStyle(.linear)
+                    .tint(accent)
+            }
+            HStack {
+                mediaButton("backward.end.fill", action: "previous track")
+                Spacer()
+                mediaButton(workspace.media.isPlaying ? "pause.fill" : "play.fill", action: "playpause")
+                Spacer()
+                mediaButton("forward.end.fill", action: "next track")
+            }
+        }
+    }
+
+    private var nextEvent: EKEvent? {
+        workspace.calendar.upcomingEvents.first { $0.endDate > Date() }
+    }
+
+    private var mediaTitle: String {
+        workspace.media.title.isEmpty ? "Nothing Playing" : workspace.media.title
+    }
+
+    @ViewBuilder
+    private func mediaArtwork(size: CGFloat, radius: CGFloat) -> some View {
+        if let image = workspace.media.artworkImage {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        } else {
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .fill(accent.opacity(0.14))
+                .frame(width: size, height: size)
+                .overlay {
+                    Image(systemName: "music.note")
+                        .font(.system(size: size * 0.32, weight: .semibold))
+                        .foregroundStyle(accent)
+                }
+        }
+    }
+
+    private func mediaButton(_ symbol: String, action: String) -> some View {
+        Button {
+            workspace.media.perform(action, app: workspace.settings.mediaApp)
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 9 * scale, weight: .bold))
+        }
+        .buttonStyle(.plain)
+        .disabled(workspace.media.connectedApp == nil)
+    }
+
+    private func heroIcon(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 16 * scale, weight: .bold))
+            .foregroundStyle(accent)
+            .frame(width: 38 * scale, height: 38 * scale)
+            .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 11 * scale, style: .continuous))
+    }
+
+    private func roundButton(_ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 8.5 * scale, weight: .bold))
+                .frame(width: 25 * scale, height: 25 * scale)
+                .background(Color.white.opacity(0.09), in: Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func timerPresetButton(_ label: String, minutes: Int) -> some View {
+        Button(label) { store.startTimer(minutes: minutes) }
+            .buttonStyle(.plain)
+            .font(.system(size: 8 * scale, weight: .bold))
+            .padding(.horizontal, 7 * scale)
+            .padding(.vertical, 4 * scale)
+            .background(accent.opacity(0.15), in: Capsule())
+    }
+
+    private func stopwatchElapsed(at date: Date) -> TimeInterval {
+        workspace.stopwatchElapsed + (workspace.stopwatchStart.map { date.timeIntervalSince($0) } ?? 0)
+    }
+
+    private func stopwatchText(at date: Date) -> String {
+        let whole = max(0, Int(stopwatchElapsed(at: date)))
+        return String(format: "%02d:%02d:%02d", whole / 3600, whole / 60 % 60, whole % 60)
+    }
+
+    private var timerIsIdle: Bool {
+        store.deadline == nil && store.pausedSeconds <= 0 && !store.finished
+    }
+
+    private var timerRemaining: TimeInterval {
+        max(0, store.deadline?.timeIntervalSinceNow ?? store.pausedSeconds)
+    }
+
+    private var timerText: String {
+        if timerIsIdle { return "25:00" }
+        let whole = max(0, Int(timerRemaining.rounded()))
+        return whole >= 3600
+            ? String(format: "%d:%02d:%02d", whole / 3600, whole / 60 % 60, whole % 60)
+            : String(format: "%02d:%02d", whole / 60, whole % 60)
+    }
+
+    private var timerProgress: Double {
+        let duration = max(0, store.timerDurationSeconds)
+        guard duration > 0 else { return timerIsIdle ? 0 : 1 }
+        return min(1, max(0, 1 - timerRemaining / duration))
     }
 }
 
