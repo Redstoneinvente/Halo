@@ -32,7 +32,7 @@ public class MediaController {
     }
 
     private static func logBridgeUnavailable(_ message: String) {
-        fputs("[Halo MediaRemote] \(message) Continuing without native MediaRemote.\n", stderr)
+        NSLog("[Halo MediaRemote] %@ Continuing without native MediaRemote.", message)
     }
 
     private var libraryPath: String? {
