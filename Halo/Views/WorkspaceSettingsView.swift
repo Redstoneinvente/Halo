@@ -34,6 +34,10 @@ struct SettingsView: View {
             workspace.settings.layout.resolvedUsesCustomOpenNotchWorkspace
     }
 
+    private var simpleMode: Bool {
+        workspace.settings.resolvedNotchMode == .simple
+    }
+
     private var sidebarGroups: [SidebarGroup] {
         let workspaceItems = ["Visual Workspace Editor", "Modules", "Widgets", "Media & Files"]
         var coreItems = ["General", "Notch Mode"]
@@ -45,6 +49,21 @@ struct SettingsView: View {
         var designItems = ["Appearance", "Closed notch", "Notch Bubbles", "Notch Skins", "Notch Ambient", "Activation Sequence"]
         if HaloDistribution.current.supportsSparkle {
             designItems.append("Update Animation")
+        }
+
+        if simpleMode {
+            return [
+                SidebarGroup(
+                    title: "Core",
+                    icon: "sparkles",
+                    items: coreItems
+                ),
+                SidebarGroup(
+                    title: "System & Support",
+                    icon: "gearshape.2",
+                    items: ["Displays", "Feedback & Support", "About"]
+                )
+            ]
         }
 
         return [
@@ -239,12 +258,59 @@ struct SettingsView: View {
                     }
                 }
                 .listStyle(.sidebar)
+
+                if simpleMode {
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 7) {
+                            Image(systemName: "slider.horizontal.3")
+                                .foregroundStyle(Color.accentColor)
+                            Text("Simple Mode")
+                                .font(.caption.weight(.semibold))
+                        }
+
+                        Text("Advanced Mode reveals Design, Workspace, Context Interfaces, Profiles & Automation, Plugins, and the full customization toolset.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Button {
+                            section = "Notch Mode"
+                        } label: {
+                            Label("View mode options", systemImage: "arrow.right.circle")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.accentColor)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.accentColor.opacity(0.14), lineWidth: 0.5)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                }
+
                 Divider()
                 VStack(alignment: .leading, spacing: 12) {
                     Link(destination: URL(string: "https://halo.redstoneinvente.com")!) { Label("Halo website", systemImage: "globe") }
                     Link(destination: URL(string: "https://buymeacoffee.com/redstoneinvente")!) { Label("Buy me a coffee", systemImage: "cup.and.saucer.fill") }
                 }.font(.callout).padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(width: 236)
+            }
+            .frame(width: 236)
+            .onChange(of: workspace.settings.resolvedNotchMode) { mode in
+                guard mode == .simple else { return }
+                if let current = section, !sections.contains(current) {
+                    section = "Notch Mode"
+                } else if section == nil {
+                    section = "Notch Mode"
+                }
+                search = ""
+                expandedSidebarGroups.formUnion(["Core", "System & Support"])
+            }
+
             Divider()
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {
