@@ -1900,8 +1900,21 @@ private final class SystemAudioMediaFallback {
                 guard self.enabled, let media = self.media, let match else { return }
 
                 let keepExistingMetadata = !self.isGenericExternalMetadata(title: media.title, artist: media.artist)
-                let title = keepExistingMetadata ? media.title : match.title
-                let artist = keepExistingMetadata ? media.artist : match.artist
+                let recognizedTitle = match.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let recognizedArtist = match.artist.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                // Normal YouTube exposes the video title/channel through the Safari extension.
+                // Those values are useful for identifying the page, but they are often not the
+                // canonical song metadata that online lyrics providers expect. Once Shazam has
+                // identified the audible track, prefer that canonical title/artist for YouTube.
+                // Keep the Safari-derived source key below so the next extension refresh does not
+                // treat this enrichment as a different track and wipe its artwork.
+                let title = (isNormalYouTube && !recognizedTitle.isEmpty)
+                    ? recognizedTitle
+                    : (keepExistingMetadata ? media.title : match.title)
+                let artist = (isNormalYouTube && !recognizedArtist.isEmpty)
+                    ? recognizedArtist
+                    : (keepExistingMetadata ? media.artist : match.artist)
 
                 let sourceKey: String
                 if let safari = SafariMediaBridge.shared.currentState(maxAge: 3.5), safari.playing {
