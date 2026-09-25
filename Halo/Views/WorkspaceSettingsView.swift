@@ -954,7 +954,7 @@ private struct NotchModeSettingsPane: View {
                             if simple.widgets.contains(widget) {
                                 Picker("Style", selection: styleBinding(widget)) {
                                     ForEach(SimpleNotchWidgetStyle.allCases) { style in
-                                        Label(style.title, systemImage: style.symbol).tag(style)
+                                        Label(simpleStyleTitle(widget, style), systemImage: style.symbol).tag(style)
                                     }
                                 }
                                 .labelsHidden()
@@ -963,7 +963,7 @@ private struct NotchModeSettingsPane: View {
                         }
 
                         if simple.widgets.contains(widget) {
-                            Text(simple.style(for: widget).detail)
+                            Text(simpleStyleDetail(widget, simple.style(for: widget)))
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                                 .padding(.leading, 26)
@@ -1049,6 +1049,24 @@ private struct NotchModeSettingsPane: View {
 
     private func simpleTitle(_ widget: ModuleID) -> String {
         widget == .shelf ? "File Tray" : widget.title
+    }
+
+    private func simpleStyleTitle(_ widget: ModuleID, _ style: SimpleNotchWidgetStyle) -> String {
+        guard widget == .calendar else { return style.title }
+        switch style {
+        case .clean: return "Agenda"
+        case .glass: return "Month"
+        case .vibrant: return "Week"
+        }
+    }
+
+    private func simpleStyleDetail(_ widget: ModuleID, _ style: SimpleNotchWidgetStyle) -> String {
+        guard widget == .calendar else { return style.detail }
+        switch style {
+        case .clean: return "Today’s date and the next event in a compact agenda."
+        case .glass: return "A real current-month calendar with weekday headers, today highlight and event dots."
+        case .vibrant: return "A seven-day strip with today, event indicators and the next appointment."
+        }
     }
 }
 
