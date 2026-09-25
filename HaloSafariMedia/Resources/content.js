@@ -78,9 +78,13 @@
         attribute('link[itemprop="name"]', "content") ||
         text("#owner #channel-name");
 
-      // Normal YouTube's og:image/twitter:image can lag behind SPA navigation or resolve to
-      // generic YouTube/channel artwork. Halo enriches music video artwork through MediaRemote
-      // and Shazam instead, so do not advertise generic page artwork as album art here.
+      // Do not fall back to YouTube's site/channel icon. Use the current video's thumbnail
+      // as a deterministic fallback while Halo's audio recognition resolves canonical song art.
+      // Deriving it from the current video ID also avoids stale og:image values after SPA navigation.
+      artworkURL =
+        youtubeThumbnailURL() ||
+        meta('meta[itemprop="thumbnailUrl"]') ||
+        attribute('link[itemprop="thumbnailUrl"]', "href");
       allowGenericArtwork = false;
     } else if (host === "open.spotify.com") {
       const pageTitle = cleanPageTitle(document.title);
@@ -122,6 +126,27 @@
     }
 
     return { host, title, artist, album, artworkURL };
+  }
+
+  function youtubeThumbnailURL() {
+    const host = location.hostname.toLowerCase();
+    if (!host.endsWith("youtube.com") || host === "music.youtube.com") return "";
+
+    try {
+      const url = new URL(location.href);
+      let videoID = url.searchParams.get("v") || "";
+
+      if (!videoID) {
+        const match = url.pathname.match(/^\/(?:shorts|embed|live)\/([^/?#]+)/i);
+        videoID = match?.[1] || "";
+      }
+
+      return videoID
+        ? `https://i.ytimg.com/vi/${encodeURIComponent(videoID)}/hqdefault.jpg`
+        : "";
+    } catch {
+      return "";
+    }
   }
 
   function siteButton(direction) {
