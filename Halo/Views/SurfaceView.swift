@@ -3908,8 +3908,11 @@ private struct SimpleNotchWorkspaceView: View {
                 }
 
                 value.widgets.remove(at: sourceIndex)
-                let adjustedTarget = sourceIndex < targetIndex ? max(0, targetIndex - 1) : targetIndex
-                value.widgets.insert(source, at: min(adjustedTarget, value.widgets.count))
+                // Dropping forward places the source after the target's new position;
+                // dropping backward places it before the target. This makes the whole
+                // row reachable, including moving a widget all the way to the end.
+                let insertionIndex = min(targetIndex, value.widgets.count)
+                value.widgets.insert(source, at: insertionIndex)
                 workspace.settings.simpleNotch = value.normalized()
                 dragging = nil
             }
