@@ -1053,7 +1053,7 @@ private struct NotchModeSettingsPane: View {
                                     }
                                 }
                                 .labelsHidden()
-                                .frame(width: 144)
+                                .frame(width: 166)
                             }
                         }
 
