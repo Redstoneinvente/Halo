@@ -1016,7 +1016,9 @@ final class WindowManager {
             .sink { [weak self] _ in self?.refreshDynamicWidths() }
             .store(in: &subscriptions)
 
-        let shouldHideInitialFrame = ActivationSequenceCoordinator.shared.shouldPlay(startupActivationContext)
+        let shouldHideInitialFrame =
+            store.workspace.settings.resolvedNotchMode == .advanced &&
+            ActivationSequenceCoordinator.shared.shouldPlay(startupActivationContext)
         initialActivationPending = shouldHideInitialFrame
         reconcile()
         guard shouldHideInitialFrame else { return }
