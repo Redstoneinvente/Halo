@@ -3603,7 +3603,13 @@ struct SurfaceView: View {
 
     private func publishOpenedNotchVisibility(_ explicitValue: Bool? = nil) {
         let value = explicitValue ?? reportsOpenedNotchVisible
-        DispatchQueue.main.async {
+        if simpleMode {
+            // Simple Mode can publish from a SwiftUI view update, so defer only here.
+            DispatchQueue.main.async {
+                workspace.setOpenedNotchVisible(value, token: openVisibilityToken)
+            }
+        } else {
+            // Preserve Advanced Mode's established synchronous behavior from main.
             workspace.setOpenedNotchVisible(value, token: openVisibilityToken)
         }
     }

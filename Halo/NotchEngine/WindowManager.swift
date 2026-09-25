@@ -1005,7 +1005,10 @@ final class WindowManager {
         store.workspace.$activities.receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.calendar.objectWillChange.receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+            .sink { [weak self] _ in
+                guard self?.store.workspace.settings.resolvedNotchMode == .simple else { return }
+                self?.refreshDynamicWidths()
+            }.store(in: &subscriptions)
 
         // Closed-notch clock width can change when a 12-hour clock crosses between
         // one- and two-digit hours. Re-measure periodically so the surface hugs the
@@ -1347,7 +1350,7 @@ final class WindowManager {
     }
 
     private func configureSimpleDynamicWidth(_ host: Host, geometry: SurfaceGeometry) {
-        var simple = store.workspace.settings.resolvedSimpleNotch
+        let configuredSimple = store.workspace.settings.resolvedSimpleNotch
         let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
         // The preset is a preference, never permission to undercut the real camera housing.
         let physicalWidth = attached ? max(16, geometry.physicalNotchWidth) : 0
@@ -1359,17 +1362,14 @@ final class WindowManager {
         let hardwareShellHeight = attached ? physicalHeight + 2 : 0
         let availableOpenWidth = max(1, geometry.visible.width - 32)
 
-        // Migrate any older multi-row/oversized Simple setup into a valid one-row setup.
-        // This only removes the newest/right-most overflow widgets and writes once.
-        let fitted = SimpleNotchMetrics.fittingSettings(
-            settings: simple,
+        // Fit the current display at runtime without mutating the saved Simple layout.
+        // A layout configured on a wide display must still be intact when Halo later
+        // returns to that display; overflow widgets are temporarily omitted, not deleted.
+        let simple = SimpleNotchMetrics.fittingSettings(
+            settings: configuredSimple,
             availableWidth: availableOpenWidth,
             hardwareWidth: hardwareShellWidth
         )
-        if fitted.widgets != simple.widgets {
-            simple = fitted
-            store.workspace.settings.simpleNotch = fitted
-        }
 
         let calendarActive = store.workspace.calendar.upcomingEvents.contains { $0.endDate > Date() }
         let active = simple.activeClosedWidgets(

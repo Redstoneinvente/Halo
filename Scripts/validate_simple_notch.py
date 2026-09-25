@@ -34,6 +34,10 @@ func XCTAssertEqual<T: Equatable>(_ lhs: T, _ rhs: T) { precondition(lhs == rhs,
 func XCTAssertEqual(_ lhs: Double, _ rhs: Double, accuracy: Double) { precondition(abs(lhs - rhs) <= accuracy) }
 func XCTAssertGreaterThanOrEqual(_ lhs: Double, _ rhs: Double) { precondition(lhs >= rhs) }
 func XCTAssertLessThanOrEqual(_ lhs: Double, _ rhs: Double) { precondition(lhs <= rhs) }
+func XCTAssertEqual<T: Equatable>(_ lhs: T, _ rhs: T, _ message: String) { precondition(lhs == rhs, message) }
+func XCTAssertTrue(_ value: Bool, _ message: String = "") { precondition(value, message) }
+func XCTAssertFalse(_ value: Bool, _ message: String = "") { precondition(!value, message) }
+func XCTAssertGreaterThan(_ lhs: Double, _ rhs: Double, _ message: String = "") { precondition(lhs > rhs, message) }
 @MainActor final class AppStore: ObservableObject {
     var deadline: Date? = nil
     var pausedSeconds: TimeInterval = 0
@@ -94,10 +98,10 @@ struct FixtureCalendar { var upcomingEvents: [EKEvent] = [] }
                         Text("HALO  /  \(style.title.uppercased())  /  \(size.rawValue.uppercased())")
                             .font(.system(size: 12, weight: .medium)).tracking(2).foregroundStyle(.secondary)
                         HStack(spacing: 12) {
-                            ForEach([ModuleID.clock, .media, .calendar, .timer, .stopwatch, .shelf]) { widget in
+                            ForEach([ModuleID.clock, .media, .calendar, .timer, .stopwatch, .shelf].filter { style.supports(widget: $0) }) { widget in
                                 SimpleNotchWidgetView(widget: widget, preset: style, sizePreset: size,
                                                       store: store, workspace: workspace, surfaceState: state)
-                                    .frame(width: SimpleNotchMetrics.width(for: widget, size: size),
+                                    .frame(width: SimpleNotchMetrics.width(for: widget, style: style, size: size),
                                            height: SimpleNotchMetrics.height(for: widget, style: style, size: size))
                             }
                         }
@@ -116,7 +120,10 @@ struct FixtureCalendar { var upcomingEvents: [EKEvent] = [] }
         tests.testEveryWidgetCombinationStaysInOneRowAndTrimsOnlyOverflow()
         tests.testSingleWidgetRetractsButAlwaysCoversHardware()
         tests.testMonthCalendarSetsRowHeightAndEmptySettingsStillShowClock()
-        print("Passed: Simple one-row width budgets, hardware floors, retraction and calendar checks.")
+        tests.testEverySimpleStyleUsesTheSameVerticalFootprint()
+        tests.testSimpleSharedHeightStaysCompact()
+        tests.testSpecializedSimpleStylesStayOnTheirIntendedWidgets()
+        print("Passed: Simple one-row width budgets, hardware floors, style scoping, retraction and calendar checks.")
     }
 }
 '''
