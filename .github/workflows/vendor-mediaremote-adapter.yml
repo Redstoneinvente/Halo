@@ -167,6 +167,23 @@ jobs:
             grep -E 'error:|unable to type-check' /tmp/halo-native-mediaremote-build.log | tail -30 || true
           fi
 
+      - name: Verify Direct build bundles native MediaRemote bridge
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Halo.xcodeproj \
+            -scheme "Halo Direct" \
+            -configuration "Debug Direct" \
+            -sdk macosx \
+            -arch arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee /tmp/halo-direct-mediaremote-build.log
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -path '*/Build/Products/Debug Direct/Halo.app' -print -quit)
+          test -n "$APP"
+          test -s "$APP/Contents/Frameworks/libHaloMediaRemoteBridge.dylib"
+          test -s "$APP/Contents/Resources/run.pl"
+
       - name: Commit native bridge migration
         run: |
           set -euo pipefail
@@ -174,6 +191,8 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add .github/scripts/remove_mediaremote_spm.py \
                   Halo/Core/WorkspaceStore.swift \
+                  Halo/Core/MediaRemoteController.swift \
+                  Halo/Core/MediaRemoteTrackInfo.swift \
                   Halo.xcodeproj/project.pbxproj \
                   Halo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
           if git diff --cached --quiet; then
