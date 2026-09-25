@@ -1359,10 +1359,15 @@ final class WindowManager {
         let size = simple.resolvedSize
         let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
         // The preset is a preference, never permission to undercut the real camera housing.
-        let hardwareWidth = attached ? max(16, geometry.physicalNotchWidth) : 0
-        let hardwareHeight = attached ? max(16, geometry.safeAreaTop) : 0
-        let baseWidth = max(hardwareWidth, SimpleNotchMetrics.closedPillWidth(size))
-        host.geometry?.activeCompactHeight = max(hardwareHeight, SimpleNotchMetrics.closedHeight(size))
+        let physicalWidth = attached ? max(16, geometry.physicalNotchWidth) : 0
+        let physicalHeight = attached ? max(16, geometry.safeAreaTop) : 0
+        // Auxiliary safe-area APIs describe the camera gap, but the visible black notch
+        // includes rounded shoulders. Give real hardware a guard band so Halo never
+        // reads as narrower than the notch it is extending.
+        let hardwareShellWidth = attached ? physicalWidth + 24 : 0
+        let hardwareShellHeight = attached ? physicalHeight + 2 : 0
+        let baseWidth = max(hardwareShellWidth, SimpleNotchMetrics.closedPillWidth(size))
+        host.geometry?.activeCompactHeight = max(hardwareShellHeight, SimpleNotchMetrics.closedHeight(size))
 
         if attached {
             let extent = SimpleNotchMetrics.closedSlotWidth(size) + SimpleNotchMetrics.closedSlotGap(size)
@@ -1400,8 +1405,11 @@ final class WindowManager {
         // closed slot arrangement. The open motion should grow vertically, not pinch inward.
         let closedWidth = host.geometry?.activeCompactWidth ?? baseWidth
         host.geometry?.expandedWidth = max(
-            SimpleNotchMetrics.expandedWidth(widgets: simple.widgets, size: size),
-            max(hardwareWidth, closedWidth)
+            max(
+                SimpleNotchMetrics.minimumOpenShelfWidth(size, hardwareWidth: hardwareShellWidth),
+                SimpleNotchMetrics.expandedWidth(widgets: simple.widgets, size: size)
+            ),
+            max(hardwareShellWidth, closedWidth)
         )
     }
 
@@ -2420,13 +2428,16 @@ final class WindowManager {
                 let hasPhysicalNotch = screen.safeAreaInsets.top > 0 && physicalWidth > 0
 
                 let size = simple.resolvedSize
-                let hardwareHeight = hasPhysicalNotch ? max(16, Double(screen.safeAreaInsets.top)) : 0
+                let physicalHeight = hasPhysicalNotch ? max(16, Double(screen.safeAreaInsets.top)) : 0
+                let hardwareShellWidth = hasPhysicalNotch ? physicalWidth + 24 : 0
+                let hardwareShellHeight = hasPhysicalNotch ? physicalHeight + 2 : 0
                 let presetClosedWidth = SimpleNotchMetrics.closedPillWidth(size)
                 let presetClosedHeight = SimpleNotchMetrics.closedHeight(size)
 
                 theme.style = hasPhysicalNotch ? .notch : .pill
                 theme.width = max(
-                    physicalWidth,
+                    hardwareShellWidth,
+                    SimpleNotchMetrics.minimumOpenShelfWidth(size, hardwareWidth: hardwareShellWidth),
                     SimpleNotchMetrics.expandedWidth(widgets: simple.widgets, size: size)
                 )
                 theme.cornerRadius = hasPhysicalNotch ? 18 : 22
@@ -2440,19 +2451,19 @@ final class WindowManager {
                 appearance.saturation = 1
                 appearance.brightness = 0
                 appearance.skin = NotchSkinOptions()
-                appearance.compactWidth = max(physicalWidth, presetClosedWidth)
-                appearance.expandedHeight = max(hardwareHeight, SimpleNotchMetrics.expandedBodyHeight(size))
+                appearance.compactWidth = max(hardwareShellWidth, presetClosedWidth)
+                appearance.expandedHeight = SimpleNotchMetrics.expandedBodyHeight(size)
                 appearance.spacing = SimpleNotchMetrics.widgetSpacing(size)
                 appearance.animation = .smooth
 
                 appearance.surface.useStyleContour = true
                 appearance.surface.shape = hasPhysicalNotch ? .scoop : .capsule
-                appearance.surface.compactHeight = max(hardwareHeight, presetClosedHeight)
+                appearance.surface.compactHeight = max(hardwareShellHeight, presetClosedHeight)
                 appearance.surface.opening = .spring
                 appearance.surface.closing = .spring
                 appearance.surface.duration = 0.28
                 appearance.surface.damping = 0.86
-                appearance.surface.shoulder = hasPhysicalNotch ? 16 : 0
+                appearance.surface.shoulder = hasPhysicalNotch ? 22 : 0
                 appearance.surface.offsets = SurfaceOffsets()
             }
             appearance.surface = (try? appearance.surface.validated()) ?? SurfaceOptions()
