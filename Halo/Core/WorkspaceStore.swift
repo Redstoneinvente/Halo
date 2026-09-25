@@ -1576,6 +1576,7 @@ private final class SystemAudioMediaFallback {
     private var safariAudibleSince: Date?
     private var recognitionInFlight = false
     private var lastRecognitionAttempt = Date.distantPast
+    private var lastRecognitionSuccessKey = ""
     private var fastRefreshTask: Task<Void, Never>?
 
     init(media: MediaService) { self.media = media }
@@ -1593,6 +1594,7 @@ private final class SystemAudioMediaFallback {
             fastRefreshTask = nil
             AudioSpectrumService.shared.cancelRecognition()
             recognitionInFlight = false
+            lastRecognitionSuccessKey = ""
             safariAudibleSince = nil
             clearIfOwned()
         }
@@ -1639,6 +1641,11 @@ private final class SystemAudioMediaFallback {
             }
             .joined(separator: "|")
 
+            let normalizedSafariHost = safari.host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let isNormalYouTube = normalizedSafariHost == "youtube.com" || normalizedSafariHost == "www.youtube.com" ||
+                (normalizedSafariHost.hasSuffix(".youtube.com") && normalizedSafariHost != "music.youtube.com")
+            let safariArtworkURL = isNormalYouTube ? nil : safari.artworkURL
+
             media.acceptExternalMedia(
                 title: safari.title.isEmpty ? "Safari Media" : safari.title,
                 artist: displayArtist,
@@ -1646,7 +1653,7 @@ private final class SystemAudioMediaFallback {
                 duration: safari.duration,
                 position: safari.position,
                 playing: true,
-                artworkURL: safari.artworkURL,
+                artworkURL: safariArtworkURL,
                 sourceKey: sourceKey
             )
 
@@ -1748,6 +1755,7 @@ private final class SystemAudioMediaFallback {
         fastRefreshTask = nil
         AudioSpectrumService.shared.cancelRecognition()
         recognitionInFlight = false
+        lastRecognitionSuccessKey = ""
         safariAudibleSince = nil
         AudioSpectrumService.shared.setActive(false, owner: "system-audio-media-fallback")
         clearIfOwned()
@@ -1838,6 +1846,10 @@ private final class SystemAudioMediaFallback {
                         .joined(separator: "|")
                 }
 
+                let liveSafariHost = liveSafari?.host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+                let liveSafariIsNormalYouTube = liveSafariHost == "youtube.com" || liveSafariHost == "www.youtube.com" ||
+                    (liveSafariHost.hasSuffix(".youtube.com") && liveSafariHost != "music.youtube.com")
+
                 media.acceptExternalMedia(
                     title: preferredTitle,
                     artist: preferredArtist,
@@ -1845,8 +1857,8 @@ private final class SystemAudioMediaFallback {
                     duration: liveSafari?.duration ?? snapshot.duration,
                     position: liveSafari?.position ?? snapshot.currentElapsed,
                     playing: liveSafari?.playing ?? shouldPresentPlaying,
-                    artworkData: snapshot.artworkData,
-                    artworkURL: snapshot.artworkURL ?? liveSafari?.artworkURL,
+                    artworkData: liveSafariIsNormalYouTube ? nil : snapshot.artworkData,
+                    artworkURL: liveSafariIsNormalYouTube ? nil : (snapshot.artworkURL ?? liveSafari?.artworkURL),
                     sourceKey: sourceKey
                 )
             }
@@ -1859,7 +1871,25 @@ private final class SystemAudioMediaFallback {
               now.timeIntervalSince(lastRecognitionAttempt) >= 15 else { return }
 
         let generic = isGenericExternalMetadata(title: media.title, artist: media.artist)
-        guard generic || media.artworkImage == nil else { return }
+        let safari = SafariMediaBridge.shared.currentState(maxAge: 3.5)
+        let safariHost = safari?.host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        let isNormalYouTube = safari?.playing == true && (
+            safariHost == "youtube.com" || safariHost == "www.youtube.com" ||
+            (safariHost.hasSuffix(".youtube.com") && safariHost != "music.youtube.com")
+        )
+        let recognitionKey: String
+        if let safari, safari.playing {
+            recognitionKey = ["safari-extension", safari.pageURL, safari.title, safari.artist]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .joined(separator: "|")
+        } else {
+            recognitionKey = [media.title, media.artist, media.album]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .joined(separator: "|")
+        }
+
+        guard recognitionKey != lastRecognitionSuccessKey else { return }
+        guard generic || media.artworkImage == nil || isNormalYouTube else { return }
 
         recognitionInFlight = true
         lastRecognitionAttempt = now
@@ -1892,6 +1922,9 @@ private final class SystemAudioMediaFallback {
                                           playing: media.isPlaying,
                                           artworkURL: match.artworkURL?.absoluteString,
                                           sourceKey: sourceKey)
+                if match.artworkURL != nil {
+                    self.lastRecognitionSuccessKey = sourceKey
+                }
             }
         }
     }
