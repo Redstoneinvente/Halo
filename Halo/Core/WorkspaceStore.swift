@@ -1617,6 +1617,7 @@ private final class SystemAudioMediaFallback {
 
             lastSafariOutput = now
             lastHeard = now
+            if safariAudibleSince == nil { safariAudibleSince = now }
             ownsFallback = true
 
             let safariHasRealArtist = !safari.artist
@@ -1654,19 +1655,12 @@ private final class SystemAudioMediaFallback {
             // to enrich missing artist/album/artwork metadata.
             requestMediaRemoteMetadata()
 
-            let needsEnrichment =
-                !safariHasRealArtist ||
-                safari.artworkURL == nil ||
-                safari.artworkURL?.isEmpty == true
-
-            if needsEnrichment {
-                requestRecognitionIfNeeded(
-                    media: media,
-                    safariLikely: true,
-                    audibleNow: true,
-                    now: now
-                )
-            }
+            requestRecognitionIfNeeded(
+                media: media,
+                safariLikely: true,
+                audibleNow: true,
+                now: now
+            )
 
             scheduleFastRefresh()
             return
@@ -1820,54 +1814,40 @@ private final class SystemAudioMediaFallback {
                 self.ownsFallback = true
                 let fallbackArtist = snapshotIsSafari ? "Playing from Safari" : (snapshot.applicationName ?? "System Audio")
                 let displayArtist = !snapshot.artist.isEmpty ? snapshot.artist : (!snapshot.album.isEmpty ? snapshot.album : fallbackArtist)
-                let sourceKey = [snapshot.bundleIdentifier ?? "", snapshot.title, snapshot.artist, snapshot.album]
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-                    .joined(separator: "|")
                 let safari = SafariMediaBridge.shared.currentState(maxAge: 3.5)
+                let liveSafari = safari?.playing == true ? safari : nil
 
-                let preferredTitle: String
-                let preferredArtist: String
-                let preferredAlbum: String
+                let preferredTitle = liveSafari.map {
+                    $0.title.isEmpty ? snapshot.title : $0.title
+                } ?? snapshot.title
+                let preferredArtist = liveSafari.map {
+                    $0.artist.isEmpty ? displayArtist : $0.artist
+                } ?? displayArtist
+                let preferredAlbum = liveSafari.map {
+                    $0.album.isEmpty ? snapshot.album : $0.album
+                } ?? snapshot.album
 
-                if let safari, safari.playing {
-                    preferredTitle = safari.title.isEmpty
-                        ? snapshot.title
-                        : safari.title
-
-                    preferredArtist = safari.artist.isEmpty
-                        ? displayArtist
-                        : safari.artist
-
-                    preferredAlbum = safari.album.isEmpty
-                        ? snapshot.album
-                        : safari.album
+                let sourceKey: String
+                if let safari = liveSafari {
+                    sourceKey = ["safari-extension", safari.pageURL, safari.title, safari.artist]
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                        .joined(separator: "|")
                 } else {
-                    preferredTitle = snapshot.title
-                    preferredArtist = displayArtist
-                    preferredAlbum = snapshot.album
+                    sourceKey = [snapshot.bundleIdentifier ?? "", snapshot.title, snapshot.artist, snapshot.album]
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                        .joined(separator: "|")
                 }
-
-                let mergedSourceKey = [
-                    snapshot.bundleIdentifier ?? "",
-                    preferredTitle,
-                    preferredArtist,
-                    preferredAlbum
-                ]
-                .map {
-                    $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                }
-                .joined(separator: "|")
 
                 media.acceptExternalMedia(
                     title: preferredTitle,
                     artist: preferredArtist,
                     album: preferredAlbum,
-                    duration: safari?.duration ?? snapshot.duration,
-                    position: safari?.position ?? snapshot.currentElapsed,
-                    playing: shouldPresentPlaying,
+                    duration: liveSafari?.duration ?? snapshot.duration,
+                    position: liveSafari?.position ?? snapshot.currentElapsed,
+                    playing: liveSafari?.playing ?? shouldPresentPlaying,
                     artworkData: snapshot.artworkData,
-                    artworkURL: snapshot.artworkURL ?? safari?.artworkURL,
-                    sourceKey: mergedSourceKey
+                    artworkURL: snapshot.artworkURL ?? liveSafari?.artworkURL,
+                    sourceKey: sourceKey
                 )
             }
         }
@@ -1892,9 +1872,18 @@ private final class SystemAudioMediaFallback {
                 let keepExistingMetadata = !self.isGenericExternalMetadata(title: media.title, artist: media.artist)
                 let title = keepExistingMetadata ? media.title : match.title
                 let artist = keepExistingMetadata ? media.artist : match.artist
-                let sourceKey = [title, artist, media.album]
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-                    .joined(separator: "|")
+
+                let sourceKey: String
+                if let safari = SafariMediaBridge.shared.currentState(maxAge: 3.5), safari.playing {
+                    sourceKey = ["safari-extension", safari.pageURL, safari.title, safari.artist]
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                        .joined(separator: "|")
+                } else {
+                    sourceKey = [title, artist, media.album]
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                        .joined(separator: "|")
+                }
+
                 media.acceptExternalMedia(title: title,
                                           artist: artist,
                                           album: media.album,
