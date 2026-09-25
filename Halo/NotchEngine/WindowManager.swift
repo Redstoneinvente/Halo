@@ -1380,25 +1380,34 @@ final class WindowManager {
         )
 
         let size = simple.resolvedSize
-        let baseWidth = max(hardwareShellWidth, SimpleNotchMetrics.closedPillWidth(size))
-        host.geometry?.activeCompactHeight = max(hardwareShellHeight, SimpleNotchMetrics.closedHeight(size))
+        let presetClosedWidth = SimpleNotchMetrics.closedPillWidth(size)
+        let presetClosedHeight = SimpleNotchMetrics.closedHeight(size)
+        let baseWidth = attached ? hardwareShellWidth : presetClosedWidth
 
         if attached {
+            // On a real notched Mac, Simple size presets affect only the opened surface.
+            // With no live closed widgets, the collapsed Halo shell must match the physical
+            // notch instead of growing to Standard / Medium / Big dimensions.
+            host.geometry?.activeCompactHeight = active.isEmpty
+                ? hardwareShellHeight
+                : max(hardwareShellHeight, presetClosedHeight)
+
             let extent = SimpleNotchMetrics.closedSlotWidth(size) + SimpleNotchMetrics.closedSlotGap(size)
             switch active.count {
             case 0:
-                host.geometry?.activeCompactWidth = baseWidth
+                host.geometry?.activeCompactWidth = hardwareShellWidth
                 host.geometry?.activeCompactCenterOffset = 0
             case 1:
                 // A single live slot grows from the right shoulder, keeping the physical
                 // camera notch visually anchored instead of creating an empty opposite wing.
-                host.geometry?.activeCompactWidth = min(geometry.visible.width, baseWidth + extent)
+                host.geometry?.activeCompactWidth = min(geometry.visible.width, hardwareShellWidth + extent)
                 host.geometry?.activeCompactCenterOffset = extent / 2
             default:
-                host.geometry?.activeCompactWidth = min(geometry.visible.width, baseWidth + extent * 2)
+                host.geometry?.activeCompactWidth = min(geometry.visible.width, hardwareShellWidth + extent * 2)
                 host.geometry?.activeCompactCenterOffset = 0
             }
         } else {
+            host.geometry?.activeCompactHeight = presetClosedHeight
             let contentWidth: Double
             if active.isEmpty {
                 contentWidth = SimpleNotchMetrics.closedPillWidth(size)
@@ -2475,14 +2484,17 @@ final class WindowManager {
                 appearance.saturation = 1
                 appearance.brightness = 0
                 appearance.skin = NotchSkinOptions()
-                appearance.compactWidth = max(hardwareShellWidth, presetClosedWidth)
+                // Closed Simple Mode hugs real notch hardware. The selected Simple size
+                // controls the opened surface; closed widgets may expand the compact frame later
+                // in configureSimpleDynamicWidth(_:geometry:).
+                appearance.compactWidth = hasPhysicalNotch ? hardwareShellWidth : presetClosedWidth
                 appearance.expandedHeight = arrangement.height
                 appearance.spacing = SimpleNotchMetrics.widgetSpacing(size)
                 appearance.animation = .smooth
 
                 appearance.surface.useStyleContour = true
                 appearance.surface.shape = hasPhysicalNotch ? .scoop : .capsule
-                appearance.surface.compactHeight = max(hardwareShellHeight, presetClosedHeight)
+                appearance.surface.compactHeight = hasPhysicalNotch ? hardwareShellHeight : presetClosedHeight
                 appearance.surface.opening = .resize
                 appearance.surface.closing = .resize
                 appearance.surface.duration = 0.26
