@@ -203,35 +203,65 @@ enum SimpleNotchMetrics {
         var height: Double
     }
 
-    /// Shared by the window and its contents so every enabled widget stays in one
-    /// horizontal row. If the fixed-size cards exceed the available display width,
-    /// the renderer scrolls horizontally instead of wrapping or scaling the cards down.
-    static func arrangement(settings: SimpleNotchSettings, availableWidth: Double,
-                            hardwareWidth: Double = 0) -> Arrangement {
+    static func requiredContentWidth(settings: SimpleNotchSettings) -> Double {
         let settings = settings.normalized()
         let size = settings.resolvedSize
-        let padding = horizontalPadding(size) * 2
-        let gap = widgetSpacing(size)
         let widgets = settings.widgets
-
-        let contentWidth = widgets.reduce(0.0) {
+        return widgets.reduce(0.0) {
             $0 + width(for: $1, size: size)
-        } + Double(max(0, widgets.count - 1)) * gap + padding
+        } + Double(max(0, widgets.count - 1)) * widgetSpacing(size)
+          + horizontalPadding(size) * 2
+    }
 
-        let maximumWindowWidth = max(1, min(1100, availableWidth))
-        let requestedWindowWidth = max(
-            minimumOpenShelfWidth(size, hardwareWidth: hardwareWidth),
-            contentWidth
+    static func fits(settings: SimpleNotchSettings, availableWidth: Double,
+                     hardwareWidth: Double = 0) -> Bool {
+        let maximum = max(1, availableWidth)
+        let required = max(
+            minimumOpenShelfWidth(settings.resolvedSize, hardwareWidth: hardwareWidth),
+            requiredContentWidth(settings: settings)
         )
-        let windowWidth = min(maximumWindowWidth, requestedWindowWidth)
+        return required <= maximum + 0.5
+    }
 
+    static func fittingSettings(settings: SimpleNotchSettings, availableWidth: Double,
+                                hardwareWidth: Double = 0) -> SimpleNotchSettings {
+        var value = settings.normalized()
+        guard !fits(settings: value, availableWidth: availableWidth, hardwareWidth: hardwareWidth) else {
+            return value
+        }
+
+        // Preserve order and remove the newest/right-most widgets until the row fits.
+        while value.widgets.count > 1 &&
+              !fits(settings: value, availableWidth: availableWidth, hardwareWidth: hardwareWidth) {
+            value.widgets.removeLast()
+        }
+        return value.normalized()
+    }
+
+    /// Simple Mode is strictly one row. The notch expands with its enabled widgets.
+    /// Settings prevents additions that would exceed the usable screen width; this
+    /// arrangement still defensively trims legacy/oversized settings so runtime never wraps,
+    /// scrolls or scales the cards.
+    static func arrangement(settings: SimpleNotchSettings, availableWidth: Double,
+                            hardwareWidth: Double = 0) -> Arrangement {
+        let settings = fittingSettings(
+            settings: settings,
+            availableWidth: availableWidth,
+            hardwareWidth: hardwareWidth
+        )
+        let size = settings.resolvedSize
+        let widgets = settings.widgets
+        let requestedWidth = max(
+            minimumOpenShelfWidth(size, hardwareWidth: hardwareWidth),
+            requiredContentWidth(settings: settings)
+        )
         let tallest = widgets.map {
             height(for: $0, style: settings.style(for: $0), size: size)
         }.max() ?? widgetHeight(size)
 
         return Arrangement(
             rows: [widgets],
-            width: windowWidth,
+            width: min(max(1, availableWidth), requestedWidth),
             height: tallest + verticalPadding(size) * 2
         )
     }
