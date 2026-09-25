@@ -1703,6 +1703,11 @@ private final class SystemAudioMediaFallback {
     private var safariAudibleSince: Date?
     private var recognitionInFlight = false
     private var lastRecognitionAttempt = Date.distantPast
+    private var lastRecognitionSuccessKey = ""
+    private var recognizedSourceKey = ""
+    private var recognizedTitle = ""
+    private var recognizedArtist = ""
+    private var recognizedArtworkURL: String?
     private var fastRefreshTask: Task<Void, Never>?
 
     init(media: MediaService) { self.media = media }
@@ -1720,6 +1725,11 @@ private final class SystemAudioMediaFallback {
             fastRefreshTask = nil
             AudioSpectrumService.shared.cancelRecognition()
             recognitionInFlight = false
+            lastRecognitionSuccessKey = ""
+            recognizedSourceKey = ""
+            recognizedTitle = ""
+            recognizedArtist = ""
+            recognizedArtworkURL = nil
             safariAudibleSince = nil
             clearIfOwned()
         }
@@ -1741,26 +1751,69 @@ private final class SystemAudioMediaFallback {
         // This path works in both Halo Direct and Halo App Store and does not depend on MediaRemote.
         if let safari = SafariMediaBridge.shared.currentState(maxAge: 3.5), safari.playing {
             if media.connectedApp != nil { media.disconnect() }
+
             lastSafariOutput = now
             lastHeard = now
-            lastRemoteMetadata = now
+            if safariAudibleSince == nil { safariAudibleSince = now }
             ownsFallback = true
 
-            let displayArtist = safari.artist.isEmpty ? safari.sourceLabel : safari.artist
-            let sourceKey = ["safari-extension", safari.pageURL, safari.title, safari.artist]
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-                .joined(separator: "|")
+            let safariHasRealArtist = !safari.artist
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+
+            let displayArtist = safariHasRealArtist
+                ? safari.artist
+                : safari.sourceLabel
+
+            let sourceKey = [
+                "safari-extension",
+                safari.pageURL,
+                safari.title,
+                safari.artist
+            ]
+            .map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }
+            .joined(separator: "|")
+
+            let normalizedSafariHost = safari.host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let isNormalYouTube = normalizedSafariHost == "youtube.com" || normalizedSafariHost == "www.youtube.com" ||
+                (normalizedSafariHost.hasSuffix(".youtube.com") && normalizedSafariHost != "music.youtube.com")
+            let hasRecognizedYouTubeMetadata = isNormalYouTube && recognizedSourceKey == sourceKey
+            let presentedTitle = hasRecognizedYouTubeMetadata && !recognizedTitle.isEmpty
+                ? recognizedTitle
+                : (safari.title.isEmpty ? "Safari Media" : safari.title)
+            let presentedArtist = hasRecognizedYouTubeMetadata && !recognizedArtist.isEmpty
+                ? recognizedArtist
+                : displayArtist
+            let youtubeFallbackArtworkURL = isNormalYouTube ? youtubeThumbnailURL(from: safari.pageURL) : nil
+            let presentedArtworkURL = hasRecognizedYouTubeMetadata
+                ? (recognizedArtworkURL ?? safari.artworkURL ?? youtubeFallbackArtworkURL)
+                : (safari.artworkURL ?? youtubeFallbackArtworkURL)
 
             media.acceptExternalMedia(
-                title: safari.title.isEmpty ? "Safari Media" : safari.title,
-                artist: displayArtist,
+                title: presentedTitle,
+                artist: presentedArtist,
                 album: safari.album,
                 duration: safari.duration,
                 position: safari.position,
                 playing: true,
-                artworkURL: safari.artworkURL,
+                artworkURL: presentedArtworkURL,
                 sourceKey: sourceKey
             )
+
+            // IMPORTANT:
+            // Safari owns playback/timing, but MediaRemote is still allowed
+            // to enrich missing artist/album/artwork metadata.
+            requestMediaRemoteMetadata()
+
+            requestRecognitionIfNeeded(
+                media: media,
+                safariLikely: true,
+                audibleNow: true,
+                now: now
+            )
+
             scheduleFastRefresh()
             return
         }
@@ -1847,6 +1900,11 @@ private final class SystemAudioMediaFallback {
         fastRefreshTask = nil
         AudioSpectrumService.shared.cancelRecognition()
         recognitionInFlight = false
+        lastRecognitionSuccessKey = ""
+        recognizedSourceKey = ""
+        recognizedTitle = ""
+        recognizedArtist = ""
+        recognizedArtworkURL = nil
         safariAudibleSince = nil
         AudioSpectrumService.shared.setActive(false, owner: "system-audio-media-fallback")
         clearIfOwned()
@@ -1913,18 +1971,57 @@ private final class SystemAudioMediaFallback {
                 self.ownsFallback = true
                 let fallbackArtist = snapshotIsSafari ? "Playing from Safari" : (snapshot.applicationName ?? "System Audio")
                 let displayArtist = !snapshot.artist.isEmpty ? snapshot.artist : (!snapshot.album.isEmpty ? snapshot.album : fallbackArtist)
-                let sourceKey = [snapshot.bundleIdentifier ?? "", snapshot.title, snapshot.artist, snapshot.album]
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-                    .joined(separator: "|")
-                media.acceptExternalMedia(title: snapshot.title,
-                                          artist: displayArtist,
-                                          album: snapshot.album,
-                                          duration: snapshot.duration,
-                                          position: snapshot.currentElapsed,
-                                          playing: shouldPresentPlaying,
-                                          artworkData: snapshot.artworkData,
-                                          artworkURL: snapshot.artworkURL,
-                                          sourceKey: sourceKey)
+                let safari = SafariMediaBridge.shared.currentState(maxAge: 3.5)
+                let liveSafari = safari?.playing == true ? safari : nil
+
+                let sourceKey: String
+                if let safari = liveSafari {
+                    sourceKey = ["safari-extension", safari.pageURL, safari.title, safari.artist]
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                        .joined(separator: "|")
+                } else {
+                    sourceKey = [snapshot.bundleIdentifier ?? "", snapshot.title, snapshot.artist, snapshot.album]
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                        .joined(separator: "|")
+                }
+
+                let liveSafariHost = liveSafari?.host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+                let liveSafariIsNormalYouTube = liveSafariHost == "youtube.com" || liveSafariHost == "www.youtube.com" ||
+                    (liveSafariHost.hasSuffix(".youtube.com") && liveSafariHost != "music.youtube.com")
+                let hasRecognizedYouTubeMetadata = liveSafariIsNormalYouTube && self.recognizedSourceKey == sourceKey
+
+                let preferredTitle = hasRecognizedYouTubeMetadata && !self.recognizedTitle.isEmpty
+                    ? self.recognizedTitle
+                    : (liveSafari.map { $0.title.isEmpty ? snapshot.title : $0.title } ?? snapshot.title)
+                let preferredArtist = hasRecognizedYouTubeMetadata && !self.recognizedArtist.isEmpty
+                    ? self.recognizedArtist
+                    : (liveSafari.map { $0.artist.isEmpty ? displayArtist : $0.artist } ?? displayArtist)
+                let preferredAlbum = liveSafari.map {
+                    $0.album.isEmpty ? snapshot.album : $0.album
+                } ?? snapshot.album
+                let preferredArtworkURL: String?
+                let youtubeFallbackArtworkURL = liveSafariIsNormalYouTube
+                    ? liveSafari.flatMap { self.youtubeThumbnailURL(from: $0.pageURL) }
+                    : nil
+                if hasRecognizedYouTubeMetadata {
+                    preferredArtworkURL = self.recognizedArtworkURL ?? liveSafari?.artworkURL ?? youtubeFallbackArtworkURL
+                } else if liveSafariIsNormalYouTube {
+                    preferredArtworkURL = liveSafari?.artworkURL ?? youtubeFallbackArtworkURL
+                } else {
+                    preferredArtworkURL = snapshot.artworkURL ?? liveSafari?.artworkURL
+                }
+
+                media.acceptExternalMedia(
+                    title: preferredTitle,
+                    artist: preferredArtist,
+                    album: preferredAlbum,
+                    duration: liveSafari?.duration ?? snapshot.duration,
+                    position: liveSafari?.position ?? snapshot.currentElapsed,
+                    playing: liveSafari?.playing ?? shouldPresentPlaying,
+                    artworkData: liveSafariIsNormalYouTube ? nil : snapshot.artworkData,
+                    artworkURL: preferredArtworkURL,
+                    sourceKey: sourceKey
+                )
             }
         }
     }
@@ -1935,7 +2032,25 @@ private final class SystemAudioMediaFallback {
               now.timeIntervalSince(lastRecognitionAttempt) >= 15 else { return }
 
         let generic = isGenericExternalMetadata(title: media.title, artist: media.artist)
-        guard generic || media.artworkImage == nil else { return }
+        let safari = SafariMediaBridge.shared.currentState(maxAge: 3.5)
+        let safariHost = safari?.host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        let isNormalYouTube = safari?.playing == true && (
+            safariHost == "youtube.com" || safariHost == "www.youtube.com" ||
+            (safariHost.hasSuffix(".youtube.com") && safariHost != "music.youtube.com")
+        )
+        let recognitionKey: String
+        if let safari, safari.playing {
+            recognitionKey = ["safari-extension", safari.pageURL, safari.title, safari.artist]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .joined(separator: "|")
+        } else {
+            recognitionKey = [media.title, media.artist, media.album]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .joined(separator: "|")
+        }
+
+        guard recognitionKey != lastRecognitionSuccessKey else { return }
+        guard generic || media.artworkImage == nil || isNormalYouTube else { return }
 
         recognitionInFlight = true
         lastRecognitionAttempt = now
@@ -1946,21 +2061,76 @@ private final class SystemAudioMediaFallback {
                 guard self.enabled, let media = self.media, let match else { return }
 
                 let keepExistingMetadata = !self.isGenericExternalMetadata(title: media.title, artist: media.artist)
-                let title = keepExistingMetadata ? media.title : match.title
-                let artist = keepExistingMetadata ? media.artist : match.artist
-                let sourceKey = [title, artist, media.album]
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-                    .joined(separator: "|")
+                let recognizedTitle = match.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let recognizedArtist = match.artist.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                // Normal YouTube exposes the video title/channel through the Safari extension.
+                // Those values are useful for identifying the page, but they are often not the
+                // canonical song metadata that online lyrics providers expect. Once Shazam has
+                // identified the audible track, prefer that canonical title/artist for YouTube.
+                // Keep the Safari-derived source key below so the next extension refresh does not
+                // treat this enrichment as a different track and wipe its artwork.
+                let title = (isNormalYouTube && !recognizedTitle.isEmpty)
+                    ? recognizedTitle
+                    : (keepExistingMetadata ? media.title : match.title)
+                let artist = (isNormalYouTube && !recognizedArtist.isEmpty)
+                    ? recognizedArtist
+                    : (keepExistingMetadata ? media.artist : match.artist)
+
+                let sourceKey: String
+                if let safari = SafariMediaBridge.shared.currentState(maxAge: 3.5), safari.playing {
+                    sourceKey = ["safari-extension", safari.pageURL, safari.title, safari.artist]
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                        .joined(separator: "|")
+                } else {
+                    sourceKey = [title, artist, media.album]
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                        .joined(separator: "|")
+                }
+
+                let recognizedArtworkURL = match.artworkURL?.absoluteString
+                if isNormalYouTube {
+                    self.recognizedSourceKey = sourceKey
+                    self.recognizedTitle = recognizedTitle
+                    self.recognizedArtist = recognizedArtist
+                    self.recognizedArtworkURL = recognizedArtworkURL
+                }
+
+                let liveSafari = SafariMediaBridge.shared.currentState(maxAge: 3.5)
+                let safariFallbackArtwork = isNormalYouTube
+                    ? (liveSafari?.artworkURL ?? liveSafari.flatMap { self.youtubeThumbnailURL(from: $0.pageURL) })
+                    : nil
                 media.acceptExternalMedia(title: title,
                                           artist: artist,
                                           album: media.album,
                                           duration: media.duration > 0 ? media.duration : nil,
                                           position: media.position >= 0 ? media.position : nil,
                                           playing: media.isPlaying,
-                                          artworkURL: match.artworkURL?.absoluteString,
+                                          artworkURL: recognizedArtworkURL ?? safariFallbackArtwork,
                                           sourceKey: sourceKey)
+                self.lastRecognitionSuccessKey = sourceKey
             }
         }
+    }
+
+    private func youtubeThumbnailURL(from pageURL: String) -> String? {
+        guard let components = URLComponents(string: pageURL),
+              let host = components.host?.lowercased(),
+              host == "youtube.com" || host == "www.youtube.com" || host.hasSuffix(".youtube.com"),
+              host != "music.youtube.com" else { return nil }
+
+        var videoID = components.queryItems?.first(where: { $0.name == "v" })?.value ?? ""
+        if videoID.isEmpty {
+            let pathParts = components.path.split(separator: "/").map(String.init)
+            if pathParts.count >= 2,
+               ["shorts", "embed", "live"].contains(pathParts[0].lowercased()) {
+                videoID = pathParts[1]
+            }
+        }
+
+        guard !videoID.isEmpty,
+              let encoded = videoID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { return nil }
+        return "https://i.ytimg.com/vi/\(encoded)/hqdefault.jpg"
     }
 
     private func isGenericExternalMetadata(title: String, artist: String) -> Bool {
