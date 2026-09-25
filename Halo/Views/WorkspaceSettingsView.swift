@@ -36,7 +36,7 @@ struct SettingsView: View {
 
     private var sidebarGroups: [SidebarGroup] {
         let workspaceItems = ["Visual Workspace Editor", "Modules", "Widgets", "Media & Files"]
-        var coreItems = ["General"]
+        var coreItems = ["General", "Notch Mode"]
         if HaloDistribution.current.supportsExternalLicensing || HaloDistribution.current.supportsAppStoreLicensing {
             coreItems.append("Account & License")
         }
@@ -323,6 +323,7 @@ struct SettingsView: View {
     private func sectionIcon(_ name: String) -> String {
         switch name {
         case "General": return "gearshape"
+        case "Notch Mode": return "rectangle.topthird.inset.filled"
         case "Account & License": return "person.crop.circle.badge.checkmark"
         case "Appearance": return "paintpalette"
         case "Notch Skins": return "square.3.layers.3d"
@@ -483,6 +484,8 @@ struct SettingsView: View {
                     Text("Option + Command").tag(UInt32(2304)); Text("Control + Option").tag(UInt32(6144)); Text("Control + Shift").tag(UInt32(4608))
                 }
             }
+        case "Notch Mode":
+            NotchModeSettingsPane(workspace: workspace)
         case "Account & License":
             if HaloDistribution.current.supportsAppStoreLicensing {
                 HaloAppStoreAccountLicenseSettingsView()
@@ -892,6 +895,146 @@ struct HaloFullLockedPage: View {
 }
 
 @MainActor
+private struct NotchModeSettingsPane: View {
+    @ObservedObject var workspace: WorkspaceStore
+
+    private var mode: HaloNotchMode { workspace.settings.resolvedNotchMode }
+    private var simple: SimpleNotchSettings { workspace.settings.resolvedSimpleNotch }
+
+    var body: some View {
+        Section("Notch Mode") {
+            Picker("Mode", selection: Binding(
+                get: { workspace.settings.resolvedNotchMode },
+                set: { workspace.settings.notchMode = $0 }
+            )) {
+                ForEach(HaloNotchMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text(mode.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        if mode == .simple {
+            Section("Simple widgets") {
+                Text("Fixed-size widgets, horizontal expansion and drag-to-reorder. Context Interfaces and advanced workspace layers stay out of the way.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                ForEach(SimpleNotchSettings.availableWidgets) { widget in
+                    VStack(alignment: .leading, spacing: 9) {
+                        HStack(spacing: 10) {
+                            Toggle(isOn: enabledBinding(widget)) {
+                                Label(simpleTitle(widget), systemImage: widget.symbol)
+                            }
+                            Spacer()
+                            if simple.widgets.contains(widget) {
+                                Picker("Style", selection: styleBinding(widget)) {
+                                    ForEach(SimpleNotchWidgetStyle.allCases) { style in
+                                        Label(style.rawValue, systemImage: style.symbol).tag(style)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: 132)
+                            }
+                        }
+
+                        if SimpleNotchSettings.closedEligibleWidgets.contains(widget),
+                           simple.widgets.contains(widget) {
+                            Toggle("Allow in closed-notch slots", isOn: closedBinding(widget))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 26)
+                        }
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+
+            Section("Closed notch") {
+                Text("Up to two useful widgets can appear while Halo is closed. Active Timer, Stopwatch, Media and Calendar take priority; Clock is the fallback.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Reorder") {
+                Text("Open Halo and drag widget cards left or right. The notch automatically resizes around the fixed widget sizes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Section("Advanced mode") {
+                Text("Your existing Visual Workspace, Context Interfaces, Profiles, Bubbles, HUD, themes and customization remain exactly as configured.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func enabledBinding(_ widget: ModuleID) -> Binding<Bool> {
+        Binding(
+            get: { workspace.settings.resolvedSimpleNotch.widgets.contains(widget) },
+            set: { enabled in
+                var value = workspace.settings.resolvedSimpleNotch
+                if enabled {
+                    if !value.widgets.contains(widget) { value.widgets.append(widget) }
+                    if SimpleNotchSettings.closedEligibleWidgets.contains(widget),
+                       !value.closedWidgets.contains(widget) {
+                        if widget == .clock {
+                            value.closedWidgets.append(widget)
+                        } else if let clockIndex = value.closedWidgets.firstIndex(of: .clock) {
+                            value.closedWidgets.insert(widget, at: clockIndex)
+                        } else {
+                            value.closedWidgets.append(widget)
+                        }
+                    }
+                } else {
+                    value.widgets.removeAll { $0 == widget }
+                }
+                workspace.settings.simpleNotch = value.normalized()
+            }
+        )
+    }
+
+    private func styleBinding(_ widget: ModuleID) -> Binding<SimpleNotchWidgetStyle> {
+        Binding(
+            get: { workspace.settings.resolvedSimpleNotch.style(for: widget) },
+            set: { style in
+                var value = workspace.settings.resolvedSimpleNotch
+                value.styles[widget.rawValue] = style
+                workspace.settings.simpleNotch = value.normalized()
+            }
+        )
+    }
+
+    private func closedBinding(_ widget: ModuleID) -> Binding<Bool> {
+        Binding(
+            get: { workspace.settings.resolvedSimpleNotch.allowsClosed(widget) },
+            set: { enabled in
+                var value = workspace.settings.resolvedSimpleNotch
+                value.closedWidgets.removeAll { $0 == widget }
+                if enabled {
+                    if widget == .clock {
+                        value.closedWidgets.append(widget)
+                    } else if let clockIndex = value.closedWidgets.firstIndex(of: .clock) {
+                        value.closedWidgets.insert(widget, at: clockIndex)
+                    } else {
+                        value.closedWidgets.append(widget)
+                    }
+                }
+                workspace.settings.simpleNotch = value.normalized()
+            }
+        )
+    }
+
+    private func simpleTitle(_ widget: ModuleID) -> String {
+        widget == .shelf ? "File Tray" : widget.title
+    }
+}
+
 private struct HaloLiteAppearanceSettingsPane: View {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
