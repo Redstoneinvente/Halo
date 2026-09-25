@@ -1393,6 +1393,14 @@ final class WindowManager {
             )
             host.geometry?.activeCompactCenterOffset = nil
         }
+
+        // Never let opening Simple make the surface narrower than an already-visible
+        // closed slot arrangement. The open motion should grow vertically, not pinch inward.
+        let closedWidth = host.geometry?.activeCompactWidth ?? baseWidth
+        host.geometry?.expandedWidth = max(
+            SimpleNotchMetrics.expandedWidth(widgets: simple.widgets),
+            closedWidth
+        )
     }
 
     private func configureDynamicWidth(_ host: Host) {
@@ -2477,7 +2485,7 @@ final class WindowManager {
             // is rectangular/window-level and can bleed through the transparent surface,
             // which reads as a muddy inner shadow around bright workspaces. Disable the
             // native shadow there; Default workspace keeps the normal macOS panel shadow.
-            host.panel.hasShadow = !effectiveLayout.resolvedUsesCustomOpenNotchWorkspace
+            host.panel.hasShadow = simpleMode ? false : !effectiveLayout.resolvedUsesCustomOpenNotchWorkspace
 
             configureDynamicWidth(host)
             let baseDashboardWidth = host.geometry!.frame(expanded: true).width
