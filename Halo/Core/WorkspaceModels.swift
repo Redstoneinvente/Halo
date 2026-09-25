@@ -64,7 +64,7 @@ struct SimpleNotchSettings: Codable, Equatable {
     var styles: [String: SimpleNotchWidgetStyle] = [:]
     /// Priority order for automatic closed-notch slots. Active transient widgets win
     /// before the Clock fallback.
-    var closedWidgets: [ModuleID] = [.timer, .stopwatch, .media, .calendar, .clock]
+    var closedWidgets: [ModuleID] = []
 
     func normalized() -> SimpleNotchSettings {
         var value = self
