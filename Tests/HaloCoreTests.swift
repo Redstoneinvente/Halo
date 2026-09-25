@@ -1331,7 +1331,12 @@ final class SimpleNotchLayoutTests: XCTestCase {
         settings.widgets = [.clock, .calendar]
         settings.styles = [ModuleID.calendar.rawValue: .glass]
         let layout = SimpleNotchMetrics.arrangement(settings: settings, availableWidth: 1000)
-        XCTAssertEqual(layout.height, SimpleNotchMetrics.calendarMonthHeight(.standard) + 16)
+        XCTAssertEqual(
+            layout.height,
+            SimpleNotchMetrics.calendarMonthHeight(.standard)
+                + SimpleNotchMetrics.openTopPadding(.standard)
+                + SimpleNotchMetrics.openBottomPadding(.standard)
+        )
         settings.widgets = []
         XCTAssertEqual(SimpleNotchMetrics.arrangement(settings: settings, availableWidth: 1000).rows, [[.clock]])
     }
