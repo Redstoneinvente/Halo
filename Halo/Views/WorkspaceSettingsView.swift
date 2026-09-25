@@ -925,11 +925,18 @@ private struct NotchModeSettingsPane: View {
                     set: { size in
                         var value = workspace.settings.resolvedSimpleNotch
                         value.size = size
+                        guard SimpleNotchMetrics.fits(
+                            settings: value,
+                            availableWidth: simpleAvailableWidth,
+                            hardwareWidth: simpleHardwareWidth
+                        ) else { return }
                         workspace.settings.simpleNotch = value.normalized()
                     }
                 )) {
                     ForEach(SimpleNotchSize.allCases) { size in
-                        Text(size.rawValue).tag(size)
+                        Text(size.rawValue)
+                            .tag(size)
+                            .disabled(!canUseSimpleSize(size))
                     }
                 }
                 .pickerStyle(.segmented)
@@ -940,7 +947,7 @@ private struct NotchModeSettingsPane: View {
             }
 
             Section("Simple widgets") {
-                Text("Fixed-size widgets with drag-to-reorder. Cards fit into rows when needed, keeping every widget visible without scrolling.")
+                Text("Simple always stays on one row. Halo expands horizontally as widgets are enabled; options that would exceed this display are disabled.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -954,6 +961,10 @@ private struct NotchModeSettingsPane: View {
                             Toggle(isOn: enabledBinding(widget)) {
                                 Label(simpleTitle(widget), systemImage: widget.symbol)
                             }
+                            .disabled(!simple.widgets.contains(widget) && !canEnableSimpleWidget(widget))
+                            .help(simple.widgets.contains(widget) || canEnableSimpleWidget(widget)
+                                  ? ""
+                                  : "This widget would make the Simple notch wider than the current display.")
                             Spacer()
                             if simple.widgets.contains(widget) {
                                 Picker("Style", selection: styleBinding(widget)) {
@@ -1005,13 +1016,58 @@ private struct NotchModeSettingsPane: View {
         }
     }
 
+    private var simpleTargetScreen: NSScreen? {
+        NSScreen.main ?? NSScreen.screens.first
+    }
+
+    private var simpleAvailableWidth: Double {
+        max(1, Double(simpleTargetScreen?.visibleFrame.width ?? 1512) - 32)
+    }
+
+    private var simpleHardwareWidth: Double {
+        guard let screen = simpleTargetScreen, screen.safeAreaInsets.top > 0 else { return 0 }
+        if let left = screen.auxiliaryTopLeftArea,
+           let right = screen.auxiliaryTopRightArea {
+            return max(0, Double(right.minX - left.maxX)) + 24
+        }
+        return 214
+    }
+
+    private func canEnableSimpleWidget(_ widget: ModuleID) -> Bool {
+        var value = workspace.settings.resolvedSimpleNotch
+        guard !value.widgets.contains(widget) else { return true }
+        value.widgets.append(widget)
+        return SimpleNotchMetrics.fits(
+            settings: value,
+            availableWidth: simpleAvailableWidth,
+            hardwareWidth: simpleHardwareWidth
+        )
+    }
+
+    private func canUseSimpleSize(_ size: SimpleNotchSize) -> Bool {
+        var value = workspace.settings.resolvedSimpleNotch
+        value.size = size
+        return SimpleNotchMetrics.fits(
+            settings: value,
+            availableWidth: simpleAvailableWidth,
+            hardwareWidth: simpleHardwareWidth
+        )
+    }
+
     private func enabledBinding(_ widget: ModuleID) -> Binding<Bool> {
         Binding(
             get: { workspace.settings.resolvedSimpleNotch.widgets.contains(widget) },
             set: { enabled in
                 var value = workspace.settings.resolvedSimpleNotch
                 if enabled {
-                    if !value.widgets.contains(widget) { value.widgets.append(widget) }
+                    if !value.widgets.contains(widget) {
+                        value.widgets.append(widget)
+                        guard SimpleNotchMetrics.fits(
+                            settings: value,
+                            availableWidth: simpleAvailableWidth,
+                            hardwareWidth: simpleHardwareWidth
+                        ) else { return }
+                    }
                 } else {
                     // The Simple shelf must always have something meaningful to show.
                     guard value.widgets.count > 1 else { return }
