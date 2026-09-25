@@ -1516,12 +1516,13 @@ enum MediaAssetReader {
         var result = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Browser media, especially YouTube, commonly reports "Artist - Song" rather than
-        // the canonical track title LRCLIB stores.
         if !cleanArtist.isEmpty {
-            let prefix = cleanArtist + " - "
-            if result.lowercased().hasPrefix(prefix.lowercased()) {
-                result = String(result.dropFirst(prefix.count))
+            for separator in [" - ", " – ", " — "] {
+                let prefix = cleanArtist + separator
+                if result.lowercased().hasPrefix(prefix.lowercased()) {
+                    result = String(result.dropFirst(prefix.count))
+                    break
+                }
             }
         }
 
@@ -1541,7 +1542,6 @@ enum MediaAssetReader {
             )
         }
 
-        // LRCLIB commonly indexes the base title rather than YouTube's "(feat. ...)" suffix.
         result = result.replacingOccurrences(
             of: #"\s*\((?:feat\.?|ft\.?)\s+[^)]*\)\s*$"#,
             with: "",
@@ -1549,6 +1549,58 @@ enum MediaAssetReader {
         )
 
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func lyricsRequest(title: String, artist: String, duration: Double?) async -> LRCLyrics? {
+        var components = URLComponents(string: "https://lrclib.net/api/get")!
+        components.queryItems = [
+            URLQueryItem(name: "track_name", value: title),
+            URLQueryItem(name: "artist_name", value: artist)
+        ]
+        if let duration, duration >= 1, duration <= 3600 {
+            components.queryItems?.append(
+                URLQueryItem(name: "duration", value: String(Int(duration.rounded())))
+            )
+        }
+        guard let url = components.url else { return nil }
+
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+        request.setValue("Halo/1.0 (https://github.com/Redstoneinvente/Halo)", forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              data.count <= 1_000_000 else { return nil }
+        return try? JSONDecoder().decode(LRCLyrics.self, from: data)
+    }
+
+    private static func lyricsSearch(title: String, artist: String, duration: Double?) async -> String {
+        var components = URLComponents(string: "https://lrclib.net/api/search")!
+        components.queryItems = [
+            URLQueryItem(name: "track_name", value: title),
+            URLQueryItem(name: "artist_name", value: artist)
+        ]
+        guard let url = components.url else { return "" }
+
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+        request.setValue("Halo/1.0 (https://github.com/Redstoneinvente/Halo)", forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              data.count <= 2_000_000,
+              let results = try? JSONDecoder().decode([LRCLyrics].self, from: data) else { return "" }
+
+        let withSynced = results.filter {
+            !($0.syncedLyrics ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard !withSynced.isEmpty else { return "" }
+
+        let best: LRCLyrics
+        if let duration {
+            best = withSynced.min {
+                abs(($0.duration ?? duration) - duration) < abs(($1.duration ?? duration) - duration)
+            } ?? withSynced[0]
+        } else {
+            best = withSynced[0]
+        }
+        return best.syncedLyrics ?? ""
     }
 
     private static func onlineLyrics(title: String, artist: String, duration: Double?) async -> String {
@@ -1559,17 +1611,11 @@ enum MediaAssetReader {
         let normalizedTitle = normalizedLyricsTitle(rawTitle, artist: rawArtist)
         let titleChanged = normalizedTitle.caseInsensitiveCompare(rawTitle) != .orderedSame
 
-        // A browser video's duration can include intros/outros and differ substantially from the
-        // actual song. Try the precise lookup first, then retry without duration before giving up.
         var attempts: [(String, Double?)] = [(rawTitle, duration)]
-        if titleChanged && !normalizedTitle.isEmpty {
-            attempts.append((normalizedTitle, duration))
-        }
+        if titleChanged && !normalizedTitle.isEmpty { attempts.append((normalizedTitle, duration)) }
         if duration != nil {
             attempts.append((rawTitle, nil))
-            if titleChanged && !normalizedTitle.isEmpty {
-                attempts.append((normalizedTitle, nil))
-            }
+            if titleChanged && !normalizedTitle.isEmpty { attempts.append((normalizedTitle, nil)) }
         }
 
         var seen = Set<String>()
@@ -1578,25 +1624,11 @@ enum MediaAssetReader {
                 (candidateDuration.map { String(Int($0.rounded())) } ?? "no-duration")
             guard seen.insert(attemptKey).inserted else { continue }
 
-            var components = URLComponents(string: "https://lrclib.net/api/get")!
-            components.queryItems = [
-                URLQueryItem(name: "track_name", value: candidateTitle),
-                URLQueryItem(name: "artist_name", value: rawArtist)
-            ]
-            if let candidateDuration, candidateDuration >= 1, candidateDuration <= 3600 {
-                components.queryItems?.append(
-                    URLQueryItem(name: "duration", value: String(Int(candidateDuration.rounded())))
-                )
-            }
-            guard let url = components.url else { continue }
-
-            var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
-            request.setValue("Halo/1.0 (https://github.com/Redstoneinvente/Halo)", forHTTPHeaderField: "User-Agent")
-
-            guard let (data, response) = try? await URLSession.shared.data(for: request),
-                  (response as? HTTPURLResponse)?.statusCode == 200,
-                  data.count <= 1_000_000,
-                  let result = try? JSONDecoder().decode(LRCLyrics.self, from: data) else { continue }
+            guard let result = await lyricsRequest(
+                title: candidateTitle,
+                artist: rawArtist,
+                duration: candidateDuration
+            ) else { continue }
 
             if let requested = candidateDuration,
                let returned = result.duration,
@@ -1609,7 +1641,10 @@ enum MediaAssetReader {
                 return synced
             }
         }
-        return ""
+
+        let searchTitle = normalizedTitle.isEmpty ? rawTitle : normalizedTitle
+        return await lyricsSearch(title: searchTitle, artist: rawArtist, duration: duration)
+    }
     }
 }
 
