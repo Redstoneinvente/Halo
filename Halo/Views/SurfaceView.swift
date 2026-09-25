@@ -4025,7 +4025,8 @@ private struct SimpleNotchWidgetView: View {
                 if playing {
                     mediaSpinStartedAt = now
                 } else {
-                    mediaSpinBase = mediaSpinAngle(at: now)
+                    let elapsed = max(0, now.timeIntervalSince(mediaSpinStartedAt))
+                    mediaSpinBase = (mediaSpinBase + elapsed * 42).truncatingRemainder(dividingBy: 360)
                 }
             }
             .onChange(of: workspace.media.title) { _ in
@@ -5739,28 +5740,30 @@ private struct SimpleNotchWidgetView: View {
             workspace.media.perform(action, app: workspace.settings.mediaApp)
         } label: {
             ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.035))
-                Circle()
-                    .stroke(Color.white.opacity(0.40), lineWidth: 1.4 * scale)
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.035))
+                    Circle()
+                        .stroke(Color.white.opacity(0.40), lineWidth: 1.4 * scale)
 
-                ForEach(0..<5, id: \.self) { spoke in
-                    Capsule()
-                        .fill(Color.white.opacity(0.42))
-                        .frame(width: 1.1 * scale, height: 14 * scale)
-                        .rotationEffect(.degrees(Double(spoke) * 36))
+                    ForEach(0..<5, id: \.self) { spoke in
+                        Capsule()
+                            .fill(Color.white.opacity(0.42))
+                            .frame(width: 1.1 * scale, height: 14 * scale)
+                            .rotationEffect(.degrees(Double(spoke) * 36))
+                    }
+
+                    Circle()
+                        .fill(Color.black.opacity(0.72))
+                        .frame(width: 15 * scale, height: 15 * scale)
                 }
-
-                Circle()
-                    .fill(Color.black.opacity(0.72))
-                    .frame(width: 15 * scale, height: 15 * scale)
+                .rotationEffect(.degrees(angle))
 
                 Image(systemName: symbol)
                     .font(.system(size: 6.5 * scale, weight: .bold))
                     .foregroundStyle(.white.opacity(0.86))
             }
             .frame(width: 40 * scale, height: 40 * scale)
-            .rotationEffect(.degrees(angle))
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
