@@ -3807,7 +3807,7 @@ private struct SimpleNotchWorkspaceView: View {
         GeometryReader { proxy in
             ScrollView(.horizontal) {
                 HStack(spacing: CGFloat(SimpleNotchMetrics.widgetSpacing(size))) {
-                    ForEach(Array(settings.widgets.enumerated()), id: \.element) { index, widget in
+                    ForEach(Array(settings.widgets.enumerated()), id: \.offset) { index, widget in
                         simpleCard(widget)
                             .overlay(alignment: .trailing) {
                                 if index < settings.widgets.count - 1 {
