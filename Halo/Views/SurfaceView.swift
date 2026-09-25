@@ -4590,7 +4590,7 @@ private struct SimpleNotchWidgetView: View {
                 columns: Array(repeating: GridItem(.flexible(), spacing: 1.5 * scale), count: 7),
                 spacing: 1.5 * scale
             ) {
-                ForEach(simpleWeekdaySymbols, id: \.self) { symbol in
+                ForEach(Array(simpleWeekdaySymbols.enumerated()), id: \.offset) { _, symbol in
                     Text(symbol.uppercased())
                         .font(.system(size: 6 * scale, weight: .bold, design: .rounded))
                         .foregroundStyle(.tertiary)
