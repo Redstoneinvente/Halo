@@ -1004,6 +1004,8 @@ final class WindowManager {
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
         store.workspace.$activities.receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
+        store.workspace.calendar.objectWillChange.receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDynamicWidths() }.store(in: &subscriptions)
 
         // Closed-notch clock width can change when a 12-hour clock crosses between
         // one- and two-digit hours. Re-measure periodically so the surface hugs the
@@ -1342,10 +1344,65 @@ final class WindowManager {
         return (side, badgeWidth, cameraInset, extraSpace)
     }
 
+    private func configureSimpleDynamicWidth(_ host: Host, geometry: SurfaceGeometry) {
+        let simple = store.workspace.settings.resolvedSimpleNotch
+        let calendarActive = store.workspace.calendar.upcomingEvents.contains { $0.endDate > Date() }
+        let active = simple.activeClosedWidgets(
+            timerActive: store.deadline != nil || store.pausedSeconds > 0 || store.finished,
+            stopwatchActive: store.workspace.stopwatchStart != nil || store.workspace.stopwatchElapsed > 0,
+            mediaActive: store.workspace.media.hasNowPlayingPresentation,
+            calendarActive: calendarActive
+        )
+
+        let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
+        let baseWidth = attached ? max(16, geometry.physicalNotchWidth) : SimpleNotchMetrics.closedPillWidth
+        host.geometry?.activeCompactHeight = attached
+            ? max(16, geometry.safeAreaTop)
+            : SimpleNotchMetrics.closedHeight
+
+        if attached {
+            let extent = SimpleNotchMetrics.closedSlotWidth + SimpleNotchMetrics.closedSlotGap
+            switch active.count {
+            case 0:
+                host.geometry?.activeCompactWidth = baseWidth
+                host.geometry?.activeCompactCenterOffset = 0
+            case 1:
+                // A single live slot grows from the right shoulder, keeping the physical
+                // camera notch visually anchored instead of creating an empty opposite wing.
+                host.geometry?.activeCompactWidth = min(geometry.visible.width, baseWidth + extent)
+                host.geometry?.activeCompactCenterOffset = extent / 2
+            default:
+                host.geometry?.activeCompactWidth = min(geometry.visible.width, baseWidth + extent * 2)
+                host.geometry?.activeCompactCenterOffset = 0
+            }
+        } else {
+            let contentWidth: Double
+            if active.isEmpty {
+                contentWidth = SimpleNotchMetrics.closedPillWidth
+            } else {
+                contentWidth =
+                    Double(active.count) * SimpleNotchMetrics.closedSlotWidth +
+                    Double(max(0, active.count - 1)) * SimpleNotchMetrics.closedSlotGap +
+                    SimpleNotchMetrics.horizontalPadding * 2
+            }
+            host.geometry?.activeCompactWidth = min(
+                geometry.visible.width,
+                max(SimpleNotchMetrics.closedPillWidth, contentWidth)
+            )
+            host.geometry?.activeCompactCenterOffset = nil
+        }
+    }
+
     private func configureDynamicWidth(_ host: Host) {
         guard host.geometry != nil else { return }
         host.geometry?.activeCompactHeight = nil
         guard let geometry = host.geometry else { return }
+
+        if store.workspace.settings.resolvedNotchMode == .simple {
+            configureSimpleDynamicWidth(host, geometry: geometry)
+            return
+        }
+
         let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
         let options = layout.closedNotch ?? ClosedNotchOptions()
         let expansion = options.expansion ?? ClosedExpansionOptions()
@@ -2312,6 +2369,48 @@ final class WindowManager {
                effectiveLayout.horizontalWidgets ?? false {
                 let requested = effectiveLayout.horizontalHeight ?? 260
                 appearance.expandedHeight = requested.isFinite ? min(1100, max(200, requested)) : 260
+            }
+
+            if store.workspace.settings.resolvedNotchMode == .simple {
+                let simple = store.workspace.settings.resolvedSimpleNotch
+                let physicalWidth: Double = {
+                    if let left = screen.auxiliaryTopLeftArea,
+                       let right = screen.auxiliaryTopRightArea {
+                        return max(0, Double(right.minX - left.maxX))
+                    }
+                    return screen.safeAreaInsets.top > 0 ? 190 : 0
+                }()
+                let hasPhysicalNotch = screen.safeAreaInsets.top > 0 && physicalWidth > 0
+
+                theme.style = hasPhysicalNotch ? .notch : .pill
+                theme.width = SimpleNotchMetrics.expandedWidth(widgets: simple.widgets)
+                theme.cornerRadius = hasPhysicalNotch ? 18 : 22
+
+                appearance.background = .solid
+                appearance.solidColor = WidgetColor(red: 0, green: 0, blue: 0)
+                appearance.gradientStartColor = WidgetColor(red: 0, green: 0, blue: 0)
+                appearance.gradientEndColor = WidgetColor(red: 0, green: 0, blue: 0)
+                appearance.assetPath = ""
+                appearance.blur = 0
+                appearance.saturation = 1
+                appearance.brightness = 0
+                appearance.skin = NotchSkinOptions()
+                appearance.compactWidth = hasPhysicalNotch ? physicalWidth : SimpleNotchMetrics.closedPillWidth
+                appearance.expandedHeight = SimpleNotchMetrics.expandedBodyHeight
+                appearance.spacing = SimpleNotchMetrics.widgetSpacing
+                appearance.animation = .smooth
+
+                appearance.surface.useStyleContour = true
+                appearance.surface.shape = hasPhysicalNotch ? .scoop : .capsule
+                appearance.surface.compactHeight = hasPhysicalNotch
+                    ? max(16, Double(screen.safeAreaInsets.top))
+                    : SimpleNotchMetrics.closedHeight
+                appearance.surface.opening = .spring
+                appearance.surface.closing = .spring
+                appearance.surface.duration = 0.28
+                appearance.surface.damping = 0.86
+                appearance.surface.shoulder = hasPhysicalNotch ? 16 : 0
+                appearance.surface.offsets = SurfaceOffsets()
             }
             appearance.surface = (try? appearance.surface.validated()) ?? SurfaceOptions()
             if host.state.activationSurfaceOptions != appearance.surface {
