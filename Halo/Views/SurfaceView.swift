@@ -3807,47 +3807,46 @@ private struct SimpleNotchWorkspaceView: View {
         GeometryReader { proxy in
             let arrangement = SimpleNotchMetrics.arrangement(settings: settings, availableWidth: proxy.size.width)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .center, spacing: CGFloat(SimpleNotchMetrics.widgetSpacing(size))) {
-                    ForEach(arrangement.rows.first ?? [], id: \.self) { widget in
-                        Group {
-                            if widget == .pet {
-                                simpleCard(widget)
-                                    // Pixel Pal owns click/double-click/long-press gestures.
-                                    // Keep reorder on the grip so its face remains fully interactive.
-                                    .overlay(alignment: .topTrailing) {
-                                        Image(systemName: "line.3.horizontal")
-                                            .font(.system(size: 8, weight: .bold))
-                                            .foregroundStyle(.white.opacity(0.42))
-                                            .frame(width: 22, height: 18)
-                                            .contentShape(Rectangle())
-                                            .background(.black.opacity(0.001))
-                                            .onDrag {
-                                                dragProvider(for: widget)
-                                            }
-                                            .help("Drag to reorder Pixel Pal")
-                                            .padding(.top, 2)
-                                            .padding(.trailing, 3)
-                                    }
-                            } else {
-                                simpleCard(widget)
-                                    .onDrag {
-                                        dragProvider(for: widget)
-                                    }
-                            }
-                        }
-                        .opacity(dragging == widget ? 0.50 : 1)
-                        .scaleEffect(dragging == widget ? 0.975 : 1)
-                        .onDrop(of: [Self.dragType], isTargeted: nil) { providers in
-                            acceptDrop(providers, before: widget)
+            HStack(alignment: .center, spacing: CGFloat(SimpleNotchMetrics.widgetSpacing(size))) {
+                ForEach(arrangement.rows.first ?? [], id: \.self) { widget in
+                    Group {
+                        if widget == .pet {
+                            simpleCard(widget)
+                                // Pixel Pal owns click/double-click/long-press gestures.
+                                // Keep reorder on the grip so its face remains fully interactive.
+                                .overlay(alignment: .topTrailing) {
+                                    Image(systemName: "line.3.horizontal")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundStyle(.white.opacity(0.42))
+                                        .frame(width: 22, height: 18)
+                                        .contentShape(Rectangle())
+                                        .background(.black.opacity(0.001))
+                                        .onDrag {
+                                            dragProvider(for: widget)
+                                        }
+                                        .help("Drag to reorder Pixel Pal")
+                                        .padding(.top, 2)
+                                        .padding(.trailing, 3)
+                                }
+                        } else {
+                            simpleCard(widget)
+                                .onDrag {
+                                    dragProvider(for: widget)
+                                }
                         }
                     }
+                    .opacity(dragging == widget ? 0.50 : 1)
+                    .scaleEffect(dragging == widget ? 0.975 : 1)
+                    .onDrop(of: [Self.dragType], isTargeted: nil) { providers in
+                        acceptDrop(providers, before: widget)
+                    }
                 }
-                .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
-                .padding(.vertical, CGFloat(SimpleNotchMetrics.verticalPadding(size)))
-                .frame(minWidth: proxy.size.width, minHeight: arrangement.height, alignment: .center)
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
+            .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
+            .padding(.vertical, CGFloat(SimpleNotchMetrics.verticalPadding(size)))
+            .frame(width: arrangement.width, height: arrangement.height, alignment: .center)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
+            .clipped()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.easeInOut(duration: 0.22), value: settings.widgets)
