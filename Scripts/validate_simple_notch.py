@@ -93,14 +93,12 @@ struct FixtureCalendar { var upcomingEvents: [EKEvent] = [] }
                     let content = VStack(alignment: .leading, spacing: 16) {
                         Text("HALO  /  \(style.title.uppercased())  /  \(size.rawValue.uppercased())")
                             .font(.system(size: 12, weight: .medium)).tracking(2).foregroundStyle(.secondary)
-                        ForEach(0..<2) { row in
-                            HStack(spacing: 12) {
-                                ForEach(row == 0 ? [ModuleID.clock, .media, .calendar] : [.timer, .stopwatch, .shelf]) { widget in
-                                    SimpleNotchWidgetView(widget: widget, preset: style, sizePreset: size,
-                                                          store: store, workspace: workspace, surfaceState: state)
-                                        .frame(width: SimpleNotchMetrics.width(for: widget, size: size),
-                                               height: SimpleNotchMetrics.height(for: widget, style: style, size: size))
-                                }
+                        HStack(spacing: 12) {
+                            ForEach([ModuleID.clock, .media, .calendar, .timer, .stopwatch, .shelf]) { widget in
+                                SimpleNotchWidgetView(widget: widget, preset: style, sizePreset: size,
+                                                      store: store, workspace: workspace, surfaceState: state)
+                                    .frame(width: SimpleNotchMetrics.width(for: widget, size: size),
+                                           height: SimpleNotchMetrics.height(for: widget, style: style, size: size))
                             }
                         }
                     }
@@ -115,10 +113,10 @@ struct FixtureCalendar { var upcomingEvents: [EKEvent] = [] }
             }
         }
         let tests = SimpleNotchLayoutTests()
-        tests.testEveryWidgetCombinationFitsWithoutLosingOrReorderingCards()
+        tests.testEveryWidgetCombinationStaysInOneRowAndTrimsOnlyOverflow()
         tests.testSingleWidgetRetractsButAlwaysCoversHardware()
         tests.testMonthCalendarSetsRowHeightAndEmptySettingsStillShowClock()
-        print("Passed: 4,572 widget combinations plus hardware floors, retraction and calendar checks.")
+        print("Passed: Simple one-row width budgets, hardware floors, retraction and calendar checks.")
     }
 }
 '''
