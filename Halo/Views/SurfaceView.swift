@@ -3455,7 +3455,7 @@ struct SurfaceView: View {
                 TeleprompterCoordinator.shared.hidePrompt()
             }
             simpleOpenContentVisible = simpleMode && state.expanded
-            workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
+            publishOpenedNotchVisibility()
             visualWorkspaceSurfacePresented = visuallyExpanded && usesVisualWorkspace && activeContext == nil
         }
         .onChange(of: runtimeGate.isReady) { ready in
@@ -3469,7 +3469,7 @@ struct SurfaceView: View {
             }
             synchronizeSurfaceCIOwnership()
         }
-        .onDisappear { workspace.setOpenedNotchVisible(false, token: openVisibilityToken) }
+        .onDisappear { publishOpenedNotchVisibility(false) }
         .onReceive(state.viewport.$size) { size in
             guard visualWorkspaceSurfacePresented, !state.expanded else { return }
             let atCompactSize =
@@ -3495,13 +3495,13 @@ struct SurfaceView: View {
             }
             if teleprompterContextActive && expanded {
                 state.expanded = false
-                workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
+                publishOpenedNotchVisibility()
                 return
             }
-            workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
+            publishOpenedNotchVisibility()
         }
         .onChange(of: state.presentationExpanded) { presentationExpanded in
-            workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
+            publishOpenedNotchVisibility()
             guard !presentationExpanded, !state.expanded else { return }
 
             // Open-only state is torn down only after the physical retract finishes.
@@ -3597,7 +3597,14 @@ struct SurfaceView: View {
                     state.contextPreferredSize = nil
                 }
             }
-            workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
+            publishOpenedNotchVisibility()
+        }
+    }
+
+    private func publishOpenedNotchVisibility(_ explicitValue: Bool? = nil) {
+        let value = explicitValue ?? reportsOpenedNotchVisible
+        DispatchQueue.main.async {
+            workspace.setOpenedNotchVisible(value, token: openVisibilityToken)
         }
     }
 
