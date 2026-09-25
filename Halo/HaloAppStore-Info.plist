@@ -14,6 +14,8 @@
 	<string>Halo reads your calendars to show schedules, holidays, and meeting links. Halo does not modify events.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Halo reads your calendar events when you enable Calendar.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Halo captures only the screen region you select when you use Capture Region. Captures stay on your Mac and are not transmitted.</string>
 	<key>HaloFirebaseAPIKey</key>
 	<string>$(HALO_FIREBASE_API_KEY)</string>
 	<key>HaloAppStoreProductIDs</key>
