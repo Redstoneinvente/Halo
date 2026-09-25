@@ -1266,3 +1266,61 @@ final class HaloCoreTests: XCTestCase {
         return root
     }
 }
+
+final class SimpleNotchLayoutTests: XCTestCase {
+    func testEveryWidgetCombinationFitsWithoutLosingOrReorderingCards() {
+        let widgets = SimpleNotchSettings.availableWidgets
+        for size in SimpleNotchSize.allCases {
+            for style in SimpleNotchWidgetStyle.allCases {
+                for mask in 1..<(1 << widgets.count) {
+                    let enabled = widgets.enumerated().compactMap { mask & (1 << $0.offset) != 0 ? $0.element : nil }
+                    var settings = SimpleNotchSettings()
+                    settings.widgets = enabled
+                    settings.size = size
+                    settings.styles = Dictionary(uniqueKeysWithValues: enabled.map { ($0.rawValue, style) })
+                    for availableWidth in [480.0, 744, 1000, 1480] {
+                        let layout = SimpleNotchMetrics.arrangement(settings: settings, availableWidth: availableWidth, hardwareWidth: 244)
+                        XCTAssertEqual(layout.rows.flatMap { $0 }, enabled)
+                        XCTAssertGreaterThanOrEqual(layout.width, 244)
+                        XCTAssertLessThanOrEqual(layout.width, min(1100, availableWidth))
+                        // The live view recomputes using the final window width. It must
+                        // get exactly the same rows and height as the window manager.
+                        let rendered = SimpleNotchMetrics.arrangement(settings: settings, availableWidth: layout.width)
+                        XCTAssertEqual(rendered.rows, layout.rows)
+                        XCTAssertEqual(rendered.height, layout.height, accuracy: 0.001)
+                        for row in layout.rows {
+                            let width = row.reduce(0.0) { $0 + SimpleNotchMetrics.width(for: $1, size: size) }
+                                + Double(row.count - 1) * SimpleNotchMetrics.widgetSpacing(size)
+                                + 2 * SimpleNotchMetrics.horizontalPadding(size)
+                            XCTAssertLessThanOrEqual(width, layout.width + 0.001)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testSingleWidgetRetractsButAlwaysCoversHardware() {
+        for size in SimpleNotchSize.allCases {
+            var settings = SimpleNotchSettings()
+            settings.widgets = [.timer]
+            settings.size = size
+            for hardware in [0.0, 214, 280, 340] {
+                let layout = SimpleNotchMetrics.arrangement(settings: settings, availableWidth: 1400, hardwareWidth: hardware)
+                XCTAssertEqual(layout.rows.count, 1)
+                XCTAssertEqual(layout.width, max(hardware, SimpleNotchMetrics.closedPillWidth(size),
+                    SimpleNotchMetrics.widgetWidth(size) + 2 * SimpleNotchMetrics.horizontalPadding(size)))
+            }
+        }
+    }
+
+    func testMonthCalendarSetsRowHeightAndEmptySettingsStillShowClock() {
+        var settings = SimpleNotchSettings()
+        settings.widgets = [.clock, .calendar]
+        settings.styles = [ModuleID.calendar.rawValue: .glass]
+        let layout = SimpleNotchMetrics.arrangement(settings: settings, availableWidth: 1000)
+        XCTAssertEqual(layout.height, SimpleNotchMetrics.calendarMonthHeight(.standard) + 16)
+        settings.widgets = []
+        XCTAssertEqual(SimpleNotchMetrics.arrangement(settings: settings, availableWidth: 1000).rows, [[.clock]])
+    }
+}

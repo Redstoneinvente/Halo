@@ -168,16 +168,16 @@ enum SimpleNotchMetrics {
 
     /// Simple is intentionally a wide, shallow shelf rather than a stack of tall cards.
     static func widgetWidth(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 190; case .medium: return 218; case .big: return 246 }
+        switch size { case .standard: return 212; case .medium: return 238; case .big: return 270 }
     }
     static func pixelPalWidth(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 164; case .medium: return 188; case .big: return 214 }
     }
     static func widgetHeight(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 84; case .medium: return 96; case .big: return 110 }
+        switch size { case .standard: return 112; case .medium: return 126; case .big: return 144 }
     }
     static func widgetSpacing(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 2; case .medium: return 4; case .big: return 6 }
+        switch size { case .standard: return 10; case .medium: return 12; case .big: return 14 }
     }
     static func horizontalPadding(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 10; case .medium: return 12; case .big: return 14 }
@@ -192,17 +192,48 @@ enum SimpleNotchMetrics {
         switch size { case .standard: return 6; case .medium: return 8; case .big: return 10 }
     }
 
-    /// The opened surface should look like the reference shelf even with only one enabled
-    /// widget. Hardware width is added by WindowManager before this is applied.
+    /// Content sets the width above the collapsed preset and physical camera floor.
     static func minimumOpenShelfWidth(_ size: SimpleNotchSize, hardwareWidth: Double = 0) -> Double {
-        let preset: Double
-        let wingAllowance: Double
-        switch size {
-        case .standard: preset = 440; wingAllowance = 220
-        case .medium: preset = 540; wingAllowance = 300
-        case .big: preset = 660; wingAllowance = 380
+        max(closedPillWidth(size), hardwareWidth)
+    }
+
+    struct Arrangement {
+        var rows: [[ModuleID]]
+        var width: Double
+        var height: Double
+    }
+
+    /// Shared by the window and its contents so every enabled widget is visible.
+    /// Fixed-size cards wrap before reaching the display edge, never into a scroll view.
+    static func arrangement(settings: SimpleNotchSettings, availableWidth: Double,
+                            hardwareWidth: Double = 0) -> Arrangement {
+        let settings = settings.normalized()
+        let size = settings.resolvedSize
+        let padding = horizontalPadding(size) * 2
+        let limit = max(1, min(1100, availableWidth) - padding)
+        let gap = widgetSpacing(size)
+        var rows: [[ModuleID]] = []
+        var row: [ModuleID] = []
+        var rowWidth = 0.0
+        var widest = 0.0
+        for widget in settings.widgets {
+            let cardWidth = width(for: widget, size: size)
+            if !row.isEmpty && rowWidth + gap + cardWidth > limit {
+                rows.append(row)
+                widest = max(widest, rowWidth)
+                row = []
+                rowWidth = 0
+            }
+            rowWidth += (row.isEmpty ? 0 : gap) + cardWidth
+            row.append(widget)
         }
-        return max(preset, hardwareWidth + wingAllowance)
+        if !row.isEmpty { rows.append(row); widest = max(widest, rowWidth) }
+        let height = rows.reduce(0.0) { total, row in
+            total + (row.map { self.height(for: $0, style: settings.style(for: $0), size: size) }.max() ?? 0)
+        } + Double(max(0, rows.count - 1)) * gap + verticalPadding(size) * 2
+        return Arrangement(rows: rows,
+                           width: max(minimumOpenShelfWidth(size, hardwareWidth: hardwareWidth), widest + padding),
+                           height: height)
     }
 
     static func calendarWidth(_ size: SimpleNotchSize) -> Double {
@@ -232,7 +263,8 @@ enum SimpleNotchMetrics {
     }
 
     static func height(for widget: ModuleID, style: SimpleNotchWidgetStyle, size: SimpleNotchSize) -> Double {
-        widget == .calendar && style == .glass ? calendarMonthHeight(size) : widgetHeight(size)
+        if widget == .calendar && style == .glass { return calendarMonthHeight(size) }
+        return widgetHeight(size) + (style == .vibrant ? 24 * size.scale : 0)
     }
 
     static func expandedWidth(widgets: [ModuleID], size: SimpleNotchSize) -> Double {

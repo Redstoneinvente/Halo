@@ -3805,56 +3805,54 @@ private struct SimpleNotchWorkspaceView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            ScrollView(.horizontal) {
-                HStack(spacing: CGFloat(SimpleNotchMetrics.widgetSpacing(size))) {
-                    ForEach(Array(settings.widgets.enumerated()), id: \.offset) { index, widget in
-                        Group {
-                            if widget == .pet {
-                                simpleCard(widget)
-                                    // Pixel Pal owns click/double-click/long-press gestures.
-                                    // Do not put the reorder drag recognizer over its full hit area.
-                                    .overlay(alignment: .topTrailing) {
-                                        Image(systemName: "line.3.horizontal")
-                                            .font(.system(size: 8, weight: .bold))
-                                            .foregroundStyle(.white.opacity(0.42))
-                                            .frame(width: 22, height: 18)
-                                            .contentShape(Rectangle())
-                                            .background(.black.opacity(0.001))
-                                            .onDrag {
-                                                dragProvider(for: widget)
-                                            }
-                                            .help("Drag to reorder Pixel Pal")
-                                            .padding(.top, 2)
-                                            .padding(.trailing, 3)
-                                    }
-                            } else {
-                                simpleCard(widget)
-                                    .onDrag {
-                                        dragProvider(for: widget)
-                                    }
+            let arrangement = SimpleNotchMetrics.arrangement(settings: settings, availableWidth: proxy.size.width)
+            let fit = min(1, min(proxy.size.width / arrangement.width, proxy.size.height / arrangement.height))
+            VStack(spacing: CGFloat(SimpleNotchMetrics.widgetSpacing(size))) {
+                ForEach(arrangement.rows.indices, id: \.self) { row in
+                    HStack(spacing: CGFloat(SimpleNotchMetrics.widgetSpacing(size))) {
+                        ForEach(arrangement.rows[row], id: \.self) { widget in
+                            Group {
+                                if widget == .pet {
+                                    simpleCard(widget)
+                                        // Pixel Pal owns click/double-click/long-press gestures.
+                                        // Do not put the reorder drag recognizer over its full hit area.
+                                        .overlay(alignment: .topTrailing) {
+                                            Image(systemName: "line.3.horizontal")
+                                                .font(.system(size: 8, weight: .bold))
+                                                .foregroundStyle(.white.opacity(0.42))
+                                                .frame(width: 22, height: 18)
+                                                .contentShape(Rectangle())
+                                                .background(.black.opacity(0.001))
+                                                .onDrag {
+                                                    dragProvider(for: widget)
+                                                }
+                                                .help("Drag to reorder Pixel Pal")
+                                                .padding(.top, 2)
+                                                .padding(.trailing, 3)
+                                        }
+                                } else {
+                                    simpleCard(widget)
+                                        .onDrag {
+                                            dragProvider(for: widget)
+                                        }
+                                }
                             }
-                        }
-                        .overlay(alignment: .trailing) {
-                            if index < settings.widgets.count - 1 {
-                                Rectangle()
-                                    .fill(Color.white.opacity(0.09))
-                                    .frame(width: 1)
-                                    .padding(.vertical, 7)
-                                    .allowsHitTesting(false)
+                            .opacity(dragging == widget ? 0.50 : 1)
+                            .scaleEffect(dragging == widget ? 0.975 : 1)
+                            .onDrop(of: [Self.dragType], isTargeted: nil) { providers in
+                                acceptDrop(providers, before: widget)
                             }
-                        }
-                        .opacity(dragging == widget ? 0.50 : 1)
-                        .scaleEffect(dragging == widget ? 0.975 : 1)
-                        .onDrop(of: [Self.dragType], isTargeted: nil) { providers in
-                            acceptDrop(providers, before: widget)
                         }
                     }
                 }
-                .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
-                .padding(.vertical, CGFloat(SimpleNotchMetrics.verticalPadding(size)))
-                .frame(minWidth: proxy.size.width, minHeight: proxy.size.height, alignment: .center)
             }
-            .scrollIndicators(.hidden)
+            .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
+            .padding(.vertical, CGFloat(SimpleNotchMetrics.verticalPadding(size)))
+            .frame(width: arrangement.width, height: arrangement.height)
+            .scaleEffect(max(0, fit), anchor: .top)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+            .clipped()
+
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.easeInOut(duration: 0.22), value: settings.widgets)
@@ -3933,7 +3931,16 @@ private struct SimpleNotchWidgetView: View {
     @ObservedObject var surfaceState: SurfaceState
 
     private var scale: CGFloat { CGFloat(sizePreset.scale) }
-    private var accent: Color { .accentColor }
+    private var accent: Color {
+        switch widget {
+        case .clock: return Color(red: 0.69, green: 0.77, blue: 1)
+        case .timer: return Color(red: 1, green: 0.72, blue: 0.42)
+        case .stopwatch: return Color(red: 0.48, green: 0.88, blue: 0.74)
+        case .calendar: return Color(red: 1, green: 0.55, blue: 0.61)
+        case .shelf: return Color(red: 0.51, green: 0.77, blue: 1)
+        default: return Color(red: 0.77, green: 0.65, blue: 1)
+        }
+    }
     private var title: String { widget == .shelf ? "File Tray" : widget.title }
 
     @ViewBuilder
@@ -3952,40 +3959,45 @@ private struct SimpleNotchWidgetView: View {
     }
 
     private var shell: some View {
-        Group {
-            switch preset {
-            case .clean:
-                compactContent
-                    .padding(.horizontal, 9 * scale)
-                    .padding(.vertical, 4 * scale)
-            case .glass:
-                focusContent
-                    .padding(.horizontal, 8 * scale)
-                    .padding(.vertical, 4 * scale)
-                    .background {
-                        RoundedRectangle(cornerRadius: 13 * scale, style: .continuous)
-                            .fill(Color.white.opacity(0.045))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 13 * scale, style: .continuous)
-                                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                            }
-                    }
-                    .padding(.horizontal, 3 * scale)
-            case .vibrant:
-                dashboardContent
-                    .padding(.horizontal, 8 * scale)
-                    .padding(.vertical, 4 * scale)
-                    .background {
-                        LinearGradient(
-                            colors: [accent.opacity(0.09), .clear],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    }
+        ZStack {
+            RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+                .fill(cardFill)
+            if preset == .glass {
+                RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(colors: [.white.opacity(0.24), .white.opacity(0.03)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing),
+                        lineWidth: 0.75
+                    )
             }
+            Group {
+                switch preset {
+                case .clean: compactContent
+                case .glass: focusContent
+                case .vibrant: dashboardContent
+                }
+            }
+            .padding(12 * scale)
         }
         .foregroundStyle(.white)
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 18 * scale, style: .continuous))
+    }
+
+    private var cardFill: LinearGradient {
+        switch preset {
+        case .clean:
+            return LinearGradient(colors: [Color(white: 0.075), Color(white: 0.055)],
+                                  startPoint: .top, endPoint: .bottom)
+        case .glass:
+            return LinearGradient(colors: [Color(white: 0.19), Color(white: 0.085), accent.opacity(0.10)],
+                                  startPoint: .topLeading, endPoint: .bottomTrailing)
+        case .vibrant:
+            return LinearGradient(colors: [accent.opacity(0.30), accent.opacity(0.12)],
+                                  startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
     }
 
     @ViewBuilder
@@ -4042,6 +4054,7 @@ private struct SimpleNotchWidgetView: View {
             default: EmptyView()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var compactClock: some View {
@@ -4077,38 +4090,49 @@ private struct SimpleNotchWidgetView: View {
 
     private var focusClock: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            VStack(spacing: 4 * scale) {
-                HStack(alignment: .firstTextBaseline, spacing: 5 * scale) {
-                    Text(context.date, style: .time)
-                        .font(.system(size: 30 * scale, weight: .black, design: .rounded))
-                        .monospacedDigit()
-                        .minimumScaleFactor(0.68)
-                        .lineLimit(1)
-                    Circle()
-                        .fill(accent)
-                        .frame(width: 5 * scale, height: 5 * scale)
-                }
-                Text(context.date.formatted(.dateTime.weekday(.wide).month(.wide).day()))
-                    .font(.system(size: 9.5 * scale, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                HStack(spacing: 4 * scale) {
-                    ForEach(simpleWeekDays, id: \.self) { day in
-                        let today = simpleCalendar.isDateInToday(day)
-                        VStack(spacing: 1) {
-                            Text(day.formatted(.dateTime.weekday(.narrow)))
-                                .font(.system(size: 6.5 * scale, weight: .bold))
-                                .foregroundStyle(.secondary)
-                            Text(day.formatted(.dateTime.day()))
-                                .font(.system(size: 7.5 * scale, weight: today ? .bold : .medium))
-                                .frame(width: 18 * scale, height: 18 * scale)
-                                .background(today ? accent : Color.clear, in: Circle())
-                                .foregroundStyle(today ? Color.black : Color.white)
-                        }
+            let parts = Calendar.current.dateComponents([.hour, .minute, .second], from: context.date)
+            HStack(spacing: 12 * scale) {
+                ZStack {
+                    Circle().fill(Color.black.opacity(0.25))
+                    ForEach(0..<12) { tick in
+                        Capsule()
+                            .fill(Color.white.opacity(tick % 3 == 0 ? 0.8 : 0.25))
+                            .frame(width: 1.5 * scale, height: (tick % 3 == 0 ? 5 : 3) * scale)
+                            .offset(y: -28 * scale)
+                            .rotationEffect(.degrees(Double(tick) * 30))
                     }
+                    clockHand(length: 18, width: 3,
+                              angle: Double((parts.hour ?? 0) % 12) * 30 + Double(parts.minute ?? 0) / 2)
+                    clockHand(length: 25, width: 2, angle: Double(parts.minute ?? 0) * 6)
+                    Capsule().fill(accent)
+                        .frame(width: scale, height: 27 * scale)
+                        .offset(y: -10 * scale)
+                        .rotationEffect(.degrees(Double(parts.second ?? 0) * 6))
+                    Circle().fill(accent).frame(width: 5 * scale, height: 5 * scale)
                 }
+                .frame(width: 68 * scale, height: 68 * scale)
+                VStack(alignment: .leading, spacing: 5 * scale) {
+                    Text(context.date.formatted(.dateTime.weekday(.abbreviated)).uppercased())
+                        .font(.system(size: 9 * scale, weight: .semibold))
+                        .tracking(1.4)
+                        .foregroundStyle(accent)
+                    Text(context.date, style: .time)
+                        .font(.system(size: 23 * scale, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                    Text(context.date.formatted(.dateTime.month(.abbreviated).day()))
+                        .font(.system(size: 10 * scale))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private func clockHand(length: CGFloat, width: CGFloat, angle: Double) -> some View {
+        Capsule().fill(Color.white.opacity(0.9))
+            .frame(width: width * scale, height: length * scale)
+            .offset(y: -length * scale / 2 + 2 * scale)
+            .rotationEffect(.degrees(angle))
     }
 
     private var dashboardClock: some View {
@@ -4231,9 +4255,7 @@ private struct SimpleNotchWidgetView: View {
                         .tracking(0.8)
                         .foregroundStyle(workspace.stopwatchStart == nil ? Color.secondary : accent)
                 }
-                ProgressView(value: (stopwatchElapsed(at: context.date).truncatingRemainder(dividingBy: 60)) / 60)
-                    .progressViewStyle(.linear)
-                    .tint(accent)
+                progressTrack((stopwatchElapsed(at: context.date).truncatingRemainder(dividingBy: 60)) / 60)
                 HStack {
                     Label("Lap minute", systemImage: "speedometer")
                         .font(.system(size: 7.5 * scale, weight: .medium))
@@ -4339,9 +4361,7 @@ private struct SimpleNotchWidgetView: View {
                         .foregroundStyle(timerIsIdle ? Color.secondary : accent)
                 }
 
-                ProgressView(value: timerProgress)
-                    .progressViewStyle(.linear)
-                    .tint(accent)
+                progressTrack(timerProgress)
 
                 if timerIsIdle {
                     HStack(spacing: 5 * scale) {
@@ -4378,7 +4398,7 @@ private struct SimpleNotchWidgetView: View {
             VStack(alignment: .leading, spacing: 3 * scale) {
                 Text(store.files.isEmpty ? "File Tray" : "\(store.files.count) item\(store.files.count == 1 ? "" : "s")")
                     .font(.system(size: 11 * scale, weight: .bold, design: .rounded))
-                Text(store.files.last?.lastPathComponent ?? "Drop files here or choose one")
+                Text(store.files.last?.lastPathComponent ?? "Drop files here")
                     .font(.system(size: 8 * scale, weight: .medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -4416,10 +4436,10 @@ private struct SimpleNotchWidgetView: View {
             }
 
             VStack(alignment: .leading, spacing: 4 * scale) {
-                Text(store.files.isEmpty ? "Drop files into Halo" : "Ready to use")
+                Text(store.files.isEmpty ? "Your file tray" : "Ready to use")
                     .font(.system(size: 10 * scale, weight: .bold))
                 if store.files.isEmpty {
-                    Text("Keep temporary files close without cluttering your desktop.")
+                    Text("Drop files here to keep them close.")
                         .font(.system(size: 7.5 * scale))
                         .foregroundStyle(.secondary)
                         .lineLimit(3)
@@ -4765,9 +4785,7 @@ private struct SimpleNotchWidgetView: View {
                     .lineLimit(1)
 
                 if workspace.media.duration > 0 {
-                    ProgressView(value: mediaProgress)
-                        .progressViewStyle(.linear)
-                        .tint(accent)
+                    progressTrack(mediaProgress)
                 } else {
                     Capsule()
                         .fill(Color.white.opacity(0.07))
@@ -4812,9 +4830,7 @@ private struct SimpleNotchWidgetView: View {
                     .lineLimit(1)
 
                 if workspace.media.duration > 0 {
-                    ProgressView(value: mediaProgress)
-                        .progressViewStyle(.linear)
-                        .tint(accent)
+                    progressTrack(mediaProgress)
                 }
 
                 HStack(spacing: 14 * scale) {
@@ -4859,9 +4875,7 @@ private struct SimpleNotchWidgetView: View {
                     Text(Self.simpleMediaTime(workspace.media.position))
                         .font(.system(size: 6.5 * scale, design: .monospaced))
                         .foregroundStyle(.secondary)
-                    ProgressView(value: mediaProgress)
-                        .progressViewStyle(.linear)
-                        .tint(accent)
+                    progressTrack(mediaProgress)
                     Text("-" + Self.simpleMediaTime(max(0, workspace.media.duration - workspace.media.position)))
                         .font(.system(size: 6.5 * scale, design: .monospaced))
                         .foregroundStyle(.secondary)
@@ -4971,12 +4985,28 @@ private struct SimpleNotchWidgetView: View {
         }
     }
 
+    private func progressTrack(_ progress: Double) -> some View {
+        GeometryReader { proxy in
+            Capsule().fill(Color.white.opacity(0.10))
+                .overlay(alignment: .leading) {
+                    Capsule().fill(accent)
+                        .frame(width: proxy.size.width * min(1, max(0, progress)))
+                }
+        }
+        .frame(height: 3 * scale)
+        .accessibilityLabel("Progress")
+        .accessibilityValue("\(Int(min(1, max(0, progress)) * 100)) percent")
+    }
+
     private func mediaButton(_ symbol: String, action: String) -> some View {
         Button {
             workspace.media.perform(action, app: workspace.settings.mediaApp)
         } label: {
             Image(systemName: symbol)
-                .font(.system(size: 9 * scale, weight: .bold))
+                .font(.system(size: 10 * scale, weight: .semibold))
+                .frame(width: 26 * scale, height: 24 * scale)
+                .background(Color.white.opacity(symbol == "play.fill" || symbol == "pause.fill" ? 0.13 : 0), in: Capsule())
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(workspace.media.connectedApp == nil)

@@ -1401,16 +1401,12 @@ final class WindowManager {
             host.geometry?.activeCompactCenterOffset = nil
         }
 
-        // Never let opening Simple make the surface narrower than an already-visible
-        // closed slot arrangement. The open motion should grow vertically, not pinch inward.
-        let closedWidth = host.geometry?.activeCompactWidth ?? baseWidth
-        host.geometry?.expandedWidth = max(
-            max(
-                SimpleNotchMetrics.minimumOpenShelfWidth(size, hardwareWidth: hardwareShellWidth),
-                SimpleNotchMetrics.expandedWidth(widgets: simple.widgets, size: size)
-            ),
-            max(hardwareShellWidth, closedWidth)
+        let arrangement = SimpleNotchMetrics.arrangement(
+            settings: simple, availableWidth: geometry.visible.width - 32,
+            hardwareWidth: hardwareShellWidth
         )
+        host.geometry?.expandedWidth = arrangement.width
+        host.geometry?.appearance.expandedHeight = arrangement.height
     }
 
     private func configureDynamicWidth(_ host: Host) {
@@ -2435,13 +2431,11 @@ final class WindowManager {
                 let presetClosedHeight = SimpleNotchMetrics.closedHeight(size)
 
                 theme.style = hasPhysicalNotch ? .notch : .pill
-                theme.width = max(
-                    hardwareShellWidth,
-                    max(
-                        SimpleNotchMetrics.minimumOpenShelfWidth(size, hardwareWidth: hardwareShellWidth),
-                        SimpleNotchMetrics.expandedWidth(widgets: simple.widgets, size: size)
-                    )
+                let arrangement = SimpleNotchMetrics.arrangement(
+                    settings: simple, availableWidth: Double(screen.visibleFrame.width) - 32,
+                    hardwareWidth: hardwareShellWidth
                 )
+                theme.width = arrangement.width
                 theme.cornerRadius = hasPhysicalNotch ? 18 : 22
 
                 appearance.background = .solid
@@ -2454,7 +2448,7 @@ final class WindowManager {
                 appearance.brightness = 0
                 appearance.skin = NotchSkinOptions()
                 appearance.compactWidth = max(hardwareShellWidth, presetClosedWidth)
-                appearance.expandedHeight = SimpleNotchMetrics.expandedBodyHeight(settings: simple)
+                appearance.expandedHeight = arrangement.height
                 appearance.spacing = SimpleNotchMetrics.widgetSpacing(size)
                 appearance.animation = .smooth
 

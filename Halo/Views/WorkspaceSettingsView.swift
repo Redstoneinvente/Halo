@@ -940,7 +940,7 @@ private struct NotchModeSettingsPane: View {
             }
 
             Section("Simple widgets") {
-                Text("Fixed-size widgets, horizontal expansion and drag-to-reorder. Context Interfaces and advanced workspace layers stay out of the way.")
+                Text("Fixed-size widgets with drag-to-reorder. Cards fit into rows when needed, keeping every widget visible without scrolling.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -992,7 +992,7 @@ private struct NotchModeSettingsPane: View {
             }
 
             Section("Reorder") {
-                Text("Open Halo and drag widget cards left or right. The notch automatically resizes around the fixed widget sizes.")
+                Text("Open Halo and drag a widget onto another to reorder. The notch fits your widgets and retracts when fewer are enabled.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
