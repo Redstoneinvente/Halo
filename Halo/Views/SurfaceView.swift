@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import CoreGraphics
 import UniformTypeIdentifiers
+import EventKit
 import Darwin
 
 enum VinylStylePreset: String, Codable, CaseIterable, Identifiable {
@@ -4573,6 +4574,7 @@ private struct SimpleClosedNotchView: View {
     let occlusion: CGRect?
 
     private var settings: SimpleNotchSettings { workspace.settings.resolvedSimpleNotch }
+    private var size: SimpleNotchSize { settings.resolvedSize }
 
     private var activeWidgets: [ModuleID] {
         settings.activeClosedWidgets(
@@ -4606,13 +4608,13 @@ private struct SimpleClosedNotchView: View {
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
             } else {
-                HStack(spacing: CGFloat(SimpleNotchMetrics.closedSlotGap)) {
+                HStack(spacing: CGFloat(SimpleNotchMetrics.closedSlotGap(size))) {
                     ForEach(activeWidgets) { widget in
                         closedSlot(widget)
-                            .frame(width: CGFloat(SimpleNotchMetrics.closedSlotWidth))
+                            .frame(width: CGFloat(SimpleNotchMetrics.closedSlotWidth(size)))
                     }
                 }
-                .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding))
+                .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
                 .frame(width: proxy.size.width, height: proxy.size.height)
             }
         }
