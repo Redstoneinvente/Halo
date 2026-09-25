@@ -55,12 +55,16 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
     case pomodoroRing = "Pomodoro Ring"
     case deadlineTimer = "Deadline"
     case segmentDisplay = "Segment Display"
+    case vinylDeck = "Vinyl Deck"
+    case cassette = "Cassette"
+    case streamBar = "Stream Bar"
     var id: String { rawValue }
 
     static let coreCases: [SimpleNotchWidgetStyle] = [.clean, .glass, .vibrant]
     static let clockCases: [SimpleNotchWidgetStyle] = coreCases + [.stackedDigital, .flipClock, .minimalDial, .romanDial]
     static let calendarCases: [SimpleNotchWidgetStyle] = coreCases + [.eventCard, .yearOverview]
     static let timerCases: [SimpleNotchWidgetStyle] = coreCases + [.pomodoroRing, .deadlineTimer, .segmentDisplay]
+    static let mediaCases: [SimpleNotchWidgetStyle] = coreCases + [.vinylDeck, .cassette, .streamBar]
 
     func supports(widget: ModuleID) -> Bool {
         switch self {
@@ -70,6 +74,8 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
             return widget == .calendar
         case .pomodoroRing, .deadlineTimer, .segmentDisplay:
             return widget == .timer
+        case .vinylDeck, .cassette, .streamBar:
+            return widget == .media
         case .clean, .glass, .vibrant:
             return true
         }
@@ -89,6 +95,9 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
         case .pomodoroRing: return "Pomodoro Ring"
         case .deadlineTimer: return "Deadline"
         case .segmentDisplay: return "Segment Display"
+        case .vinylDeck: return "Vinyl Deck"
+        case .cassette: return "Cassette"
+        case .streamBar: return "Stream Bar"
         }
     }
 
@@ -106,6 +115,9 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
         case .pomodoroRing: return "A focused circular countdown inspired by dedicated Pomodoro timers."
         case .deadlineTimer: return "A minimal deadline treatment showing how long remains and when the timer ends."
         case .segmentDisplay: return "A bold segmented-style digital countdown with compact playback controls."
+        case .vinylDeck: return "A record-player layout with circular artwork, progress and transport controls."
+        case .cassette: return "A retro cassette transport with twin reels, metadata and playback controls."
+        case .streamBar: return "A slim streaming overlay with artwork, metadata, progress and transport in one row."
         }
     }
 
@@ -123,6 +135,9 @@ enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
         case .pomodoroRing: return "circle.dashed.inset.filled"
         case .deadlineTimer: return "hourglass"
         case .segmentDisplay: return "numbers.rectangle"
+        case .vinylDeck: return "record.circle"
+        case .cassette: return "rectangle.fill.on.rectangle.fill"
+        case .streamBar: return "waveform.path"
         }
     }
 }
@@ -350,6 +365,10 @@ enum SimpleNotchMetrics {
         switch size { case .standard: return 264; case .medium: return 300; case .big: return 336 }
     }
 
+    static func mediaFeatureWidth(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 292; case .medium: return 330; case .big: return 370 }
+    }
+
     static func clockWidth(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 220; case .medium: return 248; case .big: return 278 }
     }
@@ -363,7 +382,11 @@ enum SimpleNotchMetrics {
             case .pomodoroRing, .deadlineTimer, .segmentDisplay: return timerFeatureWidth(size)
             default: return widgetWidth(size)
             }
-        case .media: return mediaWidth(size)
+        case .media:
+            switch style {
+            case .vinylDeck, .cassette, .streamBar: return mediaFeatureWidth(size)
+            default: return mediaWidth(size)
+            }
         case .clock: return clockWidth(size)
         case .pet: return pixelPalWidth(size)
         default: return widgetWidth(size)
