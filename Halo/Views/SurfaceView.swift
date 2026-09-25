@@ -4046,37 +4046,66 @@ private struct SimpleNotchWidgetView: View {
 
     private var compactClock: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 9 * scale) {
-                heroIcon("clock.fill")
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(context.date, style: .time)
-                        .font(.system(size: 18 * scale, weight: .bold, design: .rounded))
+            HStack(spacing: 10 * scale) {
+                VStack(spacing: -2) {
+                    Text(context.date.formatted(.dateTime.month(.abbreviated)).uppercased())
+                        .font(.system(size: 7.5 * scale, weight: .bold, design: .rounded))
+                        .foregroundStyle(accent)
+                    Text(context.date.formatted(.dateTime.day()))
+                        .font(.system(size: 30 * scale, weight: .black, design: .rounded))
                         .monospacedDigit()
-                    Text(context.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
-                        .font(.system(size: 8.5 * scale, weight: .medium))
-                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 42 * scale)
+
+                VStack(alignment: .leading, spacing: 2 * scale) {
+                    Text(context.date, style: .time)
+                        .font(.system(size: 22 * scale, weight: .bold, design: .rounded))
+                        .monospacedDigit()
                         .lineLimit(1)
+                    Text(context.date.formatted(.dateTime.weekday(.wide)))
+                        .font(.system(size: 9 * scale, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text(context.date.formatted(.dateTime.year()))
+                        .font(.system(size: 7 * scale, weight: .medium))
+                        .foregroundStyle(.tertiary)
                 }
                 Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
     private var focusClock: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            VStack(spacing: 5 * scale) {
-                Text(context.date.formatted(.dateTime.weekday(.wide)).uppercased())
-                    .font(.system(size: 8 * scale, weight: .bold, design: .rounded))
-                    .tracking(1.1)
-                    .foregroundStyle(accent)
-                Text(context.date, style: .time)
-                    .font(.system(size: 22 * scale, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .minimumScaleFactor(0.68)
-                    .lineLimit(1)
-                Text(context.date.formatted(.dateTime.month(.wide).day()))
+            VStack(spacing: 4 * scale) {
+                HStack(alignment: .firstTextBaseline, spacing: 5 * scale) {
+                    Text(context.date, style: .time)
+                        .font(.system(size: 30 * scale, weight: .black, design: .rounded))
+                        .monospacedDigit()
+                        .minimumScaleFactor(0.68)
+                        .lineLimit(1)
+                    Circle()
+                        .fill(accent)
+                        .frame(width: 5 * scale, height: 5 * scale)
+                }
+                Text(context.date.formatted(.dateTime.weekday(.wide).month(.wide).day()))
                     .font(.system(size: 9.5 * scale, weight: .semibold))
                     .foregroundStyle(.secondary)
+                HStack(spacing: 4 * scale) {
+                    ForEach(simpleClockWeekDays, id: \.self) { day in
+                        let today = simpleCalendar.isDateInToday(day)
+                        VStack(spacing: 1) {
+                            Text(day.formatted(.dateTime.weekday(.narrow)))
+                                .font(.system(size: 6.5 * scale, weight: .bold))
+                                .foregroundStyle(.secondary)
+                            Text(day.formatted(.dateTime.day()))
+                                .font(.system(size: 7.5 * scale, weight: today ? .bold : .medium))
+                                .frame(width: 18 * scale, height: 18 * scale)
+                                .background(today ? accent : Color.clear, in: Circle())
+                                .foregroundStyle(today ? Color.black : Color.white)
+                        }
+                    }
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -4084,61 +4113,105 @@ private struct SimpleNotchWidgetView: View {
 
     private var dashboardClock: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(alignment: .bottom, spacing: 8 * scale) {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(context.date.formatted(.dateTime.day()))
-                        .font(.system(size: 26 * scale, weight: .black, design: .rounded))
-                    Text(context.date.formatted(.dateTime.month(.abbreviated)).uppercased())
-                        .font(.system(size: 8 * scale, weight: .bold))
-                        .foregroundStyle(accent)
+            VStack(alignment: .leading, spacing: 6 * scale) {
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: -2) {
+                        Text(context.date.formatted(.dateTime.weekday(.wide)).uppercased())
+                            .font(.system(size: 7 * scale, weight: .bold, design: .rounded))
+                            .tracking(0.8)
+                            .foregroundStyle(accent)
+                        Text(context.date, style: .time)
+                            .font(.system(size: 24 * scale, weight: .black, design: .rounded))
+                            .monospacedDigit()
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(context.date.formatted(.dateTime.day()))
+                            .font(.system(size: 26 * scale, weight: .black, design: .rounded))
+                        Text(context.date.formatted(.dateTime.month(.abbreviated)).uppercased())
+                            .font(.system(size: 7 * scale, weight: .bold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                Spacer(minLength: 0)
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text(context.date, style: .time)
-                        .font(.system(size: 16 * scale, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                    Text(context.date.formatted(.dateTime.weekday(.wide)))
-                        .font(.system(size: 8 * scale))
-                        .foregroundStyle(.secondary)
-                }
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.85), accent.opacity(0.10)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: 2 * scale)
             }
         }
     }
 
     private var compactStopwatch: some View {
         TimelineView(.periodic(from: .now, by: 0.1)) { context in
-            HStack(spacing: 8 * scale) {
-                heroIcon("stopwatch.fill")
-                Text(stopwatchText(at: context.date))
-                    .font(.system(size: 15 * scale, weight: .bold, design: .monospaced))
-                    .minimumScaleFactor(0.72)
-                    .lineLimit(1)
+            HStack(spacing: 9 * scale) {
+                ZStack {
+                    Circle().stroke(Color.white.opacity(0.10), lineWidth: 3 * scale)
+                    Circle()
+                        .trim(from: 0, to: CGFloat((stopwatchElapsed(at: context.date).truncatingRemainder(dividingBy: 60)) / 60))
+                        .stroke(accent, style: StrokeStyle(lineWidth: 3 * scale, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    Image(systemName: "stopwatch.fill")
+                        .font(.system(size: 12 * scale, weight: .bold))
+                        .foregroundStyle(accent)
+                }
+                .frame(width: 44 * scale, height: 44 * scale)
+
+                VStack(alignment: .leading, spacing: 2 * scale) {
+                    Text(stopwatchText(at: context.date))
+                        .font(.system(size: 17 * scale, weight: .bold, design: .monospaced))
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
+                    Text(workspace.stopwatchStart == nil ? (workspace.stopwatchElapsed > 0 ? "Paused" : "Ready") : "Running")
+                        .font(.system(size: 8 * scale, weight: .semibold))
+                        .foregroundStyle(workspace.stopwatchStart == nil ? .secondary : accent)
+                }
                 Spacer(minLength: 0)
                 roundButton(workspace.stopwatchStart == nil ? "play.fill" : "pause.fill") {
                     workspace.toggleStopwatch()
                 }
             }
+            .frame(maxHeight: .infinity)
         }
     }
 
     private var focusStopwatch: some View {
         TimelineView(.periodic(from: .now, by: 0.1)) { context in
-            VStack(spacing: 7 * scale) {
+            HStack(spacing: 12 * scale) {
                 ZStack {
                     Circle().stroke(Color.white.opacity(0.10), lineWidth: 4 * scale)
                     Circle()
                         .trim(from: 0, to: CGFloat((stopwatchElapsed(at: context.date).truncatingRemainder(dividingBy: 60)) / 60))
                         .stroke(accent, style: StrokeStyle(lineWidth: 4 * scale, lineCap: .round))
                         .rotationEffect(.degrees(-90))
-                    Text(stopwatchText(at: context.date))
-                        .font(.system(size: 12 * scale, weight: .bold, design: .monospaced))
-                        .minimumScaleFactor(0.65)
+                    Text(String(format: "%02d", Int(stopwatchElapsed(at: context.date)) % 60))
+                        .font(.system(size: 17 * scale, weight: .black, design: .rounded))
+                        .monospacedDigit()
                 }
-                .frame(width: 54 * scale, height: 54 * scale)
+                .frame(width: 68 * scale, height: 68 * scale)
 
-                roundButton(workspace.stopwatchStart == nil ? "play.fill" : "pause.fill") {
-                    workspace.toggleStopwatch()
+                VStack(alignment: .leading, spacing: 6 * scale) {
+                    Text(stopwatchText(at: context.date))
+                        .font(.system(size: 16 * scale, weight: .bold, design: .monospaced))
+                        .minimumScaleFactor(0.68)
+                        .lineLimit(1)
+                    HStack(spacing: 7 * scale) {
+                        roundButton(workspace.stopwatchStart == nil ? "play.fill" : "pause.fill") {
+                            workspace.toggleStopwatch()
+                        }
+                        if workspace.stopwatchElapsed > 0 || workspace.stopwatchStart != nil {
+                            roundButton("arrow.counterclockwise") {
+                                workspace.stopwatchStart = nil
+                                workspace.stopwatchElapsed = 0
+                            }
+                        }
+                    }
                 }
+                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -4146,15 +4219,24 @@ private struct SimpleNotchWidgetView: View {
 
     private var dashboardStopwatch: some View {
         TimelineView(.periodic(from: .now, by: 0.1)) { context in
-            VStack(alignment: .leading, spacing: 7 * scale) {
-                Text(stopwatchText(at: context.date))
-                    .font(.system(size: 16 * scale, weight: .bold, design: .monospaced))
-                    .minimumScaleFactor(0.7)
-                    .lineLimit(1)
+            VStack(alignment: .leading, spacing: 6 * scale) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(stopwatchText(at: context.date))
+                        .font(.system(size: 20 * scale, weight: .black, design: .monospaced))
+                        .minimumScaleFactor(0.68)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(workspace.stopwatchStart == nil ? "PAUSED" : "LIVE")
+                        .font(.system(size: 6.5 * scale, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundStyle(workspace.stopwatchStart == nil ? .secondary : accent)
+                }
+                ProgressView(value: (stopwatchElapsed(at: context.date).truncatingRemainder(dividingBy: 60)) / 60)
+                    .progressViewStyle(.linear)
+                    .tint(accent)
                 HStack {
-                    Label(workspace.stopwatchStart == nil ? "Paused" : "Running",
-                          systemImage: workspace.stopwatchStart == nil ? "pause.circle" : "record.circle")
-                        .font(.system(size: 8.5 * scale, weight: .semibold))
+                    Label("Lap minute", systemImage: "gauge.with.dots.needle.33percent")
+                        .font(.system(size: 7.5 * scale, weight: .medium))
                         .foregroundStyle(.secondary)
                     Spacer()
                     roundButton(workspace.stopwatchStart == nil ? "play.fill" : "pause.fill") { workspace.toggleStopwatch() }
@@ -4169,39 +4251,76 @@ private struct SimpleNotchWidgetView: View {
 
     private var compactTimer: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
-            HStack(spacing: 8 * scale) {
-                heroIcon("timer")
-                VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 9 * scale) {
+                ZStack {
+                    Circle().stroke(Color.white.opacity(0.10), lineWidth: 3 * scale)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(timerProgress))
+                        .stroke(accent, style: StrokeStyle(lineWidth: 3 * scale, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    Image(systemName: timerIsIdle ? "timer" : "hourglass")
+                        .font(.system(size: 12 * scale, weight: .bold))
+                        .foregroundStyle(accent)
+                }
+                .frame(width: 44 * scale, height: 44 * scale)
+
+                VStack(alignment: .leading, spacing: 2 * scale) {
                     Text(timerText)
-                        .font(.system(size: 16 * scale, weight: .bold, design: .monospaced))
-                    Text(timerIsIdle ? "25 minute quick timer" : "Timer active")
-                        .font(.system(size: 8 * scale))
+                        .font(.system(size: 18 * scale, weight: .black, design: .monospaced))
+                    Text(timerIsIdle ? "Quick focus timer" : (store.deadline == nil ? "Paused" : "Counting down"))
+                        .font(.system(size: 8 * scale, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
-                roundButton(timerIsIdle ? "play.fill" : "pause.fill") {
+                roundButton(timerIsIdle ? "play.fill" : (store.deadline == nil ? "play.fill" : "pause.fill")) {
                     if timerIsIdle { store.startTimer(minutes: 25) } else { store.pauseResume() }
                 }
             }
+            .frame(maxHeight: .infinity)
         }
     }
 
     private var focusTimer: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
-            VStack(spacing: 6 * scale) {
+            HStack(spacing: 12 * scale) {
                 ZStack {
                     Circle().stroke(Color.white.opacity(0.10), lineWidth: 5 * scale)
                     Circle()
                         .trim(from: 0, to: CGFloat(timerProgress))
                         .stroke(accent, style: StrokeStyle(lineWidth: 5 * scale, lineCap: .round))
                         .rotationEffect(.degrees(-90))
-                    Text(timerText)
-                        .font(.system(size: 14 * scale, weight: .bold, design: .monospaced))
+                    VStack(spacing: 0) {
+                        Text(timerText)
+                            .font(.system(size: 13 * scale, weight: .black, design: .monospaced))
+                            .minimumScaleFactor(0.7)
+                        Text(timerIsIdle ? "READY" : "FOCUS")
+                            .font(.system(size: 5.5 * scale, weight: .bold))
+                            .tracking(0.7)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .frame(width: 56 * scale, height: 56 * scale)
-                Text(timerIsIdle ? "Ready" : "Focus")
-                    .font(.system(size: 8.5 * scale, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                .frame(width: 72 * scale, height: 72 * scale)
+
+                VStack(alignment: .leading, spacing: 6 * scale) {
+                    if timerIsIdle {
+                        Text("Start a focus")
+                            .font(.system(size: 9 * scale, weight: .semibold))
+                        HStack(spacing: 4 * scale) {
+                            timerPresetButton("5m", minutes: 5)
+                            timerPresetButton("15m", minutes: 15)
+                            timerPresetButton("25m", minutes: 25)
+                        }
+                    } else {
+                        Text(store.deadline == nil ? "Paused" : "In progress")
+                            .font(.system(size: 9 * scale, weight: .semibold))
+                        HStack(spacing: 6 * scale) {
+                            roundButton(store.deadline == nil ? "play.fill" : "pause.fill") { store.pauseResume() }
+                            roundButton("plus") { store.addTimer(minutes: 5) }
+                            roundButton("xmark") { store.resetTimer() }
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -4209,20 +4328,36 @@ private struct SimpleNotchWidgetView: View {
 
     private var dashboardTimer: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
-            VStack(alignment: .leading, spacing: 7 * scale) {
-                Text(timerText)
-                    .font(.system(size: 16 * scale, weight: .bold, design: .monospaced))
+            VStack(alignment: .leading, spacing: 6 * scale) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(timerText)
+                        .font(.system(size: 20 * scale, weight: .black, design: .monospaced))
+                    Spacer()
+                    Text(timerIsIdle ? "READY" : (store.deadline == nil ? "PAUSED" : "ACTIVE"))
+                        .font(.system(size: 6.5 * scale, weight: .bold))
+                        .tracking(0.7)
+                        .foregroundStyle(timerIsIdle ? .secondary : accent)
+                }
+
+                ProgressView(value: timerProgress)
+                    .progressViewStyle(.linear)
+                    .tint(accent)
+
                 if timerIsIdle {
                     HStack(spacing: 5 * scale) {
                         timerPresetButton("5m", minutes: 5)
                         timerPresetButton("15m", minutes: 15)
                         timerPresetButton("25m", minutes: 25)
+                        Spacer(minLength: 0)
                     }
                 } else {
                     HStack {
-                        ProgressView(value: timerProgress)
-                            .progressViewStyle(.linear)
-                        roundButton("pause.fill") { store.pauseResume() }
+                        Text(store.deadline == nil ? "Tap play to continue" : "Stay focused")
+                            .font(.system(size: 7.5 * scale, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        roundButton(store.deadline == nil ? "play.fill" : "pause.fill") { store.pauseResume() }
+                        roundButton("xmark") { store.resetTimer() }
                     }
                 }
             }
