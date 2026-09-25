@@ -4729,7 +4729,7 @@ private struct SimpleNotchWidgetView: View {
                         .foregroundStyle(accent)
                     Spacer()
                     if !timerIsIdle {
-                        Text(timerProgress.formatted(.percent.precision(.fractionLength(0))))
+                        Text("\(Int((timerProgress * 100).rounded()))%")
                             .font(.system(size: 6.5 * scale, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                     }
