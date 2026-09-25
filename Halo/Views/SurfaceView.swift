@@ -3913,8 +3913,8 @@ private struct SimpleNotchWorkspaceView: View {
 
     @ViewBuilder
     private func simpleCard(_ widget: ModuleID) -> some View {
-        let width = CGFloat(SimpleNotchMetrics.width(for: widget, size: size))
         let preset = settings.style(for: widget)
+        let width = CGFloat(SimpleNotchMetrics.width(for: widget, style: preset, size: size))
         let height = CGFloat(SimpleNotchMetrics.height(for: widget, style: preset, size: size))
 
         SimpleNotchWidgetView(
@@ -4027,6 +4027,10 @@ private struct SimpleNotchWidgetView: View {
                 if widget == .clock { minimalDialClock } else { compactContent }
             case .romanDial:
                 if widget == .clock { romanDialClock } else { compactContent }
+            case .eventCard:
+                if widget == .calendar { calendarEventCard } else { compactContent }
+            case .yearOverview:
+                if widget == .calendar { calendarYearOverview } else { compactContent }
             }
         }
         .padding(12 * scale)
@@ -4920,6 +4924,151 @@ private struct SimpleNotchWidgetView: View {
         }
     }
 
+    private var calendarEventCard: some View {
+        HStack(spacing: 12 * scale) {
+            VStack(alignment: .leading, spacing: -2 * scale) {
+                Text(Date.now.formatted(.dateTime.weekday(.wide)).uppercased())
+                    .font(.system(size: 7.5 * scale, weight: .bold, design: .rounded))
+                    .tracking(0.9)
+                    .foregroundStyle(accent)
+                Text(Date.now.formatted(.dateTime.day()))
+                    .font(.system(size: 34 * scale, weight: .light, design: .rounded))
+                    .monospacedDigit()
+                Text(Date.now.formatted(.dateTime.month(.abbreviated)).uppercased())
+                    .font(.system(size: 7 * scale, weight: .bold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 54 * scale, alignment: .leading)
+
+            Capsule()
+                .fill(accent)
+                .frame(width: 3 * scale, height: 54 * scale)
+
+            VStack(alignment: .leading, spacing: 3 * scale) {
+                if let event = nextEvent {
+                    Text(event.title ?? "Event")
+                        .font(.system(size: 11 * scale, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+
+                    if let location = event.location, !location.isEmpty {
+                        Text(location)
+                            .font(.system(size: 8.5 * scale, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Text(event.isAllDay
+                         ? "All day"
+                         : event.startDate.formatted(date: .omitted, time: .shortened) + " – " +
+                           event.endDate.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 8 * scale, weight: .medium, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                } else {
+                    Text("No upcoming events")
+                        .font(.system(size: 11 * scale, weight: .semibold, design: .rounded))
+                    Text("Your calendar is clear")
+                        .font(.system(size: 8 * scale, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var calendarYearOverview: some View {
+        VStack(alignment: .leading, spacing: 5 * scale) {
+            HStack {
+                Text(Date.now.formatted(.dateTime.year()))
+                    .font(.system(size: 11 * scale, weight: .bold, design: .rounded))
+                Text("YEAR")
+                    .font(.system(size: 6.5 * scale, weight: .bold, design: .rounded))
+                    .tracking(0.9)
+                    .foregroundStyle(accent)
+                Spacer()
+                Text("TODAY · " + Date.now.formatted(.dateTime.month(.abbreviated).day()))
+                    .font(.system(size: 6.5 * scale, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 5 * scale), count: 4),
+                spacing: 4 * scale
+            ) {
+                ForEach(simpleYearMonths, id: \.self) { month in
+                    simpleMiniMonth(month)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var simpleYearMonths: [Date] {
+        let now = Date()
+        let year = simpleCalendar.component(.year, from: now)
+        guard let start = simpleCalendar.date(from: DateComponents(year: year, month: 1, day: 1)) else {
+            return []
+        }
+        return (0..<12).compactMap {
+            simpleCalendar.date(byAdding: .month, value: $0, to: start)
+        }
+    }
+
+    private func simpleMiniMonth(_ month: Date) -> some View {
+        let dayRange = simpleCalendar.range(of: .day, in: .month, for: month) ?? 1..<2
+        let firstWeekday = simpleCalendar.component(.weekday, from: month)
+        let leading = (firstWeekday - simpleCalendar.firstWeekday + 7) % 7
+        let cells: [Int?] =
+            Array(repeating: nil, count: leading) +
+            dayRange.map { Optional($0) }
+
+        return VStack(alignment: .leading, spacing: 1.5 * scale) {
+            HStack(spacing: 3 * scale) {
+                Text(month.formatted(.dateTime.month(.abbreviated)).uppercased())
+                    .font(.system(size: 5.5 * scale, weight: .bold, design: .rounded))
+                    .foregroundStyle(
+                        simpleCalendar.isDate(month, equalTo: Date(), toGranularity: .month)
+                            ? accent
+                            : Color.white.opacity(0.72)
+                    )
+                Spacer(minLength: 0)
+            }
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 0.5 * scale), count: 7),
+                spacing: 0.5 * scale
+            ) {
+                ForEach(Array(cells.enumerated()), id: \.offset) { _, day in
+                    if let day {
+                        let date = simpleCalendar.date(
+                            from: DateComponents(
+                                year: simpleCalendar.component(.year, from: month),
+                                month: simpleCalendar.component(.month, from: month),
+                                day: day
+                            )
+                        )
+                        let today = date.map(simpleCalendar.isDateInToday) ?? false
+                        Text(String(day))
+                            .font(.system(size: 4.2 * scale, weight: today ? .bold : .medium, design: .rounded))
+                            .monospacedDigit()
+                            .frame(maxWidth: .infinity, minHeight: 6.5 * scale)
+                            .background(
+                                today ? accent : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 2.5 * scale, style: .continuous)
+                            )
+                            .foregroundStyle(today ? Color.black : Color.white.opacity(0.72))
+                    } else {
+                        Color.clear.frame(minHeight: 6.5 * scale)
+                    }
+                }
+            }
+        }
+        .padding(3.5 * scale)
+        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 7 * scale, style: .continuous))
+    }
+
     private func simpleMonthDay(_ day: Date) -> some View {
         let inMonth = simpleCalendar.isDate(day, equalTo: simpleMonthAnchor, toGranularity: .month)
         let today = simpleCalendar.isDateInToday(day)
@@ -5383,7 +5532,7 @@ private struct SimpleClosedNotchView: View {
     private func closedSlot(_ widget: ModuleID) -> some View {
         let preset = settings.style(for: widget)
         switch preset {
-        case .clean, .stackedDigital, .flipClock, .minimalDial, .romanDial:
+        case .clean, .stackedDigital, .flipClock, .minimalDial, .romanDial, .eventCard, .yearOverview:
             closedCore(widget)
                 .padding(.horizontal, 6 * scale)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
