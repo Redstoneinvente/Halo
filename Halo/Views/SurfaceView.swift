@@ -2765,6 +2765,8 @@ struct SurfaceView: View {
     @State private var integrationAutoOpeningSurface = false
     @State private var teleprompterActive = false
     @State private var visualWorkspaceSurfacePresented = false
+    @State private var simpleOpenContentVisible = false
+    @State private var simpleAnimationToken = UUID()
     @AppStorage("HaloContextTeleprompterEnabled") private var teleprompterCIEnabled = true
     @AppStorage("HaloContextTeleprompterPriority") private var teleprompterPriority = 70.0
     @AppStorage("HaloContextTransferEnabled") private var transferCIEnabled = true
@@ -3451,6 +3453,7 @@ struct SurfaceView: View {
                 teleprompterActive = false
                 TeleprompterCoordinator.shared.hidePrompt()
             }
+            simpleOpenContentVisible = simpleMode && state.expanded
             workspace.setOpenedNotchVisible(reportsOpenedNotchVisible, token: openVisibilityToken)
             visualWorkspaceSurfacePresented = visuallyExpanded && usesVisualWorkspace && activeContext == nil
         }
@@ -3483,6 +3486,9 @@ struct SurfaceView: View {
             }
         }
         .onChange(of: state.expanded) { expanded in
+            if simpleMode {
+                updateSimpleContentAnimation(expanded: expanded)
+            }
             if expanded && usesVisualWorkspace && activeContext == nil {
                 visualWorkspaceSurfacePresented = true
             }
@@ -3598,18 +3604,36 @@ struct SurfaceView: View {
     private var simpleSurfaceContent: some View {
         if visuallyExpanded {
             VStack(spacing: 0) {
-                Color.clear
-                    .frame(height: max(40, state.compactHeight))
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        guard !state.pinned else { return }
-                        state.expanded = false
-                    }
+                ZStack {
+                    Color.clear
+
+                    // Keep the compact content alive while the shell begins opening and
+                    // bring it back before the physical close completes. This makes the
+                    // Simple surface read as one object morphing between states instead of
+                    // two unrelated views popping in and out.
+                    SimpleClosedNotchView(
+                        store: store,
+                        workspace: workspace,
+                        occlusion: state.closedOcclusion
+                    )
+                    .frame(width: state.compactWidth, height: state.compactHeight)
+                    .opacity(simpleOpenContentVisible ? 0 : 1)
+                    .scaleEffect(simpleOpenContentVisible ? 0.985 : 1, anchor: .top)
+                    .allowsHitTesting(false)
+                }
+                .frame(height: max(40, state.compactHeight))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard !state.pinned else { return }
+                    state.expanded = false
+                }
 
                 SimpleNotchWorkspaceView(store: store, workspace: workspace, surfaceState: state)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .opacity(simpleOpenContentVisible ? 1 : 0)
+                    .scaleEffect(simpleOpenContentVisible ? 1 : 0.975, anchor: .top)
+                    .offset(y: simpleOpenContentVisible ? 0 : -7)
             }
-            .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .top)))
         } else {
             SimpleClosedNotchView(
                 store: store,
@@ -3622,7 +3646,40 @@ struct SurfaceView: View {
                 state.collapseTask?.cancel()
                 state.expanded = true
             }
-            .transition(.opacity)
+        }
+    }
+
+    private func updateSimpleContentAnimation(expanded: Bool) {
+        guard simpleMode else { return }
+
+        let token = UUID()
+        simpleAnimationToken = token
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || !theme.animations
+
+        if !expanded {
+            if reduceMotion {
+                simpleOpenContentVisible = false
+            } else {
+                withAnimation(.easeIn(duration: 0.12)) {
+                    simpleOpenContentVisible = false
+                }
+            }
+            return
+        }
+
+        guard !reduceMotion else {
+            simpleOpenContentVisible = true
+            return
+        }
+
+        // Give the shell a tiny head start. The content then settles into the space
+        // instead of appearing before there is enough room for it.
+        simpleOpenContentVisible = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.045) {
+            guard simpleAnimationToken == token, state.expanded, simpleMode else { return }
+            withAnimation(.easeOut(duration: 0.18)) {
+                simpleOpenContentVisible = true
+            }
         }
     }
 
