@@ -4092,7 +4092,7 @@ private struct SimpleNotchWidgetView: View {
                     .font(.system(size: 9.5 * scale, weight: .semibold))
                     .foregroundStyle(.secondary)
                 HStack(spacing: 4 * scale) {
-                    ForEach(simpleClockWeekDays, id: \.self) { day in
+                    ForEach(simpleWeekDays, id: \.self) { day in
                         let today = simpleCalendar.isDateInToday(day)
                         VStack(spacing: 1) {
                             Text(day.formatted(.dateTime.weekday(.narrow)))
@@ -4168,7 +4168,7 @@ private struct SimpleNotchWidgetView: View {
                         .lineLimit(1)
                     Text(workspace.stopwatchStart == nil ? (workspace.stopwatchElapsed > 0 ? "Paused" : "Ready") : "Running")
                         .font(.system(size: 8 * scale, weight: .semibold))
-                        .foregroundStyle(workspace.stopwatchStart == nil ? .secondary : accent)
+                        .foregroundStyle(workspace.stopwatchStart == nil ? Color.secondary : accent)
                 }
                 Spacer(minLength: 0)
                 roundButton(workspace.stopwatchStart == nil ? "play.fill" : "pause.fill") {
@@ -4229,13 +4229,13 @@ private struct SimpleNotchWidgetView: View {
                     Text(workspace.stopwatchStart == nil ? "PAUSED" : "LIVE")
                         .font(.system(size: 6.5 * scale, weight: .bold))
                         .tracking(0.8)
-                        .foregroundStyle(workspace.stopwatchStart == nil ? .secondary : accent)
+                        .foregroundStyle(workspace.stopwatchStart == nil ? Color.secondary : accent)
                 }
                 ProgressView(value: (stopwatchElapsed(at: context.date).truncatingRemainder(dividingBy: 60)) / 60)
                     .progressViewStyle(.linear)
                     .tint(accent)
                 HStack {
-                    Label("Lap minute", systemImage: "gauge.with.dots.needle.33percent")
+                    Label("Lap minute", systemImage: "speedometer")
                         .font(.system(size: 7.5 * scale, weight: .medium))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -4336,7 +4336,7 @@ private struct SimpleNotchWidgetView: View {
                     Text(timerIsIdle ? "READY" : (store.deadline == nil ? "PAUSED" : "ACTIVE"))
                         .font(.system(size: 6.5 * scale, weight: .bold))
                         .tracking(0.7)
-                        .foregroundStyle(timerIsIdle ? .secondary : accent)
+                        .foregroundStyle(timerIsIdle ? Color.secondary : accent)
                 }
 
                 ProgressView(value: timerProgress)
@@ -4724,7 +4724,7 @@ private struct SimpleNotchWidgetView: View {
                         .foregroundStyle(accent)
                     Capsule().fill(accent.opacity(0.55)).frame(width: 18 * scale, height: 2 * scale)
                 }
-                Label("Click reactions", systemImage: "cursorarrow.click.2")
+                Label("Click reactions", systemImage: "cursorarrow.click")
                     .font(.system(size: 7.5 * scale, weight: .medium))
                     .foregroundStyle(.secondary)
                 Label("Context aware", systemImage: "sparkles")
@@ -4880,7 +4880,7 @@ private struct SimpleNotchWidgetView: View {
         }
     }
 
-    private var simpleCalendar: Calendar {    private var simpleCalendar: Calendar { Calendar.autoupdatingCurrent }
+    private var simpleCalendar: Calendar { Calendar.autoupdatingCurrent }
 
     private var simpleMonthAnchor: Date {
         simpleCalendar.dateInterval(of: .month, for: Date())?.start
