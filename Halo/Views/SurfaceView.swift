@@ -3625,8 +3625,7 @@ struct SurfaceView: View {
                     system: workspace.system
                 )
             }
-            if !usesVisualWorkspace &&
-                !transferContextActive &&
+            if !transferContextActive &&
                 !clipboardContextActive &&
                 !customContextActive &&
                 !integrationContextActive &&
