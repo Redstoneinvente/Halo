@@ -3864,8 +3864,8 @@ private struct SimpleNotchWorkspaceView: View {
     @ViewBuilder
     private func simpleCard(_ widget: ModuleID) -> some View {
         let width = CGFloat(SimpleNotchMetrics.width(for: widget, size: size))
-        let height = CGFloat(SimpleNotchMetrics.widgetHeight(size))
         let preset = settings.style(for: widget)
+        let height = CGFloat(SimpleNotchMetrics.height(for: widget, style: preset, size: size))
 
         SimpleNotchWidgetView(
             widget: widget,
@@ -4292,80 +4292,165 @@ private struct SimpleNotchWidgetView: View {
     }
 
     private var compactCalendar: some View {
-        HStack(spacing: 9 * scale) {
+        HStack(spacing: 10 * scale) {
             VStack(spacing: -2) {
                 Text(Date.now.formatted(.dateTime.month(.abbreviated)).uppercased())
-                    .font(.system(size: 7.5 * scale, weight: .bold))
+                    .font(.system(size: 7.5 * scale, weight: .bold, design: .rounded))
                     .foregroundStyle(accent)
                 Text(Date.now.formatted(.dateTime.day()))
-                    .font(.system(size: 25 * scale, weight: .black, design: .rounded))
+                    .font(.system(size: 26 * scale, weight: .black, design: .rounded))
+                    .monospacedDigit()
+                Text(Date.now.formatted(.dateTime.weekday(.abbreviated)).uppercased())
+                    .font(.system(size: 7 * scale, weight: .bold))
+                    .foregroundStyle(.secondary)
             }
-            if let event = nextEvent {
-                VStack(alignment: .leading, spacing: 2) {
+            .frame(width: 44 * scale)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.10))
+                .frame(width: 1, height: 42 * scale)
+
+            VStack(alignment: .leading, spacing: 3 * scale) {
+                Text("TODAY")
+                    .font(.system(size: 7 * scale, weight: .bold, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundStyle(accent)
+
+                if let event = nextEvent {
                     Text(event.title ?? "Event")
-                        .font(.system(size: 9 * scale, weight: .semibold))
-                        .lineLimit(2)
-                    Text(event.isAllDay ? "All day" : event.startDate.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 9.5 * scale, weight: .semibold))
+                        .lineLimit(1)
+                    HStack(spacing: 4 * scale) {
+                        Circle()
+                            .fill(accent)
+                            .frame(width: 4 * scale, height: 4 * scale)
+                        Text(event.isAllDay ? "All day" : event.startDate.formatted(date: .omitted, time: .shortened))
+                            .font(.system(size: 7.5 * scale, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Nothing scheduled")
+                        .font(.system(size: 9.5 * scale, weight: .semibold))
+                    Text("Your day is clear")
                         .font(.system(size: 7.5 * scale))
                         .foregroundStyle(.secondary)
                 }
-            } else {
-                Text("Nothing scheduled")
-                    .font(.system(size: 9 * scale, weight: .semibold))
-                    .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
         }
     }
 
     private var focusCalendar: some View {
-        VStack(spacing: 1 * scale) {
-            Text(Date.now.formatted(.dateTime.weekday(.wide)).uppercased())
-                .font(.system(size: 8 * scale, weight: .bold))
-                .foregroundStyle(accent)
-            Text(Date.now.formatted(.dateTime.day()))
-                .font(.system(size: 30 * scale, weight: .black, design: .rounded))
-                .minimumScaleFactor(0.7)
-            Text(Date.now.formatted(.dateTime.month(.wide)))
-                .font(.system(size: 10 * scale, weight: .semibold))
-            if let event = nextEvent {
-                Text(event.title ?? "Event")
-                    .font(.system(size: 7.5 * scale, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .padding(.top, 3 * scale)
+        VStack(spacing: 4 * scale) {
+            HStack {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(simpleMonthAnchor.formatted(.dateTime.month(.wide)))
+                        .font(.system(size: 10 * scale, weight: .bold, design: .rounded))
+                    Text(simpleMonthAnchor.formatted(.dateTime.year()))
+                        .font(.system(size: 7 * scale, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("MONTH")
+                    .font(.system(size: 6.5 * scale, weight: .bold, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundStyle(accent)
+            }
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 1.5 * scale), count: 7),
+                spacing: 1.5 * scale
+            ) {
+                ForEach(simpleWeekdaySymbols, id: \.self) { symbol in
+                    Text(symbol.uppercased())
+                        .font(.system(size: 6 * scale, weight: .bold, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity)
+                }
+
+                ForEach(simpleMonthDays, id: \.self) { day in
+                    simpleMonthDay(day)
+                }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var dashboardCalendar: some View {
-        VStack(alignment: .leading, spacing: 6 * scale) {
+        VStack(alignment: .leading, spacing: 5 * scale) {
             HStack {
-                Text(Date.now.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
-                    .font(.system(size: 10 * scale, weight: .bold))
+                Text(Date.now.formatted(.dateTime.month(.wide).year()))
+                    .font(.system(size: 9.5 * scale, weight: .bold, design: .rounded))
                 Spacer()
-                Text("\(workspace.calendar.upcomingEvents.count)")
-                    .font(.system(size: 8 * scale, weight: .bold))
-                    .padding(.horizontal, 6 * scale)
-                    .padding(.vertical, 2 * scale)
-                    .background(accent.opacity(0.16), in: Capsule())
+                Text("THIS WEEK")
+                    .font(.system(size: 6.5 * scale, weight: .bold))
+                    .tracking(0.7)
+                    .foregroundStyle(accent)
             }
-            if let event = nextEvent {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(event.title ?? "Event")
-                        .font(.system(size: 10 * scale, weight: .semibold))
-                        .lineLimit(2)
-                    Text(event.isAllDay ? "All day" : event.startDate.formatted(date: .omitted, time: .shortened))
-                        .font(.system(size: 8 * scale))
-                        .foregroundStyle(accent)
+
+            HStack(spacing: 3 * scale) {
+                ForEach(simpleWeekDays, id: \.self) { day in
+                    let today = simpleCalendar.isDateInToday(day)
+                    VStack(spacing: 1.5 * scale) {
+                        Text(day.formatted(.dateTime.weekday(.narrow)))
+                            .font(.system(size: 6.5 * scale, weight: .bold))
+                            .foregroundStyle(.secondary)
+                        Text(day.formatted(.dateTime.day()))
+                            .font(.system(size: 9 * scale, weight: today ? .bold : .semibold, design: .rounded))
+                            .frame(width: 20 * scale, height: 20 * scale)
+                            .background(
+                                today ? accent : Color.white.opacity(0.055),
+                                in: Circle()
+                            )
+                            .foregroundStyle(today ? Color.black : Color.white)
+                        Circle()
+                            .fill(hasSimpleCalendarEvent(on: day) ? accent : Color.clear)
+                            .frame(width: 3 * scale, height: 3 * scale)
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-            } else {
-                Label("Your day is clear", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 9 * scale, weight: .semibold))
-                    .foregroundStyle(.secondary)
+            }
+
+            if let event = nextEvent {
+                HStack(spacing: 6 * scale) {
+                    Capsule()
+                        .fill(accent)
+                        .frame(width: 2.5 * scale, height: 22 * scale)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(event.title ?? "Event")
+                            .font(.system(size: 8.5 * scale, weight: .semibold))
+                            .lineLimit(1)
+                        Text(event.isAllDay ? "All day" : event.startDate.formatted(date: .omitted, time: .shortened))
+                            .font(.system(size: 7 * scale))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
             }
         }
+    }
+
+    private func simpleMonthDay(_ day: Date) -> some View {
+        let inMonth = simpleCalendar.isDate(day, equalTo: simpleMonthAnchor, toGranularity: .month)
+        let today = simpleCalendar.isDateInToday(day)
+        let hasEvent = hasSimpleCalendarEvent(on: day)
+
+        return VStack(spacing: 0.5 * scale) {
+            Text(day.formatted(.dateTime.day()))
+                .font(.system(size: 7.5 * scale, weight: today ? .bold : .medium, design: .rounded))
+                .foregroundStyle(inMonth ? Color.white : Color.white.opacity(0.23))
+                .frame(width: 18 * scale, height: 14 * scale)
+                .background(
+                    today ? accent : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 5 * scale, style: .continuous)
+                )
+                .foregroundStyle(today ? Color.black : (inMonth ? Color.white : Color.white.opacity(0.23)))
+
+            Circle()
+                .fill(hasEvent && inMonth ? accent : Color.clear)
+                .frame(width: 2.5 * scale, height: 2.5 * scale)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var compactPixelPal: some View {
@@ -4476,6 +4561,44 @@ private struct SimpleNotchWidgetView: View {
                 Spacer()
                 mediaButton("forward.end.fill", action: "next track")
             }
+        }
+    }
+
+    private var simpleCalendar: Calendar { Calendar.autoupdatingCurrent }
+
+    private var simpleMonthAnchor: Date {
+        simpleCalendar.dateInterval(of: .month, for: Date())?.start
+            ?? simpleCalendar.startOfDay(for: Date())
+    }
+
+    private var simpleWeekdaySymbols: [String] {
+        let symbols = simpleCalendar.veryShortStandaloneWeekdaySymbols
+        let offset = max(0, min(6, simpleCalendar.firstWeekday - 1))
+        return (0..<7).map { symbols[(offset + $0) % symbols.count] }
+    }
+
+    private var simpleMonthDays: [Date] {
+        let monthStart = simpleMonthAnchor
+        let gridStart = simpleCalendar.dateInterval(of: .weekOfYear, for: monthStart)?.start ?? monthStart
+        return (0..<42).compactMap {
+            simpleCalendar.date(byAdding: .day, value: $0, to: gridStart)
+        }
+    }
+
+    private var simpleWeekDays: [Date] {
+        let today = simpleCalendar.startOfDay(for: Date())
+        let weekStart = simpleCalendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
+        return (0..<7).compactMap {
+            simpleCalendar.date(byAdding: .day, value: $0, to: weekStart)
+        }
+    }
+
+    private func hasSimpleCalendarEvent(on day: Date) -> Bool {
+        let start = simpleCalendar.startOfDay(for: day)
+        let end = simpleCalendar.date(byAdding: .day, value: 1, to: start)
+            ?? start.addingTimeInterval(86_400)
+        return workspace.calendar.upcomingEvents.contains {
+            $0.startDate < end && $0.endDate > start
         }
     }
 
