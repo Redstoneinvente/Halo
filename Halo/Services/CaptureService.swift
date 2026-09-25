@@ -116,8 +116,9 @@ final class CaptureService: ObservableObject {
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         configuration.showsCursor = false
 
+        let ownBundleIdentifier = Bundle.main.bundleIdentifier ?? ""
         let ownApplications = content.applications.filter {
-            $0.bundleIdentifier == Bundle.main.bundleIdentifier
+            $0.bundleIdentifier == ownBundleIdentifier
         }
         let filter = SCContentFilter(
             display: display,
