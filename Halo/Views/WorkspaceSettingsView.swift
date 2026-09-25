@@ -1209,6 +1209,7 @@ private struct NotchModeSettingsPane: View {
         case .clock: return SimpleNotchWidgetStyle.clockCases
         case .calendar: return SimpleNotchWidgetStyle.calendarCases
         case .timer: return SimpleNotchWidgetStyle.timerCases
+        case .media: return SimpleNotchWidgetStyle.mediaCases
         default: return SimpleNotchWidgetStyle.coreCases
         }
     }
@@ -1224,7 +1225,7 @@ private struct NotchModeSettingsPane: View {
             case .flipClock: return "Flip Clock"
             case .minimalDial: return "Minimal Dial"
             case .romanDial: return "Roman Dial"
-            case .eventCard, .yearOverview, .pomodoroRing, .deadlineTimer, .segmentDisplay: return style.title
+            case .eventCard, .yearOverview, .pomodoroRing, .deadlineTimer, .segmentDisplay, .vinylDeck, .cassette, .streamBar: return style.title
             }
         case .calendar:
             switch style {
@@ -1264,6 +1265,9 @@ private struct NotchModeSettingsPane: View {
             case .clean: return "Now Playing"
             case .glass: return "Artwork Focus"
             case .vibrant: return "Playback Panel"
+            case .vinylDeck: return "Vinyl Deck"
+            case .cassette: return "Cassette"
+            case .streamBar: return "Stream Bar"
             default: return style.title
             }
         case .pet:
@@ -1289,7 +1293,7 @@ private struct NotchModeSettingsPane: View {
             case .flipClock: return "Two mechanical flip-style number tiles for hours and minutes, with compact day and meridiem details."
             case .minimalDial: return "A clean analog face with sparse ticks, thin hands and lightweight date information."
             case .romanDial: return "A classic analog face with XII, III, VI and IX markers plus a compact digital readout."
-            case .eventCard, .yearOverview, .pomodoroRing, .deadlineTimer, .segmentDisplay: return style.detail
+            case .eventCard, .yearOverview, .pomodoroRing, .deadlineTimer, .segmentDisplay, .vinylDeck, .cassette, .streamBar: return style.detail
             }
         case .calendar:
             switch style {
@@ -1329,6 +1333,9 @@ private struct NotchModeSettingsPane: View {
             case .clean: return "Compact now-playing information with fast playback access."
             case .glass: return "Album artwork and the current track become the visual focus."
             case .vibrant: return "A fuller playback panel with track details, progress and controls."
+            case .vinylDeck: return "A circular record-player treatment built from the current artwork, with track progress and transport controls."
+            case .cassette: return "A retro cassette-style transport with twin reels, title and artist metadata, plus playback controls."
+            case .streamBar: return "A long streaming-overlay player that keeps artwork, metadata, progress and controls in one horizontal strip."
             default: return style.detail
             }
         case .pet:
