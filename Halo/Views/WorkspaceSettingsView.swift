@@ -1048,7 +1048,7 @@ private struct NotchModeSettingsPane: View {
                             Spacer()
                             if simple.widgets.contains(widget) {
                                 Picker("Style", selection: styleBinding(widget)) {
-                                    ForEach(SimpleNotchWidgetStyle.allCases) { style in
+                                    ForEach(simpleStyles(for: widget)) { style in
                                         Label(simpleStyleTitle(widget, style), systemImage: style.symbol).tag(style)
                                     }
                                 }
@@ -1204,21 +1204,125 @@ private struct NotchModeSettingsPane: View {
         widget == .shelf ? "File Tray" : widget.title
     }
 
+    private func simpleStyles(for widget: ModuleID) -> [SimpleNotchWidgetStyle] {
+        widget == .clock ? SimpleNotchWidgetStyle.clockCases : SimpleNotchWidgetStyle.coreCases
+    }
+
     private func simpleStyleTitle(_ widget: ModuleID, _ style: SimpleNotchWidgetStyle) -> String {
-        guard widget == .calendar else { return style.title }
-        switch style {
-        case .clean: return "Agenda"
-        case .glass: return "Month"
-        case .vibrant: return "Week"
+        switch widget {
+        case .clock:
+            switch style {
+            case .clean: return "Date & Time"
+            case .glass: return "Analog Duo"
+            case .vibrant: return "Time Panel"
+            case .stackedDigital: return "Stacked Digital"
+            case .flipClock: return "Flip Clock"
+            case .minimalDial: return "Minimal Dial"
+            case .romanDial: return "Roman Dial"
+            }
+        case .calendar:
+            switch style {
+            case .clean: return "Agenda"
+            case .glass: return "Month"
+            case .vibrant: return "Week"
+            default: return style.title
+            }
+        case .timer:
+            switch style {
+            case .clean: return "Ring Timer"
+            case .glass: return "Countdown Focus"
+            case .vibrant: return "Timer Panel"
+            default: return style.title
+            }
+        case .stopwatch:
+            switch style {
+            case .clean: return "Progress Ring"
+            case .glass: return "Large Dial"
+            case .vibrant: return "Run Panel"
+            default: return style.title
+            }
+        case .shelf:
+            switch style {
+            case .clean: return "Quick Tray"
+            case .glass: return "Drop Zone"
+            case .vibrant: return "File Panel"
+            default: return style.title
+            }
+        case .media:
+            switch style {
+            case .clean: return "Now Playing"
+            case .glass: return "Artwork Focus"
+            case .vibrant: return "Playback Panel"
+            default: return style.title
+            }
+        case .pet:
+            switch style {
+            case .clean: return "Compact Pal"
+            case .glass: return "Pal Focus"
+            case .vibrant: return "Pal Status"
+            default: return style.title
+            }
+        default:
+            return style.title
         }
     }
 
     private func simpleStyleDetail(_ widget: ModuleID, _ style: SimpleNotchWidgetStyle) -> String {
-        guard widget == .calendar else { return style.detail }
-        switch style {
-        case .clean: return "Today’s date and the next event in a compact agenda."
-        case .glass: return "A real current-month calendar with weekday headers, today highlight and event dots."
-        case .vibrant: return "A seven-day strip with today, event indicators and the next appointment."
+        switch widget {
+        case .clock:
+            switch style {
+            case .clean: return "Large digital time paired with the current date and weekday."
+            case .glass: return "A full analog face paired with a readable digital time and date."
+            case .vibrant: return "A structured time-and-date information panel with a slim accent timeline."
+            case .stackedDigital: return "Large stacked hour and minute digits with a narrow date rail, adapted from segmented desk clocks."
+            case .flipClock: return "Two mechanical flip-style number tiles for hours and minutes, with compact day and meridiem details."
+            case .minimalDial: return "A clean analog face with sparse ticks, thin hands and lightweight date information."
+            case .romanDial: return "A classic analog face with XII, III, VI and IX markers plus a compact digital readout."
+            }
+        case .calendar:
+            switch style {
+            case .clean: return "Today’s date and the next event in a compact agenda."
+            case .glass: return "A real current-month calendar with weekday headers, today highlight and event dots."
+            case .vibrant: return "A seven-day strip with today, event indicators and the next appointment."
+            default: return style.detail
+            }
+        case .timer:
+            switch style {
+            case .clean: return "A compact progress ring, remaining time and the primary timer action."
+            case .glass: return "A large countdown treatment with the progress state as the visual focus."
+            case .vibrant: return "A fuller timer panel with status, progress and controls."
+            default: return style.detail
+            }
+        case .stopwatch:
+            switch style {
+            case .clean: return "A small progress ring beside elapsed time and the primary control."
+            case .glass: return "A larger seconds dial with elapsed time and direct controls."
+            case .vibrant: return "A telemetry-like stopwatch panel with status, progress and controls."
+            default: return style.detail
+            }
+        case .shelf:
+            switch style {
+            case .clean: return "A compact file tray for quick access and drag-and-drop."
+            case .glass: return "A larger drop target that prioritizes the current file action."
+            case .vibrant: return "A richer file panel with counts, status and actions."
+            default: return style.detail
+            }
+        case .media:
+            switch style {
+            case .clean: return "Compact now-playing information with fast playback access."
+            case .glass: return "Album artwork and the current track become the visual focus."
+            case .vibrant: return "A fuller playback panel with track details, progress and controls."
+            default: return style.detail
+            }
+        case .pet:
+            switch style {
+            case .clean: return "The smallest interactive Pixel Pal layout."
+            case .glass: return "A larger Pixel Pal presentation with the character as the focus."
+            case .vibrant: return "Pixel Pal with extra status and supporting information."
+            default: return style.detail
+            }
+        default:
+            return style.detail
         }
     }
 }
