@@ -981,16 +981,6 @@ private struct NotchModeSettingsPane: View {
                 var value = workspace.settings.resolvedSimpleNotch
                 if enabled {
                     if !value.widgets.contains(widget) { value.widgets.append(widget) }
-                    if SimpleNotchSettings.closedEligibleWidgets.contains(widget),
-                       !value.closedWidgets.contains(widget) {
-                        if widget == .clock {
-                            value.closedWidgets.append(widget)
-                        } else if let clockIndex = value.closedWidgets.firstIndex(of: .clock) {
-                            value.closedWidgets.insert(widget, at: clockIndex)
-                        } else {
-                            value.closedWidgets.append(widget)
-                        }
-                    }
                 } else {
                     value.widgets.removeAll { $0 == widget }
                 }
