@@ -26,6 +26,124 @@ enum ModuleID: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+
+enum HaloNotchMode: String, Codable, CaseIterable, Identifiable {
+    case simple = "Simple"
+    case advanced = "Advanced"
+    var id: String { rawValue }
+
+    var detail: String {
+        switch self {
+        case .simple: return "A focused notch with fixed widgets, drag-to-reorder, and no Context Interfaces."
+        case .advanced: return "The complete Halo workspace, including your current layouts, CIs, profiles, and customization."
+        }
+    }
+}
+
+enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
+    case clean = "Clean"
+    case glass = "Glass"
+    case vibrant = "Vibrant"
+    var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .clean: return "circle"
+        case .glass: return "drop.fill"
+        case .vibrant: return "sparkles"
+        }
+    }
+}
+
+struct SimpleNotchSettings: Codable, Equatable {
+    static let availableWidgets: [ModuleID] = [.clock, .stopwatch, .shelf, .calendar, .pet, .timer, .media]
+    static let closedEligibleWidgets: [ModuleID] = [.clock, .stopwatch, .timer, .media, .calendar]
+
+    /// Order is also the enabled set: widgets absent from this array stay hidden.
+    var widgets: [ModuleID] = [.clock, .media, .timer]
+    var styles: [String: SimpleNotchWidgetStyle] = [:]
+    /// Priority order for automatic closed-notch slots. Active transient widgets win
+    /// before the Clock fallback.
+    var closedWidgets: [ModuleID] = [.timer, .stopwatch, .media, .calendar, .clock]
+
+    func normalized() -> SimpleNotchSettings {
+        var value = self
+        var seen = Set<ModuleID>()
+        value.widgets = widgets.filter {
+            Self.availableWidgets.contains($0) && seen.insert($0).inserted
+        }
+        var closedSeen = Set<ModuleID>()
+        value.closedWidgets = closedWidgets.filter {
+            Self.closedEligibleWidgets.contains($0) && closedSeen.insert($0).inserted
+        }
+        value.styles = styles.filter { key, _ in
+            guard let module = ModuleID(rawValue: key) else { return false }
+            return Self.availableWidgets.contains(module)
+        }
+        return value
+    }
+
+    func style(for widget: ModuleID) -> SimpleNotchWidgetStyle {
+        styles[widget.rawValue] ?? .clean
+    }
+
+    func contains(_ widget: ModuleID) -> Bool {
+        normalized().widgets.contains(widget)
+    }
+
+    func allowsClosed(_ widget: ModuleID) -> Bool {
+        normalized().closedWidgets.contains(widget)
+    }
+
+    func activeClosedWidgets(
+        timerActive: Bool,
+        stopwatchActive: Bool,
+        mediaActive: Bool,
+        calendarActive: Bool
+    ) -> [ModuleID] {
+        let state = normalized()
+        return Array(state.closedWidgets.filter { widget in
+            switch widget {
+            case .timer: return timerActive
+            case .stopwatch: return stopwatchActive
+            case .media: return mediaActive
+            case .calendar: return calendarActive
+            case .clock: return true
+            default: return false
+            }
+        }.prefix(2))
+    }
+}
+
+enum SimpleNotchMetrics {
+    static let closedPillWidth = 190.0
+    static let closedHeight = 32.0
+    static let widgetWidth = 156.0
+    static let pixelPalWidth = 126.0
+    static let widgetHeight = 126.0
+    static let widgetSpacing = 10.0
+    static let horizontalPadding = 12.0
+    static let verticalPadding = 10.0
+    static let closedSlotWidth = 116.0
+    static let closedSlotGap = 8.0
+
+    static func width(for widget: ModuleID) -> Double {
+        widget == .pet ? pixelPalWidth : widgetWidth
+    }
+
+    static func expandedWidth(widgets: [ModuleID]) -> Double {
+        let widgets = widgets.filter { SimpleNotchSettings.availableWidgets.contains($0) }
+        guard !widgets.isEmpty else { return closedPillWidth }
+        let content = widgets.reduce(0.0) { $0 + width(for: $1) }
+        let gaps = Double(max(0, widgets.count - 1)) * widgetSpacing
+        return max(closedPillWidth, content + gaps + horizontalPadding * 2)
+    }
+
+    static var expandedBodyHeight: Double {
+        widgetHeight + verticalPadding * 2
+    }
+}
+
 enum BackgroundKind: String, Codable, CaseIterable { case gradient, solid, glass, image, video }
 
 struct GlassOptions: Codable, Equatable {
@@ -1294,6 +1412,12 @@ struct AutomationRule: Codable, Identifiable {
     }
 }
 struct WorkspaceSettings: Codable {
+    /// Optional fields keep settings created before Notch Mode fully backwards compatible.
+    var notchMode: HaloNotchMode?
+    var simpleNotch: SimpleNotchSettings?
+    var resolvedNotchMode: HaloNotchMode { notchMode ?? .advanced }
+    var resolvedSimpleNotch: SimpleNotchSettings { (simpleNotch ?? SimpleNotchSettings()).normalized() }
+
     var automaticMedia: Bool?
     var profileSchedules: [ProfileSchedule]?
     var version = 1
