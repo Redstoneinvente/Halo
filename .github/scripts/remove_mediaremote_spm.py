@@ -47,7 +47,7 @@ old_library_end = s.find('\n    @discardableResult', old_library_start)
 if old_library_start < 0 or old_library_end < 0:
     raise SystemExit('MediaController libraryPath block not found')
 new_library = '''    private static func logBridgeUnavailable(_ message: String) {
-        fputs("[Halo MediaRemote] \\(message) Continuing without native MediaRemote.\\n", stderr)
+        NSLog("[Halo MediaRemote] %@ Continuing without native MediaRemote.", message)
     }
 
     private var libraryPath: String? {
