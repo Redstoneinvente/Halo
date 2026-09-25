@@ -2312,12 +2312,25 @@ final class WindowManager {
             guard let host, !host.state.expanded else { return }
             host.state.completeCollapsedPresentation()
         }
+        var motion = geometry.appearance.surface
+        var motionPreset = geometry.appearance.animation
+        if store.workspace.settings.resolvedNotchMode == .simple {
+            // Simple Mode is meant to feel like the native notch itself stretching,
+            // not a dashboard bouncing into place. Use a monotonic resize and make
+            // retraction slightly quicker than expansion.
+            motion.opening = .resize
+            motion.closing = .resize
+            motion.duration = expanded ? 0.26 : 0.22
+            motion.damping = 1
+            motionPreset = .smooth
+        }
+
         host.animator.move(
             panel: host.panel,
             state: host.state,
             target: target,
-            options: geometry.appearance.surface,
-            preset: geometry.appearance.animation,
+            options: motion,
+            preset: motionPreset,
             animations: host.state.theme.animations && !host.state.editingGeometry,
             opening: expanded,
             style: geometry.style,
@@ -2470,10 +2483,10 @@ final class WindowManager {
                 appearance.surface.useStyleContour = true
                 appearance.surface.shape = hasPhysicalNotch ? .scoop : .capsule
                 appearance.surface.compactHeight = max(hardwareShellHeight, presetClosedHeight)
-                appearance.surface.opening = .spring
-                appearance.surface.closing = .spring
-                appearance.surface.duration = 0.28
-                appearance.surface.damping = 0.86
+                appearance.surface.opening = .resize
+                appearance.surface.closing = .resize
+                appearance.surface.duration = 0.26
+                appearance.surface.damping = 1.0
                 appearance.surface.shoulder = hasPhysicalNotch ? 22 : 0
                 appearance.surface.offsets = SurfaceOffsets()
             }
