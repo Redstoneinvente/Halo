@@ -1336,20 +1336,27 @@ final class SimpleNotchLayoutTests: XCTestCase {
         XCTAssertEqual(SimpleNotchMetrics.arrangement(settings: settings, availableWidth: 1000).rows, [[.clock]])
     }
 
-    func testClockExclusiveSimpleStylesDoNotLeakToOtherWidgets() {
+    func testSpecializedSimpleStylesStayOnTheirIntendedWidgets() {
         var settings = SimpleNotchSettings()
-        settings.widgets = [.clock, .timer, .media]
+        settings.widgets = [.clock, .calendar, .timer, .media]
         settings.styles = [
             ModuleID.clock.rawValue: .flipClock,
-            ModuleID.timer.rawValue: .romanDial,
+            ModuleID.calendar.rawValue: .yearOverview,
+            ModuleID.timer.rawValue: .eventCard,
             ModuleID.media.rawValue: .stackedDigital
         ]
 
         let normalized = settings.normalized()
         XCTAssertEqual(normalized.style(for: .clock), .flipClock)
+        XCTAssertEqual(normalized.style(for: .calendar), .yearOverview)
         XCTAssertEqual(normalized.style(for: .timer), .clean)
         XCTAssertEqual(normalized.style(for: .media), .clean)
         XCTAssertEqual(SimpleNotchWidgetStyle.clockCases.count, 7)
+        XCTAssertEqual(SimpleNotchWidgetStyle.calendarCases.count, 5)
         XCTAssertEqual(SimpleNotchWidgetStyle.coreCases, [.clean, .glass, .vibrant])
+        XCTAssertTrue(SimpleNotchWidgetStyle.eventCard.supports(widget: .calendar))
+        XCTAssertFalse(SimpleNotchWidgetStyle.eventCard.supports(widget: .clock))
+        XCTAssertTrue(SimpleNotchWidgetStyle.romanDial.supports(widget: .clock))
+        XCTAssertFalse(SimpleNotchWidgetStyle.romanDial.supports(widget: .calendar))
     }
 }
