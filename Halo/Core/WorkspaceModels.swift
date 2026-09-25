@@ -262,6 +262,16 @@ enum SimpleNotchMetrics {
     static func verticalPadding(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 8; case .medium: return 9; case .big: return 10 }
     }
+
+    /// Keep the Simple row visually tucked beneath the physical notch. The larger
+    /// bottom inset preserves breathing room without creating a dead band above widgets.
+    static func openTopPadding(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 2; case .medium: return 3; case .big: return 4 }
+    }
+
+    static func openBottomPadding(_ size: SimpleNotchSize) -> Double {
+        verticalPadding(size)
+    }
     static func closedSlotWidth(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 118; case .medium: return 132; case .big: return 148 }
     }
@@ -339,7 +349,7 @@ enum SimpleNotchMetrics {
         return Arrangement(
             rows: [widgets],
             width: min(max(1, availableWidth), requestedWidth),
-            height: tallest + verticalPadding(size) * 2
+            height: tallest + openTopPadding(size) + openBottomPadding(size)
         )
     }
 
@@ -421,7 +431,7 @@ enum SimpleNotchMetrics {
         let tallest = settings.widgets.map {
             height(for: $0, style: settings.style(for: $0), size: size)
         }.max() ?? widgetHeight(size)
-        return tallest + verticalPadding(size) * 2
+        return tallest + openTopPadding(size) + openBottomPadding(size)
     }
 }
 
