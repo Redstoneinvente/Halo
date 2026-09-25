@@ -1205,7 +1205,11 @@ private struct NotchModeSettingsPane: View {
     }
 
     private func simpleStyles(for widget: ModuleID) -> [SimpleNotchWidgetStyle] {
-        widget == .clock ? SimpleNotchWidgetStyle.clockCases : SimpleNotchWidgetStyle.coreCases
+        switch widget {
+        case .clock: return SimpleNotchWidgetStyle.clockCases
+        case .calendar: return SimpleNotchWidgetStyle.calendarCases
+        default: return SimpleNotchWidgetStyle.coreCases
+        }
     }
 
     private func simpleStyleTitle(_ widget: ModuleID, _ style: SimpleNotchWidgetStyle) -> String {
@@ -1219,12 +1223,15 @@ private struct NotchModeSettingsPane: View {
             case .flipClock: return "Flip Clock"
             case .minimalDial: return "Minimal Dial"
             case .romanDial: return "Roman Dial"
+            case .eventCard, .yearOverview: return style.title
             }
         case .calendar:
             switch style {
             case .clean: return "Agenda"
             case .glass: return "Month"
             case .vibrant: return "Week"
+            case .eventCard: return "Event Card"
+            case .yearOverview: return "Year Overview"
             default: return style.title
             }
         case .timer:
@@ -1278,12 +1285,15 @@ private struct NotchModeSettingsPane: View {
             case .flipClock: return "Two mechanical flip-style number tiles for hours and minutes, with compact day and meridiem details."
             case .minimalDial: return "A clean analog face with sparse ticks, thin hands and lightweight date information."
             case .romanDial: return "A classic analog face with XII, III, VI and IX markers plus a compact digital readout."
+            case .eventCard, .yearOverview: return style.detail
             }
         case .calendar:
             switch style {
             case .clean: return "Today’s date and the next event in a compact agenda."
             case .glass: return "A real current-month calendar with weekday headers, today highlight and event dots."
             case .vibrant: return "A seven-day strip with today, event indicators and the next appointment."
+            case .eventCard: return "A bold date-led event card with the next appointment, location and time."
+            case .yearOverview: return "All twelve months at once in a compact mini-calendar grid; today remains highlighted."
             default: return style.detail
             }
         case .timer:
