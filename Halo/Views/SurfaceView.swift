@@ -4676,7 +4676,7 @@ private struct SimpleNotchWidgetView: View {
                             .minimumScaleFactor(0.62)
                             .lineLimit(1)
                         Text(timerIsIdle ? "READY" : (store.deadline == nil ? "PAUSED" : "FOCUS"))
-                            .font(.system(size: 5.5 * scale, weight: .bold, design: .rounded))
+                            .font(.system(size: 5.0 * scale, weight: .bold, design: .rounded))
                             .tracking(0.8)
                             .foregroundStyle(.secondary)
                     }
@@ -5222,8 +5222,8 @@ private struct SimpleNotchWidgetView: View {
             }
 
             LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 5 * scale), count: 4),
-                spacing: 4 * scale
+                columns: Array(repeating: GridItem(.flexible(), spacing: 4 * scale), count: 6),
+                spacing: 3 * scale
             ) {
                 ForEach(simpleYearMonths, id: \.self) { month in
                     simpleMiniMonth(month)
@@ -5279,22 +5279,22 @@ private struct SimpleNotchWidgetView: View {
                         )
                         let today = date.map { simpleCalendar.isDateInToday($0) } ?? false
                         Text(String(day))
-                            .font(.system(size: 4.2 * scale, weight: today ? .bold : .medium, design: .rounded))
+                            .font(.system(size: 3.8 * scale, weight: today ? .bold : .medium, design: .rounded))
                             .monospacedDigit()
-                            .frame(maxWidth: .infinity, minHeight: 6.5 * scale)
+                            .frame(maxWidth: .infinity, minHeight: 5.5 * scale)
                             .background(
                                 today ? accent : Color.clear,
                                 in: RoundedRectangle(cornerRadius: 2.5 * scale, style: .continuous)
                             )
                             .foregroundStyle(today ? Color.black : Color.white.opacity(0.72))
                     } else {
-                        Color.clear.frame(minHeight: 6.5 * scale)
+                        Color.clear.frame(minHeight: 5.5 * scale)
                     }
                 }
             }
         }
-        .padding(3.5 * scale)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 7 * scale, style: .continuous))
+        .padding(2.5 * scale)
+        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 6 * scale, style: .continuous))
     }
 
     private func simpleMonthDay(_ day: Date) -> some View {
