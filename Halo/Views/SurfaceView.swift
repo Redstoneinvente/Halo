@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Foundation
 import CoreGraphics
 import UniformTypeIdentifiers
 import EventKit
