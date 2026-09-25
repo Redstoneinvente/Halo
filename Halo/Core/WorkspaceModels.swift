@@ -41,16 +41,49 @@ enum HaloNotchMode: String, Codable, CaseIterable, Identifiable {
 }
 
 enum SimpleNotchWidgetStyle: String, Codable, CaseIterable, Identifiable {
+    // Keep the raw values stable so Simple settings saved by earlier branch builds
+    // continue to decode, while the visible names now describe true layout families.
     case clean = "Clean"
     case glass = "Glass"
     case vibrant = "Vibrant"
     var id: String { rawValue }
 
+    var title: String {
+        switch self {
+        case .clean: return "Compact"
+        case .glass: return "Focus"
+        case .vibrant: return "Dashboard"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .clean: return "Dense, glanceable information with the primary action close at hand."
+        case .glass: return "A hero treatment built around the widget's most important content."
+        case .vibrant: return "A richer mini-dashboard with secondary information and controls."
+        }
+    }
+
     var symbol: String {
         switch self {
-        case .clean: return "circle"
-        case .glass: return "drop.fill"
-        case .vibrant: return "sparkles"
+        case .clean: return "rectangle.compress.vertical"
+        case .glass: return "viewfinder"
+        case .vibrant: return "rectangle.3.group"
+        }
+    }
+}
+
+enum SimpleNotchSize: String, Codable, CaseIterable, Identifiable {
+    case standard = "Standard"
+    case medium = "Medium"
+    case big = "Big"
+    var id: String { rawValue }
+
+    var scale: Double {
+        switch self {
+        case .standard: return 1.0
+        case .medium: return 1.16
+        case .big: return 1.34
         }
     }
 }
@@ -62,6 +95,9 @@ struct SimpleNotchSettings: Codable, Equatable {
     /// Order is also the enabled set: widgets absent from this array stay hidden.
     var widgets: [ModuleID] = [.clock, .media, .timer]
     var styles: [String: SimpleNotchWidgetStyle] = [:]
+    /// Optional for backwards compatibility with Simple settings saved before size presets.
+    var size: SimpleNotchSize?
+    var resolvedSize: SimpleNotchSize { size ?? .standard }
     /// Priority order for automatic closed-notch slots. Active transient widgets win
     /// before the Clock fallback.
     var closedWidgets: [ModuleID] = []
@@ -117,31 +153,51 @@ struct SimpleNotchSettings: Codable, Equatable {
 }
 
 enum SimpleNotchMetrics {
-    static let closedPillWidth = 190.0
-    static let closedHeight = 32.0
-    static let widgetWidth = 156.0
-    static let pixelPalWidth = 126.0
-    static let widgetHeight = 126.0
-    static let widgetSpacing = 10.0
-    static let horizontalPadding = 12.0
-    static let verticalPadding = 10.0
-    static let closedSlotWidth = 116.0
-    static let closedSlotGap = 8.0
-
-    static func width(for widget: ModuleID) -> Double {
-        widget == .pet ? pixelPalWidth : widgetWidth
+    static func closedPillWidth(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 190; case .medium: return 220; case .big: return 260 }
+    }
+    static func closedHeight(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 32; case .medium: return 36; case .big: return 42 }
+    }
+    static func widgetWidth(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 156; case .medium: return 184; case .big: return 216 }
+    }
+    static func pixelPalWidth(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 126; case .medium: return 148; case .big: return 174 }
+    }
+    static func widgetHeight(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 126; case .medium: return 148; case .big: return 172 }
+    }
+    static func widgetSpacing(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 10; case .medium: return 12; case .big: return 14 }
+    }
+    static func horizontalPadding(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 12; case .medium: return 14; case .big: return 16 }
+    }
+    static func verticalPadding(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 10; case .medium: return 12; case .big: return 14 }
+    }
+    static func closedSlotWidth(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 116; case .medium: return 132; case .big: return 150 }
+    }
+    static func closedSlotGap(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 8; case .medium: return 8; case .big: return 10 }
     }
 
-    static func expandedWidth(widgets: [ModuleID]) -> Double {
+    static func width(for widget: ModuleID, size: SimpleNotchSize) -> Double {
+        widget == .pet ? pixelPalWidth(size) : widgetWidth(size)
+    }
+
+    static func expandedWidth(widgets: [ModuleID], size: SimpleNotchSize) -> Double {
         let widgets = widgets.filter { SimpleNotchSettings.availableWidgets.contains($0) }
-        guard !widgets.isEmpty else { return closedPillWidth }
-        let content = widgets.reduce(0.0) { $0 + width(for: $1) }
-        let gaps = Double(max(0, widgets.count - 1)) * widgetSpacing
-        return max(closedPillWidth, content + gaps + horizontalPadding * 2)
+        guard !widgets.isEmpty else { return closedPillWidth(size) }
+        let content = widgets.reduce(0.0) { $0 + width(for: $1, size: size) }
+        let gaps = Double(max(0, widgets.count - 1)) * widgetSpacing(size)
+        return max(closedPillWidth(size), content + gaps + horizontalPadding(size) * 2)
     }
 
-    static var expandedBodyHeight: Double {
-        widgetHeight + verticalPadding * 2
+    static func expandedBodyHeight(_ size: SimpleNotchSize) -> Double {
+        widgetHeight(size) + verticalPadding(size) * 2
     }
 }
 
