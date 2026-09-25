@@ -3408,11 +3408,12 @@ struct SurfaceView: View {
                 )
             }
         }
-        .onChange(of: state.dropTargeted) { active in
-            if active && dropCIEnabled {
-                state.collapseTask?.cancel()
-                state.expanded = true
-            }
+        .onChange(of: state.dropTargeted) { _ in
+            // Re-run normal CI arbitration. If Drop CI wins, synchronizeSurfaceCIOwnership()
+            // calls activateDropOwnership(), which records whether Drop CI opened Halo.
+            // Do not set expanded directly here or drag-cancel cannot safely know whether
+            // it owns the responsibility to close the notch again.
+            synchronizeSurfaceCIOwnership()
         }
         .onAppear {
             if !commercialSurfaceGate.isReady {
