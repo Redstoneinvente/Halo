@@ -1356,14 +1356,16 @@ final class WindowManager {
             calendarActive: calendarActive
         )
 
+        let size = simple.resolvedSize
         let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
-        let baseWidth = attached ? max(16, geometry.physicalNotchWidth) : SimpleNotchMetrics.closedPillWidth
-        host.geometry?.activeCompactHeight = attached
-            ? max(16, geometry.safeAreaTop)
-            : SimpleNotchMetrics.closedHeight
+        // The preset is a preference, never permission to undercut the real camera housing.
+        let hardwareWidth = attached ? max(16, geometry.physicalNotchWidth) : 0
+        let hardwareHeight = attached ? max(16, geometry.safeAreaTop) : 0
+        let baseWidth = max(hardwareWidth, SimpleNotchMetrics.closedPillWidth(size))
+        host.geometry?.activeCompactHeight = max(hardwareHeight, SimpleNotchMetrics.closedHeight(size))
 
         if attached {
-            let extent = SimpleNotchMetrics.closedSlotWidth + SimpleNotchMetrics.closedSlotGap
+            let extent = SimpleNotchMetrics.closedSlotWidth(size) + SimpleNotchMetrics.closedSlotGap(size)
             switch active.count {
             case 0:
                 host.geometry?.activeCompactWidth = baseWidth
@@ -1380,16 +1382,16 @@ final class WindowManager {
         } else {
             let contentWidth: Double
             if active.isEmpty {
-                contentWidth = SimpleNotchMetrics.closedPillWidth
+                contentWidth = SimpleNotchMetrics.closedPillWidth(size)
             } else {
                 contentWidth =
-                    Double(active.count) * SimpleNotchMetrics.closedSlotWidth +
-                    Double(max(0, active.count - 1)) * SimpleNotchMetrics.closedSlotGap +
-                    SimpleNotchMetrics.horizontalPadding * 2
+                    Double(active.count) * SimpleNotchMetrics.closedSlotWidth(size) +
+                    Double(max(0, active.count - 1)) * SimpleNotchMetrics.closedSlotGap(size) +
+                    SimpleNotchMetrics.horizontalPadding(size) * 2
             }
             host.geometry?.activeCompactWidth = min(
                 geometry.visible.width,
-                max(SimpleNotchMetrics.closedPillWidth, contentWidth)
+                max(baseWidth, contentWidth)
             )
             host.geometry?.activeCompactCenterOffset = nil
         }
@@ -1398,8 +1400,8 @@ final class WindowManager {
         // closed slot arrangement. The open motion should grow vertically, not pinch inward.
         let closedWidth = host.geometry?.activeCompactWidth ?? baseWidth
         host.geometry?.expandedWidth = max(
-            SimpleNotchMetrics.expandedWidth(widgets: simple.widgets),
-            closedWidth
+            SimpleNotchMetrics.expandedWidth(widgets: simple.widgets, size: size),
+            max(hardwareWidth, closedWidth)
         )
     }
 
@@ -2417,8 +2419,16 @@ final class WindowManager {
                 }()
                 let hasPhysicalNotch = screen.safeAreaInsets.top > 0 && physicalWidth > 0
 
+                let size = simple.resolvedSize
+                let hardwareHeight = hasPhysicalNotch ? max(16, Double(screen.safeAreaInsets.top)) : 0
+                let presetClosedWidth = SimpleNotchMetrics.closedPillWidth(size)
+                let presetClosedHeight = SimpleNotchMetrics.closedHeight(size)
+
                 theme.style = hasPhysicalNotch ? .notch : .pill
-                theme.width = SimpleNotchMetrics.expandedWidth(widgets: simple.widgets)
+                theme.width = max(
+                    physicalWidth,
+                    SimpleNotchMetrics.expandedWidth(widgets: simple.widgets, size: size)
+                )
                 theme.cornerRadius = hasPhysicalNotch ? 18 : 22
 
                 appearance.background = .solid
@@ -2430,16 +2440,14 @@ final class WindowManager {
                 appearance.saturation = 1
                 appearance.brightness = 0
                 appearance.skin = NotchSkinOptions()
-                appearance.compactWidth = hasPhysicalNotch ? physicalWidth : SimpleNotchMetrics.closedPillWidth
-                appearance.expandedHeight = SimpleNotchMetrics.expandedBodyHeight
-                appearance.spacing = SimpleNotchMetrics.widgetSpacing
+                appearance.compactWidth = max(physicalWidth, presetClosedWidth)
+                appearance.expandedHeight = max(hardwareHeight, SimpleNotchMetrics.expandedBodyHeight(size))
+                appearance.spacing = SimpleNotchMetrics.widgetSpacing(size)
                 appearance.animation = .smooth
 
                 appearance.surface.useStyleContour = true
                 appearance.surface.shape = hasPhysicalNotch ? .scoop : .capsule
-                appearance.surface.compactHeight = hasPhysicalNotch
-                    ? max(16, Double(screen.safeAreaInsets.top))
-                    : SimpleNotchMetrics.closedHeight
+                appearance.surface.compactHeight = max(hardwareHeight, presetClosedHeight)
                 appearance.surface.opening = .spring
                 appearance.surface.closing = .spring
                 appearance.surface.duration = 0.28
