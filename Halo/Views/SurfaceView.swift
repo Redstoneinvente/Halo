@@ -4031,6 +4031,12 @@ private struct SimpleNotchWidgetView: View {
                 if widget == .calendar { calendarEventCard } else { compactContent }
             case .yearOverview:
                 if widget == .calendar { calendarYearOverview } else { compactContent }
+            case .pomodoroRing:
+                if widget == .timer { pomodoroRingTimer } else { compactContent }
+            case .deadlineTimer:
+                if widget == .timer { deadlineTimer } else { compactContent }
+            case .segmentDisplay:
+                if widget == .timer { segmentDisplayTimer } else { compactContent }
             }
         }
         .padding(12 * scale)
@@ -4641,6 +4647,222 @@ private struct SimpleNotchWidgetView: View {
                 }
             }
         }
+    }
+
+    private var pomodoroRingTimer: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            HStack(spacing: 13 * scale) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.white.opacity(0.10), lineWidth: 5 * scale)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(timerProgress))
+                        .stroke(
+                            accent,
+                            style: StrokeStyle(lineWidth: 5 * scale, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+
+                    VStack(spacing: 1 * scale) {
+                        Text(timerText)
+                            .font(.system(size: 16 * scale, weight: .semibold, design: .monospaced))
+                            .monospacedDigit()
+                            .minimumScaleFactor(0.62)
+                            .lineLimit(1)
+                        Text(timerIsIdle ? "READY" : (store.deadline == nil ? "PAUSED" : "FOCUS"))
+                            .font(.system(size: 5.5 * scale, weight: .bold, design: .rounded))
+                            .tracking(0.8)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 80 * scale, height: 80 * scale)
+
+                VStack(alignment: .leading, spacing: 6 * scale) {
+                    HStack(spacing: 5 * scale) {
+                        Circle()
+                            .fill(timerIsIdle ? Color.secondary : accent)
+                            .frame(width: 4 * scale, height: 4 * scale)
+                        Text("POMODORO")
+                            .font(.system(size: 7 * scale, weight: .bold, design: .rounded))
+                            .tracking(1)
+                            .foregroundStyle(timerIsIdle ? Color.secondary : accent)
+                    }
+
+                    if timerIsIdle {
+                        Text("Choose a focus session")
+                            .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
+                        HStack(spacing: 4 * scale) {
+                            timerPresetButton("15m", minutes: 15)
+                            timerPresetButton("25m", minutes: 25)
+                            timerPresetButton("45m", minutes: 45)
+                        }
+                    } else {
+                        Text(store.deadline == nil ? "Session paused" : "Stay with one thing")
+                            .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
+                        HStack(spacing: 6 * scale) {
+                            roundButton(store.deadline == nil ? "play.fill" : "pause.fill") {
+                                store.pauseResume()
+                            }
+                            roundButton("plus") {
+                                store.addTimer(minutes: 5)
+                            }
+                            roundButton("arrow.counterclockwise") {
+                                store.resetTimer()
+                            }
+                        }
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var deadlineTimer: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            VStack(alignment: .leading, spacing: 5 * scale) {
+                HStack {
+                    Text(timerIsIdle ? "FOCUS TIMER" : (store.deadline == nil ? "PAUSED" : "ENDS"))
+                        .font(.system(size: 6.5 * scale, weight: .bold, design: .rounded))
+                        .tracking(0.9)
+                        .foregroundStyle(accent)
+                    Spacer()
+                    if !timerIsIdle {
+                        Text(timerProgress.formatted(.percent.precision(.fractionLength(0))))
+                            .font(.system(size: 6.5 * scale, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text(timerDeadlineHeadline)
+                    .font(.system(size: 22 * scale, weight: .medium, design: .rounded))
+                    .minimumScaleFactor(0.68)
+                    .lineLimit(1)
+
+                HStack(alignment: .center, spacing: 7 * scale) {
+                    Capsule()
+                        .fill(accent)
+                        .frame(width: 3 * scale, height: 28 * scale)
+
+                    VStack(alignment: .leading, spacing: 1.5 * scale) {
+                        Text(timerIsIdle ? "25 minute focus" : timerDeadlineSubheadline)
+                            .font(.system(size: 8.5 * scale, weight: .semibold, design: .rounded))
+                            .lineLimit(1)
+                        Text(timerIsIdle ? "Pick a duration to begin" : timerText + " remaining")
+                            .font(.system(size: 7 * scale, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    if timerIsIdle {
+                        timerPresetButton("25m", minutes: 25)
+                    } else {
+                        roundButton(store.deadline == nil ? "play.fill" : "pause.fill") {
+                            store.pauseResume()
+                        }
+                        roundButton("xmark") {
+                            store.resetTimer()
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        }
+    }
+
+    private var segmentDisplayTimer: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            VStack(alignment: .leading, spacing: 6 * scale) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
+                        .fill(Color.black.opacity(0.42))
+                    RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8 * scale)
+
+                    VStack(spacing: 2 * scale) {
+                        Text(timerText)
+                            .font(.system(size: 28 * scale, weight: .light, design: .monospaced))
+                            .monospacedDigit()
+                            .tracking(2.2 * scale)
+                            .minimumScaleFactor(0.58)
+                            .lineLimit(1)
+                            .foregroundStyle(Color.white.opacity(0.96))
+
+                        HStack(spacing: 5 * scale) {
+                            Text(timerIsIdle ? "PRESET 25 MIN" : (store.deadline == nil ? "PAUSED" : "COUNTDOWN"))
+                                .font(.system(size: 5.5 * scale, weight: .bold, design: .monospaced))
+                                .tracking(0.7)
+                                .foregroundStyle(accent)
+                            Circle()
+                                .fill(timerIsIdle ? Color.secondary.opacity(0.5) : accent)
+                                .frame(width: 3 * scale, height: 3 * scale)
+                        }
+                    }
+                    .padding(.horizontal, 8 * scale)
+                }
+                .frame(height: 64 * scale)
+
+                HStack(spacing: 6 * scale) {
+                    if timerIsIdle {
+                        timerPresetButton("5m", minutes: 5)
+                        timerPresetButton("25m", minutes: 25)
+                        timerPresetButton("60m", minutes: 60)
+                    } else {
+                        Text(timerDeadlineSubheadline)
+                            .font(.system(size: 7 * scale, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        roundButton(store.deadline == nil ? "play.fill" : "pause.fill") {
+                            store.pauseResume()
+                        }
+                        roundButton("plus") {
+                            store.addTimer(minutes: 5)
+                        }
+                        roundButton("xmark") {
+                            store.resetTimer()
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var timerDeadlineHeadline: String {
+        if timerIsIdle { return "Start a session" }
+        if store.finished { return "Complete" }
+
+        let remaining = max(0, Int(timerRemaining.rounded()))
+        if store.deadline == nil {
+            return remaining >= 3600
+                ? "Paused · \(remaining / 3600)h \((remaining / 60) % 60)m"
+                : "Paused · \(max(1, remaining / 60)) min"
+        }
+
+        if remaining >= 3600 {
+            let hours = remaining / 3600
+            let minutes = (remaining / 60) % 60
+            return minutes > 0 ? "In \(hours)h \(minutes)m" : "In \(hours)h"
+        }
+        if remaining >= 60 {
+            return "In \(max(1, remaining / 60)) min"
+        }
+        return "In \(remaining) sec"
+    }
+
+    private var timerDeadlineSubheadline: String {
+        if store.finished { return "Timer finished" }
+        if let deadline = store.deadline {
+            return "Ends at " + deadline.formatted(date: .omitted, time: .shortened)
+        }
+        if store.pausedSeconds > 0 {
+            return "Resume to set a finish time"
+        }
+        return "Ready when you are"
     }
 
     private var compactFiles: some View {
@@ -5532,7 +5754,7 @@ private struct SimpleClosedNotchView: View {
     private func closedSlot(_ widget: ModuleID) -> some View {
         let preset = settings.style(for: widget)
         switch preset {
-        case .clean, .stackedDigital, .flipClock, .minimalDial, .romanDial, .eventCard, .yearOverview:
+        case .clean, .stackedDigital, .flipClock, .minimalDial, .romanDial, .eventCard, .yearOverview, .pomodoroRing, .deadlineTimer, .segmentDisplay:
             closedCore(widget)
                 .padding(.horizontal, 6 * scale)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
