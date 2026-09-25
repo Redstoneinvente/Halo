@@ -248,8 +248,10 @@ enum SimpleNotchMetrics {
     static func pixelPalWidth(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 164; case .medium: return 188; case .big: return 214 }
     }
+    /// Every Simple widget uses the same vertical footprint for a given size.
+    /// Styles may change composition and width, but never the row height.
     static func widgetHeight(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 112; case .medium: return 126; case .big: return 144 }
+        switch size { case .standard: return 148; case .medium: return 166; case .big: return 188 }
     }
     static func widgetSpacing(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 10; case .medium: return 12; case .big: return 14 }
@@ -346,7 +348,7 @@ enum SimpleNotchMetrics {
     }
 
     static func calendarMonthHeight(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 148; case .medium: return 166; case .big: return 188 }
+        widgetHeight(size)
     }
 
     static func calendarYearWidth(_ size: SimpleNotchSize) -> Double {
@@ -354,7 +356,7 @@ enum SimpleNotchMetrics {
     }
 
     static func calendarYearHeight(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 184; case .medium: return 206; case .big: return 230 }
+        widgetHeight(size)
     }
 
     static func timerFeatureWidth(_ size: SimpleNotchSize) -> Double {
@@ -398,15 +400,9 @@ enum SimpleNotchMetrics {
     }
 
     static func height(for widget: ModuleID, style: SimpleNotchWidgetStyle, size: SimpleNotchSize) -> Double {
-        if widget == .calendar {
-            switch style {
-            case .glass: return calendarMonthHeight(size)
-            case .yearOverview: return calendarYearHeight(size)
-            case .vibrant: return widgetHeight(size) + 24 * size.scale
-            default: return widgetHeight(size)
-            }
-        }
-        return widgetHeight(size) + (style == .vibrant ? 24 * size.scale : 0)
+        // Vertical rhythm is intentionally style-invariant in Simple Mode.
+        // Richer styles must adapt their internal layout instead of resizing the notch.
+        widgetHeight(size)
     }
 
     static func expandedWidth(widgets: [ModuleID], size: SimpleNotchSize) -> Double {
