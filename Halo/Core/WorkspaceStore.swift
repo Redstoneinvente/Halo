@@ -1659,9 +1659,10 @@ private final class SystemAudioMediaFallback {
             let presentedArtist = hasRecognizedYouTubeMetadata && !recognizedArtist.isEmpty
                 ? recognizedArtist
                 : displayArtist
+            let youtubeFallbackArtworkURL = isNormalYouTube ? youtubeThumbnailURL(from: safari.pageURL) : nil
             let presentedArtworkURL = hasRecognizedYouTubeMetadata
-                ? (recognizedArtworkURL ?? safari.artworkURL)
-                : safari.artworkURL
+                ? (recognizedArtworkURL ?? safari.artworkURL ?? youtubeFallbackArtworkURL)
+                : (safari.artworkURL ?? youtubeFallbackArtworkURL)
 
             media.acceptExternalMedia(
                 title: presentedTitle,
@@ -1872,10 +1873,13 @@ private final class SystemAudioMediaFallback {
                     $0.album.isEmpty ? snapshot.album : $0.album
                 } ?? snapshot.album
                 let preferredArtworkURL: String?
+                let youtubeFallbackArtworkURL = liveSafariIsNormalYouTube
+                    ? liveSafari.flatMap { self.youtubeThumbnailURL(from: $0.pageURL) }
+                    : nil
                 if hasRecognizedYouTubeMetadata {
-                    preferredArtworkURL = self.recognizedArtworkURL ?? liveSafari?.artworkURL
+                    preferredArtworkURL = self.recognizedArtworkURL ?? liveSafari?.artworkURL ?? youtubeFallbackArtworkURL
                 } else if liveSafariIsNormalYouTube {
-                    preferredArtworkURL = liveSafari?.artworkURL
+                    preferredArtworkURL = liveSafari?.artworkURL ?? youtubeFallbackArtworkURL
                 } else {
                     preferredArtworkURL = snapshot.artworkURL ?? liveSafari?.artworkURL
                 }
@@ -1965,8 +1969,9 @@ private final class SystemAudioMediaFallback {
                     self.recognizedArtworkURL = recognizedArtworkURL
                 }
 
+                let liveSafari = SafariMediaBridge.shared.currentState(maxAge: 3.5)
                 let safariFallbackArtwork = isNormalYouTube
-                    ? SafariMediaBridge.shared.currentState(maxAge: 3.5)?.artworkURL
+                    ? (liveSafari?.artworkURL ?? liveSafari.flatMap { self.youtubeThumbnailURL(from: $0.pageURL) })
                     : nil
                 media.acceptExternalMedia(title: title,
                                           artist: artist,
@@ -1979,6 +1984,26 @@ private final class SystemAudioMediaFallback {
                 self.lastRecognitionSuccessKey = sourceKey
             }
         }
+    }
+
+    private func youtubeThumbnailURL(from pageURL: String) -> String? {
+        guard let components = URLComponents(string: pageURL),
+              let host = components.host?.lowercased(),
+              host == "youtube.com" || host == "www.youtube.com" || host.hasSuffix(".youtube.com"),
+              host != "music.youtube.com" else { return nil }
+
+        var videoID = components.queryItems?.first(where: { $0.name == "v" })?.value ?? ""
+        if videoID.isEmpty {
+            let pathParts = components.path.split(separator: "/").map(String.init)
+            if pathParts.count >= 2,
+               ["shorts", "embed", "live"].contains(pathParts[0].lowercased()) {
+                videoID = pathParts[1]
+            }
+        }
+
+        guard !videoID.isEmpty,
+              let encoded = videoID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { return nil }
+        return "https://i.ytimg.com/vi/\(encoded)/hqdefault.jpg"
     }
 
     private func isGenericExternalMetadata(title: String, artist: String) -> Bool {
