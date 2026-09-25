@@ -201,8 +201,21 @@ enum SimpleNotchMetrics {
         return max(preset, hardwareWidth + wingAllowance)
     }
 
+    static func calendarWidth(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 226; case .medium: return 258; case .big: return 292 }
+    }
+
+    static func calendarMonthHeight(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 128; case .medium: return 144; case .big: return 164 }
+    }
+
     static func width(for widget: ModuleID, size: SimpleNotchSize) -> Double {
-        widget == .pet ? pixelPalWidth(size) : widgetWidth(size)
+        if widget == .calendar { return calendarWidth(size) }
+        return widget == .pet ? pixelPalWidth(size) : widgetWidth(size)
+    }
+
+    static func height(for widget: ModuleID, style: SimpleNotchWidgetStyle, size: SimpleNotchSize) -> Double {
+        widget == .calendar && style == .glass ? calendarMonthHeight(size) : widgetHeight(size)
     }
 
     static func expandedWidth(widgets: [ModuleID], size: SimpleNotchSize) -> Double {
@@ -216,8 +229,12 @@ enum SimpleNotchMetrics {
         )
     }
 
-    static func expandedBodyHeight(_ size: SimpleNotchSize) -> Double {
-        widgetHeight(size) + verticalPadding(size) * 2
+    static func expandedBodyHeight(settings: SimpleNotchSettings) -> Double {
+        let size = settings.resolvedSize
+        let tallest = settings.widgets.map {
+            height(for: $0, style: settings.style(for: $0), size: size)
+        }.max() ?? widgetHeight(size)
+        return tallest + verticalPadding(size) * 2
     }
 }
 
