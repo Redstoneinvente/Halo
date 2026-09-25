@@ -3622,7 +3622,7 @@ struct SurfaceView: View {
                     .scaleEffect(simpleOpenContentVisible ? 0.985 : 1, anchor: .top)
                     .allowsHitTesting(false)
                 }
-                .frame(height: max(40, state.compactHeight))
+                .frame(height: simpleOpenTopInset)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     guard !state.pinned else { return }
@@ -3648,6 +3648,16 @@ struct SurfaceView: View {
                 state.expanded = true
             }
         }
+    }
+
+    private var simpleOpenTopInset: CGFloat {
+        // On a real notched Mac, reserve only the hardware notch itself. The previous
+        // 40 pt floor stacked with row padding and created a visible dead band.
+        if state.physicalNotchHeight > 0 {
+            return max(1, state.physicalNotchHeight + 2)
+        }
+        // Pills/simulated notches do not have hardware to tuck beneath.
+        return max(24, state.compactHeight)
     }
 
     private func updateSimpleContentAnimation(expanded: Bool) {
@@ -3901,7 +3911,8 @@ private struct SimpleNotchWorkspaceView: View {
                 }
             }
             .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
-            .padding(.vertical, CGFloat(SimpleNotchMetrics.verticalPadding(size)))
+            .padding(.top, CGFloat(SimpleNotchMetrics.openTopPadding(size)))
+            .padding(.bottom, CGFloat(SimpleNotchMetrics.openBottomPadding(size)))
             .frame(width: arrangement.width, height: arrangement.height, alignment: .center)
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
             .clipped()
