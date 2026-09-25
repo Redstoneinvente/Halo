@@ -81,9 +81,9 @@ enum SimpleNotchSize: String, Codable, CaseIterable, Identifiable {
 
     var scale: Double {
         switch self {
-        case .standard: return 1.0
-        case .medium: return 1.16
-        case .big: return 1.34
+        case .standard: return 0.90
+        case .medium: return 1.0
+        case .big: return 1.12
         }
     }
 }
@@ -153,35 +153,52 @@ struct SimpleNotchSettings: Codable, Equatable {
 }
 
 enum SimpleNotchMetrics {
+    /// Non-notched displays use these as the collapsed pill. A real notch applies an
+    /// additional hardware floor in WindowManager.
     static func closedPillWidth(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 190; case .medium: return 220; case .big: return 260 }
+        switch size { case .standard: return 220; case .medium: return 250; case .big: return 285 }
     }
     static func closedHeight(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 32; case .medium: return 36; case .big: return 42 }
+        switch size { case .standard: return 34; case .medium: return 38; case .big: return 42 }
     }
+
+    /// Simple is intentionally a wide, shallow shelf rather than a stack of tall cards.
     static func widgetWidth(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 156; case .medium: return 184; case .big: return 216 }
+        switch size { case .standard: return 176; case .medium: return 204; case .big: return 232 }
     }
     static func pixelPalWidth(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 126; case .medium: return 148; case .big: return 174 }
+        switch size { case .standard: return 148; case .medium: return 170; case .big: return 194 }
     }
     static func widgetHeight(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 126; case .medium: return 148; case .big: return 172 }
+        switch size { case .standard: return 68; case .medium: return 78; case .big: return 90 }
     }
     static func widgetSpacing(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 10; case .medium: return 12; case .big: return 14 }
+        switch size { case .standard: return 2; case .medium: return 4; case .big: return 6 }
     }
     static func horizontalPadding(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 12; case .medium: return 14; case .big: return 16 }
-    }
-    static func verticalPadding(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 10; case .medium: return 12; case .big: return 14 }
     }
+    static func verticalPadding(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 6; case .medium: return 7; case .big: return 8 }
+    }
     static func closedSlotWidth(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 116; case .medium: return 132; case .big: return 150 }
+        switch size { case .standard: return 118; case .medium: return 132; case .big: return 148 }
     }
     static func closedSlotGap(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 8; case .medium: return 8; case .big: return 10 }
+        switch size { case .standard: return 6; case .medium: return 8; case .big: return 10 }
+    }
+
+    /// The opened surface should look like the reference shelf even with only one enabled
+    /// widget. Hardware width is added by WindowManager before this is applied.
+    static func minimumOpenShelfWidth(_ size: SimpleNotchSize, hardwareWidth: Double = 0) -> Double {
+        let preset: Double
+        let wingAllowance: Double
+        switch size {
+        case .standard: preset = 440; wingAllowance = 220
+        case .medium: preset = 540; wingAllowance = 300
+        case .big: preset = 660; wingAllowance = 380
+        }
+        return max(preset, hardwareWidth + wingAllowance)
     }
 
     static func width(for widget: ModuleID, size: SimpleNotchSize) -> Double {
@@ -190,10 +207,13 @@ enum SimpleNotchMetrics {
 
     static func expandedWidth(widgets: [ModuleID], size: SimpleNotchSize) -> Double {
         let widgets = widgets.filter { SimpleNotchSettings.availableWidgets.contains($0) }
-        guard !widgets.isEmpty else { return closedPillWidth(size) }
+        guard !widgets.isEmpty else { return minimumOpenShelfWidth(size) }
         let content = widgets.reduce(0.0) { $0 + width(for: $1, size: size) }
         let gaps = Double(max(0, widgets.count - 1)) * widgetSpacing(size)
-        return max(closedPillWidth(size), content + gaps + horizontalPadding(size) * 2)
+        return max(
+            minimumOpenShelfWidth(size),
+            content + gaps + horizontalPadding(size) * 2
+        )
     }
 
     static func expandedBodyHeight(_ size: SimpleNotchSize) -> Double {
