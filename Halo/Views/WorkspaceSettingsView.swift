@@ -294,27 +294,32 @@ struct SettingsView: View {
                 }
 
                 Divider()
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     Link(destination: URL(string: "https://halo.redstoneinvente.com")!) {
                         Label("Halo website", systemImage: "globe")
                     }
-                    Link(destination: URL(string: "https://halo.redstoneinvente.com/terms/")!) {
-                        Label("Terms", systemImage: "doc.text")
+                    .font(.callout)
+
+                    HStack(spacing: 5) {
+                        Link("Terms", destination: URL(string: "https://halo.redstoneinvente.com/terms/")!)
+                        Text("·")
+                        Link("EULA", destination: URL(string: "https://halo.redstoneinvente.com/EULA/")!)
+                        Text("·")
+                        Link("Privacy", destination: URL(string: "https://halo.redstoneinvente.com/privacy/")!)
                     }
-                    Link(destination: URL(string: "https://halo.redstoneinvente.com/EULA/")!) {
-                        Label("EULA", systemImage: "doc.badge.gearshape")
-                    }
-                    Link(destination: URL(string: "https://halo.redstoneinvente.com/privacy/")!) {
-                        Label("Privacy", systemImage: "hand.raised")
-                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
 #if !HALO_APPSTORE
                     Link(destination: URL(string: "https://buymeacoffee.com/redstoneinvente")!) {
                         Label("Buy me a coffee", systemImage: "cup.and.saucer.fill")
                     }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 #endif
                 }
-                .font(.callout)
-                .padding(16)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(width: 236)
