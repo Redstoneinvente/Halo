@@ -4023,7 +4023,7 @@ private struct SimpleNotchWidgetView: View {
                 heroIcon("clock.fill")
                 VStack(alignment: .leading, spacing: 1) {
                     Text(context.date, style: .time)
-                        .font(.system(size: 20 * scale, weight: .bold, design: .rounded))
+                        .font(.system(size: 18 * scale, weight: .bold, design: .rounded))
                         .monospacedDigit()
                     Text(context.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
                         .font(.system(size: 8.5 * scale, weight: .medium))
@@ -4043,7 +4043,7 @@ private struct SimpleNotchWidgetView: View {
                     .tracking(1.1)
                     .foregroundStyle(accent)
                 Text(context.date, style: .time)
-                    .font(.system(size: 28 * scale, weight: .bold, design: .rounded))
+                    .font(.system(size: 22 * scale, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .minimumScaleFactor(0.68)
                     .lineLimit(1)
@@ -4060,7 +4060,7 @@ private struct SimpleNotchWidgetView: View {
             HStack(alignment: .bottom, spacing: 8 * scale) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(context.date.formatted(.dateTime.day()))
-                        .font(.system(size: 32 * scale, weight: .black, design: .rounded))
+                        .font(.system(size: 26 * scale, weight: .black, design: .rounded))
                     Text(context.date.formatted(.dateTime.month(.abbreviated)).uppercased())
                         .font(.system(size: 8 * scale, weight: .bold))
                         .foregroundStyle(accent)
@@ -4068,7 +4068,7 @@ private struct SimpleNotchWidgetView: View {
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 1) {
                     Text(context.date, style: .time)
-                        .font(.system(size: 19 * scale, weight: .bold, design: .rounded))
+                        .font(.system(size: 16 * scale, weight: .bold, design: .rounded))
                         .monospacedDigit()
                     Text(context.date.formatted(.dateTime.weekday(.wide)))
                         .font(.system(size: 8 * scale))
@@ -4107,7 +4107,7 @@ private struct SimpleNotchWidgetView: View {
                         .font(.system(size: 12 * scale, weight: .bold, design: .monospaced))
                         .minimumScaleFactor(0.65)
                 }
-                .frame(width: 76 * scale, height: 76 * scale)
+                .frame(width: 54 * scale, height: 54 * scale)
 
                 roundButton(workspace.stopwatchStart == nil ? "play.fill" : "pause.fill") {
                     workspace.toggleStopwatch()
@@ -4121,7 +4121,7 @@ private struct SimpleNotchWidgetView: View {
         TimelineView(.periodic(from: .now, by: 0.1)) { context in
             VStack(alignment: .leading, spacing: 7 * scale) {
                 Text(stopwatchText(at: context.date))
-                    .font(.system(size: 21 * scale, weight: .bold, design: .monospaced))
+                    .font(.system(size: 16 * scale, weight: .bold, design: .monospaced))
                     .minimumScaleFactor(0.7)
                     .lineLimit(1)
                 HStack {
@@ -4146,7 +4146,7 @@ private struct SimpleNotchWidgetView: View {
                 heroIcon("timer")
                 VStack(alignment: .leading, spacing: 1) {
                     Text(timerText)
-                        .font(.system(size: 18 * scale, weight: .bold, design: .monospaced))
+                        .font(.system(size: 16 * scale, weight: .bold, design: .monospaced))
                     Text(timerIsIdle ? "25 minute quick timer" : "Timer active")
                         .font(.system(size: 8 * scale))
                         .foregroundStyle(.secondary)
@@ -4171,7 +4171,7 @@ private struct SimpleNotchWidgetView: View {
                     Text(timerText)
                         .font(.system(size: 14 * scale, weight: .bold, design: .monospaced))
                 }
-                .frame(width: 80 * scale, height: 80 * scale)
+                .frame(width: 56 * scale, height: 56 * scale)
                 Text(timerIsIdle ? "Ready" : "Focus")
                     .font(.system(size: 8.5 * scale, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -4184,7 +4184,7 @@ private struct SimpleNotchWidgetView: View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             VStack(alignment: .leading, spacing: 7 * scale) {
                 Text(timerText)
-                    .font(.system(size: 22 * scale, weight: .bold, design: .monospaced))
+                    .font(.system(size: 16 * scale, weight: .bold, design: .monospaced))
                 if timerIsIdle {
                     HStack(spacing: 5 * scale) {
                         timerPresetButton("5m", minutes: 5)
@@ -4222,9 +4222,9 @@ private struct SimpleNotchWidgetView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 16 * scale, style: .continuous)
                     .fill(accent.opacity(0.15))
-                    .frame(width: 72 * scale, height: 62 * scale)
+                    .frame(width: 54 * scale, height: 44 * scale)
                 Image(systemName: store.files.isEmpty ? "tray" : "doc.on.doc.fill")
-                    .font(.system(size: 26 * scale, weight: .medium))
+                    .font(.system(size: 20 * scale, weight: .medium))
                     .foregroundStyle(accent)
             }
             Text(store.files.isEmpty ? "Drop files here" : "\(store.files.count) in tray")
@@ -4297,7 +4297,7 @@ private struct SimpleNotchWidgetView: View {
                 .font(.system(size: 8 * scale, weight: .bold))
                 .foregroundStyle(accent)
             Text(Date.now.formatted(.dateTime.day()))
-                .font(.system(size: 44 * scale, weight: .black, design: .rounded))
+                .font(.system(size: 30 * scale, weight: .black, design: .rounded))
                 .minimumScaleFactor(0.7)
             Text(Date.now.formatted(.dateTime.month(.wide)))
                 .font(.system(size: 10 * scale, weight: .semibold))
@@ -4344,7 +4344,7 @@ private struct SimpleNotchWidgetView: View {
     private var compactPixelPal: some View {
         HStack(spacing: 6 * scale) {
             pixelPal
-                .frame(width: 62 * scale, height: 62 * scale)
+                .frame(width: 46 * scale, height: 46 * scale)
             VStack(alignment: .leading, spacing: 2) {
                 Text("PIXEL PAL")
                     .font(.system(size: 8 * scale, weight: .bold, design: .monospaced))
@@ -4360,14 +4360,14 @@ private struct SimpleNotchWidgetView: View {
 
     private var focusPixelPal: some View {
         pixelPal
-            .frame(width: 96 * scale, height: 96 * scale)
+            .frame(width: 58 * scale, height: 58 * scale)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var dashboardPixelPal: some View {
         HStack(spacing: 7 * scale) {
             pixelPal
-                .frame(width: 74 * scale, height: 74 * scale)
+                .frame(width: 54 * scale, height: 54 * scale)
             VStack(alignment: .leading, spacing: 4 * scale) {
                 Text("Online")
                     .font(.system(size: 9 * scale, weight: .bold))
@@ -4390,7 +4390,7 @@ private struct SimpleNotchWidgetView: View {
 
     private var compactMedia: some View {
         HStack(spacing: 8 * scale) {
-            mediaArtwork(size: 46 * scale, radius: 10 * scale)
+            mediaArtwork(size: 36 * scale, radius: 8 * scale)
             VStack(alignment: .leading, spacing: 2) {
                 Text(mediaTitle)
                     .font(.system(size: 10 * scale, weight: .bold))
@@ -4409,7 +4409,7 @@ private struct SimpleNotchWidgetView: View {
 
     private var focusMedia: some View {
         VStack(spacing: 6 * scale) {
-            mediaArtwork(size: 72 * scale, radius: 16 * scale)
+            mediaArtwork(size: 46 * scale, radius: 10 * scale)
             Text(mediaTitle)
                 .font(.system(size: 9.5 * scale, weight: .bold))
                 .lineLimit(1)
@@ -4425,7 +4425,7 @@ private struct SimpleNotchWidgetView: View {
     private var dashboardMedia: some View {
         VStack(alignment: .leading, spacing: 6 * scale) {
             HStack(spacing: 7 * scale) {
-                mediaArtwork(size: 44 * scale, radius: 9 * scale)
+                mediaArtwork(size: 34 * scale, radius: 8 * scale)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(mediaTitle)
                         .font(.system(size: 9.5 * scale, weight: .bold))
@@ -4493,9 +4493,9 @@ private struct SimpleNotchWidgetView: View {
 
     private func heroIcon(_ symbol: String) -> some View {
         Image(systemName: symbol)
-            .font(.system(size: 16 * scale, weight: .bold))
+            .font(.system(size: 13 * scale, weight: .bold))
             .foregroundStyle(accent)
-            .frame(width: 38 * scale, height: 38 * scale)
+            .frame(width: 30 * scale, height: 30 * scale)
             .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 11 * scale, style: .continuous))
     }
 
