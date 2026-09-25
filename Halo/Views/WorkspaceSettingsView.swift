@@ -533,7 +533,7 @@ struct SettingsView: View {
             if featureAccess.allows(.advancedClosedNotch) {
                 ClosedNotchSettingsView(layout: $workspace.settings.layout, media: workspace.media, app: workspace.settings.mediaApp)
             } else {
-                HaloLiteClosedNotchSettingsView()
+                HaloLiteClosedNotchSettingsView(layout: $workspace.settings.layout)
             }
         case "Notch Bubbles":
             if featureAccess.allows(.advancedBubbles) {
@@ -1075,23 +1075,70 @@ private struct HaloLiteActivationSequenceSettingsPane: View {
 
 @MainActor
 private struct HaloLiteClosedNotchSettingsView: View {
+    @Binding var layout: WorkspaceLayout
     @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
+
+    private var compactWidth: Binding<Double> {
+        Binding(
+            get: { layout.appearance.compactWidth },
+            set: { layout.appearance.compactWidth = min(640, max(16, $0)) }
+        )
+    }
+
+    private var compactHeight: Binding<Double> {
+        Binding(
+            get: { layout.appearance.surface.compactHeight },
+            set: { layout.appearance.surface.compactHeight = min(100, max(16, $0)) }
+        )
+    }
 
     var body: some View {
         Section("Closed notch") {
             Label("Standard Halo closed notch", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.primary)
-            Text("Halo Lite uses the polished default closed-notch presentation with the same normal animation quality and interaction behaviour.")
+            Text("Halo Lite keeps the standard closed-notch design, while still letting you size the surface to fit your Mac and preferred layout.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             Toggle("Keep closed contents visible when Halo opens", isOn: $keepClosedContentsWhenOpen)
         }
 
+        Section("Size") {
+            LabeledContent("Width") {
+                HStack(spacing: 10) {
+                    Slider(value: compactWidth, in: 120...640, step: 1)
+                        .frame(width: 190)
+                    Text("\(Int(compactWidth.wrappedValue)) pt")
+                        .monospacedDigit()
+                        .frame(width: 58, alignment: .trailing)
+                }
+            }
+
+            LabeledContent("Height") {
+                HStack(spacing: 10) {
+                    Slider(value: compactHeight, in: 16...100, step: 1)
+                        .frame(width: 190)
+                    Text("\(Int(compactHeight.wrappedValue)) pt")
+                        .monospacedDigit()
+                        .frame(width: 58, alignment: .trailing)
+                }
+            }
+
+            Button("Reset closed-notch size") {
+                let defaults = Appearance()
+                layout.appearance.compactWidth = defaults.compactWidth
+                layout.appearance.surface.compactHeight = defaults.surface.compactHeight
+            }
+
+            Text("Only the closed-notch width and height are exposed in Halo Lite. Positioning, shape, media presentation, visualizers and deeper closed-notch styling remain Halo Full features.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
         Section("Customization") {
             HaloLockedSetting(
                 title: "Advanced closed-notch design",
-                detail: "Geometry, artwork layers, visualizers, media presentation and deeper closed-notch styling are available with Halo Full."
+                detail: "Positioning, artwork layers, visualizers, media presentation and deeper closed-notch styling are available with Halo Full."
             )
         }
     }
