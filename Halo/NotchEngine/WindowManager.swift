@@ -2454,7 +2454,7 @@ final class WindowManager {
                 appearance.brightness = 0
                 appearance.skin = NotchSkinOptions()
                 appearance.compactWidth = max(hardwareShellWidth, presetClosedWidth)
-                appearance.expandedHeight = SimpleNotchMetrics.expandedBodyHeight(size)
+                appearance.expandedHeight = SimpleNotchMetrics.expandedBodyHeight(settings: simple)
                 appearance.spacing = SimpleNotchMetrics.widgetSpacing(size)
                 appearance.animation = .smooth
 
