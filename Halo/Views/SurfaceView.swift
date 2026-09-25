@@ -3829,8 +3829,8 @@ private struct SimpleNotchWorkspaceView: View {
         .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
         .padding(.vertical, CGFloat(SimpleNotchMetrics.verticalPadding(size)))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .animation(.snappy(duration: 0.22), value: settings.widgets)
-        .animation(.snappy(duration: 0.22), value: size)
+        .animation(.easeInOut(duration: 0.22), value: settings.widgets)
+        .animation(.easeInOut(duration: 0.22), value: size)
     }
 
     @ViewBuilder
