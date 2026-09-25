@@ -20,7 +20,16 @@
 
   function mediaElements() {
     return Array.from(document.querySelectorAll("video, audio")).filter((element) => {
-      return Number.isFinite(element.duration) || element.readyState > 0 || !element.paused;
+      const hasMedia = Number.isFinite(element.duration) || element.readyState > 0 || !element.paused;
+      if (!hasMedia) return false;
+
+      // Ignore background/autoplay media that cannot currently produce audible output.
+      // Large muted hero videos otherwise beat a real audio element in mediaScore() and
+      // make Halo open Audio CI with the page title instead of actual media metadata.
+      const effectivelyMuted = element.muted || Number(element.volume) <= 0.001;
+      if (!element.paused && effectivelyMuted) return false;
+
+      return true;
     });
   }
 
@@ -198,7 +207,7 @@
       album: metadata.album,
       artworkURL: metadata.artworkURL || null,
       sourceLabel: sourceLabel(metadata.host),
-      playing: hasMedia ? (!media.paused && !media.ended) : false,
+      playing: hasMedia ? (!media.paused && !media.ended && !media.muted && Number(media.volume) > 0.001) : false,
       duration,
       position,
       playbackRate: hasMedia && Number.isFinite(media.playbackRate) ? media.playbackRate : 1,
@@ -282,7 +291,7 @@
 
   for (const eventName of [
     "play", "pause", "ended", "loadedmetadata", "durationchange",
-    "ratechange", "seeked", "emptied"
+    "ratechange", "seeked", "emptied", "volumechange"
   ]) {
     document.addEventListener(eventName, () => sendState(true), true);
   }
@@ -294,7 +303,7 @@
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ["src", "poster", "title"]
+    attributeFilter: ["src", "poster", "title", "muted"]
   });
 
   setInterval(() => sendState(false), SEND_INTERVAL_MS);
