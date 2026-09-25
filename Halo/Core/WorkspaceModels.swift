@@ -248,10 +248,10 @@ enum SimpleNotchMetrics {
     static func pixelPalWidth(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 164; case .medium: return 188; case .big: return 214 }
     }
-    /// Every Simple widget uses the same vertical footprint for a given size.
-    /// Styles may change composition and width, but never the row height.
+    /// Every Simple widget uses the same compact vertical footprint for a given size.
+    /// Rich styles must reflow internally instead of making the whole notch taller.
     static func widgetHeight(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 148; case .medium: return 166; case .big: return 188 }
+        switch size { case .standard: return 112; case .medium: return 126; case .big: return 144 }
     }
     static func widgetSpacing(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 10; case .medium: return 12; case .big: return 14 }
@@ -266,11 +266,11 @@ enum SimpleNotchMetrics {
     /// Keep the Simple row visually tucked beneath the physical notch. The larger
     /// bottom inset preserves breathing room without creating a dead band above widgets.
     static func openTopPadding(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 2; case .medium: return 3; case .big: return 4 }
+        switch size { case .standard: return 0; case .medium: return 1; case .big: return 2 }
     }
 
     static func openBottomPadding(_ size: SimpleNotchSize) -> Double {
-        verticalPadding(size)
+        switch size { case .standard: return 6; case .medium: return 7; case .big: return 8 }
     }
     static func closedSlotWidth(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 118; case .medium: return 132; case .big: return 148 }
