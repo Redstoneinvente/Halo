@@ -108,6 +108,10 @@ struct SimpleNotchSettings: Codable, Equatable {
         value.widgets = widgets.filter {
             Self.availableWidgets.contains($0) && seen.insert($0).inserted
         }
+        // Simple Mode must never open to an empty black surface.
+        if value.widgets.isEmpty {
+            value.widgets = [.clock]
+        }
         var closedSeen = Set<ModuleID>()
         value.closedWidgets = closedWidgets.filter {
             Self.closedEligibleWidgets.contains($0) && closedSeen.insert($0).inserted
@@ -164,13 +168,13 @@ enum SimpleNotchMetrics {
 
     /// Simple is intentionally a wide, shallow shelf rather than a stack of tall cards.
     static func widgetWidth(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 176; case .medium: return 204; case .big: return 232 }
+        switch size { case .standard: return 190; case .medium: return 218; case .big: return 246 }
     }
     static func pixelPalWidth(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 148; case .medium: return 170; case .big: return 194 }
+        switch size { case .standard: return 164; case .medium: return 188; case .big: return 214 }
     }
     static func widgetHeight(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 68; case .medium: return 78; case .big: return 90 }
+        switch size { case .standard: return 84; case .medium: return 96; case .big: return 110 }
     }
     static func widgetSpacing(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 2; case .medium: return 4; case .big: return 6 }
@@ -179,7 +183,7 @@ enum SimpleNotchMetrics {
         switch size { case .standard: return 10; case .medium: return 12; case .big: return 14 }
     }
     static func verticalPadding(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 6; case .medium: return 7; case .big: return 8 }
+        switch size { case .standard: return 8; case .medium: return 9; case .big: return 10 }
     }
     static func closedSlotWidth(_ size: SimpleNotchSize) -> Double {
         switch size { case .standard: return 118; case .medium: return 132; case .big: return 148 }
@@ -202,16 +206,29 @@ enum SimpleNotchMetrics {
     }
 
     static func calendarWidth(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 226; case .medium: return 258; case .big: return 292 }
+        switch size { case .standard: return 272; case .medium: return 306; case .big: return 342 }
     }
 
     static func calendarMonthHeight(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 128; case .medium: return 144; case .big: return 164 }
+        switch size { case .standard: return 148; case .medium: return 166; case .big: return 188 }
+    }
+
+    static func mediaWidth(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 264; case .medium: return 300; case .big: return 336 }
+    }
+
+    static func clockWidth(_ size: SimpleNotchSize) -> Double {
+        switch size { case .standard: return 220; case .medium: return 248; case .big: return 278 }
     }
 
     static func width(for widget: ModuleID, size: SimpleNotchSize) -> Double {
-        if widget == .calendar { return calendarWidth(size) }
-        return widget == .pet ? pixelPalWidth(size) : widgetWidth(size)
+        switch widget {
+        case .calendar: return calendarWidth(size)
+        case .media: return mediaWidth(size)
+        case .clock: return clockWidth(size)
+        case .pet: return pixelPalWidth(size)
+        default: return widgetWidth(size)
+        }
     }
 
     static func height(for widget: ModuleID, style: SimpleNotchWidgetStyle, size: SimpleNotchSize) -> Double {
