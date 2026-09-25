@@ -2437,8 +2437,10 @@ final class WindowManager {
                 theme.style = hasPhysicalNotch ? .notch : .pill
                 theme.width = max(
                     hardwareShellWidth,
-                    SimpleNotchMetrics.minimumOpenShelfWidth(size, hardwareWidth: hardwareShellWidth),
-                    SimpleNotchMetrics.expandedWidth(widgets: simple.widgets, size: size)
+                    max(
+                        SimpleNotchMetrics.minimumOpenShelfWidth(size, hardwareWidth: hardwareShellWidth),
+                        SimpleNotchMetrics.expandedWidth(widgets: simple.widgets, size: size)
+                    )
                 )
                 theme.cornerRadius = hasPhysicalNotch ? 18 : 22
 
