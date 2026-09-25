@@ -1208,6 +1208,7 @@ private struct NotchModeSettingsPane: View {
         switch widget {
         case .clock: return SimpleNotchWidgetStyle.clockCases
         case .calendar: return SimpleNotchWidgetStyle.calendarCases
+        case .timer: return SimpleNotchWidgetStyle.timerCases
         default: return SimpleNotchWidgetStyle.coreCases
         }
     }
@@ -1223,7 +1224,7 @@ private struct NotchModeSettingsPane: View {
             case .flipClock: return "Flip Clock"
             case .minimalDial: return "Minimal Dial"
             case .romanDial: return "Roman Dial"
-            case .eventCard, .yearOverview: return style.title
+            case .eventCard, .yearOverview, .pomodoroRing, .deadlineTimer, .segmentDisplay: return style.title
             }
         case .calendar:
             switch style {
@@ -1239,6 +1240,9 @@ private struct NotchModeSettingsPane: View {
             case .clean: return "Ring Timer"
             case .glass: return "Countdown Focus"
             case .vibrant: return "Timer Panel"
+            case .pomodoroRing: return "Pomodoro Ring"
+            case .deadlineTimer: return "Deadline"
+            case .segmentDisplay: return "Segment Display"
             default: return style.title
             }
         case .stopwatch:
@@ -1285,7 +1289,7 @@ private struct NotchModeSettingsPane: View {
             case .flipClock: return "Two mechanical flip-style number tiles for hours and minutes, with compact day and meridiem details."
             case .minimalDial: return "A clean analog face with sparse ticks, thin hands and lightweight date information."
             case .romanDial: return "A classic analog face with XII, III, VI and IX markers plus a compact digital readout."
-            case .eventCard, .yearOverview: return style.detail
+            case .eventCard, .yearOverview, .pomodoroRing, .deadlineTimer, .segmentDisplay: return style.detail
             }
         case .calendar:
             switch style {
@@ -1301,6 +1305,9 @@ private struct NotchModeSettingsPane: View {
             case .clean: return "A compact progress ring, remaining time and the primary timer action."
             case .glass: return "A large countdown treatment with the progress state as the visual focus."
             case .vibrant: return "A fuller timer panel with status, progress and controls."
+            case .pomodoroRing: return "A large circular Pomodoro countdown with focus status and direct pause, resume and reset controls."
+            case .deadlineTimer: return "A minimal deadline layout showing the remaining duration and the exact time the timer will finish."
+            case .segmentDisplay: return "A high-contrast digital countdown inspired by segmented desk displays, with quick timer controls."
             default: return style.detail
             }
         case .stopwatch:
