@@ -1343,17 +1343,18 @@ final class SimpleNotchLayoutTests: XCTestCase {
             ModuleID.clock.rawValue: .flipClock,
             ModuleID.calendar.rawValue: .yearOverview,
             ModuleID.timer.rawValue: .segmentDisplay,
-            ModuleID.media.rawValue: .stackedDigital
+            ModuleID.media.rawValue: .vinylDeck
         ]
 
         let normalized = settings.normalized()
         XCTAssertEqual(normalized.style(for: .clock), .flipClock)
         XCTAssertEqual(normalized.style(for: .calendar), .yearOverview)
         XCTAssertEqual(normalized.style(for: .timer), .segmentDisplay)
-        XCTAssertEqual(normalized.style(for: .media), .clean)
+        XCTAssertEqual(normalized.style(for: .media), .vinylDeck)
         XCTAssertEqual(SimpleNotchWidgetStyle.clockCases.count, 7)
         XCTAssertEqual(SimpleNotchWidgetStyle.calendarCases.count, 5)
         XCTAssertEqual(SimpleNotchWidgetStyle.timerCases.count, 6)
+        XCTAssertEqual(SimpleNotchWidgetStyle.mediaCases.count, 6)
         XCTAssertEqual(SimpleNotchWidgetStyle.coreCases, [.clean, .glass, .vibrant])
         XCTAssertTrue(SimpleNotchWidgetStyle.eventCard.supports(widget: .calendar))
         XCTAssertFalse(SimpleNotchWidgetStyle.eventCard.supports(widget: .clock))
@@ -1361,9 +1362,15 @@ final class SimpleNotchLayoutTests: XCTestCase {
         XCTAssertFalse(SimpleNotchWidgetStyle.romanDial.supports(widget: .calendar))
         XCTAssertTrue(SimpleNotchWidgetStyle.pomodoroRing.supports(widget: .timer))
         XCTAssertFalse(SimpleNotchWidgetStyle.pomodoroRing.supports(widget: .calendar))
+        XCTAssertTrue(SimpleNotchWidgetStyle.vinylDeck.supports(widget: .media))
+        XCTAssertFalse(SimpleNotchWidgetStyle.vinylDeck.supports(widget: .timer))
         XCTAssertGreaterThan(
             SimpleNotchMetrics.width(for: .timer, style: .segmentDisplay, size: .standard),
             SimpleNotchMetrics.width(for: .timer, style: .clean, size: .standard)
+        )
+        XCTAssertGreaterThan(
+            SimpleNotchMetrics.width(for: .media, style: .streamBar, size: .standard),
+            SimpleNotchMetrics.width(for: .media, style: .clean, size: .standard)
         )
     }
 }
