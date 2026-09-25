@@ -203,37 +203,37 @@ enum SimpleNotchMetrics {
         var height: Double
     }
 
-    /// Shared by the window and its contents so every enabled widget is visible.
-    /// Fixed-size cards wrap before reaching the display edge, never into a scroll view.
+    /// Shared by the window and its contents so every enabled widget stays in one
+    /// horizontal row. If the fixed-size cards exceed the available display width,
+    /// the renderer scrolls horizontally instead of wrapping or scaling the cards down.
     static func arrangement(settings: SimpleNotchSettings, availableWidth: Double,
                             hardwareWidth: Double = 0) -> Arrangement {
         let settings = settings.normalized()
         let size = settings.resolvedSize
         let padding = horizontalPadding(size) * 2
-        let limit = max(1, min(1100, availableWidth) - padding)
         let gap = widgetSpacing(size)
-        var rows: [[ModuleID]] = []
-        var row: [ModuleID] = []
-        var rowWidth = 0.0
-        var widest = 0.0
-        for widget in settings.widgets {
-            let cardWidth = width(for: widget, size: size)
-            if !row.isEmpty && rowWidth + gap + cardWidth > limit {
-                rows.append(row)
-                widest = max(widest, rowWidth)
-                row = []
-                rowWidth = 0
-            }
-            rowWidth += (row.isEmpty ? 0 : gap) + cardWidth
-            row.append(widget)
-        }
-        if !row.isEmpty { rows.append(row); widest = max(widest, rowWidth) }
-        let height = rows.reduce(0.0) { total, row in
-            total + (row.map { self.height(for: $0, style: settings.style(for: $0), size: size) }.max() ?? 0)
-        } + Double(max(0, rows.count - 1)) * gap + verticalPadding(size) * 2
-        return Arrangement(rows: rows,
-                           width: max(minimumOpenShelfWidth(size, hardwareWidth: hardwareWidth), widest + padding),
-                           height: height)
+        let widgets = settings.widgets
+
+        let contentWidth = widgets.reduce(0.0) {
+            $0 + width(for: $1, size: size)
+        } + Double(max(0, widgets.count - 1)) * gap + padding
+
+        let maximumWindowWidth = max(1, min(1100, availableWidth))
+        let requestedWindowWidth = max(
+            minimumOpenShelfWidth(size, hardwareWidth: hardwareWidth),
+            contentWidth
+        )
+        let windowWidth = min(maximumWindowWidth, requestedWindowWidth)
+
+        let tallest = widgets.map {
+            height(for: $0, style: settings.style(for: $0), size: size)
+        }.max() ?? widgetHeight(size)
+
+        return Arrangement(
+            rows: [widgets],
+            width: windowWidth,
+            height: tallest + verticalPadding(size) * 2
+        )
     }
 
     static func calendarWidth(_ size: SimpleNotchSize) -> Double {
