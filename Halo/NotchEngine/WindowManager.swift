@@ -1347,16 +1347,7 @@ final class WindowManager {
     }
 
     private func configureSimpleDynamicWidth(_ host: Host, geometry: SurfaceGeometry) {
-        let simple = store.workspace.settings.resolvedSimpleNotch
-        let calendarActive = store.workspace.calendar.upcomingEvents.contains { $0.endDate > Date() }
-        let active = simple.activeClosedWidgets(
-            timerActive: store.deadline != nil || store.pausedSeconds > 0 || store.finished,
-            stopwatchActive: store.workspace.stopwatchStart != nil || store.workspace.stopwatchElapsed > 0,
-            mediaActive: store.workspace.media.hasNowPlayingPresentation,
-            calendarActive: calendarActive
-        )
-
-        let size = simple.resolvedSize
+        var simple = store.workspace.settings.resolvedSimpleNotch
         let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
         // The preset is a preference, never permission to undercut the real camera housing.
         let physicalWidth = attached ? max(16, geometry.physicalNotchWidth) : 0
@@ -1366,6 +1357,29 @@ final class WindowManager {
         // reads as narrower than the notch it is extending.
         let hardwareShellWidth = attached ? physicalWidth + 24 : 0
         let hardwareShellHeight = attached ? physicalHeight + 2 : 0
+        let availableOpenWidth = max(1, geometry.visible.width - 32)
+
+        // Migrate any older multi-row/oversized Simple setup into a valid one-row setup.
+        // This only removes the newest/right-most overflow widgets and writes once.
+        let fitted = SimpleNotchMetrics.fittingSettings(
+            settings: simple,
+            availableWidth: availableOpenWidth,
+            hardwareWidth: hardwareShellWidth
+        )
+        if fitted.widgets != simple.widgets {
+            simple = fitted
+            store.workspace.settings.simpleNotch = fitted
+        }
+
+        let calendarActive = store.workspace.calendar.upcomingEvents.contains { $0.endDate > Date() }
+        let active = simple.activeClosedWidgets(
+            timerActive: store.deadline != nil || store.pausedSeconds > 0 || store.finished,
+            stopwatchActive: store.workspace.stopwatchStart != nil || store.workspace.stopwatchElapsed > 0,
+            mediaActive: store.workspace.media.hasNowPlayingPresentation,
+            calendarActive: calendarActive
+        )
+
+        let size = simple.resolvedSize
         let baseWidth = max(hardwareShellWidth, SimpleNotchMetrics.closedPillWidth(size))
         host.geometry?.activeCompactHeight = max(hardwareShellHeight, SimpleNotchMetrics.closedHeight(size))
 
@@ -1402,7 +1416,8 @@ final class WindowManager {
         }
 
         let arrangement = SimpleNotchMetrics.arrangement(
-            settings: simple, availableWidth: geometry.visible.width - 32,
+            settings: simple,
+            availableWidth: availableOpenWidth,
             hardwareWidth: hardwareShellWidth
         )
         host.geometry?.expandedWidth = arrangement.width
