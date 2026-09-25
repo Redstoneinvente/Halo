@@ -1007,7 +1007,7 @@ private struct NotchModeSettingsPane: View {
                 }
                 .pickerStyle(.segmented)
 
-                Text("Standard stays closest to the hardware notch. Medium and Big scale the opened notch and its fixed widgets. On notched Macs, Halo will never shrink below the real camera notch.")
+                Text("Standard, Medium and Big scale only the opened Simple notch and its fixed widgets. On notched Macs, the closed notch stays matched to the physical notch and expands only when a closed-notch widget needs room.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
