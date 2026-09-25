@@ -295,9 +295,27 @@ struct SettingsView: View {
 
                 Divider()
                 VStack(alignment: .leading, spacing: 12) {
-                    Link(destination: URL(string: "https://halo.redstoneinvente.com")!) { Label("Halo website", systemImage: "globe") }
-                    Link(destination: URL(string: "https://buymeacoffee.com/redstoneinvente")!) { Label("Buy me a coffee", systemImage: "cup.and.saucer.fill") }
-                }.font(.callout).padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                    Link(destination: URL(string: "https://halo.redstoneinvente.com")!) {
+                        Label("Halo website", systemImage: "globe")
+                    }
+                    Link(destination: URL(string: "https://halo.redstoneinvente.com/terms/")!) {
+                        Label("Terms", systemImage: "doc.text")
+                    }
+                    Link(destination: URL(string: "https://halo.redstoneinvente.com/EULA/")!) {
+                        Label("EULA", systemImage: "doc.badge.gearshape")
+                    }
+                    Link(destination: URL(string: "https://halo.redstoneinvente.com/privacy/")!) {
+                        Label("Privacy", systemImage: "hand.raised")
+                    }
+#if !HALO_APPSTORE
+                    Link(destination: URL(string: "https://buymeacoffee.com/redstoneinvente")!) {
+                        Label("Buy me a coffee", systemImage: "cup.and.saucer.fill")
+                    }
+#endif
+                }
+                .font(.callout)
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(width: 236)
             .onChange(of: workspace.settings.resolvedNotchMode) { mode in
