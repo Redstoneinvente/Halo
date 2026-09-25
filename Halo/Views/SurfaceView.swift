@@ -4365,63 +4365,143 @@ private struct SimpleNotchWidgetView: View {
     }
 
     private var compactFiles: some View {
-        HStack(spacing: 9 * scale) {
-            heroIcon(store.files.isEmpty ? "tray" : "tray.full.fill")
-            VStack(alignment: .leading, spacing: 1) {
-                Text("\(store.files.count) item\(store.files.count == 1 ? "" : "s")")
-                    .font(.system(size: 14 * scale, weight: .bold, design: .rounded))
-                Text("Drop or add files")
-                    .font(.system(size: 8.5 * scale))
+        HStack(spacing: 10 * scale) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
+                    .fill(accent.opacity(0.13))
+                Image(systemName: store.files.isEmpty ? "tray" : "doc.on.doc.fill")
+                    .font(.system(size: 17 * scale, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
+            .frame(width: 48 * scale, height: 48 * scale)
+
+            VStack(alignment: .leading, spacing: 3 * scale) {
+                Text(store.files.isEmpty ? "File Tray" : "\(store.files.count) item\(store.files.count == 1 ? "" : "s")")
+                    .font(.system(size: 11 * scale, weight: .bold, design: .rounded))
+                Text(store.files.last?.lastPathComponent ?? "Drop files here or choose one")
+                    .font(.system(size: 8 * scale, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if !store.files.isEmpty {
+                    Text("Ready when you are")
+                        .font(.system(size: 7 * scale, weight: .medium))
+                        .foregroundStyle(accent)
+                }
             }
             Spacer(minLength: 0)
             roundButton("plus") { store.chooseFiles() }
         }
+        .frame(maxHeight: .infinity)
     }
 
     private var focusFiles: some View {
-        VStack(spacing: 7 * scale) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16 * scale, style: .continuous)
-                    .fill(accent.opacity(0.15))
-                    .frame(width: 54 * scale, height: 44 * scale)
-                Image(systemName: store.files.isEmpty ? "tray" : "doc.on.doc.fill")
-                    .font(.system(size: 20 * scale, weight: .medium))
-                    .foregroundStyle(accent)
+        HStack(spacing: 11 * scale) {
+            VStack(spacing: 4 * scale) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16 * scale, style: .continuous)
+                        .fill(accent.opacity(0.14))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 16 * scale, style: .continuous)
+                                .strokeBorder(accent.opacity(0.22), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        }
+                    Image(systemName: store.files.isEmpty ? "arrow.down.doc.fill" : "doc.on.doc.fill")
+                        .font(.system(size: 22 * scale, weight: .medium))
+                        .foregroundStyle(accent)
+                }
+                .frame(width: 64 * scale, height: 58 * scale)
+                Text(store.files.isEmpty ? "DROP" : "\(store.files.count) FILES")
+                    .font(.system(size: 6.5 * scale, weight: .bold, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
             }
-            Text(store.files.isEmpty ? "Drop files here" : "\(store.files.count) in tray")
-                .font(.system(size: 10 * scale, weight: .semibold))
-            Text("Originals stay untouched")
-                .font(.system(size: 7.5 * scale))
-                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4 * scale) {
+                Text(store.files.isEmpty ? "Drop files into Halo" : "Ready to use")
+                    .font(.system(size: 10 * scale, weight: .bold))
+                if store.files.isEmpty {
+                    Text("Keep temporary files close without cluttering your desktop.")
+                        .font(.system(size: 7.5 * scale))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                } else {
+                    ForEach(Array(store.files.suffix(2)), id: \.self) { url in
+                        HStack(spacing: 4 * scale) {
+                            Image(systemName: "doc.fill")
+                                .font(.system(size: 7 * scale))
+                                .foregroundStyle(accent)
+                            Text(url.lastPathComponent)
+                                .font(.system(size: 7.5 * scale, weight: .medium))
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                Button {
+                    store.chooseFiles()
+                } label: {
+                    Label("Add", systemImage: "plus")
+                        .font(.system(size: 7.5 * scale, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(accent)
+            }
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var dashboardFiles: some View {
         VStack(alignment: .leading, spacing: 5 * scale) {
+            HStack {
+                Text(store.files.isEmpty ? "DROP ZONE" : "RECENT FILES")
+                    .font(.system(size: 6.5 * scale, weight: .bold, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundStyle(accent)
+                Spacer()
+                Text("\(store.files.count)")
+                    .font(.system(size: 8 * scale, weight: .bold, design: .rounded))
+                    .padding(.horizontal, 6 * scale)
+                    .padding(.vertical, 2 * scale)
+                    .background(Color.white.opacity(0.07), in: Capsule())
+            }
+
             if store.files.isEmpty {
-                Label("Drop files anywhere on this card", systemImage: "arrow.down.doc")
-                    .font(.system(size: 9 * scale, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
+                HStack(spacing: 7 * scale) {
+                    Image(systemName: "arrow.down.doc")
+                        .font(.system(size: 16 * scale, weight: .medium))
+                        .foregroundStyle(accent)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Drop anything here")
+                            .font(.system(size: 9 * scale, weight: .semibold))
+                        Text("Files stay where they are")
+                            .font(.system(size: 7 * scale))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    roundButton("plus") { store.chooseFiles() }
+                }
+                .frame(maxHeight: .infinity)
             } else {
-                ForEach(Array(store.files.prefix(2)), id: \.self) { url in
-                    HStack(spacing: 5 * scale) {
-                        Image(systemName: "doc.fill").foregroundStyle(accent)
-                        Text(url.lastPathComponent)
-                            .font(.system(size: 8.5 * scale, weight: .medium))
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
+                VStack(spacing: 3 * scale) {
+                    ForEach(Array(store.files.suffix(3)), id: \.self) { url in
+                        HStack(spacing: 5 * scale) {
+                            Image(systemName: "doc.fill")
+                                .font(.system(size: 7.5 * scale))
+                                .foregroundStyle(accent)
+                            Text(url.lastPathComponent)
+                                .font(.system(size: 8 * scale, weight: .medium))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
                     }
                 }
-            }
-            HStack {
-                Text("\(store.files.count) total")
-                    .font(.system(size: 8 * scale))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                roundButton("plus") { store.chooseFiles() }
+                Spacer(minLength: 0)
+                HStack {
+                    Text("Drag back out anytime")
+                        .font(.system(size: 7 * scale))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    roundButton("plus") { store.chooseFiles() }
+                }
             }
         }
     }
@@ -4589,43 +4669,72 @@ private struct SimpleNotchWidgetView: View {
     }
 
     private var compactPixelPal: some View {
-        HStack(spacing: 6 * scale) {
+        HStack(spacing: 9 * scale) {
             pixelPal
-                .frame(width: 46 * scale, height: 46 * scale)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("PIXEL PAL")
-                    .font(.system(size: 8 * scale, weight: .bold, design: .monospaced))
-                    .foregroundStyle(accent)
-                Text("Your tiny notch companion")
-                    .font(.system(size: 8 * scale, weight: .medium))
+                .frame(width: 64 * scale, height: 64 * scale)
+            VStack(alignment: .leading, spacing: 3 * scale) {
+                HStack(spacing: 4 * scale) {
+                    Circle().fill(accent).frame(width: 5 * scale, height: 5 * scale)
+                    Text("PIXEL PAL")
+                        .font(.system(size: 7.5 * scale, weight: .bold, design: .monospaced))
+                        .tracking(0.5)
+                        .foregroundStyle(accent)
+                }
+                Text("Your notch companion")
+                    .font(.system(size: 9 * scale, weight: .semibold))
+                Text("Click, pet, poke or feed")
+                    .font(.system(size: 7 * scale))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var focusPixelPal: some View {
-        pixelPal
-            .frame(width: 58 * scale, height: 58 * scale)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        HStack(spacing: 10 * scale) {
+            pixelPal
+                .frame(width: 82 * scale, height: 82 * scale)
+            VStack(alignment: .leading, spacing: 4 * scale) {
+                Text("Pixel Pal")
+                    .font(.system(size: 11 * scale, weight: .bold, design: .rounded))
+                Label("Interactive", systemImage: "hand.tap.fill")
+                    .font(.system(size: 7.5 * scale, weight: .semibold))
+                    .foregroundStyle(accent)
+                Text("Move your pointer around the face and see how it reacts.")
+                    .font(.system(size: 7 * scale))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var dashboardPixelPal: some View {
-        HStack(spacing: 7 * scale) {
+        HStack(spacing: 9 * scale) {
             pixelPal
-                .frame(width: 54 * scale, height: 54 * scale)
-            VStack(alignment: .leading, spacing: 4 * scale) {
-                Text("Online")
-                    .font(.system(size: 9 * scale, weight: .bold))
-                    .foregroundStyle(accent)
-                Label("Interactive", systemImage: "hand.tap.fill")
-                    .font(.system(size: 7.5 * scale))
+                .frame(width: 74 * scale, height: 74 * scale)
+            VStack(alignment: .leading, spacing: 5 * scale) {
+                HStack(spacing: 5 * scale) {
+                    Text("ONLINE")
+                        .font(.system(size: 6.5 * scale, weight: .bold, design: .rounded))
+                        .tracking(0.8)
+                        .foregroundStyle(accent)
+                    Capsule().fill(accent.opacity(0.55)).frame(width: 18 * scale, height: 2 * scale)
+                }
+                Label("Click reactions", systemImage: "cursorarrow.click.2")
+                    .font(.system(size: 7.5 * scale, weight: .medium))
                     .foregroundStyle(.secondary)
-                Label("Living in your notch", systemImage: "sparkles")
-                    .font(.system(size: 7.5 * scale))
+                Label("Context aware", systemImage: "sparkles")
+                    .font(.system(size: 7.5 * scale, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Label("Lives in Halo", systemImage: "rectangle.topthird.inset.filled")
+                    .font(.system(size: 7.5 * scale, weight: .medium))
                     .foregroundStyle(.secondary)
             }
+            Spacer(minLength: 0)
         }
     }
 
@@ -4636,59 +4745,131 @@ private struct SimpleNotchWidgetView: View {
     }
 
     private var compactMedia: some View {
-        HStack(spacing: 8 * scale) {
-            mediaArtwork(size: 36 * scale, radius: 8 * scale)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(mediaTitle)
-                    .font(.system(size: 10 * scale, weight: .bold))
-                    .lineLimit(1)
-                Text(workspace.media.artist.isEmpty ? "Media" : workspace.media.artist)
-                    .font(.system(size: 8 * scale))
+        HStack(spacing: 10 * scale) {
+            mediaArtwork(size: 58 * scale, radius: 12 * scale)
+
+            VStack(alignment: .leading, spacing: 4 * scale) {
+                HStack(spacing: 5 * scale) {
+                    Text(mediaTitle)
+                        .font(.system(size: 10 * scale, weight: .bold))
+                        .lineLimit(1)
+                    if workspace.media.isPlaying {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 7 * scale, weight: .bold))
+                            .foregroundStyle(accent)
+                    }
+                }
+                Text(mediaSubtitle)
+                    .font(.system(size: 8 * scale, weight: .medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                if workspace.media.duration > 0 {
+                    ProgressView(value: mediaProgress)
+                        .progressViewStyle(.linear)
+                        .tint(accent)
+                } else {
+                    Capsule()
+                        .fill(Color.white.opacity(0.07))
+                        .frame(height: 2 * scale)
+                }
+
+                HStack(spacing: 10 * scale) {
+                    mediaButton("backward.end.fill", action: "previous track")
+                    mediaButton(workspace.media.isPlaying ? "pause.fill" : "play.fill", action: "playpause")
+                    mediaButton("forward.end.fill", action: "next track")
+                }
             }
             Spacer(minLength: 0)
-            roundButton(workspace.media.isPlaying ? "pause.fill" : "play.fill") {
-                workspace.media.perform("playpause", app: workspace.settings.mediaApp)
-            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var focusMedia: some View {
-        VStack(spacing: 6 * scale) {
-            mediaArtwork(size: 46 * scale, radius: 10 * scale)
-            Text(mediaTitle)
-                .font(.system(size: 9.5 * scale, weight: .bold))
-                .lineLimit(1)
-            HStack(spacing: 12 * scale) {
-                mediaButton("backward.end.fill", action: "previous track")
-                mediaButton(workspace.media.isPlaying ? "pause.fill" : "play.fill", action: "playpause")
-                mediaButton("forward.end.fill", action: "next track")
+        HStack(spacing: 12 * scale) {
+            ZStack(alignment: .bottomTrailing) {
+                mediaArtwork(size: 76 * scale, radius: 15 * scale)
+                if workspace.media.connectedApp != nil {
+                    Image(systemName: workspace.media.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
+                        .font(.system(size: 7 * scale, weight: .bold))
+                        .frame(width: 20 * scale, height: 20 * scale)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .padding(4 * scale)
+                }
             }
+
+            VStack(alignment: .leading, spacing: 5 * scale) {
+                Text(mediaSourceName.uppercased())
+                    .font(.system(size: 6.5 * scale, weight: .bold, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundStyle(accent)
+                Text(mediaTitle)
+                    .font(.system(size: 11 * scale, weight: .bold))
+                    .lineLimit(1)
+                Text(mediaSubtitle)
+                    .font(.system(size: 8 * scale, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                if workspace.media.duration > 0 {
+                    ProgressView(value: mediaProgress)
+                        .progressViewStyle(.linear)
+                        .tint(accent)
+                }
+
+                HStack(spacing: 14 * scale) {
+                    mediaButton("backward.end.fill", action: "previous track")
+                    mediaButton(workspace.media.isPlaying ? "pause.fill" : "play.fill", action: "playpause")
+                    mediaButton("forward.end.fill", action: "next track")
+                }
+            }
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var dashboardMedia: some View {
         VStack(alignment: .leading, spacing: 6 * scale) {
-            HStack(spacing: 7 * scale) {
-                mediaArtwork(size: 34 * scale, radius: 8 * scale)
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 9 * scale) {
+                mediaArtwork(size: 52 * scale, radius: 11 * scale)
+
+                VStack(alignment: .leading, spacing: 2 * scale) {
+                    HStack(spacing: 4 * scale) {
+                        Text(mediaSourceName.uppercased())
+                            .font(.system(size: 6.2 * scale, weight: .bold))
+                            .tracking(0.7)
+                            .foregroundStyle(accent)
+                        if workspace.media.isPlaying {
+                            Circle().fill(accent).frame(width: 4 * scale, height: 4 * scale)
+                        }
+                    }
                     Text(mediaTitle)
-                        .font(.system(size: 9.5 * scale, weight: .bold))
+                        .font(.system(size: 10 * scale, weight: .bold))
                         .lineLimit(1)
-                    Text(workspace.media.artist)
+                    Text(mediaSubtitle)
                         .font(.system(size: 7.5 * scale))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
-            if workspace.media.duration > 0 {
-                ProgressView(value: min(1, max(0, workspace.media.position / max(1, workspace.media.duration))))
-                    .progressViewStyle(.linear)
-                    .tint(accent)
+
+            HStack(spacing: 7 * scale) {
+                if workspace.media.duration > 0 {
+                    Text(Self.simpleMediaTime(workspace.media.position))
+                        .font(.system(size: 6.5 * scale, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    ProgressView(value: mediaProgress)
+                        .progressViewStyle(.linear)
+                        .tint(accent)
+                    Text("-" + Self.simpleMediaTime(max(0, workspace.media.duration - workspace.media.position)))
+                        .font(.system(size: 6.5 * scale, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Capsule().fill(Color.white.opacity(0.07)).frame(height: 2 * scale)
+                }
             }
+
             HStack {
                 mediaButton("backward.end.fill", action: "previous track")
                 Spacer()
@@ -4699,7 +4880,7 @@ private struct SimpleNotchWidgetView: View {
         }
     }
 
-    private var simpleCalendar: Calendar { Calendar.autoupdatingCurrent }
+    private var simpleCalendar: Calendar {    private var simpleCalendar: Calendar { Calendar.autoupdatingCurrent }
 
     private var simpleMonthAnchor: Date {
         simpleCalendar.dateInterval(of: .month, for: Date())?.start
@@ -4743,6 +4924,31 @@ private struct SimpleNotchWidgetView: View {
 
     private var mediaTitle: String {
         workspace.media.title.isEmpty ? "Nothing Playing" : workspace.media.title
+    }
+
+    private var mediaSubtitle: String {
+        if workspace.media.connectedApp == nil { return "Start playing something" }
+        if !workspace.media.artist.isEmpty { return workspace.media.artist }
+        return workspace.media.isPlaying ? "Now playing" : "Paused"
+    }
+
+    private var mediaSourceName: String {
+        guard let app = workspace.media.connectedApp else { return "Media" }
+        switch app {
+        case "com.apple.Music": return "Apple Music"
+        case "com.spotify.client": return "Spotify"
+        default: return "Now Playing"
+        }
+    }
+
+    private var mediaProgress: Double {
+        guard workspace.media.duration > 0 else { return 0 }
+        return min(1, max(0, workspace.media.position / max(1, workspace.media.duration)))
+    }
+
+    private static func simpleMediaTime(_ seconds: Double) -> String {
+        let value = max(0, Int(seconds))
+        return String(format: "%d:%02d", value / 60, value % 60)
     }
 
     @ViewBuilder
