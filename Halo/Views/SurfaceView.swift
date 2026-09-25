@@ -3665,7 +3665,7 @@ struct SurfaceView: View {
     @ViewBuilder private var surfaceBackgroundLayer: some View {
         ZStack {
             if simpleMode {
-                Color.black
+                workspace.settings.resolvedSimpleNotch.resolvedBackgroundColor.color
             } else if transferContextActive {
                 TransferSurfaceBackground(monitor: transfer)
             } else if clipboardContextActive {
