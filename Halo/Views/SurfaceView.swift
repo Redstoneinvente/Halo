@@ -3425,11 +3425,12 @@ struct SurfaceView: View {
                 )
             }
         }
-        .onChange(of: state.dropTargeted) { active in
-            if active && dropCIEnabled {
-                state.collapseTask?.cancel()
-                state.expanded = true
-            }
+        .onChange(of: state.dropTargeted) { _ in
+            // Re-run normal CI arbitration. If Drop CI wins, synchronizeSurfaceCIOwnership()
+            // calls activateDropOwnership(), which records whether Drop CI opened Halo.
+            // Do not set expanded directly here or drag-cancel cannot safely know whether
+            // it owns the responsibility to close the notch again.
+            synchronizeSurfaceCIOwnership()
         }
         .onAppear {
             if !runtimeGate.isReady {
@@ -3642,8 +3643,7 @@ struct SurfaceView: View {
                     system: workspace.system
                 )
             }
-            if !usesVisualWorkspace &&
-                !transferContextActive &&
+            if !transferContextActive &&
                 !clipboardContextActive &&
                 !customContextActive &&
                 !integrationContextActive &&
@@ -4087,6 +4087,14 @@ private struct OpenNotchBackgroundView: View {
     private var effectiveAppearance: Appearance {
         var appearance = options.baseAppearance(fallback)
 
+        // Visual Workspace glass has its own edge-depth vignette in SurfaceBackground.
+        // That vignette is literally a black radial gradient around the inside edge and
+        // visually reads as the same "surface shadow" as the chrome shadow below.
+        // When Surface shadow is off, remove *all* dark edge depth so the surface is flat.
+        if appearance.background == .glass, options.shadowEnabled != true {
+            appearance.glass.edgeDepth = 0
+        }
+
         // Solid and gradient Visual Workspace backgrounds must never inherit a stale
         // blur value from the Default workspace or from a previously selected image/video.
         // Blurring an opaque surface against the transparent NSPanel feathers its alpha
@@ -4170,7 +4178,10 @@ private struct OpenNotchSurfaceChrome: View {
                 )
             }
 
-            if (options.shadowOpacity ?? 0) > 0 {
+            // The old slider-only shadow could remain active in saved layouts and,
+            // because this chrome is drawn over the clipped surface, its blur reads like
+            // an unintended inner shadow. Require an explicit opt-in before rendering it.
+            if options.shadowEnabled == true, (options.shadowOpacity ?? 0) > 0 {
                 contour.stroke(
                     .black.opacity(options.shadowOpacity ?? 0),
                     lineWidth: 1
@@ -6522,7 +6533,13 @@ private enum ContextMusicArtworkReader {
         var value = ""
         if onlineFallback { value = await onlineLyrics(title: title, artist: artist, duration: duration) }
         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, app == "com.apple.Music" { value = await embeddedAppleMusicLyrics() }
-        let bounded = String(value.prefix(20_000)); lock.lock(); lyricsCache[cacheKey] = bounded; lock.unlock(); return bounded
+        let bounded = String(value.prefix(20_000))
+        // Do not cache misses. Browser metadata can settle a moment after playback starts and
+        // a transient LRCLIB/network miss must not pin "Synced lyrics unavailable" forever.
+        if !bounded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lock.lock(); lyricsCache[cacheKey] = bounded; lock.unlock()
+        }
+        return bounded
     }
 
     private static func embeddedAppleMusicLyrics() async -> String {
@@ -6544,18 +6561,184 @@ private enum ContextMusicArtworkReader {
         } }
     }
 
-    private static func onlineLyrics(title: String, artist: String, duration: Double?) async -> String {
-        guard !title.isEmpty, !artist.isEmpty else { return "" }
+    private static func normalizedLyricsTitle(_ title: String, artist: String) -> String {
+        var result = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !cleanArtist.isEmpty {
+            for separator in [" - ", " – ", " — "] {
+                let prefix = cleanArtist + separator
+                if result.lowercased().hasPrefix(prefix.lowercased()) {
+                    result = String(result.dropFirst(prefix.count))
+                    break
+                }
+            }
+        }
+
+        let suffixPatterns = [
+            #"\s*\((?:official\s+)?(?:music\s+)?video\)\s*$"#,
+            #"\s*\((?:official\s+)?audio\)\s*$"#,
+            #"\s*\((?:official\s+)?lyric\s+video\)\s*$"#,
+            #"\s*\((?:lyrics?)\)\s*$"#,
+            #"\s*\[(?:official\s+)?(?:music\s+)?video\]\s*$"#,
+            #"\s*\[(?:official\s+)?audio\]\s*$"#
+        ]
+        for pattern in suffixPatterns {
+            result = result.replacingOccurrences(
+                of: pattern,
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+
+        result = result.replacingOccurrences(
+            of: #"\s*\((?:feat\.?|ft\.?)\s+[^)]*\)\s*$"#,
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func lyricsCandidates(title: String, artist: String) -> [(title: String, artist: String)] {
+        let rawTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawTitle.isEmpty else { return [] }
+
+        var candidates: [(title: String, artist: String)] = []
+        func append(_ candidateTitle: String, _ candidateArtist: String) {
+            let cleanTitle = candidateTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanArtist = candidateArtist.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleanTitle.isEmpty, !cleanArtist.isEmpty else { return }
+            let key = cleanTitle.lowercased() + "|" + cleanArtist.lowercased()
+            guard !candidates.contains(where: {
+                $0.title.lowercased() + "|" + $0.artist.lowercased() == key
+            }) else { return }
+            candidates.append((cleanTitle, cleanArtist))
+        }
+
+        if !rawArtist.isEmpty {
+            append(rawTitle, rawArtist)
+            let normalized = normalizedLyricsTitle(rawTitle, artist: rawArtist)
+            if !normalized.isEmpty { append(normalized, rawArtist) }
+        }
+
+        // YouTube commonly exposes "Artist - Song" in the video title while the channel/author
+        // can be decorated, truncated, or otherwise unsuitable for a lyrics provider. Derive a
+        // canonical pair directly from the title so Safari metadata does not have to be perfect.
+        for separator in [" - ", " – ", " — "] {
+            guard let range = rawTitle.range(of: separator) else { continue }
+            let inferredArtist = String(rawTitle[..<range.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let inferredTitle = String(rawTitle[range.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !inferredArtist.isEmpty, !inferredTitle.isEmpty else { continue }
+            append(inferredTitle, inferredArtist)
+            let normalized = normalizedLyricsTitle(inferredTitle, artist: inferredArtist)
+            if !normalized.isEmpty { append(normalized, inferredArtist) }
+            break
+        }
+
+        return candidates
+    }
+
+    private static func lyricsRequest(title: String, artist: String, duration: Double?) async -> LRCLyrics? {
         var components = URLComponents(string: "https://lrclib.net/api/get")!
-        components.queryItems = [URLQueryItem(name: "track_name", value: title), URLQueryItem(name: "artist_name", value: artist)]
-        if let duration, duration >= 1, duration <= 3600 { components.queryItems?.append(URLQueryItem(name: "duration", value: String(Int(duration.rounded())))) }
-        guard let url = components.url else { return "" }
+        components.queryItems = [
+            URLQueryItem(name: "track_name", value: title),
+            URLQueryItem(name: "artist_name", value: artist)
+        ]
+        if let duration, duration >= 1, duration <= 3600 {
+            components.queryItems?.append(
+                URLQueryItem(name: "duration", value: String(Int(duration.rounded())))
+            )
+        }
+        guard let url = components.url else { return nil }
+
         var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
         request.setValue("Halo/1.0 (https://github.com/Redstoneinvente/Halo)", forHTTPHeaderField: "User-Agent")
-        guard let (data, response) = try? await URLSession.shared.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200,
-              data.count <= 1_000_000, let result = try? JSONDecoder().decode(LRCLyrics.self, from: data) else { return "" }
-        if let requested = duration, let returned = result.duration, abs(requested - returned) > 2.5 { return "" }
-        return result.syncedLyrics ?? ""
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              data.count <= 1_000_000 else { return nil }
+        return try? JSONDecoder().decode(LRCLyrics.self, from: data)
+    }
+
+    private static func lyricsSearch(title: String, artist: String, duration: Double?) async -> String {
+        var components = URLComponents(string: "https://lrclib.net/api/search")!
+        components.queryItems = [
+            URLQueryItem(name: "track_name", value: title),
+            URLQueryItem(name: "artist_name", value: artist)
+        ]
+        guard let url = components.url else { return "" }
+
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+        request.setValue("Halo/1.0 (https://github.com/Redstoneinvente/Halo)", forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              data.count <= 2_000_000,
+              let results = try? JSONDecoder().decode([LRCLyrics].self, from: data) else { return "" }
+
+        let withSynced = results.filter {
+            !($0.syncedLyrics ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard !withSynced.isEmpty else { return "" }
+
+        let best: LRCLyrics
+        if let duration {
+            best = withSynced.min {
+                abs(($0.duration ?? duration) - duration) < abs(($1.duration ?? duration) - duration)
+            } ?? withSynced[0]
+        } else {
+            best = withSynced[0]
+        }
+        return best.syncedLyrics ?? ""
+    }
+
+    private static func onlineLyrics(title: String, artist: String, duration: Double?) async -> String {
+        let candidates = lyricsCandidates(title: title, artist: artist)
+        guard !candidates.isEmpty else { return "" }
+
+        var seen = Set<String>()
+        for candidate in candidates {
+            let durations: [Double?] = duration == nil ? [nil] : [duration, nil]
+            for candidateDuration in durations {
+                let attemptKey = candidate.title.lowercased() + "|" +
+                    candidate.artist.lowercased() + "|" +
+                    (candidateDuration.map { String(Int($0.rounded())) } ?? "no-duration")
+                guard seen.insert(attemptKey).inserted else { continue }
+
+                guard let result = await lyricsRequest(
+                    title: candidate.title,
+                    artist: candidate.artist,
+                    duration: candidateDuration
+                ) else { continue }
+
+                if let requested = candidateDuration,
+                   let returned = result.duration,
+                   abs(requested - returned) > 2.5 {
+                    continue
+                }
+
+                if let synced = result.syncedLyrics,
+                   !synced.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return synced
+                }
+            }
+        }
+
+        // Exact /api/get can miss browser-style metadata. Search every canonical candidate and
+        // return the first synced result instead of betting everything on Safari's artist field.
+        for candidate in candidates {
+            let searched = await lyricsSearch(
+                title: candidate.title,
+                artist: candidate.artist,
+                duration: duration
+            )
+            if !searched.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return searched
+            }
+        }
+        return ""
     }
 }
 
