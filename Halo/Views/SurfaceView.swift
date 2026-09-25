@@ -4575,6 +4575,7 @@ private struct SimpleClosedNotchView: View {
 
     private var settings: SimpleNotchSettings { workspace.settings.resolvedSimpleNotch }
     private var size: SimpleNotchSize { settings.resolvedSize }
+    private var scale: CGFloat { CGFloat(size.scale) }
 
     private var activeWidgets: [ModuleID] {
         settings.activeClosedWidgets(
@@ -4623,12 +4624,55 @@ private struct SimpleClosedNotchView: View {
     @ViewBuilder
     private func closedSlot(_ widget: ModuleID) -> some View {
         let preset = settings.style(for: widget)
+        switch preset {
+        case .clean:
+            closedCore(widget)
+                .padding(.horizontal, 6 * scale)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .glass:
+            HStack(spacing: 5 * scale) {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 4 * scale, height: 4 * scale)
+                closedCore(widget)
+            }
+            .padding(.horizontal, 7 * scale)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background {
+                RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .opacity(0.42)
+                    .padding(.vertical, 3)
+            }
+        case .vibrant:
+            HStack(spacing: 5 * scale) {
+                Image(systemName: widget.symbol)
+                    .font(.system(size: 8 * scale, weight: .bold))
+                    .foregroundStyle(Color.accentColor)
+                closedCore(widget)
+            }
+            .padding(.horizontal, 7 * scale)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background {
+                RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.18))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
+                            .stroke(Color.accentColor.opacity(0.28), lineWidth: 1)
+                    }
+                    .padding(.vertical, 3)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func closedCore(_ widget: ModuleID) -> some View {
         Group {
             switch widget {
             case .clock:
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text(context.date, style: .time)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .font(.system(size: 12 * scale, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .lineLimit(1)
                 }
@@ -4637,76 +4681,60 @@ private struct SimpleClosedNotchView: View {
                     let elapsed = workspace.stopwatchElapsed +
                         (workspace.stopwatchStart.map { context.date.timeIntervalSince($0) } ?? 0)
                     Text(Self.stopwatchString(elapsed))
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 10.5 * scale, weight: .semibold, design: .monospaced))
+                        .minimumScaleFactor(0.72)
                         .lineLimit(1)
                 }
             case .timer:
                 if let deadline = store.deadline {
                     Text(deadline, style: .timer)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 11 * scale, weight: .semibold, design: .monospaced))
+                        .lineLimit(1)
                 } else if store.pausedSeconds > 0 {
                     Text(Self.timerString(store.pausedSeconds))
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 11 * scale, weight: .semibold, design: .monospaced))
+                        .lineLimit(1)
                 } else {
                     Image(systemName: "timer")
+                        .font(.system(size: 11 * scale, weight: .semibold))
                 }
             case .media:
-                HStack(spacing: 6) {
+                HStack(spacing: 5 * scale) {
                     if let image = workspace.media.artworkImage {
                         Image(nsImage: image)
                             .resizable()
                             .scaledToFill()
-                            .frame(width: 20, height: 20)
-                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                            .frame(width: 20 * scale, height: 20 * scale)
+                            .clipShape(RoundedRectangle(cornerRadius: 5 * scale, style: .continuous))
                     } else {
                         Image(systemName: workspace.media.isPlaying ? "waveform" : "music.note")
+                            .font(.system(size: 9 * scale, weight: .semibold))
                     }
                     Text(workspace.media.title.isEmpty ? "Media" : workspace.media.title)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 9.5 * scale, weight: .semibold))
                         .lineLimit(1)
                 }
             case .calendar:
                 if let event = workspace.calendar.upcomingEvents.first(where: { $0.endDate > Date() }) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "calendar")
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(event.title ?? "Event").lineLimit(1)
-                            Text(event.isAllDay ? "All day" : event.startDate.formatted(date: .omitted, time: .shortened))
-                                .font(.system(size: 8))
-                                .foregroundStyle(.secondary)
-                        }
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(event.title ?? "Event")
+                            .font(.system(size: 8.5 * scale, weight: .semibold))
+                            .lineLimit(1)
+                        Text(event.isAllDay ? "All day" : event.startDate.formatted(date: .omitted, time: .shortened))
+                            .font(.system(size: 7 * scale))
+                            .foregroundStyle(.secondary)
                     }
-                    .font(.system(size: 9, weight: .semibold))
                 } else {
-                    Label(Date.now.formatted(.dateTime.day().month(.abbreviated)), systemImage: "calendar")
-                        .font(.system(size: 9, weight: .semibold))
+                    Text(Date.now.formatted(.dateTime.day().month(.abbreviated)))
+                        .font(.system(size: 9 * scale, weight: .semibold))
+                        .lineLimit(1)
                 }
             default:
                 EmptyView()
             }
         }
-        .padding(.horizontal, 7)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background { closedBackground(preset) }
         .foregroundStyle(.white)
         .clipped()
-    }
-
-    @ViewBuilder
-    private func closedBackground(_ preset: SimpleNotchWidgetStyle) -> some View {
-        switch preset {
-        case .clean:
-            Color.clear
-        case .glass:
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .opacity(0.38)
-                .padding(.vertical, 3)
-        case .vibrant:
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.accentColor.opacity(0.18))
-                .padding(.vertical, 3)
-        }
     }
 
     private static func stopwatchString(_ elapsed: TimeInterval) -> String {
