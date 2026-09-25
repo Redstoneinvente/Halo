@@ -965,7 +965,7 @@ private struct NotchModeSettingsPane: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text("Simple always keeps at least one widget enabled, so the opened notch never becomes an empty black surface.")
+                Text("Simple always keeps at least one widget enabled, so the opened notch never becomes an empty surface.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
 
