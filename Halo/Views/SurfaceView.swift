@@ -3981,6 +3981,8 @@ private struct SimpleNotchWidgetView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject var surfaceState: SurfaceState
+    @State private var mediaSpinBase: Double = 0
+    @State private var mediaSpinStartedAt = Date()
 
     private var scale: CGFloat { CGFloat(sizePreset.scale) }
     private var accent: Color {
@@ -3998,7 +4000,7 @@ private struct SimpleNotchWidgetView: View {
     @ViewBuilder
     var body: some View {
         if widget == .shelf {
-            shell
+            shellWithMediaMotion
                 .dropDestination(for: URL.self) { urls, _ in
                     let files = urls.filter(\.isFileURL)
                     guard !files.isEmpty else { return false }
@@ -4006,8 +4008,31 @@ private struct SimpleNotchWidgetView: View {
                     return true
                 }
         } else {
-            shell
+            shellWithMediaMotion
         }
+    }
+
+    private var shellWithMediaMotion: some View {
+        shell
+            .onAppear {
+                guard widget == .media else { return }
+                mediaSpinBase = (workspace.media.position * 22).truncatingRemainder(dividingBy: 360)
+                mediaSpinStartedAt = Date()
+            }
+            .onChange(of: workspace.media.isPlaying) { playing in
+                guard widget == .media else { return }
+                let now = Date()
+                if playing {
+                    mediaSpinStartedAt = now
+                } else {
+                    mediaSpinBase = mediaSpinAngle(at: now)
+                }
+            }
+            .onChange(of: workspace.media.title) { _ in
+                guard widget == .media else { return }
+                mediaSpinBase = 0
+                mediaSpinStartedAt = Date()
+            }
     }
 
     private var shell: some View {
@@ -5436,42 +5461,68 @@ private struct SimpleNotchWidgetView: View {
     }
 
     private var focusMedia: some View {
-        HStack(spacing: 12 * scale) {
-            ZStack(alignment: .bottomTrailing) {
-                mediaArtwork(size: 76 * scale, radius: 15 * scale)
-                if workspace.media.connectedApp != nil {
-                    Image(systemName: workspace.media.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
-                        .font(.system(size: 7 * scale, weight: .bold))
-                        .frame(width: 20 * scale, height: 20 * scale)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .padding(4 * scale)
-                }
-            }
+        HStack(spacing: 8 * scale) {
+            ZStack(alignment: .bottomLeading) {
+                mediaArtworkPanel(
+                    width: 194 * scale,
+                    height: 108 * scale,
+                    radius: 16 * scale
+                )
 
-            VStack(alignment: .leading, spacing: 5 * scale) {
-                Text(mediaSourceName.uppercased())
-                    .font(.system(size: 6.5 * scale, weight: .bold, design: .rounded))
-                    .tracking(0.8)
-                    .foregroundStyle(accent)
-                Text(mediaTitle)
-                    .font(.system(size: 11 * scale, weight: .bold))
-                    .lineLimit(1)
-                Text(mediaSubtitle)
-                    .font(.system(size: 8 * scale, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.16), .black.opacity(0.82)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16 * scale, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2 * scale) {
+                    Text(mediaSourceName.uppercased())
+                        .font(.system(size: 5.5 * scale, weight: .bold, design: .rounded))
+                        .tracking(0.9)
+                        .foregroundStyle(accent)
+                    Text(mediaTitle)
+                        .font(.system(size: 10.5 * scale, weight: .bold))
+                        .lineLimit(1)
+                    Text(mediaSubtitle)
+                        .font(.system(size: 7 * scale, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.72))
+                        .lineLimit(1)
+                }
+                .padding(9 * scale)
 
                 if workspace.media.duration > 0 {
-                    progressTrack(mediaProgress)
-                }
-
-                HStack(spacing: 14 * scale) {
-                    mediaButton("backward.end.fill", action: "previous track")
-                    mediaButton(workspace.media.isPlaying ? "pause.fill" : "play.fill", action: "playpause")
-                    mediaButton("forward.end.fill", action: "next track")
+                    GeometryReader { proxy in
+                        VStack {
+                            Spacer()
+                            Capsule()
+                                .fill(Color.white.opacity(0.22))
+                                .frame(height: 2 * scale)
+                                .overlay(alignment: .leading) {
+                                    Capsule()
+                                        .fill(accent)
+                                        .frame(width: proxy.size.width * mediaProgress, height: 2 * scale)
+                                }
+                        }
+                    }
+                    .padding(.horizontal, 9 * scale)
+                    .padding(.bottom, 5 * scale)
                 }
             }
-            Spacer(minLength: 0)
+            .frame(width: 194 * scale, height: 108 * scale)
+
+            VStack(spacing: 7 * scale) {
+                mediaButton("backward.end.fill", action: "previous track")
+                mediaButton(workspace.media.isPlaying ? "pause.fill" : "play.fill", action: "playpause")
+                mediaButton("forward.end.fill", action: "next track")
+
+                if workspace.media.duration > 0 {
+                    Text(Self.simpleMediaTime(max(0, workspace.media.duration - workspace.media.position)))
+                        .font(.system(size: 5.5 * scale, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .frame(maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -5527,181 +5578,194 @@ private struct SimpleNotchWidgetView: View {
     }
 
     private var vinylDeckMedia: some View {
-        HStack(spacing: 13 * scale) {
-            ZStack {
-                Circle()
-                    .fill(Color.black.opacity(0.82))
-                Circle()
-                    .stroke(Color.white.opacity(0.10), lineWidth: 1 * scale)
-                Circle()
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1 * scale)
-                    .padding(6 * scale)
-                Circle()
-                    .stroke(Color.white.opacity(0.07), lineWidth: 1 * scale)
-                    .padding(12 * scale)
+        TimelineView(
+            .animation(
+                minimumInterval: 1.0 / 30.0,
+                paused: !workspace.media.isPlaying || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            )
+        ) { context in
+            HStack(spacing: 13 * scale) {
+                vinylRecord(angle: mediaSpinAngle(at: context.date))
+                    .frame(width: 82 * scale, height: 82 * scale)
 
-                if let image = workspace.media.artworkImage {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 38 * scale, height: 38 * scale)
-                        .clipShape(Circle())
-                } else {
-                    Circle()
-                        .fill(accent.opacity(0.18))
-                        .frame(width: 38 * scale, height: 38 * scale)
-                        .overlay {
-                            Image(systemName: "music.note")
-                                .font(.system(size: 12 * scale, weight: .semibold))
-                                .foregroundStyle(accent)
+                VStack(alignment: .leading, spacing: 5 * scale) {
+                    HStack(spacing: 5 * scale) {
+                        Text("VINYL DECK")
+                            .font(.system(size: 6.5 * scale, weight: .bold, design: .rounded))
+                            .tracking(0.9)
+                            .foregroundStyle(accent)
+                        if workspace.media.isPlaying {
+                            Circle()
+                                .fill(accent)
+                                .frame(width: 4 * scale, height: 4 * scale)
                         }
-                }
+                    }
 
-                Circle()
-                    .fill(Color.black.opacity(0.85))
-                    .frame(width: 7 * scale, height: 7 * scale)
-                Circle()
-                    .fill(Color.white.opacity(0.65))
-                    .frame(width: 2 * scale, height: 2 * scale)
-            }
-            .frame(width: 82 * scale, height: 82 * scale)
-            .rotationEffect(.degrees(workspace.media.position * 14))
+                    Text(mediaTitle)
+                        .font(.system(size: 11 * scale, weight: .bold))
+                        .lineLimit(1)
+                    Text(mediaSubtitle)
+                        .font(.system(size: 8 * scale, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
 
-            VStack(alignment: .leading, spacing: 5 * scale) {
-                HStack(spacing: 5 * scale) {
-                    Text("VINYL DECK")
-                        .font(.system(size: 6.5 * scale, weight: .bold, design: .rounded))
-                        .tracking(0.9)
-                        .foregroundStyle(accent)
-                    if workspace.media.isPlaying {
-                        Circle()
-                            .fill(accent)
-                            .frame(width: 4 * scale, height: 4 * scale)
+                    if workspace.media.duration > 0 {
+                        HStack(spacing: 6 * scale) {
+                            Text(Self.simpleMediaTime(workspace.media.position))
+                                .font(.system(size: 6 * scale, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            progressTrack(mediaProgress)
+                            Text(Self.simpleMediaTime(max(0, workspace.media.duration - workspace.media.position)))
+                                .font(.system(size: 6 * scale, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    HStack(spacing: 12 * scale) {
+                        mediaButton("backward.end.fill", action: "previous track")
+                        mediaButton(workspace.media.isPlaying ? "pause.fill" : "play.fill", action: "playpause")
+                        mediaButton("forward.end.fill", action: "next track")
                     }
                 }
 
-                Text(mediaTitle)
-                    .font(.system(size: 11 * scale, weight: .bold))
-                    .lineLimit(1)
-                Text(mediaSubtitle)
-                    .font(.system(size: 8 * scale, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                if workspace.media.duration > 0 {
-                    HStack(spacing: 6 * scale) {
-                        Text(Self.simpleMediaTime(workspace.media.position))
-                            .font(.system(size: 6 * scale, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                        progressTrack(mediaProgress)
-                        Text(Self.simpleMediaTime(max(0, workspace.media.duration - workspace.media.position)))
-                            .font(.system(size: 6 * scale, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                HStack(spacing: 12 * scale) {
-                    mediaButton("backward.end.fill", action: "previous track")
-                    mediaButton(workspace.media.isPlaying ? "pause.fill" : "play.fill", action: "playpause")
-                    mediaButton("forward.end.fill", action: "next track")
-                }
+                Spacer(minLength: 0)
             }
-
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var cassetteMedia: some View {
-        HStack(spacing: 12 * scale) {
+        TimelineView(
+            .animation(
+                minimumInterval: 1.0 / 30.0,
+                paused: !workspace.media.isPlaying || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            )
+        ) { context in
             ZStack {
-                RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
-                    .fill(Color.white.opacity(0.08))
-                RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8 * scale)
+                RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+                    .fill(Color.white.opacity(0.075))
+                RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.9 * scale)
 
-                VStack(spacing: 5 * scale) {
-                    HStack {
-                        Text("NOW PLAYING")
-                            .font(.system(size: 5.5 * scale, weight: .bold, design: .monospaced))
-                            .tracking(0.8)
-                            .foregroundStyle(accent)
-                        Spacer()
+                VStack(spacing: 6 * scale) {
+                    HStack(spacing: 6 * scale) {
+                        VStack(alignment: .leading, spacing: 1 * scale) {
+                            Text(mediaTitle)
+                                .font(.system(size: 9 * scale, weight: .bold, design: .rounded))
+                                .lineLimit(1)
+                            Text(mediaSubtitle)
+                                .font(.system(size: 6.5 * scale, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
                         Text(mediaSourceName.uppercased())
-                            .font(.system(size: 5 * scale, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tertiary)
+                            .font(.system(size: 5 * scale, weight: .bold, design: .monospaced))
+                            .tracking(0.7)
+                            .foregroundStyle(accent)
                     }
 
                     ZStack {
-                        RoundedRectangle(cornerRadius: 7 * scale, style: .continuous)
-                            .fill(Color.black.opacity(0.32))
-                        HStack(spacing: 18 * scale) {
-                            cassetteReel(progress: workspace.media.position * 0.18)
-                            Capsule()
-                                .fill(Color.white.opacity(0.10))
-                                .frame(width: 25 * scale, height: 4 * scale)
-                            cassetteReel(progress: -workspace.media.position * 0.18)
+                        RoundedRectangle(cornerRadius: 11 * scale, style: .continuous)
+                            .fill(Color.black.opacity(0.30))
+                        RoundedRectangle(cornerRadius: 11 * scale, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.7 * scale)
+
+                        HStack(spacing: 13 * scale) {
+                            cassetteReelButton(
+                                symbol: "backward.end.fill",
+                                action: "previous track",
+                                angle: mediaSpinAngle(at: context.date)
+                            )
+
+                            Button {
+                                workspace.media.perform("playpause", app: workspace.settings.mediaApp)
+                            } label: {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
+                                        .fill(accent.opacity(0.16))
+                                    Image(systemName: workspace.media.isPlaying ? "pause.fill" : "play.fill")
+                                        .font(.system(size: 10 * scale, weight: .bold))
+                                        .foregroundStyle(accent)
+                                }
+                                .frame(width: 39 * scale, height: 29 * scale)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(workspace.media.connectedApp == nil)
+                            .help(workspace.media.isPlaying ? "Pause" : "Play")
+
+                            cassetteReelButton(
+                                symbol: "forward.end.fill",
+                                action: "next track",
+                                angle: -mediaSpinAngle(at: context.date)
+                            )
                         }
                     }
-                    .frame(height: 36 * scale)
+                    .frame(height: 50 * scale)
 
                     HStack(spacing: 6 * scale) {
-                        Capsule().fill(Color.white.opacity(0.12)).frame(height: 2 * scale)
+                        Circle()
+                            .fill(Color.white.opacity(0.18))
+                            .frame(width: 4 * scale, height: 4 * scale)
+
+                        if workspace.media.duration > 0 {
+                            progressTrack(mediaProgress)
+                        } else {
+                            Capsule()
+                                .fill(Color.white.opacity(0.08))
+                                .frame(height: 3 * scale)
+                        }
+
                         Text(workspace.media.isPlaying ? "PLAY" : "PAUSE")
                             .font(.system(size: 5 * scale, weight: .bold, design: .monospaced))
-                            .foregroundStyle(accent)
-                        Capsule().fill(Color.white.opacity(0.12)).frame(height: 2 * scale)
+                            .tracking(0.7)
+                            .foregroundStyle(workspace.media.connectedApp == nil ? Color.secondary : accent)
+
+                        Circle()
+                            .fill(Color.white.opacity(0.18))
+                            .frame(width: 4 * scale, height: 4 * scale)
                     }
                 }
-                .padding(8 * scale)
+                .padding(.horizontal, 13 * scale)
+                .padding(.vertical, 10 * scale)
             }
-            .frame(width: 118 * scale, height: 72 * scale)
-
-            VStack(alignment: .leading, spacing: 5 * scale) {
-                Text(mediaTitle)
-                    .font(.system(size: 10.5 * scale, weight: .bold, design: .rounded))
-                    .lineLimit(1)
-                Text(mediaSubtitle)
-                    .font(.system(size: 8 * scale, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                if workspace.media.duration > 0 {
-                    progressTrack(mediaProgress)
-                } else {
-                    Capsule()
-                        .fill(Color.white.opacity(0.07))
-                        .frame(height: 3 * scale)
-                }
-
-                HStack(spacing: 10 * scale) {
-                    mediaButton("backward.end.fill", action: "previous track")
-                    mediaButton(workspace.media.isPlaying ? "pause.fill" : "play.fill", action: "playpause")
-                    mediaButton("forward.end.fill", action: "next track")
-                }
-            }
-
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func cassetteReel(progress: Double) -> some View {
-        ZStack {
-            Circle()
-                .stroke(Color.white.opacity(0.45), lineWidth: 1.3 * scale)
-            ForEach(0..<4, id: \.self) { spoke in
-                Capsule()
-                    .fill(Color.white.opacity(0.45))
-                    .frame(width: 1 * scale, height: 10 * scale)
-                    .rotationEffect(.degrees(Double(spoke) * 45))
+    private func cassetteReelButton(symbol: String, action: String, angle: Double) -> some View {
+        Button {
+            workspace.media.perform(action, app: workspace.settings.mediaApp)
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.035))
+                Circle()
+                    .stroke(Color.white.opacity(0.40), lineWidth: 1.4 * scale)
+
+                ForEach(0..<5, id: \.self) { spoke in
+                    Capsule()
+                        .fill(Color.white.opacity(0.42))
+                        .frame(width: 1.1 * scale, height: 14 * scale)
+                        .rotationEffect(.degrees(Double(spoke) * 36))
+                }
+
+                Circle()
+                    .fill(Color.black.opacity(0.72))
+                    .frame(width: 15 * scale, height: 15 * scale)
+
+                Image(systemName: symbol)
+                    .font(.system(size: 6.5 * scale, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.86))
             }
-            Circle()
-                .fill(Color.black.opacity(0.70))
-                .frame(width: 5 * scale, height: 5 * scale)
+            .frame(width: 40 * scale, height: 40 * scale)
+            .rotationEffect(.degrees(angle))
+            .contentShape(Circle())
         }
-        .frame(width: 22 * scale, height: 22 * scale)
-        .rotationEffect(.degrees(progress))
+        .buttonStyle(.plain)
+        .disabled(workspace.media.connectedApp == nil)
+        .help(action == "previous track" ? "Previous track" : "Next track")
     }
 
     private var streamBarMedia: some View {
@@ -5814,6 +5878,76 @@ private struct SimpleNotchWidgetView: View {
     private static func simpleMediaTime(_ seconds: Double) -> String {
         let value = max(0, Int(seconds))
         return String(format: "%d:%02d", value / 60, value % 60)
+    }
+
+    private func mediaSpinAngle(at date: Date) -> Double {
+        guard workspace.media.isPlaying,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            return mediaSpinBase.truncatingRemainder(dividingBy: 360)
+        }
+        let elapsed = max(0, date.timeIntervalSince(mediaSpinStartedAt))
+        return (mediaSpinBase + elapsed * 42).truncatingRemainder(dividingBy: 360)
+    }
+
+    private func vinylRecord(angle: Double) -> some View {
+        ZStack {
+            Circle()
+                .fill(Color.black.opacity(0.84))
+            Circle()
+                .stroke(Color.white.opacity(0.11), lineWidth: 1 * scale)
+            Circle()
+                .stroke(Color.white.opacity(0.08), lineWidth: 1 * scale)
+                .padding(6 * scale)
+            Circle()
+                .stroke(Color.white.opacity(0.065), lineWidth: 1 * scale)
+                .padding(12 * scale)
+
+            if let image = workspace.media.artworkImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 38 * scale, height: 38 * scale)
+                    .clipShape(Circle())
+            } else {
+                Circle()
+                    .fill(accent.opacity(0.18))
+                    .frame(width: 38 * scale, height: 38 * scale)
+                    .overlay {
+                        Image(systemName: "music.note")
+                            .font(.system(size: 12 * scale, weight: .semibold))
+                            .foregroundStyle(accent)
+                    }
+            }
+
+            Circle()
+                .fill(Color.black.opacity(0.86))
+                .frame(width: 7 * scale, height: 7 * scale)
+            Circle()
+                .fill(Color.white.opacity(0.68))
+                .frame(width: 2 * scale, height: 2 * scale)
+        }
+        .rotationEffect(.degrees(angle))
+    }
+
+    @ViewBuilder
+    private func mediaArtworkPanel(width: CGFloat, height: CGFloat, radius: CGFloat) -> some View {
+        if let image = workspace.media.artworkImage {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: width, height: height)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        } else {
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .fill(accent.opacity(0.14))
+                .frame(width: width, height: height)
+                .overlay {
+                    Image(systemName: "music.note")
+                        .font(.system(size: min(width, height) * 0.30, weight: .semibold))
+                        .foregroundStyle(accent)
+                }
+        }
     }
 
     @ViewBuilder
