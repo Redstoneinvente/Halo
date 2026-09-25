@@ -230,10 +230,17 @@ final class HaloFeatureAccess: ObservableObject {
         appearance.blur = 0
         appearance.saturation = 1
         appearance.brightness = 0
-        appearance.compactWidth = Appearance().compactWidth
+
+        // Closed-notch size is part of the Halo Lite experience. Preserve only
+        // compact width/height from the saved layout; deeper closed-surface
+        // geometry and styling still resolve to Halo's safe defaults.
+        appearance.compactWidth = min(640, max(16, saved.appearance.compactWidth))
+        var liteSurface = SurfaceOptions()
+        liteSurface.compactHeight = min(100, max(16, saved.appearance.surface.compactHeight))
+        appearance.surface = liteSurface
+
         appearance.skin = NotchSkinOptions()
         appearance.animation = .smooth
-        appearance.surface = SurfaceOptions()
         value.appearance = appearance
 
         return value
