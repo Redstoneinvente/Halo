@@ -946,6 +946,20 @@ private struct NotchModeSettingsPane: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Notch color") {
+                ColorPicker("Color", selection: simpleBackgroundColor, supportsOpacity: false)
+
+                Button("Reset to Black") {
+                    var value = workspace.settings.resolvedSimpleNotch
+                    value.backgroundColor = .black
+                    workspace.settings.simpleNotch = value.normalized()
+                }
+
+                Text("Sets the Simple Mode notch surface color in both its opened and closed states.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Simple widgets") {
                 Text("Simple always stays on one row. Halo expands horizontally as widgets are enabled; options that would exceed this display are disabled.")
                     .font(.caption)
@@ -1031,6 +1045,17 @@ private struct NotchModeSettingsPane: View {
             return max(0, Double(right.minX - left.maxX)) + 24
         }
         return 214
+    }
+
+    private var simpleBackgroundColor: Binding<Color> {
+        Binding(
+            get: { workspace.settings.resolvedSimpleNotch.resolvedBackgroundColor.color },
+            set: { color in
+                var value = workspace.settings.resolvedSimpleNotch
+                value.backgroundColor = WidgetColor(color)
+                workspace.settings.simpleNotch = value.normalized()
+            }
+        )
     }
 
     private func canEnableSimpleWidget(_ widget: ModuleID) -> Bool {
