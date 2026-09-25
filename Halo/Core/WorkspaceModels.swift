@@ -98,6 +98,9 @@ struct SimpleNotchSettings: Codable, Equatable {
     /// Optional for backwards compatibility with Simple settings saved before size presets.
     var size: SimpleNotchSize?
     var resolvedSize: SimpleNotchSize { size ?? .standard }
+    /// Optional so Simple settings saved before notch color customization remain compatible.
+    var backgroundColor: WidgetColor?
+    var resolvedBackgroundColor: WidgetColor { backgroundColor ?? .black }
     /// Priority order for automatic closed-notch slots. Active transient widgets win
     /// before the Clock fallback.
     var closedWidgets: [ModuleID] = []
