@@ -1336,6 +1336,39 @@ final class SimpleNotchLayoutTests: XCTestCase {
         XCTAssertEqual(SimpleNotchMetrics.arrangement(settings: settings, availableWidth: 1000).rows, [[.clock]])
     }
 
+    func testEverySimpleStyleUsesTheSameVerticalFootprint() {
+        for size in SimpleNotchSize.allCases {
+            let expected = SimpleNotchMetrics.widgetHeight(size)
+
+            for widget in SimpleNotchSettings.availableWidgets {
+                for style in SimpleNotchWidgetStyle.allCases where style.supports(widget: widget) {
+                    XCTAssertEqual(
+                        SimpleNotchMetrics.height(for: widget, style: style, size: size),
+                        expected,
+                        "Expected \(widget.rawValue) / \(style.rawValue) to keep the shared Simple height"
+                    )
+                }
+            }
+
+            var compact = SimpleNotchSettings()
+            compact.size = size
+            compact.widgets = [.clock, .calendar, .timer, .media]
+
+            var rich = compact
+            rich.styles = [
+                ModuleID.clock.rawValue: .romanDial,
+                ModuleID.calendar.rawValue: .yearOverview,
+                ModuleID.timer.rawValue: .pomodoroRing,
+                ModuleID.media.rawValue: .vinylDeck
+            ]
+
+            XCTAssertEqual(
+                SimpleNotchMetrics.expandedBodyHeight(settings: compact),
+                SimpleNotchMetrics.expandedBodyHeight(settings: rich)
+            )
+        }
+    }
+
     func testSpecializedSimpleStylesStayOnTheirIntendedWidgets() {
         var settings = SimpleNotchSettings()
         settings.widgets = [.clock, .calendar, .timer, .media]
