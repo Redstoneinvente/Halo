@@ -1619,7 +1619,8 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
     private func removeEntry(id: String) {
         entries.removeAll { $0.id == id }
         handles.removeValue(forKey: id)
-        knownMinimized.remove(id)
+        // Keep the ID in knownMinimized until a scan observes the window restored.
+        // This prevents a short AX propagation delay from re-adding the same window.
     }
 
     private func attribute(_ name: CFString, from element: AXUIElement) -> CFTypeRef? {
@@ -3702,8 +3703,6 @@ final class NotchBubbleManager {
             .store(in: &subscriptions)
 
         settingsStore.$settings
-            .map { HaloFeatureAccess.shared.effectiveBubbleSettings($0.normalized()) }
-            .map { $0.enabled && $0.resolvedAppMinimizeBubblesEnabled }
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshAppWindowMonitoring() }
