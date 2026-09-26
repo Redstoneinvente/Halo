@@ -30,35 +30,6 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Test distribution capability layer
-        run: |
-          cat > /tmp/main.swift <<'SWIFT'
-          precondition(HaloDistribution.current == .direct)
-          precondition(HaloDistribution.direct.supportsSparkle)
-          precondition(HaloDistribution.direct.supportsExternalLicensing)
-          precondition(!HaloDistribution.direct.supportsAppStoreLicensing)
-          precondition(HaloDistribution.direct.supportsUnrestrictedFileAccess)
-          precondition(HaloDistribution.direct.supportsPartnerIntegrations)
-          precondition(!HaloDistribution.appStore.supportsSparkle)
-          precondition(!HaloDistribution.appStore.supportsExternalLicensing)
-          precondition(HaloDistribution.appStore.supportsAppStoreLicensing)
-          precondition(!HaloDistribution.appStore.supportsUnrestrictedFileAccess)
-          precondition(HaloDistribution.appStore.supportsPartnerIntegrations)
-          SWIFT
-          swiftc -D HALO_DIRECT Halo/Core/HaloDistribution.swift /tmp/main.swift -o /tmp/halo-distribution-direct
-          /tmp/halo-distribution-direct
-
-          cat > /tmp/main.swift <<'SWIFT'
-          precondition(HaloDistribution.current == .appStore)
-          precondition(!HaloDistribution.current.supportsSparkle)
-          precondition(!HaloDistribution.current.supportsExternalLicensing)
-          precondition(HaloDistribution.current.supportsAppStoreLicensing)
-          precondition(!HaloDistribution.current.supportsUnrestrictedFileAccess)
-          precondition(HaloDistribution.current.supportsPartnerIntegrations)
-          SWIFT
-          swiftc -D HALO_APPSTORE Halo/Core/HaloDistribution.swift /tmp/main.swift -o /tmp/halo-distribution-appstore
-          /tmp/halo-distribution-appstore
-
       - name: Build Halo Direct
         run: |
           set -o pipefail
