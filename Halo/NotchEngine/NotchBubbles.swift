@@ -1452,6 +1452,7 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
         let bundleIdentifier: String?
         let appName: String
         let windowTitle: String
+        let windowFrame: CGRect?
         let minimizedAt: Date
     }
 
@@ -1633,6 +1634,7 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
                         bundleIdentifier: app.bundleIdentifier,
                         appName: appName,
                         windowTitle: title,
+                        windowFrame: windowFrame(for: window),
                         minimizedAt: Date()
                     ),
                     element: window
@@ -1692,6 +1694,28 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
 
     private func booleanAttribute(_ name: CFString, from element: AXUIElement) -> Bool? {
         (attribute(name, from: element) as? NSNumber)?.boolValue
+    }
+
+    private func windowFrame(for element: AXUIElement) -> CGRect? {
+        guard let positionValue = attribute(kAXPositionAttribute as CFString, from: element),
+              let sizeValue = attribute(kAXSizeAttribute as CFString, from: element),
+              CFGetTypeID(positionValue) == AXValueGetTypeID(),
+              CFGetTypeID(sizeValue) == AXValueGetTypeID() else {
+            return nil
+        }
+
+        let positionAX = unsafeBitCast(positionValue, to: AXValue.self)
+        let sizeAX = unsafeBitCast(sizeValue, to: AXValue.self)
+        var position = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(positionAX, .cgPoint, &position),
+              AXValueGetValue(sizeAX, .cgSize, &size),
+              size.width > 0,
+              size.height > 0 else {
+            return nil
+        }
+
+        return CGRect(origin: position, size: size)
     }
 }
 
