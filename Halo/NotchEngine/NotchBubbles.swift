@@ -948,7 +948,9 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedFilesEnabled: Bool { filesEnabled ?? false }
     var resolvedFilesPersistent: Bool { filesPersistent ?? false }
     var resolvedFilesDisplayMode: FileBubbleDisplayMode { filesDisplayMode ?? .latest }
-    var resolvedAppMinimizeBubblesEnabled: Bool { appMinimizeBubblesEnabled ?? false }
+    var resolvedAppMinimizeBubblesEnabled: Bool {
+        HaloDistribution.current.supportsAppWindowBubbles && (appMinimizeBubblesEnabled ?? false)
+    }
 
     func acceptsHUDEvent(_ kind: HaloHUDEventKind) -> Bool {
         switch kind {
@@ -5674,42 +5676,50 @@ struct NotchBubbleSettingsView: View {
         }
 
         Section("App Bubbles") {
-            Toggle(
-                "Show minimized windows as bubbles",
-                isOn: Binding(
-                    get: { settings.resolvedAppMinimizeBubblesEnabled },
-                    set: { enabled in
-                        var next = settingsStore.settings
-                        next.appMinimizeBubblesEnabled = enabled
-                        settingsStore.settings = next.normalized()
-                        if enabled {
-                            MinimizedWindowBubbleCenter.shared.requestAccessibilityPermission()
+            if HaloDistribution.current.supportsAppWindowBubbles {
+                Toggle(
+                    "Show minimized windows as bubbles",
+                    isOn: Binding(
+                        get: { settings.resolvedAppMinimizeBubblesEnabled },
+                        set: { enabled in
+                            var next = settingsStore.settings
+                            next.appMinimizeBubblesEnabled = enabled
+                            settingsStore.settings = next.normalized()
+                            if enabled {
+                                MinimizedWindowBubbleCenter.shared.requestAccessibilityPermission()
+                            }
                         }
-                    }
+                    )
                 )
-            )
 
-            Text("When you minimize an app window, Halo keeps it in a Bubble. Click the Bubble to restore the most recently minimized window.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Text("When you minimize an app window, Halo keeps it in a Bubble. Click the Bubble to restore the most recently minimized window.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-            if settings.resolvedAppMinimizeBubblesEnabled {
-                if minimizedWindowCenter.accessibilityGranted {
-                    Label("Accessibility access granted", systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    HStack {
-                        Label("Accessibility access is required to detect and restore windows.", systemImage: "exclamationmark.triangle")
+                if settings.resolvedAppMinimizeBubblesEnabled {
+                    if minimizedWindowCenter.accessibilityGranted {
+                        Label("Accessibility access granted", systemImage: "checkmark.circle.fill")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Grant Access") {
-                            MinimizedWindowBubbleCenter.shared.requestAccessibilityPermission()
+                    } else {
+                        HStack {
+                            Label("Accessibility access is required to detect and restore windows.", systemImage: "exclamationmark.triangle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Grant Access") {
+                                MinimizedWindowBubbleCenter.shared.requestAccessibilityPermission()
+                            }
+                            .buttonStyle(.borderless)
                         }
-                        .buttonStyle(.borderless)
                     }
                 }
+            } else {
+                Label("App Bubbles are available in Halo Direct.", systemImage: "lock.fill")
+                    .font(.callout.weight(.medium))
+                Text("The App Store build runs inside macOS App Sandbox, so Halo does not expose cross-app window control there.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
 
