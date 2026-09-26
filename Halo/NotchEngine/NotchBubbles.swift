@@ -1617,7 +1617,7 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
             guard let windows = attribute(kAXWindowsAttribute as CFString, from: application) as? [AXUIElement] else {
                 continue
             }
-            let focusedWindow = attribute(kAXFocusedWindowAttribute as CFString, from: application) as? AXUIElement
+            let focusedWindow = axElementAttribute(kAXFocusedWindowAttribute as CFString, from: application)
 
             for window in windows {
                 let isMinimized = booleanAttribute(kAXMinimizedAttribute as CFString, from: window) == true
@@ -1719,6 +1719,15 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
 
     private func booleanAttribute(_ name: CFString, from element: AXUIElement) -> Bool? {
         (attribute(name, from: element) as? NSNumber)?.boolValue
+    }
+
+    private func axElementAttribute(_ name: CFString, from element: AXUIElement) -> AXUIElement? {
+        guard let value = attribute(name, from: element),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else {
+            return nil
+        }
+
+        return unsafeBitCast(value, to: AXUIElement.self)
     }
 
     private func windowFrame(for element: AXUIElement) -> CGRect? {
