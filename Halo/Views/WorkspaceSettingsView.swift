@@ -2934,65 +2934,200 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
 
     var body: some View {
         Toggle("Show on all displays", isOn: $store.configuration.allDisplays)
+
         ForEach(NSScreen.screens, id: \.localizedName) { screen in
             let id = WindowManager.displayID(screen)
+
             Section(screen.localizedName) {
-                if let index = workspace.settings.displays.firstIndex(where: { $0.id == id }) {
-                    Toggle("Show Halo here", isOn: $workspace.settings.displays[index].enabled)
-                    if let profileID = workspace.settings.displays[index].profileID,
+                if let current = displayOverride(id: id) {
+                    Toggle(
+                        "Show Halo here",
+                        isOn: displayBinding(
+                            id: id,
+                            keyPath: \.enabled,
+                            fallback: current.enabled
+                        )
+                    )
+
+                    if let profileID = current.profileID,
                        let profile = workspace.settings.profiles.first(where: { $0.id == profileID }) {
-                        Picker("Display profile", selection: Binding(
-                            get: { workspace.settings.displays[index].profileID ?? profileID },
-                            set: { workspace.settings.displays[index].profileID = $0 }
-                        )) {
-                            ForEach(workspace.settings.profiles) { Text($0.name).tag($0.id) }
+                        Picker(
+                            "Display profile",
+                            selection: profileSelectionBinding(id: id, fallback: profileID)
+                        ) {
+                            ForEach(workspace.settings.profiles) {
+                                Text($0.name).tag($0.id)
+                            }
                         }
-                        Text("This display follows \(profile.name) live. Editing that profile updates this display too.").font(.caption).foregroundStyle(.secondary)
+
+                        Text("This display follows \(profile.name) live. Editing that profile updates this display too.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
                         Button("Customize this display instead") {
-                            workspace.settings.displays[index].theme = profile.theme
-                            workspace.settings.displays[index].layout = profile.layout
-                            workspace.settings.displays[index].profileID = nil
+                            mutateDisplay(id: id) { display in
+                                display.theme = profile.theme
+                                display.layout = profile.layout
+                                display.profileID = nil
+                            }
                         }
-                        Button("Follow global profile") { workspace.settings.displays.removeAll { $0.id == id } }
+
+                        Button("Follow global profile") {
+                            removeDisplayOverride(id: id)
+                        }
                     } else {
-                        Picker("Style", selection: $workspace.settings.displays[index].theme.style) { ForEach(SurfaceStyle.allCases) { Text($0.rawValue).tag($0) } }
-                        Slider(value: $workspace.settings.displays[index].theme.width, in: 340...640, onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0, display: screen) }) { Text("Width") }
-                        Slider(value: $workspace.settings.displays[index].theme.tint, in: 0...1) { Text("Accent") }
+                        Picker(
+                            "Style",
+                            selection: displayBinding(
+                                id: id,
+                                keyPath: \.theme.style,
+                                fallback: current.theme.style
+                            )
+                        ) {
+                            ForEach(SurfaceStyle.allCases) {
+                                Text($0.rawValue).tag($0)
+                            }
+                        }
+
+                        Slider(
+                            value: displayBinding(
+                                id: id,
+                                keyPath: \.theme.width,
+                                fallback: current.theme.width
+                            ),
+                            in: 340...640,
+                            onEditingChanged: {
+                                GeometryPreview.update(expanded: true, editing: $0, display: screen)
+                            }
+                        ) {
+                            Text("Width")
+                        }
+
+                        Slider(
+                            value: displayBinding(
+                                id: id,
+                                keyPath: \.theme.tint,
+                                fallback: current.theme.tint
+                            ),
+                            in: 0...1
+                        ) {
+                            Text("Accent")
+                        }
+
                         Menu("Use a profile on this display") {
                             ForEach(workspace.settings.profiles) { profile in
                                 Button(profile.name) {
-                                    workspace.settings.displays[index].profileID = profile.id
-                                    workspace.settings.displays[index].theme = profile.theme
-                                    workspace.settings.displays[index].layout = nil
+                                    mutateDisplay(id: id) { display in
+                                        display.profileID = profile.id
+                                        display.theme = profile.theme
+                                        display.layout = nil
+                                    }
                                 }
                             }
                         }
+
                         Button("Follow global modules and background") {
-                            workspace.settings.displays[index].profileID = nil
-                            workspace.settings.displays[index].layout = nil
+                            mutateDisplay(id: id) { display in
+                                display.profileID = nil
+                                display.layout = nil
+                            }
                         }
-                        if workspace.settings.displays[index].layout != nil {
+
+                        if current.layout != nil {
                             SurfaceAppearanceControls(
-                                appearance: Binding(
-                                    get: { workspace.settings.displays[index].layout?.appearance ?? workspace.settings.layout.appearance },
-                                    set: { workspace.settings.displays[index].layout?.appearance = $0 }
-                                ),
-                                theme: workspace.settings.displays[index].theme,
+                                appearance: layoutAppearanceBinding(id: id),
+                                theme: current.theme,
                                 screen: screen,
                                 scope: .geometry
                             )
                         } else {
                             Button("Customize closed size, shape and position here") {
-                                workspace.settings.displays[index].layout = workspace.settings.layout
+                                mutateDisplay(id: id) { display in
+                                    display.layout = workspace.settings.layout
+                                }
                             }
                         }
-                        Button("Use global theme") { workspace.settings.displays.removeAll { $0.id == id } }
+
+                        Button("Use global theme") {
+                            removeDisplayOverride(id: id)
+                        }
                     }
                 } else {
-                    Button("Customize this display") { workspace.settings.displays.append(DisplayOverride(id: id, theme: store.configuration.theme)) }
+                    Button("Customize this display") {
+                        guard displayOverride(id: id) == nil else { return }
+                        workspace.settings.displays.append(
+                            DisplayOverride(id: id, theme: store.configuration.theme)
+                        )
+                    }
                 }
             }
         }
+    }
+
+    private func displayOverride(id: String) -> DisplayOverride? {
+        workspace.settings.displays.first(where: { $0.id == id })
+    }
+
+    private func displayBinding<Value>(
+        id: String,
+        keyPath: WritableKeyPath<DisplayOverride, Value>,
+        fallback: Value
+    ) -> Binding<Value> {
+        Binding(
+            get: {
+                workspace.settings.displays
+                    .first(where: { $0.id == id })?[keyPath: keyPath] ?? fallback
+            },
+            set: { newValue in
+                mutateDisplay(id: id) { display in
+                    display[keyPath: keyPath] = newValue
+                }
+            }
+        )
+    }
+
+    private func profileSelectionBinding(id: String, fallback: UUID) -> Binding<UUID> {
+        Binding(
+            get: {
+                workspace.settings.displays
+                    .first(where: { $0.id == id })?.profileID ?? fallback
+            },
+            set: { profileID in
+                mutateDisplay(id: id) { display in
+                    display.profileID = profileID
+                }
+            }
+        )
+    }
+
+    private func layoutAppearanceBinding(id: String) -> Binding<Appearance> {
+        Binding(
+            get: {
+                workspace.settings.displays
+                    .first(where: { $0.id == id })?.layout?.appearance
+                    ?? workspace.settings.layout.appearance
+            },
+            set: { appearance in
+                mutateDisplay(id: id) { display in
+                    guard display.layout != nil else { return }
+                    display.layout?.appearance = appearance
+                }
+            }
+        )
+    }
+
+    private func mutateDisplay(
+        id: String,
+        _ update: (inout DisplayOverride) -> Void
+    ) {
+        guard let index = workspace.settings.displays.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        update(&workspace.settings.displays[index])
+    }
+
+    private func removeDisplayOverride(id: String) {
+        workspace.settings.displays.removeAll { $0.id == id }
     }
 }
 
