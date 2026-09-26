@@ -1187,8 +1187,8 @@ final class HaloLicenseManager: ObservableObject {
             return
         }
         await prepareFingerprint()
-        // Press licenses are a separate Halo entitlement and must never be sent to LicenseSeat.
-        if await restorePressLicense() { return }
+        // Halo-managed PK/GK licenses are separate entitlements and must never be sent to LicenseSeat.
+        if await restoreManagedLicense() { return }
 
         // Prefer a paid LicenseSeat entitlement whenever one is stored and valid.
         if isConfigured, let key = await HaloKeychain.string(for: licenseKeyKey), !key.isEmpty {
@@ -1278,16 +1278,18 @@ final class HaloLicenseManager: ObservableObject {
         guard cleaned.count >= 6 else { errorMessage = "Enter your Halo license key."; return }
         await prepareFingerprint()
 
-        // PK_ keys are Halo press licenses. Keep this branch before every LicenseSeat guard/request.
-        if Self.isPressLicenseKey(cleaned) {
+        // PK_ press keys and GK_ giveaway keys are Halo-managed Firestore licenses.
+        // Keep this branch before every LicenseSeat guard/request.
+        if Self.isManagedLicenseKey(cleaned) {
+            let plan = Self.managedLicensePlan(for: cleaned)
             isBusy = true; state = .checking; errorMessage = nil; notice = nil
             defer { isBusy = false }
             do {
-                try await activatePressLicense(cleaned)
-                notice = "Press license activated on this Mac."
+                try await activateManagedLicense(cleaned)
+                notice = "\(plan) license activated on this Mac."
             } catch {
                 let message = readable(error)
-                details = HaloLicenseDetails(status: "invalid", plan: "Press", expiresAt: nil, activeSeats: 0, seatLimit: 1)
+                details = HaloLicenseDetails(status: "invalid", plan: plan, expiresAt: nil, activeSeats: 0, seatLimit: 1)
                 state = .invalid(message)
                 errorMessage = message
             }
@@ -1323,7 +1325,7 @@ final class HaloLicenseManager: ObservableObject {
     func validate() async {
         guard HaloDistribution.current.supportsExternalLicensing else { return }
         await prepareFingerprint()
-        if await restorePressLicense() { return }
+        if await restoreManagedLicense() { return }
         guard isConfigured else { state = .unconfigured; return }
         guard let key = await HaloKeychain.string(for: licenseKeyKey), !key.isEmpty else { state = .inactive; return }
         isBusy = true; state = .checking; errorMessage = nil
@@ -1354,23 +1356,34 @@ final class HaloLicenseManager: ObservableObject {
     func deactivate() async {
         guard HaloDistribution.current.supportsExternalLicensing else { return }
         await prepareFingerprint()
-        if let key = await HaloKeychain.string(for: pressLicenseKey), Self.isPressLicenseKey(key) {
-            await HaloKeychain.remove(pressLicenseKey)
-            await HaloKeychain.remove(pressLicenseOwnerKey)
-            cachedPressOwner = ""
-            licenseHint = ""
-            details = .empty
+        if let key = await HaloKeychain.string(for: pressLicenseKey), Self.isManagedLicenseKey(key) {
+            let plan = Self.managedLicensePlan(for: key)
+            isBusy = true
             errorMessage = nil
-            if await restoreLocalTrial() {
-                notice = "Press license removed. Your local trial is still active."
-            } else if isConfigured,
-                      let paidKey = await HaloKeychain.string(for: licenseKeyKey),
-                      !paidKey.isEmpty {
-                await validate()
-                notice = "Press license removed. Your paid license is active."
-            } else {
-                state = isConfigured ? .inactive : .unconfigured
-                notice = "Press license removed from this Mac."
+            notice = nil
+            defer { isBusy = false }
+
+            do {
+                try await deactivateManagedLicense(key)
+                await HaloKeychain.remove(pressLicenseKey)
+                await HaloKeychain.remove(pressLicenseOwnerKey)
+                cachedPressOwner = ""
+                licenseHint = ""
+                details = .empty
+
+                if await restoreLocalTrial() {
+                    notice = "\(plan) license removed. Your local trial is still active."
+                } else if isConfigured,
+                          let paidKey = await HaloKeychain.string(for: licenseKeyKey),
+                          !paidKey.isEmpty {
+                    await validate()
+                    notice = "\(plan) license removed. Your paid license is active."
+                } else {
+                    state = isConfigured ? .inactive : .unconfigured
+                    notice = "\(plan) license removed from this Mac."
+                }
+            } catch {
+                errorMessage = readable(error)
             }
             return
         }
@@ -1413,7 +1426,7 @@ final class HaloLicenseManager: ObservableObject {
     func accessValid(for accountID: String) -> Bool {
         guard HaloDistribution.current.supportsExternalLicensing else { return true }
         guard state.isValid else { return false }
-        if details.plan == "Press" {
+        if details.plan == "Press" || details.plan == "Giveaway" {
             return !cachedPressOwner.isEmpty && cachedPressOwner == accountID
         }
         guard details.isTrial && details.plan == "Local Trial" else { return true }
@@ -1423,204 +1436,274 @@ final class HaloLicenseManager: ObservableObject {
         return Date() < expiresAt
     }
 
-    private static func isPressLicenseKey(_ key: String) -> Bool {
+    private static func isManagedLicenseKey(_ key: String) -> Bool {
+        let normalized = key.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return normalized.hasPrefix("PK_") || normalized.hasPrefix("GK_")
+    }
+
+    private static func managedLicensePlan(for key: String) -> String {
         key.trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased()
-            .hasPrefix("PK_")
+            .hasPrefix("GK_") ? "Giveaway" : "Press"
+    }
+
+    private static func managedLicenseType(for key: String) -> String {
+        managedLicensePlan(for: key) == "Giveaway" ? "giveaway" : "press"
+    }
+
+    private static func managedLicenseCollections(for key: String) -> [String] {
+        managedLicensePlan(for: key) == "Giveaway"
+            ? ["giveawayLicenses", "pressLicenses"]
+            : ["pressLicenses"]
     }
 
     @discardableResult
-    private func restorePressLicense() async -> Bool {
+    private func restoreManagedLicense() async -> Bool {
         guard let key = await HaloKeychain.string(for: pressLicenseKey),
-              Self.isPressLicenseKey(key) else { return false }
+              Self.isManagedLicenseKey(key) else { return false }
 
+        let plan = Self.managedLicensePlan(for: key)
         let account = HaloAccountManager.shared
         guard account.isSignedIn, !account.userID.isEmpty else {
             licenseHint = Self.hint(key)
-            details = HaloLicenseDetails(status: "account_required", plan: "Press", expiresAt: nil, activeSeats: 0, seatLimit: 1)
-            state = .invalid("Sign in to the Halo account that activated this press license.")
+            details = HaloLicenseDetails(status: "account_required", plan: plan, expiresAt: nil, activeSeats: 0, seatLimit: 1)
+            state = .invalid("Sign in to the Halo account that activated this \(plan.lowercased()) license.")
             return true
         }
 
         do {
             let token = try await account.validIDToken()
-            var document = try await fetchPressLicense(key: key, token: token)
-            _ = try validatePressLicenseDocument(document, key: key, requireBound: false)
+            var document = try await fetchManagedLicense(key: key, token: token)
+            _ = try validateManagedLicenseDocument(document, key: key, requireCurrentDevice: false)
 
-            if pressBool(document, "bound") != true {
-                try await bindUnboundPressLicense(
-                    key: key,
-                    document: document,
-                    token: token
-                )
-                document = try await fetchPressLicense(key: key, token: token)
-            }
+            try await ensureManagedLicenseDevice(key: key, document: document, token: token)
+            document = try await fetchManagedLicense(key: key, token: token)
 
-            let expiresAt = try validatePressLicenseDocument(document, key: key, requireBound: true)
+            let snapshot = try validateManagedLicenseDocument(document, key: key, requireCurrentDevice: true)
             guard await HaloKeychain.set(account.userID, for: pressLicenseOwnerKey) else {
-                throw HaloCommercialError.message("Halo could not save the press license owner securely on this Mac.")
+                throw HaloCommercialError.message("Halo could not save the license owner securely on this Mac.")
             }
-            applyPressLicense(key, expiresAt: expiresAt)
+            applyManagedLicense(key, document: document, expiresAt: snapshot.expiresAt)
         } catch {
             let message = readable(error)
             licenseHint = Self.hint(key)
-            details = HaloLicenseDetails(status: "invalid", plan: "Press", expiresAt: nil, activeSeats: 0, seatLimit: 1)
+            details = HaloLicenseDetails(status: "invalid", plan: plan, expiresAt: nil, activeSeats: 0, seatLimit: 1)
             state = .invalid(message)
             errorMessage = message
         }
         return true
     }
 
-    private func activatePressLicense(_ key: String) async throws {
+    private func activateManagedLicense(_ key: String) async throws {
         let account = HaloAccountManager.shared
+        let plan = Self.managedLicensePlan(for: key)
         guard account.isSignedIn, !account.userID.isEmpty else {
-            throw HaloCommercialError.message("Sign in to your Halo account before activating a press license.")
+            throw HaloCommercialError.message("Sign in to your Halo account before activating this \(plan.lowercased()) license.")
         }
         guard !account.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw HaloCommercialError.message("Your Halo account does not have an email address.")
         }
 
         let token = try await account.validIDToken()
-        var document = try await fetchPressLicense(key: key, token: token)
-        _ = try validatePressLicenseDocument(document, key: key, requireBound: false)
+        var document = try await fetchManagedLicense(key: key, token: token)
+        _ = try validateManagedLicenseDocument(document, key: key, requireCurrentDevice: false)
 
-        if pressBool(document, "bound") != true {
-            try await bindUnboundPressLicense(
-                key: key,
-                document: document,
-                token: token
-            )
-            document = try await fetchPressLicense(key: key, token: token)
-        }
+        try await ensureManagedLicenseDevice(key: key, document: document, token: token)
+        document = try await fetchManagedLicense(key: key, token: token)
 
-        let expiresAt = try validatePressLicenseDocument(document, key: key, requireBound: true)
+        let snapshot = try validateManagedLicenseDocument(document, key: key, requireCurrentDevice: true)
         guard await HaloKeychain.set(key, for: pressLicenseKey),
               await HaloKeychain.set(account.userID, for: pressLicenseOwnerKey) else {
-            throw HaloCommercialError.message("Halo could not save the press license securely on this Mac.")
+            throw HaloCommercialError.message("Halo could not save this license securely on this Mac.")
         }
-        applyPressLicense(key, expiresAt: expiresAt)
+        applyManagedLicense(key, document: document, expiresAt: snapshot.expiresAt)
     }
 
-    private func bindUnboundPressLicense(
+    private func ensureManagedLicenseDevice(
+        key: String,
+        document: [String: Any],
+        token: String
+    ) async throws {
+        if managedBool(document, "bound") != true {
+            try await bindUnboundManagedLicense(key: key, document: document, token: token)
+            return
+        }
+
+        let snapshot = try validateManagedLicenseDocument(document, key: key, requireCurrentDevice: false)
+        let current = fingerprint()
+        if snapshot.deviceIDs.contains(current) { return }
+
+        guard snapshot.deviceIDs.count < snapshot.deviceLimit else {
+            throw HaloCommercialError.message(
+                "This \(Self.managedLicensePlan(for: key).lowercased()) license has reached its \(snapshot.deviceLimit)-device activation limit."
+            )
+        }
+
+        do {
+            try await updateManagedLicenseDevices(
+                document: document,
+                deviceIDs: snapshot.deviceIDs + [current],
+                token: token
+            )
+        } catch {
+            // Another Mac may have taken a seat after our read. Re-check the canonical state.
+            let refreshed = try await fetchManagedLicense(key: key, token: token)
+            let latest = try validateManagedLicenseDocument(refreshed, key: key, requireCurrentDevice: false)
+            if latest.deviceIDs.contains(current) { return }
+            if latest.deviceIDs.count >= latest.deviceLimit {
+                throw HaloCommercialError.message(
+                    "This \(Self.managedLicensePlan(for: key).lowercased()) license has reached its \(latest.deviceLimit)-device activation limit."
+                )
+            }
+            throw error
+        }
+    }
+
+    private func bindUnboundManagedLicense(
         key: String,
         document: [String: Any],
         token: String
     ) async throws {
         do {
-            try await bindPressLicense(key: key, document: document, token: token)
+            try await bindManagedLicense(key: key, document: document, token: token)
         } catch {
-            // A concurrent activation may have completed the one-way bind after our read.
-            // Re-fetch once and accept it only if it now belongs to this account + Mac.
+            // A concurrent activation may have completed the bind after our read.
             let refreshed: [String: Any]
             do {
-                refreshed = try await fetchPressLicense(key: key, token: token)
+                refreshed = try await fetchManagedLicense(key: key, token: token)
             } catch {
                 throw error
             }
 
-            if pressBool(refreshed, "bound") == true {
-                _ = try validatePressLicenseDocument(refreshed, key: key, requireBound: true)
+            if managedBool(refreshed, "bound") == true {
+                let snapshot = try validateManagedLicenseDocument(refreshed, key: key, requireCurrentDevice: false)
+                let current = fingerprint()
+                if snapshot.deviceIDs.contains(current) { return }
+                guard snapshot.deviceIDs.count < snapshot.deviceLimit else {
+                    throw HaloCommercialError.message(
+                        "This \(Self.managedLicensePlan(for: key).lowercased()) license has reached its \(snapshot.deviceLimit)-device activation limit."
+                    )
+                }
+                try await updateManagedLicenseDevices(
+                    document: refreshed,
+                    deviceIDs: snapshot.deviceIDs + [current],
+                    token: token
+                )
                 return
             }
 
-            // The write genuinely failed and the key is still unbound. Preserve the
-            // original Firestore error instead of replacing it with "not activated yet".
             throw error
         }
     }
 
-    private func validatePressLicenseDocument(
+    private func validateManagedLicenseDocument(
         _ document: [String: Any],
         key: String,
-        requireBound: Bool
-    ) throws -> Date? {
-        guard pressString(document, "licenseType")?.lowercased() == "press" else {
-            throw HaloCommercialError.message("This is not a Halo press license.")
+        requireCurrentDevice: Bool
+    ) throws -> (expiresAt: Date?, deviceIDs: [String], deviceLimit: Int) {
+        let expectedType = Self.managedLicenseType(for: key)
+        let actualType = managedString(document, "licenseType")?.lowercased() ?? ""
+        guard actualType == expectedType else {
+            throw HaloCommercialError.message("This is not a valid Halo \(Self.managedLicensePlan(for: key).lowercased()) license.")
         }
-        guard pressBool(document, "active") == true else {
-            throw HaloCommercialError.message("This press license is disabled.")
+        guard managedBool(document, "active") == true else {
+            throw HaloCommercialError.message("This \(Self.managedLicensePlan(for: key).lowercased()) license is disabled.")
         }
-        guard pressBool(document, "revoked") != true else {
-            throw HaloCommercialError.message("This press license has been revoked.")
+        guard managedBool(document, "revoked") != true else {
+            throw HaloCommercialError.message("This \(Self.managedLicensePlan(for: key).lowercased()) license has been revoked.")
         }
 
-        let expiresAt = pressTimestamp(document, "expiresAt")
+        let expiresAt = managedTimestamp(document, "expiresAt")
         if let expiresAt, Date() >= expiresAt {
-            throw HaloCommercialError.message("This press license has expired.")
+            throw HaloCommercialError.message("This \(Self.managedLicensePlan(for: key).lowercased()) license has expired.")
         }
 
-        let bound = pressBool(document, "bound") == true
-        if requireBound || bound {
-            guard bound else {
-                throw HaloCommercialError.message("This press license has not been activated yet.")
-            }
+        let deviceLimit = managedDeviceLimit(document)
+        let deviceIDs = managedDeviceIDs(document)
+        let bound = managedBool(document, "bound") == true
 
+        if bound {
             let account = HaloAccountManager.shared
             let expectedEmail = account.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            let boundUID = pressString(document, "boundUid") ?? ""
-            let boundEmail = (pressString(document, "boundEmail") ?? "")
+            let boundUID = managedString(document, "boundUid") ?? ""
+            let boundEmail = (managedString(document, "boundEmail") ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
-            let boundDevice = pressString(document, "boundDeviceId") ?? ""
 
             guard boundUID == account.userID else {
-                throw HaloCommercialError.message("This press license is already bound to another Halo account.")
+                throw HaloCommercialError.message("This license is already bound to another Halo account.")
             }
             guard boundEmail == expectedEmail else {
-                throw HaloCommercialError.message("This press license is already bound to another email address.")
-            }
-            guard boundDevice == fingerprint() else {
-                throw HaloCommercialError.message("This press license is already bound to another Mac.")
+                throw HaloCommercialError.message("This license is already bound to another email address.")
             }
         }
 
-        return expiresAt
+        if requireCurrentDevice {
+            guard bound else {
+                throw HaloCommercialError.message("This license has not been activated yet.")
+            }
+            guard deviceIDs.contains(fingerprint()) else {
+                throw HaloCommercialError.message("This Mac is not activated for this license.")
+            }
+        }
+
+        return (expiresAt, deviceIDs, deviceLimit)
     }
 
-    private func fetchPressLicense(key: String, token: String) async throws -> [String: Any] {
+    private func fetchManagedLicense(key: String, token: String) async throws -> [String: Any] {
         guard let projectID = firebaseProjectID(from: token), !projectID.isEmpty else {
             throw HaloCommercialError.message("Halo could not identify the Firebase project.")
         }
+
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
         guard let encodedProject = projectID.addingPercentEncoding(withAllowedCharacters: allowed),
-              let encodedKey = key.addingPercentEncoding(withAllowedCharacters: allowed),
-              let url = URL(string: "https://firestore.googleapis.com/v1/projects/\(encodedProject)/databases/(default)/documents/pressLicenses/\(encodedKey)") else {
-            throw HaloCommercialError.message("Halo could not prepare the press license lookup.")
+              let encodedKey = key.addingPercentEncoding(withAllowedCharacters: allowed) else {
+            throw HaloCommercialError.message("Halo could not prepare the license lookup.")
         }
 
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw HaloCommercialError.message("No response from Firestore.")
+        for collection in Self.managedLicenseCollections(for: key) {
+            guard let encodedCollection = collection.addingPercentEncoding(withAllowedCharacters: allowed),
+                  let url = URL(string: "https://firestore.googleapis.com/v1/projects/\(encodedProject)/databases/(default)/documents/\(encodedCollection)/\(encodedKey)") else {
+                continue
+            }
+
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw HaloCommercialError.message("No response from Firestore.")
+            }
+            if http.statusCode == 404 { continue }
+            guard (200..<300).contains(http.statusCode) else {
+                throw HaloCommercialError.message(firestoreManagedLicenseError(data, statusCode: http.statusCode))
+            }
+            guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw HaloCommercialError.message("Firestore returned an unreadable Halo license.")
+            }
+            return root
         }
-        if http.statusCode == 404 {
-            throw HaloCommercialError.message("Press license was not found.")
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            throw HaloCommercialError.message(firestorePressError(data, statusCode: http.statusCode))
-        }
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw HaloCommercialError.message("Firestore returned an unreadable press license.")
-        }
-        return root
+
+        throw HaloCommercialError.message(
+            "\(Self.managedLicensePlan(for: key)) license was not found."
+        )
     }
 
-    private func bindPressLicense(key: String, document: [String: Any], token: String) async throws {
+    private func bindManagedLicense(key: String, document: [String: Any], token: String) async throws {
         let account = HaloAccountManager.shared
         guard let projectID = firebaseProjectID(from: token), !projectID.isEmpty,
               let updateTime = document["updateTime"] as? String,
               let documentName = document["name"] as? String else {
-            throw HaloCommercialError.message("The press license record is incomplete.")
+            throw HaloCommercialError.message("The Halo license record is incomplete.")
         }
 
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
         guard let encodedProject = projectID.addingPercentEncoding(withAllowedCharacters: allowed),
               let url = URL(string: "https://firestore.googleapis.com/v1/projects/\(encodedProject)/databases/(default)/documents:commit") else {
-            throw HaloCommercialError.message("Halo could not prepare the press license activation.")
+            throw HaloCommercialError.message("Halo could not prepare the license activation.")
         }
 
         let email = account.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let current = fingerprint()
         let body: [String: Any] = [
             "writes": [[
                 "update": [
@@ -1629,11 +1712,12 @@ final class HaloLicenseManager: ObservableObject {
                         "bound": ["booleanValue": true],
                         "boundUid": ["stringValue": account.userID],
                         "boundEmail": ["stringValue": email],
-                        "boundDeviceId": ["stringValue": fingerprint()]
+                        "boundDeviceId": ["stringValue": current],
+                        "boundDeviceIds": managedFirestoreStringArray([current])
                     ]
                 ],
                 "updateMask": [
-                    "fieldPaths": ["bound", "boundUid", "boundEmail", "boundDeviceId"]
+                    "fieldPaths": ["bound", "boundUid", "boundEmail", "boundDeviceId", "boundDeviceIds"]
                 ],
                 "currentDocument": ["updateTime": updateTime],
                 "updateTransforms": [
@@ -1643,6 +1727,73 @@ final class HaloLicenseManager: ObservableObject {
             ]]
         ]
 
+        try await commitManagedLicenseWrite(body, token: token)
+    }
+
+    private func updateManagedLicenseDevices(
+        document: [String: Any],
+        deviceIDs: [String],
+        token: String
+    ) async throws {
+        guard let updateTime = document["updateTime"] as? String,
+              let documentName = document["name"] as? String else {
+            throw HaloCommercialError.message("The Halo license record is incomplete.")
+        }
+
+        let normalized = Array(Set(deviceIDs.filter { !$0.isEmpty })).sorted()
+        let legacyDevice = normalized.first ?? ""
+        let body: [String: Any] = [
+            "writes": [[
+                "update": [
+                    "name": documentName,
+                    "fields": [
+                        "boundDeviceId": ["stringValue": legacyDevice],
+                        "boundDeviceIds": managedFirestoreStringArray(normalized)
+                    ]
+                ],
+                "updateMask": [
+                    "fieldPaths": ["boundDeviceId", "boundDeviceIds"]
+                ],
+                "currentDocument": ["updateTime": updateTime],
+                "updateTransforms": [
+                    ["fieldPath": "updatedAt", "setToServerValue": "REQUEST_TIME"]
+                ]
+            ]]
+        ]
+
+        try await commitManagedLicenseWrite(body, token: token)
+    }
+
+    private func deactivateManagedLicense(_ key: String) async throws {
+        let account = HaloAccountManager.shared
+        guard account.isSignedIn, !account.userID.isEmpty else {
+            throw HaloCommercialError.message("Sign in to the Halo account that owns this license before deactivating it.")
+        }
+
+        let token = try await account.validIDToken()
+        let document = try await fetchManagedLicense(key: key, token: token)
+        let snapshot = try validateManagedLicenseDocument(document, key: key, requireCurrentDevice: true)
+        let current = fingerprint()
+        let remaining = snapshot.deviceIDs.filter { $0 != current }
+
+        try await updateManagedLicenseDevices(
+            document: document,
+            deviceIDs: remaining,
+            token: token
+        )
+    }
+
+    private func commitManagedLicenseWrite(_ body: [String: Any], token: String) async throws {
+        guard let projectID = firebaseProjectID(from: token), !projectID.isEmpty else {
+            throw HaloCommercialError.message("Halo could not identify the Firebase project.")
+        }
+
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        guard let encodedProject = projectID.addingPercentEncoding(withAllowedCharacters: allowed),
+              let url = URL(string: "https://firestore.googleapis.com/v1/projects/\(encodedProject)/databases/(default)/documents:commit") else {
+            throw HaloCommercialError.message("Halo could not prepare the Firestore license update.")
+        }
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -1651,55 +1802,100 @@ final class HaloLicenseManager: ObservableObject {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
-            throw HaloCommercialError.message("No response from Firestore while activating the press license.")
+            throw HaloCommercialError.message("No response from Firestore while updating the license.")
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw HaloCommercialError.message(firestorePressError(data, statusCode: http.statusCode))
+            throw HaloCommercialError.message(firestoreManagedLicenseError(data, statusCode: http.statusCode))
         }
     }
 
-    private func pressField(_ document: [String: Any], _ name: String) -> [String: Any]? {
+    private func managedField(_ document: [String: Any], _ name: String) -> [String: Any]? {
         guard let fields = document["fields"] as? [String: Any] else { return nil }
         return fields[name] as? [String: Any]
     }
 
-    private func pressString(_ document: [String: Any], _ name: String) -> String? {
-        pressField(document, name)?["stringValue"] as? String
+    private func managedString(_ document: [String: Any], _ name: String) -> String? {
+        managedField(document, name)?["stringValue"] as? String
     }
 
-    private func pressBool(_ document: [String: Any], _ name: String) -> Bool? {
-        pressField(document, name)?["booleanValue"] as? Bool
+    private func managedBool(_ document: [String: Any], _ name: String) -> Bool? {
+        managedField(document, name)?["booleanValue"] as? Bool
     }
 
-    private func pressTimestamp(_ document: [String: Any], _ name: String) -> Date? {
-        guard let raw = pressField(document, name)?["timestampValue"] as? String else { return nil }
+    private func managedInt(_ document: [String: Any], _ name: String) -> Int? {
+        let value = managedField(document, name)?["integerValue"]
+        if let value = value as? String { return Int(value) }
+        if let value = value as? NSNumber { return value.intValue }
+        if let value = value as? Int { return value }
+        return nil
+    }
+
+    private func managedStringArray(_ document: [String: Any], _ name: String) -> [String] {
+        guard let array = managedField(document, name)?["arrayValue"] as? [String: Any],
+              let values = array["values"] as? [[String: Any]] else { return [] }
+        return values.compactMap { $0["stringValue"] as? String }.filter { !$0.isEmpty }
+    }
+
+    private func managedFirestoreStringArray(_ values: [String]) -> [String: Any] {
+        [
+            "arrayValue": [
+                "values": values.map { ["stringValue": $0] }
+            ]
+        ]
+    }
+
+    private func managedDeviceIDs(_ document: [String: Any]) -> [String] {
+        let modern = managedStringArray(document, "boundDeviceIds")
+        if !modern.isEmpty { return Array(Set(modern)).sorted() }
+        if let legacy = managedString(document, "boundDeviceId"), !legacy.isEmpty {
+            return [legacy]
+        }
+        return []
+    }
+
+    private func managedDeviceLimit(_ document: [String: Any]) -> Int {
+        max(1, managedInt(document, "deviceLimit") ?? 1)
+    }
+
+    private func managedTimestamp(_ document: [String: Any], _ name: String) -> Date? {
+        guard let raw = managedField(document, name)?["timestampValue"] as? String else { return nil }
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return fractional.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
     }
 
-    private func firestorePressError(_ data: Data, statusCode: Int) -> String {
+    private func firestoreManagedLicenseError(_ data: Data, statusCode: Int) -> String {
         let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let error = root?["error"] as? [String: Any]
         let status = (error?["status"] as? String) ?? ""
         if status == "PERMISSION_DENIED" || statusCode == 403 {
-            return "Halo is not allowed to access this press license. Check the Firestore press-license rules."
+            return "Halo is not allowed to access this license. Check the Firestore managed-license rules."
         }
         if status == "UNAUTHENTICATED" || statusCode == 401 {
             return "Your Halo session expired. Sign in again and retry."
         }
         if status == "FAILED_PRECONDITION" || status == "ABORTED" || statusCode == 409 {
-            return "This press license was activated by another request. Halo will re-check its binding."
+            return "This license changed on another Mac. Halo will re-check its device activations."
         }
-        return (error?["message"] as? String) ?? "Firestore press license request failed (\(statusCode))."
+        return (error?["message"] as? String) ?? "Firestore Halo license request failed (\(statusCode))."
     }
 
-    private func applyPressLicense(_ key: String, expiresAt: Date?) {
+    private func applyManagedLicense(_ key: String, document: [String: Any], expiresAt: Date?) {
         trialExpiryTask?.cancel()
         cachedPressOwner = HaloAccountManager.shared.userID
         licenseHint = Self.hint(key)
-        details = HaloLicenseDetails(status: "active", plan: "Press", expiresAt: expiresAt, activeSeats: 1, seatLimit: 1)
-        state = .valid(plan: "Press")
+
+        let deviceIDs = managedDeviceIDs(document)
+        let deviceLimit = managedDeviceLimit(document)
+        let plan = Self.managedLicensePlan(for: key)
+        details = HaloLicenseDetails(
+            status: "active",
+            plan: plan,
+            expiresAt: expiresAt,
+            activeSeats: deviceIDs.count,
+            seatLimit: deviceLimit
+        )
+        state = .valid(plan: plan)
         errorMessage = nil
     }
 
