@@ -3829,6 +3829,7 @@ private struct NotchBubbleMaskShape: Shape {
 
 @MainActor
 private struct NotchBubbleView: View {
+    let activityID: String
     let kind: NotchBubbleKind
 
     @ObservedObject var store: AppStore
@@ -3848,7 +3849,8 @@ private struct NotchBubbleView: View {
     @State private var showingDetail = false
     @State private var lastNonZeroAudioVolume: Float = 0.5
 
-    init(kind: NotchBubbleKind, store: AppStore, workspace: WorkspaceStore, surfaceState: SurfaceState) {
+    init(activityID: String, kind: NotchBubbleKind, store: AppStore, workspace: WorkspaceStore, surfaceState: SurfaceState) {
+        self.activityID = activityID
         self.kind = kind
         self.store = store
         self.workspace = workspace
@@ -3887,7 +3889,7 @@ private struct NotchBubbleView: View {
             .onHover { value in
                 if value && !hovering {
                     HaloHoverHaptics.pulse(
-                        id: "bubble." + surfaceState.displayID + "." + kind.rawValue,
+                        id: "bubble." + surfaceState.displayID + "." + activityID,
                         strength: store.configuration.resolvedHoverHapticStrength,
                         pattern: store.configuration.resolvedHoverHapticPattern
                     )
@@ -3900,7 +3902,7 @@ private struct NotchBubbleView: View {
                 updateInteractionProtection()
             }
             .onReceive(NotificationCenter.default.publisher(for: .haloNotchBubbleDirectionalGesture)) { note in
-                guard note.object as? String == kind.rawValue,
+                guard note.object as? String == activityID,
                       let rawDirection = note.userInfo?["direction"] as? String,
                       let direction = NotchBubbleGestureDirection(rawValue: rawDirection) else {
                     return
@@ -3938,7 +3940,7 @@ private struct NotchBubbleView: View {
                             handlePrimaryTap()
                             let override = settings.styleOverride(for: kind)
                             HaloHoverHaptics.pulse(
-                                id: "bubble.gesture.tap." + surfaceState.displayID + "." + kind.rawValue,
+                                id: "bubble.gesture.tap." + surfaceState.displayID + "." + activityID,
                                 strength: override?.tapHapticStrength
                                     ?? store.configuration.resolvedHoverHapticStrength,
                                 pattern: override?.tapHapticPattern
@@ -3955,7 +3957,7 @@ private struct NotchBubbleView: View {
                     Divider()
                     HStack {
                         Button("Dismiss current activity") {
-                            activityCenter.dismiss(kind: kind)
+                            dismissCurrentActivity()
                             showingDetail = false
                         }
                         .buttonStyle(.borderless)
@@ -3975,7 +3977,7 @@ private struct NotchBubbleView: View {
             }
             .contextMenu {
                 Button("Dismiss current activity") {
-                    activityCenter.dismiss(kind: kind)
+                    dismissCurrentActivity()
                 }
             }
             .accessibilityLabel(kind.title)
@@ -4017,9 +4019,13 @@ private struct NotchBubbleView: View {
         }
     }
 
+    private var appWindowEntry: MinimizedWindowBubbleCenter.Entry? {
+        minimizedWindowCenter.entry(activityID: activityID)
+    }
+
     @ViewBuilder
     private var appWindowBubbleContent: some View {
-        if let entry = minimizedWindowCenter.current {
+        if let entry = appWindowEntry {
             ZStack(alignment: .bottomTrailing) {
                 Group {
                     if let icon = minimizedWindowCenter.appIcon(for: entry) {
@@ -4960,7 +4966,7 @@ private struct NotchBubbleView: View {
 
     private var appWindowDetail: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let entry = minimizedWindowCenter.current {
+            if let entry = appWindowEntry {
                 HStack(spacing: 12) {
                     Group {
                         if let icon = minimizedWindowCenter.appIcon(for: entry) {
@@ -4993,7 +4999,7 @@ private struct NotchBubbleView: View {
                 }
 
                 Button("Restore Window") {
-                    _ = minimizedWindowCenter.restoreCurrent()
+                    _ = minimizedWindowCenter.restore(activityID: activityID)
                     activityCenter.clearDismissal(kind: .appWindow)
                     showingDetail = false
                 }
@@ -5399,7 +5405,7 @@ private struct NotchBubbleView: View {
 
     private func handlePrimaryTap() {
         if kind == .appWindow {
-            if minimizedWindowCenter.restoreCurrent() {
+            if minimizedWindowCenter.restore(activityID: activityID) {
                 activityCenter.clearDismissal(kind: .appWindow)
             }
             showingDetail = false
@@ -5625,6 +5631,14 @@ private struct NotchBubbleView: View {
         )
     }
 
+    private func dismissCurrentActivity() {
+        if kind == .appWindow {
+            minimizedWindowCenter.dismiss(activityID: activityID)
+        } else {
+            activityCenter.dismiss(kind: kind)
+        }
+    }
+
     private func mediaCommand(_ command: String) {
         guard let sourceBundleID = media.connectedApp, !sourceBundleID.isEmpty else {
             media.performSystem(command)
@@ -5688,7 +5702,7 @@ private struct NotchBubbleView: View {
         case .files:
             return store.files.isEmpty ? "File Shelf" : "\(store.files.count) staged item\(store.files.count == 1 ? "" : "s")"
         case .appWindow:
-            if let entry = minimizedWindowCenter.current {
+            if let entry = appWindowEntry {
                 return "\(entry.appName) · \(entry.windowTitle)"
             }
             return "Minimized app window"
