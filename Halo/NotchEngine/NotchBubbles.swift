@@ -757,6 +757,7 @@ struct NotchBubbleSettings: Codable, Equatable {
     var appMinimizeBubbleLimit: Int?
     // App windows can be positioned independently from the global Bubble layout.
     var appMinimizeBubblePlacement: AppWindowBubblePlacement?
+    var appMinimizeBubbleAnimationEnabled: Bool?
 
     /// Per-provider appearance overrides. Missing entries inherit the global bubble defaults.
     var bubbleStyles: [String: NotchBubbleStyleOverride]?
@@ -982,6 +983,10 @@ struct NotchBubbleSettings: Codable, Equatable {
 
     var resolvedAppMinimizeBubblePlacement: AppWindowBubblePlacement {
         appMinimizeBubblePlacement ?? .belowNotch
+    }
+
+    var resolvedAppMinimizeBubbleAnimationEnabled: Bool {
+        appMinimizeBubbleAnimationEnabled ?? true
     }
 
     func acceptsHUDEvent(_ kind: HaloHUDEventKind) -> Bool {
