@@ -3,6 +3,9 @@ import ApplicationServices
 import Combine
 import EventKit
 import QuartzCore
+import CoreImage
+import CoreMedia
+import ScreenCaptureKit
 import SwiftUI
 
 // MARK: - Notch Bubble models
@@ -113,6 +116,14 @@ enum NotchBubbleSideMode: String, Codable, CaseIterable, Identifiable, Hashable 
     case automatic = "Auto"
     case left = "Left"
     case right = "Right"
+
+    var id: String { rawValue }
+}
+
+enum AppWindowBubblePlacement: String, Codable, CaseIterable, Identifiable, Hashable {
+    case left = "Left"
+    case right = "Right"
+    case belowNotch = "Below Notch"
 
     var id: String { rawValue }
 }
@@ -743,6 +754,8 @@ struct NotchBubbleSettings: Codable, Equatable {
     var appMinimizeBubblesEnabled: Bool?
     // 0 means unlimited. Missing values preserve the original single-window behavior.
     var appMinimizeBubbleLimit: Int?
+    // App windows can be positioned independently from the global Bubble layout.
+    var appMinimizeBubblePlacement: AppWindowBubblePlacement?
 
     /// Per-provider appearance overrides. Missing entries inherit the global bubble defaults.
     var bubbleStyles: [String: NotchBubbleStyleOverride]?
@@ -797,6 +810,9 @@ struct NotchBubbleSettings: Codable, Equatable {
             value.musicArtworkZoom = min(1.8, max(1.0, musicArtworkZoom.isFinite ? musicArtworkZoom : 1.0))
         }
         value.maximumBubbles = min(99, max(1, maximumBubbles))
+        if let appMinimizeBubblePlacement {
+            value.appMinimizeBubblePlacement = appMinimizeBubblePlacement
+        }
         if let appMinimizeBubbleLimit {
             value.appMinimizeBubbleLimit = appMinimizeBubbleLimit <= 0
                 ? 0
@@ -961,6 +977,10 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedAppMinimizeBubbleLimit: Int {
         let value = appMinimizeBubbleLimit ?? 1
         return value <= 0 ? Int.max : min(99, max(1, value))
+    }
+
+    var resolvedAppMinimizeBubblePlacement: AppWindowBubblePlacement {
+        appMinimizeBubblePlacement ?? .belowNotch
     }
 
     func acceptsHUDEvent(_ kind: HaloHUDEventKind) -> Bool {
