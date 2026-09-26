@@ -18,7 +18,10 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             oldValue.hotkeyModifiers != settings.hotkeyModifiers
         if hotkeyChanged { updateHotkey() }
 
-        let mediaSourceChanged = oldValue.mediaApp != settings.mediaApp || oldValue.automaticMedia != settings.automaticMedia
+        let notchModeChanged = oldValue.resolvedNotchMode != settings.resolvedNotchMode
+        let mediaSourceChanged = oldValue.mediaApp != settings.mediaApp ||
+            oldValue.automaticMedia != settings.automaticMedia ||
+            notchModeChanged
         if mediaSourceChanged { media.disconnect() }
 
         let baseArtworkInputsChanged = oldValue.layout.contextMusic != settings.layout.contextMusic ||
@@ -47,7 +50,11 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             guard let id = scheduledProfileID else { return false }
             return oldValue.profiles.first(where: { $0.id == id })?.layout.hud != settings.profiles.first(where: { $0.id == id })?.layout.hud
         }()
-        if oldValue.layout.hud != settings.layout.hud || oldValue.displays != settings.displays || activeProfileHUDChanged || displayProfileInputsChanged {
+        if notchModeChanged ||
+            oldValue.layout.hud != settings.layout.hud ||
+            oldValue.displays != settings.displays ||
+            activeProfileHUDChanged ||
+            displayProfileInputsChanged {
             hudEngine?.configurationDidChange()
         }
 
@@ -181,10 +188,27 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
                 layout.closedNotch?.albumBackgroundColor == true
         })
     }
-    private var isAutomaticMediaSource: Bool { settings.automaticMedia ?? true }
-    private var isSystemAudioOnly: Bool { !isAutomaticMediaSource && settings.mediaApp == Self.systemAudioSource }
-    private var isSafariMediaOnly: Bool { !isAutomaticMediaSource && settings.mediaApp == Self.safariMediaSource }
+    private var simpleMode: Bool { settings.resolvedNotchMode == .simple }
+
+    // Simple Mode always behaves like Media = Auto. The user's explicit source
+    // selection is an Advanced Mode preference and is left untouched for when
+    // they switch back.
+    private var effectiveMediaApp: String {
+        simpleMode ? "com.apple.Music" : settings.mediaApp
+    }
+    private var isAutomaticMediaSource: Bool {
+        simpleMode || (settings.automaticMedia ?? true)
+    }
+    private var isSystemAudioOnly: Bool {
+        !isAutomaticMediaSource && effectiveMediaApp == Self.systemAudioSource
+    }
+    private var isSafariMediaOnly: Bool {
+        !isAutomaticMediaSource && effectiveMediaApp == Self.safariMediaSource
+    }
     private var wantsSystemAudioFallback: Bool {
+        if simpleMode {
+            return settings.resolvedSimpleNotch.widgets.contains(.media)
+        }
         if isSystemAudioOnly || isSafariMediaOnly { return true }
         guard isAutomaticMediaSource else { return false }
         let layout = effectiveLayout
@@ -210,7 +234,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             return
         }
 
-        let preferred = settings.mediaApp == Self.systemAudioSource ? "com.apple.Music" : settings.mediaApp
+        let preferred = effectiveMediaApp == Self.systemAudioSource ? "com.apple.Music" : effectiveMediaApp
         media.poll(app: preferred, automatic: isAutomaticMediaSource)
         systemAudioFallback?.refresh()
     }
