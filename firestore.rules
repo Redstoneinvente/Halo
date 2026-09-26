@@ -7,6 +7,10 @@ service cloud.firestore {
              && request.auth.token.email_verified == true;
     }
 
+    function isSignedInHaloUser() {
+      return request.auth != null;
+    }
+
     function isHaloLicenseAdmin() {
       return request.auth != null
              && request.auth.uid == "ERaS9esf2wZK46SM70TbShsP68e2";
@@ -21,7 +25,7 @@ service cloud.firestore {
     }
 
     function canReadManagedLicense() {
-      return isVerifiedHaloUser()
+      return isSignedInHaloUser()
              && (
                !('bound' in resource.data)
                || resource.data.bound != true
@@ -33,7 +37,7 @@ service cloud.firestore {
     }
 
     function canUpdateManagedLicenseDevices() {
-      return isVerifiedHaloUser()
+      return isSignedInHaloUser()
              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                'bound',
                'boundUid',
