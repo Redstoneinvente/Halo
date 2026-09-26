@@ -3874,12 +3874,9 @@ struct SurfaceView: View {
 // MARK: - Simple Notch Mode
 
 private struct SimpleNotchWorkspaceView: View {
-    static let dragType = "com.redstoneinvente.halo.simple-widget"
-
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject var surfaceState: SurfaceState
-    @State private var dragging: ModuleID?
 
     private var settings: SimpleNotchSettings { workspace.settings.resolvedSimpleNotch }
     private var size: SimpleNotchSize { settings.resolvedSize }
@@ -3890,37 +3887,26 @@ private struct SimpleNotchWorkspaceView: View {
 
             HStack(alignment: .center, spacing: CGFloat(SimpleNotchMetrics.widgetSpacing(size))) {
                 ForEach(arrangement.rows.first ?? [], id: \.self) { widget in
-                    Group {
-                        if widget == .pet {
-                            simpleCard(widget)
-                                // Pixel Pal owns click/double-click/long-press gestures.
-                                // Keep reorder on the grip so its face remains fully interactive.
-                                .overlay(alignment: .topTrailing) {
-                                    Image(systemName: "line.3.horizontal")
-                                        .font(.system(size: 8, weight: .bold))
-                                        .foregroundStyle(.white.opacity(0.42))
-                                        .frame(width: 22, height: 18)
-                                        .contentShape(Rectangle())
-                                        .background(.black.opacity(0.001))
-                                        .onDrag {
-                                            dragProvider(for: widget)
-                                        }
-                                        .help("Drag to reorder Pixel Pal")
-                                        .padding(.top, 2)
-                                        .padding(.trailing, 3)
-                                }
-                        } else {
-                            simpleCard(widget)
-                                .onDrag {
-                                    dragProvider(for: widget)
-                                }
+                    simpleCard(widget)
+                        // String is a native Transferable, which makes reordering reliable
+                        // inside Halo's non-activating notch window without requiring an
+                        // undeclared custom UTI / NSItemProvider representation.
+                        .draggable(widget.rawValue)
+                        .overlay(alignment: .topTrailing) {
+                            Image(systemName: "line.3.horizontal")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.46))
+                                .frame(width: 24, height: 20)
+                                .contentShape(Rectangle())
+                                .background(.black.opacity(0.001))
+                                .draggable(widget.rawValue)
+                                .help("Drag to reorder \(simpleTitle(widget))")
+                                .padding(.top, 2)
+                                .padding(.trailing, 3)
                         }
-                    }
-                    .opacity(dragging == widget ? 0.50 : 1)
-                    .scaleEffect(dragging == widget ? 0.975 : 1)
-                    .onDrop(of: [Self.dragType], isTargeted: nil) { providers in
-                        acceptDrop(providers, before: widget)
-                    }
+                        .dropDestination(for: String.self) { values, _ in
+                            acceptDrop(values, onto: widget)
+                        }
                 }
             }
             .padding(.horizontal, CGFloat(SimpleNotchMetrics.horizontalPadding(size)))
@@ -3955,41 +3941,25 @@ private struct SimpleNotchWorkspaceView: View {
         .accessibilityLabel("\(simpleTitle(widget)) widget")
     }
 
-    private func dragProvider(for widget: ModuleID) -> NSItemProvider {
-        dragging = widget
-        let provider = NSItemProvider()
-        provider.registerDataRepresentation(
-            forTypeIdentifier: Self.dragType,
-            visibility: .ownProcess
-        ) { completion in
-            completion(Data(widget.rawValue.utf8), nil)
-            return nil
-        }
-        return provider
-    }
+    private func acceptDrop(_ values: [String], onto target: ModuleID) -> Bool {
+        guard let raw = values.first(where: { ModuleID(rawValue: $0) != nil }),
+              let source = ModuleID(rawValue: raw),
+              source != target else { return false }
 
-    private func acceptDrop(_ providers: [NSItemProvider], before target: ModuleID) -> Bool {
-        guard let provider = providers.first else { return false }
-        provider.loadDataRepresentation(forTypeIdentifier: Self.dragType) { data, _ in
-            guard let data,
-                  let raw = String(data: data, encoding: .utf8),
-                  let source = ModuleID(rawValue: raw) else { return }
-            Task { @MainActor in
-                var value = workspace.settings.resolvedSimpleNotch
-                guard source != target,
-                      let sourceIndex = value.widgets.firstIndex(of: source),
-                      let targetIndex = value.widgets.firstIndex(of: target) else {
-                    dragging = nil
-                    return
-                }
+        var value = workspace.settings.resolvedSimpleNotch
+        guard let sourceIndex = value.widgets.firstIndex(of: source),
+              let targetIndex = value.widgets.firstIndex(of: target) else { return false }
 
-                value.widgets.remove(at: sourceIndex)
-                let insertionIndex = min(targetIndex, value.widgets.count)
-                value.widgets.insert(source, at: insertionIndex)
-                workspace.settings.simpleNotch = value.normalized()
-                dragging = nil
-            }
-        }
+        value.widgets.remove(at: sourceIndex)
+
+        // Dropping onto a card means moving to that card's position. When moving
+        // right, the target shifts left after removing the source, so retain the
+        // original target index. When moving left, insert directly before it.
+        let insertionIndex = sourceIndex < targetIndex
+            ? min(targetIndex, value.widgets.count)
+            : targetIndex
+        value.widgets.insert(source, at: insertionIndex)
+        workspace.settings.simpleNotch = value.normalized()
         return true
     }
 
@@ -5275,6 +5245,7 @@ private struct SimpleNotchWidgetView: View {
     }
 
     private func simpleMiniMonth(_ month: Date) -> some View {
+        let yearScale = max(CGFloat(1), scale)
         let dayRange = simpleCalendar.range(of: .day, in: .month, for: month) ?? 1..<2
         let firstWeekday = simpleCalendar.component(.weekday, from: month)
         let leading = (firstWeekday - simpleCalendar.firstWeekday + 7) % 7
@@ -5285,7 +5256,7 @@ private struct SimpleNotchWidgetView: View {
         return VStack(alignment: .leading, spacing: 1.5 * scale) {
             HStack(spacing: 3 * scale) {
                 Text(month.formatted(.dateTime.month(.abbreviated)).uppercased())
-                    .font(.system(size: 6.3 * scale, weight: .bold, design: .rounded))
+                    .font(.system(size: 6.3 * yearScale, weight: .bold, design: .rounded))
                     .foregroundStyle(
                         simpleCalendar.isDate(month, equalTo: Date(), toGranularity: .month)
                             ? accent
@@ -5309,7 +5280,7 @@ private struct SimpleNotchWidgetView: View {
                         )
                         let today = date.map { simpleCalendar.isDateInToday($0) } ?? false
                         Text(String(day))
-                            .font(.system(size: 4.7 * scale, weight: today ? .bold : .medium, design: .rounded))
+                            .font(.system(size: 4.7 * yearScale, weight: today ? .bold : .medium, design: .rounded))
                             .monospacedDigit()
                             .frame(maxWidth: .infinity, minHeight: 6.0 * scale)
                             .background(
