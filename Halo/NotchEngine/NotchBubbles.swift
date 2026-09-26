@@ -1,7 +1,11 @@
 import AppKit
+import ApplicationServices
 import Combine
 import EventKit
 import QuartzCore
+import CoreImage
+import CoreMedia
+import ScreenCaptureKit
 import SwiftUI
 
 // MARK: - Notch Bubble models
@@ -18,6 +22,7 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
     case audio
     case vinyl
     case files
+    case appWindow
 
     var id: String { rawValue }
 
@@ -34,6 +39,7 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .audio: return "Audio"
         case .vinyl: return "Vinyl"
         case .files: return "File Shelf"
+        case .appWindow: return "App Window"
         }
     }
 
@@ -50,23 +56,25 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .audio: return "speaker.wave.2.fill"
         case .vinyl: return "record.circle.fill"
         case .files: return "tray.full.fill"
+        case .appWindow: return "macwindow"
         }
     }
 
     /// Stable tie-breaker only. Explicit priority and presentation mode always win first.
     var policyRank: Int {
         switch self {
-        case .timer: return 0
-        case .calendar: return 1
-        case .files: return 2
-        case .stopwatch: return 3
-        case .music: return 4
-        case .vinyl: return 5
-        case .audio: return 6
-        case .system: return 7
-        case .clipboard: return 8
-        case .clock: return 9
-        case .pixelPal: return 10
+        case .appWindow: return 0
+        case .timer: return 1
+        case .calendar: return 2
+        case .files: return 3
+        case .stopwatch: return 4
+        case .music: return 5
+        case .vinyl: return 6
+        case .audio: return 7
+        case .system: return 8
+        case .clipboard: return 9
+        case .clock: return 10
+        case .pixelPal: return 11
         }
     }
 }
@@ -108,6 +116,14 @@ enum NotchBubbleSideMode: String, Codable, CaseIterable, Identifiable, Hashable 
     case automatic = "Auto"
     case left = "Left"
     case right = "Right"
+
+    var id: String { rawValue }
+}
+
+enum AppWindowBubblePlacement: String, Codable, CaseIterable, Identifiable, Hashable {
+    case left = "Left"
+    case right = "Right"
+    case belowNotch = "Below Notch"
 
     var id: String { rawValue }
 }
@@ -348,7 +364,7 @@ enum NotchBubbleGestureAction: String, Codable, CaseIterable, Identifiable, Hash
         case .pixelPal:
             return common + [.feedPixelPal]
 
-        case .clock, .clipboard, .calendar, .files:
+        case .clock, .clipboard, .calendar, .files, .appWindow:
             return common
         }
     }
@@ -384,6 +400,7 @@ fileprivate enum NotchBubbleGestureDirection: String {
 
 private extension Notification.Name {
     static let haloNotchBubbleDirectionalGesture = Notification.Name("HaloNotchBubbleDirectionalGesture")
+    static let haloNotchBubbleForceTouch = Notification.Name("HaloNotchBubbleForceTouch")
 }
 
 enum MusicBubbleDisplayMode: String, Codable, CaseIterable, Identifiable, Hashable {
@@ -638,8 +655,7 @@ struct ResolvedNotchBubbleStyle {
 }
 
 struct NotchBubble: Identifiable, Equatable {
-    var id: String { kind.rawValue }
-
+    let id: String
     let kind: NotchBubbleKind
     var placement: NotchBubblePlacement = .automatic
     var size: CGFloat
@@ -735,6 +751,14 @@ struct NotchBubbleSettings: Codable, Equatable {
     var filesPersistent: Bool?
     var filesDisplayMode: FileBubbleDisplayMode?
 
+    // Experimental App Bubbles. Optional keeps older settings decodable.
+    var appMinimizeBubblesEnabled: Bool?
+    // 0 means unlimited. Missing values preserve the original single-window behavior.
+    var appMinimizeBubbleLimit: Int?
+    // App windows can be positioned independently from the global Bubble layout.
+    var appMinimizeBubblePlacement: AppWindowBubblePlacement?
+    var appMinimizeBubbleAnimationEnabled: Bool?
+
     /// Per-provider appearance overrides. Missing entries inherit the global bubble defaults.
     var bubbleStyles: [String: NotchBubbleStyleOverride]?
 
@@ -788,6 +812,14 @@ struct NotchBubbleSettings: Codable, Equatable {
             value.musicArtworkZoom = min(1.8, max(1.0, musicArtworkZoom.isFinite ? musicArtworkZoom : 1.0))
         }
         value.maximumBubbles = min(99, max(1, maximumBubbles))
+        if let appMinimizeBubblePlacement {
+            value.appMinimizeBubblePlacement = appMinimizeBubblePlacement
+        }
+        if let appMinimizeBubbleLimit {
+            value.appMinimizeBubbleLimit = appMinimizeBubbleLimit <= 0
+                ? 0
+                : min(99, max(1, appMinimizeBubbleLimit))
+        }
         if let bubbleStyles {
             var normalizedStyles: [String: NotchBubbleStyleOverride] = [:]
             for (key, override) in bubbleStyles {
@@ -940,6 +972,22 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedFilesEnabled: Bool { filesEnabled ?? false }
     var resolvedFilesPersistent: Bool { filesPersistent ?? false }
     var resolvedFilesDisplayMode: FileBubbleDisplayMode { filesDisplayMode ?? .latest }
+    var resolvedAppMinimizeBubblesEnabled: Bool {
+        HaloDistribution.current.supportsAppWindowBubbles && (appMinimizeBubblesEnabled ?? false)
+    }
+
+    var resolvedAppMinimizeBubbleLimit: Int {
+        let value = appMinimizeBubbleLimit ?? 1
+        return value <= 0 ? Int.max : min(99, max(1, value))
+    }
+
+    var resolvedAppMinimizeBubblePlacement: AppWindowBubblePlacement {
+        appMinimizeBubblePlacement ?? .belowNotch
+    }
+
+    var resolvedAppMinimizeBubbleAnimationEnabled: Bool {
+        appMinimizeBubbleAnimationEnabled ?? true
+    }
 
     func acceptsHUDEvent(_ kind: HaloHUDEventKind) -> Bool {
         switch kind {
@@ -971,6 +1019,7 @@ struct NotchBubbleSettings: Codable, Equatable {
         case .audio: return resolvedAudioEnabled
         case .vinyl: return resolvedVinylEnabled
         case .files: return resolvedFilesEnabled
+        case .appWindow: return resolvedAppMinimizeBubblesEnabled
         }
     }
 
@@ -984,6 +1033,7 @@ struct NotchBubbleSettings: Codable, Equatable {
         case .calendar: return resolvedCalendarPersistent
         case .vinyl: return resolvedVinylPersistent
         case .files: return resolvedFilesPersistent
+        case .appWindow: return false
         }
     }
 
@@ -1295,6 +1345,7 @@ extension HaloFeatureAccess {
         value.calendarEnabled = false
         value.vinylEnabled = false
         value.filesEnabled = false
+        value.appMinimizeBubblesEnabled = false
 
         // Persistent/pinned provider behavior is part of advanced Bubbles.
         value.musicPersistent = false
@@ -1395,6 +1446,631 @@ final class NotchBubbleSettingsStore: ObservableObject {
 }
 
 // MARK: - Providers, activity state and policy
+
+
+@MainActor
+final class MinimizedWindowBubbleCenter: ObservableObject {
+    static let shared = MinimizedWindowBubbleCenter()
+
+    struct Entry: Identifiable, Equatable {
+        let id: String
+        let processIdentifier: pid_t
+        let bundleIdentifier: String?
+        let appName: String
+        let windowTitle: String
+        let windowFrame: CGRect?
+        let minimizedAt: Date
+    }
+
+    @Published private(set) var entries: [Entry] = []
+    @Published private(set) var accessibilityGranted = AXIsProcessTrusted()
+
+    private struct Snapshot {
+        let entry: Entry
+        let element: AXUIElement
+    }
+
+    private var handles: [String: AXUIElement] = [:]
+    private var knownMinimized = Set<String>()
+    private var hasBaseline = false
+    private var polling: AnyCancellable?
+    private var enabled = false
+
+    var current: Entry? { entries.first }
+
+    func entry(activityID: String) -> Entry? {
+        guard activityID.hasPrefix("appWindow.") else { return nil }
+        let entryID = String(activityID.dropFirst("appWindow.".count))
+        return entries.first(where: { $0.id == entryID })
+    }
+
+    private init() {}
+
+    func setEnabled(_ enabled: Bool) {
+        guard self.enabled != enabled || (enabled && polling == nil) else { return }
+        self.enabled = enabled
+
+        if enabled {
+            startPolling()
+        } else {
+            stopPolling()
+        }
+    }
+
+    func requestAccessibilityPermission() {
+        let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        let options = [promptKey: true] as CFDictionary
+        accessibilityGranted = AXIsProcessTrustedWithOptions(options)
+        if accessibilityGranted {
+            hasBaseline = false
+            scan()
+        }
+    }
+
+    func appIcon(for entry: Entry) -> NSImage? {
+        if let running = NSRunningApplication(processIdentifier: entry.processIdentifier),
+           let icon = running.icon {
+            return icon
+        }
+
+        guard let bundleIdentifier = entry.bundleIdentifier,
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            return nil
+        }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
+
+    @discardableResult
+    func restoreCurrent() -> Bool {
+        guard let entry = current else { return false }
+        return restore(entry: entry)
+    }
+
+    @discardableResult
+    func restore(activityID: String) -> Bool {
+        guard let entry = entry(activityID: activityID) else { return false }
+        return restore(entry: entry)
+    }
+
+    func dismiss(activityID: String) {
+        guard let entry = entry(activityID: activityID) else { return }
+        removeEntry(id: entry.id)
+    }
+
+    @discardableResult
+    private func restore(entry: Entry) -> Bool {
+        guard let element = handles[entry.id] else {
+            removeEntry(id: entry.id)
+            return false
+        }
+
+        let result = AXUIElementSetAttributeValue(
+            element,
+            kAXMinimizedAttribute as CFString,
+            kCFBooleanFalse
+        )
+        guard result == .success else {
+            scan()
+            return false
+        }
+
+        _ = AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+        if let app = NSRunningApplication(processIdentifier: entry.processIdentifier) {
+            app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        }
+
+        removeEntry(id: entry.id)
+        if !entries.isEmpty {
+            NotchBubbleActivityCenter.shared.clearDismissal(kind: .appWindow)
+        }
+        return true
+    }
+
+    private func startPolling() {
+        polling?.cancel()
+        hasBaseline = false
+
+        scan()
+        polling = Timer.publish(every: 0.35, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.scan()
+            }
+    }
+
+    private func stopPolling() {
+        polling?.cancel()
+        polling = nil
+        hasBaseline = false
+        knownMinimized.removeAll()
+        handles.removeAll()
+        entries.removeAll()
+    }
+
+    private func scan() {
+        guard enabled else { return }
+
+        let trusted = AXIsProcessTrusted()
+        if accessibilityGranted != trusted {
+            accessibilityGranted = trusted
+        }
+
+        guard trusted else {
+            hasBaseline = false
+            knownMinimized.removeAll()
+            handles.removeAll()
+            entries.removeAll()
+            return
+        }
+
+        var minimized: [String: Snapshot] = [:]
+        var visiblePreviewEntries: [Entry] = []
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+
+        for app in NSWorkspace.shared.runningApplications {
+            guard app.processIdentifier != ownPID,
+                  app.activationPolicy == .regular,
+                  !app.isTerminated else { continue }
+
+            let application = AXUIElementCreateApplication(app.processIdentifier)
+            guard let windows = attribute(kAXWindowsAttribute as CFString, from: application) as? [AXUIElement] else {
+                continue
+            }
+            let focusedWindow = axElementAttribute(kAXFocusedWindowAttribute as CFString, from: application)
+
+            for window in windows {
+                let isMinimized = booleanAttribute(kAXMinimizedAttribute as CFString, from: window) == true
+                let title = stringAttribute(kAXTitleAttribute as CFString, from: window) ?? "Window"
+                let document = stringAttribute(kAXDocumentAttribute as CFString, from: window) ?? ""
+                let identifier = stringAttribute(kAXIdentifierAttribute as CFString, from: window)
+                let frame = windowFrame(for: window)
+                let geometryIdentity: String = {
+                    guard let frame else { return "no-frame" }
+                    return "\(Int(frame.minX.rounded()))x\(Int(frame.minY.rounded()))-\(Int(frame.width.rounded()))x\(Int(frame.height.rounded()))"
+                }()
+                let identity: String
+                if let identifier, !identifier.isEmpty {
+                    identity = "ax:\(identifier)"
+                } else if !document.isEmpty {
+                    identity = "doc:\(document)|\(title)"
+                } else {
+                    identity = "window:\(title)|\(geometryIdentity)"
+                }
+                let id = "\(app.processIdentifier)|\(identity)"
+                let appName = app.localizedName
+                    ?? app.bundleIdentifier?.split(separator: ".").last.map(String.init)
+                    ?? "App"
+
+                let entry = Entry(
+                    id: id,
+                    processIdentifier: app.processIdentifier,
+                    bundleIdentifier: app.bundleIdentifier,
+                    appName: appName,
+                    windowTitle: title,
+                    windowFrame: frame,
+                    minimizedAt: Date()
+                )
+
+                if isMinimized {
+                    minimized[id] = Snapshot(entry: entry, element: window)
+                } else if app.processIdentifier == frontmostPID,
+                          let focusedWindow,
+                          CFEqual(focusedWindow, window),
+                          frame?.width ?? 0 > 80,
+                          frame?.height ?? 0 > 60 {
+                    visiblePreviewEntries.append(entry)
+                }
+            }
+        }
+
+        AppWindowPreviewCenter.shared.cacheVisiblePreviews(entries: visiblePreviewEntries)
+
+        let currentKeys = Set(minimized.keys)
+        if !hasBaseline {
+            knownMinimized = currentKeys
+            hasBaseline = true
+            return
+        }
+
+        let newlyMinimized = currentKeys.subtracting(knownMinimized)
+        for key in newlyMinimized {
+            guard let snapshot = minimized[key] else { continue }
+            entries.removeAll { $0.id == key }
+            entries.insert(snapshot.entry, at: 0)
+            handles[key] = snapshot.element
+        }
+
+        // Keep handles fresh because AX can vend a new wrapper for the same remote window.
+        for entry in entries {
+            if let snapshot = minimized[entry.id] {
+                handles[entry.id] = snapshot.element
+            }
+        }
+
+        entries.removeAll { !currentKeys.contains($0.id) }
+        handles = handles.filter { currentKeys.contains($0.key) }
+        knownMinimized = currentKeys
+
+        if !newlyMinimized.isEmpty {
+            NotchBubbleActivityCenter.shared.clearDismissal(kind: .appWindow)
+        }
+    }
+
+    private func removeEntry(id: String) {
+        entries.removeAll { $0.id == id }
+        handles.removeValue(forKey: id)
+        AppWindowPreviewCenter.shared.clear(activityID: "appWindow." + id)
+        // Keep the ID in knownMinimized until a scan observes the window restored.
+        // This prevents a short AX propagation delay from re-adding the same window.
+    }
+
+    private func attribute(_ name: CFString, from element: AXUIElement) -> CFTypeRef? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, name, &value) == .success else {
+            return nil
+        }
+        return value
+    }
+
+    private func stringAttribute(_ name: CFString, from element: AXUIElement) -> String? {
+        attribute(name, from: element) as? String
+    }
+
+    private func booleanAttribute(_ name: CFString, from element: AXUIElement) -> Bool? {
+        (attribute(name, from: element) as? NSNumber)?.boolValue
+    }
+
+    private func axElementAttribute(_ name: CFString, from element: AXUIElement) -> AXUIElement? {
+        guard let value = attribute(name, from: element),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else {
+            return nil
+        }
+
+        return unsafeBitCast(value, to: AXUIElement.self)
+    }
+
+    private func windowFrame(for element: AXUIElement) -> CGRect? {
+        guard let positionValue = attribute(kAXPositionAttribute as CFString, from: element),
+              let sizeValue = attribute(kAXSizeAttribute as CFString, from: element),
+              CFGetTypeID(positionValue) == AXValueGetTypeID(),
+              CFGetTypeID(sizeValue) == AXValueGetTypeID() else {
+            return nil
+        }
+
+        let positionAX = positionValue as! AXValue
+        let sizeAX = sizeValue as! AXValue
+        var position = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetType(positionAX) == .cgPoint,
+              AXValueGetType(sizeAX) == .cgSize,
+              AXValueGetValue(positionAX, .cgPoint, &position),
+              AXValueGetValue(sizeAX, .cgSize, &size),
+              size.width > 0,
+              size.height > 0 else {
+            return nil
+        }
+
+        return CGRect(origin: position, size: size)
+    }
+}
+
+private enum AppWindowPreviewError: LocalizedError {
+    case permissionRequired
+    case windowUnavailable
+    case captureUnavailable
+    case encodingFailed
+    case timedOut
+
+    var errorDescription: String? {
+        switch self {
+        case .permissionRequired:
+            return "Screen Recording access is required for window previews."
+        case .windowUnavailable:
+            return "Halo could not find this minimized window in ScreenCaptureKit."
+        case .captureUnavailable:
+            return "macOS did not return a preview frame for this window."
+        case .encodingFailed:
+            return "Halo could not prepare the window preview."
+        case .timedOut:
+            return "The window preview timed out. Force Touch the Bubble again to retry."
+        }
+    }
+}
+
+private final class AppWindowPreviewFrameReceiver: NSObject, SCStreamOutput, @unchecked Sendable {
+    let sampleQueue = DispatchQueue(label: "Halo.AppWindowPreview.Frame", qos: .userInitiated)
+
+    private let stateQueue = DispatchQueue(label: "Halo.AppWindowPreview.State")
+    private let imageContext = CIContext()
+    private var continuation: CheckedContinuation<Data, Error>?
+    private var stream: SCStream?
+    private var finished = false
+
+    func captureSingleFrame(from stream: SCStream) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            stateQueue.sync {
+                self.continuation = continuation
+                self.stream = stream
+                self.finished = false
+            }
+
+            stateQueue.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.finish(.failure(AppWindowPreviewError.timedOut))
+            }
+
+            Task { [weak self] in
+                do {
+                    try await stream.startCapture()
+                } catch {
+                    self?.finish(.failure(error))
+                }
+            }
+        }
+    }
+
+    func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of outputType: SCStreamOutputType
+    ) {
+        guard outputType == .screen,
+              sampleBuffer.isValid,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            return
+        }
+
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let cgImage = imageContext.createCGImage(image, from: image.extent) else {
+            finish(.failure(AppWindowPreviewError.captureUnavailable))
+            return
+        }
+
+        let representation = NSBitmapImageRep(cgImage: cgImage)
+        guard let data = representation.representation(using: .png, properties: [:]) else {
+            finish(.failure(AppWindowPreviewError.encodingFailed))
+            return
+        }
+
+        finish(.success(data))
+    }
+
+    private func finish(_ result: Result<Data, Error>) {
+        stateQueue.async { [weak self] in
+            guard let self, !self.finished else { return }
+            self.finished = true
+
+            let continuation = self.continuation
+            let stream = self.stream
+            self.continuation = nil
+            self.stream = nil
+
+            continuation?.resume(with: result)
+
+            if let stream {
+                Task {
+                    try? await stream.stopCapture()
+                }
+            }
+        }
+    }
+}
+
+@MainActor
+final class AppWindowPreviewCenter: ObservableObject {
+    static let shared = AppWindowPreviewCenter()
+
+    @Published private(set) var images: [String: NSImage] = [:]
+    @Published private(set) var loadingIDs = Set<String>()
+    @Published private(set) var errors: [String: String] = [:]
+    @Published private(set) var screenCaptureGranted = CGPreflightScreenCaptureAccess()
+
+    private var lastVisibleCacheAt = Date.distantPast
+    private var lastVisibleCachePID: pid_t?
+
+    private init() {}
+
+    func image(for activityID: String) -> NSImage? {
+        images[activityID]
+    }
+
+    func error(for activityID: String) -> String? {
+        errors[activityID]
+    }
+
+    func requestScreenCapturePermission() {
+        if CGPreflightScreenCaptureAccess() {
+            screenCaptureGranted = true
+            return
+        }
+
+        let granted = CGRequestScreenCaptureAccess()
+        screenCaptureGranted = CGPreflightScreenCaptureAccess()
+        if granted && !screenCaptureGranted {
+            errors["permission"] = "Screen Recording access was granted. Quit and reopen Halo before using App Bubble previews."
+        }
+    }
+
+    func refreshPermissionState() {
+        screenCaptureGranted = CGPreflightScreenCaptureAccess()
+    }
+
+    func loadPreview(
+        activityID: String,
+        entry: MinimizedWindowBubbleCenter.Entry,
+        forceRefresh: Bool = true
+    ) {
+        refreshPermissionState()
+
+        guard screenCaptureGranted else {
+            errors[activityID] = "Allow Screen Recording for Halo, then quit and reopen Halo to use Force Touch previews."
+            return
+        }
+
+        if images[activityID] != nil {
+            errors.removeValue(forKey: activityID)
+            return
+        }
+
+        errors[activityID] = "Halo did not have time to cache this window before it was minimized. Restore it once, then minimize it again."
+    }
+
+    func clear(activityID: String) {
+        images.removeValue(forKey: activityID)
+        errors.removeValue(forKey: activityID)
+        loadingIDs.remove(activityID)
+    }
+
+    func cacheVisiblePreviews(entries: [MinimizedWindowBubbleCenter.Entry]) {
+        guard !entries.isEmpty else { return }
+        refreshPermissionState()
+        guard screenCaptureGranted else { return }
+
+        let pid = entries.first?.processIdentifier
+        let now = Date()
+        let appChanged = pid != lastVisibleCachePID
+        guard appChanged || now.timeIntervalSince(lastVisibleCacheAt) >= 0.25 else { return }
+
+        lastVisibleCacheAt = now
+        lastVisibleCachePID = pid
+
+        guard let rawList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return
+        }
+
+        for entry in entries.prefix(8) {
+            guard let windowID = Self.bestCGWindowID(for: entry, in: rawList),
+                  let cgImage = CGWindowListCreateImage(
+                    .null,
+                    .optionIncludingWindow,
+                    windowID,
+                    [.boundsIgnoreFraming, .bestResolution]
+                  ) else {
+                continue
+            }
+
+            let activityID = "appWindow." + entry.id
+            images[activityID] = NSImage(cgImage: cgImage, size: .zero)
+            errors.removeValue(forKey: activityID)
+        }
+    }
+
+    private static func bestCGWindowID(
+        for entry: MinimizedWindowBubbleCenter.Entry,
+        in windows: [[String: Any]]
+    ) -> CGWindowID? {
+        let candidates = windows.compactMap { info -> (CGWindowID, String, CGRect)? in
+            guard let ownerPID = info[kCGWindowOwnerPID as String] as? NSNumber,
+                  ownerPID.int32Value == entry.processIdentifier,
+                  let number = info[kCGWindowNumber as String] as? NSNumber,
+                  let boundsInfo = info[kCGWindowBounds as String] as? [String: Any],
+                  let x = (boundsInfo["X"] as? NSNumber)?.doubleValue,
+                  let y = (boundsInfo["Y"] as? NSNumber)?.doubleValue,
+                  let width = (boundsInfo["Width"] as? NSNumber)?.doubleValue,
+                  let height = (boundsInfo["Height"] as? NSNumber)?.doubleValue else {
+                return nil
+            }
+
+            let bounds = CGRect(x: x, y: y, width: width, height: height)
+
+            let title = info[kCGWindowName as String] as? String ?? ""
+            return (CGWindowID(number.uint32Value), title, bounds)
+        }
+
+        guard !candidates.isEmpty else { return nil }
+
+        let normalizedTitle = entry.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let titleMatches = candidates.filter {
+            $0.1.trimmingCharacters(in: .whitespacesAndNewlines) == normalizedTitle
+        }
+        let pool = titleMatches.isEmpty ? candidates : titleMatches
+
+        guard pool.count > 1, let expectedFrame = entry.windowFrame else {
+            return pool.first?.0
+        }
+
+        return pool.min {
+            frameDistance($0.2, expectedFrame) < frameDistance($1.2, expectedFrame)
+        }?.0
+    }
+
+    private static func capturePreviewData(
+        for entry: MinimizedWindowBubbleCenter.Entry
+    ) async throws -> Data {
+        guard CGPreflightScreenCaptureAccess() else {
+            throw AppWindowPreviewError.permissionRequired
+        }
+
+        let content = try await SCShareableContent.excludingDesktopWindows(
+            false,
+            onScreenWindowsOnly: false
+        )
+
+        let candidates = content.windows.filter {
+            $0.owningApplication?.processID == entry.processIdentifier
+        }
+
+        guard let window = bestWindow(for: entry, from: candidates) else {
+            throw AppWindowPreviewError.windowUnavailable
+        }
+
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let configuration = SCStreamConfiguration()
+        let sourceSize = window.frame.size
+        let width = max(1, sourceSize.width)
+        let height = max(1, sourceSize.height)
+        let longest = max(width, height)
+        let scale = min(2.0, 1400.0 / longest)
+
+        configuration.width = max(1, Int((width * scale).rounded()))
+        configuration.height = max(1, Int((height * scale).rounded()))
+        configuration.queueDepth = 1
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        configuration.showsCursor = false
+        configuration.capturesAudio = false
+
+        let receiver = AppWindowPreviewFrameReceiver()
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+        try stream.addStreamOutput(
+            receiver,
+            type: .screen,
+            sampleHandlerQueue: receiver.sampleQueue
+        )
+
+        return try await receiver.captureSingleFrame(from: stream)
+    }
+
+    private static func bestWindow(
+        for entry: MinimizedWindowBubbleCenter.Entry,
+        from candidates: [SCWindow]
+    ) -> SCWindow? {
+        guard !candidates.isEmpty else { return nil }
+
+        let normalizedTitle = entry.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let titleMatches = candidates.filter {
+            ($0.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == normalizedTitle
+        }
+        let pool = titleMatches.isEmpty ? candidates : titleMatches
+
+        guard pool.count > 1, let expectedFrame = entry.windowFrame else {
+            return pool.first
+        }
+
+        return pool.min {
+            frameDistance($0.frame, expectedFrame) < frameDistance($1.frame, expectedFrame)
+        }
+    }
+
+    private static func frameDistance(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        abs(lhs.width - rhs.width)
+            + abs(lhs.height - rhs.height)
+            + abs(lhs.minX - rhs.minX) * 0.25
+            + abs(lhs.minY - rhs.minY) * 0.25
+    }
+}
 
 @MainActor
 protocol BubbleProvider {
@@ -1708,29 +2384,41 @@ struct NotchBubblePolicyEngine {
             return true
         }
 
-        let deduplicated = Dictionary(grouping: visible, by: \.kind).compactMap { _, values in
+        let deduplicated = Dictionary(grouping: visible) { activity in
+            activity.kind == .appWindow ? activity.id : "kind." + activity.kind.rawValue
+        }.compactMap { _, values in
             values.sorted {
                 if $0.priority != $1.priority { return $0.priority > $1.priority }
                 return $0.updatedAt > $1.updatedAt
             }.first
         }
 
-        return deduplicated
-            .sorted {
-                if $0.priority != $1.priority { return $0.priority > $1.priority }
-                if $0.mode != $1.mode {
-                    let rank: [NotchBubblePresentationMode: Int] = [
-                        .confirmation: 3, .activeTask: 2, .pinned: 1, .onDemand: 0
-                    ]
-                    return rank[$0.mode, default: 0] > rank[$1.mode, default: 0]
-                }
-                if $0.kind.policyRank != $1.kind.policyRank {
-                    return $0.kind.policyRank < $1.kind.policyRank
-                }
-                return $0.updatedAt > $1.updatedAt
+        let sorted = deduplicated.sorted {
+            if $0.priority != $1.priority { return $0.priority > $1.priority }
+            if $0.mode != $1.mode {
+                let rank: [NotchBubblePresentationMode: Int] = [
+                    .confirmation: 3, .activeTask: 2, .pinned: 1, .onDemand: 0
+                ]
+                return rank[$0.mode, default: 0] > rank[$1.mode, default: 0]
             }
-            .prefix(settings.maximumBubbles)
-            .map { $0 }
+            if $0.kind.policyRank != $1.kind.policyRank {
+                return $0.kind.policyRank < $1.kind.policyRank
+            }
+            return $0.updatedAt > $1.updatedAt
+        }
+
+        var normalCount = 0
+        var appWindowCount = 0
+        return sorted.filter { activity in
+            if activity.kind == .appWindow {
+                guard appWindowCount < settings.resolvedAppMinimizeBubbleLimit else { return false }
+                appWindowCount += 1
+                return true
+            }
+            guard normalCount < settings.maximumBubbles else { return false }
+            normalCount += 1
+            return true
+        }
     }
 }
 
@@ -1763,6 +2451,26 @@ struct BubbleRegistry {
         var activities = providers
             .filter { access.allows(bubble: $0.kind) }
             .compactMap { $0.activity(store: store, settings: effectiveSettings) }
+
+        if access.allows(bubble: .appWindow),
+           effectiveSettings.resolvedAppMinimizeBubblesEnabled {
+            activities.append(contentsOf: MinimizedWindowBubbleCenter.shared.entries.map { entry in
+                NotchBubbleActivity(
+                    id: "appWindow." + entry.id,
+                    kind: .appWindow,
+                    sourceIdentifier: entry.bundleIdentifier ?? "pid.\(entry.processIdentifier)",
+                    mode: .activeTask,
+                    priority: .important,
+                    title: entry.appName,
+                    subtitle: entry.windowTitle,
+                    icon: "macwindow",
+                    progress: nil,
+                    updatedAt: entry.minimizedAt,
+                    expiresAt: nil
+                )
+            })
+        }
+
         activities.append(contentsOf: runtime.activeTransientActivities().filter {
             access.allows(bubble: $0.kind)
         })
@@ -1779,6 +2487,7 @@ struct BubbleRegistry {
         return selected.map { activity in
             let style = effectiveSettings.resolvedStyle(for: activity.kind)
             return NotchBubble(
+                id: activity.kind == .appWindow ? activity.id : activity.kind.rawValue,
                 kind: activity.kind,
                 size: style.size,
                 shape: style.shape,
@@ -1799,71 +2508,100 @@ struct BubbleLayoutEngine {
         in screenFrame: CGRect,
         compactHeight: CGFloat,
         settings: NotchBubbleSettings,
-        sideAssignments: [NotchBubbleKind: NotchBubbleSide] = [:]
-    ) -> [NotchBubbleKind: CGRect] {
+        sideAssignments: [String: NotchBubbleSide] = [:]
+    ) -> [String: CGRect] {
         guard !bubbles.isEmpty else { return [:] }
 
         let spacing = CGFloat(settings.spacing)
         let gap = max(5, spacing)
         let globalVerticalOffset = CGFloat(settings.resolvedVerticalOffset)
-        var result: [NotchBubbleKind: CGRect] = [:]
+        let availableWidth = max(1, screenFrame.width - 8)
+        var result: [String: CGRect] = [:]
+
+        let standardBubbles = bubbles.filter { $0.kind != .appWindow }
+        let appBubbles = bubbles.filter { $0.kind == .appWindow }
+
+        var leftWingOffset: CGFloat = gap
+        var rightWingOffset: CGFloat = gap
 
         switch settings.layout {
         case .satellites:
-            let totalWidth = bubbles.reduce(CGFloat.zero) { $0 + $1.size }
-                + CGFloat(max(0, bubbles.count - 1)) * spacing
-            var x = surfaceFrame.midX - totalWidth / 2
+            var rows: [[NotchBubble]] = []
+            var currentRow: [NotchBubble] = []
+            var currentWidth: CGFloat = 0
 
-            for bubble in bubbles {
-                let style = settings.resolvedStyle(for: bubble.kind)
-                let size = bubble.size
-                let y = surfaceFrame.minY - gap - size - globalVerticalOffset - style.verticalOffset
-                let frame = CGRect(x: x, y: y, width: size, height: size)
-                result[bubble.kind] = clamped(frame, to: screenFrame)
-                x += size + spacing
+            for bubble in standardBubbles {
+                let addedWidth = bubble.size + (currentRow.isEmpty ? 0 : spacing)
+                if !currentRow.isEmpty && currentWidth + addedWidth > availableWidth {
+                    rows.append(currentRow)
+                    currentRow = [bubble]
+                    currentWidth = bubble.size
+                } else {
+                    currentRow.append(bubble)
+                    currentWidth += addedWidth
+                }
+            }
+            if !currentRow.isEmpty {
+                rows.append(currentRow)
+            }
+
+            var yCursor = surfaceFrame.minY - gap - globalVerticalOffset
+            for row in rows {
+                let rowHeight = row.map(\.size).max() ?? 0
+                let totalWidth = row.reduce(CGFloat.zero) { $0 + $1.size }
+                    + CGFloat(max(0, row.count - 1)) * spacing
+                var x = surfaceFrame.midX - totalWidth / 2
+                let rowY = yCursor - rowHeight
+
+                for bubble in row {
+                    let style = settings.resolvedStyle(for: bubble.kind)
+                    let y = rowY + (rowHeight - bubble.size) / 2 - style.verticalOffset
+                    let frame = CGRect(x: x, y: y, width: bubble.size, height: bubble.size)
+                    result[bubble.id] = clamped(frame, to: screenFrame)
+                    x += bubble.size + spacing
+                }
+
+                yCursor = rowY - spacing
             }
 
         case .wings:
-            // Wings belong to the menu-bar band, not the expanding body of Halo.
             let menuBarHeight = max(1, compactHeight)
             let menuBarCenterY = screenFrame.maxY - menuBarHeight / 2
-            var leftOffset: CGFloat = gap
-            var rightOffset: CGFloat = gap
 
-            for bubble in bubbles {
+            for bubble in standardBubbles {
                 let style = settings.resolvedStyle(for: bubble.kind)
                 let size = bubble.size
                 let y = menuBarCenterY - size / 2 - globalVerticalOffset - style.verticalOffset
-                let side = sideAssignments[bubble.kind]
+                let side = sideAssignments[bubble.id]
                     ?? fallbackSide(for: settings.resolvedBubbleSideMode)
                 let frame: CGRect
 
                 switch side {
                 case .left:
                     frame = CGRect(
-                        x: surfaceFrame.minX - leftOffset - size,
+                        x: surfaceFrame.minX - leftWingOffset - size,
                         y: y,
                         width: size,
                         height: size
                     )
-                    leftOffset += size + spacing
+                    leftWingOffset += size + spacing
 
                 case .right:
                     frame = CGRect(
-                        x: surfaceFrame.maxX + rightOffset,
+                        x: surfaceFrame.maxX + rightWingOffset,
                         y: y,
                         width: size,
                         height: size
                     )
-                    rightOffset += size + spacing
+                    rightWingOffset += size + spacing
                 }
 
-                result[bubble.kind] = clamped(frame, to: screenFrame)
+                result[bubble.id] = clamped(frame, to: screenFrame)
             }
 
         case .stack:
             var yCursor = surfaceFrame.minY - gap - globalVerticalOffset
-            for bubble in bubbles {
+            for bubble in standardBubbles {
                 let style = settings.resolvedStyle(for: bubble.kind)
                 let size = bubble.size
                 yCursor -= size + style.verticalOffset
@@ -1873,8 +2611,112 @@ struct BubbleLayoutEngine {
                     width: size,
                     height: size
                 )
-                result[bubble.kind] = clamped(frame, to: screenFrame)
+                result[bubble.id] = clamped(frame, to: screenFrame)
                 yCursor -= spacing
+            }
+        }
+
+        switch settings.resolvedAppMinimizeBubblePlacement {
+        case .left, .right:
+            let menuBarHeight = max(1, compactHeight)
+            let menuBarCenterY = screenFrame.maxY - menuBarHeight / 2
+            let appSide: NotchBubbleSide =
+                settings.resolvedAppMinimizeBubblePlacement == .left ? .left : .right
+            let screenMargin: CGFloat = 4
+            var row = 0
+            var sideOffset = appSide == .left ? leftWingOffset : rightWingOffset
+
+            for bubble in appBubbles {
+                let style = settings.resolvedStyle(for: bubble.kind)
+                let size = bubble.size
+
+                func frameForCurrentRow() -> CGRect {
+                    let y = menuBarCenterY
+                        - size / 2
+                        - globalVerticalOffset
+                        - style.verticalOffset
+                        - CGFloat(row) * (size + spacing)
+
+                    if appSide == .left {
+                        return CGRect(
+                            x: surfaceFrame.minX - sideOffset - size,
+                            y: y,
+                            width: size,
+                            height: size
+                        )
+                    }
+
+                    return CGRect(
+                        x: surfaceFrame.maxX + sideOffset,
+                        y: y,
+                        width: size,
+                        height: size
+                    )
+                }
+
+                var frame = frameForCurrentRow()
+                let exceedsHorizontalBounds =
+                    frame.minX < screenFrame.minX + screenMargin ||
+                    frame.maxX > screenFrame.maxX - screenMargin
+
+                if exceedsHorizontalBounds && sideOffset > gap {
+                    row += 1
+                    sideOffset = gap
+                    frame = frameForCurrentRow()
+                }
+
+                result[bubble.id] = clamped(frame, to: screenFrame)
+                sideOffset += size + spacing
+            }
+
+        case .belowNotch:
+            let startY: CGFloat = {
+                guard settings.layout != .wings,
+                      let lowestStandardY = result.values.map(\.minY).min() else {
+                    return surfaceFrame.minY - gap - globalVerticalOffset
+                }
+                return min(
+                    surfaceFrame.minY - gap - globalVerticalOffset,
+                    lowestStandardY - spacing
+                )
+            }()
+
+            var rows: [[NotchBubble]] = []
+            var currentRow: [NotchBubble] = []
+            var currentWidth: CGFloat = 0
+
+            for bubble in appBubbles {
+                let addedWidth = bubble.size + (currentRow.isEmpty ? 0 : spacing)
+                if !currentRow.isEmpty && currentWidth + addedWidth > availableWidth {
+                    rows.append(currentRow)
+                    currentRow = [bubble]
+                    currentWidth = bubble.size
+                } else {
+                    currentRow.append(bubble)
+                    currentWidth += addedWidth
+                }
+            }
+            if !currentRow.isEmpty {
+                rows.append(currentRow)
+            }
+
+            var yCursor = startY
+            for row in rows {
+                let rowHeight = row.map(\.size).max() ?? 0
+                let totalWidth = row.reduce(CGFloat.zero) { $0 + $1.size }
+                    + CGFloat(max(0, row.count - 1)) * spacing
+                var x = surfaceFrame.midX - totalWidth / 2
+                let rowY = yCursor - rowHeight
+
+                for bubble in row {
+                    let style = settings.resolvedStyle(for: bubble.kind)
+                    let y = rowY + (rowHeight - bubble.size) / 2 - style.verticalOffset
+                    let frame = CGRect(x: x, y: y, width: bubble.size, height: bubble.size)
+                    result[bubble.id] = clamped(frame, to: screenFrame)
+                    x += bubble.size + spacing
+                }
+
+                yCursor = rowY - spacing
             }
         }
 
@@ -1954,12 +2796,33 @@ private final class NotchBubblePanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     var bubbleKind: NotchBubbleKind?
+    var bubbleIdentifier: String?
 
     private var horizontalAccumulator: CGFloat = 0
     private var verticalAccumulator: CGFloat = 0
     private var triggeredDuringCurrentTrackpadGesture = false
+    private var forceTouchTriggered = false
 
     override func sendEvent(_ event: NSEvent) {
+        if event.type == .pressure,
+           let bubbleIdentifier {
+            if event.stage >= 2, !forceTouchTriggered {
+                forceTouchTriggered = true
+                NotificationCenter.default.post(
+                    name: .haloNotchBubbleForceTouch,
+                    object: bubbleIdentifier,
+                    userInfo: ["active": true]
+                )
+            } else if event.stage < 2, forceTouchTriggered {
+                forceTouchTriggered = false
+                NotificationCenter.default.post(
+                    name: .haloNotchBubbleForceTouch,
+                    object: bubbleIdentifier,
+                    userInfo: ["active": false]
+                )
+            }
+        }
+
         if event.type == .scrollWheel,
            handleBubbleScrollGesture(event) {
             return
@@ -1968,7 +2831,7 @@ private final class NotchBubblePanel: NSPanel {
     }
 
     private func handleBubbleScrollGesture(_ event: NSEvent) -> Bool {
-        guard let bubbleKind else { return false }
+        guard let bubbleKind, let bubbleIdentifier else { return false }
 
         if event.phase == .began || event.phase == .mayBegin {
             horizontalAccumulator = 0
@@ -2027,7 +2890,7 @@ private final class NotchBubblePanel: NSPanel {
 
         NotificationCenter.default.post(
             name: .haloNotchBubbleDirectionalGesture,
-            object: bubbleKind.rawValue,
+            object: bubbleIdentifier,
             userInfo: [
                 "direction": direction.rawValue,
                 "repeat": isRepeat
@@ -2046,6 +2909,7 @@ private final class TransparentNotchBubbleHostingView<Content: View>: NSHostingV
         layer?.backgroundColor = NSColor.clear.cgColor
         layer?.isOpaque = false
         layer?.masksToBounds = false
+        pressureConfiguration = NSPressureConfiguration(pressureBehavior: .primaryDeepClick)
     }
 }
 
@@ -2778,6 +3642,7 @@ final class BubbleWindowController {
         case retracting
     }
 
+    let id: String
     let kind: NotchBubbleKind
 
     private let panel: NotchBubblePanel
@@ -2788,7 +3653,8 @@ final class BubbleWindowController {
 
     var frame: CGRect { panel.frame }
 
-    init(kind: NotchBubbleKind, store: AppStore, state: SurfaceState) {
+    init(id: String, kind: NotchBubbleKind, store: AppStore, state: SurfaceState) {
+        self.id = id
         self.kind = kind
         panel = NotchBubblePanel(
             contentRect: .zero,
@@ -2797,6 +3663,7 @@ final class BubbleWindowController {
             defer: false
         )
         panel.bubbleKind = kind
+        panel.bubbleIdentifier = id
         panel.isReleasedWhenClosed = false
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -2809,6 +3676,7 @@ final class BubbleWindowController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
         let root = NotchBubbleView(
+            activityID: id,
             kind: kind,
             store: store,
             workspace: store.workspace,
@@ -2900,6 +3768,54 @@ final class BubbleWindowController {
         }
     }
 
+    func receive(
+        frame: CGRect,
+        settings: NotchBubbleSettings,
+        animated: Bool
+    ) {
+        desiredFrame = frame
+        removalGeneration += 1
+        lifecyclePhase = .visible
+        frameAnimator.cancel()
+        frameAnimator.resetVisuals(panel: panel)
+        panel.setFrame(frame, display: false)
+
+        guard animated,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              let layer = panel.contentView?.layer else {
+            panel.alphaValue = 1
+            panel.orderFrontRegardless()
+            return
+        }
+
+        panel.alphaValue = 1
+        panel.orderFrontRegardless()
+
+        let scale = CAKeyframeAnimation(keyPath: "transform.scale")
+        scale.values = [0.72, 1.10, 0.96, 1.0]
+        scale.keyTimes = [0.0, 0.42, 0.72, 1.0]
+        scale.duration = 0.28
+        scale.timingFunctions = [
+            CAMediaTimingFunction(name: .easeOut),
+            CAMediaTimingFunction(name: .easeInEaseOut),
+            CAMediaTimingFunction(name: .easeOut)
+        ]
+
+        let opacity = CAKeyframeAnimation(keyPath: "opacity")
+        opacity.values = [0.35, 1.0, 1.0]
+        opacity.keyTimes = [0.0, 0.45, 1.0]
+        opacity.duration = 0.22
+        opacity.timingFunctions = [
+            CAMediaTimingFunction(name: .easeOut),
+            CAMediaTimingFunction(name: .linear)
+        ]
+
+        layer.removeAnimation(forKey: "appBubbleReceiveScale")
+        layer.removeAnimation(forKey: "appBubbleReceiveOpacity")
+        layer.add(scale, forKey: "appBubbleReceiveScale")
+        layer.add(opacity, forKey: "appBubbleReceiveOpacity")
+    }
+
     func remove(
         animated: Bool,
         emergenceFrame: CGRect,
@@ -2949,6 +3865,7 @@ private final class NotchBubbleDisplayHost {
     private let store: AppStore
     private let settingsStore: NotchBubbleSettingsStore
     private let activityCenter = NotchBubbleActivityCenter.shared
+    private let minimizedWindowCenter = MinimizedWindowBubbleCenter.shared
     private let registry = BubbleRegistry()
     private let layoutEngine = BubbleLayoutEngine()
 
@@ -2957,11 +3874,11 @@ private final class NotchBubbleDisplayHost {
     private var screenFrame: CGRect
     private var surfaceFrame: CGRect
     private var surfaceRuntimeEnabled = false
-    private var controllers: [NotchBubbleKind: BubbleWindowController] = [:]
+    private var controllers: [String: BubbleWindowController] = [:]
     // Side ownership is intentionally stateful. Auto placement assigns a side when
     // a bubble first appears and never moves an existing bubble across the notch
     // just to rebalance the layout.
-    private var bubbleSideAssignments: [NotchBubbleKind: NotchBubbleSide] = [:]
+    private var bubbleSideAssignments: [String: NotchBubbleSide] = [:]
     private var subscriptions = Set<AnyCancellable>()
     private var lastCalendarActivityID: String?
     private var lastObservedSettings: NotchBubbleSettings
@@ -3157,6 +4074,12 @@ private final class NotchBubbleDisplayHost {
             .sink { [weak self] _ in self?.refresh(animated: true) }
             .store(in: &subscriptions)
 
+        minimizedWindowCenter.$entries
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .store(in: &subscriptions)
+
         store.workspace.calendar.$calendarRevision
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
@@ -3255,10 +4178,10 @@ private final class NotchBubbleDisplayHost {
             settings: settings,
             sideAssignments: sideAssignments
         )
-        let activeKinds = Set(bubbles.map(\.kind))
+        let activeIDs = Set(bubbles.map(\.id))
 
-        for kind in Array(controllers.keys) where !activeKinds.contains(kind) {
-            guard let controller = controllers[kind] else { continue }
+        for id in Array(controllers.keys) where !activeIDs.contains(id) {
+            guard let controller = controllers[id] else { continue }
             let emergenceFrame = layoutEngine.emergenceFrame(
                 for: controller.frame,
                 around: surfaceFrame,
@@ -3272,22 +4195,40 @@ private final class NotchBubbleDisplayHost {
                 settings: settings
             ) { [weak self, weak controller] in
                 guard let self, let controller,
-                      self.controllers[kind] === controller else { return }
+                      self.controllers[id] === controller else { return }
                 controller.close()
-                self.controllers.removeValue(forKey: kind)
-                self.bubbleSideAssignments.removeValue(forKey: kind)
+                self.controllers.removeValue(forKey: id)
+                self.bubbleSideAssignments.removeValue(forKey: id)
             }
         }
 
         for bubble in bubbles {
-            guard let frame = frames[bubble.kind] else { continue }
+            guard let frame = frames[bubble.id] else { continue }
             let controller: BubbleWindowController
-            if let existing = controllers[bubble.kind] {
+            let isNewController: Bool
+
+            if let existing = controllers[bubble.id] {
                 controller = existing
+                isNewController = false
             } else {
-                controller = BubbleWindowController(kind: bubble.kind, store: store, state: state)
-                controllers[bubble.kind] = controller
+                controller = BubbleWindowController(id: bubble.id, kind: bubble.kind, store: store, state: state)
+                controllers[bubble.id] = controller
+                isNewController = true
             }
+
+            if bubble.kind == .appWindow,
+               isNewController,
+               settings.resolvedAppMinimizeBubbleAnimationEnabled {
+                // Do not replay the window's movement after macOS has already minimized it.
+                // The Bubble appears at its final position and briefly reacts as the receiver.
+                controller.receive(
+                    frame: frame,
+                    settings: settings,
+                    animated: animated
+                )
+                continue
+            }
+
             let emergenceFrame = layoutEngine.emergenceFrame(
                 for: frame,
                 around: surfaceFrame,
@@ -3295,6 +4236,7 @@ private final class NotchBubbleDisplayHost {
                 compactWidth: state.physicalNotchWidth > 1 ? state.physicalNotchWidth : state.compactWidth,
                 compactHeight: state.physicalNotchHeight > 1 ? state.physicalNotchHeight : state.compactHeight
             )
+
             controller.present(
                 frame: frame,
                 emergenceFrame: emergenceFrame,
@@ -3308,29 +4250,35 @@ private final class NotchBubbleDisplayHost {
     private func resolvedSideAssignments(
         for bubbles: [NotchBubble],
         settings: NotchBubbleSettings
-    ) -> [NotchBubbleKind: NotchBubbleSide] {
+    ) -> [String: NotchBubbleSide] {
         guard settings.layout == .wings else { return [:] }
 
-        let activeKinds = Set(bubbles.map(\.kind))
-        let retainedKinds = Set(controllers.keys).union(activeKinds)
+        let standardBubbles = bubbles.filter { $0.kind != .appWindow }
+        let activeIDs = Set(standardBubbles.map(\.id))
+        let retainedControllerIDs = Set(
+            controllers.values
+                .filter { $0.kind != .appWindow }
+                .map(\.id)
+        )
+        let retainedIDs = retainedControllerIDs.union(activeIDs)
         bubbleSideAssignments = bubbleSideAssignments.filter {
-            retainedKinds.contains($0.key)
+            retainedIDs.contains($0.key)
         }
 
         switch settings.resolvedBubbleSideMode {
         case .left:
-            for kind in activeKinds {
-                bubbleSideAssignments[kind] = .left
+            for id in activeIDs {
+                bubbleSideAssignments[id] = .left
             }
 
         case .right:
-            for kind in activeKinds {
-                bubbleSideAssignments[kind] = .right
+            for id in activeIDs {
+                bubbleSideAssignments[id] = .right
             }
 
         case .automatic:
-            // Count currently-owned sides first. Existing bubbles keep their side.
-            // Only bubbles without an assignment participate in balancing.
+            // Count currently-owned sides first. Existing standard bubbles keep their side.
+            // App Bubbles are intentionally excluded because they have their own placement.
             var leftCount = bubbleSideAssignments.values.reduce(into: 0) { count, side in
                 if side == .left { count += 1 }
             }
@@ -3338,7 +4286,7 @@ private final class NotchBubbleDisplayHost {
                 if side == .right { count += 1 }
             }
 
-            for bubble in bubbles where bubbleSideAssignments[bubble.kind] == nil {
+            for bubble in standardBubbles where bubbleSideAssignments[bubble.id] == nil {
                 let side: NotchBubbleSide
                 if leftCount == rightCount {
                     side = settings.resolvedAutomaticPrioritySide
@@ -3348,7 +4296,7 @@ private final class NotchBubbleDisplayHost {
                     side = .right
                 }
 
-                bubbleSideAssignments[bubble.kind] = side
+                bubbleSideAssignments[bubble.id] = side
                 if side == .left {
                     leftCount += 1
                 } else {
@@ -3373,7 +4321,7 @@ private final class NotchBubbleDisplayHost {
             return state.physicalNotchHeight > 1 ? state.physicalNotchHeight : state.compactHeight
         }()
 
-        for (kind, controller) in controllers {
+        for (id, controller) in controllers {
             let emergenceFrame = layoutEngine.emergenceFrame(
                 for: controller.frame,
                 around: surfaceFrame,
@@ -3387,10 +4335,10 @@ private final class NotchBubbleDisplayHost {
                 settings: settings
             ) { [weak self, weak controller] in
                 guard let self, let controller,
-                      self.controllers[kind] === controller else { return }
+                      self.controllers[id] === controller else { return }
                 controller.close()
-                self.controllers.removeValue(forKey: kind)
-                self.bubbleSideAssignments.removeValue(forKey: kind)
+                self.controllers.removeValue(forKey: id)
+                self.bubbleSideAssignments.removeValue(forKey: id)
             }
         }
     }
@@ -3401,6 +4349,7 @@ final class NotchBubbleManager {
     private let store: AppStore
     private let settingsStore = NotchBubbleSettingsStore.shared
     private let activityCenter = NotchBubbleActivityCenter.shared
+    private let minimizedWindowCenter = MinimizedWindowBubbleCenter.shared
     private var hosts: [String: NotchBubbleDisplayHost] = [:]
     private var surfaceRuntimeEnabled = false
     private var subscriptions = Set<AnyCancellable>()
@@ -3419,6 +4368,18 @@ final class NotchBubbleManager {
                     )
                 )
             }
+            .store(in: &subscriptions)
+
+        settingsStore.$settings
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshAppWindowMonitoring() }
+            .store(in: &subscriptions)
+
+        HaloFeatureAccess.shared.$accessLevel
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshAppWindowMonitoring() }
             .store(in: &subscriptions)
     }
 
@@ -3454,6 +4415,18 @@ final class NotchBubbleManager {
         for host in hosts.values {
             host.setSurfaceRuntimeEnabled(granted)
         }
+        refreshAppWindowMonitoring()
+    }
+
+    private func refreshAppWindowMonitoring() {
+        let settings = HaloFeatureAccess.shared.effectiveBubbleSettings(
+            settingsStore.settings.normalized()
+        )
+        minimizedWindowCenter.setEnabled(
+            surfaceRuntimeEnabled &&
+            settings.enabled &&
+            settings.resolvedAppMinimizeBubblesEnabled
+        )
     }
 }
 
@@ -3480,6 +4453,7 @@ private struct NotchBubbleMaskShape: Shape {
 
 @MainActor
 private struct NotchBubbleView: View {
+    let activityID: String
     let kind: NotchBubbleKind
 
     @ObservedObject var store: AppStore
@@ -3493,12 +4467,17 @@ private struct NotchBubbleView: View {
     @ObservedObject private var pal = HaloPixelPalStore.shared
     @ObservedObject private var settingsStore = NotchBubbleSettingsStore.shared
     @ObservedObject private var activityCenter = NotchBubbleActivityCenter.shared
+    @ObservedObject private var minimizedWindowCenter = MinimizedWindowBubbleCenter.shared
+    @ObservedObject private var appWindowPreviewCenter = AppWindowPreviewCenter.shared
 
     @State private var hovering = false
     @State private var showingDetail = false
+    @State private var showingWindowPreview = false
+    @State private var lastForceTouchAt: Date?
     @State private var lastNonZeroAudioVolume: Float = 0.5
 
-    init(kind: NotchBubbleKind, store: AppStore, workspace: WorkspaceStore, surfaceState: SurfaceState) {
+    init(activityID: String, kind: NotchBubbleKind, store: AppStore, workspace: WorkspaceStore, surfaceState: SurfaceState) {
+        self.activityID = activityID
         self.kind = kind
         self.store = store
         self.workspace = workspace
@@ -3537,7 +4516,7 @@ private struct NotchBubbleView: View {
             .onHover { value in
                 if value && !hovering {
                     HaloHoverHaptics.pulse(
-                        id: "bubble." + surfaceState.displayID + "." + kind.rawValue,
+                        id: "bubble." + surfaceState.displayID + "." + activityID,
                         strength: store.configuration.resolvedHoverHapticStrength,
                         pattern: store.configuration.resolvedHoverHapticPattern
                     )
@@ -3549,8 +4528,27 @@ private struct NotchBubbleView: View {
             .onChange(of: showingDetail) { _ in
                 updateInteractionProtection()
             }
+            .onChange(of: showingWindowPreview) { _ in
+                updateInteractionProtection()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .haloNotchBubbleForceTouch)) { note in
+                guard kind == .appWindow,
+                      note.object as? String == activityID else {
+                    return
+                }
+
+                let active = note.userInfo?["active"] as? Bool ?? true
+                lastForceTouchAt = Date()
+
+                if active {
+                    guard let entry = appWindowEntry else { return }
+                    openAppWindowPreview(entry: entry)
+                } else {
+                    showingWindowPreview = false
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .haloNotchBubbleDirectionalGesture)) { note in
-                guard note.object as? String == kind.rawValue,
+                guard note.object as? String == activityID,
                       let rawDirection = note.userInfo?["direction"] as? String,
                       let direction = NotchBubbleGestureDirection(rawValue: rawDirection) else {
                     return
@@ -3588,7 +4586,7 @@ private struct NotchBubbleView: View {
                             handlePrimaryTap()
                             let override = settings.styleOverride(for: kind)
                             HaloHoverHaptics.pulse(
-                                id: "bubble.gesture.tap." + surfaceState.displayID + "." + kind.rawValue,
+                                id: "bubble.gesture.tap." + surfaceState.displayID + "." + activityID,
                                 strength: override?.tapHapticStrength
                                     ?? store.configuration.resolvedHoverHapticStrength,
                                 pattern: override?.tapHapticPattern
@@ -3605,7 +4603,7 @@ private struct NotchBubbleView: View {
                     Divider()
                     HStack {
                         Button("Dismiss current activity") {
-                            activityCenter.dismiss(kind: kind)
+                            dismissCurrentActivity()
                             showingDetail = false
                         }
                         .buttonStyle(.borderless)
@@ -3623,9 +4621,15 @@ private struct NotchBubbleView: View {
                     showingDetail = false
                 }
             }
+            .popover(isPresented: $showingWindowPreview, arrowEdge: .top) {
+                appWindowPreviewCard
+                    .onExitCommand {
+                        showingWindowPreview = false
+                    }
+            }
             .contextMenu {
                 Button("Dismiss current activity") {
-                    activityCenter.dismiss(kind: kind)
+                    dismissCurrentActivity()
                 }
             }
             .accessibilityLabel(kind.title)
@@ -3661,7 +4665,148 @@ private struct NotchBubbleView: View {
                 vinylBubbleContent
             case .files:
                 fileBubbleContent
+            case .appWindow:
+                appWindowBubbleContent
             }
+        }
+    }
+
+    private var appWindowEntry: MinimizedWindowBubbleCenter.Entry? {
+        minimizedWindowCenter.entry(activityID: activityID)
+    }
+
+    @ViewBuilder
+    private var appWindowPreviewCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let entry = appWindowEntry {
+                HStack(spacing: 10) {
+                    Group {
+                        if let icon = minimizedWindowCenter.appIcon(for: entry) {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .scaledToFit()
+                        } else {
+                            Image(systemName: "macwindow")
+                                .font(.title2)
+                        }
+                    }
+                    .frame(width: 36, height: 36)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry.appName)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(entry.windowTitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    Button("Restore") {
+                        if minimizedWindowCenter.restore(activityID: activityID) {
+                            activityCenter.clearDismissal(kind: .appWindow)
+                        }
+                        showingWindowPreview = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
+                Group {
+                    if let image = appWindowPreviewCenter.image(for: activityID) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: 520, maxHeight: 340)
+                            .background(Color.black.opacity(0.35))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    } else if appWindowPreviewCenter.loadingIDs.contains(activityID) {
+                        VStack(spacing: 10) {
+                            ProgressView()
+                            Text("Loading window preview…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                    } else if let error = appWindowPreviewCenter.error(for: activityID) {
+                        VStack(spacing: 10) {
+                            Image(systemName: "rectangle.on.rectangle.slash")
+                                .font(.system(size: 28))
+                                .foregroundStyle(.secondary)
+                            Text(error)
+                                .font(.callout)
+                                .multilineTextAlignment(.center)
+                                .foregroundStyle(.secondary)
+
+                            if !appWindowPreviewCenter.screenCaptureGranted {
+                                Button("Grant Screen Recording Access") {
+                                    appWindowPreviewCenter.requestScreenCapturePermission()
+                                }
+                                .buttonStyle(.bordered)
+                            } else {
+                                Button("Retry Preview") {
+                                    appWindowPreviewCenter.loadPreview(
+                                        activityID: activityID,
+                                        entry: entry,
+                                        forceRefresh: true
+                                    )
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding(20)
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                    } else {
+                        Text("Force Touch this App Bubble to load a preview.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 220)
+                    }
+                }
+
+                Text("Force Touch previews the minimized window without restoring it.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text("This minimized window is no longer available.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .frame(width: 548)
+    }
+
+    @ViewBuilder
+    private var appWindowBubbleContent: some View {
+        if let entry = appWindowEntry {
+            ZStack(alignment: .bottomTrailing) {
+                Group {
+                    if let icon = minimizedWindowCenter.appIcon(for: entry) {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .scaledToFit()
+                    } else {
+                        Image(systemName: "macwindow")
+                            .font(.system(size: bubbleStyle.size * 0.38, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .padding(bubbleStyle.size * 0.12)
+
+                if minimizedWindowCenter.entries.count > 1 {
+                    Text("\(minimizedWindowCenter.entries.count)")
+                        .font(.system(size: max(7, bubbleStyle.size * 0.14), weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(4)
+                        .background(providerAccentColor, in: Circle())
+                        .padding(2)
+                }
+            }
+        } else {
+            Image(systemName: "macwindow")
+                .font(.system(size: bubbleStyle.size * 0.38, weight: .semibold))
+                .foregroundStyle(.white)
         }
     }
 
@@ -4280,6 +5425,8 @@ private struct NotchBubbleView: View {
             return Color(red: 0.26, green: 0.66, blue: 1.0)
         case .files:
             return Color(red: 0.32, green: 0.78, blue: 0.60)
+        case .appWindow:
+            return Color(red: 0.36, green: 0.68, blue: 1.0)
         }
     }
 
@@ -4566,6 +5713,55 @@ private struct NotchBubbleView: View {
             vinylDetail
         case .files:
             moduleDetail(.shelf)
+        case .appWindow:
+            appWindowDetail
+        }
+    }
+
+    private var appWindowDetail: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let entry = appWindowEntry {
+                HStack(spacing: 12) {
+                    Group {
+                        if let icon = minimizedWindowCenter.appIcon(for: entry) {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .scaledToFit()
+                        } else {
+                            Image(systemName: "macwindow")
+                                .font(.title2)
+                        }
+                    }
+                    .frame(width: 48, height: 48)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(entry.appName)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(entry.windowTitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                        if minimizedWindowCenter.entries.count > 1 {
+                            Text("\(minimizedWindowCenter.entries.count) minimized windows in the stack")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                Button("Restore Window") {
+                    _ = minimizedWindowCenter.restore(activityID: activityID)
+                    activityCenter.clearDismissal(kind: .appWindow)
+                    showingDetail = false
+                }
+                .buttonStyle(.borderedProminent)
+            } else {
+                Text("No minimized app window is waiting.")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -4751,6 +5947,7 @@ private struct NotchBubbleView: View {
         case .clock, .stopwatch, .system, .clipboard, .calendar, .audio: return 354
         case .vinyl: return 360
         case .files: return 354
+        case .appWindow: return 360
         }
     }
 
@@ -4841,7 +6038,7 @@ private struct NotchBubbleView: View {
             handled = true
 
         case .dismiss:
-            activityCenter.dismiss(kind: kind)
+            dismissCurrentActivity()
             showingDetail = false
             handled = true
 
@@ -4960,7 +6157,36 @@ private struct NotchBubbleView: View {
         return handled
     }
 
+    private func openAppWindowPreview(entry explicitEntry: MinimizedWindowBubbleCenter.Entry? = nil) {
+        guard kind == .appWindow,
+              let entry = explicitEntry ?? appWindowEntry else {
+            return
+        }
+
+        showingDetail = false
+        showingWindowPreview = true
+        appWindowPreviewCenter.loadPreview(
+            activityID: activityID,
+            entry: entry,
+            forceRefresh: false
+        )
+    }
+
     private func handlePrimaryTap() {
+        if kind == .appWindow,
+           let lastForceTouchAt,
+           Date().timeIntervalSince(lastForceTouchAt) < 0.7 {
+            return
+        }
+
+        if kind == .appWindow {
+            if minimizedWindowCenter.restore(activityID: activityID) {
+                activityCenter.clearDismissal(kind: .appWindow)
+            }
+            showingDetail = false
+            return
+        }
+
         guard kind == .music else {
             showingDetail.toggle()
             return
@@ -5176,8 +6402,16 @@ private struct NotchBubbleView: View {
     private func updateInteractionProtection() {
         activityCenter.setInteracting(
             kind: kind,
-            interacting: hovering || showingDetail
+            interacting: hovering || showingDetail || showingWindowPreview
         )
+    }
+
+    private func dismissCurrentActivity() {
+        if kind == .appWindow {
+            minimizedWindowCenter.dismiss(activityID: activityID)
+        } else {
+            activityCenter.dismiss(kind: kind)
+        }
     }
 
     private func mediaCommand(_ command: String) {
@@ -5209,7 +6443,7 @@ private struct NotchBubbleView: View {
 
             surfaceState.openExplicitly(canOpenMusicCI ? .music : .normal)
 
-        case .timer, .pixelPal, .clock, .stopwatch, .system, .clipboard, .calendar, .audio, .files:
+        case .timer, .pixelPal, .clock, .stopwatch, .system, .clipboard, .calendar, .audio, .files, .appWindow:
             // These bubbles are shortcuts into the user's normal opened notch.
             // They do not replace the dashboard with a focused widget.
             surfaceState.openExplicitly(.normal)
@@ -5242,6 +6476,11 @@ private struct NotchBubbleView: View {
             return media.isPlaying ? "Vinyl · \(media.title)" : "Vinyl"
         case .files:
             return store.files.isEmpty ? "File Shelf" : "\(store.files.count) staged item\(store.files.count == 1 ? "" : "s")"
+        case .appWindow:
+            if let entry = appWindowEntry {
+                return "\(entry.appName) · \(entry.windowTitle)"
+            }
+            return "Minimized app window"
         }
     }
 }
@@ -5252,6 +6491,8 @@ private struct NotchBubbleView: View {
 struct NotchBubbleSettingsView: View {
     @ObservedObject var store: AppStore
     @ObservedObject private var settingsStore = NotchBubbleSettingsStore.shared
+    @ObservedObject private var minimizedWindowCenter = MinimizedWindowBubbleCenter.shared
+    @ObservedObject private var appWindowPreviewCenter = AppWindowPreviewCenter.shared
     @State private var expandedGestureEditors = Set<String>()
 
     private var settings: NotchBubbleSettings {
@@ -5264,6 +6505,130 @@ struct NotchBubbleSettingsView: View {
             Text("A selective activity surface for useful state and actions — not a second notification centre.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+
+        Section("App Bubbles") {
+            if HaloDistribution.current.supportsAppWindowBubbles {
+                Toggle(
+                    "Show minimized windows as bubbles",
+                    isOn: Binding(
+                        get: { settings.resolvedAppMinimizeBubblesEnabled },
+                        set: { enabled in
+                            var next = settingsStore.settings
+                            next.appMinimizeBubblesEnabled = enabled
+                            settingsStore.settings = next.normalized()
+                            if enabled {
+                                MinimizedWindowBubbleCenter.shared.requestAccessibilityPermission()
+                            }
+                        }
+                    )
+                )
+
+                Text("When you minimize an app window, Halo keeps it in a Bubble. Click a Bubble to restore that exact window.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if settings.resolvedAppMinimizeBubblesEnabled {
+                    Picker(
+                        "App Bubble placement",
+                        selection: Binding(
+                            get: { settings.resolvedAppMinimizeBubblePlacement },
+                            set: { value in
+                                var next = settingsStore.settings
+                                next.appMinimizeBubblePlacement = value
+                                settingsStore.settings = next.normalized()
+                            }
+                        )
+                    ) {
+                        ForEach(AppWindowBubblePlacement.allCases) { placement in
+                            Text(placement.rawValue).tag(placement)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Toggle(
+                        "Animate App Bubble receive",
+                        isOn: Binding(
+                            get: { settings.resolvedAppMinimizeBubbleAnimationEnabled },
+                            set: { enabled in
+                                var next = settingsStore.settings
+                                next.appMinimizeBubbleAnimationEnabled = enabled
+                                settingsStore.settings = next.normalized()
+                            }
+                        )
+                    )
+
+                    Picker(
+                        "Maximum minimized windows",
+                        selection: Binding(
+                            get: { settingsStore.settings.appMinimizeBubbleLimit ?? 1 },
+                            set: { value in
+                                var next = settingsStore.settings
+                                next.appMinimizeBubbleLimit = value
+                                settingsStore.settings = next.normalized()
+                            }
+                        )
+                    ) {
+                        Text("1").tag(1)
+                        Text("2").tag(2)
+                        Text("3").tag(3)
+                        Text("5").tag(5)
+                        Text("8").tag(8)
+                        Text("12").tag(12)
+                        Text("Unlimited").tag(0)
+                    }
+
+                    Text(settings.resolvedAppMinimizeBubbleLimit == Int.max
+                         ? "Every minimized window can remain visible as its own App Bubble."
+                         : "Up to \(settings.resolvedAppMinimizeBubbleLimit) minimized window\(settings.resolvedAppMinimizeBubbleLimit == 1 ? "" : "s") can remain visible at once.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("Force Touch an App Bubble to preview that minimized window without restoring it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if minimizedWindowCenter.accessibilityGranted {
+                        Label("Accessibility access granted", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        HStack {
+                            Label("Accessibility access is required to detect and restore windows.", systemImage: "exclamationmark.triangle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Grant Access") {
+                                MinimizedWindowBubbleCenter.shared.requestAccessibilityPermission()
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+
+                    if appWindowPreviewCenter.screenCaptureGranted {
+                        Label("Screen Recording access granted for Force Touch previews", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        HStack {
+                            Label("Screen Recording access is required for window previews.", systemImage: "rectangle.on.rectangle.slash")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Grant Preview Access") {
+                                appWindowPreviewCenter.requestScreenCapturePermission()
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+            } else {
+                Label("App Bubbles are available in Halo Direct.", systemImage: "lock.fill")
+                    .font(.callout.weight(.medium))
+                Text("The App Store build runs inside macOS App Sandbox, so Halo does not expose cross-app window control there.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
 
         Section("Activity policy") {
@@ -5892,6 +7257,11 @@ struct NotchBubbleSettingsView: View {
                         Text(mode.rawValue).tag(mode)
                     }
                 }
+
+            case .appWindow:
+                Text("Uses the minimized app's icon. Click the Bubble to restore the window. If several windows are minimized, Halo keeps them in a newest-first stack.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
             case .vinyl:
                 Picker("Display", selection: optionalBinding(\.vinylDisplayMode, default: VinylBubbleDisplayMode.fullRecord)) {
