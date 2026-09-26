@@ -2529,32 +2529,51 @@ struct BubbleLayoutEngine {
             let menuBarCenterY = screenFrame.maxY - menuBarHeight / 2
             let appSide: NotchBubbleSide =
                 settings.resolvedAppMinimizeBubblePlacement == .left ? .left : .right
+            let screenMargin: CGFloat = 4
+            var row = 0
+            var sideOffset = appSide == .left ? leftWingOffset : rightWingOffset
 
             for bubble in appBubbles {
                 let style = settings.resolvedStyle(for: bubble.kind)
                 let size = bubble.size
-                let y = menuBarCenterY - size / 2 - globalVerticalOffset - style.verticalOffset
-                let frame: CGRect
 
-                if appSide == .left {
-                    frame = CGRect(
-                        x: surfaceFrame.minX - leftWingOffset - size,
+                func frameForCurrentRow() -> CGRect {
+                    let y = menuBarCenterY
+                        - size / 2
+                        - globalVerticalOffset
+                        - style.verticalOffset
+                        - CGFloat(row) * (size + spacing)
+
+                    if appSide == .left {
+                        return CGRect(
+                            x: surfaceFrame.minX - sideOffset - size,
+                            y: y,
+                            width: size,
+                            height: size
+                        )
+                    }
+
+                    return CGRect(
+                        x: surfaceFrame.maxX + sideOffset,
                         y: y,
                         width: size,
                         height: size
                     )
-                    leftWingOffset += size + spacing
-                } else {
-                    frame = CGRect(
-                        x: surfaceFrame.maxX + rightWingOffset,
-                        y: y,
-                        width: size,
-                        height: size
-                    )
-                    rightWingOffset += size + spacing
+                }
+
+                var frame = frameForCurrentRow()
+                let exceedsHorizontalBounds =
+                    frame.minX < screenFrame.minX + screenMargin ||
+                    frame.maxX > screenFrame.maxX - screenMargin
+
+                if exceedsHorizontalBounds && sideOffset > gap {
+                    row += 1
+                    sideOffset = gap
+                    frame = frameForCurrentRow()
                 }
 
                 result[bubble.id] = clamped(frame, to: screenFrame)
+                sideOffset += size + spacing
             }
 
         case .belowNotch:
