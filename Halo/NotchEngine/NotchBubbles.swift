@@ -4576,13 +4576,7 @@ private struct NotchBubbleView: View {
                 }
 
                 lastForceTouchAt = Date()
-                showingDetail = false
-                showingWindowPreview = true
-                appWindowPreviewCenter.loadPreview(
-                    activityID: activityID,
-                    entry: entry,
-                    forceRefresh: true
-                )
+                openAppWindowPreview(entry: entry)
             }
             .onReceive(NotificationCenter.default.publisher(for: .haloNotchBubbleDirectionalGesture)) { note in
                 guard note.object as? String == activityID,
@@ -4665,6 +4659,12 @@ private struct NotchBubbleView: View {
                     }
             }
             .contextMenu {
+                if kind == .appWindow {
+                    Button("Preview Window") {
+                        openAppWindowPreview()
+                    }
+                }
+
                 Button("Dismiss current activity") {
                     dismissCurrentActivity()
                 }
@@ -6192,6 +6192,21 @@ private struct NotchBubbleView: View {
         }
 
         return handled
+    }
+
+    private func openAppWindowPreview(entry explicitEntry: MinimizedWindowBubbleCenter.Entry? = nil) {
+        guard kind == .appWindow,
+              let entry = explicitEntry ?? appWindowEntry else {
+            return
+        }
+
+        showingDetail = false
+        showingWindowPreview = true
+        appWindowPreviewCenter.loadPreview(
+            activityID: activityID,
+            entry: entry,
+            forceRefresh: false
+        )
     }
 
     private func handlePrimaryTap() {
