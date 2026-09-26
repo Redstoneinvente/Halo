@@ -4232,19 +4232,48 @@ private final class NotchBubbleDisplayHost {
         for bubble in bubbles {
             guard let frame = frames[bubble.id] else { continue }
             let controller: BubbleWindowController
+            let isNewController: Bool
+
             if let existing = controllers[bubble.id] {
                 controller = existing
+                isNewController = false
             } else {
                 controller = BubbleWindowController(id: bubble.id, kind: bubble.kind, store: store, state: state)
                 controllers[bubble.id] = controller
+                isNewController = true
+
+                if bubble.kind == .appWindow,
+                   settings.resolvedAppMinimizeBubbleAnimationEnabled,
+                   let entry = minimizedWindowCenter.entry(activityID: bubble.id),
+                   let sourceFrame = entry.windowFrame,
+                   let preview = AppWindowPreviewCenter.shared.image(for: bubble.id) {
+                    AppWindowMinimizeAnimator.shared.animate(
+                        activityID: bubble.id,
+                        image: preview,
+                        from: sourceFrame,
+                        to: frame
+                    )
+                }
             }
-            let emergenceFrame = layoutEngine.emergenceFrame(
-                for: frame,
-                around: surfaceFrame,
-                in: screenFrame,
-                compactWidth: state.physicalNotchWidth > 1 ? state.physicalNotchWidth : state.compactWidth,
-                compactHeight: state.physicalNotchHeight > 1 ? state.physicalNotchHeight : state.compactHeight
-            )
+
+            let emergenceFrame: CGRect
+            if bubble.kind == .appWindow,
+               isNewController,
+               settings.resolvedAppMinimizeBubbleAnimationEnabled,
+               AppWindowPreviewCenter.shared.image(for: bubble.id) != nil {
+                // The cached window snapshot supplies the visual travel into the Bubble.
+                // Keep the destination Bubble itself stable underneath that animation.
+                emergenceFrame = frame
+            } else {
+                emergenceFrame = layoutEngine.emergenceFrame(
+                    for: frame,
+                    around: surfaceFrame,
+                    in: screenFrame,
+                    compactWidth: state.physicalNotchWidth > 1 ? state.physicalNotchWidth : state.compactWidth,
+                    compactHeight: state.physicalNotchHeight > 1 ? state.physicalNotchHeight : state.compactHeight
+                )
+            }
+
             controller.present(
                 frame: frame,
                 emergenceFrame: emergenceFrame,
