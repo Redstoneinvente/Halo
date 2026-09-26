@@ -2810,10 +2810,16 @@ private final class NotchBubblePanel: NSPanel {
                 forceTouchTriggered = true
                 NotificationCenter.default.post(
                     name: .haloNotchBubbleForceTouch,
-                    object: bubbleIdentifier
+                    object: bubbleIdentifier,
+                    userInfo: ["active": true]
                 )
-            } else if event.stage == 0 {
+            } else if event.stage < 2, forceTouchTriggered {
                 forceTouchTriggered = false
+                NotificationCenter.default.post(
+                    name: .haloNotchBubbleForceTouch,
+                    object: bubbleIdentifier,
+                    userInfo: ["active": false]
+                )
             }
         }
 
@@ -4527,13 +4533,19 @@ private struct NotchBubbleView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .haloNotchBubbleForceTouch)) { note in
                 guard kind == .appWindow,
-                      note.object as? String == activityID,
-                      let entry = appWindowEntry else {
+                      note.object as? String == activityID else {
                     return
                 }
 
+                let active = note.userInfo?["active"] as? Bool ?? true
                 lastForceTouchAt = Date()
-                openAppWindowPreview(entry: entry)
+
+                if active {
+                    guard let entry = appWindowEntry else { return }
+                    openAppWindowPreview(entry: entry)
+                } else {
+                    showingWindowPreview = false
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .haloNotchBubbleDirectionalGesture)) { note in
                 guard note.object as? String == activityID,
@@ -4616,12 +4628,6 @@ private struct NotchBubbleView: View {
                     }
             }
             .contextMenu {
-                if kind == .appWindow {
-                    Button("Preview Window") {
-                        openAppWindowPreview()
-                    }
-                }
-
                 Button("Dismiss current activity") {
                     dismissCurrentActivity()
                 }
