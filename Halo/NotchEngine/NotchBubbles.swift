@@ -5748,11 +5748,37 @@ struct NotchBubbleSettingsView: View {
                     )
                 )
 
-                Text("When you minimize an app window, Halo keeps it in a Bubble. Click the Bubble to restore the most recently minimized window.")
+                Text("When you minimize an app window, Halo keeps it in a Bubble. Click a Bubble to restore that exact window.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 if settings.resolvedAppMinimizeBubblesEnabled {
+                    Picker(
+                        "Maximum minimized windows",
+                        selection: Binding(
+                            get: { settingsStore.settings.appMinimizeBubbleLimit ?? 1 },
+                            set: { value in
+                                var next = settingsStore.settings
+                                next.appMinimizeBubbleLimit = value
+                                settingsStore.settings = next.normalized()
+                            }
+                        )
+                    ) {
+                        Text("1").tag(1)
+                        Text("2").tag(2)
+                        Text("3").tag(3)
+                        Text("5").tag(5)
+                        Text("8").tag(8)
+                        Text("12").tag(12)
+                        Text("Unlimited").tag(0)
+                    }
+
+                    Text(settings.resolvedAppMinimizeBubbleLimit == Int.max
+                         ? "Every minimized window can remain visible as its own App Bubble."
+                         : "Up to \(settings.resolvedAppMinimizeBubbleLimit) minimized window\(settings.resolvedAppMinimizeBubbleLimit == 1 ? "" : "s") can remain visible at once.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     if minimizedWindowCenter.accessibilityGranted {
                         Label("Accessibility access granted", systemImage: "checkmark.circle.fill")
                             .font(.caption)
