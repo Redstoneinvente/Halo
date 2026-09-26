@@ -2,6 +2,8 @@ import XCTest
 import CryptoKit
 #if SWIFT_PACKAGE
 @testable import HaloCore
+#else
+@testable import Halo
 #endif
 
 final class LicenseTests: XCTestCase {

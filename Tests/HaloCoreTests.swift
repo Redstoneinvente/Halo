@@ -1,6 +1,8 @@
 import XCTest
 #if SWIFT_PACKAGE
 @testable import HaloCore
+#else
+@testable import Halo
 #endif
 
 final class HaloCoreTests: XCTestCase {

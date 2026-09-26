@@ -106,6 +106,13 @@
 			remoteGlobalIDString = 5AF000000000000000000301;
 			remoteInfo = HaloSafariMedia;
 		};
+		A9E000000000000000000601 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 000000000000000000000005;
+			remoteInfo = Halo;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -499,6 +506,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				A9E000000000000000000602 /* PBXTargetDependency */,
 			);
 			name = HaloCoreTests;
 			productName = HaloCoreTests;
@@ -701,13 +709,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				00000000000000000000026C /* Core/PersonalizationModels.swift in Sources */,
-				000000000000000000000208 /* Core/WidgetModels.swift in Sources */,
-				0000000000000000000001A4 /* Core/SurfaceModels.swift in Sources */,
-				0000000000000000000000FA /* Core/Models.swift in Sources */,
-				0000000000000000000000FB /* Core/WorkspaceModels.swift in Sources */,
-				0000000000000000000000FC /* Core/ExtensionContracts.swift in Sources */,
-				D15700000000000000000002 /* Core/HaloDistribution.swift in Sources */,
 				0000000000000000000000FD /* Tests/HaloCoreTests.swift in Sources */,
 				0000000000000000000000FE /* Tests/LicenseTests.swift in Sources */,
 			);
@@ -728,6 +729,11 @@
 			isa = PBXTargetDependency;
 			target = 5AF000000000000000000301 /* HaloSafariMedia */;
 			targetProxy = 5AF000000000000000000601 /* PBXContainerItemProxy */;
+		};
+		A9E000000000000000000602 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 000000000000000000000005 /* Halo */;
+			targetProxy = A9E000000000000000000601 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -842,8 +848,10 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
 				SWIFT_VERSION = 5.0;
 			};
@@ -854,8 +862,10 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
 				SWIFT_VERSION = 5.0;
 			};
@@ -1219,8 +1229,10 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
 				SWIFT_VERSION = 5.0;
 			};
@@ -1231,8 +1243,10 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
 				SWIFT_VERSION = 5.0;
 			};
@@ -1243,8 +1257,10 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_APPSTORE";
 				SWIFT_VERSION = 5.0;
 			};
@@ -1255,8 +1271,10 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_APPSTORE";
 				SWIFT_VERSION = 5.0;
 			};
