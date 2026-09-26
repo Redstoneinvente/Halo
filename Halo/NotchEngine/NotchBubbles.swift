@@ -1599,7 +1599,9 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
         }
 
         var minimized: [String: Snapshot] = [:]
+        var visiblePreviewEntries: [Entry] = []
         let ownPID = ProcessInfo.processInfo.processIdentifier
+        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 
         for app in NSWorkspace.shared.runningApplications {
             guard app.processIdentifier != ownPID,
@@ -1612,10 +1614,7 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
             }
 
             for window in windows {
-                guard booleanAttribute(kAXMinimizedAttribute as CFString, from: window) == true else {
-                    continue
-                }
-
+                let isMinimized = booleanAttribute(kAXMinimizedAttribute as CFString, from: window) == true
                 let title = stringAttribute(kAXTitleAttribute as CFString, from: window) ?? "Window"
                 let document = stringAttribute(kAXDocumentAttribute as CFString, from: window) ?? ""
                 let identifier = stringAttribute(kAXIdentifierAttribute as CFString, from: window)
@@ -1627,21 +1626,29 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
                 let appName = app.localizedName
                     ?? app.bundleIdentifier?.split(separator: ".").last.map(String.init)
                     ?? "App"
+                let frame = windowFrame(for: window)
 
-                minimized[id] = Snapshot(
-                    entry: Entry(
-                        id: id,
-                        processIdentifier: app.processIdentifier,
-                        bundleIdentifier: app.bundleIdentifier,
-                        appName: appName,
-                        windowTitle: title,
-                        windowFrame: windowFrame(for: window),
-                        minimizedAt: Date()
-                    ),
-                    element: window
+                let entry = Entry(
+                    id: id,
+                    processIdentifier: app.processIdentifier,
+                    bundleIdentifier: app.bundleIdentifier,
+                    appName: appName,
+                    windowTitle: title,
+                    windowFrame: frame,
+                    minimizedAt: Date()
                 )
+
+                if isMinimized {
+                    minimized[id] = Snapshot(entry: entry, element: window)
+                } else if app.processIdentifier == frontmostPID,
+                          frame?.width ?? 0 > 80,
+                          frame?.height ?? 0 > 60 {
+                    visiblePreviewEntries.append(entry)
+                }
             }
         }
+
+        AppWindowPreviewCenter.shared.cacheVisiblePreviews(entries: visiblePreviewEntries)
 
         let currentKeys = Set(minimized.keys)
         if !hasBaseline {
