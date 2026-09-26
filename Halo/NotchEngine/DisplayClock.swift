@@ -435,6 +435,72 @@ private enum HaloSandboxDropAccess {
         }
     }
 
+    static func withWritableParentAccessAsync<T: Sendable>(
+        for itemURL: URL,
+        purpose: String,
+        _ body: @escaping @Sendable () throws -> T
+    ) async throws -> T {
+        try await withWritableDirectoryAccessAsync(
+            itemURL.deletingLastPathComponent(),
+            purpose: purpose,
+            body
+        )
+    }
+
+    static func withWritableDirectoryAccessAsync<T: Sendable>(
+        _ directory: URL,
+        purpose: String,
+        _ body: @escaping @Sendable () throws -> T
+    ) async throws -> T {
+        let performOffMain: () async throws -> T = {
+            try await Task.detached(priority: .userInitiated) {
+                try body()
+            }.value
+        }
+
+        guard !HaloDistribution.current.supportsUnrestrictedFileAccess else {
+            return try await performOffMain()
+        }
+
+        let target = directory.resolvingSymlinksInPath().standardizedFileURL
+
+        if let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first,
+           target == downloads.resolvingSymlinksInPath().standardizedFileURL {
+            return try await performOffMain()
+        }
+
+        if let scopedURL = resolvedBookmarkScope(containing: target) {
+            let started = scopedURL.startAccessingSecurityScopedResource()
+            defer { if started { scopedURL.stopAccessingSecurityScopedResource() } }
+            return try await performOffMain()
+        }
+
+        let panel = NSOpenPanel()
+        panel.title = "Allow Halo to Modify Files"
+        panel.message = "Halo needs access to \(target.lastPathComponent) to \(purpose). Choose this folder once; Halo will remember the permission."
+        panel.prompt = "Allow"
+        panel.directoryURL = target
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = true
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let selected = panel.url else {
+            throw AccessError.cancelled(purpose)
+        }
+
+        let selectedURL = selected.resolvingSymlinksInPath().standardizedFileURL
+        guard contains(selectedURL, target) else {
+            throw AccessError.wrongFolder(expected: target, selected: selectedURL)
+        }
+
+        try rememberSelectedDirectory(selectedURL)
+        let started = selectedURL.startAccessingSecurityScopedResource()
+        defer { if started { selectedURL.stopAccessingSecurityScopedResource() } }
+        return try await performOffMain()
+    }
+
     static func withWritableParentAccess<T>(
         for itemURL: URL,
         purpose: String,
@@ -555,7 +621,7 @@ private enum HaloDropZoneActionExecutor {
         urls: [URL],
         shelfHandler: (([URL]) -> Void)?,
         closeHandler: () -> Void
-    ) -> String {
+    ) async -> String {
         let accepted = urls.filter { zone.accepts.accepts($0) }
         guard !accepted.isEmpty else {
             return "Nothing matched this zone's \(zone.accepts.rawValue.lowercased()) filter."
@@ -591,38 +657,42 @@ private enum HaloDropZoneActionExecutor {
                 pasteboard.writeObjects(accepted.map { $0 as NSURL })
                 outcome = accepted.count == 1 ? "Copied file URL" : "Copied file URLs"
             case .duplicate:
-                try accepted.forEach { url in
-                    try HaloSandboxDropAccess.withWritableParentAccess(for: url, purpose: "create a duplicate beside it") {
-                        try FileManager.default.copyItem(at: url, to: uniqueSibling(for: url, suffix: " copy"))
-                    }
+                for url in accepted {
+                    try await duplicate(url)
                 }
                 outcome = accepted.count == 1 ? "Created duplicate" : "Created \(accepted.count) duplicates"
             case .rename:
                 let requestedName = zone.parameter.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !requestedName.isEmpty else { return "Enter a new name." }
-                try accepted.forEach { try rename($0, newName: requestedName) }
+                for url in accepted {
+                    try await rename(url, newName: requestedName)
+                }
                 outcome = accepted.count == 1 ? "Renamed item" : "Renamed \(accepted.count) items"
             case .compress:
-                try accepted.forEach { try launchDittoCompress($0) }
-                outcome = accepted.count == 1 ? "Compression started" : "Started \(accepted.count) ZIP jobs"
+                for url in accepted {
+                    try await launchDittoCompress(url)
+                }
+                outcome = accepted.count == 1 ? "Created ZIP archive" : "Created \(accepted.count) ZIP archives"
             case .extract:
                 let archives = accepted.filter { $0.pathExtension.lowercased() == "zip" }
                 guard !archives.isEmpty else { return "Extract currently supports ZIP files." }
-                try archives.forEach { try launchDittoExtract($0) }
-                outcome = archives.count == 1 ? "Extraction started" : "Started \(archives.count) extraction jobs"
+                for url in archives {
+                    try await launchDittoExtract(url)
+                }
+                outcome = archives.count == 1 ? "Extracted ZIP archive" : "Extracted \(archives.count) ZIP archives"
             case .convertPNG:
-                let count = try convertImages(accepted, output: .png)
+                let count = try await convertImages(accepted, output: .png)
                 outcome = count == 1 ? "Created PNG copy" : "Created \(count) PNG copies"
             case .convertJPEG:
-                let count = try convertImages(accepted, output: .jpeg)
+                let count = try await convertImages(accepted, output: .jpeg)
                 outcome = count == 1 ? "Created JPEG copy" : "Created \(count) JPEG copies"
             case .copyDesktop:
                 let folder = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
-                try copy(accepted, to: folder)
+                try await copy(accepted, to: folder)
                 outcome = "Copied to Desktop"
             case .copyDownloads:
                 let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
-                try copy(accepted, to: folder)
+                try await copy(accepted, to: folder)
                 outcome = "Copied to Downloads"
             case .copyFolder:
                 let path = zone.parameter.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -632,7 +702,7 @@ private enum HaloDropZoneActionExecutor {
                 guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
                     return "The configured destination folder is unavailable."
                 }
-                try copy(accepted, to: folder)
+                try await copy(accepted, to: folder)
                 outcome = "Copied to \(folder.lastPathComponent)"
             case .wallpaper:
                 guard let image = accepted.first(where: { HaloDropZoneAcceptance.images.accepts($0) }) else {
@@ -658,7 +728,7 @@ private enum HaloDropZoneActionExecutor {
         return outcome
     }
 
-    private enum ImageOutput { case png, jpeg }
+    private enum ImageOutput: Sendable { case png, jpeg }
 
     private static func writeText(_ text: String) {
         let pasteboard = NSPasteboard.general
@@ -666,14 +736,14 @@ private enum HaloDropZoneActionExecutor {
         pasteboard.setString(text, forType: .string)
     }
 
-    private static func uniqueSibling(for url: URL, suffix: String, forcedExtension: String? = nil) -> URL {
+    nonisolated private static func uniqueSibling(for url: URL, suffix: String, forcedExtension: String? = nil) -> URL {
         let directory = url.deletingLastPathComponent()
         let ext = forcedExtension ?? url.pathExtension
         let stem = url.deletingPathExtension().lastPathComponent + suffix
         return uniqueURL(in: directory, stem: stem, extension: ext)
     }
 
-    private static func uniqueURL(in directory: URL, stem: String, extension ext: String) -> URL {
+    nonisolated private static func uniqueURL(in directory: URL, stem: String, extension ext: String) -> URL {
         var index = 0
         while true {
             let suffix = index == 0 ? "" : " \(index + 1)"
@@ -684,8 +754,14 @@ private enum HaloDropZoneActionExecutor {
         }
     }
 
-    private static func rename(_ url: URL, newName requestedName: String) throws {
-        try HaloSandboxDropAccess.withWritableParentAccess(for: url, purpose: "rename files in this folder") {
+    private static func duplicate(_ url: URL) async throws {
+        try await HaloSandboxDropAccess.withWritableParentAccessAsync(for: url, purpose: "create a duplicate beside it") {
+            try FileManager.default.copyItem(at: url, to: uniqueSibling(for: url, suffix: " copy"))
+        }
+    }
+
+    private static func rename(_ url: URL, newName requestedName: String) async throws {
+        try await HaloSandboxDropAccess.withWritableParentAccessAsync(for: url, purpose: "rename files in this folder") {
             guard FileManager.default.fileExists(atPath: url.path) else {
                 throw CocoaError(.fileNoSuchFile)
             }
@@ -731,15 +807,15 @@ private enum HaloDropZoneActionExecutor {
         }
     }
 
-    private static func launchDittoCompress(_ url: URL) throws {
-        try HaloSandboxDropAccess.withWritableParentAccess(for: url, purpose: "create ZIP archives in this folder") {
+    private static func launchDittoCompress(_ url: URL) async throws {
+        try await HaloSandboxDropAccess.withWritableParentAccessAsync(for: url, purpose: "create ZIP archives in this folder") {
             let destination = uniqueSibling(for: url, suffix: "", forcedExtension: "zip")
             try runDitto(["-c", "-k", "--sequesterRsrc", "--keepParent", url.path, destination.path])
         }
     }
 
-    private static func launchDittoExtract(_ url: URL) throws {
-        try HaloSandboxDropAccess.withWritableParentAccess(for: url, purpose: "extract ZIP archives in this folder") {
+    private static func launchDittoExtract(_ url: URL) async throws {
+        try await HaloSandboxDropAccess.withWritableParentAccessAsync(for: url, purpose: "extract ZIP archives in this folder") {
             let directory = url.deletingLastPathComponent()
             let base = url.deletingPathExtension().lastPathComponent
             var destination = directory.appendingPathComponent(base + " extracted", isDirectory: true)
@@ -758,7 +834,7 @@ private enum HaloDropZoneActionExecutor {
         }
     }
 
-    private static func runDitto(_ arguments: [String]) throws {
+    nonisolated private static func runDitto(_ arguments: [String]) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
         process.arguments = arguments
@@ -773,8 +849,8 @@ private enum HaloDropZoneActionExecutor {
         }
     }
 
-    private static func copy(_ urls: [URL], to folder: URL) throws {
-        try HaloSandboxDropAccess.withWritableDirectoryAccess(folder, purpose: "copy files into this folder") {
+    private static func copy(_ urls: [URL], to folder: URL) async throws {
+        try await HaloSandboxDropAccess.withWritableDirectoryAccessAsync(folder, purpose: "copy files into this folder") {
             for url in urls {
                 let sourceScoped = url.startAccessingSecurityScopedResource()
                 defer { if sourceScoped { url.stopAccessingSecurityScopedResource() } }
@@ -788,24 +864,30 @@ private enum HaloDropZoneActionExecutor {
         }
     }
 
-    private static func convertImages(_ urls: [URL], output: ImageOutput) throws -> Int {
+    private static func convertImages(_ urls: [URL], output: ImageOutput) async throws -> Int {
         var converted = 0
         for url in urls {
             guard HaloDropZoneAcceptance.images.accepts(url) else { continue }
-            try HaloSandboxDropAccess.withWritableParentAccess(for: url, purpose: "create converted images in this folder") {
+            let didConvert = try await HaloSandboxDropAccess.withWritableParentAccessAsync(
+                for: url,
+                purpose: "create converted images in this folder"
+            ) {
                 guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                      let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return }
+                      let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return false }
 
                 let ext = output == .png ? "png" : "jpg"
                 let destination = uniqueSibling(for: url, suffix: " converted", forcedExtension: ext)
                 let identifier = output == .png ? UTType.png.identifier : UTType.jpeg.identifier
-                guard let writer = CGImageDestinationCreateWithURL(destination as CFURL, identifier as CFString, 1, nil) else { return }
+                guard let writer = CGImageDestinationCreateWithURL(destination as CFURL, identifier as CFString, 1, nil) else {
+                    return false
+                }
                 let properties: CFDictionary? = output == .jpeg
                     ? [kCGImageDestinationLossyCompressionQuality: 0.92] as CFDictionary
                     : nil
                 CGImageDestinationAddImage(writer, image, properties)
-                if CGImageDestinationFinalize(writer) { converted += 1 }
+                return CGImageDestinationFinalize(writer)
             }
+            if didConvert { converted += 1 }
         }
         if converted == 0 { throw CocoaError(.fileReadUnsupportedScheme) }
         return converted
@@ -1346,13 +1428,20 @@ private final class HaloEmbeddedDropZoneController {
             return true
         }
 
-        let result = HaloDropZoneActionExecutor.perform(
-            zone: zone,
-            urls: urls,
-            shelfHandler: { [weak self] urls in _ = self?.originalDropHandler?(urls) },
-            closeHandler: { [weak target] in _ = target?.dragStateHandler?(false, []) }
-        )
-        completeDrop(result: result)
+        dropHandled = true
+        model.result = "Working…"
+        model.hoveredZone = nil
+
+        Task { @MainActor [weak self, weak target] in
+            guard let self else { return }
+            let result = await HaloDropZoneActionExecutor.perform(
+                zone: zone,
+                urls: urls,
+                shelfHandler: { [weak self] urls in _ = self?.originalDropHandler?(urls) },
+                closeHandler: { [weak target] in _ = target?.dragStateHandler?(false, []) }
+            )
+            self.completeDrop(result: result)
+        }
         return true
     }
 
@@ -1384,14 +1473,20 @@ private final class HaloEmbeddedDropZoneController {
             var runtimeZone = zone
             runtimeZone.parameter = name
             self.model.clearRename()
-            let result = HaloDropZoneActionExecutor.perform(
-                zone: runtimeZone,
-                urls: accepted,
-                shelfHandler: shelf,
-                closeHandler: {}
-            )
-            _ = target?.dragStateHandler?(false, [])
-            self.completeDrop(result: result)
+            self.dropHandled = true
+            self.model.result = "Renaming…"
+
+            Task { @MainActor [weak self, weak target] in
+                guard let self else { return }
+                let result = await HaloDropZoneActionExecutor.perform(
+                    zone: runtimeZone,
+                    urls: accepted,
+                    shelfHandler: shelf,
+                    closeHandler: {}
+                )
+                _ = target?.dragStateHandler?(false, [])
+                self.completeDrop(result: result)
+            }
         }
         model.renameCancelHandler = { [weak self, weak target] in
             guard let self else { return }

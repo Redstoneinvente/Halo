@@ -3,8 +3,12 @@ name: Validate Halo Build Variants
 on:
   push:
     branches:
+      - main
       - app-store-testing
       - app-store-sandbox-testing
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
@@ -12,6 +16,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  halo-core-tests:
+    name: Halo Core Tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run core regression tests
+        run: |
+          swift test -Xswiftc -D -Xswiftc HALO_DIRECT
+
   halo-direct:
     name: Halo Direct
     runs-on: macos-latest

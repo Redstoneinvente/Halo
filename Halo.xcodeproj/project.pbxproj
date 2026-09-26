@@ -15,6 +15,8 @@
 		0000000000000000000000CD /* Views/WorkspaceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000069 /* Views/WorkspaceSettingsView.swift */; };
 		0000000000000000000000CE /* Core/WorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006A /* Core/WorkspaceModels.swift */; };
 		0000000000000000000000CF /* Core/WorkspaceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006B /* Core/WorkspaceStore.swift */; };
+		A9F000000000000000000001 /* Core/MediaRemoteController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000101 /* Core/MediaRemoteController.swift */; };
+		A9F000000000000000000002 /* Core/MediaRemoteTrackInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000102 /* Core/MediaRemoteTrackInfo.swift */; };
 		0000000000000000000000D0 /* Views/ModuleViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006C /* Views/ModuleViews.swift */; };
 		0000000000000000000000D1 /* Services/Integrations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006D /* Services/Integrations.swift */; };
 		0000000000000000000000D2 /* Services/CaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006E /* Services/CaptureService.swift */; };
@@ -131,6 +133,8 @@
 		000000000000000000000069 /* Views/WorkspaceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/WorkspaceSettingsView.swift; sourceTree = "<group>"; };
 		00000000000000000000006A /* Core/WorkspaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/WorkspaceModels.swift; sourceTree = "<group>"; };
 		00000000000000000000006B /* Core/WorkspaceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/WorkspaceStore.swift; sourceTree = "<group>"; };
+		A9F000000000000000000101 /* Core/MediaRemoteController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/MediaRemoteController.swift; sourceTree = "<group>"; };
+		A9F000000000000000000102 /* Core/MediaRemoteTrackInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/MediaRemoteTrackInfo.swift; sourceTree = "<group>"; };
 		00000000000000000000006C /* Views/ModuleViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ModuleViews.swift; sourceTree = "<group>"; };
 		00000000000000000000006D /* Services/Integrations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Integrations.swift; sourceTree = "<group>"; };
 		00000000000000000000006E /* Services/CaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CaptureService.swift; sourceTree = "<group>"; };
@@ -317,6 +321,8 @@
 				000000000000000000000069 /* Views/WorkspaceSettingsView.swift */,
 				00000000000000000000006A /* Core/WorkspaceModels.swift */,
 				00000000000000000000006B /* Core/WorkspaceStore.swift */,
+				A9F000000000000000000101 /* Core/MediaRemoteController.swift */,
+				A9F000000000000000000102 /* Core/MediaRemoteTrackInfo.swift */,
 				00000000000000000000006C /* Views/ModuleViews.swift */,
 				A11C0F1A0000000000000312 /* Views/VisualWorkspaceAdaptiveWidgets.swift */,
 				A11C0F1A0000000000000322 /* Views/ActivationSequence.swift */,
@@ -662,6 +668,8 @@
 				0000000000000000000000CD /* Views/WorkspaceSettingsView.swift in Sources */,
 				0000000000000000000000CE /* Core/WorkspaceModels.swift in Sources */,
 				0000000000000000000000CF /* Core/WorkspaceStore.swift in Sources */,
+				A9F000000000000000000001 /* Core/MediaRemoteController.swift in Sources */,
+				A9F000000000000000000002 /* Core/MediaRemoteTrackInfo.swift in Sources */,
 				0000000000000000000000D0 /* Views/ModuleViews.swift in Sources */,
 				A11C0F1A0000000000000311 /* Views/VisualWorkspaceAdaptiveWidgets.swift in Sources */,
 				A11C0F1A0000000000000321 /* Views/ActivationSequence.swift in Sources */,
