@@ -7,6 +7,62 @@ service cloud.firestore {
              && request.auth.token.email_verified == true;
     }
 
+    function isSignedInHaloUser() {
+      return request.auth != null;
+    }
+
+    function isHaloLicenseAdmin() {
+      return request.auth != null
+             && request.auth.uid == "ERaS9esf2wZK46SM70TbShsP68e2";
+    }
+
+    function managedLicenseDeviceLimit() {
+      return ('deviceLimit' in resource.data
+              && resource.data.deviceLimit is int
+              && resource.data.deviceLimit > 0)
+             ? resource.data.deviceLimit
+             : 1;
+    }
+
+    function canReadManagedLicense() {
+      return isSignedInHaloUser()
+             && (
+               !('bound' in resource.data)
+               || resource.data.bound != true
+               || (
+                 'boundUid' in resource.data
+                 && resource.data.boundUid == request.auth.uid
+               )
+             );
+    }
+
+    function canUpdateManagedLicenseDevices() {
+      return isSignedInHaloUser()
+             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               'bound',
+               'boundUid',
+               'boundEmail',
+               'boundDeviceId',
+               'boundDeviceIds',
+               'boundAt',
+               'updatedAt'
+             ])
+             && request.resource.data.bound == true
+             && request.resource.data.boundUid == request.auth.uid
+             && request.resource.data.boundEmail is string
+             && request.resource.data.boundDeviceId is string
+             && request.resource.data.boundDeviceIds is list
+             && request.resource.data.boundDeviceIds.size() <= managedLicenseDeviceLimit()
+             && (
+               !('bound' in resource.data)
+               || resource.data.bound != true
+               || (
+                 'boundUid' in resource.data
+                 && resource.data.boundUid == request.auth.uid
+               )
+             );
+    }
+
     // One immutable trial claim per Firebase account.
     match /haloTrialClaims/{userId} {
       allow get: if request.auth != null && request.auth.uid == userId;
@@ -101,6 +157,33 @@ service cloud.firestore {
                         || request.resource.data.diagnosticsInstallationID is string);
 
       allow update, delete: if false;
+    }
+
+    // Halo-managed license documents.
+    // PK_ press keys live in pressLicenses. GK_ giveaway keys should live in
+    // giveawayLicenses (Halo also has a client-side fallback for transitional
+    // GK records stored in pressLicenses).
+    //
+    // The Mac app may only bind account/device ownership and adjust the device
+    // seat list. License type, status, expiry and deviceLimit remain admin-owned.
+    match /pressLicenses/{licenseKey} {
+      allow get: if isHaloLicenseAdmin() || canReadManagedLicense();
+      allow list: if isHaloLicenseAdmin();
+      allow create, delete: if isHaloLicenseAdmin();
+      allow update: if isHaloLicenseAdmin() || canUpdateManagedLicenseDevices();
+    }
+
+    match /giveawayLicenses/{licenseKey} {
+      allow get: if isHaloLicenseAdmin() || canReadManagedLicense();
+      allow list: if isHaloLicenseAdmin();
+      allow create, delete: if isHaloLicenseAdmin();
+      allow update: if isHaloLicenseAdmin() || canUpdateManagedLicenseDevices();
+    }
+
+    // Giveaway pools contain unclaimed keys and are admin-only. They must never
+    // be readable by the public giveaway page or the Mac client.
+    match /giveawayPools/{poolId} {
+      allow read, write: if isHaloLicenseAdmin();
     }
 
     match /{document=**} {
