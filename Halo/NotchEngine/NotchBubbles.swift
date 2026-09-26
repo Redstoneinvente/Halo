@@ -2887,8 +2887,22 @@ private final class NotchBubblePanel: NSPanel {
     private var horizontalAccumulator: CGFloat = 0
     private var verticalAccumulator: CGFloat = 0
     private var triggeredDuringCurrentTrackpadGesture = false
+    private var forceTouchTriggered = false
 
     override func sendEvent(_ event: NSEvent) {
+        if event.type == .pressure,
+           let bubbleIdentifier {
+            if event.stage >= 2, !forceTouchTriggered {
+                forceTouchTriggered = true
+                NotificationCenter.default.post(
+                    name: .haloNotchBubbleForceTouch,
+                    object: bubbleIdentifier
+                )
+            } else if event.stage == 0 {
+                forceTouchTriggered = false
+            }
+        }
+
         if event.type == .scrollWheel,
            handleBubbleScrollGesture(event) {
             return
