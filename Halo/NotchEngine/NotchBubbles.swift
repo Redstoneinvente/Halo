@@ -1624,15 +1624,23 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
                 let title = stringAttribute(kAXTitleAttribute as CFString, from: window) ?? "Window"
                 let document = stringAttribute(kAXDocumentAttribute as CFString, from: window) ?? ""
                 let identifier = stringAttribute(kAXIdentifierAttribute as CFString, from: window)
-                let fallbackHash = CFHash(window)
-                let identity = identifier?.isEmpty == false
-                    ? identifier!
-                    : "\(title)|\(document)|\(fallbackHash)"
+                let frame = windowFrame(for: window)
+                let geometryIdentity: String = {
+                    guard let frame else { return "no-frame" }
+                    return "\(Int(frame.minX.rounded()))x\(Int(frame.minY.rounded()))-\(Int(frame.width.rounded()))x\(Int(frame.height.rounded()))"
+                }()
+                let identity: String
+                if let identifier, !identifier.isEmpty {
+                    identity = "ax:\(identifier)"
+                } else if !document.isEmpty {
+                    identity = "doc:\(document)|\(title)"
+                } else {
+                    identity = "window:\(title)|\(geometryIdentity)"
+                }
                 let id = "\(app.processIdentifier)|\(identity)"
                 let appName = app.localizedName
                     ?? app.bundleIdentifier?.split(separator: ".").last.map(String.init)
                     ?? "App"
-                let frame = windowFrame(for: window)
 
                 let entry = Entry(
                     id: id,
