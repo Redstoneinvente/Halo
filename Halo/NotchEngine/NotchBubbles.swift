@@ -5659,6 +5659,7 @@ private struct NotchBubbleView: View {
 struct NotchBubbleSettingsView: View {
     @ObservedObject var store: AppStore
     @ObservedObject private var settingsStore = NotchBubbleSettingsStore.shared
+    @ObservedObject private var minimizedWindowCenter = MinimizedWindowBubbleCenter.shared
     @State private var expandedGestureEditors = Set<String>()
 
     private var settings: NotchBubbleSettings {
