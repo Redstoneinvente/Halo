@@ -1617,6 +1617,7 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
             guard let windows = attribute(kAXWindowsAttribute as CFString, from: application) as? [AXUIElement] else {
                 continue
             }
+            let focusedWindow = attribute(kAXFocusedWindowAttribute as CFString, from: application) as? AXUIElement
 
             for window in windows {
                 let isMinimized = booleanAttribute(kAXMinimizedAttribute as CFString, from: window) == true
@@ -1646,6 +1647,8 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
                 if isMinimized {
                     minimized[id] = Snapshot(entry: entry, element: window)
                 } else if app.processIdentifier == frontmostPID,
+                          let focusedWindow,
+                          CFEqual(focusedWindow, window),
                           frame?.width ?? 0 > 80,
                           frame?.height ?? 0 > 60 {
                     visiblePreviewEntries.append(entry)
@@ -1909,7 +1912,7 @@ final class AppWindowPreviewCenter: ObservableObject {
         let pid = entries.first?.processIdentifier
         let now = Date()
         let appChanged = pid != lastVisibleCachePID
-        guard appChanged || now.timeIntervalSince(lastVisibleCacheAt) >= 0.75 else { return }
+        guard appChanged || now.timeIntervalSince(lastVisibleCacheAt) >= 0.25 else { return }
 
         lastVisibleCacheAt = now
         lastVisibleCachePID = pid
