@@ -2122,17 +2122,43 @@ struct BubbleLayoutEngine {
 
         switch settings.layout {
         case .satellites:
-            let totalWidth = bubbles.reduce(CGFloat.zero) { $0 + $1.size }
-                + CGFloat(max(0, bubbles.count - 1)) * spacing
-            var x = surfaceFrame.midX - totalWidth / 2
+            let availableWidth = max(1, screenFrame.width - 8)
+            var rows: [[NotchBubble]] = []
+            var currentRow: [NotchBubble] = []
+            var currentWidth: CGFloat = 0
 
             for bubble in bubbles {
-                let style = settings.resolvedStyle(for: bubble.kind)
-                let size = bubble.size
-                let y = surfaceFrame.minY - gap - size - globalVerticalOffset - style.verticalOffset
-                let frame = CGRect(x: x, y: y, width: size, height: size)
-                result[bubble.id] = clamped(frame, to: screenFrame)
-                x += size + spacing
+                let addedWidth = bubble.size + (currentRow.isEmpty ? 0 : spacing)
+                if !currentRow.isEmpty && currentWidth + addedWidth > availableWidth {
+                    rows.append(currentRow)
+                    currentRow = [bubble]
+                    currentWidth = bubble.size
+                } else {
+                    currentRow.append(bubble)
+                    currentWidth += addedWidth
+                }
+            }
+            if !currentRow.isEmpty {
+                rows.append(currentRow)
+            }
+
+            var yCursor = surfaceFrame.minY - gap - globalVerticalOffset
+            for row in rows {
+                let rowHeight = row.map(\.size).max() ?? 0
+                let totalWidth = row.reduce(CGFloat.zero) { $0 + $1.size }
+                    + CGFloat(max(0, row.count - 1)) * spacing
+                var x = surfaceFrame.midX - totalWidth / 2
+                let rowY = yCursor - rowHeight
+
+                for bubble in row {
+                    let style = settings.resolvedStyle(for: bubble.kind)
+                    let y = rowY + (rowHeight - bubble.size) / 2 - style.verticalOffset
+                    let frame = CGRect(x: x, y: y, width: bubble.size, height: bubble.size)
+                    result[bubble.id] = clamped(frame, to: screenFrame)
+                    x += bubble.size + spacing
+                }
+
+                yCursor = rowY - spacing
             }
 
         case .wings:
