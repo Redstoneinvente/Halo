@@ -1719,6 +1719,262 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
     }
 }
 
+private enum AppWindowPreviewError: LocalizedError {
+    case permissionRequired
+    case windowUnavailable
+    case captureUnavailable
+    case encodingFailed
+    case timedOut
+
+    var errorDescription: String? {
+        switch self {
+        case .permissionRequired:
+            return "Screen Recording access is required for window previews."
+        case .windowUnavailable:
+            return "Halo could not find this minimized window in ScreenCaptureKit."
+        case .captureUnavailable:
+            return "macOS did not return a preview frame for this window."
+        case .encodingFailed:
+            return "Halo could not prepare the window preview."
+        case .timedOut:
+            return "The window preview timed out. Force Touch the Bubble again to retry."
+        }
+    }
+}
+
+private final class AppWindowPreviewFrameReceiver: NSObject, SCStreamOutput, @unchecked Sendable {
+    let sampleQueue = DispatchQueue(label: "Halo.AppWindowPreview.Frame", qos: .userInitiated)
+
+    private let stateQueue = DispatchQueue(label: "Halo.AppWindowPreview.State")
+    private let imageContext = CIContext()
+    private var continuation: CheckedContinuation<Data, Error>?
+    private var stream: SCStream?
+    private var finished = false
+
+    func captureSingleFrame(from stream: SCStream) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            stateQueue.sync {
+                self.continuation = continuation
+                self.stream = stream
+                self.finished = false
+            }
+
+            stateQueue.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.finish(.failure(AppWindowPreviewError.timedOut))
+            }
+
+            Task { [weak self] in
+                do {
+                    try await stream.startCapture()
+                } catch {
+                    self?.finish(.failure(error))
+                }
+            }
+        }
+    }
+
+    func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of outputType: SCStreamOutputType
+    ) {
+        guard outputType == .screen,
+              sampleBuffer.isValid,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            return
+        }
+
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let cgImage = imageContext.createCGImage(image, from: image.extent) else {
+            finish(.failure(AppWindowPreviewError.captureUnavailable))
+            return
+        }
+
+        let representation = NSBitmapImageRep(cgImage: cgImage)
+        guard let data = representation.representation(using: .png, properties: [:]) else {
+            finish(.failure(AppWindowPreviewError.encodingFailed))
+            return
+        }
+
+        finish(.success(data))
+    }
+
+    private func finish(_ result: Result<Data, Error>) {
+        stateQueue.async { [weak self] in
+            guard let self, !self.finished else { return }
+            self.finished = true
+
+            let continuation = self.continuation
+            let stream = self.stream
+            self.continuation = nil
+            self.stream = nil
+
+            continuation?.resume(with: result)
+
+            if let stream {
+                Task {
+                    try? await stream.stopCapture()
+                }
+            }
+        }
+    }
+}
+
+@MainActor
+final class AppWindowPreviewCenter: ObservableObject {
+    static let shared = AppWindowPreviewCenter()
+
+    @Published private(set) var images: [String: NSImage] = [:]
+    @Published private(set) var loadingIDs = Set<String>()
+    @Published private(set) var errors: [String: String] = [:]
+    @Published private(set) var screenCaptureGranted = CGPreflightScreenCaptureAccess()
+
+    private init() {}
+
+    func image(for activityID: String) -> NSImage? {
+        images[activityID]
+    }
+
+    func error(for activityID: String) -> String? {
+        errors[activityID]
+    }
+
+    func requestScreenCapturePermission() {
+        if CGPreflightScreenCaptureAccess() {
+            screenCaptureGranted = true
+            return
+        }
+
+        let granted = CGRequestScreenCaptureAccess()
+        screenCaptureGranted = CGPreflightScreenCaptureAccess()
+        if granted && !screenCaptureGranted {
+            errors["permission"] = "Screen Recording access was granted. Quit and reopen Halo before using App Bubble previews."
+        }
+    }
+
+    func refreshPermissionState() {
+        screenCaptureGranted = CGPreflightScreenCaptureAccess()
+    }
+
+    func loadPreview(
+        activityID: String,
+        entry: MinimizedWindowBubbleCenter.Entry,
+        forceRefresh: Bool = true
+    ) {
+        refreshPermissionState()
+
+        guard screenCaptureGranted else {
+            errors[activityID] = "Allow Screen Recording for Halo, then quit and reopen Halo to use Force Touch previews."
+            return
+        }
+
+        if !forceRefresh, images[activityID] != nil {
+            return
+        }
+
+        guard !loadingIDs.contains(activityID) else { return }
+        loadingIDs.insert(activityID)
+        errors.removeValue(forKey: activityID)
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            do {
+                let data = try await Self.capturePreviewData(for: entry)
+                guard let image = NSImage(data: data) else {
+                    throw AppWindowPreviewError.encodingFailed
+                }
+                self.images[activityID] = image
+                self.errors.removeValue(forKey: activityID)
+            } catch {
+                self.errors[activityID] = error.localizedDescription
+            }
+
+            self.loadingIDs.remove(activityID)
+        }
+    }
+
+    func clear(activityID: String) {
+        images.removeValue(forKey: activityID)
+        errors.removeValue(forKey: activityID)
+        loadingIDs.remove(activityID)
+    }
+
+    private static func capturePreviewData(
+        for entry: MinimizedWindowBubbleCenter.Entry
+    ) async throws -> Data {
+        guard CGPreflightScreenCaptureAccess() else {
+            throw AppWindowPreviewError.permissionRequired
+        }
+
+        let content = try await SCShareableContent.excludingDesktopWindows(
+            false,
+            onScreenWindowsOnly: false
+        )
+
+        let candidates = content.windows.filter {
+            $0.owningApplication?.processID == entry.processIdentifier
+        }
+
+        guard let window = bestWindow(for: entry, from: candidates) else {
+            throw AppWindowPreviewError.windowUnavailable
+        }
+
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let configuration = SCStreamConfiguration()
+        let sourceSize = window.frame.size
+        let width = max(1, sourceSize.width)
+        let height = max(1, sourceSize.height)
+        let longest = max(width, height)
+        let scale = min(2.0, 1400.0 / longest)
+
+        configuration.width = max(1, Int((width * scale).rounded()))
+        configuration.height = max(1, Int((height * scale).rounded()))
+        configuration.queueDepth = 1
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        configuration.showsCursor = false
+        configuration.capturesAudio = false
+
+        let receiver = AppWindowPreviewFrameReceiver()
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+        try stream.addStreamOutput(
+            receiver,
+            type: .screen,
+            sampleHandlerQueue: receiver.sampleQueue
+        )
+
+        return try await receiver.captureSingleFrame(from: stream)
+    }
+
+    private static func bestWindow(
+        for entry: MinimizedWindowBubbleCenter.Entry,
+        from candidates: [SCWindow]
+    ) -> SCWindow? {
+        guard !candidates.isEmpty else { return nil }
+
+        let normalizedTitle = entry.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let titleMatches = candidates.filter {
+            ($0.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == normalizedTitle
+        }
+        let pool = titleMatches.isEmpty ? candidates : titleMatches
+
+        guard pool.count > 1, let expectedFrame = entry.windowFrame else {
+            return pool.first
+        }
+
+        return pool.min {
+            frameDistance($0.frame, expectedFrame) < frameDistance($1.frame, expectedFrame)
+        }
+    }
+
+    private static func frameDistance(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        abs(lhs.width - rhs.width)
+            + abs(lhs.height - rhs.height)
+            + abs(lhs.minX - rhs.minX) * 0.25
+            + abs(lhs.minY - rhs.minY) * 0.25
+    }
+}
+
 @MainActor
 protocol BubbleProvider {
     var kind: NotchBubbleKind { get }
