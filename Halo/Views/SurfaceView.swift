@@ -4193,7 +4193,7 @@ private struct SimpleNotchWidgetView: View {
                     Circle().fill(accent).frame(width: 5 * scale, height: 5 * scale)
                 }
                 .frame(width: 68 * scale, height: 68 * scale)
-                VStack(alignment: .leading, spacing: 4 * scale) {
+                VStack(alignment: .leading, spacing: 5 * scale) {
                     Text(context.date.formatted(.dateTime.weekday(.abbreviated)).uppercased())
                         .font(.system(size: 9 * scale, weight: .semibold))
                         .tracking(1.4)
@@ -5237,7 +5237,7 @@ private struct SimpleNotchWidgetView: View {
     }
 
     private var calendarYearOverview: some View {
-        VStack(alignment: .leading, spacing: 5 * scale) {
+        VStack(alignment: .leading, spacing: 4 * scale) {
             HStack {
                 Text(Date.now.formatted(.dateTime.year()))
                     .font(.system(size: 11 * scale, weight: .bold, design: .rounded))
