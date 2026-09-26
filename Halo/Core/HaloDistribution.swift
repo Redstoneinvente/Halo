@@ -107,6 +107,9 @@ final class HaloFeatureAccess: ObservableObject {
 
     /// Runtime Bubble provider boundary.
     func allows(bubble: NotchBubbleKind) -> Bool {
+        if bubble == .appWindow && !HaloDistribution.current.supportsAppWindowBubbles {
+            return false
+        }
         if isFull { return true }
         switch bubble {
         case .music, .timer, .audio:
@@ -317,7 +320,8 @@ enum HaloDistribution: String, CaseIterable, Sendable {
                 supportsAppStoreLicensing: false,
                 supportsUnrestrictedFileAccess: true,
                 supportsPartnerIntegrations: true,
-                supportsSystemAudio: true
+                supportsSystemAudio: true,
+                supportsAppWindowBubbles: true
             )
         case .appStore:
             return HaloDistributionCapabilities(
@@ -326,7 +330,8 @@ enum HaloDistribution: String, CaseIterable, Sendable {
                 supportsAppStoreLicensing: true,
                 supportsUnrestrictedFileAccess: false,
                 supportsPartnerIntegrations: true,
-                supportsSystemAudio: false
+                supportsSystemAudio: false,
+                supportsAppWindowBubbles: false
             )
         }
     }
@@ -337,6 +342,7 @@ enum HaloDistribution: String, CaseIterable, Sendable {
     var supportsUnrestrictedFileAccess: Bool { capabilities.supportsUnrestrictedFileAccess }
     var supportsPartnerIntegrations: Bool { capabilities.supportsPartnerIntegrations }
     var supportsSystemAudio: Bool { capabilities.supportsSystemAudio }
+    var supportsAppWindowBubbles: Bool { capabilities.supportsAppWindowBubbles }
 }
 
 /// Distribution-sensitive capabilities exposed to the rest of Halo.
@@ -351,4 +357,5 @@ struct HaloDistributionCapabilities: Equatable, Sendable {
     let supportsUnrestrictedFileAccess: Bool
     let supportsPartnerIntegrations: Bool
     let supportsSystemAudio: Bool
+    let supportsAppWindowBubbles: Bool
 }
