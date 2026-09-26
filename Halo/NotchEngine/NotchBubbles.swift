@@ -1966,10 +1966,15 @@ final class AppWindowPreviewCenter: ObservableObject {
             guard let ownerPID = info[kCGWindowOwnerPID as String] as? NSNumber,
                   ownerPID.int32Value == entry.processIdentifier,
                   let number = info[kCGWindowNumber as String] as? NSNumber,
-                  let boundsDictionary = info[kCGWindowBounds as String] as? CFDictionary,
-                  let bounds = CGRect(dictionaryRepresentation: boundsDictionary) else {
+                  let boundsInfo = info[kCGWindowBounds as String] as? [String: Any],
+                  let x = (boundsInfo["X"] as? NSNumber)?.doubleValue,
+                  let y = (boundsInfo["Y"] as? NSNumber)?.doubleValue,
+                  let width = (boundsInfo["Width"] as? NSNumber)?.doubleValue,
+                  let height = (boundsInfo["Height"] as? NSNumber)?.doubleValue else {
                 return nil
             }
+
+            let bounds = CGRect(x: x, y: y, width: width, height: height)
 
             let title = info[kCGWindowName as String] as? String ?? ""
             return (CGWindowID(number.uint32Value), title, bounds)
