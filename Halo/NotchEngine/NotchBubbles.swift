@@ -5888,6 +5888,23 @@ struct NotchBubbleSettingsView: View {
 
                 if settings.resolvedAppMinimizeBubblesEnabled {
                     Picker(
+                        "App Bubble placement",
+                        selection: Binding(
+                            get: { settings.resolvedAppMinimizeBubblePlacement },
+                            set: { value in
+                                var next = settingsStore.settings
+                                next.appMinimizeBubblePlacement = value
+                                settingsStore.settings = next.normalized()
+                            }
+                        )
+                    ) {
+                        ForEach(AppWindowBubblePlacement.allCases) { placement in
+                            Text(placement.rawValue).tag(placement)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Picker(
                         "Maximum minimized windows",
                         selection: Binding(
                             get: { settingsStore.settings.appMinimizeBubbleLimit ?? 1 },
