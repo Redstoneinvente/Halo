@@ -5284,7 +5284,7 @@ private struct NotchBubbleView: View {
             handled = true
 
         case .dismiss:
-            activityCenter.dismiss(kind: kind)
+            dismissCurrentActivity()
             showingDetail = false
             handled = true
 
