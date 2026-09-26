@@ -362,7 +362,10 @@ enum SimpleNotchMetrics {
     }
 
     static func calendarYearWidth(_ size: SimpleNotchSize) -> Double {
-        switch size { case .standard: return 328; case .medium: return 370; case .big: return 414 }
+        // Twelve mini-months need materially more width than the normal calendar.
+        // Keep the two-row year layout, but give every 7-column month grid enough
+        // room that day numbers remain legible instead of collapsing together.
+        switch size { case .standard: return 404; case .medium: return 456; case .big: return 510 }
     }
 
     static func calendarYearHeight(_ size: SimpleNotchSize) -> Double {
