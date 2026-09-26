@@ -2073,106 +2073,6 @@ final class AppWindowPreviewCenter: ObservableObject {
 }
 
 @MainActor
-final class AppWindowMinimizeAnimator {
-    static let shared = AppWindowMinimizeAnimator()
-
-    private var panels: [String: NSPanel] = [:]
-
-    private init() {}
-
-    func animate(
-        activityID: String,
-        image: NSImage,
-        from quartzFrame: CGRect,
-        to targetFrame: CGRect
-    ) {
-        panels[activityID]?.close()
-        panels.removeValue(forKey: activityID)
-
-        let startFrame = Self.appKitFrame(fromQuartzFrame: quartzFrame)
-        guard startFrame.width > 40, startFrame.height > 30 else { return }
-
-        let panel = NSPanel(
-            contentRect: startFrame,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.isReleasedWhenClosed = false
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.hidesOnDeactivate = false
-        panel.ignoresMouseEvents = true
-        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 2)
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-
-        let imageView = NSImageView(frame: CGRect(origin: .zero, size: startFrame.size))
-        imageView.image = image
-        imageView.imageScaling = .scaleProportionallyUpOrDown
-        imageView.wantsLayer = true
-        imageView.layer?.cornerRadius = 10
-        imageView.layer?.masksToBounds = true
-        panel.contentView = imageView
-
-        panels[activityID] = panel
-        panel.alphaValue = 0.96
-        panel.orderFrontRegardless()
-
-        let finalFrame = targetFrame.insetBy(dx: -2, dy: -2)
-
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.34
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            panel.animator().setFrame(finalFrame, display: true)
-            panel.animator().alphaValue = 0.08
-        }, completionHandler: { [weak self, weak panel] in
-            Task { @MainActor in
-                guard let self, let panel else { return }
-                panel.orderOut(nil)
-                panel.close()
-                self.panels.removeValue(forKey: activityID)
-            }
-        })
-    }
-
-    private static func appKitFrame(fromQuartzFrame frame: CGRect) -> CGRect {
-        let center = CGPoint(x: frame.midX, y: frame.midY)
-
-        for screen in NSScreen.screens {
-            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
-                continue
-            }
-
-            let displayBounds = CGDisplayBounds(CGDirectDisplayID(number.uint32Value))
-            guard displayBounds.contains(center) || displayBounds.intersects(frame) else {
-                continue
-            }
-
-            let localX = frame.minX - displayBounds.minX
-            let localYFromTop = frame.minY - displayBounds.minY
-            return CGRect(
-                x: screen.frame.minX + localX,
-                y: screen.frame.maxY - localYFromTop - frame.height,
-                width: frame.width,
-                height: frame.height
-            )
-        }
-
-        if let main = NSScreen.main {
-            return CGRect(
-                x: frame.minX,
-                y: main.frame.maxY - frame.maxY,
-                width: frame.width,
-                height: frame.height
-            )
-        }
-
-        return frame
-    }
-}
-
-@MainActor
 protocol BubbleProvider {
     var kind: NotchBubbleKind { get }
     func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity?
@@ -3862,6 +3762,54 @@ final class BubbleWindowController {
         }
     }
 
+    func receive(
+        frame: CGRect,
+        settings: NotchBubbleSettings,
+        animated: Bool
+    ) {
+        desiredFrame = frame
+        removalGeneration += 1
+        lifecyclePhase = .visible
+        frameAnimator.cancel()
+        frameAnimator.resetVisuals(panel: panel)
+        panel.setFrame(frame, display: false)
+
+        guard animated,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              let layer = panel.contentView?.layer else {
+            panel.alphaValue = 1
+            panel.orderFrontRegardless()
+            return
+        }
+
+        panel.alphaValue = 1
+        panel.orderFrontRegardless()
+
+        let scale = CAKeyframeAnimation(keyPath: "transform.scale")
+        scale.values = [0.72, 1.10, 0.96, 1.0]
+        scale.keyTimes = [0.0, 0.42, 0.72, 1.0]
+        scale.duration = 0.28
+        scale.timingFunctions = [
+            CAMediaTimingFunction(name: .easeOut),
+            CAMediaTimingFunction(name: .easeInEaseOut),
+            CAMediaTimingFunction(name: .easeOut)
+        ]
+
+        let opacity = CAKeyframeAnimation(keyPath: "opacity")
+        opacity.values = [0.35, 1.0, 1.0]
+        opacity.keyTimes = [0.0, 0.45, 1.0]
+        opacity.duration = 0.22
+        opacity.timingFunctions = [
+            CAMediaTimingFunction(name: .easeOut),
+            CAMediaTimingFunction(name: .linear)
+        ]
+
+        layer.removeAnimation(forKey: "appBubbleReceiveScale")
+        layer.removeAnimation(forKey: "appBubbleReceiveOpacity")
+        layer.add(scale, forKey: "appBubbleReceiveScale")
+        layer.add(opacity, forKey: "appBubbleReceiveOpacity")
+    }
+
     func remove(
         animated: Bool,
         emergenceFrame: CGRect,
@@ -4260,38 +4208,28 @@ private final class NotchBubbleDisplayHost {
                 controller = BubbleWindowController(id: bubble.id, kind: bubble.kind, store: store, state: state)
                 controllers[bubble.id] = controller
                 isNewController = true
-
-                if bubble.kind == .appWindow,
-                   settings.resolvedAppMinimizeBubbleAnimationEnabled,
-                   let entry = minimizedWindowCenter.entry(activityID: bubble.id),
-                   let sourceFrame = entry.windowFrame,
-                   let preview = AppWindowPreviewCenter.shared.image(for: bubble.id) {
-                    AppWindowMinimizeAnimator.shared.animate(
-                        activityID: bubble.id,
-                        image: preview,
-                        from: sourceFrame,
-                        to: frame
-                    )
-                }
             }
 
-            let emergenceFrame: CGRect
             if bubble.kind == .appWindow,
                isNewController,
-               settings.resolvedAppMinimizeBubbleAnimationEnabled,
-               AppWindowPreviewCenter.shared.image(for: bubble.id) != nil {
-                // The cached window snapshot supplies the visual travel into the Bubble.
-                // Keep the destination Bubble itself stable underneath that animation.
-                emergenceFrame = frame
-            } else {
-                emergenceFrame = layoutEngine.emergenceFrame(
-                    for: frame,
-                    around: surfaceFrame,
-                    in: screenFrame,
-                    compactWidth: state.physicalNotchWidth > 1 ? state.physicalNotchWidth : state.compactWidth,
-                    compactHeight: state.physicalNotchHeight > 1 ? state.physicalNotchHeight : state.compactHeight
+               settings.resolvedAppMinimizeBubbleAnimationEnabled {
+                // Do not replay the window's movement after macOS has already minimized it.
+                // The Bubble appears at its final position and briefly reacts as the receiver.
+                controller.receive(
+                    frame: frame,
+                    settings: settings,
+                    animated: animated
                 )
+                continue
             }
+
+            let emergenceFrame = layoutEngine.emergenceFrame(
+                for: frame,
+                around: surfaceFrame,
+                in: screenFrame,
+                compactWidth: state.physicalNotchWidth > 1 ? state.physicalNotchWidth : state.compactWidth,
+                compactHeight: state.physicalNotchHeight > 1 ? state.physicalNotchHeight : state.compactHeight
+            )
 
             controller.present(
                 frame: frame,
@@ -6603,7 +6541,7 @@ struct NotchBubbleSettingsView: View {
                     .pickerStyle(.segmented)
 
                     Toggle(
-                        "Animate windows into App Bubbles",
+                        "Animate App Bubble receive",
                         isOn: Binding(
                             get: { settings.resolvedAppMinimizeBubbleAnimationEnabled },
                             set: { enabled in
