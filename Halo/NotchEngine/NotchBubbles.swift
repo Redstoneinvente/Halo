@@ -4072,8 +4072,14 @@ private final class NotchBubbleDisplayHost {
     ) -> [String: NotchBubbleSide] {
         guard settings.layout == .wings else { return [:] }
 
-        let activeIDs = Set(bubbles.map(\.id))
-        let retainedIDs = Set(controllers.keys).union(activeIDs)
+        let standardBubbles = bubbles.filter { $0.kind != .appWindow }
+        let activeIDs = Set(standardBubbles.map(\.id))
+        let retainedControllerIDs = Set(
+            controllers.values
+                .filter { $0.kind != .appWindow }
+                .map(\.id)
+        )
+        let retainedIDs = retainedControllerIDs.union(activeIDs)
         bubbleSideAssignments = bubbleSideAssignments.filter {
             retainedIDs.contains($0.key)
         }
@@ -4090,8 +4096,8 @@ private final class NotchBubbleDisplayHost {
             }
 
         case .automatic:
-            // Count currently-owned sides first. Existing bubbles keep their side.
-            // Only bubbles without an assignment participate in balancing.
+            // Count currently-owned sides first. Existing standard bubbles keep their side.
+            // App Bubbles are intentionally excluded because they have their own placement.
             var leftCount = bubbleSideAssignments.values.reduce(into: 0) { count, side in
                 if side == .left { count += 1 }
             }
@@ -4099,7 +4105,7 @@ private final class NotchBubbleDisplayHost {
                 if side == .right { count += 1 }
             }
 
-            for bubble in bubbles where bubbleSideAssignments[bubble.id] == nil {
+            for bubble in standardBubbles where bubbleSideAssignments[bubble.id] == nil {
                 let side: NotchBubbleSide
                 if leftCount == rightCount {
                     side = settings.resolvedAutomaticPrioritySide
