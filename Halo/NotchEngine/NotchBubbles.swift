@@ -2048,6 +2048,106 @@ final class AppWindowPreviewCenter: ObservableObject {
 }
 
 @MainActor
+final class AppWindowMinimizeAnimator {
+    static let shared = AppWindowMinimizeAnimator()
+
+    private var panels: [String: NSPanel] = [:]
+
+    private init() {}
+
+    func animate(
+        activityID: String,
+        image: NSImage,
+        from quartzFrame: CGRect,
+        to targetFrame: CGRect
+    ) {
+        panels[activityID]?.close()
+        panels.removeValue(forKey: activityID)
+
+        let startFrame = Self.appKitFrame(fromQuartzFrame: quartzFrame)
+        guard startFrame.width > 40, startFrame.height > 30 else { return }
+
+        let panel = NSPanel(
+            contentRect: startFrame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isReleasedWhenClosed = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.ignoresMouseEvents = true
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 2)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+
+        let imageView = NSImageView(frame: CGRect(origin: .zero, size: startFrame.size))
+        imageView.image = image
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.wantsLayer = true
+        imageView.layer?.cornerRadius = 10
+        imageView.layer?.masksToBounds = true
+        panel.contentView = imageView
+
+        panels[activityID] = panel
+        panel.alphaValue = 0.96
+        panel.orderFrontRegardless()
+
+        let finalFrame = targetFrame.insetBy(dx: -2, dy: -2)
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.34
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(finalFrame, display: true)
+            panel.animator().alphaValue = 0.08
+        }, completionHandler: { [weak self, weak panel] in
+            Task { @MainActor in
+                guard let self, let panel else { return }
+                panel.orderOut(nil)
+                panel.close()
+                self.panels.removeValue(forKey: activityID)
+            }
+        })
+    }
+
+    private static func appKitFrame(fromQuartzFrame frame: CGRect) -> CGRect {
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+
+        for screen in NSScreen.screens {
+            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+                continue
+            }
+
+            let displayBounds = CGDisplayBounds(CGDirectDisplayID(number.uint32Value))
+            guard displayBounds.contains(center) || displayBounds.intersects(frame) else {
+                continue
+            }
+
+            let localX = frame.minX - displayBounds.minX
+            let localYFromTop = frame.minY - displayBounds.minY
+            return CGRect(
+                x: screen.frame.minX + localX,
+                y: screen.frame.maxY - localYFromTop - frame.height,
+                width: frame.width,
+                height: frame.height
+            )
+        }
+
+        if let main = NSScreen.main {
+            return CGRect(
+                x: frame.minX,
+                y: main.frame.maxY - frame.maxY,
+                width: frame.width,
+                height: frame.height
+            )
+        }
+
+        return frame
+    }
+}
+
+@MainActor
 protocol BubbleProvider {
     var kind: NotchBubbleKind { get }
     func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity?
