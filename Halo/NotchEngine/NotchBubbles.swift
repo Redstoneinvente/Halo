@@ -1840,6 +1840,9 @@ final class AppWindowPreviewCenter: ObservableObject {
     @Published private(set) var errors: [String: String] = [:]
     @Published private(set) var screenCaptureGranted = CGPreflightScreenCaptureAccess()
 
+    private var lastVisibleCacheAt = Date.distantPast
+    private var lastVisibleCachePID: pid_t?
+
     private init() {}
 
     func image(for activityID: String) -> NSImage? {
@@ -1879,9 +1882,13 @@ final class AppWindowPreviewCenter: ObservableObject {
             return
         }
 
-        if !forceRefresh, images[activityID] != nil {
+        if images[activityID] != nil {
+            errors.removeValue(forKey: activityID)
             return
         }
+
+        errors[activityID] = "No pre-minimize preview was cached for this window yet."
+        return
 
         guard !loadingIDs.contains(activityID) else { return }
         loadingIDs.insert(activityID)
@@ -1909,6 +1916,77 @@ final class AppWindowPreviewCenter: ObservableObject {
         images.removeValue(forKey: activityID)
         errors.removeValue(forKey: activityID)
         loadingIDs.remove(activityID)
+    }
+
+    func cacheVisiblePreviews(entries: [MinimizedWindowBubbleCenter.Entry]) {
+        guard !entries.isEmpty else { return }
+        refreshPermissionState()
+        guard screenCaptureGranted else { return }
+
+        let pid = entries.first?.processIdentifier
+        let now = Date()
+        let appChanged = pid != lastVisibleCachePID
+        guard appChanged || now.timeIntervalSince(lastVisibleCacheAt) >= 0.75 else { return }
+
+        lastVisibleCacheAt = now
+        lastVisibleCachePID = pid
+
+        guard let rawList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return
+        }
+
+        for entry in entries.prefix(8) {
+            guard let windowID = Self.bestCGWindowID(for: entry, in: rawList),
+                  let cgImage = CGWindowListCreateImage(
+                    .null,
+                    .optionIncludingWindow,
+                    windowID,
+                    [.boundsIgnoreFraming, .bestResolution]
+                  ) else {
+                continue
+            }
+
+            let activityID = "appWindow." + entry.id
+            images[activityID] = NSImage(cgImage: cgImage, size: .zero)
+            errors.removeValue(forKey: activityID)
+        }
+    }
+
+    private static func bestCGWindowID(
+        for entry: MinimizedWindowBubbleCenter.Entry,
+        in windows: [[String: Any]]
+    ) -> CGWindowID? {
+        let candidates = windows.compactMap { info -> (CGWindowID, String, CGRect)? in
+            guard let ownerPID = info[kCGWindowOwnerPID as String] as? NSNumber,
+                  ownerPID.int32Value == entry.processIdentifier,
+                  let number = info[kCGWindowNumber as String] as? NSNumber,
+                  let boundsDictionary = info[kCGWindowBounds as String] as? CFDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDictionary) else {
+                return nil
+            }
+
+            let title = info[kCGWindowName as String] as? String ?? ""
+            return (CGWindowID(number.uint32Value), title, bounds)
+        }
+
+        guard !candidates.isEmpty else { return nil }
+
+        let normalizedTitle = entry.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let titleMatches = candidates.filter {
+            $0.1.trimmingCharacters(in: .whitespacesAndNewlines) == normalizedTitle
+        }
+        let pool = titleMatches.isEmpty ? candidates : titleMatches
+
+        guard pool.count > 1, let expectedFrame = entry.windowFrame else {
+            return pool.first?.0
+        }
+
+        return pool.min {
+            frameDistance($0.2, expectedFrame) < frameDistance($1.2, expectedFrame)
+        }?.0
     }
 
     private static func capturePreviewData(
