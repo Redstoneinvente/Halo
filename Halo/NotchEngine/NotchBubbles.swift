@@ -2983,9 +2983,6 @@ private final class NotchBubblePanel: NSPanel {
 private final class TransparentNotchBubbleHostingView<Content: View>: NSHostingView<Content> {
     override var isOpaque: Bool { false }
 
-    var forceTouchActivityID: String?
-    private var forceTouchTriggered = false
-
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         wantsLayer = true
@@ -2993,22 +2990,6 @@ private final class TransparentNotchBubbleHostingView<Content: View>: NSHostingV
         layer?.isOpaque = false
         layer?.masksToBounds = false
         pressureConfiguration = NSPressureConfiguration(pressureBehavior: .primaryDeepClick)
-    }
-
-    override func pressureChange(with event: NSEvent) {
-        if event.stage >= 2 {
-            if !forceTouchTriggered, let forceTouchActivityID {
-                forceTouchTriggered = true
-                NotificationCenter.default.post(
-                    name: .haloNotchBubbleForceTouch,
-                    object: forceTouchActivityID
-                )
-            }
-        } else if event.stage == 0 {
-            forceTouchTriggered = false
-        }
-
-        super.pressureChange(with: event)
     }
 }
 
@@ -3782,7 +3763,6 @@ final class BubbleWindowController {
             surfaceState: state
         )
         let view = TransparentNotchBubbleHostingView(rootView: root)
-        view.forceTouchActivityID = id
         view.sizingOptions = []
         view.wantsLayer = true
         view.layer?.backgroundColor = NSColor.clear.cgColor
