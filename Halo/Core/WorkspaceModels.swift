@@ -362,10 +362,10 @@ enum SimpleNotchMetrics {
     }
 
     static func calendarYearWidth(_ size: SimpleNotchSize) -> Double {
-        // Twelve mini-months need materially more width than the normal calendar.
-        // Keep the two-row year layout, but give every 7-column month grid enough
-        // room that day numbers remain legible instead of collapsing together.
-        switch size { case .standard: return 404; case .medium: return 456; case .big: return 510 }
+        // Year Overview is inherently dense. Do not compress its horizontal
+        // footprint for Standard/Medium or the six mini-month columns collapse.
+        // The size preset still changes typography and the shared widget height.
+        510
     }
 
     static func calendarYearHeight(_ size: SimpleNotchSize) -> Double {
