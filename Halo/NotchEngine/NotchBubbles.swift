@@ -1706,11 +1706,13 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
             return nil
         }
 
-        let positionAX = unsafeBitCast(positionValue, to: AXValue.self)
-        let sizeAX = unsafeBitCast(sizeValue, to: AXValue.self)
+        let positionAX = positionValue as! AXValue
+        let sizeAX = sizeValue as! AXValue
         var position = CGPoint.zero
         var size = CGSize.zero
-        guard AXValueGetValue(positionAX, .cgPoint, &position),
+        guard AXValueGetType(positionAX) == .cgPoint,
+              AXValueGetType(sizeAX) == .cgSize,
+              AXValueGetValue(positionAX, .cgPoint, &position),
               AXValueGetValue(sizeAX, .cgSize, &size),
               size.width > 0,
               size.height > 0 else {
