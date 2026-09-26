@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Combine
 import EventKit
 import QuartzCore
@@ -18,6 +19,7 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
     case audio
     case vinyl
     case files
+    case appWindow
 
     var id: String { rawValue }
 
@@ -34,6 +36,7 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .audio: return "Audio"
         case .vinyl: return "Vinyl"
         case .files: return "File Shelf"
+        case .appWindow: return "App Window"
         }
     }
 
@@ -50,23 +53,25 @@ enum NotchBubbleKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .audio: return "speaker.wave.2.fill"
         case .vinyl: return "record.circle.fill"
         case .files: return "tray.full.fill"
+        case .appWindow: return "macwindow"
         }
     }
 
     /// Stable tie-breaker only. Explicit priority and presentation mode always win first.
     var policyRank: Int {
         switch self {
-        case .timer: return 0
-        case .calendar: return 1
-        case .files: return 2
-        case .stopwatch: return 3
-        case .music: return 4
-        case .vinyl: return 5
-        case .audio: return 6
-        case .system: return 7
-        case .clipboard: return 8
-        case .clock: return 9
-        case .pixelPal: return 10
+        case .appWindow: return 0
+        case .timer: return 1
+        case .calendar: return 2
+        case .files: return 3
+        case .stopwatch: return 4
+        case .music: return 5
+        case .vinyl: return 6
+        case .audio: return 7
+        case .system: return 8
+        case .clipboard: return 9
+        case .clock: return 10
+        case .pixelPal: return 11
         }
     }
 }
@@ -348,7 +353,7 @@ enum NotchBubbleGestureAction: String, Codable, CaseIterable, Identifiable, Hash
         case .pixelPal:
             return common + [.feedPixelPal]
 
-        case .clock, .clipboard, .calendar, .files:
+        case .clock, .clipboard, .calendar, .files, .appWindow:
             return common
         }
     }
@@ -735,6 +740,9 @@ struct NotchBubbleSettings: Codable, Equatable {
     var filesPersistent: Bool?
     var filesDisplayMode: FileBubbleDisplayMode?
 
+    // Experimental App Bubbles. Optional keeps older settings decodable.
+    var appMinimizeBubblesEnabled: Bool?
+
     /// Per-provider appearance overrides. Missing entries inherit the global bubble defaults.
     var bubbleStyles: [String: NotchBubbleStyleOverride]?
 
@@ -940,6 +948,7 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedFilesEnabled: Bool { filesEnabled ?? false }
     var resolvedFilesPersistent: Bool { filesPersistent ?? false }
     var resolvedFilesDisplayMode: FileBubbleDisplayMode { filesDisplayMode ?? .latest }
+    var resolvedAppMinimizeBubblesEnabled: Bool { appMinimizeBubblesEnabled ?? false }
 
     func acceptsHUDEvent(_ kind: HaloHUDEventKind) -> Bool {
         switch kind {
@@ -971,6 +980,7 @@ struct NotchBubbleSettings: Codable, Equatable {
         case .audio: return resolvedAudioEnabled
         case .vinyl: return resolvedVinylEnabled
         case .files: return resolvedFilesEnabled
+        case .appWindow: return resolvedAppMinimizeBubblesEnabled
         }
     }
 
@@ -984,6 +994,7 @@ struct NotchBubbleSettings: Codable, Equatable {
         case .calendar: return resolvedCalendarPersistent
         case .vinyl: return resolvedVinylPersistent
         case .files: return resolvedFilesPersistent
+        case .appWindow: return false
         }
     }
 
@@ -1295,6 +1306,7 @@ extension HaloFeatureAccess {
         value.calendarEnabled = false
         value.vinylEnabled = false
         value.filesEnabled = false
+        value.appMinimizeBubblesEnabled = false
 
         // Persistent/pinned provider behavior is part of advanced Bubbles.
         value.musicPersistent = false
@@ -1396,10 +1408,269 @@ final class NotchBubbleSettingsStore: ObservableObject {
 
 // MARK: - Providers, activity state and policy
 
+
+@MainActor
+final class MinimizedWindowBubbleCenter: ObservableObject {
+    static let shared = MinimizedWindowBubbleCenter()
+
+    struct Entry: Identifiable, Equatable {
+        let id: String
+        let processIdentifier: pid_t
+        let bundleIdentifier: String?
+        let appName: String
+        let windowTitle: String
+        let minimizedAt: Date
+    }
+
+    @Published private(set) var entries: [Entry] = []
+    @Published private(set) var accessibilityGranted = AXIsProcessTrusted()
+
+    private struct Snapshot {
+        let entry: Entry
+        let element: AXUIElement
+    }
+
+    private var handles: [String: AXUIElement] = [:]
+    private var knownMinimized = Set<String>()
+    private var hasBaseline = false
+    private var polling: AnyCancellable?
+    private var enabled = false
+
+    var current: Entry? { entries.first }
+
+    private init() {}
+
+    func setEnabled(_ enabled: Bool) {
+        guard self.enabled != enabled || (enabled && polling == nil) else { return }
+        self.enabled = enabled
+
+        if enabled {
+            startPolling()
+        } else {
+            stopPolling()
+        }
+    }
+
+    func requestAccessibilityPermission() {
+        let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        let options = [promptKey: true] as CFDictionary
+        accessibilityGranted = AXIsProcessTrustedWithOptions(options)
+        if accessibilityGranted {
+            hasBaseline = false
+            scan()
+        }
+    }
+
+    func appIcon(for entry: Entry) -> NSImage? {
+        if let running = NSRunningApplication(processIdentifier: entry.processIdentifier),
+           let icon = running.icon {
+            return icon
+        }
+
+        guard let bundleIdentifier = entry.bundleIdentifier,
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            return nil
+        }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
+
+    @discardableResult
+    func restoreCurrent() -> Bool {
+        guard let entry = current else { return false }
+        guard let element = handles[entry.id] else {
+            removeEntry(id: entry.id)
+            return false
+        }
+
+        let result = AXUIElementSetAttributeValue(
+            element,
+            kAXMinimizedAttribute as CFString,
+            kCFBooleanFalse
+        )
+        guard result == .success else {
+            scan()
+            return false
+        }
+
+        _ = AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+        if let app = NSRunningApplication(processIdentifier: entry.processIdentifier) {
+            app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        }
+
+        removeEntry(id: entry.id)
+        if !entries.isEmpty {
+            NotchBubbleActivityCenter.shared.clearDismissal(kind: .appWindow)
+        }
+        return true
+    }
+
+    private func startPolling() {
+        polling?.cancel()
+        hasBaseline = false
+
+        scan()
+        polling = Timer.publish(every: 0.35, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.scan()
+            }
+    }
+
+    private func stopPolling() {
+        polling?.cancel()
+        polling = nil
+        hasBaseline = false
+        knownMinimized.removeAll()
+        handles.removeAll()
+        entries.removeAll()
+    }
+
+    private func scan() {
+        guard enabled else { return }
+
+        let trusted = AXIsProcessTrusted()
+        if accessibilityGranted != trusted {
+            accessibilityGranted = trusted
+        }
+
+        guard trusted else {
+            hasBaseline = false
+            knownMinimized.removeAll()
+            handles.removeAll()
+            entries.removeAll()
+            return
+        }
+
+        var minimized: [String: Snapshot] = [:]
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+
+        for app in NSWorkspace.shared.runningApplications {
+            guard app.processIdentifier != ownPID,
+                  app.activationPolicy == .regular,
+                  !app.isTerminated else { continue }
+
+            let application = AXUIElementCreateApplication(app.processIdentifier)
+            guard let windows = attribute(kAXWindowsAttribute as CFString, from: application) as? [AXUIElement] else {
+                continue
+            }
+
+            for window in windows {
+                guard booleanAttribute(kAXMinimizedAttribute as CFString, from: window) == true else {
+                    continue
+                }
+
+                let title = stringAttribute(kAXTitleAttribute as CFString, from: window) ?? "Window"
+                let document = stringAttribute(kAXDocumentAttribute as CFString, from: window) ?? ""
+                let identifier = stringAttribute(kAXIdentifierAttribute as CFString, from: window)
+                let fallbackHash = CFHash(window)
+                let identity = identifier?.isEmpty == false
+                    ? identifier!
+                    : "\(title)|\(document)|\(fallbackHash)"
+                let id = "\(app.processIdentifier)|\(identity)"
+                let appName = app.localizedName
+                    ?? app.bundleIdentifier?.split(separator: ".").last.map(String.init)
+                    ?? "App"
+
+                minimized[id] = Snapshot(
+                    entry: Entry(
+                        id: id,
+                        processIdentifier: app.processIdentifier,
+                        bundleIdentifier: app.bundleIdentifier,
+                        appName: appName,
+                        windowTitle: title,
+                        minimizedAt: Date()
+                    ),
+                    element: window
+                )
+            }
+        }
+
+        let currentKeys = Set(minimized.keys)
+        if !hasBaseline {
+            knownMinimized = currentKeys
+            hasBaseline = true
+            return
+        }
+
+        let newlyMinimized = currentKeys.subtracting(knownMinimized)
+        for key in newlyMinimized {
+            guard let snapshot = minimized[key] else { continue }
+            entries.removeAll { $0.id == key }
+            entries.insert(snapshot.entry, at: 0)
+            handles[key] = snapshot.element
+        }
+
+        // Keep handles fresh because AX can vend a new wrapper for the same remote window.
+        for entry in entries {
+            if let snapshot = minimized[entry.id] {
+                handles[entry.id] = snapshot.element
+            }
+        }
+
+        entries.removeAll { !currentKeys.contains($0.id) }
+        handles = handles.filter { currentKeys.contains($0.key) }
+        knownMinimized = currentKeys
+
+        if !newlyMinimized.isEmpty {
+            NotchBubbleActivityCenter.shared.clearDismissal(kind: .appWindow)
+        }
+    }
+
+    private func removeEntry(id: String) {
+        entries.removeAll { $0.id == id }
+        handles.removeValue(forKey: id)
+        knownMinimized.remove(id)
+    }
+
+    private func attribute(_ name: CFString, from element: AXUIElement) -> CFTypeRef? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, name, &value) == .success else {
+            return nil
+        }
+        return value
+    }
+
+    private func stringAttribute(_ name: CFString, from element: AXUIElement) -> String? {
+        attribute(name, from: element) as? String
+    }
+
+    private func booleanAttribute(_ name: CFString, from element: AXUIElement) -> Bool? {
+        (attribute(name, from: element) as? NSNumber)?.boolValue
+    }
+}
+
 @MainActor
 protocol BubbleProvider {
     var kind: NotchBubbleKind { get }
     func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity?
+}
+
+
+@MainActor
+private struct AppWindowBubbleProvider: BubbleProvider {
+    let kind: NotchBubbleKind = .appWindow
+
+    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
+        guard settings.resolvedAppMinimizeBubblesEnabled,
+              let entry = MinimizedWindowBubbleCenter.shared.current else { return nil }
+
+        let count = MinimizedWindowBubbleCenter.shared.entries.count
+        return NotchBubbleActivity(
+            id: "appWindow." + entry.id,
+            kind: kind,
+            sourceIdentifier: entry.bundleIdentifier ?? "pid.\(entry.processIdentifier)",
+            mode: .activeTask,
+            priority: .important,
+            title: entry.appName,
+            subtitle: count > 1
+                ? "\(entry.windowTitle) · \(count) minimized windows"
+                : entry.windowTitle,
+            icon: "macwindow",
+            progress: nil,
+            updatedAt: entry.minimizedAt,
+            expiresAt: nil
+        )
+    }
 }
 
 @MainActor
@@ -1737,6 +2008,7 @@ struct NotchBubblePolicyEngine {
 @MainActor
 struct BubbleRegistry {
     private let providers: [any BubbleProvider] = [
+        AppWindowBubbleProvider(),
         MusicBubbleProvider(),
         TimerBubbleProvider(),
         CalendarBubbleProvider(),
@@ -2949,6 +3221,7 @@ private final class NotchBubbleDisplayHost {
     private let store: AppStore
     private let settingsStore: NotchBubbleSettingsStore
     private let activityCenter = NotchBubbleActivityCenter.shared
+    private let minimizedWindowCenter = MinimizedWindowBubbleCenter.shared
     private let registry = BubbleRegistry()
     private let layoutEngine = BubbleLayoutEngine()
 
@@ -3153,6 +3426,12 @@ private final class NotchBubbleDisplayHost {
             .store(in: &subscriptions)
 
         activityCenter.$suppressedKinds
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .store(in: &subscriptions)
+
+        minimizedWindowCenter.$entries
+            .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refresh(animated: true) }
             .store(in: &subscriptions)
@@ -3401,6 +3680,7 @@ final class NotchBubbleManager {
     private let store: AppStore
     private let settingsStore = NotchBubbleSettingsStore.shared
     private let activityCenter = NotchBubbleActivityCenter.shared
+    private let minimizedWindowCenter = MinimizedWindowBubbleCenter.shared
     private var hosts: [String: NotchBubbleDisplayHost] = [:]
     private var surfaceRuntimeEnabled = false
     private var subscriptions = Set<AnyCancellable>()
@@ -3419,6 +3699,20 @@ final class NotchBubbleManager {
                     )
                 )
             }
+            .store(in: &subscriptions)
+
+        settingsStore.$settings
+            .map { HaloFeatureAccess.shared.effectiveBubbleSettings($0.normalized()) }
+            .map { $0.enabled && $0.resolvedAppMinimizeBubblesEnabled }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshAppWindowMonitoring() }
+            .store(in: &subscriptions)
+
+        HaloFeatureAccess.shared.$accessLevel
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshAppWindowMonitoring() }
             .store(in: &subscriptions)
     }
 
@@ -3454,6 +3748,18 @@ final class NotchBubbleManager {
         for host in hosts.values {
             host.setSurfaceRuntimeEnabled(granted)
         }
+        refreshAppWindowMonitoring()
+    }
+
+    private func refreshAppWindowMonitoring() {
+        let settings = HaloFeatureAccess.shared.effectiveBubbleSettings(
+            settingsStore.settings.normalized()
+        )
+        minimizedWindowCenter.setEnabled(
+            surfaceRuntimeEnabled &&
+            settings.enabled &&
+            settings.resolvedAppMinimizeBubblesEnabled
+        )
     }
 }
 
@@ -3493,6 +3799,7 @@ private struct NotchBubbleView: View {
     @ObservedObject private var pal = HaloPixelPalStore.shared
     @ObservedObject private var settingsStore = NotchBubbleSettingsStore.shared
     @ObservedObject private var activityCenter = NotchBubbleActivityCenter.shared
+    @ObservedObject private var minimizedWindowCenter = MinimizedWindowBubbleCenter.shared
 
     @State private var hovering = false
     @State private var showingDetail = false
@@ -3661,7 +3968,42 @@ private struct NotchBubbleView: View {
                 vinylBubbleContent
             case .files:
                 fileBubbleContent
+            case .appWindow:
+                appWindowBubbleContent
             }
+        }
+    }
+
+    @ViewBuilder
+    private var appWindowBubbleContent: some View {
+        if let entry = minimizedWindowCenter.current {
+            ZStack(alignment: .bottomTrailing) {
+                Group {
+                    if let icon = minimizedWindowCenter.appIcon(for: entry) {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .scaledToFit()
+                    } else {
+                        Image(systemName: "macwindow")
+                            .font(.system(size: bubbleStyle.size * 0.38, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .padding(bubbleStyle.size * 0.12)
+
+                if minimizedWindowCenter.entries.count > 1 {
+                    Text("\(minimizedWindowCenter.entries.count)")
+                        .font(.system(size: max(7, bubbleStyle.size * 0.14), weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(4)
+                        .background(providerAccentColor, in: Circle())
+                        .padding(2)
+                }
+            }
+        } else {
+            Image(systemName: "macwindow")
+                .font(.system(size: bubbleStyle.size * 0.38, weight: .semibold))
+                .foregroundStyle(.white)
         }
     }
 
@@ -4280,6 +4622,8 @@ private struct NotchBubbleView: View {
             return Color(red: 0.26, green: 0.66, blue: 1.0)
         case .files:
             return Color(red: 0.32, green: 0.78, blue: 0.60)
+        case .appWindow:
+            return Color(red: 0.36, green: 0.68, blue: 1.0)
         }
     }
 
@@ -4566,6 +4910,55 @@ private struct NotchBubbleView: View {
             vinylDetail
         case .files:
             moduleDetail(.shelf)
+        case .appWindow:
+            appWindowDetail
+        }
+    }
+
+    private var appWindowDetail: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let entry = minimizedWindowCenter.current {
+                HStack(spacing: 12) {
+                    Group {
+                        if let icon = minimizedWindowCenter.appIcon(for: entry) {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .scaledToFit()
+                        } else {
+                            Image(systemName: "macwindow")
+                                .font(.title2)
+                        }
+                    }
+                    .frame(width: 48, height: 48)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(entry.appName)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(entry.windowTitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                        if minimizedWindowCenter.entries.count > 1 {
+                            Text("\(minimizedWindowCenter.entries.count) minimized windows in the stack")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                Button("Restore Window") {
+                    _ = minimizedWindowCenter.restoreCurrent()
+                    activityCenter.clearDismissal(kind: .appWindow)
+                    showingDetail = false
+                }
+                .buttonStyle(.borderedProminent)
+            } else {
+                Text("No minimized app window is waiting.")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -4751,6 +5144,7 @@ private struct NotchBubbleView: View {
         case .clock, .stopwatch, .system, .clipboard, .calendar, .audio: return 354
         case .vinyl: return 360
         case .files: return 354
+        case .appWindow: return 360
         }
     }
 
@@ -4961,6 +5355,14 @@ private struct NotchBubbleView: View {
     }
 
     private func handlePrimaryTap() {
+        if kind == .appWindow {
+            if minimizedWindowCenter.restoreCurrent() {
+                activityCenter.clearDismissal(kind: .appWindow)
+            }
+            showingDetail = false
+            return
+        }
+
         guard kind == .music else {
             showingDetail.toggle()
             return
@@ -5209,7 +5611,7 @@ private struct NotchBubbleView: View {
 
             surfaceState.openExplicitly(canOpenMusicCI ? .music : .normal)
 
-        case .timer, .pixelPal, .clock, .stopwatch, .system, .clipboard, .calendar, .audio, .files:
+        case .timer, .pixelPal, .clock, .stopwatch, .system, .clipboard, .calendar, .audio, .files, .appWindow:
             // These bubbles are shortcuts into the user's normal opened notch.
             // They do not replace the dashboard with a focused widget.
             surfaceState.openExplicitly(.normal)
@@ -5242,6 +5644,11 @@ private struct NotchBubbleView: View {
             return media.isPlaying ? "Vinyl · \(media.title)" : "Vinyl"
         case .files:
             return store.files.isEmpty ? "File Shelf" : "\(store.files.count) staged item\(store.files.count == 1 ? "" : "s")"
+        case .appWindow:
+            if let entry = minimizedWindowCenter.current {
+                return "\(entry.appName) · \(entry.windowTitle)"
+            }
+            return "Minimized app window"
         }
     }
 }
@@ -5264,6 +5671,46 @@ struct NotchBubbleSettingsView: View {
             Text("A selective activity surface for useful state and actions — not a second notification centre.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+
+        Section("App Bubbles") {
+            Toggle(
+                "Show minimized windows as bubbles",
+                isOn: Binding(
+                    get: { settings.resolvedAppMinimizeBubblesEnabled },
+                    set: { enabled in
+                        var next = settingsStore.settings
+                        next.appMinimizeBubblesEnabled = enabled
+                        settingsStore.settings = next.normalized()
+                        if enabled {
+                            MinimizedWindowBubbleCenter.shared.requestAccessibilityPermission()
+                        }
+                    }
+                )
+            )
+
+            Text("When you minimize an app window, Halo keeps it in a Bubble. Click the Bubble to restore the most recently minimized window.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if settings.resolvedAppMinimizeBubblesEnabled {
+                if minimizedWindowCenter.accessibilityGranted {
+                    Label("Accessibility access granted", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    HStack {
+                        Label("Accessibility access is required to detect and restore windows.", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Grant Access") {
+                            MinimizedWindowBubbleCenter.shared.requestAccessibilityPermission()
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
         }
 
         Section("Activity policy") {
@@ -5892,6 +6339,11 @@ struct NotchBubbleSettingsView: View {
                         Text(mode.rawValue).tag(mode)
                     }
                 }
+
+            case .appWindow:
+                Text("Uses the minimized app's icon. Click the Bubble to restore the window. If several windows are minimized, Halo keeps them in a newest-first stack.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
             case .vinyl:
                 Picker("Display", selection: optionalBinding(\.vinylDisplayMode, default: VinylBubbleDisplayMode.fullRecord)) {
