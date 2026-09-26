@@ -1887,29 +1887,7 @@ final class AppWindowPreviewCenter: ObservableObject {
             return
         }
 
-        errors[activityID] = "No pre-minimize preview was cached for this window yet."
-        return
-
-        guard !loadingIDs.contains(activityID) else { return }
-        loadingIDs.insert(activityID)
-        errors.removeValue(forKey: activityID)
-
-        Task { [weak self] in
-            guard let self else { return }
-
-            do {
-                let data = try await Self.capturePreviewData(for: entry)
-                guard let image = NSImage(data: data) else {
-                    throw AppWindowPreviewError.encodingFailed
-                }
-                self.images[activityID] = image
-                self.errors.removeValue(forKey: activityID)
-            } catch {
-                self.errors[activityID] = error.localizedDescription
-            }
-
-            self.loadingIDs.remove(activityID)
-        }
+        errors[activityID] = "Halo did not have time to cache this window before it was minimized. Restore it once, then minimize it again."
     }
 
     func clear(activityID: String) {
