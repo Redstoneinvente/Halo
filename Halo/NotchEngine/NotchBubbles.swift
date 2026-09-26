@@ -2111,14 +2111,14 @@ struct BubbleLayoutEngine {
         in screenFrame: CGRect,
         compactHeight: CGFloat,
         settings: NotchBubbleSettings,
-        sideAssignments: [NotchBubbleKind: NotchBubbleSide] = [:]
-    ) -> [NotchBubbleKind: CGRect] {
+        sideAssignments: [String: NotchBubbleSide] = [:]
+    ) -> [String: CGRect] {
         guard !bubbles.isEmpty else { return [:] }
 
         let spacing = CGFloat(settings.spacing)
         let gap = max(5, spacing)
         let globalVerticalOffset = CGFloat(settings.resolvedVerticalOffset)
-        var result: [NotchBubbleKind: CGRect] = [:]
+        var result: [String: CGRect] = [:]
 
         switch settings.layout {
         case .satellites:
@@ -2131,7 +2131,7 @@ struct BubbleLayoutEngine {
                 let size = bubble.size
                 let y = surfaceFrame.minY - gap - size - globalVerticalOffset - style.verticalOffset
                 let frame = CGRect(x: x, y: y, width: size, height: size)
-                result[bubble.kind] = clamped(frame, to: screenFrame)
+                result[bubble.id] = clamped(frame, to: screenFrame)
                 x += size + spacing
             }
 
@@ -2146,7 +2146,7 @@ struct BubbleLayoutEngine {
                 let style = settings.resolvedStyle(for: bubble.kind)
                 let size = bubble.size
                 let y = menuBarCenterY - size / 2 - globalVerticalOffset - style.verticalOffset
-                let side = sideAssignments[bubble.kind]
+                let side = sideAssignments[bubble.id]
                     ?? fallbackSide(for: settings.resolvedBubbleSideMode)
                 let frame: CGRect
 
@@ -2170,7 +2170,7 @@ struct BubbleLayoutEngine {
                     rightOffset += size + spacing
                 }
 
-                result[bubble.kind] = clamped(frame, to: screenFrame)
+                result[bubble.id] = clamped(frame, to: screenFrame)
             }
 
         case .stack:
@@ -2185,7 +2185,7 @@ struct BubbleLayoutEngine {
                     width: size,
                     height: size
                 )
-                result[bubble.kind] = clamped(frame, to: screenFrame)
+                result[bubble.id] = clamped(frame, to: screenFrame)
                 yCursor -= spacing
             }
         }
@@ -2266,6 +2266,7 @@ private final class NotchBubblePanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     var bubbleKind: NotchBubbleKind?
+    var bubbleIdentifier: String?
 
     private var horizontalAccumulator: CGFloat = 0
     private var verticalAccumulator: CGFloat = 0
@@ -2280,7 +2281,7 @@ private final class NotchBubblePanel: NSPanel {
     }
 
     private func handleBubbleScrollGesture(_ event: NSEvent) -> Bool {
-        guard let bubbleKind else { return false }
+        guard let bubbleKind, let bubbleIdentifier else { return false }
 
         if event.phase == .began || event.phase == .mayBegin {
             horizontalAccumulator = 0
@@ -2339,7 +2340,7 @@ private final class NotchBubblePanel: NSPanel {
 
         NotificationCenter.default.post(
             name: .haloNotchBubbleDirectionalGesture,
-            object: bubbleKind.rawValue,
+            object: bubbleIdentifier,
             userInfo: [
                 "direction": direction.rawValue,
                 "repeat": isRepeat
@@ -3090,6 +3091,7 @@ final class BubbleWindowController {
         case retracting
     }
 
+    let id: String
     let kind: NotchBubbleKind
 
     private let panel: NotchBubblePanel
@@ -3100,7 +3102,8 @@ final class BubbleWindowController {
 
     var frame: CGRect { panel.frame }
 
-    init(kind: NotchBubbleKind, store: AppStore, state: SurfaceState) {
+    init(id: String, kind: NotchBubbleKind, store: AppStore, state: SurfaceState) {
+        self.id = id
         self.kind = kind
         panel = NotchBubblePanel(
             contentRect: .zero,
@@ -3109,6 +3112,7 @@ final class BubbleWindowController {
             defer: false
         )
         panel.bubbleKind = kind
+        panel.bubbleIdentifier = id
         panel.isReleasedWhenClosed = false
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -3121,6 +3125,7 @@ final class BubbleWindowController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
         let root = NotchBubbleView(
+            activityID: id,
             kind: kind,
             store: store,
             workspace: store.workspace,
@@ -3270,11 +3275,11 @@ private final class NotchBubbleDisplayHost {
     private var screenFrame: CGRect
     private var surfaceFrame: CGRect
     private var surfaceRuntimeEnabled = false
-    private var controllers: [NotchBubbleKind: BubbleWindowController] = [:]
+    private var controllers: [String: BubbleWindowController] = [:]
     // Side ownership is intentionally stateful. Auto placement assigns a side when
     // a bubble first appears and never moves an existing bubble across the notch
     // just to rebalance the layout.
-    private var bubbleSideAssignments: [NotchBubbleKind: NotchBubbleSide] = [:]
+    private var bubbleSideAssignments: [String: NotchBubbleSide] = [:]
     private var subscriptions = Set<AnyCancellable>()
     private var lastCalendarActivityID: String?
     private var lastObservedSettings: NotchBubbleSettings
@@ -3574,10 +3579,10 @@ private final class NotchBubbleDisplayHost {
             settings: settings,
             sideAssignments: sideAssignments
         )
-        let activeKinds = Set(bubbles.map(\.kind))
+        let activeIDs = Set(bubbles.map(\.id))
 
-        for kind in Array(controllers.keys) where !activeKinds.contains(kind) {
-            guard let controller = controllers[kind] else { continue }
+        for id in Array(controllers.keys) where !activeIDs.contains(id) {
+            guard let controller = controllers[id] else { continue }
             let emergenceFrame = layoutEngine.emergenceFrame(
                 for: controller.frame,
                 around: surfaceFrame,
@@ -3591,21 +3596,21 @@ private final class NotchBubbleDisplayHost {
                 settings: settings
             ) { [weak self, weak controller] in
                 guard let self, let controller,
-                      self.controllers[kind] === controller else { return }
+                      self.controllers[id] === controller else { return }
                 controller.close()
-                self.controllers.removeValue(forKey: kind)
-                self.bubbleSideAssignments.removeValue(forKey: kind)
+                self.controllers.removeValue(forKey: id)
+                self.bubbleSideAssignments.removeValue(forKey: id)
             }
         }
 
         for bubble in bubbles {
-            guard let frame = frames[bubble.kind] else { continue }
+            guard let frame = frames[bubble.id] else { continue }
             let controller: BubbleWindowController
-            if let existing = controllers[bubble.kind] {
+            if let existing = controllers[bubble.id] {
                 controller = existing
             } else {
-                controller = BubbleWindowController(kind: bubble.kind, store: store, state: state)
-                controllers[bubble.kind] = controller
+                controller = BubbleWindowController(id: bubble.id, kind: bubble.kind, store: store, state: state)
+                controllers[bubble.id] = controller
             }
             let emergenceFrame = layoutEngine.emergenceFrame(
                 for: frame,
@@ -3627,24 +3632,24 @@ private final class NotchBubbleDisplayHost {
     private func resolvedSideAssignments(
         for bubbles: [NotchBubble],
         settings: NotchBubbleSettings
-    ) -> [NotchBubbleKind: NotchBubbleSide] {
+    ) -> [String: NotchBubbleSide] {
         guard settings.layout == .wings else { return [:] }
 
-        let activeKinds = Set(bubbles.map(\.kind))
-        let retainedKinds = Set(controllers.keys).union(activeKinds)
+        let activeIDs = Set(bubbles.map(\.id))
+        let retainedIDs = Set(controllers.keys).union(activeIDs)
         bubbleSideAssignments = bubbleSideAssignments.filter {
-            retainedKinds.contains($0.key)
+            retainedIDs.contains($0.key)
         }
 
         switch settings.resolvedBubbleSideMode {
         case .left:
-            for kind in activeKinds {
-                bubbleSideAssignments[kind] = .left
+            for id in activeIDs {
+                bubbleSideAssignments[id] = .left
             }
 
         case .right:
-            for kind in activeKinds {
-                bubbleSideAssignments[kind] = .right
+            for id in activeIDs {
+                bubbleSideAssignments[id] = .right
             }
 
         case .automatic:
@@ -3657,7 +3662,7 @@ private final class NotchBubbleDisplayHost {
                 if side == .right { count += 1 }
             }
 
-            for bubble in bubbles where bubbleSideAssignments[bubble.kind] == nil {
+            for bubble in bubbles where bubbleSideAssignments[bubble.id] == nil {
                 let side: NotchBubbleSide
                 if leftCount == rightCount {
                     side = settings.resolvedAutomaticPrioritySide
@@ -3667,7 +3672,7 @@ private final class NotchBubbleDisplayHost {
                     side = .right
                 }
 
-                bubbleSideAssignments[bubble.kind] = side
+                bubbleSideAssignments[bubble.id] = side
                 if side == .left {
                     leftCount += 1
                 } else {
@@ -3692,7 +3697,7 @@ private final class NotchBubbleDisplayHost {
             return state.physicalNotchHeight > 1 ? state.physicalNotchHeight : state.compactHeight
         }()
 
-        for (kind, controller) in controllers {
+        for (id, controller) in controllers {
             let emergenceFrame = layoutEngine.emergenceFrame(
                 for: controller.frame,
                 around: surfaceFrame,
@@ -3706,10 +3711,10 @@ private final class NotchBubbleDisplayHost {
                 settings: settings
             ) { [weak self, weak controller] in
                 guard let self, let controller,
-                      self.controllers[kind] === controller else { return }
+                      self.controllers[id] === controller else { return }
                 controller.close()
-                self.controllers.removeValue(forKey: kind)
-                self.bubbleSideAssignments.removeValue(forKey: kind)
+                self.controllers.removeValue(forKey: id)
+                self.bubbleSideAssignments.removeValue(forKey: id)
             }
         }
     }
