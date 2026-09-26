@@ -1987,29 +1987,41 @@ struct NotchBubblePolicyEngine {
             return true
         }
 
-        let deduplicated = Dictionary(grouping: visible, by: \.kind).compactMap { _, values in
+        let deduplicated = Dictionary(grouping: visible) { activity in
+            activity.kind == .appWindow ? activity.id : "kind." + activity.kind.rawValue
+        }.compactMap { _, values in
             values.sorted {
                 if $0.priority != $1.priority { return $0.priority > $1.priority }
                 return $0.updatedAt > $1.updatedAt
             }.first
         }
 
-        return deduplicated
-            .sorted {
-                if $0.priority != $1.priority { return $0.priority > $1.priority }
-                if $0.mode != $1.mode {
-                    let rank: [NotchBubblePresentationMode: Int] = [
-                        .confirmation: 3, .activeTask: 2, .pinned: 1, .onDemand: 0
-                    ]
-                    return rank[$0.mode, default: 0] > rank[$1.mode, default: 0]
-                }
-                if $0.kind.policyRank != $1.kind.policyRank {
-                    return $0.kind.policyRank < $1.kind.policyRank
-                }
-                return $0.updatedAt > $1.updatedAt
+        let sorted = deduplicated.sorted {
+            if $0.priority != $1.priority { return $0.priority > $1.priority }
+            if $0.mode != $1.mode {
+                let rank: [NotchBubblePresentationMode: Int] = [
+                    .confirmation: 3, .activeTask: 2, .pinned: 1, .onDemand: 0
+                ]
+                return rank[$0.mode, default: 0] > rank[$1.mode, default: 0]
             }
-            .prefix(settings.maximumBubbles)
-            .map { $0 }
+            if $0.kind.policyRank != $1.kind.policyRank {
+                return $0.kind.policyRank < $1.kind.policyRank
+            }
+            return $0.updatedAt > $1.updatedAt
+        }
+
+        var normalCount = 0
+        var appWindowCount = 0
+        return sorted.filter { activity in
+            if activity.kind == .appWindow {
+                guard appWindowCount < settings.resolvedAppMinimizeBubbleLimit else { return false }
+                appWindowCount += 1
+                return true
+            }
+            guard normalCount < settings.maximumBubbles else { return false }
+            normalCount += 1
+            return true
+        }
     }
 }
 
@@ -2042,6 +2054,26 @@ struct BubbleRegistry {
         var activities = providers
             .filter { access.allows(bubble: $0.kind) }
             .compactMap { $0.activity(store: store, settings: effectiveSettings) }
+
+        if access.allows(bubble: .appWindow),
+           effectiveSettings.resolvedAppMinimizeBubblesEnabled {
+            activities.append(contentsOf: MinimizedWindowBubbleCenter.shared.entries.map { entry in
+                NotchBubbleActivity(
+                    id: "appWindow." + entry.id,
+                    kind: .appWindow,
+                    sourceIdentifier: entry.bundleIdentifier ?? "pid.\(entry.processIdentifier)",
+                    mode: .activeTask,
+                    priority: .important,
+                    title: entry.appName,
+                    subtitle: entry.windowTitle,
+                    icon: "macwindow",
+                    progress: nil,
+                    updatedAt: entry.minimizedAt,
+                    expiresAt: nil
+                )
+            })
+        }
+
         activities.append(contentsOf: runtime.activeTransientActivities().filter {
             access.allows(bubble: $0.kind)
         })
@@ -2058,6 +2090,7 @@ struct BubbleRegistry {
         return selected.map { activity in
             let style = effectiveSettings.resolvedStyle(for: activity.kind)
             return NotchBubble(
+                id: activity.id,
                 kind: activity.kind,
                 size: style.size,
                 shape: style.shape,
