@@ -15,30 +15,22 @@
 		0000000000000000000000CD /* Views/WorkspaceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000069 /* Views/WorkspaceSettingsView.swift */; };
 		0000000000000000000000CE /* Core/WorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006A /* Core/WorkspaceModels.swift */; };
 		0000000000000000000000CF /* Core/WorkspaceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006B /* Core/WorkspaceStore.swift */; };
-		A9F000000000000000000001 /* Core/MediaRemoteController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000101 /* Core/MediaRemoteController.swift */; };
-		A9F000000000000000000002 /* Core/MediaRemoteTrackInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000102 /* Core/MediaRemoteTrackInfo.swift */; };
 		0000000000000000000000D0 /* Views/ModuleViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006C /* Views/ModuleViews.swift */; };
 		0000000000000000000000D1 /* Services/Integrations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006D /* Services/Integrations.swift */; };
 		0000000000000000000000D2 /* Services/CaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006E /* Services/CaptureService.swift */; };
 		0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006F /* Core/ExtensionContracts.swift */; };
-		0000000000000000000000FA /* Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000065 /* Core/Models.swift */; };
-		0000000000000000000000FB /* Core/WorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006A /* Core/WorkspaceModels.swift */; };
-		0000000000000000000000FC /* Core/ExtensionContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006F /* Core/ExtensionContracts.swift */; };
 		0000000000000000000000FD /* Tests/HaloCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000096 /* Tests/HaloCoreTests.swift */; };
 		0000000000000000000000FE /* Tests/LicenseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000097 /* Tests/LicenseTests.swift */; };
 		00000000000000000000019A /* Core/SurfaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000190 /* Core/SurfaceModels.swift */; };
 		00000000000000000000019B /* Views/SurfaceAppearanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000191 /* Views/SurfaceAppearanceView.swift */; };
 		00000000000000000000019C /* Services/ShelfPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000192 /* Services/ShelfPreview.swift */; };
-		0000000000000000000001A4 /* Core/SurfaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000190 /* Core/SurfaceModels.swift */; };
 		0000000000000000000001FE /* Core/WidgetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000001F4 /* Core/WidgetModels.swift */; };
 		0000000000000000000001FF /* Views/WidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000001F5 /* Views/WidgetViews.swift */; };
 		000000000000000000000200 /* Views/WidgetSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000001F6 /* Views/WidgetSettingsView.swift */; };
 		000000000000000000000201 /* Views/ClosedNotchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000001F7 /* Views/ClosedNotchView.swift */; };
-		000000000000000000000208 /* Core/WidgetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000001F4 /* Core/WidgetModels.swift */; };
 		000000000000000000000262 /* Core/PersonalizationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000258 /* Core/PersonalizationModels.swift */; };
 		000000000000000000000263 /* Views/PersonalizationSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000259 /* Views/PersonalizationSettingsView.swift */; };
 		000000000000000000000264 /* Views/DecorationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000025A /* Views/DecorationsView.swift */; };
-		00000000000000000000026C /* Core/PersonalizationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000258 /* Core/PersonalizationModels.swift */; };
 		0000000000000000000002C6 /* NotchEngine/DisplayClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002BC /* NotchEngine/DisplayClock.swift */; };
 		0000000000000000000002D1 /* Services/AudioSpectrumService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002D0 /* Services/AudioSpectrumService.swift */; };
 		0000000000000000000002E3 /* Services/HUDEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002E2 /* Services/HUDEngine.swift */; };
@@ -56,6 +48,8 @@
 		A11C0F1A0000000000000371 /* Views/PixelPetWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */; };
 		A57A00000000000000000001 /* Core/AppStoreLicensing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000101 /* Core/AppStoreLicensing.swift */; };
 		A57A00000000000000000011 /* Views/AppStoreSubscriptionGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */; };
+		A9F000000000000000000001 /* Core/MediaRemoteController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000101 /* Core/MediaRemoteController.swift */; };
+		A9F000000000000000000002 /* Core/MediaRemoteTrackInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000102 /* Core/MediaRemoteTrackInfo.swift */; };
 		B0BB1E000000000000000001 /* NotchEngine/NotchBubbles.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0BB1E000000000000000101 /* NotchEngine/NotchBubbles.swift */; };
 		B1A0D1000000000000000001 /* Services/AudioSpectrumModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A0D1000000000000000101 /* Services/AudioSpectrumModels.swift */; };
 		B1A0D1000000000000000002 /* Services/AudioSpectrumProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A0D1000000000000000102 /* Services/AudioSpectrumProviding.swift */; };
@@ -73,7 +67,6 @@
 		C1A30000000000000000000B /* Services/IntegrationShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A30000000000000000010B /* Services/IntegrationShortcuts.swift */; };
 		C1A30000000000000000000C /* Core/IntegrationActionDropTargetRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A30000000000000000010C /* Core/IntegrationActionDropTargetRegistry.swift */; };
 		D15700000000000000000001 /* Core/HaloDistribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15700000000000000000101 /* Core/HaloDistribution.swift */; };
-		D15700000000000000000002 /* Core/HaloDistribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15700000000000000000101 /* Core/HaloDistribution.swift */; };
 		F84A0A87305545C500E8B51E /* dog.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A85305545C500E8B51E /* dog.png */; };
 		F84A0A88305545C500E8B51E /* fox.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A86305545C500E8B51E /* fox.png */; };
 		F84A0A89305545C500E8B51E /* cat.png in Resources */ = {isa = PBXBuildFile; fileRef = F84A0A84305545C500E8B51E /* cat.png */; };
@@ -140,8 +133,6 @@
 		000000000000000000000069 /* Views/WorkspaceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/WorkspaceSettingsView.swift; sourceTree = "<group>"; };
 		00000000000000000000006A /* Core/WorkspaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/WorkspaceModels.swift; sourceTree = "<group>"; };
 		00000000000000000000006B /* Core/WorkspaceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/WorkspaceStore.swift; sourceTree = "<group>"; };
-		A9F000000000000000000101 /* Core/MediaRemoteController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/MediaRemoteController.swift; sourceTree = "<group>"; };
-		A9F000000000000000000102 /* Core/MediaRemoteTrackInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/MediaRemoteTrackInfo.swift; sourceTree = "<group>"; };
 		00000000000000000000006C /* Views/ModuleViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ModuleViews.swift; sourceTree = "<group>"; };
 		00000000000000000000006D /* Services/Integrations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Integrations.swift; sourceTree = "<group>"; };
 		00000000000000000000006E /* Services/CaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CaptureService.swift; sourceTree = "<group>"; };
@@ -182,6 +173,8 @@
 		A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PixelPetWidget.swift; sourceTree = "<group>"; };
 		A57A00000000000000000101 /* Core/AppStoreLicensing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/AppStoreLicensing.swift; sourceTree = "<group>"; };
 		A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/AppStoreSubscriptionGateView.swift; sourceTree = "<group>"; };
+		A9F000000000000000000101 /* Core/MediaRemoteController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/MediaRemoteController.swift; sourceTree = "<group>"; };
+		A9F000000000000000000102 /* Core/MediaRemoteTrackInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/MediaRemoteTrackInfo.swift; sourceTree = "<group>"; };
 		B0BB1E000000000000000101 /* NotchEngine/NotchBubbles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchEngine/NotchBubbles.swift; sourceTree = "<group>"; };
 		B1A0D1000000000000000101 /* Services/AudioSpectrumModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/AudioSpectrumModels.swift; sourceTree = "<group>"; };
 		B1A0D1000000000000000102 /* Services/AudioSpectrumProviding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/AudioSpectrumProviding.swift; sourceTree = "<group>"; };
@@ -769,7 +762,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 209;
+				CURRENT_PROJECT_VERSION = 210;
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -790,7 +783,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.7;
+				MARKETING_VERSION = 0.2.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -808,7 +801,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 209;
+				CURRENT_PROJECT_VERSION = 210;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
@@ -830,7 +823,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.7;
+				MARKETING_VERSION = 0.2.9;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -846,28 +839,28 @@
 		000000000000000000000019 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
 				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 			};
 			name = Debug;
 		};
 		00000000000000000000001A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
 				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 			};
 			name = Release;
 		};
@@ -1062,7 +1055,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 209;
+				CURRENT_PROJECT_VERSION = 210;
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1083,7 +1076,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.7;
+				MARKETING_VERSION = 0.2.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1101,7 +1094,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 209;
+				CURRENT_PROJECT_VERSION = 210;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
@@ -1123,7 +1116,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.7;
+				MARKETING_VERSION = 0.2.9;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -1145,7 +1138,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/HaloAppStore.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 209;
+				CURRENT_PROJECT_VERSION = 210;
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1166,7 +1159,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.7;
+				MARKETING_VERSION = 0.2.9;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-dead_strip_dylibs",
@@ -1188,7 +1181,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/HaloAppStore.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 209;
+				CURRENT_PROJECT_VERSION = 210;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = YES;
@@ -1210,7 +1203,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.7;
+				MARKETING_VERSION = 0.2.9;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-dead_strip_dylibs",
@@ -1227,56 +1220,56 @@
 		A55000000000000000000021 /* Debug Direct */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
 				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 			};
 			name = "Debug Direct";
 		};
 		A55000000000000000000022 /* Release Direct */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_DIRECT";
 				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 			};
 			name = "Release Direct";
 		};
 		A55000000000000000000023 /* Debug App Store */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_APPSTORE";
 				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 			};
 			name = "Debug App Store";
 		};
 		A55000000000000000000024 /* Release App Store */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.HaloCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HALO_APPSTORE";
 				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Halo.app/Contents/MacOS/Halo";
 			};
 			name = "Release App Store";
 		};
