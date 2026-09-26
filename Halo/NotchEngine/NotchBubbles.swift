@@ -643,8 +643,7 @@ struct ResolvedNotchBubbleStyle {
 }
 
 struct NotchBubble: Identifiable, Equatable {
-    var id: String { kind.rawValue }
-
+    let id: String
     let kind: NotchBubbleKind
     var placement: NotchBubblePlacement = .automatic
     var size: CGFloat
@@ -742,6 +741,8 @@ struct NotchBubbleSettings: Codable, Equatable {
 
     // Experimental App Bubbles. Optional keeps older settings decodable.
     var appMinimizeBubblesEnabled: Bool?
+    // 0 means unlimited. Missing values preserve the original single-window behavior.
+    var appMinimizeBubbleLimit: Int?
 
     /// Per-provider appearance overrides. Missing entries inherit the global bubble defaults.
     var bubbleStyles: [String: NotchBubbleStyleOverride]?
@@ -796,6 +797,11 @@ struct NotchBubbleSettings: Codable, Equatable {
             value.musicArtworkZoom = min(1.8, max(1.0, musicArtworkZoom.isFinite ? musicArtworkZoom : 1.0))
         }
         value.maximumBubbles = min(99, max(1, maximumBubbles))
+        if let appMinimizeBubbleLimit {
+            value.appMinimizeBubbleLimit = appMinimizeBubbleLimit <= 0
+                ? 0
+                : min(99, max(1, appMinimizeBubbleLimit))
+        }
         if let bubbleStyles {
             var normalizedStyles: [String: NotchBubbleStyleOverride] = [:]
             for (key, override) in bubbleStyles {
@@ -950,6 +956,11 @@ struct NotchBubbleSettings: Codable, Equatable {
     var resolvedFilesDisplayMode: FileBubbleDisplayMode { filesDisplayMode ?? .latest }
     var resolvedAppMinimizeBubblesEnabled: Bool {
         HaloDistribution.current.supportsAppWindowBubbles && (appMinimizeBubblesEnabled ?? false)
+    }
+
+    var resolvedAppMinimizeBubbleLimit: Int {
+        let value = appMinimizeBubbleLimit ?? 1
+        return value <= 0 ? Int.max : min(99, max(1, value))
     }
 
     func acceptsHUDEvent(_ kind: HaloHUDEventKind) -> Bool {
@@ -1440,6 +1451,12 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
 
     var current: Entry? { entries.first }
 
+    func entry(activityID: String) -> Entry? {
+        guard activityID.hasPrefix("appWindow.") else { return nil }
+        let entryID = String(activityID.dropFirst("appWindow.".count))
+        return entries.first(where: { $0.id == entryID })
+    }
+
     private init() {}
 
     func setEnabled(_ enabled: Bool) {
@@ -1479,6 +1496,22 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
     @discardableResult
     func restoreCurrent() -> Bool {
         guard let entry = current else { return false }
+        return restore(entry: entry)
+    }
+
+    @discardableResult
+    func restore(activityID: String) -> Bool {
+        guard let entry = entry(activityID: activityID) else { return false }
+        return restore(entry: entry)
+    }
+
+    func dismiss(activityID: String) {
+        guard let entry = entry(activityID: activityID) else { return }
+        removeEntry(id: entry.id)
+    }
+
+    @discardableResult
+    private func restore(entry: Entry) -> Bool {
         guard let element = handles[entry.id] else {
             removeEntry(id: entry.id)
             return false
@@ -1646,34 +1679,6 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
 protocol BubbleProvider {
     var kind: NotchBubbleKind { get }
     func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity?
-}
-
-
-@MainActor
-private struct AppWindowBubbleProvider: BubbleProvider {
-    let kind: NotchBubbleKind = .appWindow
-
-    func activity(store: AppStore, settings: NotchBubbleSettings) -> NotchBubbleActivity? {
-        guard settings.resolvedAppMinimizeBubblesEnabled,
-              let entry = MinimizedWindowBubbleCenter.shared.current else { return nil }
-
-        let count = MinimizedWindowBubbleCenter.shared.entries.count
-        return NotchBubbleActivity(
-            id: "appWindow." + entry.id,
-            kind: kind,
-            sourceIdentifier: entry.bundleIdentifier ?? "pid.\(entry.processIdentifier)",
-            mode: .activeTask,
-            priority: .important,
-            title: entry.appName,
-            subtitle: count > 1
-                ? "\(entry.windowTitle) · \(count) minimized windows"
-                : entry.windowTitle,
-            icon: "macwindow",
-            progress: nil,
-            updatedAt: entry.minimizedAt,
-            expiresAt: nil
-        )
-    }
 }
 
 @MainActor
@@ -2011,7 +2016,6 @@ struct NotchBubblePolicyEngine {
 @MainActor
 struct BubbleRegistry {
     private let providers: [any BubbleProvider] = [
-        AppWindowBubbleProvider(),
         MusicBubbleProvider(),
         TimerBubbleProvider(),
         CalendarBubbleProvider(),
