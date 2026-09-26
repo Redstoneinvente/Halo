@@ -23,7 +23,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run core regression tests
         run: |
-          swift test -Xswiftc -D -Xswiftc HALO_DIRECT
+          set -o pipefail
+          xcodebuild \
+            -project Halo.xcodeproj \
+            -scheme "Halo Direct" \
+            -configuration "Debug Direct" \
+            -destination "platform=macOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            test
 
   halo-direct:
     name: Halo Direct
