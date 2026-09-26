@@ -6290,6 +6290,7 @@ struct NotchBubbleSettingsView: View {
     @ObservedObject var store: AppStore
     @ObservedObject private var settingsStore = NotchBubbleSettingsStore.shared
     @ObservedObject private var minimizedWindowCenter = MinimizedWindowBubbleCenter.shared
+    @ObservedObject private var appWindowPreviewCenter = AppWindowPreviewCenter.shared
     @State private var expandedGestureEditors = Set<String>()
 
     private var settings: NotchBubbleSettings {
@@ -6369,6 +6370,10 @@ struct NotchBubbleSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    Text("Force Touch an App Bubble to preview that minimized window without restoring it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     if minimizedWindowCenter.accessibilityGranted {
                         Label("Accessibility access granted", systemImage: "checkmark.circle.fill")
                             .font(.caption)
@@ -6381,6 +6386,23 @@ struct NotchBubbleSettingsView: View {
                             Spacer()
                             Button("Grant Access") {
                                 MinimizedWindowBubbleCenter.shared.requestAccessibilityPermission()
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+
+                    if appWindowPreviewCenter.screenCaptureGranted {
+                        Label("Screen Recording access granted for Force Touch previews", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        HStack {
+                            Label("Screen Recording access is required for window previews.", systemImage: "rectangle.on.rectangle.slash")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Grant Preview Access") {
+                                appWindowPreviewCenter.requestScreenCapturePermission()
                             }
                             .buttonStyle(.borderless)
                         }
