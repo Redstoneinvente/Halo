@@ -1677,6 +1677,7 @@ final class MinimizedWindowBubbleCenter: ObservableObject {
     private func removeEntry(id: String) {
         entries.removeAll { $0.id == id }
         handles.removeValue(forKey: id)
+        AppWindowPreviewCenter.shared.clear(activityID: "appWindow." + id)
         // Keep the ID in knownMinimized until a scan observes the window restored.
         // This prevents a short AX propagation delay from re-adding the same window.
     }
@@ -4280,9 +4281,12 @@ private struct NotchBubbleView: View {
     @ObservedObject private var settingsStore = NotchBubbleSettingsStore.shared
     @ObservedObject private var activityCenter = NotchBubbleActivityCenter.shared
     @ObservedObject private var minimizedWindowCenter = MinimizedWindowBubbleCenter.shared
+    @ObservedObject private var appWindowPreviewCenter = AppWindowPreviewCenter.shared
 
     @State private var hovering = false
     @State private var showingDetail = false
+    @State private var showingWindowPreview = false
+    @State private var lastForceTouchAt: Date?
     @State private var lastNonZeroAudioVolume: Float = 0.5
 
     init(activityID: String, kind: NotchBubbleKind, store: AppStore, workspace: WorkspaceStore, surfaceState: SurfaceState) {
@@ -4336,6 +4340,25 @@ private struct NotchBubbleView: View {
             }
             .onChange(of: showingDetail) { _ in
                 updateInteractionProtection()
+            }
+            .onChange(of: showingWindowPreview) { _ in
+                updateInteractionProtection()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .haloNotchBubbleForceTouch)) { note in
+                guard kind == .appWindow,
+                      note.object as? String == activityID,
+                      let entry = appWindowEntry else {
+                    return
+                }
+
+                lastForceTouchAt = Date()
+                showingDetail = false
+                showingWindowPreview = true
+                appWindowPreviewCenter.loadPreview(
+                    activityID: activityID,
+                    entry: entry,
+                    forceRefresh: true
+                )
             }
             .onReceive(NotificationCenter.default.publisher(for: .haloNotchBubbleDirectionalGesture)) { note in
                 guard note.object as? String == activityID,
@@ -4411,6 +4434,12 @@ private struct NotchBubbleView: View {
                     showingDetail = false
                 }
             }
+            .popover(isPresented: $showingWindowPreview, arrowEdge: .top) {
+                appWindowPreviewCard
+                    .onExitCommand {
+                        showingWindowPreview = false
+                    }
+            }
             .contextMenu {
                 Button("Dismiss current activity") {
                     dismissCurrentActivity()
@@ -4457,6 +4486,108 @@ private struct NotchBubbleView: View {
 
     private var appWindowEntry: MinimizedWindowBubbleCenter.Entry? {
         minimizedWindowCenter.entry(activityID: activityID)
+    }
+
+    @ViewBuilder
+    private var appWindowPreviewCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let entry = appWindowEntry {
+                HStack(spacing: 10) {
+                    Group {
+                        if let icon = minimizedWindowCenter.appIcon(for: entry) {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .scaledToFit()
+                        } else {
+                            Image(systemName: "macwindow")
+                                .font(.title2)
+                        }
+                    }
+                    .frame(width: 36, height: 36)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry.appName)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(entry.windowTitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    Button("Restore") {
+                        if minimizedWindowCenter.restore(activityID: activityID) {
+                            activityCenter.clearDismissal(kind: .appWindow)
+                        }
+                        showingWindowPreview = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
+                Group {
+                    if let image = appWindowPreviewCenter.image(for: activityID) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: 520, maxHeight: 340)
+                            .background(Color.black.opacity(0.35))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    } else if appWindowPreviewCenter.loadingIDs.contains(activityID) {
+                        VStack(spacing: 10) {
+                            ProgressView()
+                            Text("Loading window preview…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                    } else if let error = appWindowPreviewCenter.error(for: activityID) {
+                        VStack(spacing: 10) {
+                            Image(systemName: "rectangle.on.rectangle.slash")
+                                .font(.system(size: 28))
+                                .foregroundStyle(.secondary)
+                            Text(error)
+                                .font(.callout)
+                                .multilineTextAlignment(.center)
+                                .foregroundStyle(.secondary)
+
+                            if !appWindowPreviewCenter.screenCaptureGranted {
+                                Button("Grant Screen Recording Access") {
+                                    appWindowPreviewCenter.requestScreenCapturePermission()
+                                }
+                                .buttonStyle(.bordered)
+                            } else {
+                                Button("Retry Preview") {
+                                    appWindowPreviewCenter.loadPreview(
+                                        activityID: activityID,
+                                        entry: entry,
+                                        forceRefresh: true
+                                    )
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding(20)
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                    } else {
+                        Text("Force Touch this App Bubble to load a preview.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 220)
+                    }
+                }
+
+                Text("Force Touch previews the minimized window without restoring it.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text("This minimized window is no longer available.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .frame(width: 548)
     }
 
     @ViewBuilder
@@ -5840,6 +5971,12 @@ private struct NotchBubbleView: View {
     }
 
     private func handlePrimaryTap() {
+        if kind == .appWindow,
+           let lastForceTouchAt,
+           Date().timeIntervalSince(lastForceTouchAt) < 0.7 {
+            return
+        }
+
         if kind == .appWindow {
             if minimizedWindowCenter.restore(activityID: activityID) {
                 activityCenter.clearDismissal(kind: .appWindow)
@@ -6063,7 +6200,7 @@ private struct NotchBubbleView: View {
     private func updateInteractionProtection() {
         activityCenter.setInteracting(
             kind: kind,
-            interacting: hovering || showingDetail
+            interacting: hovering || showingDetail || showingWindowPreview
         )
     }
 
