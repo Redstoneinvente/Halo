@@ -2090,7 +2090,7 @@ struct BubbleRegistry {
         return selected.map { activity in
             let style = effectiveSettings.resolvedStyle(for: activity.kind)
             return NotchBubble(
-                id: activity.id,
+                id: activity.kind == .appWindow ? activity.id : activity.kind.rawValue,
                 kind: activity.kind,
                 size: style.size,
                 shape: style.shape,
