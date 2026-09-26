@@ -235,6 +235,17 @@ final class HaloHUDEngine {
     }
 
     func configurationDidChange() {
+        if simpleMode {
+            tearDownInput()
+            tapState.replace([])
+            queue.removeAll()
+            editorPreviewPinned = false
+            hide(immediate: true)
+            removeMenuPresentation()
+            HaloHUDNotchBridge.shared.dismiss()
+            return
+        }
+
         configureInput()
         if model.visible && !editorPreviewPinned {
             let settings = resolvedSettings
@@ -244,6 +255,7 @@ final class HaloHUDEngine {
         }
     }
 
+    private var simpleMode: Bool { workspace.settings.resolvedNotchMode == .simple }
     private var resolvedSettings: HaloHUDSettings { workspace.effectiveLayout.hud ?? HaloHUDSettings() }
 
     private func createPanel() {
@@ -256,6 +268,10 @@ final class HaloHUDEngine {
 
     private func configureInput() {
         tearDownInput()
+        guard !simpleMode else {
+            tapState.replace([])
+            return
+        }
         let settings = resolvedSettings
         guard settings.enabled else { tapState.replace([]); return }
         workspace.audio.refresh()
@@ -295,6 +311,7 @@ final class HaloHUDEngine {
     private func reenableTap() { if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) } }
 
     private func handleObserved(_ event: NSEvent) {
+        guard !simpleMode else { return }
         if event.type == .flagsChanged {
             let caps = event.modifierFlags.contains(.capsLock)
             guard caps != lastCapsLock else { return }; lastCapsLock = caps
@@ -325,6 +342,7 @@ final class HaloHUDEngine {
     }
 
     private func handleReplacementKey(_ key: Int) {
+        guard !simpleMode else { return }
         switch key {
         case 0, 1, 7:
             workspace.audio.refresh(); let current = min(1, max(0, workspace.audio.volume)); let step: Float32 = 0.0625
@@ -381,6 +399,7 @@ final class HaloHUDEngine {
     }
 
     private func preview(_ note: Notification) {
+        guard !simpleMode else { return }
         let raw = note.userInfo?["kind"] as? String ?? "volume"
         let value = (note.userInfo?["value"] as? Double) ?? 0.68
         let persistent = note.userInfo?["persistent"] as? Bool ?? false
@@ -402,6 +421,7 @@ final class HaloHUDEngine {
     }
 
     func emit(_ event: HaloHUDEvent, force: Bool = false) {
+        guard !simpleMode else { return }
         guard HaloFeatureAccess.shared.allows(hudEvent: event.kind) else { return }
 
         // Notch Bubbles consume Halo HUD's verified event stream instead of re-detecting
@@ -436,6 +456,7 @@ final class HaloHUDEngine {
     }
 
     private func route(_ event: HaloHUDEvent, configuration: HaloHUDConfiguration, depth: Int) {
+        guard !simpleMode else { return }
         guard depth < 3 else { return }
         switch configuration.presentation.target {
         case .disabled: return
