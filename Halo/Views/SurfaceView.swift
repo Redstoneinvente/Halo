@@ -4193,7 +4193,7 @@ private struct SimpleNotchWidgetView: View {
                     Circle().fill(accent).frame(width: 5 * scale, height: 5 * scale)
                 }
                 .frame(width: 68 * scale, height: 68 * scale)
-                VStack(alignment: .leading, spacing: 5 * scale) {
+                VStack(alignment: .leading, spacing: 4 * scale) {
                     Text(context.date.formatted(.dateTime.weekday(.abbreviated)).uppercased())
                         .font(.system(size: 9 * scale, weight: .semibold))
                         .tracking(1.4)
@@ -5252,7 +5252,7 @@ private struct SimpleNotchWidgetView: View {
             }
 
             LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 4 * scale), count: 6),
+                columns: Array(repeating: GridItem(.flexible(), spacing: 5 * scale), count: 6),
                 spacing: 3 * scale
             ) {
                 ForEach(simpleYearMonths, id: \.self) { month in
@@ -5285,7 +5285,7 @@ private struct SimpleNotchWidgetView: View {
         return VStack(alignment: .leading, spacing: 1.5 * scale) {
             HStack(spacing: 3 * scale) {
                 Text(month.formatted(.dateTime.month(.abbreviated)).uppercased())
-                    .font(.system(size: 5.5 * scale, weight: .bold, design: .rounded))
+                    .font(.system(size: 6.3 * scale, weight: .bold, design: .rounded))
                     .foregroundStyle(
                         simpleCalendar.isDate(month, equalTo: Date(), toGranularity: .month)
                             ? accent
@@ -5295,8 +5295,8 @@ private struct SimpleNotchWidgetView: View {
             }
 
             LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 0.5 * scale), count: 7),
-                spacing: 0.5 * scale
+                columns: Array(repeating: GridItem(.flexible(), spacing: 0.35 * scale), count: 7),
+                spacing: 0.35 * scale
             ) {
                 ForEach(Array(cells.enumerated()), id: \.offset) { _, day in
                     if let day {
@@ -5309,22 +5309,22 @@ private struct SimpleNotchWidgetView: View {
                         )
                         let today = date.map { simpleCalendar.isDateInToday($0) } ?? false
                         Text(String(day))
-                            .font(.system(size: 3.8 * scale, weight: today ? .bold : .medium, design: .rounded))
+                            .font(.system(size: 4.7 * scale, weight: today ? .bold : .medium, design: .rounded))
                             .monospacedDigit()
-                            .frame(maxWidth: .infinity, minHeight: 5.5 * scale)
+                            .frame(maxWidth: .infinity, minHeight: 6.0 * scale)
                             .background(
                                 today ? accent : Color.clear,
                                 in: RoundedRectangle(cornerRadius: 2.5 * scale, style: .continuous)
                             )
                             .foregroundStyle(today ? Color.black : Color.white.opacity(0.72))
                     } else {
-                        Color.clear.frame(minHeight: 5.5 * scale)
+                        Color.clear.frame(minHeight: 6.0 * scale)
                     }
                 }
             }
         }
-        .padding(2.5 * scale)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 6 * scale, style: .continuous))
+        .padding(2 * scale)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 6 * scale, style: .continuous))
     }
 
     private func simpleMonthDay(_ day: Date) -> some View {
