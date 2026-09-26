@@ -6583,6 +6583,18 @@ struct NotchBubbleSettingsView: View {
                     }
                     .pickerStyle(.segmented)
 
+                    Toggle(
+                        "Animate windows into App Bubbles",
+                        isOn: Binding(
+                            get: { settings.resolvedAppMinimizeBubbleAnimationEnabled },
+                            set: { enabled in
+                                var next = settingsStore.settings
+                                next.appMinimizeBubbleAnimationEnabled = enabled
+                                settingsStore.settings = next.normalized()
+                            }
+                        )
+                    )
+
                     Picker(
                         "Maximum minimized windows",
                         selection: Binding(
