@@ -411,7 +411,6 @@ final class HaloReviewPromptCoordinator: ObservableObject {
     private let defaults = UserDefaults.standard
     private let suppressedKey = "HaloReviewPromptSuppressedV1"
     private let completedKey = "HaloReviewPromptCompletedV1"
-    private let nextEligibleKey = "HaloReviewPromptNextEligibleV1"
     private var started = false
     private var evaluationTask: Task<Void, Never>?
     private var autoDismissTask: Task<Void, Never>?
@@ -448,10 +447,6 @@ final class HaloReviewPromptCoordinator: ObservableObject {
 
     func openReviewCenter() {
         dismiss()
-        defaults.set(
-            Date().addingTimeInterval(30 * 86_400),
-            forKey: nextEligibleKey
-        )
         NotificationCenter.default.post(name: .init("HaloOpenSettings"), object: nil)
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .init("HaloOpenReviews"), object: nil)
@@ -496,10 +491,6 @@ final class HaloReviewPromptCoordinator: ObservableObject {
         autoDismissTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 14_000_000_000)
             guard !Task.isCancelled, let self, self.isPresented else { return }
-            self.defaults.set(
-                Date().addingTimeInterval(7 * 86_400),
-                forKey: self.nextEligibleKey
-            )
             self.dismiss()
         }
     }
