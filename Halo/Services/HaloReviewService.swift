@@ -413,7 +413,6 @@ final class HaloReviewPromptCoordinator: ObservableObject {
     private let completedKey = "HaloReviewPromptCompletedV1"
     private var started = false
     private var evaluationTask: Task<Void, Never>?
-    private var autoDismissTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
 
     private init() {}
@@ -459,8 +458,6 @@ final class HaloReviewPromptCoordinator: ObservableObject {
     }
 
     func dismiss() {
-        autoDismissTask?.cancel()
-        autoDismissTask = nil
         if isPresented { isPresented = false }
     }
 
@@ -486,12 +483,8 @@ final class HaloReviewPromptCoordinator: ObservableObject {
     }
 
     private func present() {
+        // The review nudge is intentionally persistent once shown. It stays open until
+        // the user chooses Review or Don't remind me, rather than collapsing on a timer.
         isPresented = true
-        autoDismissTask?.cancel()
-        autoDismissTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 14_000_000_000)
-            guard !Task.isCancelled, let self, self.isPresented else { return }
-            self.dismiss()
-        }
     }
 }
