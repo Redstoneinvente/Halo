@@ -3146,21 +3146,7 @@ struct SurfaceView: View {
                         Circle().fill(store.deadline == nil ? accent : .green).frame(width: 6, height: 6)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                       } else if !visuallyExpanded {
-                        if reviewPromptActive {
-                            VStack(spacing: 0) {
-                                ClosedNotchView(
-                                    store: store,
-                                    workspace: workspace,
-                                    layout: layout,
-                                    occlusion: state.closedOcclusion,
-                                    referenceWidth: state.compactWidth
-                                )
-                                .frame(height: reviewPromptBaseHeight)
-
-                                HaloReviewNotchPromptView()
-                                    .frame(height: reviewPromptExtraHeight)
-                            }
-                        } else if transferContextActive {
+                        if transferContextActive {
                             TransferClosedContextView(monitor: transfer, surfaceState: state)
                         } else if clipboardContextActive {
                             ClipboardClosedContextView(monitor: clipboardCI, surfaceState: state)
@@ -3361,6 +3347,27 @@ struct SurfaceView: View {
                         .frame(height: max(40, state.compactHeight))
                         .zIndex(3)
                 }
+            }
+
+            // The compact renderer is allowed to draw across the entire resized surface.
+            // Keep the review affordance in its own top-level layer so closed-notch content
+            // can never paint over it. It occupies only the extra height added for the prompt.
+            if reviewPromptActive && !visuallyExpanded {
+                VStack(spacing: 0) {
+                    Spacer(minLength: reviewPromptBaseHeight)
+
+                    HaloReviewNotchPromptView()
+                        .frame(maxWidth: .infinity)
+                        .frame(height: reviewPromptExtraHeight)
+                        .background(.black.opacity(0.96))
+                        .overlay(alignment: .top) {
+                            Rectangle()
+                                .fill(.white.opacity(0.08))
+                                .frame(height: 1)
+                        }
+                }
+                .frame(width: surfaceProxy.size.width, height: surfaceProxy.size.height, alignment: .top)
+                .zIndex(100)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -3718,20 +3725,6 @@ struct SurfaceView: View {
                     .scaleEffect(simpleOpenContentVisible ? 1 : 0.975, anchor: .top)
                     .offset(y: simpleOpenContentVisible ? 0 : -7)
             }
-        } else if reviewPromptActive {
-            VStack(spacing: 0) {
-                SimpleClosedNotchView(
-                    store: store,
-                    workspace: workspace,
-                    occlusion: state.closedOcclusion
-                )
-                .frame(width: state.compactWidth, height: reviewPromptBaseHeight)
-                .contentShape(Rectangle())
-
-                HaloReviewNotchPromptView()
-                    .frame(height: reviewPromptExtraHeight)
-            }
-            .frame(width: state.compactWidth, height: state.compactHeight, alignment: .top)
         } else {
             SimpleClosedNotchView(
                 store: store,
