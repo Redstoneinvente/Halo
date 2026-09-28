@@ -159,6 +159,84 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+
+    // Customer reviews submitted from Halo. Public website reads use the trusted
+    // Cloudflare/service-account path and therefore do not require public Firestore reads.
+    // A signed-in verified user can only see and manage documents they own.
+    match /customerReviews/{reviewId} {
+      allow get, list: if isVerifiedHaloUser()
+                       && resource.data.uid == request.auth.uid;
+
+      allow create: if isVerifiedHaloUser()
+                    && request.resource.data.keys().hasOnly([
+                      'schemaVersion',
+                      'uid',
+                      'name',
+                      'title',
+                      'review',
+                      'rating',
+                      'source',
+                      'sourceUrl',
+                      'avatarUrl',
+                      'published',
+                      'featured',
+                      'verifiedPurchase',
+                      'date',
+                      'createdAt',
+                      'updatedAt'
+                    ])
+                    && request.resource.data.schemaVersion == 1
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() >= 2
+                    && request.resource.data.name.size() <= 60
+                    && request.resource.data.title is string
+                    && request.resource.data.title.size() <= 100
+                    && request.resource.data.review is string
+                    && request.resource.data.review.size() >= 10
+                    && request.resource.data.review.size() <= 2000
+                    && request.resource.data.rating is int
+                    && request.resource.data.rating >= 1
+                    && request.resource.data.rating <= 5
+                    && request.resource.data.source == 'Halo app'
+                    && request.resource.data.sourceUrl == ''
+                    && request.resource.data.avatarUrl == ''
+                    && request.resource.data.published == false
+                    && request.resource.data.featured == false
+                    && request.resource.data.verifiedPurchase == false
+                    && request.resource.data.date == request.time
+                    && request.resource.data.createdAt == request.time
+                    && request.resource.data.updatedAt == request.time;
+
+      allow update: if isVerifiedHaloUser()
+                    && resource.data.uid == request.auth.uid
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                      'name',
+                      'title',
+                      'review',
+                      'rating',
+                      'published',
+                      'updatedAt'
+                    ])
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() >= 2
+                    && request.resource.data.name.size() <= 60
+                    && request.resource.data.title is string
+                    && request.resource.data.title.size() <= 100
+                    && request.resource.data.review is string
+                    && request.resource.data.review.size() >= 10
+                    && request.resource.data.review.size() <= 2000
+                    && request.resource.data.rating is int
+                    && request.resource.data.rating >= 1
+                    && request.resource.data.rating <= 5
+                    && request.resource.data.published == false
+                    && request.resource.data.updatedAt == request.time;
+
+      allow delete: if isVerifiedHaloUser()
+                    && resource.data.uid == request.auth.uid;
+    }
+
     // Halo-managed license documents.
     // PK_ press keys live in pressLicenses. GK_ giveaway keys should live in
     // giveawayLicenses (Halo also has a client-side fallback for transitional

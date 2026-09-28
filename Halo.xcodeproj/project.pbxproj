@@ -88,6 +88,8 @@
 		F8AFA0D33061155D004D7B68 /* Halo 2.storekit in Resources */ = {isa = PBXBuildFile; fileRef = F8AFA0D23061155D004D7B68 /* Halo 2.storekit */; };
 		FBAC00000000000000000001 /* Services/HaloFeedbackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */; };
 		FBAC00000000000000000002 /* Views/HaloFeedbackCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */; };
+		A7E500000000000000000001 /* Services/HaloReviewService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7E500000000000000000101 /* Services/HaloReviewService.swift */; };
+		A7E500000000000000000002 /* Views/HaloReviewCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7E500000000000000000102 /* Views/HaloReviewCenterView.swift */; };
 		FBAC00000000000000000301 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000300 /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
@@ -232,6 +234,8 @@
 		F8AFA0D23061155D004D7B68 /* Halo 2.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Halo 2.storekit"; sourceTree = "<group>"; };
 		FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HaloFeedbackService.swift; sourceTree = "<group>"; };
 		FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HaloFeedbackCenterView.swift; sourceTree = "<group>"; };
+		A7E500000000000000000101 /* Services/HaloReviewService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HaloReviewService.swift; sourceTree = "<group>"; };
+		A7E500000000000000000102 /* Views/HaloReviewCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HaloReviewCenterView.swift; sourceTree = "<group>"; };
 		FBAC00000000000000000300 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -332,6 +336,8 @@
 				00000000000000000000006E /* Services/CaptureService.swift */,
 				FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */,
 				FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */,
+				A7E500000000000000000101 /* Services/HaloReviewService.swift */,
+				A7E500000000000000000102 /* Views/HaloReviewCenterView.swift */,
 				00000000000000000000006F /* Core/ExtensionContracts.swift */,
 				A57A00000000000000000101 /* Core/AppStoreLicensing.swift */,
 				D15700000000000000000101 /* Core/HaloDistribution.swift */,
@@ -680,6 +686,8 @@
 				0000000000000000000000D2 /* Services/CaptureService.swift in Sources */,
 				FBAC00000000000000000001 /* Services/HaloFeedbackService.swift in Sources */,
 				FBAC00000000000000000002 /* Views/HaloFeedbackCenterView.swift in Sources */,
+				A7E500000000000000000001 /* Services/HaloReviewService.swift in Sources */,
+				A7E500000000000000000002 /* Views/HaloReviewCenterView.swift in Sources */,
 				0000000000000000000000D3 /* Core/ExtensionContracts.swift in Sources */,
 				A57A00000000000000000001 /* Core/AppStoreLicensing.swift in Sources */,
 				D15700000000000000000001 /* Core/HaloDistribution.swift in Sources */,

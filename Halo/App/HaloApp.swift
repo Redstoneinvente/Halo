@@ -75,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         HaloFeedbackService.shared.start()
+        HaloReviewPromptCoordinator.shared.start()
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(metricKitCrashDetected),
@@ -108,6 +109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let feedbackItem = NSMenuItem(title: "Send Feedback…", action: #selector(openFeedback), keyEquivalent: "")
         feedbackItem.target = self
         menu.addItem(feedbackItem)
+
+        let reviewItem = NSMenuItem(title: "Review Halo…", action: #selector(openReviews), keyEquivalent: "")
+        reviewItem.target = self
+        menu.addItem(reviewItem)
 
         if HaloDistribution.current.supportsSparkle {
             let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
@@ -487,6 +492,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         HaloFeedbackService.shared.select(.bug)
         openSettings()
         NotificationCenter.default.post(name: .init("HaloOpenFeedback"), object: nil)
+    }
+    @objc private func openReviews() {
+        openSettings()
+        NotificationCenter.default.post(name: .init("HaloOpenReviews"), object: nil)
     }
     @objc private func checkForUpdates() {
         guard HaloDistribution.current.supportsSparkle else { return }

@@ -2762,12 +2762,14 @@ struct SurfaceView: View {
     @ObservedObject private var integrationCI = IntegrationCIRuntime.shared
     @ObservedObject private var runtimeGate = HaloRuntimeGate.shared
     @ObservedObject private var featureAccess = HaloFeatureAccess.shared
+    @ObservedObject private var reviewPrompt = HaloReviewPromptCoordinator.shared
     @State private var clipboardOpenedNotch = false
     @State private var integrationAutoOpeningSurface = false
     @State private var teleprompterActive = false
     @State private var visualWorkspaceSurfacePresented = false
     @State private var simpleOpenContentVisible = false
     @State private var simpleAnimationToken = UUID()
+    @State private var reviewPromptBaseCompactHeight: CGFloat?
     @AppStorage("HaloContextTeleprompterEnabled") private var teleprompterCIEnabled = true
     @AppStorage("HaloContextTeleprompterPriority") private var teleprompterPriority = 70.0
     @AppStorage("HaloContextTransferEnabled") private var transferCIEnabled = true
@@ -2805,6 +2807,50 @@ struct SurfaceView: View {
         featureAccess.effectiveLayout(state.layoutOverride ?? workspace.effectiveLayout)
     }
     private var simpleMode: Bool { workspace.settings.resolvedNotchMode == .simple }
+    private let reviewPromptExtraHeight: CGFloat = 54
+
+    private var reviewPromptTargetsThisSurface: Bool {
+        guard reviewPrompt.isPresented,
+              runtimeGate.isReady,
+              !state.expanded,
+              !state.presentationExpanded,
+              !state.editingGeometry,
+              state.activeCIIdentifier == nil else { return false }
+
+        guard let main = NSScreen.main else {
+            return NSScreen.screens.first.map { WindowManager.displayID($0) == state.displayID } ?? true
+        }
+        return WindowManager.displayID(main) == state.displayID
+    }
+
+    private var reviewPromptActive: Bool {
+        reviewPromptTargetsThisSurface && reviewPromptBaseCompactHeight != nil
+    }
+
+    private var reviewPromptBaseHeight: CGFloat {
+        reviewPromptBaseCompactHeight ?? max(state.physicalNotchHeight, state.compactHeight - reviewPromptExtraHeight)
+    }
+
+    private func synchronizeReviewPromptGeometry() {
+        if reviewPromptTargetsThisSurface {
+            if reviewPromptBaseCompactHeight == nil {
+                // Do not steal a compact-height override from another transient surface feature.
+                guard state.contextPreferredCompactHeight == nil else { return }
+                reviewPromptBaseCompactHeight = state.compactHeight
+            }
+            guard let base = reviewPromptBaseCompactHeight else { return }
+            let requested = min(220, max(base + reviewPromptExtraHeight, state.physicalNotchHeight + reviewPromptExtraHeight))
+            if state.contextPreferredCompactHeight != requested {
+                state.contextPreferredCompactHeight = requested
+            }
+            return
+        }
+
+        if reviewPromptBaseCompactHeight != nil {
+            state.contextPreferredCompactHeight = nil
+            reviewPromptBaseCompactHeight = nil
+        }
+    }
     private var contextOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
     private var bluetoothEligible: Bool {
         guard bluetoothCIEnabled else { return false }
@@ -3100,7 +3146,21 @@ struct SurfaceView: View {
                         Circle().fill(store.deadline == nil ? accent : .green).frame(width: 6, height: 6)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                       } else if !visuallyExpanded {
-                        if transferContextActive {
+                        if reviewPromptActive {
+                            VStack(spacing: 0) {
+                                ClosedNotchView(
+                                    store: store,
+                                    workspace: workspace,
+                                    layout: layout,
+                                    occlusion: state.closedOcclusion,
+                                    referenceWidth: state.compactWidth
+                                )
+                                .frame(height: reviewPromptBaseHeight)
+
+                                HaloReviewNotchPromptView()
+                                    .frame(height: reviewPromptExtraHeight)
+                            }
+                        } else if transferContextActive {
                             TransferClosedContextView(monitor: transfer, surfaceState: state)
                         } else if clipboardContextActive {
                             ClipboardClosedContextView(monitor: clipboardCI, surfaceState: state)
@@ -3128,6 +3188,7 @@ struct SurfaceView: View {
                     .frame(height: visuallyExpanded ? max(40, state.compactHeight) : state.compactHeight)
                     .contentShape(Rectangle())
                     .onTapGesture {
+                        guard !reviewPromptActive else { return }
                         guard !teleprompterActive else { return }
                         if state.expanded && state.pinned { return }
                         state.expanded.toggle()
@@ -3342,6 +3403,15 @@ struct SurfaceView: View {
                     }
                 }
             }
+        }
+        .onReceive(reviewPrompt.$isPresented) { _ in
+            synchronizeReviewPromptGeometry()
+        }
+        .onChange(of: state.expanded) { _ in
+            synchronizeReviewPromptGeometry()
+        }
+        .onChange(of: state.activeCIIdentifier) { _ in
+            synchronizeReviewPromptGeometry()
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { note in
             guard featureAccess.allows(.customCI),
@@ -3648,6 +3718,20 @@ struct SurfaceView: View {
                     .scaleEffect(simpleOpenContentVisible ? 1 : 0.975, anchor: .top)
                     .offset(y: simpleOpenContentVisible ? 0 : -7)
             }
+        } else if reviewPromptActive {
+            VStack(spacing: 0) {
+                SimpleClosedNotchView(
+                    store: store,
+                    workspace: workspace,
+                    occlusion: state.closedOcclusion
+                )
+                .frame(width: state.compactWidth, height: reviewPromptBaseHeight)
+                .contentShape(Rectangle())
+
+                HaloReviewNotchPromptView()
+                    .frame(height: reviewPromptExtraHeight)
+            }
+            .frame(width: state.compactWidth, height: state.compactHeight, alignment: .top)
         } else {
             SimpleClosedNotchView(
                 store: store,

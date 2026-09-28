@@ -61,7 +61,7 @@ struct SettingsView: View {
                 SidebarGroup(
                     title: "System & Support",
                     icon: "gearshape.2",
-                    items: ["Displays", "Feedback & Support", "About"]
+                    items: ["Displays", "Reviews", "Feedback & Support", "About"]
                 )
             ]
         }
@@ -95,7 +95,7 @@ struct SettingsView: View {
             SidebarGroup(
                 title: "System & Support",
                 icon: "gearshape.2",
-                items: ["Displays", "Plugins", "Feedback & Support", "About"]
+                items: ["Displays", "Plugins", "Reviews", "Feedback & Support", "About"]
             )
         ]
     }
@@ -381,6 +381,14 @@ struct SettingsView: View {
             section = "Feedback & Support"
             expandedSidebarGroups.insert("System & Support")
         }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloOpenReviews"))) { _ in
+            section = "Reviews"
+            expandedSidebarGroups.insert("System & Support")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloOpenAccount"))) { _ in
+            section = "Account & License"
+            expandedSidebarGroups.insert("Core")
+        }
         .onDisappear {
             endDirectGeometryEditingIfNeeded()
         }
@@ -431,6 +439,7 @@ struct SettingsView: View {
         case "Automation": return "bolt"
         case "Displays": return "display.2"
         case "Plugins": return "puzzlepiece.extension"
+        case "Reviews": return "star.bubble.fill"
         case "Feedback & Support": return "bubble.left.and.bubble.right.fill"
         case "Privacy": return "hand.raised"
         case "Update Animation": return "arrow.down.circle"
@@ -581,6 +590,8 @@ struct SettingsView: View {
             } else {
                 HaloAccountLicenseSettingsView()
             }
+        case "Reviews":
+            HaloReviewCenterView()
         case "Feedback & Support":
             HaloFeedbackCenterView()
         case "Schedules":
