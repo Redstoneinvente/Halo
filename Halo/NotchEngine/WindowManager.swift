@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import SwiftUI
 import Combine
 import QuartzCore
@@ -809,6 +810,7 @@ final class WindowManager {
     private var initialActivationPending = false
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
+    private var appAutomationHiddenDisplayIDs = Set<String>()
     private var settingsSurfacePreviewExpanded: Bool?
     private var settingsSurfacePreviewDisplayID: String?
     private var settingsSurfacePreviewPreviousExpanded: [String: Bool] = [:]
@@ -861,6 +863,15 @@ final class WindowManager {
     func start() {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refreshAppAutomationVisibilityIfNeeded() }
+            .store(in: &subscriptions)
+        Timer.publish(every: 0.75, on: .main, in: .common)
+            .autoconnect()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refreshAppAutomationVisibilityIfNeeded() }
+            .store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloPreviewActivationSequence"))
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.previewActivation() }.store(in: &subscriptions)
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
@@ -2452,6 +2463,159 @@ final class WindowManager {
         return true
     }
 
+    private struct ForegroundWindowCoverage {
+        let bundleIdentifier: String
+        var maximizedDisplayIDs: Set<String>
+        var fullScreenDisplayIDs: Set<String>
+    }
+
+    private func refreshAppAutomationVisibilityIfNeeded() {
+        guard store.workspace.settings.resolvedAppNotchHideRules.contains(where: {
+            $0.enabled && !$0.bundleIdentifier.isEmpty
+        }) else {
+            if !appAutomationHiddenDisplayIDs.isEmpty {
+                appAutomationHiddenDisplayIDs.removeAll()
+                reconcile()
+            }
+            return
+        }
+
+        let screens = store.configuration.allDisplays ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
+        let next = resolvedAppAutomationHiddenDisplayIDs(for: screens)
+        guard next != appAutomationHiddenDisplayIDs else { return }
+        appAutomationHiddenDisplayIDs = next
+        reconcile()
+    }
+
+    private func resolvedAppAutomationHiddenDisplayIDs(for screens: [NSScreen]) -> Set<String> {
+        let rules = store.workspace.settings.resolvedAppNotchHideRules.filter {
+            $0.enabled && !$0.bundleIdentifier.isEmpty
+        }
+        guard !rules.isEmpty,
+              let coverage = foregroundWindowCoverage(for: screens) else {
+            return []
+        }
+
+        var hidden = Set<String>()
+
+        for rule in rules where rule.bundleIdentifier == coverage.bundleIdentifier {
+            for screen in screens {
+                let displayID = Self.displayID(screen)
+                guard rule.targets(displayID: displayID) else { continue }
+
+                let matches: Bool
+                switch rule.condition {
+                case .foreground:
+                    matches = true
+                case .maximized:
+                    matches = coverage.maximizedDisplayIDs.contains(displayID)
+                case .fullScreen:
+                    matches = coverage.fullScreenDisplayIDs.contains(displayID)
+                case .maximizedOrFullScreen:
+                    matches = coverage.maximizedDisplayIDs.contains(displayID) ||
+                        coverage.fullScreenDisplayIDs.contains(displayID)
+                }
+
+                if matches {
+                    hidden.insert(displayID)
+                }
+            }
+        }
+
+        return hidden
+    }
+
+    private func foregroundWindowCoverage(for screens: [NSScreen]) -> ForegroundWindowCoverage? {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              let bundleIdentifier = app.bundleIdentifier,
+              !bundleIdentifier.isEmpty else {
+            return nil
+        }
+
+        var result = ForegroundWindowCoverage(
+            bundleIdentifier: bundleIdentifier,
+            maximizedDisplayIDs: [],
+            fullScreenDisplayIDs: []
+        )
+
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return result
+        }
+
+        let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
+        let pid = app.processIdentifier
+
+        for windowInfo in windows {
+            guard (windowInfo[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
+                  (windowInfo[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  ((windowInfo[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1) > 0.01,
+                  let bounds = windowInfo[kCGWindowBounds as String] as? [String: Any],
+                  let x = (bounds["X"] as? NSNumber)?.doubleValue,
+                  let y = (bounds["Y"] as? NSNumber)?.doubleValue,
+                  let width = (bounds["Width"] as? NSNumber)?.doubleValue,
+                  let height = (bounds["Height"] as? NSNumber)?.doubleValue,
+                  width >= 160,
+                  height >= 100 else {
+                continue
+            }
+
+            let windowFrame = CGRect(
+                x: x,
+                y: Double(primaryTop) - y - height,
+                width: width,
+                height: height
+            )
+
+            guard let screen = bestScreen(for: windowFrame, screens: screens) else { continue }
+            let displayID = Self.displayID(screen)
+
+            if window(windowFrame, effectivelyCovers: screen.frame, minimumCoverage: 0.96, edgeTolerance: 18) {
+                result.fullScreenDisplayIDs.insert(displayID)
+                continue
+            }
+
+            if window(windowFrame, effectivelyCovers: screen.visibleFrame, minimumCoverage: 0.90, edgeTolerance: 40) {
+                result.maximizedDisplayIDs.insert(displayID)
+            }
+        }
+
+        return result
+    }
+
+    private func bestScreen(for windowFrame: CGRect, screens: [NSScreen]) -> NSScreen? {
+        screens.max { lhs, rhs in
+            intersectionArea(windowFrame, lhs.frame) < intersectionArea(windowFrame, rhs.frame)
+        }.flatMap { screen in
+            intersectionArea(windowFrame, screen.frame) > 1 ? screen : nil
+        }
+    }
+
+    private func intersectionArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        let intersection = lhs.intersection(rhs)
+        guard !intersection.isNull, !intersection.isEmpty else { return 0 }
+        return max(0, intersection.width) * max(0, intersection.height)
+    }
+
+    private func window(
+        _ windowFrame: CGRect,
+        effectivelyCovers target: CGRect,
+        minimumCoverage: CGFloat,
+        edgeTolerance: CGFloat
+    ) -> Bool {
+        guard target.width > 0, target.height > 0 else { return false }
+
+        let targetArea = target.width * target.height
+        let coverage = intersectionArea(windowFrame, target) / targetArea
+        guard coverage >= minimumCoverage else { return false }
+
+        let reachesLeft = windowFrame.minX <= target.minX + edgeTolerance
+        let reachesRight = windowFrame.maxX >= target.maxX - edgeTolerance
+        let reachesBottom = windowFrame.minY <= target.minY + edgeTolerance
+        let reachesTop = windowFrame.maxY >= target.maxY - edgeTolerance
+        return reachesLeft && reachesRight && reachesBottom && reachesTop
+    }
+
     private func reconcile() {
         let simpleMode = store.workspace.settings.resolvedNotchMode == .simple
         if simpleMode {
@@ -2465,12 +2629,15 @@ final class WindowManager {
         }
 
         let screens = store.configuration.allDisplays ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
+        let hiddenDisplayIDs = resolvedAppAutomationHiddenDisplayIDs(for: screens)
+        appAutomationHiddenDisplayIDs = hiddenDisplayIDs
         var active = Set<String>()
         for screen in screens {
             let access = HaloFeatureAccess.shared
             let id = Self.displayID(screen)
             let override = store.workspace.settings.displays.first { $0.id == id }
             guard override?.enabled != false else { continue }
+            guard !hiddenDisplayIDs.contains(id) else { continue }
 
             let usesDisplayCustomization = access.allows(.multiDisplayCustomization)
             let displayProfile = usesDisplayCustomization

@@ -1687,13 +1687,41 @@ struct Profile: Codable, Identifiable {
         }
     }
 }
-enum RuleTrigger: String, Codable, CaseIterable { case activeApp, batteryBelow, charging, displayCount, hour }
+enum RuleTrigger: String, Codable, CaseIterable, Hashable {
+    case activeApp
+    case batteryBelow
+    case charging
+    case displayCount
+    case hour
+
+    var title: String {
+        switch self {
+        case .activeApp: return "Application is active"
+        case .batteryBelow: return "Battery is below"
+        case .charging: return "Power state is"
+        case .displayCount: return "Display count is"
+        case .hour: return "Local hour is"
+        }
+    }
+
+    var defaultValue: String {
+        switch self {
+        case .activeApp: return "com.apple.dt.Xcode"
+        case .batteryBelow: return "20"
+        case .charging: return "true"
+        case .displayCount: return "1"
+        case .hour: return "9"
+        }
+    }
+}
+
 struct AutomationRule: Codable, Identifiable {
     var id = UUID()
     var enabled = true
     var trigger: RuleTrigger = .activeApp
     var value = "com.apple.dt.Xcode"
     var profileID: UUID
+
     func matches(app: String, battery: Int?, charging: Bool, displays: Int, hour: Int) -> Bool {
         guard enabled else { return false }
         switch trigger {
@@ -1705,6 +1733,51 @@ struct AutomationRule: Codable, Identifiable {
         }
     }
 }
+
+enum AppNotchHideCondition: String, Codable, CaseIterable, Identifiable, Hashable {
+    case foreground
+    case maximized
+    case fullScreen
+    case maximizedOrFullScreen
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .foreground: return "Whenever app is in foreground"
+        case .maximized: return "Foreground + maximized"
+        case .fullScreen: return "Foreground + full screen"
+        case .maximizedOrFullScreen: return "Foreground + maximized or full screen"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .foreground:
+            return "Hide Halo on the selected displays whenever this app is the frontmost application."
+        case .maximized:
+            return "Hide Halo only when this app is frontmost and its window fills nearly all usable space on that display."
+        case .fullScreen:
+            return "Hide Halo only when this app is frontmost and has a full-screen window on that display."
+        case .maximizedOrFullScreen:
+            return "Hide Halo when this app is frontmost and its window is maximized or full screen on that display."
+        }
+    }
+}
+
+struct AppNotchHideRule: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var enabled = true
+    var bundleIdentifier = ""
+    var condition: AppNotchHideCondition = .maximizedOrFullScreen
+    /// Empty means all currently enabled Halo displays.
+    var displayIDs: [String] = []
+
+    func targets(displayID: String) -> Bool {
+        displayIDs.isEmpty || displayIDs.contains(displayID)
+    }
+}
+
 struct WorkspaceSettings: Codable {
     /// Optional fields keep settings created before Notch Mode fully backwards compatible.
     var notchMode: HaloNotchMode?
@@ -1718,6 +1791,9 @@ struct WorkspaceSettings: Codable {
     var layout = WorkspaceLayout()
     var profiles = Profile.presets
     var rules: [AutomationRule] = []
+    /// Optional for backwards-compatible decoding of settings saved before app-based visibility rules.
+    var appNotchHideRules: [AppNotchHideRule]?
+    var resolvedAppNotchHideRules: [AppNotchHideRule] { appNotchHideRules ?? [] }
     var displays: [DisplayOverride] = []
     var clipboardEnabled = false
     var clipboardExcludedApps = "com.1password.1password,com.agilebits.onepassword7,com.apple.keychainaccess,com.bitwarden.desktop"

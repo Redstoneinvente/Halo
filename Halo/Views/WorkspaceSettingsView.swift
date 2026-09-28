@@ -759,18 +759,7 @@ struct SettingsView: View {
                     bullets: ["Application rules", "Battery and charging rules", "Display-count rules", "Time and context triggers"]
                 )
             } else {
-            Text("Rules apply a profile when a condition becomes true. The first newly matching rule wins. No scripts or shell commands run.")
-            ForEach($workspace.settings.rules) { $rule in
-                VStack(alignment: .leading) {
-                    Toggle("Enabled", isOn: $rule.enabled)
-                    Picker("When", selection: $rule.trigger) { ForEach(RuleTrigger.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
-                    TextField("Value", text: $rule.value)
-                    Picker("Apply profile", selection: $rule.profileID) { ForEach(workspace.settings.profiles) { Text($0.name).tag($0.id) } }
-                    Button("Remove rule") { workspace.settings.rules.removeAll { $0.id == rule.id } }
-                }
-            }
-            Button("Add rule") { if let profile = workspace.settings.profiles.first { workspace.settings.rules.append(AutomationRule(profileID: profile.id)) } }.disabled(workspace.settings.profiles.isEmpty)
-            Text("Values: app bundle ID; battery percentage; charging true/false; display count; local hour 0–23. Rules do not restore the previous profile.").font(.caption)
+                AutomationSettingsPane(workspace: workspace)
             }
         case "Displays":
             if featureAccess.allows(.multiDisplayCustomization) {
@@ -6779,6 +6768,476 @@ private enum HaloInstalledApplicationCatalog {
                 return $0.bundleIdentifier.localizedCaseInsensitiveCompare($1.bundleIdentifier) == .orderedAscending
             }
             return nameComparison == .orderedAscending
+        }
+    }
+}
+
+
+@MainActor
+private struct AutomationSettingsPane: View {
+    @ObservedObject var workspace: WorkspaceStore
+
+    private var appHideRules: Binding<[AppNotchHideRule]> {
+        Binding(
+            get: { workspace.settings.appNotchHideRules ?? [] },
+            set: { workspace.settings.appNotchHideRules = $0 }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Profile Rules")
+                    .font(.headline)
+                Text("Apply a profile when a condition becomes true. The first newly matching rule wins. Halo never runs scripts or shell commands.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if workspace.settings.rules.isEmpty {
+                Text("No profile rules yet.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach($workspace.settings.rules) { $rule in
+                AutomationProfileRuleEditor(
+                    rule: $rule,
+                    profiles: workspace.settings.profiles,
+                    onRemove: {
+                        workspace.settings.rules.removeAll { $0.id == rule.id }
+                    }
+                )
+            }
+
+            Button {
+                guard let profile = workspace.settings.profiles.first else { return }
+                workspace.settings.rules.append(AutomationRule(profileID: profile.id))
+            } label: {
+                Label("Add Profile Rule", systemImage: "plus")
+            }
+            .disabled(workspace.settings.profiles.isEmpty)
+
+            Divider()
+                .padding(.vertical, 2)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Hide Halo for Apps")
+                    .font(.headline)
+                Text("Keep Halo out of the way for games, video apps, presentations, or any other foreground app. Rules can target individual displays.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if appHideRules.wrappedValue.isEmpty {
+                Text("No app visibility rules yet.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(appHideRules) { $rule in
+                AppNotchHideRuleEditor(
+                    rule: $rule,
+                    onRemove: {
+                        var rules = appHideRules.wrappedValue
+                        rules.removeAll { $0.id == rule.id }
+                        appHideRules.wrappedValue = rules
+                    }
+                )
+            }
+
+            Button {
+                var rules = appHideRules.wrappedValue
+                rules.append(AppNotchHideRule())
+                appHideRules.wrappedValue = rules
+            } label: {
+                Label("Add App Visibility Rule", systemImage: "plus")
+            }
+        }
+    }
+}
+
+@MainActor
+private struct AutomationProfileRuleEditor: View {
+    @Binding var rule: AutomationRule
+    let profiles: [Profile]
+    let onRemove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Toggle("Enabled", isOn: $rule.enabled)
+                Spacer()
+                Button(role: .destructive, action: onRemove) {
+                    Label("Remove", systemImage: "trash")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .help("Remove rule")
+            }
+
+            Picker("When", selection: $rule.trigger) {
+                ForEach(RuleTrigger.allCases, id: \.self) { trigger in
+                    Text(trigger.title).tag(trigger)
+                }
+            }
+            .onChange(of: rule.trigger) { trigger in
+                rule.value = trigger.defaultValue
+            }
+
+            valueEditor
+
+            Picker("Apply profile", selection: $rule.profileID) {
+                ForEach(profiles) { profile in
+                    Text(profile.name).tag(profile.id)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        }
+    }
+
+    @ViewBuilder
+    private var valueEditor: some View {
+        switch rule.trigger {
+        case .activeApp:
+            InstalledAppSinglePicker(label: "Application", bundleID: $rule.value)
+
+        case .batteryBelow:
+            Stepper(
+                value: Binding(
+                    get: { min(100, max(1, Int(rule.value) ?? 20)) },
+                    set: { rule.value = String($0) }
+                ),
+                in: 1...100
+            ) {
+                LabeledContent("Battery below") {
+                    Text("\(min(100, max(1, Int(rule.value) ?? 20)))%")
+                        .monospacedDigit()
+                }
+            }
+
+        case .charging:
+            Picker("Power state", selection: $rule.value) {
+                Text("Charging").tag("true")
+                Text("On battery").tag("false")
+            }
+
+        case .displayCount:
+            Stepper(
+                value: Binding(
+                    get: { min(12, max(1, Int(rule.value) ?? 1)) },
+                    set: { rule.value = String($0) }
+                ),
+                in: 1...12
+            ) {
+                LabeledContent("Display count") {
+                    Text("\(min(12, max(1, Int(rule.value) ?? 1)))")
+                        .monospacedDigit()
+                }
+            }
+
+        case .hour:
+            Picker(
+                "Local hour",
+                selection: Binding(
+                    get: { min(23, max(0, Int(rule.value) ?? 9)) },
+                    set: { rule.value = String($0) }
+                )
+            ) {
+                ForEach(0..<24, id: \.self) { hour in
+                    Text(String(format: "%02d:00", hour)).tag(hour)
+                }
+            }
+        }
+    }
+}
+
+@MainActor
+private struct AppNotchHideRuleEditor: View {
+    @Binding var rule: AppNotchHideRule
+    let onRemove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Toggle("Enabled", isOn: $rule.enabled)
+                Spacer()
+                Button(role: .destructive, action: onRemove) {
+                    Label("Remove", systemImage: "trash")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .help("Remove rule")
+            }
+
+            InstalledAppSinglePicker(label: "Application", bundleID: $rule.bundleIdentifier)
+
+            Picker("Hide when", selection: $rule.condition) {
+                ForEach(AppNotchHideCondition.allCases) { condition in
+                    Text(condition.title).tag(condition)
+                }
+            }
+
+            AutomationDisplayPicker(displayIDs: $rule.displayIDs)
+
+            Text(rule.condition.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if rule.bundleIdentifier.isEmpty {
+                Label("Choose an application before this rule can run.", systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        }
+    }
+}
+
+@MainActor
+private struct InstalledAppSinglePicker: View {
+    let label: String
+    @Binding var bundleID: String
+    @State private var showingPicker = false
+
+    var body: some View {
+        LabeledContent(label) {
+            HStack(spacing: 10) {
+                Text(bundleID.isEmpty ? "None selected" : bundleID)
+                    .foregroundStyle(bundleID.isEmpty ? .secondary : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 260, alignment: .trailing)
+
+                Button("Choose…") {
+                    showingPicker = true
+                }
+            }
+        }
+        .sheet(isPresented: $showingPicker) {
+            InstalledAppSingleSelectionSheet(bundleID: $bundleID)
+        }
+    }
+}
+
+@MainActor
+private struct InstalledAppSingleSelectionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var bundleID: String
+
+    @State private var applications: [HaloInstalledApplication] = []
+    @State private var searchText = ""
+    @State private var isLoading = true
+
+    private var filteredApplications: [HaloInstalledApplication] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return applications }
+        return applications.filter {
+            $0.name.localizedCaseInsensitiveContains(query) ||
+            $0.bundleIdentifier.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var selectedApplication: HaloInstalledApplication? {
+        applications.first { $0.bundleIdentifier == bundleID }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Choose Application")
+                        .font(.title2.bold())
+                    Text("Search installed applications by name or bundle identifier.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(20)
+
+            TextField("Search apps or bundle IDs", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 14)
+
+            Divider()
+
+            if isLoading {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Finding installed apps…")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if filteredApplications.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 30))
+                        .foregroundStyle(.secondary)
+                    Text("No apps found")
+                        .font(.headline)
+                    Text("Try another app name or bundle identifier.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(filteredApplications) { application in
+                            Button {
+                                bundleID = application.bundleIdentifier
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(nsImage: NSWorkspace.shared.icon(forFile: application.url.path))
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 32, height: 32)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(application.name)
+                                            .font(.body.weight(.medium))
+                                            .foregroundStyle(.primary)
+                                        Text(application.bundleIdentifier)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Spacer()
+
+                                    Image(systemName: application.bundleIdentifier == bundleID ? "checkmark.circle.fill" : "circle")
+                                        .font(.title3)
+                                        .foregroundStyle(application.bundleIdentifier == bundleID ? Color.accentColor : Color.secondary)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .contentShape(Rectangle())
+                                .background(
+                                    application.bundleIdentifier == bundleID ? Color.accentColor.opacity(0.08) : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 9)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(8)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                if !bundleID.isEmpty {
+                    Button("Clear Selection", role: .destructive) {
+                        bundleID = ""
+                    }
+                }
+
+                Spacer()
+
+                if let selectedApplication {
+                    Text(selectedApplication.name)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else if !bundleID.isEmpty {
+                    Text(bundleID)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .padding(16)
+        }
+        .frame(width: 640, height: 560)
+        .task {
+            let found = await Task.detached(priority: .userInitiated) {
+                HaloInstalledApplicationCatalog.discover()
+            }.value
+            applications = found
+            isLoading = false
+        }
+    }
+}
+
+@MainActor
+private struct AutomationDisplayPicker: View {
+    private struct DisplayOption: Identifiable {
+        let id: String
+        let name: String
+    }
+
+    @Binding var displayIDs: [String]
+
+    private var displays: [DisplayOption] {
+        NSScreen.screens.map {
+            DisplayOption(id: WindowManager.displayID($0), name: $0.localizedName)
+        }
+    }
+
+    private var summary: String {
+        if displayIDs.isEmpty { return "All displays" }
+        if displayIDs.count == 1,
+           let display = displays.first(where: { $0.id == displayIDs[0] }) {
+            return display.name
+        }
+        return "\(displayIDs.count) displays"
+    }
+
+    var body: some View {
+        LabeledContent("Displays") {
+            Menu {
+                Button {
+                    displayIDs = []
+                } label: {
+                    Label("All displays", systemImage: displayIDs.isEmpty ? "checkmark" : "display.2")
+                }
+
+                Divider()
+
+                ForEach(displays) { display in
+                    Button {
+                        toggle(display.id)
+                    } label: {
+                        Label(
+                            display.name,
+                            systemImage: displayIDs.contains(display.id) ? "checkmark" : "display"
+                        )
+                    }
+                }
+            } label: {
+                Text(summary)
+                    .frame(minWidth: 140, alignment: .trailing)
+            }
+        }
+    }
+
+    private func toggle(_ id: String) {
+        if displayIDs.isEmpty {
+            displayIDs = [id]
+            return
+        }
+
+        if displayIDs.contains(id) {
+            let remaining = displayIDs.filter { $0 != id }
+            guard !remaining.isEmpty else { return }
+            displayIDs = remaining
+        } else {
+            displayIDs.append(id)
         }
     }
 }
