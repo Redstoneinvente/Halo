@@ -131,6 +131,10 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     private var installedRetroGameHotkey = ""
     private var installedClipboardCIHotkey = ""
     private var pendingSave: DispatchWorkItem?
+    private var workspacePersistenceBlocked = false
+    private static let workspaceKey = "workspace.v1"
+    private static let workspaceBackupKey = "workspace.v1.backup"
+    private static let workspaceRecoveryKey = "workspace.v1.recovery"
     private var hudEngine: HaloHUDEngine?
     private var systemAudioFallback: SystemAudioMediaFallback?
     private var systemLiveActivitySource: SystemLiveActivitySource?
@@ -139,9 +143,35 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
     var applyTheme: ((Theme) -> Void)?
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: "workspace.v1"), let saved = try? JSONDecoder().decode(WorkspaceSettings.self, from: data), saved.version == 1 {
+        let decoder = JSONDecoder()
+
+        if let data = defaults.data(forKey: Self.workspaceKey) {
+            if let saved = try? decoder.decode(WorkspaceSettings.self, from: data), saved.version == 1 {
+                settings = saved
+                defaults.set(data, forKey: Self.workspaceBackupKey)
+            } else {
+                // Never destroy an unreadable payload. Keep the exact bytes for recovery,
+                // then try the last settings payload that was known to decode successfully.
+                defaults.set(data, forKey: Self.workspaceRecoveryKey)
+                if let backup = defaults.data(forKey: Self.workspaceBackupKey),
+                   let saved = try? decoder.decode(WorkspaceSettings.self, from: backup),
+                   saved.version == 1 {
+                    settings = saved
+                    defaults.set(backup, forKey: Self.workspaceKey)
+                } else {
+                    settings = WorkspaceSettings()
+                    workspacePersistenceBlocked = true
+                }
+            }
+        } else if let backup = defaults.data(forKey: Self.workspaceBackupKey),
+                  let saved = try? decoder.decode(WorkspaceSettings.self, from: backup),
+                  saved.version == 1 {
             settings = saved
-        } else { settings = WorkspaceSettings() }
+            defaults.set(backup, forKey: Self.workspaceKey)
+        } else {
+            settings = WorkspaceSettings()
+        }
+
         if let data = defaults.data(forKey: "plugins.v1"), let saved = try? JSONDecoder().decode([PluginManifest].self, from: data) {
             plugins = saved.compactMap { try? $0.validated() }
         }
@@ -399,8 +429,24 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
     private func persist() {
-        do { defaults.set(try JSONEncoder().encode(settings), forKey: "workspace.v1") }
-        catch { self.error = error.localizedDescription }
+        guard !workspacePersistenceBlocked else {
+            if error == nil {
+                error = "Halo preserved an unreadable workspace for recovery instead of overwriting it."
+            }
+            return
+        }
+
+        do {
+            let encoded = try JSONEncoder().encode(settings)
+            if let current = defaults.data(forKey: Self.workspaceKey),
+               let saved = try? JSONDecoder().decode(WorkspaceSettings.self, from: current),
+               saved.version == 1 {
+                defaults.set(current, forKey: Self.workspaceBackupKey)
+            }
+            defaults.set(encoded, forKey: Self.workspaceKey)
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
     private func updateHotkey() {
         let key = "\(settings.hotkeyEnabled)-\(settings.hotkeyCode)-\(settings.hotkeyModifiers)"

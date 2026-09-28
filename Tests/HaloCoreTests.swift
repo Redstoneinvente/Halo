@@ -1420,4 +1420,53 @@ final class SimpleNotchLayoutTests: XCTestCase {
             SimpleNotchMetrics.width(for: .media, style: .clean, size: .standard)
         )
     }
+
+    func testLegacyGlassOptionsDecodeMissingNewOpticalFields() throws {
+        let legacy = Data(#"{"clarity":0.91,"frost":0.22,"lightAbsorption":0.08,"chromaticShift":0.03,"tint":{"red":0.7,"green":0.8,"blue":0.9,},"tintAmount":0.02,"highlight":0.1,"edgeDepth":0.05}"#.utf8)
+        let decoded = try JSONDecoder().decode(GlassOptions.self, from: legacy)
+
+        XCTAssertEqual(decoded.clarity, 0.91, accuracy: 0.0001)
+        XCTAssertEqual(decoded.frost, 0.22, accuracy: 0.0001)
+        XCTAssertEqual(decoded.refraction, GlassOptions().refraction, accuracy: 0.0001)
+    }
+
+    func testLegacyVisualWorkspaceItemDecodesWhenNewFieldsAreMissing() throws {
+        let legacy = Data(#"{"kind":"module","module":"clock","sizing":{"mode":"Flexible","minimumWidth":80,"preferredWidth":260,"maximumWidth":900,"minimumHeight":44,"preferredHeight":150,"maximumHeight":700}}"#.utf8)
+        let decoded = try JSONDecoder().decode(OpenNotchItem.self, from: legacy)
+
+        XCTAssertEqual(decoded.module, .clock)
+        XCTAssertFalse(decoded.hidden)
+        XCTAssertEqual(decoded.presentation, .automatic)
+        XCTAssertEqual(decoded.interactions, OpenNotchInteractions())
+    }
+
+    func testLegacyWidgetStyleDecodesWithoutNewDesignSystemFields() throws {
+        let legacy = Data(#"{"fontFamily":"System","customFont":"Helvetica Neue","weight":"Regular","fontSize":18,"textColor":{"red":1,"green":1,"blue":1},"accentColor":{"red":0.4,"green":0.7,"blue":1},"backgroundColor":{"red":0,"green":0,"blue":0},"backgroundOpacity":0.12,"padding":10,"cornerRadius":12,"width":240,"minimumHeight":80,"showTitle":false}"#.utf8)
+        let decoded = try JSONDecoder().decode(WidgetStyle.self, from: legacy)
+
+        XCTAssertEqual(decoded.fontSize, 18, accuracy: 0.0001)
+        XCTAssertFalse(decoded.showTitle)
+        XCTAssertNil(decoded.layoutMode)
+        XCTAssertNil(decoded.elementStyles)
+    }
+
+    @MainActor
+    func testWorkspaceStoreRecoversLastKnownGoodPayloadInsteadOfOverwritingIt() throws {
+        let suite = "HaloCoreTests.persistence.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        var good = WorkspaceSettings()
+        good.notes = "keep me"
+        let goodData = try JSONEncoder().encode(good)
+        defaults.set(goodData, forKey: "workspace.v1.backup")
+        defaults.set(Data("{broken".utf8), forKey: "workspace.v1")
+
+        let store = WorkspaceStore(defaults: defaults)
+
+        XCTAssertEqual(store.settings.notes, "keep me")
+        XCTAssertEqual(defaults.data(forKey: "workspace.v1.recovery"), Data("{broken".utf8))
+        XCTAssertEqual(defaults.data(forKey: "workspace.v1"), goodData)
+    }
+
 }

@@ -2333,3 +2333,131 @@ enum MusicPalette {
         return result
     }
 }
+
+// MARK: - Widget profile persistence compatibility
+
+extension WidgetElementStyle {
+    private enum HaloCodingKeys: String, CodingKey {
+        case visible, fontScale, opacity, foreground, customForeground, background, backgroundColor,
+             backgroundOpacity, padding, cornerRadius, emphasis, dividerAfter, alignment, externalSpacing,
+             xOffset, yOffset, textAlignment, fontFamily, customFont, fontSize, fontWeight, borderColor,
+             borderWidth, borderOpacity, shadowBlur, shadowOpacity, tintColor, tintOpacity, iconSize,
+             contentDensity, priority
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = WidgetElementStyle()
+        visible = c.haloDecode(Bool.self, forKey: .visible, default: fallback.visible)
+        fontScale = c.haloDecode(Double.self, forKey: .fontScale, default: fallback.fontScale)
+        opacity = c.haloDecode(Double.self, forKey: .opacity, default: fallback.opacity)
+        foreground = c.haloDecode(WidgetElementForegroundStyle.self, forKey: .foreground, default: fallback.foreground)
+        customForeground = c.haloDecode(WidgetColor.self, forKey: .customForeground, default: fallback.customForeground)
+        background = c.haloDecode(WidgetElementBackgroundStyle.self, forKey: .background, default: fallback.background)
+        backgroundColor = c.haloDecode(WidgetColor.self, forKey: .backgroundColor, default: fallback.backgroundColor)
+        backgroundOpacity = c.haloDecode(Double.self, forKey: .backgroundOpacity, default: fallback.backgroundOpacity)
+        padding = c.haloDecode(Double.self, forKey: .padding, default: fallback.padding)
+        cornerRadius = c.haloDecode(Double.self, forKey: .cornerRadius, default: fallback.cornerRadius)
+        emphasis = c.haloDecode(WidgetElementEmphasis.self, forKey: .emphasis, default: fallback.emphasis)
+        dividerAfter = c.haloDecode(Bool.self, forKey: .dividerAfter, default: fallback.dividerAfter)
+        alignment = c.haloOptional(WidgetContentAlignment.self, forKey: .alignment)
+        externalSpacing = c.haloOptional(Double.self, forKey: .externalSpacing)
+        xOffset = c.haloOptional(Double.self, forKey: .xOffset)
+        yOffset = c.haloOptional(Double.self, forKey: .yOffset)
+        textAlignment = c.haloOptional(WidgetContentAlignment.self, forKey: .textAlignment)
+        fontFamily = c.haloOptional(WidgetFontFamily.self, forKey: .fontFamily)
+        customFont = c.haloOptional(String.self, forKey: .customFont)
+        fontSize = c.haloOptional(Double.self, forKey: .fontSize)
+        fontWeight = c.haloOptional(WidgetFontWeight.self, forKey: .fontWeight)
+        borderColor = c.haloOptional(WidgetColor.self, forKey: .borderColor)
+        borderWidth = c.haloOptional(Double.self, forKey: .borderWidth)
+        borderOpacity = c.haloOptional(Double.self, forKey: .borderOpacity)
+        shadowBlur = c.haloOptional(Double.self, forKey: .shadowBlur)
+        shadowOpacity = c.haloOptional(Double.self, forKey: .shadowOpacity)
+        tintColor = c.haloOptional(WidgetColor.self, forKey: .tintColor)
+        tintOpacity = c.haloOptional(Double.self, forKey: .tintOpacity)
+        iconSize = c.haloOptional(Double.self, forKey: .iconSize)
+        contentDensity = c.haloOptional(Double.self, forKey: .contentDensity)
+        priority = c.haloOptional(OpenNotchPriority.self, forKey: .priority)
+    }
+}
+
+extension WidgetStyle {
+    private enum HaloCodingKeys: String, CodingKey {
+        case fontFamily, customFont, weight, fontSize, textColor, accentColor, backgroundColor,
+             backgroundOpacity, padding, cornerRadius, width, minimumHeight, showTitle, clock,
+             visualCalendar, visualAdaptive, content, chrome, layoutMode, cardBackgroundStyle,
+             backgroundSecondaryColor, outlineStyle, showHeaderIcon, gradientAngle, glassTintOpacity,
+             elementStyles
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = WidgetStyle()
+        fontFamily = c.haloDecode(WidgetFontFamily.self, forKey: .fontFamily, default: fallback.fontFamily)
+        customFont = c.haloDecode(String.self, forKey: .customFont, default: fallback.customFont)
+        weight = c.haloDecode(WidgetFontWeight.self, forKey: .weight, default: fallback.weight)
+        fontSize = c.haloDecode(Double.self, forKey: .fontSize, default: fallback.fontSize)
+        textColor = c.haloDecode(WidgetColor.self, forKey: .textColor, default: fallback.textColor)
+        accentColor = c.haloDecode(WidgetColor.self, forKey: .accentColor, default: fallback.accentColor)
+        backgroundColor = c.haloDecode(WidgetColor.self, forKey: .backgroundColor, default: fallback.backgroundColor)
+        backgroundOpacity = c.haloDecode(Double.self, forKey: .backgroundOpacity, default: fallback.backgroundOpacity)
+        padding = c.haloDecode(Double.self, forKey: .padding, default: fallback.padding)
+        cornerRadius = c.haloDecode(Double.self, forKey: .cornerRadius, default: fallback.cornerRadius)
+        width = c.haloDecode(Double.self, forKey: .width, default: fallback.width)
+        minimumHeight = c.haloDecode(Double.self, forKey: .minimumHeight, default: fallback.minimumHeight)
+        showTitle = c.haloDecode(Bool.self, forKey: .showTitle, default: fallback.showTitle)
+        clock = c.haloDecode(ClockOptions.self, forKey: .clock, default: fallback.clock)
+        visualCalendar = c.haloOptional(VisualCalendarOptions.self, forKey: .visualCalendar)
+        visualAdaptive = c.haloOptional(VisualAdaptiveWidgetOptions.self, forKey: .visualAdaptive)
+        content = c.haloOptional(WidgetContentOptions.self, forKey: .content)
+        chrome = c.haloOptional(WidgetChromeOptions.self, forKey: .chrome)
+        layoutMode = c.haloOptional(WidgetLayoutMode.self, forKey: .layoutMode)
+        cardBackgroundStyle = c.haloOptional(WidgetCardBackgroundStyle.self, forKey: .cardBackgroundStyle)
+        backgroundSecondaryColor = c.haloOptional(WidgetColor.self, forKey: .backgroundSecondaryColor)
+        outlineStyle = c.haloOptional(WidgetOutlineStyle.self, forKey: .outlineStyle)
+        showHeaderIcon = c.haloOptional(Bool.self, forKey: .showHeaderIcon)
+        gradientAngle = c.haloOptional(Double.self, forKey: .gradientAngle)
+        glassTintOpacity = c.haloOptional(Double.self, forKey: .glassTintOpacity)
+        elementStyles = c.haloOptional([String: WidgetElementStyle].self, forKey: .elementStyles)
+    }
+}
+
+extension ClosedNotchOptions {
+    private enum HaloCodingKeys: String, CodingKey {
+        case applyBackgroundWhenOpened, autoFitContent, horizontalPadding, verticalPadding, sideMargin,
+             outerMargin, albumTextColor, albumBackgroundColor, readableAlbumForegroundColors,
+             albumBackgroundFrequencyEffect, mediaOptions, artworkOptions, reactiveBackground,
+             powerReaction, leftDecoration, rightDecoration, visualizer, expansion, left, right,
+             fontSize, color, animation, animate
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = ClosedNotchOptions()
+        applyBackgroundWhenOpened = c.haloOptional(Bool.self, forKey: .applyBackgroundWhenOpened)
+        autoFitContent = c.haloOptional(Bool.self, forKey: .autoFitContent)
+        horizontalPadding = c.haloOptional(Double.self, forKey: .horizontalPadding)
+        verticalPadding = c.haloOptional(Double.self, forKey: .verticalPadding)
+        sideMargin = c.haloOptional(Double.self, forKey: .sideMargin)
+        outerMargin = c.haloOptional(Double.self, forKey: .outerMargin)
+        albumTextColor = c.haloOptional(Bool.self, forKey: .albumTextColor)
+        albumBackgroundColor = c.haloOptional(Bool.self, forKey: .albumBackgroundColor)
+        readableAlbumForegroundColors = c.haloOptional(Bool.self, forKey: .readableAlbumForegroundColors)
+        albumBackgroundFrequencyEffect = c.haloOptional(Bool.self, forKey: .albumBackgroundFrequencyEffect)
+        mediaOptions = c.haloOptional(ClosedMediaOptions.self, forKey: .mediaOptions)
+        artworkOptions = c.haloOptional(ClosedArtworkOptions.self, forKey: .artworkOptions)
+        reactiveBackground = c.haloOptional(ReactiveBackgroundOptions.self, forKey: .reactiveBackground)
+        powerReaction = c.haloOptional(PowerReactionOptions.self, forKey: .powerReaction)
+        leftDecoration = c.haloOptional(SideDecoration.self, forKey: .leftDecoration)
+        rightDecoration = c.haloOptional(SideDecoration.self, forKey: .rightDecoration)
+        visualizer = c.haloOptional(VisualizerOptions.self, forKey: .visualizer)
+        expansion = c.haloOptional(ClosedExpansionOptions.self, forKey: .expansion)
+        left = c.haloDecode(ClosedNotchItem.self, forKey: .left, default: fallback.left)
+        right = c.haloDecode(ClosedNotchItem.self, forKey: .right, default: fallback.right)
+        fontSize = c.haloDecode(Double.self, forKey: .fontSize, default: fallback.fontSize)
+        color = c.haloDecode(WidgetColor.self, forKey: .color, default: fallback.color)
+        animation = c.haloDecode(PlaybackAnimation.self, forKey: .animation, default: fallback.animation)
+        animate = c.haloDecode(Bool.self, forKey: .animate, default: fallback.animate)
+    }
+}

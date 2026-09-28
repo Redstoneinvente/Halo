@@ -591,24 +591,25 @@ struct Appearance: Codable, Equatable {
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        grain = try c.decodeIfPresent(GrainOptions.self, forKey: .grain)
-        backgroundSchedule = try c.decodeIfPresent([TimedBackground].self, forKey: .backgroundSchedule)
-        surface = try c.decodeIfPresent(SurfaceOptions.self, forKey: .surface) ?? SurfaceOptions()
-        background = try c.decodeIfPresent(BackgroundKind.self, forKey: .background) ?? .gradient
-        skin = (try c.decodeIfPresent(NotchSkinOptions.self, forKey: .skin) ?? NotchSkinOptions()).normalized()
-        glass = (try c.decodeIfPresent(GlassOptions.self, forKey: .glass) ?? GlassOptions()).normalized()
-        solidColor = try c.decodeIfPresent(WidgetColor.self, forKey: .solidColor)
-        gradientStartColor = try c.decodeIfPresent(WidgetColor.self, forKey: .gradientStartColor)
-        gradientEndColor = try c.decodeIfPresent(WidgetColor.self, forKey: .gradientEndColor)
-        assetPath = try c.decodeIfPresent(String.self, forKey: .assetPath) ?? ""
-        blur = try c.decodeIfPresent(Double.self, forKey: .blur) ?? 0
-        saturation = try c.decodeIfPresent(Double.self, forKey: .saturation) ?? 1
-        brightness = try c.decodeIfPresent(Double.self, forKey: .brightness) ?? 0
-        expandedHeight = try c.decodeIfPresent(Double.self, forKey: .expandedHeight) ?? 500
-        compactWidth = try c.decodeIfPresent(Double.self, forKey: .compactWidth) ?? 190
-        spacing = try c.decodeIfPresent(Double.self, forKey: .spacing) ?? 12
-        animation = try c.decodeIfPresent(AnimationPreset.self, forKey: .animation) ?? .smooth
-        pauseVideoOnBattery = try c.decodeIfPresent(Bool.self, forKey: .pauseVideoOnBattery) ?? true
+        let fallback = Appearance()
+        grain = c.haloOptional(GrainOptions.self, forKey: .grain)
+        backgroundSchedule = c.haloOptional([TimedBackground].self, forKey: .backgroundSchedule)
+        surface = c.haloDecode(SurfaceOptions.self, forKey: .surface, default: fallback.surface)
+        background = c.haloDecode(BackgroundKind.self, forKey: .background, default: fallback.background)
+        skin = c.haloDecode(NotchSkinOptions.self, forKey: .skin, default: fallback.skin).normalized()
+        glass = c.haloDecode(GlassOptions.self, forKey: .glass, default: fallback.glass).normalized()
+        solidColor = c.haloOptional(WidgetColor.self, forKey: .solidColor)
+        gradientStartColor = c.haloOptional(WidgetColor.self, forKey: .gradientStartColor)
+        gradientEndColor = c.haloOptional(WidgetColor.self, forKey: .gradientEndColor)
+        assetPath = c.haloDecode(String.self, forKey: .assetPath, default: fallback.assetPath)
+        blur = c.haloDecode(Double.self, forKey: .blur, default: fallback.blur)
+        saturation = c.haloDecode(Double.self, forKey: .saturation, default: fallback.saturation)
+        brightness = c.haloDecode(Double.self, forKey: .brightness, default: fallback.brightness)
+        expandedHeight = c.haloDecode(Double.self, forKey: .expandedHeight, default: fallback.expandedHeight)
+        compactWidth = c.haloDecode(Double.self, forKey: .compactWidth, default: fallback.compactWidth)
+        spacing = c.haloDecode(Double.self, forKey: .spacing, default: fallback.spacing)
+        animation = c.haloDecode(AnimationPreset.self, forKey: .animation, default: fallback.animation)
+        pauseVideoOnBattery = c.haloDecode(Bool.self, forKey: .pauseVideoOnBattery, default: fallback.pauseVideoOnBattery)
     }
 }
 struct DisplayOverride: Codable, Identifiable, Equatable {
@@ -3449,5 +3450,522 @@ enum HaloPixelPalPowerAnimationTiming {
     static func smoothstep(_ raw: Double) -> Double {
         let value = min(1, max(0, raw))
         return value * value * (3 - 2 * value)
+    }
+}
+
+
+// MARK: - Backwards-compatible workspace persistence
+
+extension SimpleNotchSettings {
+    private enum HaloCodingKeys: String, CodingKey {
+        case widgets, styles, size, backgroundColor, closedWidgets
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = SimpleNotchSettings()
+        widgets = c.haloDecode([ModuleID].self, forKey: .widgets, default: fallback.widgets)
+        styles = c.haloDecode([String: SimpleNotchWidgetStyle].self, forKey: .styles, default: fallback.styles)
+        size = c.haloOptional(SimpleNotchSize.self, forKey: .size)
+        backgroundColor = c.haloOptional(WidgetColor.self, forKey: .backgroundColor)
+        closedWidgets = c.haloDecode([ModuleID].self, forKey: .closedWidgets, default: fallback.closedWidgets)
+    }
+}
+
+extension GlassOptions {
+    private enum HaloCodingKeys: String, CodingKey {
+        case clarity, frost, lightAbsorption, refraction, chromaticShift, tint, tintAmount, highlight, edgeDepth
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = GlassOptions()
+        clarity = c.haloDecode(Double.self, forKey: .clarity, default: fallback.clarity)
+        frost = c.haloDecode(Double.self, forKey: .frost, default: fallback.frost)
+        lightAbsorption = c.haloDecode(Double.self, forKey: .lightAbsorption, default: fallback.lightAbsorption)
+        refraction = c.haloDecode(Double.self, forKey: .refraction, default: fallback.refraction)
+        chromaticShift = c.haloDecode(Double.self, forKey: .chromaticShift, default: fallback.chromaticShift)
+        tint = c.haloDecode(WidgetColor.self, forKey: .tint, default: fallback.tint)
+        tintAmount = c.haloDecode(Double.self, forKey: .tintAmount, default: fallback.tintAmount)
+        highlight = c.haloDecode(Double.self, forKey: .highlight, default: fallback.highlight)
+        edgeDepth = c.haloDecode(Double.self, forKey: .edgeDepth, default: fallback.edgeDepth)
+    }
+}
+
+extension NotchSkinOptions {
+    private enum HaloCodingKeys: String, CodingKey {
+        case enabled, preset, visibility, opacity, blend, usesThemeTint, tint, scale
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = NotchSkinOptions()
+        enabled = c.haloDecode(Bool.self, forKey: .enabled, default: fallback.enabled)
+        preset = c.haloDecode(NotchSkinPreset.self, forKey: .preset, default: fallback.preset)
+        visibility = c.haloDecode(NotchSkinVisibility.self, forKey: .visibility, default: fallback.visibility)
+        opacity = c.haloDecode(Double.self, forKey: .opacity, default: fallback.opacity)
+        blend = c.haloDecode(NotchSkinBlend.self, forKey: .blend, default: fallback.blend)
+        usesThemeTint = c.haloDecode(Bool.self, forKey: .usesThemeTint, default: fallback.usesThemeTint)
+        tint = c.haloDecode(WidgetColor.self, forKey: .tint, default: fallback.tint)
+        scale = c.haloDecode(Double.self, forKey: .scale, default: fallback.scale)
+    }
+}
+
+extension DisplayOverride {
+    private enum HaloCodingKeys: String, CodingKey {
+        case id, enabled, theme, layout, profileID
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = DisplayOverride(id: UUID().uuidString)
+        id = c.haloDecode(String.self, forKey: .id, default: fallback.id)
+        enabled = c.haloDecode(Bool.self, forKey: .enabled, default: fallback.enabled)
+        theme = c.haloDecode(Theme.self, forKey: .theme, default: fallback.theme)
+        layout = c.haloOptional(WorkspaceLayout.self, forKey: .layout)
+        profileID = c.haloOptional(UUID.self, forKey: .profileID)
+    }
+}
+
+extension WorkspaceLayout {
+    private enum HaloCodingKeys: String, CodingKey {
+        case contextMusic, hud, horizontalWidgets, horizontalPages, horizontalHeight,
+             openNotchContentMode, openHorizontalPadding, openVerticalPadding, openFixedColumns,
+             useCustomOpenNotchWorkspace, openNotch, widgets, closedNotch, order, enabled, appearance
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = WorkspaceLayout()
+        contextMusic = c.haloOptional(ContextMusicOptions.self, forKey: .contextMusic)
+        hud = c.haloOptional(HaloHUDSettings.self, forKey: .hud)
+        horizontalWidgets = c.haloOptional(Bool.self, forKey: .horizontalWidgets)
+        horizontalPages = c.haloOptional(Bool.self, forKey: .horizontalPages)
+        horizontalHeight = c.haloOptional(Double.self, forKey: .horizontalHeight)
+        openNotchContentMode = c.haloOptional(OpenNotchContentMode.self, forKey: .openNotchContentMode)
+        openHorizontalPadding = c.haloOptional(Double.self, forKey: .openHorizontalPadding)
+        openVerticalPadding = c.haloOptional(Double.self, forKey: .openVerticalPadding)
+        openFixedColumns = c.haloOptional(Int.self, forKey: .openFixedColumns)
+        useCustomOpenNotchWorkspace = c.haloOptional(Bool.self, forKey: .useCustomOpenNotchWorkspace)
+        openNotch = c.haloOptional(OpenNotchLayout.self, forKey: .openNotch)
+        widgets = c.haloOptional([String: WidgetStyle].self, forKey: .widgets)
+        closedNotch = c.haloOptional(ClosedNotchOptions.self, forKey: .closedNotch)
+        order = c.haloDecode([ModuleID].self, forKey: .order, default: fallback.order)
+        enabled = c.haloDecode(Set<ModuleID>.self, forKey: .enabled, default: fallback.enabled)
+        appearance = c.haloDecode(Appearance.self, forKey: .appearance, default: fallback.appearance)
+    }
+}
+
+extension OpenNotchSizing {
+    private enum HaloCodingKeys: String, CodingKey {
+        case mode, minimumWidth, preferredWidth, maximumWidth, minimumHeight, preferredHeight, maximumHeight
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = OpenNotchSizing()
+        mode = c.haloDecode(OpenNotchSizingMode.self, forKey: .mode, default: fallback.mode)
+        minimumWidth = c.haloDecode(Double.self, forKey: .minimumWidth, default: fallback.minimumWidth)
+        preferredWidth = c.haloDecode(Double.self, forKey: .preferredWidth, default: fallback.preferredWidth)
+        maximumWidth = c.haloDecode(Double.self, forKey: .maximumWidth, default: fallback.maximumWidth)
+        minimumHeight = c.haloDecode(Double.self, forKey: .minimumHeight, default: fallback.minimumHeight)
+        preferredHeight = c.haloDecode(Double.self, forKey: .preferredHeight, default: fallback.preferredHeight)
+        maximumHeight = c.haloDecode(Double.self, forKey: .maximumHeight, default: fallback.maximumHeight)
+    }
+}
+
+extension OpenNotchGridPlacement {
+    private enum HaloCodingKeys: String, CodingKey {
+        case column, row, columnSpan, rowSpan
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = OpenNotchGridPlacement()
+        column = c.haloDecode(Int.self, forKey: .column, default: fallback.column)
+        row = c.haloDecode(Int.self, forKey: .row, default: fallback.row)
+        columnSpan = c.haloDecode(Int.self, forKey: .columnSpan, default: fallback.columnSpan)
+        rowSpan = c.haloDecode(Int.self, forKey: .rowSpan, default: fallback.rowSpan)
+    }
+}
+
+extension OpenNotchVisibilityRule {
+    private enum HaloCodingKeys: String, CodingKey {
+        case id, metric, comparison, value
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = OpenNotchVisibilityRule()
+        id = c.haloDecode(UUID.self, forKey: .id, default: fallback.id)
+        metric = c.haloDecode(OpenNotchVisibilityMetric.self, forKey: .metric, default: fallback.metric)
+        comparison = c.haloDecode(OpenNotchVisibilityComparison.self, forKey: .comparison, default: fallback.comparison)
+        value = c.haloDecode(Double.self, forKey: .value, default: fallback.value)
+    }
+}
+
+extension OpenNotchInteractions {
+    private enum HaloCodingKeys: String, CodingKey {
+        case singleClick, doubleClick, rightClick, scroll, drag, modifierClick
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = OpenNotchInteractions()
+        singleClick = c.haloDecode(OpenNotchInteractionAction.self, forKey: .singleClick, default: fallback.singleClick)
+        doubleClick = c.haloDecode(OpenNotchInteractionAction.self, forKey: .doubleClick, default: fallback.doubleClick)
+        rightClick = c.haloDecode(OpenNotchInteractionAction.self, forKey: .rightClick, default: fallback.rightClick)
+        scroll = c.haloDecode(OpenNotchInteractionAction.self, forKey: .scroll, default: fallback.scroll)
+        drag = c.haloDecode(OpenNotchInteractionAction.self, forKey: .drag, default: fallback.drag)
+        modifierClick = c.haloDecode(OpenNotchInteractionAction.self, forKey: .modifierClick, default: fallback.modifierClick)
+    }
+}
+
+extension OpenNotchItem {
+    private enum HaloCodingKeys: String, CodingKey {
+        case id, kind, module, element, customText, customIcon, customAssetPath, buttonLabel, buttonURL,
+             hidden, sizing, gridPlacement, presentation, priority, visibilityLogic, visibilityRules,
+             style, widgetStyle, verticalAlignment, interactions
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = OpenNotchItem()
+        id = c.haloDecode(UUID.self, forKey: .id, default: fallback.id)
+        kind = c.haloDecode(OpenNotchItemKind.self, forKey: .kind, default: fallback.kind)
+        module = c.haloOptional(ModuleID.self, forKey: .module)
+        element = c.haloOptional(OpenNotchElementKind.self, forKey: .element)
+        customText = c.haloDecode(String.self, forKey: .customText, default: fallback.customText)
+        customIcon = c.haloDecode(String.self, forKey: .customIcon, default: fallback.customIcon)
+        customAssetPath = c.haloDecode(String.self, forKey: .customAssetPath, default: fallback.customAssetPath)
+        buttonLabel = c.haloDecode(String.self, forKey: .buttonLabel, default: fallback.buttonLabel)
+        buttonURL = c.haloDecode(String.self, forKey: .buttonURL, default: fallback.buttonURL)
+        hidden = c.haloDecode(Bool.self, forKey: .hidden, default: fallback.hidden)
+        sizing = c.haloDecode(OpenNotchSizing.self, forKey: .sizing, default: fallback.sizing)
+        gridPlacement = c.haloOptional(OpenNotchGridPlacement.self, forKey: .gridPlacement)
+        presentation = c.haloDecode(OpenNotchPresentation.self, forKey: .presentation, default: fallback.presentation)
+        priority = c.haloDecode(OpenNotchPriority.self, forKey: .priority, default: fallback.priority)
+        visibilityLogic = c.haloDecode(OpenNotchVisibilityLogic.self, forKey: .visibilityLogic, default: fallback.visibilityLogic)
+        visibilityRules = c.haloDecode([OpenNotchVisibilityRule].self, forKey: .visibilityRules, default: fallback.visibilityRules)
+        style = c.haloOptional(WidgetElementStyle.self, forKey: .style)
+        widgetStyle = c.haloOptional(WidgetStyle.self, forKey: .widgetStyle)
+        verticalAlignment = c.haloOptional(OpenNotchBlockVerticalAlignment.self, forKey: .verticalAlignment)
+        interactions = c.haloDecode(OpenNotchInteractions.self, forKey: .interactions, default: fallback.interactions)
+    }
+}
+
+extension OpenNotchGroup {
+    private enum HaloCodingKeys: String, CodingKey {
+        case id, name, axis, alignment, spacing, padding, items
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = OpenNotchGroup()
+        id = c.haloDecode(UUID.self, forKey: .id, default: fallback.id)
+        name = c.haloDecode(String.self, forKey: .name, default: fallback.name)
+        axis = c.haloDecode(OpenNotchAxis.self, forKey: .axis, default: fallback.axis)
+        alignment = c.haloDecode(OpenNotchGroupAlignment.self, forKey: .alignment, default: fallback.alignment)
+        spacing = c.haloDecode(Double.self, forKey: .spacing, default: fallback.spacing)
+        padding = c.haloDecode(OpenNotchInsets.self, forKey: .padding, default: fallback.padding)
+        items = c.haloDecode([OpenNotchItem].self, forKey: .items, default: fallback.items)
+    }
+}
+
+extension OpenNotchRegionFrame {
+    private enum HaloCodingKeys: String, CodingKey {
+        case x, y, width, height
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = OpenNotchRegionFrame()
+        x = c.haloDecode(Double.self, forKey: .x, default: fallback.x)
+        y = c.haloDecode(Double.self, forKey: .y, default: fallback.y)
+        width = c.haloDecode(Double.self, forKey: .width, default: fallback.width)
+        height = c.haloDecode(Double.self, forKey: .height, default: fallback.height)
+    }
+}
+
+extension OpenNotchRegion {
+    private enum HaloCodingKeys: String, CodingKey {
+        case id, placement, padding, widthFraction, heightFraction, frame, groups
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = OpenNotchRegion()
+        id = c.haloDecode(UUID.self, forKey: .id, default: fallback.id)
+        placement = c.haloDecode(OpenNotchRegionPlacement.self, forKey: .placement, default: fallback.placement)
+        padding = c.haloDecode(OpenNotchInsets.self, forKey: .padding, default: fallback.padding)
+        widthFraction = c.haloOptional(Double.self, forKey: .widthFraction)
+        heightFraction = c.haloOptional(Double.self, forKey: .heightFraction)
+        frame = c.haloOptional(OpenNotchRegionFrame.self, forKey: .frame)
+        groups = c.haloDecode([OpenNotchGroup].self, forKey: .groups, default: fallback.groups)
+    }
+}
+
+extension OpenNotchAppearance {
+    private enum HaloCodingKeys: String, CodingKey {
+        case background, solidColor, gradientStartColor, gradientEndColor, assetPath, blur, saturation,
+             brightness, contrast, glass, tintColor, tintOpacity, grain, warmth, borderColor, borderWidth,
+             borderOpacity, innerHighlight, shadowEnabled, shadowBlur, shadowOpacity, glow
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = OpenNotchAppearance()
+        background = c.haloOptional(BackgroundKind.self, forKey: .background)
+        solidColor = c.haloOptional(WidgetColor.self, forKey: .solidColor)
+        gradientStartColor = c.haloOptional(WidgetColor.self, forKey: .gradientStartColor)
+        gradientEndColor = c.haloOptional(WidgetColor.self, forKey: .gradientEndColor)
+        assetPath = c.haloDecode(String.self, forKey: .assetPath, default: fallback.assetPath)
+        blur = c.haloOptional(Double.self, forKey: .blur)
+        saturation = c.haloOptional(Double.self, forKey: .saturation)
+        brightness = c.haloOptional(Double.self, forKey: .brightness)
+        contrast = c.haloOptional(Double.self, forKey: .contrast)
+        glass = c.haloOptional(GlassOptions.self, forKey: .glass)
+        tintColor = c.haloOptional(WidgetColor.self, forKey: .tintColor)
+        tintOpacity = c.haloOptional(Double.self, forKey: .tintOpacity)
+        grain = c.haloOptional(Double.self, forKey: .grain)
+        warmth = c.haloOptional(Double.self, forKey: .warmth)
+        borderColor = c.haloOptional(WidgetColor.self, forKey: .borderColor)
+        borderWidth = c.haloOptional(Double.self, forKey: .borderWidth)
+        borderOpacity = c.haloOptional(Double.self, forKey: .borderOpacity)
+        innerHighlight = c.haloOptional(Double.self, forKey: .innerHighlight)
+        shadowEnabled = c.haloOptional(Bool.self, forKey: .shadowEnabled)
+        shadowBlur = c.haloOptional(Double.self, forKey: .shadowBlur)
+        shadowOpacity = c.haloOptional(Double.self, forKey: .shadowOpacity)
+        glow = c.haloOptional(Double.self, forKey: .glow)
+    }
+}
+
+extension OpenNotchLayout {
+    private enum HaloCodingKeys: String, CodingKey {
+        case version, preset, contentMode, regions, gridItems, gridColumns, gridRows, gridGap,
+             gridCellHeight, gridPadding, columnWeights, rowWeights, appearance
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = OpenNotchLayout()
+        version = c.haloDecode(Int.self, forKey: .version, default: fallback.version)
+        preset = c.haloDecode(OpenNotchPreset.self, forKey: .preset, default: fallback.preset)
+        contentMode = c.haloOptional(OpenNotchContentMode.self, forKey: .contentMode)
+        regions = c.haloDecode([OpenNotchRegion].self, forKey: .regions, default: fallback.regions)
+        gridItems = c.haloOptional([OpenNotchItem].self, forKey: .gridItems)
+        gridColumns = c.haloOptional(Int.self, forKey: .gridColumns)
+        gridRows = c.haloOptional(Int.self, forKey: .gridRows)
+        gridGap = c.haloOptional(Double.self, forKey: .gridGap)
+        gridCellHeight = c.haloOptional(Double.self, forKey: .gridCellHeight)
+        gridPadding = c.haloOptional(OpenNotchInsets.self, forKey: .gridPadding)
+        columnWeights = c.haloOptional([Double].self, forKey: .columnWeights)
+        rowWeights = c.haloOptional([Double].self, forKey: .rowWeights)
+        appearance = c.haloDecode(OpenNotchAppearance.self, forKey: .appearance, default: fallback.appearance)
+    }
+}
+
+extension Profile {
+    private enum HaloCodingKeys: String, CodingKey {
+        case icon, description, id, name, theme, layout
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = Profile(name: "Profile")
+        icon = c.haloOptional(String.self, forKey: .icon)
+        description = c.haloOptional(String.self, forKey: .description)
+        id = c.haloDecode(UUID.self, forKey: .id, default: fallback.id)
+        name = c.haloDecode(String.self, forKey: .name, default: fallback.name)
+        theme = c.haloDecode(Theme.self, forKey: .theme, default: fallback.theme)
+        layout = c.haloDecode(WorkspaceLayout.self, forKey: .layout, default: fallback.layout)
+    }
+}
+
+extension AutomationRule {
+    private enum HaloCodingKeys: String, CodingKey {
+        case id, enabled, trigger, value, profileID
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        id = c.haloDecode(UUID.self, forKey: .id, default: UUID())
+        enabled = c.haloDecode(Bool.self, forKey: .enabled, default: true)
+        trigger = c.haloDecode(RuleTrigger.self, forKey: .trigger, default: .activeApp)
+        value = c.haloDecode(String.self, forKey: .value, default: trigger.defaultValue)
+        profileID = c.haloDecode(UUID.self, forKey: .profileID, default: UUID())
+    }
+}
+
+extension AppNotchHideRule {
+    private enum HaloCodingKeys: String, CodingKey {
+        case id, enabled, bundleIdentifier, condition, displayIDs
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = AppNotchHideRule()
+        id = c.haloDecode(UUID.self, forKey: .id, default: fallback.id)
+        enabled = c.haloDecode(Bool.self, forKey: .enabled, default: fallback.enabled)
+        bundleIdentifier = c.haloDecode(String.self, forKey: .bundleIdentifier, default: fallback.bundleIdentifier)
+        condition = c.haloDecode(AppNotchHideCondition.self, forKey: .condition, default: fallback.condition)
+        displayIDs = c.haloDecode([String].self, forKey: .displayIDs, default: fallback.displayIDs)
+    }
+}
+
+extension WorkspaceSettings {
+    private enum HaloCodingKeys: String, CodingKey {
+        case notchMode, simpleNotch, automaticMedia, profileSchedules, version, layout, profiles, rules,
+             appNotchHideRules, displays, clipboardEnabled, clipboardExcludedApps, shelfRetentionMinutes,
+             persistShelf, mediaApp, notes, hotkeyEnabled, hotkeyCode, hotkeyModifiers
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = WorkspaceSettings()
+        notchMode = c.haloOptional(HaloNotchMode.self, forKey: .notchMode)
+        simpleNotch = c.haloOptional(SimpleNotchSettings.self, forKey: .simpleNotch)
+        automaticMedia = c.haloOptional(Bool.self, forKey: .automaticMedia)
+        profileSchedules = c.haloOptional([ProfileSchedule].self, forKey: .profileSchedules)
+        version = c.haloDecode(Int.self, forKey: .version, default: fallback.version)
+        layout = c.haloDecode(WorkspaceLayout.self, forKey: .layout, default: fallback.layout)
+        profiles = c.haloDecode([Profile].self, forKey: .profiles, default: fallback.profiles)
+        rules = c.haloDecode([AutomationRule].self, forKey: .rules, default: fallback.rules)
+        appNotchHideRules = c.haloOptional([AppNotchHideRule].self, forKey: .appNotchHideRules)
+        displays = c.haloDecode([DisplayOverride].self, forKey: .displays, default: fallback.displays)
+        clipboardEnabled = c.haloDecode(Bool.self, forKey: .clipboardEnabled, default: fallback.clipboardEnabled)
+        clipboardExcludedApps = c.haloDecode(String.self, forKey: .clipboardExcludedApps, default: fallback.clipboardExcludedApps)
+        shelfRetentionMinutes = c.haloDecode(Int.self, forKey: .shelfRetentionMinutes, default: fallback.shelfRetentionMinutes)
+        persistShelf = c.haloDecode(Bool.self, forKey: .persistShelf, default: fallback.persistShelf)
+        mediaApp = c.haloDecode(String.self, forKey: .mediaApp, default: fallback.mediaApp)
+        notes = c.haloDecode(String.self, forKey: .notes, default: fallback.notes)
+        hotkeyEnabled = c.haloDecode(Bool.self, forKey: .hotkeyEnabled, default: fallback.hotkeyEnabled)
+        hotkeyCode = c.haloDecode(UInt32.self, forKey: .hotkeyCode, default: fallback.hotkeyCode)
+        hotkeyModifiers = c.haloDecode(UInt32.self, forKey: .hotkeyModifiers, default: fallback.hotkeyModifiers)
+    }
+}
+
+
+extension ContextMusicOptions {
+    private enum HaloCodingKeys: String, CodingKey {
+        case enabled, showArtwork, showTitle, showArtist, showControls, showVisualizer, artworkSize,
+             fontSize, background, backgroundOpacity, textColor, layoutMode, foregroundArtwork,
+             artworkBackground, artworkBackgroundBlur, artworkBackgroundDim, contentAlignment,
+             spacing, cornerRadius, controlSize, vinylRPM, showLyrics, lyricDisplay, lyricSyncOffset,
+             lyricsOnline, lyricFontSize, lyricTransition, lyricTransitionDuration, visualizerStyle,
+             songTextColors, songControlColors, songVisualizerColors, songBackgroundColors,
+             readableSongForegroundColors, adaptiveElementColors, adaptiveColorDistribution,
+             horizontalMargin, topMargin, bottomMargin
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = ContextMusicOptions()
+        enabled = c.haloDecode(Bool.self, forKey: .enabled, default: fallback.enabled)
+        showArtwork = c.haloDecode(Bool.self, forKey: .showArtwork, default: fallback.showArtwork)
+        showTitle = c.haloDecode(Bool.self, forKey: .showTitle, default: fallback.showTitle)
+        showArtist = c.haloDecode(Bool.self, forKey: .showArtist, default: fallback.showArtist)
+        showControls = c.haloDecode(Bool.self, forKey: .showControls, default: fallback.showControls)
+        showVisualizer = c.haloDecode(Bool.self, forKey: .showVisualizer, default: fallback.showVisualizer)
+        artworkSize = c.haloDecode(Double.self, forKey: .artworkSize, default: fallback.artworkSize)
+        fontSize = c.haloDecode(Double.self, forKey: .fontSize, default: fallback.fontSize)
+        background = c.haloDecode(BackgroundKind.self, forKey: .background, default: fallback.background)
+        backgroundOpacity = c.haloDecode(Double.self, forKey: .backgroundOpacity, default: fallback.backgroundOpacity)
+        textColor = c.haloDecode(WidgetColor.self, forKey: .textColor, default: fallback.textColor)
+        layoutMode = c.haloOptional(ContextMusicLayoutMode.self, forKey: .layoutMode)
+        foregroundArtwork = c.haloOptional(ContextArtworkPresentation.self, forKey: .foregroundArtwork)
+        artworkBackground = c.haloOptional(Bool.self, forKey: .artworkBackground)
+        artworkBackgroundBlur = c.haloOptional(Double.self, forKey: .artworkBackgroundBlur)
+        artworkBackgroundDim = c.haloOptional(Double.self, forKey: .artworkBackgroundDim)
+        contentAlignment = c.haloOptional(ContextContentAlignment.self, forKey: .contentAlignment)
+        spacing = c.haloOptional(Double.self, forKey: .spacing)
+        cornerRadius = c.haloOptional(Double.self, forKey: .cornerRadius)
+        controlSize = c.haloOptional(Double.self, forKey: .controlSize)
+        vinylRPM = c.haloOptional(Double.self, forKey: .vinylRPM)
+        showLyrics = c.haloOptional(Bool.self, forKey: .showLyrics)
+        lyricDisplay = c.haloOptional(LyricDisplayMode.self, forKey: .lyricDisplay)
+        lyricSyncOffset = c.haloOptional(Double.self, forKey: .lyricSyncOffset)
+        lyricsOnline = c.haloOptional(Bool.self, forKey: .lyricsOnline)
+        lyricFontSize = c.haloOptional(Double.self, forKey: .lyricFontSize)
+        lyricTransition = c.haloOptional(ContextLyricTransition.self, forKey: .lyricTransition)
+        lyricTransitionDuration = c.haloOptional(Double.self, forKey: .lyricTransitionDuration)
+        visualizerStyle = c.haloOptional(PlaybackAnimation.self, forKey: .visualizerStyle)
+        songTextColors = c.haloOptional(Bool.self, forKey: .songTextColors)
+        songControlColors = c.haloOptional(Bool.self, forKey: .songControlColors)
+        songVisualizerColors = c.haloOptional(Bool.self, forKey: .songVisualizerColors)
+        songBackgroundColors = c.haloOptional(Bool.self, forKey: .songBackgroundColors)
+        readableSongForegroundColors = c.haloOptional(Bool.self, forKey: .readableSongForegroundColors)
+        adaptiveElementColors = c.haloOptional(Bool.self, forKey: .adaptiveElementColors)
+        adaptiveColorDistribution = c.haloOptional(AudioCIColorDistribution.self, forKey: .adaptiveColorDistribution)
+        horizontalMargin = c.haloOptional(Double.self, forKey: .horizontalMargin)
+        topMargin = c.haloOptional(Double.self, forKey: .topMargin)
+        bottomMargin = c.haloOptional(Double.self, forKey: .bottomMargin)
+    }
+}
+
+extension HaloHUDConfiguration {
+    private enum HaloPersistenceCodingKeys: String, CodingKey {
+        case presentation, layout, components, progressStyle, segments, iconSize, textSize, appearance, animation, behavior
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloPersistenceCodingKeys.self)
+        let fallback = HaloHUDConfiguration()
+        presentation = c.haloDecode(HaloHUDPresentationConfiguration.self, forKey: .presentation, default: fallback.presentation)
+        layout = c.haloDecode(HaloHUDLayoutConfiguration.self, forKey: .layout, default: fallback.layout)
+        components = c.haloDecode(HaloHUDComponents.self, forKey: .components, default: fallback.components)
+        progressStyle = c.haloDecode(HaloHUDProgressStyle.self, forKey: .progressStyle, default: fallback.progressStyle)
+        segments = c.haloDecode(Int.self, forKey: .segments, default: fallback.segments)
+        iconSize = c.haloDecode(Double.self, forKey: .iconSize, default: fallback.iconSize)
+        textSize = c.haloDecode(Double.self, forKey: .textSize, default: fallback.textSize)
+        appearance = c.haloDecode(HaloHUDAppearanceConfiguration.self, forKey: .appearance, default: fallback.appearance)
+        animation = c.haloDecode(HaloHUDAnimationConfiguration.self, forKey: .animation, default: fallback.animation)
+        behavior = c.haloDecode(HaloHUDBehaviorConfiguration.self, forKey: .behavior, default: fallback.behavior)
+    }
+}
+
+extension HaloHUDEventOverride {
+    private enum HaloCodingKeys: String, CodingKey {
+        case enabled, useGlobalSettings, configuration
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = HaloHUDEventOverride()
+        enabled = c.haloDecode(Bool.self, forKey: .enabled, default: fallback.enabled)
+        useGlobalSettings = c.haloDecode(Bool.self, forKey: .useGlobalSettings, default: fallback.useGlobalSettings)
+        configuration = c.haloDecode(HaloHUDConfiguration.self, forKey: .configuration, default: fallback.configuration)
+    }
+}
+
+extension HaloHUDAppRule {
+    private enum HaloCodingKeys: String, CodingKey {
+        case id, enabled, bundleIdentifier, target
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = HaloHUDAppRule()
+        id = c.haloDecode(UUID.self, forKey: .id, default: fallback.id)
+        enabled = c.haloDecode(Bool.self, forKey: .enabled, default: fallback.enabled)
+        bundleIdentifier = c.haloDecode(String.self, forKey: .bundleIdentifier, default: fallback.bundleIdentifier)
+        target = c.haloDecode(HaloHUDPresentationTarget.self, forKey: .target, default: fallback.target)
+    }
+}
+
+extension HaloHUDSettings {
+    private enum HaloPersistenceCodingKeys: String, CodingKey {
+        case version, enabled, global, events, customPresets, appRules
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloPersistenceCodingKeys.self)
+        let fallback = HaloHUDSettings()
+        version = c.haloDecode(Int.self, forKey: .version, default: fallback.version)
+        enabled = c.haloDecode(Bool.self, forKey: .enabled, default: fallback.enabled)
+        global = c.haloDecode(HaloHUDConfiguration.self, forKey: .global, default: fallback.global)
+        events = c.haloDecode([String: HaloHUDEventOverride].self, forKey: .events, default: fallback.events)
+        customPresets = c.haloDecode([HaloHUDPreset].self, forKey: .customPresets, default: fallback.customPresets)
+        appRules = c.haloDecode([HaloHUDAppRule].self, forKey: .appRules, default: fallback.appRules)
     }
 }

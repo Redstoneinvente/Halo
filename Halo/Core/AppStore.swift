@@ -20,15 +20,45 @@ final class AppStore: ObservableObject {
     private var ticker: AnyCancellable?
     private let defaults: UserDefaults
     private var pendingSave: DispatchWorkItem?
+    private var configurationPersistenceBlocked = false
+    private static let configurationKey = "configuration"
+    private static let configurationBackupKey = "configuration.backup"
+    private static let configurationRecoveryKey = "configuration.recovery"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: "configuration"),
-           var saved = try? JSONDecoder().decode(Configuration.self, from: data),
-           let theme = try? saved.theme.validated() {
+        let decoder = JSONDecoder()
+
+        func decodedConfiguration(_ data: Data) -> Configuration? {
+            guard var saved = try? decoder.decode(Configuration.self, from: data),
+                  let theme = try? saved.theme.validated() else { return nil }
             saved.theme = theme
+            return saved
+        }
+
+        if let data = defaults.data(forKey: Self.configurationKey) {
+            if let saved = decodedConfiguration(data) {
+                configuration = saved
+                defaults.set(data, forKey: Self.configurationBackupKey)
+            } else {
+                defaults.set(data, forKey: Self.configurationRecoveryKey)
+                if let backup = defaults.data(forKey: Self.configurationBackupKey),
+                   let saved = decodedConfiguration(backup) {
+                    configuration = saved
+                    defaults.set(backup, forKey: Self.configurationKey)
+                } else {
+                    configuration = Configuration()
+                    configurationPersistenceBlocked = true
+                }
+            }
+        } else if let backup = defaults.data(forKey: Self.configurationBackupKey),
+                  let saved = decodedConfiguration(backup) {
             configuration = saved
-        } else { configuration = Configuration() }
+            defaults.set(backup, forKey: Self.configurationKey)
+        } else {
+            configuration = Configuration()
+        }
+
         workspace.applyTheme = { [weak self] theme in self?.configuration.theme = theme }
         // Environmental Interface is intentionally dormant for now. Keep the implementation
         // and assets in the tree so development can resume later without shipping EI at runtime.
@@ -60,8 +90,25 @@ final class AppStore: ObservableObject {
     }
     func flushConfiguration() {
         pendingSave?.cancel()
-        do { defaults.set(try JSONEncoder().encode(configuration), forKey: "configuration") }
-        catch { self.error = error.localizedDescription }
+        guard !configurationPersistenceBlocked else {
+            if error == nil {
+                error = "Halo preserved an unreadable configuration for recovery instead of overwriting it."
+            }
+            return
+        }
+
+        do {
+            let encoded = try JSONEncoder().encode(configuration)
+            if let current = defaults.data(forKey: Self.configurationKey),
+               var saved = try? JSONDecoder().decode(Configuration.self, from: current),
+               let theme = try? saved.theme.validated() {
+                saved.theme = theme
+                defaults.set(current, forKey: Self.configurationBackupKey)
+            }
+            defaults.set(encoded, forKey: Self.configurationKey)
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
     func startTimer(duration: TimeInterval) {
         // Custom timers are first-class: support H/M/S precision while keeping an upper

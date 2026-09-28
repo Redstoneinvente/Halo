@@ -389,3 +389,44 @@ enum SurfaceMotion {
         }
     }
 }
+
+// MARK: - Surface persistence compatibility
+
+extension SurfaceOptions {
+    private enum HaloCodingKeys: String, CodingKey {
+        case useStyleContour, outlineEnabled, offsets, shape, compactHeight, opening, closing,
+             duration, damping, topRadius, bottomRadius, shoulder
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = SurfaceOptions()
+        useStyleContour = c.haloOptional(Bool.self, forKey: .useStyleContour)
+        outlineEnabled = c.haloOptional(Bool.self, forKey: .outlineEnabled)
+        offsets = c.haloOptional(SurfaceOffsets.self, forKey: .offsets)
+        shape = c.haloDecode(SurfaceShapeKind.self, forKey: .shape, default: fallback.shape)
+        compactHeight = c.haloDecode(Double.self, forKey: .compactHeight, default: fallback.compactHeight)
+        opening = c.haloDecode(SurfaceTransition.self, forKey: .opening, default: fallback.opening)
+        closing = c.haloDecode(SurfaceTransition.self, forKey: .closing, default: fallback.closing)
+        duration = c.haloDecode(Double.self, forKey: .duration, default: fallback.duration)
+        damping = c.haloDecode(Double.self, forKey: .damping, default: fallback.damping)
+        topRadius = c.haloDecode(Double.self, forKey: .topRadius, default: fallback.topRadius)
+        bottomRadius = c.haloDecode(Double.self, forKey: .bottomRadius, default: fallback.bottomRadius)
+        shoulder = c.haloDecode(Double.self, forKey: .shoulder, default: fallback.shoulder)
+    }
+}
+
+extension SurfaceOffsets {
+    private enum HaloCodingKeys: String, CodingKey {
+        case openedX, openedY, closedX, closedY
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = SurfaceOffsets()
+        openedX = c.haloDecode(Double.self, forKey: .openedX, default: fallback.openedX)
+        openedY = c.haloDecode(Double.self, forKey: .openedY, default: fallback.openedY)
+        closedX = c.haloDecode(Double.self, forKey: .closedX, default: fallback.closedX)
+        closedY = c.haloDecode(Double.self, forKey: .closedY, default: fallback.closedY)
+    }
+}

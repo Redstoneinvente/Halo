@@ -408,3 +408,71 @@ extension NSColor {
         return true
     }
 }
+
+// MARK: - Backwards-compatible persistence decoding
+
+extension KeyedDecodingContainer {
+    /// Persisted Halo settings live across app upgrades. A newly-added field, removed enum case,
+    /// or malformed optional sub-object must not invalidate the entire saved workspace.
+    func haloDecode<T: Decodable>(
+        _ type: T.Type,
+        forKey key: Key,
+        default fallback: @autoclosure () -> T
+    ) -> T {
+        do {
+            return try decodeIfPresent(type, forKey: key) ?? fallback()
+        } catch {
+            return fallback()
+        }
+    }
+
+    func haloOptional<T: Decodable>(_ type: T.Type, forKey key: Key) -> T? {
+        do {
+            return try decodeIfPresent(type, forKey: key)
+        } catch {
+            return nil
+        }
+    }
+}
+
+extension Theme {
+    private enum HaloCodingKeys: String, CodingKey {
+        case version, name, width, cornerRadius, tint, opacity, animations, style
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = Theme()
+        version = c.haloDecode(Int.self, forKey: .version, default: fallback.version)
+        name = c.haloDecode(String.self, forKey: .name, default: fallback.name)
+        width = c.haloDecode(Double.self, forKey: .width, default: fallback.width)
+        cornerRadius = c.haloDecode(Double.self, forKey: .cornerRadius, default: fallback.cornerRadius)
+        tint = c.haloDecode(Double.self, forKey: .tint, default: fallback.tint)
+        opacity = c.haloDecode(Double.self, forKey: .opacity, default: fallback.opacity)
+        animations = c.haloDecode(Bool.self, forKey: .animations, default: fallback.animations)
+        style = c.haloDecode(SurfaceStyle.self, forKey: .style, default: fallback.style)
+    }
+}
+
+extension Configuration {
+    private enum HaloCodingKeys: String, CodingKey {
+        case theme, hoverToExpand, hoverOpenDelay, hoverCloseDelay, hoverHapticStrength,
+             hoverHapticPattern, allDisplays, simulateNotch, showClock, showTimer, showShelf
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HaloCodingKeys.self)
+        let fallback = Configuration()
+        theme = c.haloDecode(Theme.self, forKey: .theme, default: fallback.theme)
+        hoverToExpand = c.haloDecode(Bool.self, forKey: .hoverToExpand, default: fallback.hoverToExpand)
+        hoverOpenDelay = c.haloOptional(Double.self, forKey: .hoverOpenDelay)
+        hoverCloseDelay = c.haloOptional(Double.self, forKey: .hoverCloseDelay)
+        hoverHapticStrength = c.haloOptional(Int.self, forKey: .hoverHapticStrength)
+        hoverHapticPattern = c.haloOptional(HaloHoverHapticPattern.self, forKey: .hoverHapticPattern)
+        allDisplays = c.haloDecode(Bool.self, forKey: .allDisplays, default: fallback.allDisplays)
+        simulateNotch = c.haloDecode(Bool.self, forKey: .simulateNotch, default: fallback.simulateNotch)
+        showClock = c.haloDecode(Bool.self, forKey: .showClock, default: fallback.showClock)
+        showTimer = c.haloDecode(Bool.self, forKey: .showTimer, default: fallback.showTimer)
+        showShelf = c.haloDecode(Bool.self, forKey: .showShelf, default: fallback.showShelf)
+    }
+}
