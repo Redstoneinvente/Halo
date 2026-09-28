@@ -1055,6 +1055,16 @@ final class WindowManager {
             .sink { [weak self] _ in self?.refreshDynamicWidths() }
             .store(in: &subscriptions)
 
+        // Review prompt ownership belongs here, at the panel/host layer. SurfaceView should
+        // never decide whether the transient panel height survives.
+        HaloReviewPromptCoordinator.shared.$isPresented
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] presented in
+                self?.synchronizeReviewPromptPresentation(presented: presented)
+            }
+            .store(in: &subscriptions)
+
         let shouldHideInitialFrame =
             store.workspace.settings.resolvedNotchMode == .advanced &&
             ActivationSequenceCoordinator.shared.shouldPlay(startupActivationContext)
@@ -2627,6 +2637,52 @@ final class WindowManager {
         return reachesLeft && reachesRight && reachesBottom && reachesTop
     }
 
+    private func reviewPromptTargetHostID() -> String? {
+        if let main = NSScreen.main {
+            let mainID = Self.displayID(main)
+            if hosts[mainID] != nil { return mainID }
+        }
+
+        for screen in NSScreen.screens {
+            let id = Self.displayID(screen)
+            if hosts[id] != nil { return id }
+        }
+
+        return hosts.keys.first
+    }
+
+    private func synchronizeReviewPromptPresentation(presented: Bool? = nil) {
+        let shouldPresent = presented ?? HaloReviewPromptCoordinator.shared.isPresented
+        let targetID = shouldPresent ? reviewPromptTargetHostID() : nil
+        let extraHeight: CGFloat = 54
+
+#if DEBUG
+        print("[Halo Review QA] sync presented=\(shouldPresent) target=\(targetID ?? "none") hosts=\(hosts.count)")
+#endif
+
+        for (id, host) in hosts {
+            guard let geometry = host.geometry else { continue }
+            let ownsPrompt = shouldPresent && id == targetID
+
+            if ownsPrompt {
+                let base = host.state.reviewPromptBaseCompactHeight ?? geometry.compactHeight
+                host.state.reviewPromptBaseCompactHeight = base
+                let requested = min(
+                    220,
+                    max(base + extraHeight, host.state.physicalNotchHeight + extraHeight)
+                )
+                if host.state.reviewPromptPreferredCompactHeight != requested {
+                    host.state.reviewPromptPreferredCompactHeight = requested
+                }
+            } else {
+                if host.state.reviewPromptPreferredCompactHeight != nil {
+                    host.state.reviewPromptPreferredCompactHeight = nil
+                }
+                host.state.reviewPromptBaseCompactHeight = nil
+            }
+        }
+    }
+
     private func reconcile() {
         let simpleMode = store.workspace.settings.resolvedNotchMode == .simple
         if simpleMode {
@@ -3194,6 +3250,10 @@ final class WindowManager {
             bubbleManager.unregister(displayID: id)
             hosts.removeValue(forKey: id)?.stop()
         }
+
+        // Reassert the prompt after any geometry/profile/display reconciliation. This makes
+        // the 10-second QA trigger durable instead of a one-shot UI request.
+        synchronizeReviewPromptPresentation()
         refreshGeometryEditorPanels()
     }
 }

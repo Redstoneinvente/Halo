@@ -444,6 +444,9 @@ final class HaloReviewPromptCoordinator: ObservableObject {
                 guard !Task.isCancelled else { return }
             }
 
+#if DEBUG
+            print("[Halo Review QA] 10s elapsed and runtime is ready; presenting")
+#endif
             await self.evaluateAndPresent()
         }
     }
@@ -500,6 +503,9 @@ final class HaloReviewPromptCoordinator: ObservableObject {
     private func present() {
         // The review nudge is intentionally persistent once shown. It stays open until
         // the user chooses Review or Don't remind me, rather than collapsing on a timer.
+#if DEBUG
+        print("[Halo Review QA] coordinator isPresented -> true")
+#endif
         isPresented = true
     }
 }

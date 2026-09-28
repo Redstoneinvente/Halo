@@ -2762,7 +2762,6 @@ struct SurfaceView: View {
     @ObservedObject private var integrationCI = IntegrationCIRuntime.shared
     @ObservedObject private var runtimeGate = HaloRuntimeGate.shared
     @ObservedObject private var featureAccess = HaloFeatureAccess.shared
-    @ObservedObject private var reviewPrompt = HaloReviewPromptCoordinator.shared
     @State private var clipboardOpenedNotch = false
     @State private var integrationAutoOpeningSurface = false
     @State private var teleprompterActive = false
@@ -2806,50 +2805,8 @@ struct SurfaceView: View {
         featureAccess.effectiveLayout(state.layoutOverride ?? workspace.effectiveLayout)
     }
     private var simpleMode: Bool { workspace.settings.resolvedNotchMode == .simple }
-    private let reviewPromptExtraHeight: CGFloat = 54
-
-    private var reviewPromptTargetsThisSurface: Bool {
-        guard reviewPrompt.isPresented,
-              runtimeGate.isReady,
-              !state.expanded,
-              !state.presentationExpanded,
-              !state.editingGeometry,
-              state.activeCIIdentifier == nil else { return false }
-
-        guard let main = NSScreen.main else {
-            return NSScreen.screens.first.map { WindowManager.displayID($0) == state.displayID } ?? true
-        }
-        return WindowManager.displayID(main) == state.displayID
-    }
-
     private var reviewPromptActive: Bool {
-        // WindowManager's dedicated request is the single source of truth once this surface
-        // has claimed the prompt. Rendering itself happens one level up in HaloSurfaceRouter.
         state.reviewPromptPreferredCompactHeight != nil
-    }
-
-    private func synchronizeReviewPromptGeometry() {
-        if reviewPromptTargetsThisSurface {
-            if state.reviewPromptBaseCompactHeight == nil {
-                state.reviewPromptBaseCompactHeight = state.compactHeight
-            }
-            guard let base = state.reviewPromptBaseCompactHeight else { return }
-            let requested = min(
-                220,
-                max(base + reviewPromptExtraHeight, state.physicalNotchHeight + reviewPromptExtraHeight)
-            )
-            if state.reviewPromptPreferredCompactHeight != requested {
-                state.reviewPromptPreferredCompactHeight = requested
-            }
-            return
-        }
-
-        // Clear by engine state, not by a child-view-local flag. This also repairs any stale
-        // expanded review panel left behind if SwiftUI rebuilt SurfaceView during animation.
-        if state.reviewPromptPreferredCompactHeight != nil {
-            state.reviewPromptPreferredCompactHeight = nil
-        }
-        state.reviewPromptBaseCompactHeight = nil
     }
     private var contextOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
     private var bluetoothEligible: Bool {
@@ -3391,15 +3348,6 @@ struct SurfaceView: View {
                 }
             }
         }
-        .onReceive(reviewPrompt.$isPresented) { _ in
-            synchronizeReviewPromptGeometry()
-        }
-        .onChange(of: state.expanded) { _ in
-            synchronizeReviewPromptGeometry()
-        }
-        .onChange(of: state.activeCIIdentifier) { _ in
-            synchronizeReviewPromptGeometry()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .init("HaloCustomCIOpenRequested"))) { note in
             guard featureAccess.allows(.customCI),
                   !disableCustomCI,
@@ -3528,10 +3476,6 @@ struct SurfaceView: View {
         }
         .onDisappear {
             publishOpenedNotchVisibility(false)
-            if state.reviewPromptPreferredCompactHeight != nil {
-                state.reviewPromptPreferredCompactHeight = nil
-            }
-            state.reviewPromptBaseCompactHeight = nil
         }
         .onReceive(state.viewport.$size) { size in
             guard visualWorkspaceSurfacePresented, !state.expanded else { return }
