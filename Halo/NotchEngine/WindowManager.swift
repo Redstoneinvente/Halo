@@ -1055,8 +1055,8 @@ final class WindowManager {
             .sink { [weak self] _ in self?.refreshDynamicWidths() }
             .store(in: &subscriptions)
 
-        // Review prompt ownership belongs here, at the panel/host layer. SurfaceView should
-        // never decide whether the transient panel height survives.
+        // Review prompt ownership belongs here, at the panel/host layer. SurfaceView does
+        // not own the transient panel height.
         HaloReviewPromptCoordinator.shared.$isPresented
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
@@ -2660,10 +2660,6 @@ final class WindowManager {
         let targetID = shouldPresent ? reviewPromptTargetHostID() : nil
         let extraHeight: CGFloat = 54
 
-#if DEBUG
-        print("[Halo Review QA] sync presented=\(shouldPresent) target=\(targetID ?? "none") hosts=\(hosts.count)")
-#endif
-
         for (id, host) in hosts {
             guard let geometry = host.geometry else { continue }
             let ownsPrompt = shouldPresent && id == targetID
@@ -3255,8 +3251,8 @@ final class WindowManager {
             hosts.removeValue(forKey: id)?.stop()
         }
 
-        // Reassert the prompt after any geometry/profile/display reconciliation. This makes
-        // the 10-second QA trigger durable instead of a one-shot UI request.
+        // Reassert the prompt after any geometry/profile/display reconciliation so the
+        // temporary review height remains stable while the reminder is visible.
         synchronizeReviewPromptPresentation()
         refreshGeometryEditorPanels()
     }

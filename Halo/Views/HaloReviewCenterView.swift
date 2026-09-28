@@ -330,13 +330,6 @@ struct HaloReviewCenterView: View {
             }
 
             Spacer()
-
-            Button("Preview notch reminder") {
-                HaloReviewPromptCoordinator.shared.presentForTesting()
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Shows the subtle review prompt in the closed notch.")
         }
 
         Text("Reviews are published immediately. You can edit or delete yours at any time.")

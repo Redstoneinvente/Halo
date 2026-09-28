@@ -409,9 +409,6 @@ final class HaloReviewPromptCoordinator: ObservableObject {
     private let defaults = UserDefaults.standard
     private let suppressedKey = "HaloReviewPromptSuppressedV1"
     private let completedKey = "HaloReviewPromptCompletedV1"
-    /// Temporary QA mode. While enabled the notch review nudge appears after every
-    /// app launch regardless of persisted suppression/completion state.
-    private let forceLaunchPromptForTesting = true
     private var started = false
     private var evaluationTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
@@ -431,10 +428,9 @@ final class HaloReviewPromptCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // QA cadence: 10 seconds after launch, then wait for Halo's surface runtime.
-        // This makes the test deterministic even if startup verification takes >10 seconds.
+        // Give the user time to settle into Halo before asking for a review.
         evaluationTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            try? await Task.sleep(nanoseconds: 120_000_000_000)
             guard !Task.isCancelled, let self else { return }
 
             while !HaloRuntimeGate.shared.isReady {
@@ -442,16 +438,8 @@ final class HaloReviewPromptCoordinator: ObservableObject {
                 guard !Task.isCancelled else { return }
             }
 
-#if DEBUG
-            print("[Halo Review QA] 10s elapsed and runtime is ready; presenting")
-#endif
             await self.evaluateAndPresent()
         }
-    }
-
-    func presentForTesting() {
-        guard !isPresented else { return }
-        present()
     }
 
     func openReviewCenter() {
@@ -464,6 +452,8 @@ final class HaloReviewPromptCoordinator: ObservableObject {
 
     func dontRemind() {
         defaults.set(true, forKey: suppressedKey)
+        evaluationTask?.cancel()
+        evaluationTask = nil
         dismiss()
     }
 
@@ -472,16 +462,8 @@ final class HaloReviewPromptCoordinator: ObservableObject {
     }
 
     private func evaluateAndPresent() async {
-        guard HaloRuntimeGate.shared.isReady else { return }
-
-        if forceLaunchPromptForTesting {
-            // Deliberately ignore old "don't remind me" and completed-review flags during QA.
-            // The user can still dismiss this launch's prompt normally.
-            present()
-            return
-        }
-
-        guard !defaults.bool(forKey: suppressedKey),
+        guard HaloRuntimeGate.shared.isReady,
+              !defaults.bool(forKey: suppressedKey),
               !defaults.bool(forKey: completedKey) else { return }
 
         let account = HaloAccountManager.shared
@@ -499,11 +481,7 @@ final class HaloReviewPromptCoordinator: ObservableObject {
     }
 
     private func present() {
-        // The review nudge is intentionally persistent once shown. It stays open until
-        // the user chooses Review or Don't remind me, rather than collapsing on a timer.
-#if DEBUG
-        print("[Halo Review QA] coordinator isPresented -> true")
-#endif
+        // Stay visible until the user chooses Review or Don't remind me.
         isPresented = true
     }
 }
