@@ -184,6 +184,9 @@ final class SurfaceState: ObservableObject {
     @Published var contextPreferredSize: CGSize?
     @Published var contextPreferredCompactWidth: CGFloat?
     @Published var contextPreferredCompactHeight: CGFloat?
+    /// Non-CI compact-height request used by the review nudge. Keep this separate from
+    /// contextPreferredCompactHeight because Simple mode deliberately clears CI sizing.
+    @Published var reviewPromptPreferredCompactHeight: CGFloat?
     @Published var contextMinimumExpandedWidth: CGFloat?
     /// Per-surface drag metadata comes from Halo's shared file-drag source. Drop CI is merely one
     /// consumer of this state; partner integrations receive the same event independently.
@@ -746,6 +749,7 @@ final class WindowManager {
         var ciOwnershipSubscription: AnyCancellable?
         var contextCompactSizeSubscription: AnyCancellable?
         var contextCompactHeightSubscription: AnyCancellable?
+        var reviewPromptCompactHeightSubscription: AnyCancellable?
         var refreshDropCIRegistration: (() -> Void)?
         var pixelPalCollapseWork: DispatchWorkItem?
         var hoverOpeningCompletionWork: DispatchWorkItem?
@@ -780,7 +784,7 @@ final class WindowManager {
         func stop() {
             animator.cancel(); state.hoverExpandTask?.cancel(); state.collapseTask?.cancel(); state.dropExitTask?.cancel()
             pixelPalCollapseWork?.cancel()
-            subscription?.cancel(); contextSizeSubscription?.cancel(); ciOwnershipSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); contextCompactHeightSubscription?.cancel()
+            subscription?.cancel(); contextSizeSubscription?.cancel(); ciOwnershipSubscription?.cancel(); contextCompactSizeSubscription?.cancel(); contextCompactHeightSubscription?.cancel(); reviewPromptCompactHeightSubscription?.cancel()
             panel.close(); ambientPanel.close(); geometryEditorPanel.close()
         }
     }
@@ -2161,10 +2165,14 @@ final class WindowManager {
         if host.state.editingGeometry {
             return geometry.frame(expanded: expanded)
         }
+        let closedHeightRequest: CGFloat? = {
+            if let review = host.state.reviewPromptPreferredCompactHeight { return review }
+            return host.state.contextPreferredCompactHeight
+        }()
         return expanded
             ? adjustedExpandedFrame(host: host, requested: activeExpandedContextRequest(for: host))
             : adjustedClosedFrame(host: host, requestedWidth: host.state.contextPreferredCompactWidth,
-                                  requestedHeight: host.state.contextPreferredCompactHeight)
+                                  requestedHeight: closedHeightRequest)
     }
 
     private func notchAmbientFrame(for geometry: SurfaceGeometry) -> CGRect {
@@ -3114,6 +3122,32 @@ final class WindowManager {
                     host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
                                        preset: .smooth, animations: host.state.theme.animations && !host.state.editingGeometry,
                                        opening: true, style: geometry.style, liveViewportResize: true,
+                                       synchronizeClosedGeometry: true,
+                                       closedCameraFrame: self.physicalCameraFrame(for: geometry))
+                }
+
+                host.reviewPromptCompactHeightSubscription = host.state.$reviewPromptPreferredCompactHeight.dropFirst().removeDuplicates(by: { lhs, rhs in
+                    switch (lhs, rhs) {
+                    case (nil, nil): return true
+                    case let (a?, b?): return abs(a - b) < 1
+                    default: return false
+                    }
+                }).receive(on: DispatchQueue.main).sink { [weak self, weak host] _ in
+                    guard let self, let host, let geometry = host.geometry,
+                          !host.state.expanded, !host.state.presentationExpanded else { return }
+                    let target = self.targetFrame(host: host, expanded: false)
+                    guard host.targetFrame != target else { return }
+                    host.targetFrame = target
+                    var motion = geometry.appearance.surface
+                    motion.opening = .resize
+                    motion.closing = .resize
+                    motion.duration = min(0.30, max(0.14, motion.duration))
+                    host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
+                                       preset: .smooth,
+                                       animations: host.state.theme.animations && !host.state.editingGeometry,
+                                       opening: true,
+                                       style: geometry.style,
+                                       liveViewportResize: true,
                                        synchronizeClosedGeometry: true,
                                        closedCameraFrame: self.physicalCameraFrame(for: geometry))
                 }

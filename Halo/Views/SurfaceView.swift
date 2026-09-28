@@ -2824,7 +2824,10 @@ struct SurfaceView: View {
     }
 
     private var reviewPromptActive: Bool {
-        reviewPromptTargetsThisSurface && reviewPromptBaseCompactHeight != nil
+        // Rendering follows the prompt lifecycle once this surface has claimed it.
+        // Do not re-evaluate every targeting guard here, otherwise a transient engine
+        // state can hide the content while leaving the resized panel visible.
+        reviewPrompt.isPresented && reviewPromptBaseCompactHeight != nil
     }
 
     private var reviewPromptBaseHeight: CGFloat {
@@ -2834,20 +2837,18 @@ struct SurfaceView: View {
     private func synchronizeReviewPromptGeometry() {
         if reviewPromptTargetsThisSurface {
             if reviewPromptBaseCompactHeight == nil {
-                // Do not steal a compact-height override from another transient surface feature.
-                guard state.contextPreferredCompactHeight == nil else { return }
                 reviewPromptBaseCompactHeight = state.compactHeight
             }
             guard let base = reviewPromptBaseCompactHeight else { return }
             let requested = min(220, max(base + reviewPromptExtraHeight, state.physicalNotchHeight + reviewPromptExtraHeight))
-            if state.contextPreferredCompactHeight != requested {
-                state.contextPreferredCompactHeight = requested
+            if state.reviewPromptPreferredCompactHeight != requested {
+                state.reviewPromptPreferredCompactHeight = requested
             }
             return
         }
 
         if reviewPromptBaseCompactHeight != nil {
-            state.contextPreferredCompactHeight = nil
+            state.reviewPromptPreferredCompactHeight = nil
             reviewPromptBaseCompactHeight = nil
         }
     }
