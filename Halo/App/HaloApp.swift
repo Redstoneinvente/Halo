@@ -158,6 +158,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         initialAccessVerificationCompleted = false
 
         if HaloDistribution.current.supportsAppStoreLicensing {
+            // App Store entitlement remains entirely Apple-managed. Restore the optional
+            // Halo account separately so features such as owned customer reviews can work
+            // without coupling Firebase identity to StoreKit licensing.
+            Task { @MainActor in
+                await HaloAccountManager.shared.restore()
+            }
+
             appStoreLicensing.statePublisher
                 .removeDuplicates()
                 .receive(on: RunLoop.main)

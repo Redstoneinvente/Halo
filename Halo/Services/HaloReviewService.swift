@@ -429,8 +429,9 @@ final class HaloReviewPromptCoordinator: ObservableObject {
         NotificationCenter.default.publisher(for: .init("HaloReviewSubmitted"))
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.defaults.set(true, forKey: self?.completedKey ?? "")
-                self?.dismiss()
+                guard let self else { return }
+                self.defaults.set(true, forKey: self.completedKey)
+                self.dismiss()
             }
             .store(in: &cancellables)
 
@@ -480,12 +481,16 @@ final class HaloReviewPromptCoordinator: ObservableObject {
         }
 
         let account = HaloAccountManager.shared
-        guard account.isSignedIn, account.emailVerified else { return }
 
-        await HaloReviewService.shared.refresh()
-        guard HaloReviewService.shared.reviews.isEmpty else {
-            defaults.set(true, forKey: completedKey)
-            return
+        // The reminder is allowed to appear even before a Halo review account exists.
+        // Tapping it takes the user to the review center where they can sign in or create
+        // an account. If we already know this account has reviewed Halo, suppress it.
+        if account.isSignedIn, account.emailVerified {
+            await HaloReviewService.shared.refresh()
+            guard HaloReviewService.shared.reviews.isEmpty else {
+                defaults.set(true, forKey: completedKey)
+                return
+            }
         }
 
         present()
