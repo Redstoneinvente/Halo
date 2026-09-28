@@ -1045,7 +1045,7 @@ private struct NotchModeSettingsPane: View {
 
                 Text("Simple always keeps at least one widget enabled, so the opened notch never becomes an empty surface.")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
 
                 ForEach(SimpleNotchSettings.availableWidgets) { widget in
                     VStack(alignment: .leading, spacing: 9) {
@@ -6773,9 +6773,40 @@ private enum HaloInstalledApplicationCatalog {
 }
 
 
+private enum HaloAutomationPaneSection: String, CaseIterable, Identifiable {
+    case profiles = "Profile switching"
+    case visibility = "App visibility"
+
+    var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .profiles: return "person.crop.rectangle.stack"
+        case .visibility: return "eye.slash"
+        }
+    }
+}
+
+@MainActor
+private enum HaloAutomationAppPresentation {
+    static func url(for bundleID: String) -> URL? {
+        guard !bundleID.isEmpty else { return nil }
+        return NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+    }
+
+    static func name(for bundleID: String) -> String {
+        guard !bundleID.isEmpty else { return "Choose an application" }
+        guard let url = url(for: bundleID) else { return bundleID }
+        return FileManager.default.displayName(atPath: url.path)
+    }
+}
+
 @MainActor
 private struct AutomationSettingsPane: View {
     @ObservedObject var workspace: WorkspaceStore
+    @State private var selection: HaloAutomationPaneSection = .profiles
+    @State private var expandedProfileRules = Set<UUID>()
+    @State private var expandedVisibilityRules = Set<UUID>()
 
     private var appHideRules: Binding<[AppNotchHideRule]> {
         Binding(
@@ -6784,75 +6815,281 @@ private struct AutomationSettingsPane: View {
         )
     }
 
+    private var enabledProfileRules: Int {
+        workspace.settings.rules.filter(\.enabled).count
+    }
+
+    private var enabledVisibilityRules: Int {
+        appHideRules.wrappedValue.filter { $0.enabled && !$0.bundleIdentifier.isEmpty }.count
+    }
+
+    private var activeRuleCount: Int {
+        enabledProfileRules + enabledVisibilityRules
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Profile Rules")
-                    .font(.headline)
-                Text("Apply a profile when a condition becomes true. The first newly matching rule wins. Halo never runs scripts or shell commands.")
+        VStack(alignment: .leading, spacing: 16) {
+            automationHeader
+
+            Picker("Automation category", selection: $selection) {
+                ForEach(HaloAutomationPaneSection.allCases) { section in
+                    Label(section.rawValue, systemImage: section.symbol)
+                        .tag(section)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            Group {
+                switch selection {
+                case .profiles:
+                    profileRulesContent
+                case .visibility:
+                    visibilityRulesContent
+                }
+            }
+            .animation(.easeInOut(duration: 0.16), value: selection)
+        }
+    }
+
+    private var automationHeader: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: "bolt.badge.automatic")
+                .font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 42, height: 42)
+                .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Automation")
+                    .font(.title3.bold())
+                Text("Let Halo react to your apps, battery, displays and time without constantly changing settings yourself.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            if workspace.settings.rules.isEmpty {
-                Text("No profile rules yet.")
-                    .font(.callout)
+            Spacer(minLength: 12)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(activeRuleCount)")
+                    .font(.title3.weight(.semibold))
+                    .monospacedDigit()
+                Text(activeRuleCount == 1 ? "active rule" : "active rules")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+        }
+        .padding(14)
+        .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        }
+    }
 
-            ForEach($workspace.settings.rules) { $rule in
-                AutomationProfileRuleEditor(
-                    rule: $rule,
-                    profiles: workspace.settings.profiles,
-                    onRemove: {
-                        workspace.settings.rules.removeAll { $0.id == rule.id }
-                    }
-                )
-            }
-
-            Button {
-                guard let profile = workspace.settings.profiles.first else { return }
-                workspace.settings.rules.append(AutomationRule(profileID: profile.id))
-            } label: {
-                Label("Add Profile Rule", systemImage: "plus")
+    private var profileRulesContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HaloAutomationSectionHeader(
+                title: "Profile switching",
+                detail: "Switch to a saved Halo profile when a condition becomes true. If several rules become true together, the first matching rule in this list takes priority.",
+                actionTitle: "Add rule",
+                actionSymbol: "plus"
+            ) {
+                addProfileRule()
             }
             .disabled(workspace.settings.profiles.isEmpty)
 
-            Divider()
-                .padding(.vertical, 2)
+            if workspace.settings.profiles.isEmpty {
+                HaloAutomationEmptyState(
+                    symbol: "person.crop.rectangle.badge.exclamationmark",
+                    title: "Create a profile first",
+                    detail: "Profile automations need at least one saved profile. Create one in Profiles, then come back here to attach conditions to it."
+                )
+            } else if workspace.settings.rules.isEmpty {
+                HaloAutomationEmptyState(
+                    symbol: "bolt.circle",
+                    title: "No profile automations yet",
+                    detail: "Add a rule to switch profiles automatically when an app opens, your battery changes, displays connect, or a certain hour arrives."
+                )
+            } else {
+                VStack(spacing: 10) {
+                    ForEach($workspace.settings.rules) { $rule in
+                        let index = workspace.settings.rules.firstIndex(where: { $0.id == rule.id }) ?? 0
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Hide Halo for Apps")
-                    .font(.headline)
-                Text("Keep Halo out of the way for games, video apps, presentations, or any other foreground app. Rules can target individual displays.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                        AutomationProfileRuleEditor(
+                            rule: $rule,
+                            profiles: workspace.settings.profiles,
+                            isExpanded: Binding(
+                                get: { expandedProfileRules.contains(rule.id) },
+                                set: { expanded in
+                                    if expanded {
+                                        expandedProfileRules.insert(rule.id)
+                                    } else {
+                                        expandedProfileRules.remove(rule.id)
+                                    }
+                                }
+                            ),
+                            canMoveUp: index > 0,
+                            canMoveDown: index < workspace.settings.rules.count - 1,
+                            onMoveUp: { moveProfileRule(rule.id, by: -1) },
+                            onMoveDown: { moveProfileRule(rule.id, by: 1) },
+                            onDuplicate: {
+                                var copy = rule
+                                copy.id = UUID()
+                                workspace.settings.rules.insert(copy, at: min(index + 1, workspace.settings.rules.count))
+                                expandedProfileRules.insert(copy.id)
+                            },
+                            onRemove: {
+                                workspace.settings.rules.removeAll { $0.id == rule.id }
+                                expandedProfileRules.remove(rule.id)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var visibilityRulesContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HaloAutomationSectionHeader(
+                title: "App visibility",
+                detail: "Hide Halo automatically for games, presentations and other apps. Each rule can target all displays or only the screens you choose.",
+                actionTitle: "Add rule",
+                actionSymbol: "plus"
+            ) {
+                addVisibilityRule()
             }
 
             if appHideRules.wrappedValue.isEmpty {
-                Text("No app visibility rules yet.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-
-            ForEach(appHideRules) { $rule in
-                AppNotchHideRuleEditor(
-                    rule: $rule,
-                    onRemove: {
-                        var rules = appHideRules.wrappedValue
-                        rules.removeAll { $0.id == rule.id }
-                        appHideRules.wrappedValue = rules
-                    }
+                HaloAutomationEmptyState(
+                    symbol: "eye.slash.circle",
+                    title: "Halo stays visible everywhere",
+                    detail: "Add a rule to hide Halo while a chosen app is foreground, maximized, full screen, or either maximized or full screen."
                 )
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(appHideRules) { $rule in
+                        AppNotchHideRuleEditor(
+                            rule: $rule,
+                            isExpanded: Binding(
+                                get: { expandedVisibilityRules.contains(rule.id) },
+                                set: { expanded in
+                                    if expanded {
+                                        expandedVisibilityRules.insert(rule.id)
+                                    } else {
+                                        expandedVisibilityRules.remove(rule.id)
+                                    }
+                                }
+                            ),
+                            onDuplicate: {
+                                var copy = rule
+                                copy.id = UUID()
+                                var rules = appHideRules.wrappedValue
+                                rules.append(copy)
+                                appHideRules.wrappedValue = rules
+                                expandedVisibilityRules.insert(copy.id)
+                            },
+                            onRemove: {
+                                var rules = appHideRules.wrappedValue
+                                rules.removeAll { $0.id == rule.id }
+                                appHideRules.wrappedValue = rules
+                                expandedVisibilityRules.remove(rule.id)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func addProfileRule() {
+        guard let profile = workspace.settings.profiles.first else { return }
+        var rule = AutomationRule(profileID: profile.id)
+        rule.enabled = false
+        workspace.settings.rules.append(rule)
+        expandedProfileRules.insert(rule.id)
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+
+    private func addVisibilityRule() {
+        var rules = appHideRules.wrappedValue
+        let rule = AppNotchHideRule()
+        rules.append(rule)
+        appHideRules.wrappedValue = rules
+        expandedVisibilityRules.insert(rule.id)
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+
+    private func moveProfileRule(_ id: UUID, by delta: Int) {
+        guard let index = workspace.settings.rules.firstIndex(where: { $0.id == id }),
+              workspace.settings.rules.indices.contains(index + delta) else { return }
+        workspace.settings.rules.swapAt(index, index + delta)
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+}
+
+@MainActor
+private struct HaloAutomationSectionHeader: View {
+    let title: String
+    let detail: String
+    let actionTitle: String
+    let actionSymbol: String
+    let action: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            Button {
-                var rules = appHideRules.wrappedValue
-                rules.append(AppNotchHideRule())
-                appHideRules.wrappedValue = rules
-            } label: {
-                Label("Add App Visibility Rule", systemImage: "plus")
+            Spacer(minLength: 12)
+
+            Button(action: action) {
+                Label(actionTitle, systemImage: actionSymbol)
             }
+            .buttonStyle(.bordered)
+        }
+    }
+}
+
+@MainActor
+private struct HaloAutomationEmptyState: View {
+    let symbol: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.system(size: 25))
+                .foregroundStyle(.secondary)
+                .frame(width: 42)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .foregroundStyle(Color.primary.opacity(0.09))
         }
     }
 }
@@ -6861,44 +7098,187 @@ private struct AutomationSettingsPane: View {
 private struct AutomationProfileRuleEditor: View {
     @Binding var rule: AutomationRule
     let profiles: [Profile]
+    @Binding var isExpanded: Bool
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+    let onDuplicate: () -> Void
     let onRemove: () -> Void
 
+    private var profile: Profile? {
+        profiles.first { $0.id == rule.profileID }
+    }
+
+    private var triggerSymbol: String {
+        switch rule.trigger {
+        case .activeApp: return "app.fill"
+        case .batteryBelow: return "battery.25"
+        case .charging: return "bolt.fill"
+        case .displayCount: return "display.2"
+        case .hour: return "clock.fill"
+        }
+    }
+
+    private var conditionSummary: String {
+        switch rule.trigger {
+        case .activeApp:
+            return "When \(HaloAutomationAppPresentation.name(for: rule.value)) is active"
+        case .batteryBelow:
+            return "When battery drops below \(min(100, max(1, Int(rule.value) ?? 20)))%"
+        case .charging:
+            return rule.value == "true" ? "When the Mac starts charging" : "When the Mac is on battery"
+        case .displayCount:
+            let count = min(12, max(1, Int(rule.value) ?? 1))
+            return "When \(count) \(count == 1 ? "display is" : "displays are") connected"
+        case .hour:
+            let hour = min(23, max(0, Int(rule.value) ?? 9))
+            return "At \(String(format: "%02d:00", hour))"
+        }
+    }
+
+    private var actionSummary: String {
+        "Switch to \(profile?.name ?? "Missing profile")"
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        VStack(spacing: 0) {
+            HStack(spacing: 11) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 11) {
+                        Image(systemName: triggerSymbol)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(rule.enabled ? Color.accentColor : Color.secondary)
+                            .frame(width: 32, height: 32)
+                            .background(
+                                (rule.enabled ? Color.accentColor : Color.secondary).opacity(0.09),
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            )
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(conditionSummary)
+                                .font(.callout.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(rule.enabled ? Color.green : Color.secondary.opacity(0.6))
+                                    .frame(width: 6, height: 6)
+                                Text(rule.enabled ? actionSummary : "Paused · \(actionSummary)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 8)
+
                 Toggle("Enabled", isOn: $rule.enabled)
-                Spacer()
-                Button(role: .destructive, action: onRemove) {
-                    Label("Remove", systemImage: "trash")
-                        .labelStyle(.iconOnly)
-                }
-                .buttonStyle(.borderless)
-                .help("Remove rule")
-            }
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .help(rule.enabled ? "Pause rule" : "Enable rule")
 
-            Picker("When", selection: $rule.trigger) {
-                ForEach(RuleTrigger.allCases, id: \.self) { trigger in
-                    Text(trigger.title).tag(trigger)
-                }
-            }
-            .onChange(of: rule.trigger) { trigger in
-                rule.value = trigger.defaultValue
-            }
+                Menu {
+                    Button(action: onMoveUp) {
+                        Label("Move Up", systemImage: "arrow.up")
+                    }
+                    .disabled(!canMoveUp)
 
-            valueEditor
+                    Button(action: onMoveDown) {
+                        Label("Move Down", systemImage: "arrow.down")
+                    }
+                    .disabled(!canMoveDown)
 
-            Picker("Apply profile", selection: $rule.profileID) {
-                ForEach(profiles) { profile in
-                    Text(profile.name).tag(profile.id)
+                    Divider()
+
+                    Button {
+                        onDuplicate()
+                    } label: {
+                        Label("Duplicate Rule", systemImage: "plus.square.on.square")
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        onRemove()
+                    } label: {
+                        Label("Delete Rule", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .frame(width: 22, height: 22)
                 }
+                .menuStyle(.borderlessButton)
+                .help("Rule actions")
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(isExpanded ? "Collapse rule" : "Edit rule")
+            }
+            .padding(12)
+
+            if isExpanded {
+                Divider()
+                    .opacity(0.65)
+
+                VStack(alignment: .leading, spacing: 16) {
+                    HaloAutomationStepHeader(number: "1", title: "When this happens")
+
+                    Picker("Trigger", selection: $rule.trigger) {
+                        ForEach(RuleTrigger.allCases, id: \.self) { trigger in
+                            Text(trigger.title).tag(trigger)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .onChange(of: rule.trigger) { trigger in
+                        rule.value = trigger.defaultValue
+                    }
+
+                    valueEditor
+
+                    Divider()
+                        .padding(.vertical, 1)
+
+                    HaloAutomationStepHeader(number: "2", title: "Then")
+
+                    Picker("Switch profile", selection: $rule.profileID) {
+                        ForEach(profiles) { profile in
+                            Label(profile.name, systemImage: profile.icon ?? "person.crop.rectangle")
+                                .tag(profile.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                .padding(14)
+                .background(Color.primary.opacity(0.018))
             }
         }
-        .padding(12)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.primary.opacity(rule.enabled ? 0.035 : 0.02), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(Color.primary.opacity(isExpanded ? 0.12 : 0.075), lineWidth: 1)
         }
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 
     @ViewBuilder
@@ -6908,17 +7288,25 @@ private struct AutomationProfileRuleEditor: View {
             InstalledAppSinglePicker(label: "Application", bundleID: $rule.value)
 
         case .batteryBelow:
-            Stepper(
-                value: Binding(
-                    get: { min(100, max(1, Int(rule.value) ?? 20)) },
-                    set: { rule.value = String($0) }
-                ),
-                in: 1...100
-            ) {
-                LabeledContent("Battery below") {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Battery level")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
                     Text("\(min(100, max(1, Int(rule.value) ?? 20)))%")
                         .monospacedDigit()
+                        .font(.callout.weight(.medium))
                 }
+
+                Slider(
+                    value: Binding(
+                        get: { Double(min(100, max(1, Int(rule.value) ?? 20))) },
+                        set: { rule.value = String(Int($0.rounded())) }
+                    ),
+                    in: 1...100,
+                    step: 1
+                )
             }
 
         case .charging:
@@ -6926,24 +7314,29 @@ private struct AutomationProfileRuleEditor: View {
                 Text("Charging").tag("true")
                 Text("On battery").tag("false")
             }
+            .pickerStyle(.segmented)
 
         case .displayCount:
-            Stepper(
-                value: Binding(
-                    get: { min(12, max(1, Int(rule.value) ?? 1)) },
-                    set: { rule.value = String($0) }
-                ),
-                in: 1...12
-            ) {
-                LabeledContent("Display count") {
+            HStack {
+                Text("Connected displays")
+                    .font(.callout)
+                Spacer()
+                Stepper(
+                    value: Binding(
+                        get: { min(12, max(1, Int(rule.value) ?? 1)) },
+                        set: { rule.value = String($0) }
+                    ),
+                    in: 1...12
+                ) {
                     Text("\(min(12, max(1, Int(rule.value) ?? 1)))")
                         .monospacedDigit()
+                        .frame(minWidth: 24)
                 }
             }
 
         case .hour:
             Picker(
-                "Local hour",
+                "Local time",
                 selection: Binding(
                     get: { min(23, max(0, Int(rule.value) ?? 9)) },
                     set: { rule.value = String($0) }
@@ -6953,6 +7346,7 @@ private struct AutomationProfileRuleEditor: View {
                     Text(String(format: "%02d:00", hour)).tag(hour)
                 }
             }
+            .pickerStyle(.menu)
         }
     }
 }
@@ -6960,46 +7354,187 @@ private struct AutomationProfileRuleEditor: View {
 @MainActor
 private struct AppNotchHideRuleEditor: View {
     @Binding var rule: AppNotchHideRule
+    @Binding var isExpanded: Bool
+    let onDuplicate: () -> Void
     let onRemove: () -> Void
 
+    private var appName: String {
+        HaloAutomationAppPresentation.name(for: rule.bundleIdentifier)
+    }
+
+    private var displaySummary: String {
+        if rule.displayIDs.isEmpty { return "All displays" }
+        if rule.displayIDs.count == 1 { return "1 display" }
+        return "\(rule.displayIDs.count) displays"
+    }
+
+    private var ruleSummary: String {
+        if rule.bundleIdentifier.isEmpty {
+            return "Choose an application"
+        }
+        return appName
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        VStack(spacing: 0) {
+            HStack(spacing: 11) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 11) {
+                        appIcon
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(ruleSummary)
+                                .font(.callout.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(rule.enabled && !rule.bundleIdentifier.isEmpty ? Color.green : Color.secondary.opacity(0.6))
+                                    .frame(width: 6, height: 6)
+                                Text(rule.bundleIdentifier.isEmpty
+                                     ? "Needs an application"
+                                     : "\(rule.condition.title) · \(displaySummary)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 8)
+
                 Toggle("Enabled", isOn: $rule.enabled)
-                Spacer()
-                Button(role: .destructive, action: onRemove) {
-                    Label("Remove", systemImage: "trash")
-                        .labelStyle(.iconOnly)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .help(rule.enabled ? "Pause rule" : "Enable rule")
+
+                Menu {
+                    Button {
+                        onDuplicate()
+                    } label: {
+                        Label("Duplicate Rule", systemImage: "plus.square.on.square")
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        onRemove()
+                    } label: {
+                        Label("Delete Rule", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .frame(width: 22, height: 22)
                 }
-                .buttonStyle(.borderless)
-                .help("Remove rule")
-            }
+                .menuStyle(.borderlessButton)
 
-            InstalledAppSinglePicker(label: "Application", bundleID: $rule.bundleIdentifier)
-
-            Picker("Hide when", selection: $rule.condition) {
-                ForEach(AppNotchHideCondition.allCases) { condition in
-                    Text(condition.title).tag(condition)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                        .frame(width: 22, height: 22)
                 }
-            }
-
-            AutomationDisplayPicker(displayIDs: $rule.displayIDs)
-
-            Text(rule.condition.detail)
-                .font(.caption)
+                .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+            }
+            .padding(12)
 
-            if rule.bundleIdentifier.isEmpty {
-                Label("Choose an application before this rule can run.", systemImage: "exclamationmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if isExpanded {
+                Divider()
+                    .opacity(0.65)
+
+                VStack(alignment: .leading, spacing: 16) {
+                    HaloAutomationStepHeader(number: "1", title: "Application")
+                    InstalledAppSinglePicker(label: "Application", bundleID: $rule.bundleIdentifier)
+
+                    Divider()
+                        .padding(.vertical, 1)
+
+                    HaloAutomationStepHeader(number: "2", title: "Hide Halo when")
+
+                    Picker("Condition", selection: $rule.condition) {
+                        ForEach(AppNotchHideCondition.allCases) { condition in
+                            Text(condition.title).tag(condition)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text(rule.condition.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Divider()
+                        .padding(.vertical, 1)
+
+                    HaloAutomationStepHeader(number: "3", title: "Displays")
+                    AutomationDisplayPicker(displayIDs: $rule.displayIDs)
+                }
+                .padding(14)
+                .background(Color.primary.opacity(0.018))
             }
         }
-        .padding(12)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.primary.opacity(rule.enabled ? 0.035 : 0.02), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(
+                    rule.bundleIdentifier.isEmpty && rule.enabled
+                    ? Color.orange.opacity(0.35)
+                    : Color.primary.opacity(isExpanded ? 0.12 : 0.075),
+                    lineWidth: 1
+                )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var appIcon: some View {
+        if let url = HaloAutomationAppPresentation.url(for: rule.bundleIdentifier) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                .resizable()
+                .scaledToFit()
+                .frame(width: 32, height: 32)
+        } else {
+            Image(systemName: rule.bundleIdentifier.isEmpty ? "app.badge.plus" : "app.dashed")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(rule.bundleIdentifier.isEmpty ? Color.orange : Color.secondary)
+                .frame(width: 32, height: 32)
+                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+}
+
+@MainActor
+private struct HaloAutomationStepHeader: View {
+    let number: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Text(number)
+                .font(.caption2.bold())
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 20, height: 20)
+                .background(Color.accentColor.opacity(0.10), in: Circle())
+
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .tracking(0.35)
         }
     }
 }
@@ -7010,19 +7545,72 @@ private struct InstalledAppSinglePicker: View {
     @Binding var bundleID: String
     @State private var showingPicker = false
 
-    var body: some View {
-        LabeledContent(label) {
-            HStack(spacing: 10) {
-                Text(bundleID.isEmpty ? "None selected" : bundleID)
-                    .foregroundStyle(bundleID.isEmpty ? .secondary : .primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: 260, alignment: .trailing)
+    private var applicationURL: URL? {
+        HaloAutomationAppPresentation.url(for: bundleID)
+    }
 
-                Button("Choose…") {
-                    showingPicker = true
+    private var applicationName: String {
+        HaloAutomationAppPresentation.name(for: bundleID)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Button {
+                showingPicker = true
+            } label: {
+                HStack(spacing: 11) {
+                    if let applicationURL {
+                        Image(nsImage: NSWorkspace.shared.icon(forFile: applicationURL.path))
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 30, height: 30)
+                    } else {
+                        Image(systemName: bundleID.isEmpty ? "app.badge.plus" : "app.dashed")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(bundleID.isEmpty ? Color.accentColor : Color.secondary)
+                            .frame(width: 30, height: 30)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    }
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(applicationName)
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+
+                        if !bundleID.isEmpty {
+                            Text(bundleID)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        } else {
+                            Text("Search your installed applications")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+                .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.primary.opacity(0.075), lineWidth: 1)
                 }
             }
+            .buttonStyle(.plain)
         }
         .sheet(isPresented: $showingPicker) {
             InstalledAppSingleSelectionSheet(bundleID: $bundleID)
@@ -7055,23 +7643,52 @@ private struct InstalledAppSingleSelectionSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
+                Image(systemName: "app.badge.checkmark")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 38, height: 38)
+                    .background(Color.accentColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
                     Text("Choose Application")
                         .font(.title2.bold())
-                    Text("Search installed applications by name or bundle identifier.")
+                    Text("Select an installed app for this automation.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
+
                 Spacer()
+
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
             .padding(20)
 
-            TextField("Search apps or bundle IDs", text: $searchText)
-                .textFieldStyle(.roundedBorder)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 14)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search by app name or bundle ID", text: $searchText)
+                    .textFieldStyle(.plain)
+
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 14)
 
             Divider()
 
@@ -7096,17 +7713,20 @@ private struct InstalledAppSingleSelectionSheet: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 2) {
+                    LazyVStack(spacing: 3) {
                         ForEach(filteredApplications) { application in
+                            let selected = application.bundleIdentifier == bundleID
+
                             Button {
                                 bundleID = application.bundleIdentifier
+                                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
                                 dismiss()
                             } label: {
                                 HStack(spacing: 12) {
                                     Image(nsImage: NSWorkspace.shared.icon(forFile: application.url.path))
                                         .resizable()
                                         .scaledToFit()
-                                        .frame(width: 32, height: 32)
+                                        .frame(width: 34, height: 34)
 
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(application.name)
@@ -7115,20 +7735,23 @@ private struct InstalledAppSingleSelectionSheet: View {
                                         Text(application.bundleIdentifier)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
+                                            .textSelection(.enabled)
                                     }
 
                                     Spacer()
 
-                                    Image(systemName: application.bundleIdentifier == bundleID ? "checkmark.circle.fill" : "circle")
-                                        .font(.title3)
-                                        .foregroundStyle(application.bundleIdentifier == bundleID ? Color.accentColor : Color.secondary)
+                                    if selected {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.title3)
+                                            .foregroundStyle(Color.accentColor)
+                                    }
                                 }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 8)
                                 .contentShape(Rectangle())
                                 .background(
-                                    application.bundleIdentifier == bundleID ? Color.accentColor.opacity(0.08) : Color.clear,
-                                    in: RoundedRectangle(cornerRadius: 9)
+                                    selected ? Color.accentColor.opacity(0.08) : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 )
                             }
                             .buttonStyle(.plain)
@@ -7140,7 +7763,7 @@ private struct InstalledAppSingleSelectionSheet: View {
 
             Divider()
 
-            HStack {
+            HStack(spacing: 12) {
                 if !bundleID.isEmpty {
                     Button("Clear Selection", role: .destructive) {
                         bundleID = ""
@@ -7150,20 +7773,30 @@ private struct InstalledAppSingleSelectionSheet: View {
                 Spacer()
 
                 if let selectedApplication {
-                    Text(selectedApplication.name)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Image(nsImage: NSWorkspace.shared.icon(forFile: selectedApplication.url.path))
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 18, height: 18)
+                        Text(selectedApplication.name)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
                 } else if !bundleID.isEmpty {
                     Text(bundleID)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                } else {
+                    Text("No application selected")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(16)
         }
-        .frame(width: 640, height: 560)
+        .frame(width: 660, height: 580)
         .task {
             let found = await Task.detached(priority: .userInitiated) {
                 HaloInstalledApplicationCatalog.discover()
@@ -7189,17 +7822,27 @@ private struct AutomationDisplayPicker: View {
         }
     }
 
+    private var selectedDisplays: [DisplayOption] {
+        displays.filter { displayIDs.contains($0.id) }
+    }
+
+    private var unavailableDisplayCount: Int {
+        max(0, displayIDs.count - selectedDisplays.count)
+    }
+
     private var summary: String {
         if displayIDs.isEmpty { return "All displays" }
-        if displayIDs.count == 1,
-           let display = displays.first(where: { $0.id == displayIDs[0] }) {
-            return display.name
-        }
+        if displayIDs.count == 1, selectedDisplays.count == 1 { return selectedDisplays[0].name }
+        if displayIDs.count == 1 { return "Saved display (not connected)" }
         return "\(displayIDs.count) displays"
     }
 
     var body: some View {
-        LabeledContent("Displays") {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("Apply on")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
             Menu {
                 Button {
                     displayIDs = []
@@ -7220,25 +7863,56 @@ private struct AutomationDisplayPicker: View {
                     }
                 }
             } label: {
-                Text(summary)
-                    .frame(minWidth: 140, alignment: .trailing)
+                HStack(spacing: 10) {
+                    Image(systemName: displayIDs.isEmpty ? "display.2" : "display")
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 22)
+
+                    Text(summary)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 38)
+                .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(Color.primary.opacity(0.075), lineWidth: 1)
+                }
             }
+            .menuStyle(.borderlessButton)
+
+            Text(displayIDs.isEmpty
+                 ? "This rule follows Halo on every enabled display."
+                 : unavailableDisplayCount > 0
+                    ? "Only the selected displays will hide Halo. \(unavailableDisplayCount) saved display\(unavailableDisplayCount == 1 ? " is" : "s are") not currently connected."
+                    : "Only the selected display\(displayIDs.count == 1 ? "" : "s") will hide Halo.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private func toggle(_ id: String) {
         if displayIDs.isEmpty {
             displayIDs = [id]
-            return
-        }
-
-        if displayIDs.contains(id) {
+        } else if displayIDs.contains(id) {
             let remaining = displayIDs.filter { $0 != id }
+            // An empty array intentionally means "All displays", so require the explicit
+            // All Displays action instead of turning a deselection into a surprising global rule.
             guard !remaining.isEmpty else { return }
             displayIDs = remaining
         } else {
             displayIDs.append(id)
         }
+
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 }
 
