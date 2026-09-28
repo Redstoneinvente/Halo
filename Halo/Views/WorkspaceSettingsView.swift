@@ -2104,11 +2104,15 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         }
         .pickerStyle(.segmented)
         .onChange(of: page) { selectedPage in
-            if selectedPage != .sizeAndPosition && geometryEditor.isEnabled {
-                setDirectGeometryEditing(false)
+            if selectedPage != .sizeAndPosition {
+                endSurfacePreview()
+                if geometryEditor.isEnabled {
+                    setDirectGeometryEditing(false)
+                }
             }
         }
         .onDisappear {
+            endSurfacePreview()
             if geometryEditor.isEnabled {
                 setDirectGeometryEditing(false)
             }
@@ -2389,7 +2393,10 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
         Section("Direct manipulation") {
             Toggle("Edit notch directly", isOn: Binding(
                 get: { geometryEditor.isEnabled },
-                set: { setDirectGeometryEditing($0) }
+                set: { enabled in
+                    if enabled { endSurfacePreview() }
+                    setDirectGeometryEditing(enabled)
+                }
             ))
 
             if geometryEditor.isEnabled {
@@ -2465,7 +2472,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             }
         }
 
-        Section("Opened notch size") {
+        Section {
             PreciseSlider(
                 title: "Width",
                 value: activeThemeBinding.width,
@@ -2485,9 +2492,11 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
                 onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }
             )
             .disabled(geometryEditor.isEnabled)
+        } header: {
+            surfacePreviewHeader("Opened notch size", expanded: true)
         }
 
-        Section("Content spacing") {
+        Section {
             if activeLayout.resolvedUsesCustomOpenNotchWorkspace {
                 PreciseSlider(title: "Horizontal padding", value: openedSidePaddingBinding, range: 0...72, step: 1, suffix: "pt")
                 PreciseSlider(title: "Vertical padding", value: openedVerticalPaddingBinding, range: 0...72, step: 1, suffix: "pt")
@@ -2497,21 +2506,63 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
                 PreciseSlider(title: "Vertical padding", value: openedVerticalPaddingBinding, range: 8...72, step: 1, suffix: "pt")
                 PreciseSlider(title: "Widget spacing", value: openedSpacingBinding, range: 4...40, step: 1, suffix: "pt")
             }
+        } header: {
+            surfacePreviewHeader("Content spacing", expanded: true)
         }
         SurfaceAppearanceControls(
             appearance: activeAppearanceBinding,
             theme: activeTheme,
             screen: directEditScreen,
-            scope: .openedPosition
+            scope: .openedPosition,
+            previewSurface: previewSurface
         )
         .disabled(geometryEditor.isEnabled)
         SurfaceAppearanceControls(
             appearance: activeAppearanceBinding,
             theme: activeTheme,
             screen: directEditScreen,
-            scope: .closedGeometry
+            scope: .closedGeometry,
+            previewSurface: previewSurface
         )
         .disabled(geometryEditor.isEnabled)
+    }
+
+    @ViewBuilder
+    private func surfacePreviewHeader(_ title: String, expanded: Bool) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+            Spacer()
+            Button {
+                previewSurface(expanded)
+            } label: {
+                Label("Preview", systemImage: expanded ? "rectangle.expand.vertical" : "rectangle.compress.vertical")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .disabled(geometryEditor.isEnabled)
+            .help(expanded ? "Keep Halo open while previewing this section" : "Keep Halo closed while previewing this section")
+        }
+    }
+
+    private func previewSurface(_ expanded: Bool) {
+        let display = directEditScreen.map(WindowManager.displayID)
+        NotificationCenter.default.post(
+            name: .init("HaloSettingsSurfacePreview"),
+            object: nil,
+            userInfo: [
+                "active": true,
+                "expanded": expanded,
+                "display": display as Any
+            ]
+        )
+    }
+
+    private func endSurfacePreview() {
+        NotificationCenter.default.post(
+            name: .init("HaloSettingsSurfacePreview"),
+            object: nil,
+            userInfo: ["active": false]
+        )
     }
 
     private var directEditScreen: NSScreen? {

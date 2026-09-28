@@ -809,6 +809,9 @@ final class WindowManager {
     private var initialActivationPending = false
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
+    private var settingsSurfacePreviewExpanded: Bool?
+    private var settingsSurfacePreviewDisplayID: String?
+    private var settingsSurfacePreviewPreviousExpanded: [String: Bool] = [:]
     private var lastContextOffset = CGSize(
         width: UserDefaults.standard.double(forKey: "HaloContextOffsetX"),
         height: UserDefaults.standard.double(forKey: "HaloContextOffsetY")
@@ -919,6 +922,21 @@ final class WindowManager {
                 self?.reconcile()
             }
             .store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: .init("HaloSettingsSurfacePreview"))
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] note in
+                guard let self else { return }
+                let active = (note.userInfo?["active"] as? Bool) ?? false
+                if active {
+                    let expanded = (note.userInfo?["expanded"] as? Bool) ?? true
+                    let display = note.userInfo?["display"] as? String
+                    self.beginSettingsSurfacePreview(expanded: expanded, displayID: display)
+                } else {
+                    self.endSettingsSurfacePreview()
+                }
+            }
+            .store(in: &subscriptions)
+
         NotificationCenter.default.publisher(for: .init("HaloGeometryPreview"))
             .receive(on: DispatchQueue.main).sink { [weak self] note in
                 let editing = (note.userInfo?["editing"] as? Bool) ?? false
@@ -1962,6 +1980,7 @@ final class WindowManager {
     }
 
     func stop() {
+        endSettingsSurfacePreview()
         activityExpiry?.cancel()
         hudNotchHideWork?.cancel(); hudNotchHideWork = nil
         if let hudMonitor { NSEvent.removeMonitor(hudMonitor); self.hudMonitor = nil }
@@ -1972,6 +1991,53 @@ final class WindowManager {
         }
         hosts.removeAll()
         subscriptions.removeAll()
+    }
+
+    private func beginSettingsSurfacePreview(expanded: Bool, displayID: String?) {
+        settingsSurfacePreviewExpanded = expanded
+        settingsSurfacePreviewDisplayID = displayID
+
+        for (id, host) in hosts {
+            guard displayID == nil || displayID == id else { continue }
+            if settingsSurfacePreviewPreviousExpanded[id] == nil {
+                settingsSurfacePreviewPreviousExpanded[id] = host.state.expanded
+            }
+            host.state.collapseTask?.cancel()
+            host.state.collapseTask = nil
+            host.state.hoverExpandTask?.cancel()
+            host.state.hoverExpandTask = nil
+            if host.state.expanded != expanded {
+                host.state.expanded = expanded
+            } else {
+                applyExpandedState(expanded, to: host)
+            }
+        }
+    }
+
+    private func endSettingsSurfacePreview() {
+        let previous = settingsSurfacePreviewPreviousExpanded
+        settingsSurfacePreviewExpanded = nil
+        settingsSurfacePreviewDisplayID = nil
+        settingsSurfacePreviewPreviousExpanded.removeAll()
+
+        for (id, wasExpanded) in previous {
+            guard let host = hosts[id] else { continue }
+            host.state.collapseTask?.cancel()
+            host.state.collapseTask = nil
+            host.state.hoverExpandTask?.cancel()
+            host.state.hoverExpandTask = nil
+            if host.state.expanded != wasExpanded {
+                host.state.expanded = wasExpanded
+            } else {
+                applyExpandedState(wasExpanded, to: host)
+            }
+        }
+    }
+
+    private func settingsPreviewTarget(for displayID: String) -> Bool? {
+        guard let expanded = settingsSurfacePreviewExpanded else { return nil }
+        guard settingsSurfacePreviewDisplayID == nil || settingsSurfacePreviewDisplayID == displayID else { return nil }
+        return expanded
     }
 
     func toggleAll() {
@@ -2740,6 +2806,16 @@ final class WindowManager {
                 if initialActivationPending { host.panel.alphaValue = 0 }
                 host.subscription = host.state.$expanded.dropFirst().removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self, weak host] expanded in
                     guard let self, let host else { return }
+
+                    if let forced = self.settingsPreviewTarget(for: id), expanded != forced {
+                        host.state.collapseTask?.cancel()
+                        host.state.collapseTask = nil
+                        host.state.hoverExpandTask?.cancel()
+                        host.state.hoverExpandTask = nil
+                        host.state.expanded = forced
+                        return
+                    }
+
                     host.pixelPalCollapseWork?.cancel()
                     host.pixelPalCollapseWork = nil
                     if expanded {
@@ -2877,6 +2953,18 @@ final class WindowManager {
                 host.panel.orderFrontRegardless()
                 host.ambientPanel.order(.below, relativeTo: host.panel.windowNumber)
                 hosts[id] = host
+                if let forced = settingsPreviewTarget(for: id) {
+                    if settingsSurfacePreviewPreviousExpanded[id] == nil {
+                        settingsSurfacePreviewPreviousExpanded[id] = host.state.expanded
+                    }
+                    host.state.collapseTask?.cancel()
+                    host.state.collapseTask = nil
+                    host.state.hoverExpandTask?.cancel()
+                    host.state.hoverExpandTask = nil
+                    if host.state.expanded != forced {
+                        host.state.expanded = forced
+                    }
+                }
                 if SurfaceGeometryEditingSession.shared.isEnabled {
                     refreshGeometryEditorPanels()
                 }

@@ -536,6 +536,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow,
               window === settings else { return }
+        NotificationCenter.default.post(
+            name: .init("HaloSettingsSurfacePreview"),
+            object: nil,
+            userInfo: ["active": false]
+        )
         endDirectGeometryEditing()
     }
 

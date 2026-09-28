@@ -251,6 +251,7 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
     let theme: Theme
     var screen: NSScreen?
     var scope: SurfaceAppearanceScope = .all
+    var previewSurface: ((Bool) -> Void)? = nil
     @AppStorage("HaloContextOffsetX") private var contextOffsetX = 0.0
     @AppStorage("HaloContextOffsetY") private var contextOffsetY = 0.0
     @AppStorage("HaloContextUsesOpenedPosition") private var contextUsesOpenedPosition = true
@@ -280,38 +281,57 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
         }
 
         if scope == .all || scope == .geometry || scope == .closedGeometry {
-            Section("Closed notch size & offsets") {
+            Section {
                 PreciseSlider(title: "Width", value: $appearance.compactWidth, range: 16...640, step: 1, suffix: "pt", onEditingChanged: {
                     GeometryPreview.update(expanded: false, editing: $0, display: screen)
                 })
                 PreciseSlider(title: "Height", value: $appearance.surface.compactHeight, range: 16...100, step: 1, suffix: "pt", onEditingChanged: {
                     GeometryPreview.update(expanded: false, editing: $0, display: screen)
                 })
+
                 if let screen {
                     let geometry = WindowManager.geometry(screen: screen, theme: theme, appearance: appearance)
-                    Text("Effective closed size: \(Int(geometry.compactWidth)) × \(Int(geometry.compactHeight)) pt.").font(.caption)
-                    if geometry.attachedToNotch {
-                        Text("16 × 16 pt is allowed. The physical camera cutout stays unchanged; a positive vertical offset moves Halo below it.").font(.caption).foregroundStyle(.secondary)
-                    }
+                    Text("Effective size: \(Int(geometry.compactWidth)) × \(Int(geometry.compactHeight)) pt")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
-                Text("Positive X moves the closed notch right; positive Y moves it down.").font(.caption)
-                offsetControl("Closed X", key: \.closedX, expanded: false)
-                offsetControl("Closed Y", key: \.closedY, expanded: false)
-                Button("Reset closed offsets") {
-                    var offsets = appearance.surface.offsets ?? SurfaceOffsets()
-                    offsets.closedX = 0
-                    offsets.closedY = 0
-                    appearance.surface.offsets = offsets
+                OffsetPositionPad(
+                    x: offsetBinding(\.closedX),
+                    y: offsetBinding(\.closedY),
+                    constraint: surfaceOffsetConstraint(expanded: false),
+                    onEditingChanged: {
+                        GeometryPreview.update(expanded: false, editing: $0, display: screen)
+                    }
+                )
+
+                offsetControl("Horizontal", key: \.closedX, expanded: false)
+                offsetControl("Vertical", key: \.closedY, expanded: false)
+
+                HStack {
+                    Spacer()
+                    Button {
+                        var offsets = appearance.surface.offsets ?? SurfaceOffsets()
+                        offsets.closedX = 0
+                        offsets.closedY = 0
+                        appearance.surface.offsets = offsets
+                        GeometryPreview.update(expanded: false, editing: false, display: screen)
+                    } label: {
+                        Label("Reset position", systemImage: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.borderless)
                 }
+            } header: {
+                geometryPreviewHeader("Closed notch size & position", expanded: false)
             }
         }
 
         if scope == .all || scope == .geometry || scope == .openedPosition {
-            Section("Opened position") {
+            Section {
                 OffsetPositionPad(
                     x: offsetBinding(\.openedX),
                     y: offsetBinding(\.openedY),
+                    constraint: surfaceOffsetConstraint(expanded: true),
                     onEditingChanged: {
                         GeometryPreview.update(expanded: true, editing: $0, display: screen)
                     }
@@ -333,9 +353,11 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
                     }
                     .buttonStyle(.borderless)
                 }
+            } header: {
+                geometryPreviewHeader("Opened position", expanded: true)
             }
 
-            Section("Context Interface position") {
+            Section {
                 Toggle("Follow opened notch position", isOn: $contextUsesOpenedPosition)
                     .onChange(of: contextUsesOpenedPosition) { followsOpened in
                         if followsOpened {
@@ -368,6 +390,8 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
                         .buttonStyle(.borderless)
                     }
                 }
+            } header: {
+                geometryPreviewHeader("Context Interface position", expanded: true)
             }
             .onAppear {
                 // Preserve existing custom CI offsets from older builds.
@@ -635,6 +659,96 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
         appearance.background = kind
     }
 
+    @ViewBuilder
+    private func geometryPreviewHeader(_ title: String, expanded: Bool) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+            Spacer()
+            if let previewSurface {
+                Button {
+                    previewSurface(expanded)
+                } label: {
+                    Label("Preview", systemImage: expanded ? "rectangle.expand.vertical" : "rectangle.compress.vertical")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .help(expanded ? "Keep Halo open while previewing this section" : "Keep Halo closed while previewing this section")
+            }
+        }
+    }
+
+    private func surfaceOffsetConstraint(expanded: Bool) -> ((Double, Double) -> OffsetDragResult)? {
+        guard let screen else { return nil }
+
+        return { rawX, rawY in
+            var previewAppearance = appearance
+            var offsets = previewAppearance.surface.offsets ?? SurfaceOffsets()
+
+            if expanded {
+                offsets.openedX = rawX
+                offsets.openedY = rawY
+            } else {
+                offsets.closedX = rawX
+                offsets.closedY = rawY
+            }
+            previewAppearance.surface.offsets = offsets
+
+            let geometry = WindowManager.geometry(screen: screen, theme: theme, appearance: previewAppearance)
+            let frame = geometry.frame(expanded: expanded)
+            let bounds = screen.frame
+            let contactTolerance: CGFloat = 0.75
+            let stickyDistance: CGFloat = 24
+            let releaseScale: CGFloat = 0.38
+
+            var adjustedX = rawX
+            var adjustedY = rawY
+            var edges = Set<OffsetPadEdge>()
+
+            if frame.minX <= bounds.minX + contactTolerance {
+                edges.insert(.left)
+                let overshoot = bounds.minX - frame.minX
+                if overshoot > 0 {
+                    let boundary = rawX + Double(overshoot)
+                    adjustedX = overshoot <= stickyDistance
+                        ? boundary
+                        : boundary - Double((overshoot - stickyDistance) * releaseScale)
+                }
+            } else if frame.maxX >= bounds.maxX - contactTolerance {
+                edges.insert(.right)
+                let overshoot = frame.maxX - bounds.maxX
+                if overshoot > 0 {
+                    let boundary = rawX - Double(overshoot)
+                    adjustedX = overshoot <= stickyDistance
+                        ? boundary
+                        : boundary + Double((overshoot - stickyDistance) * releaseScale)
+                }
+            }
+
+            // UI Y grows downward, while AppKit screen Y grows upward.
+            if frame.minY <= bounds.minY + contactTolerance {
+                edges.insert(.bottom)
+                let overshoot = bounds.minY - frame.minY
+                if overshoot > 0 {
+                    let boundary = rawY - Double(overshoot)
+                    adjustedY = overshoot <= stickyDistance
+                        ? boundary
+                        : boundary + Double((overshoot - stickyDistance) * releaseScale)
+                }
+            } else if frame.maxY >= bounds.maxY - contactTolerance {
+                edges.insert(.top)
+                let overshoot = frame.maxY - bounds.maxY
+                if overshoot > 0 {
+                    let boundary = rawY + Double(overshoot)
+                    adjustedY = overshoot <= stickyDistance
+                        ? boundary
+                        : boundary - Double((overshoot - stickyDistance) * releaseScale)
+                }
+            }
+
+            return OffsetDragResult(x: adjustedX, y: adjustedY, edges: edges)
+        }
+    }
+
     private func offsetBinding(_ key: WritableKeyPath<SurfaceOffsets, Double>) -> Binding<Double> {
         Binding(
             get: { (appearance.surface.offsets ?? SurfaceOffsets())[keyPath: key] },
@@ -660,12 +774,28 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
     }
 }
 
+private enum OffsetPadEdge: Hashable {
+    case left, right, top, bottom
+}
+
+private struct OffsetDragResult {
+    var x: Double
+    var y: Double
+    var edges: Set<OffsetPadEdge> = []
+}
+
 private struct OffsetPositionPad: View {
     @Binding var x: Double
     @Binding var y: Double
 
     var range: ClosedRange<Double> = -160...160
+    var constraint: ((Double, Double) -> OffsetDragResult)? = nil
     var onEditingChanged: ((Bool) -> Void)? = nil
+
+    @State private var dragging = false
+    @State private var contactEdges = Set<OffsetPadEdge>()
+    @State private var lastHapticX: Int?
+    @State private var lastHapticY: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -710,20 +840,65 @@ private struct OffsetPositionPad: View {
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { gesture in
-                            onEditingChanged?(true)
-                            x = value(for: gesture.location.x, length: size.width)
-                            y = value(for: gesture.location.y, length: size.height)
+                            if !dragging {
+                                dragging = true
+                                let initial = constraint?(x, y) ?? OffsetDragResult(x: x, y: y)
+                                contactEdges = initial.edges
+                                lastHapticX = hapticIndex(x)
+                                lastHapticY = hapticIndex(y)
+                                onEditingChanged?(true)
+                            }
+
+                            let rawX = value(for: gesture.location.x, length: size.width)
+                            let rawY = value(for: gesture.location.y, length: size.height)
+                            let result = constraint?(rawX, rawY) ?? OffsetDragResult(x: rawX, y: rawY)
+                            let newlyTouched = result.edges.subtracting(contactEdges)
+
+                            if !newlyTouched.isEmpty {
+                                performEdgeHaptic()
+                            } else {
+                                performDragHapticIfNeeded(x: result.x, y: result.y)
+                            }
+
+                            contactEdges = result.edges
+                            x = result.x
+                            y = result.y
                         }
                         .onEnded { _ in
+                            dragging = false
+                            contactEdges.removeAll()
+                            lastHapticX = nil
+                            lastHapticY = nil
                             onEditingChanged?(false)
                         }
                 )
             }
             .frame(height: 108)
 
-            Text("The pad covers ±160 pt for quick adjustments. Use the fields below for larger or exact values.")
+            Text("Edges have a magnetic stop. Push a little farther to move Halo beyond the screen.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func hapticIndex(_ value: Double) -> Int {
+        Int((value / 10).rounded())
+    }
+
+    private func performDragHapticIfNeeded(x: Double, y: Double) {
+        let nextX = hapticIndex(x)
+        let nextY = hapticIndex(y)
+        guard nextX != lastHapticX || nextY != lastHapticY else { return }
+        lastHapticX = nextX
+        lastHapticY = nextY
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+
+    private func performEdgeHaptic() {
+        let performer = NSHapticFeedbackManager.defaultPerformer
+        performer.perform(.levelChange, performanceTime: .now)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.045) {
+            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         }
     }
 
