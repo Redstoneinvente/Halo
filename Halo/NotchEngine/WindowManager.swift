@@ -2425,6 +2425,23 @@ final class WindowManager {
         }
         var motion = geometry.appearance.surface
         var motionPreset = geometry.appearance.animation
+
+        if !expanded,
+           layoutContainsVisualWorkspacePixelPal(host),
+           host.state.activeCIIdentifier == nil {
+            let preferences = HaloPixelPalStore.shared.preferences
+            let powerDownDuration = HaloPixelPalPowerAnimationTiming.duration(
+                style: preferences.bootDownAnimation,
+                direction: .down,
+                speed: preferences.powerAnimationSpeed
+            )
+            if powerDownDuration > 0.001 {
+                // Run Pixel Pal's power-down *with* the physical retract instead of
+                // leaving a tiny final LED state floating in a full-size open panel.
+                motion.duration = max(motion.duration, powerDownDuration)
+            }
+        }
+
         if store.workspace.settings.resolvedNotchMode == .simple {
             // Simple Mode is meant to feel like the native notch itself stretching,
             // not a dashboard bouncing into place. Use a monotonic resize and make
@@ -2447,45 +2464,6 @@ final class WindowManager {
             style: geometry.style,
             completion: completion
         )
-    }
-
-    private func schedulePixelPalGatedCollapse(for host: Host) -> Bool {
-        guard HaloFeatureAccess.shared.allows(.pixelPal) else {
-            host.state.setPixelPalCloseGateActive(false)
-            return false
-        }
-
-        // This delay exists only for a Pixel Pal that is actually part of the visible
-        // normal workspace being dismissed. When a CI owns the surface, Pixel Pal is
-        // not rendered, so gating CI closure on its boot-down animation is dead time.
-        let containsPixelPal = layoutContainsVisualWorkspacePixelPal(host)
-        guard HaloPixelPalCloseGatePolicy.shouldDelayCollapse(
-            layoutContainsPixelPal: containsPixelPal,
-            activeCIIdentifier: host.state.activeCIIdentifier
-        ) else {
-            host.state.setPixelPalCloseGateActive(false)
-            return false
-        }
-
-        let preferences = HaloPixelPalStore.shared.preferences
-        guard preferences.bootDownAnimation != .none else { return false }
-
-        let delay = HaloPixelPalPowerAnimationTiming.closeGateDelay(
-            style: preferences.bootDownAnimation,
-            speed: preferences.powerAnimationSpeed
-        )
-        guard delay > 0.001 else { return false }
-
-        host.pixelPalCollapseWork?.cancel()
-        host.state.setPixelPalCloseGateActive(true)
-        let work = DispatchWorkItem { [weak self, weak host] in
-            guard let self, let host, !host.state.expanded else { return }
-            host.pixelPalCollapseWork = nil
-            self.applyExpandedState(false, to: host)
-        }
-        host.pixelPalCollapseWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
-        return true
     }
 
     private struct ForegroundWindowCoverage {
@@ -3063,9 +3041,11 @@ final class WindowManager {
                         host.hoverOpeningCompletionWork = nil
                         host.state.cancelHoverOpeningGuard()
 
-                        if !self.schedulePixelPalGatedCollapse(for: host) {
-                            self.applyExpandedState(false, to: host)
-                        }
+                        // Pixel Pal now powers down concurrently with the retract. Keeping the
+                        // full panel open until the LEDs finish is what caused the awkward
+                        // "tiny face in a huge empty notch" transition.
+                        host.state.setPixelPalCloseGateActive(false)
+                        self.applyExpandedState(false, to: host)
                     }
                 }
                 host.contextSizeSubscription = host.state.$contextPreferredSize.dropFirst().removeDuplicates(by: { lhs, rhs in
