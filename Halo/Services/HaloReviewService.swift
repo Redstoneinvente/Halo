@@ -101,7 +101,7 @@ final class HaloReviewService: ObservableObject {
                 draft: cleaned,
                 idToken: token
             )
-            notice = "Thanks for reviewing Halo. Your review was submitted for approval."
+            notice = "Thanks for reviewing Halo. Your review is now published."
             NotificationCenter.default.post(name: .init("HaloReviewSubmitted"), object: nil)
             await refreshPreservingNotice()
             return true
@@ -136,9 +136,7 @@ final class HaloReviewService: ObservableObject {
         do {
             let token = try await account.validIDToken()
             try await updateReview(id: review.id, draft: cleaned, idToken: token)
-            notice = review.published
-                ? "Changes saved. Because the review changed, it has been sent back for approval."
-                : "Review updated."
+            notice = "Review updated and published."
             await refreshPreservingNotice()
             return true
         } catch {
@@ -287,7 +285,7 @@ final class HaloReviewService: ObservableObject {
             "source": ["stringValue": "Halo app"],
             "sourceUrl": ["stringValue": ""],
             "avatarUrl": ["stringValue": ""],
-            "published": ["booleanValue": false],
+            "published": ["booleanValue": true],
             "featured": ["booleanValue": false],
             "verifiedPurchase": ["booleanValue": false]
         ]
@@ -320,7 +318,7 @@ final class HaloReviewService: ObservableObject {
                     "title": ["stringValue": draft.title],
                     "review": ["stringValue": draft.review],
                     "rating": ["integerValue": String(draft.rating)],
-                    "published": ["booleanValue": false]
+                    "published": ["booleanValue": true]
                 ]
             ],
             "updateMask": [

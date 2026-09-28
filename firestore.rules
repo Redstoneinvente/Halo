@@ -201,7 +201,7 @@ service cloud.firestore {
                     && request.resource.data.source == 'Halo app'
                     && request.resource.data.sourceUrl == ''
                     && request.resource.data.avatarUrl == ''
-                    && request.resource.data.published == false
+                    && request.resource.data.published == true
                     && request.resource.data.featured == false
                     && request.resource.data.verifiedPurchase == false
                     && request.resource.data.date == request.time
@@ -230,7 +230,7 @@ service cloud.firestore {
                     && request.resource.data.rating is int
                     && request.resource.data.rating >= 1
                     && request.resource.data.rating <= 5
-                    && request.resource.data.published == false
+                    && request.resource.data.published == true
                     && request.resource.data.updatedAt == request.time;
 
       allow delete: if isVerifiedHaloUser()

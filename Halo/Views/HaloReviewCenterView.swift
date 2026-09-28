@@ -16,7 +16,7 @@ struct HaloReviewCenterView: View {
     var body: some View {
         Group {
             Section("Review Halo") {
-                Text("Tell other people what Halo is actually like to use. Reviews submitted here can appear on the Halo website after moderation.")
+                Text("Tell other people what Halo is actually like to use. Reviews submitted here are published immediately and can appear on the Halo website.")
                     .font(.callout)
 
                 reviewIdentity
@@ -339,24 +339,16 @@ struct HaloReviewCenterView: View {
             .help("Shows the subtle review prompt in the closed notch.")
         }
 
-        Text(editingReviewID == nil
-             ? "New reviews are unpublished until you approve them in Firestore."
-             : "Editing a published review sends it back for approval before it appears publicly again.")
+        Text("Reviews are published immediately. You can edit or delete yours at any time.")
             .font(.caption)
             .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
     private func reviewStatus(_ review: HaloCustomerReview) -> some View {
-        if review.published {
-            Label("Published", systemImage: "checkmark.seal.fill")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.green)
-        } else {
-            Label("Awaiting approval", systemImage: "clock")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-        }
+        Label(review.published ? "Published" : "Legacy unpublished", systemImage: review.published ? "checkmark.seal.fill" : "exclamationmark.circle")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(review.published ? .green : .secondary)
     }
 
     private var suggestedDisplayName: String {
