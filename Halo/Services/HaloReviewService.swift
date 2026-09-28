@@ -411,6 +411,9 @@ final class HaloReviewPromptCoordinator: ObservableObject {
     private let defaults = UserDefaults.standard
     private let suppressedKey = "HaloReviewPromptSuppressedV1"
     private let completedKey = "HaloReviewPromptCompletedV1"
+    /// Temporary QA mode. While enabled the notch review nudge appears after every
+    /// app launch regardless of persisted suppression/completion state.
+    private let forceLaunchPromptForTesting = true
     private var started = false
     private var evaluationTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
@@ -430,12 +433,18 @@ final class HaloReviewPromptCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Testing cadence: evaluate the review prompt 10 seconds after every app launch.
-        // The permanent "Don't remind me" choice and a completed review still suppress it.
+        // QA cadence: 10 seconds after launch, then wait for Halo's surface runtime.
+        // This makes the test deterministic even if startup verification takes >10 seconds.
         evaluationTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 10_000_000_000)
-            guard !Task.isCancelled else { return }
-            await self?.evaluateAndPresent()
+            guard !Task.isCancelled, let self else { return }
+
+            while !HaloRuntimeGate.shared.isReady {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled else { return }
+            }
+
+            await self.evaluateAndPresent()
         }
     }
 
@@ -462,15 +471,21 @@ final class HaloReviewPromptCoordinator: ObservableObject {
     }
 
     private func evaluateAndPresent() async {
+        guard HaloRuntimeGate.shared.isReady else { return }
+
+        if forceLaunchPromptForTesting {
+            // Deliberately ignore old "don't remind me" and completed-review flags during QA.
+            // The user can still dismiss this launch's prompt normally.
+            present()
+            return
+        }
+
         guard !defaults.bool(forKey: suppressedKey),
-              !defaults.bool(forKey: completedKey),
-              HaloRuntimeGate.shared.isReady else { return }
+              !defaults.bool(forKey: completedKey) else { return }
 
         let account = HaloAccountManager.shared
 
-        // The reminder is allowed to appear even before a Halo review account exists.
-        // Tapping it takes the user to the review center where they can sign in or create
-        // an account. If we already know this account has reviewed Halo, suppress it.
+        // Production behavior: if this signed-in account already reviewed Halo, do not nag.
         if account.isSignedIn, account.emailVerified {
             await HaloReviewService.shared.refresh()
             guard HaloReviewService.shared.reviews.isEmpty else {
