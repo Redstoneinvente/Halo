@@ -1554,9 +1554,12 @@ private final class HaloPixelPalSurfacePowerController: ObservableObject {
     @Published private(set) var phase: HaloPixelPalPowerPhase = .off
 
     private var hostExpanded = false
+    private var openingPending = false
     private var bootUpStyle: HaloPixelPalPowerAnimationStyle = .scanline
     private var bootDownStyle: HaloPixelPalPowerAnimationStyle = .scanline
     private var animationSpeed = 1.0
+    private var settleWork: DispatchWorkItem?
+    private var fallbackWork: DispatchWorkItem?
     private var phaseWork: DispatchWorkItem?
 
     func prepareForAppearance(
@@ -1569,10 +1572,11 @@ private final class HaloPixelPalSurfacePowerController: ObservableObject {
         cancelScheduledWork()
         configure(bootUpStyle: bootUpStyle, bootDownStyle: bootDownStyle, animationSpeed: animationSpeed)
         hostExpanded = expanded
+        openingPending = false
         phase = .off
 
         if expanded {
-            beginBootUp()
+            beginOpening(transitionDuration: transitionDuration)
         }
     }
 
@@ -1586,18 +1590,32 @@ private final class HaloPixelPalSurfacePowerController: ObservableObject {
         configure(bootUpStyle: bootUpStyle, bootDownStyle: bootDownStyle, animationSpeed: animationSpeed)
 
         if expanded == hostExpanded {
-            if expanded, phase == .off {
-                beginBootUp()
+            if expanded, phase == .off, !openingPending {
+                beginOpening(transitionDuration: transitionDuration)
             }
             return
         }
 
         hostExpanded = expanded
         if expanded {
-            beginBootUp()
+            beginOpening(transitionDuration: transitionDuration)
         } else {
             beginClosing()
         }
+    }
+
+    func noteGeometryChange() {
+        guard hostExpanded, openingPending else { return }
+
+        settleWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.beginBootUpIfReady()
+        }
+        settleWork = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + HaloPixelPalPowerAnimationTiming.geometrySettleDelay,
+            execute: work
+        )
     }
 
     private func configure(
@@ -1610,16 +1628,40 @@ private final class HaloPixelPalSurfacePowerController: ObservableObject {
         self.animationSpeed = min(1.75, max(0.5, animationSpeed.isFinite ? animationSpeed : 1))
     }
 
+    private func beginOpening(transitionDuration: Double) {
+        settleWork?.cancel()
+        fallbackWork?.cancel()
+        phaseWork?.cancel()
+
+        openingPending = true
+        phase = .off
+
+        let fallback = DispatchWorkItem { [weak self] in
+            self?.beginBootUpIfReady()
+        }
+        fallbackWork = fallback
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + HaloPixelPalPowerAnimationTiming.fallbackBootDelay(surfaceDuration: transitionDuration),
+            execute: fallback
+        )
+    }
+
     private func beginClosing() {
+        openingPending = false
+        settleWork?.cancel()
+        fallbackWork?.cancel()
         phaseWork?.cancel()
 
         guard phase != .off else { return }
         beginBootDown()
     }
 
-    private func beginBootUp() {
-        guard hostExpanded else { return }
+    private func beginBootUpIfReady() {
+        guard hostExpanded, openingPending else { return }
 
+        openingPending = false
+        settleWork?.cancel()
+        fallbackWork?.cancel()
         phaseWork?.cancel()
 
         let duration = HaloPixelPalPowerAnimationTiming.duration(
@@ -1668,7 +1710,11 @@ private final class HaloPixelPalSurfacePowerController: ObservableObject {
     }
 
     private func cancelScheduledWork() {
+        settleWork?.cancel()
+        fallbackWork?.cancel()
         phaseWork?.cancel()
+        settleWork = nil
+        fallbackWork = nil
         phaseWork = nil
     }
 }
@@ -1682,16 +1728,27 @@ private struct HaloPixelPalPowerTransitionView: View {
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        ZStack {
-            background
-            if preferences.pixelBackdropEnabled {
-                preferences.pixelBackdropColor.color
-            }
-            Canvas { context, size in
-                drawPowerAnimation(context: &context, size: size)
+        Group {
+            switch phase {
+            case .bootingUp, .bootingDown:
+                ZStack {
+                    background
+                    if preferences.pixelBackdropEnabled {
+                        preferences.pixelBackdropColor.color
+                    }
+                    Canvas { context, size in
+                        drawPowerAnimation(context: &context, size: size)
+                    }
+                }
+                .clipShape(HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius))
+
+            case .off, .on:
+                // Before boot-up starts and after boot-down completes, Pixel Pal must be
+                // visually absent. In particular, do not leave its configured background
+                // floating in the workspace with no face/animation content.
+                Color.clear
             }
         }
-        .clipShape(HaloPixelPalRelativeRoundedRectangle(radiusFraction: preferences.backgroundCornerRadius))
         .allowsHitTesting(false)
     }
 
@@ -2109,6 +2166,9 @@ struct HaloPixelPetWidget: View {
 
     var body: some View {
         pixelPalTimeline
+        .onReceive(NotificationCenter.default.publisher(for: .init("HaloPanelGeometryChanged"))) { _ in
+            surfacePower.noteGeometryChange()
+        }
         .contentShape(Rectangle())
         .allowsHitTesting(surfacePower.phase.isPoweredOn)
         .gesture(
