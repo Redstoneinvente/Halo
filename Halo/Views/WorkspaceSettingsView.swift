@@ -6914,35 +6914,36 @@ private struct AutomationSettingsPane: View {
                 )
             } else {
                 VStack(spacing: 10) {
-                    ForEach($workspace.settings.rules) { $rule in
-                        let index = workspace.settings.rules.firstIndex(where: { $0.id == rule.id }) ?? 0
+                    ForEach(workspace.settings.rules) { snapshot in
+                        let index = workspace.settings.rules.firstIndex(where: { $0.id == snapshot.id })
 
                         AutomationProfileRuleEditor(
-                            rule: $rule,
+                            rule: profileRuleBinding(snapshot),
                             profiles: workspace.settings.profiles,
                             isExpanded: Binding(
-                                get: { expandedProfileRules.contains(rule.id) },
+                                get: { expandedProfileRules.contains(snapshot.id) },
                                 set: { expanded in
                                     if expanded {
-                                        expandedProfileRules.insert(rule.id)
+                                        expandedProfileRules.insert(snapshot.id)
                                     } else {
-                                        expandedProfileRules.remove(rule.id)
+                                        expandedProfileRules.remove(snapshot.id)
                                     }
                                 }
                             ),
-                            canMoveUp: index > 0,
-                            canMoveDown: index < workspace.settings.rules.count - 1,
-                            onMoveUp: { moveProfileRule(rule.id, by: -1) },
-                            onMoveDown: { moveProfileRule(rule.id, by: 1) },
+                            canMoveUp: (index ?? 0) > 0,
+                            canMoveDown: index.map { $0 < workspace.settings.rules.count - 1 } ?? false,
+                            onMoveUp: { moveProfileRule(snapshot.id, by: -1) },
+                            onMoveDown: { moveProfileRule(snapshot.id, by: 1) },
                             onDuplicate: {
-                                var copy = rule
+                                guard let currentIndex = workspace.settings.rules.firstIndex(where: { $0.id == snapshot.id }) else { return }
+                                var copy = snapshot
                                 copy.id = UUID()
-                                workspace.settings.rules.insert(copy, at: min(index + 1, workspace.settings.rules.count))
+                                workspace.settings.rules.insert(copy, at: min(currentIndex + 1, workspace.settings.rules.count))
                                 expandedProfileRules.insert(copy.id)
                             },
                             onRemove: {
-                                workspace.settings.rules.removeAll { $0.id == rule.id }
-                                expandedProfileRules.remove(rule.id)
+                                workspace.settings.rules.removeAll { $0.id == snapshot.id }
+                                expandedProfileRules.remove(snapshot.id)
                             }
                         )
                     }
@@ -6970,21 +6971,22 @@ private struct AutomationSettingsPane: View {
                 )
             } else {
                 VStack(spacing: 10) {
-                    ForEach(appHideRules) { $rule in
+                    ForEach(appHideRules.wrappedValue) { snapshot in
                         AppNotchHideRuleEditor(
-                            rule: $rule,
+                            rule: appHideRuleBinding(snapshot),
                             isExpanded: Binding(
-                                get: { expandedVisibilityRules.contains(rule.id) },
+                                get: { expandedVisibilityRules.contains(snapshot.id) },
                                 set: { expanded in
                                     if expanded {
-                                        expandedVisibilityRules.insert(rule.id)
+                                        expandedVisibilityRules.insert(snapshot.id)
                                     } else {
-                                        expandedVisibilityRules.remove(rule.id)
+                                        expandedVisibilityRules.remove(snapshot.id)
                                     }
                                 }
                             ),
                             onDuplicate: {
-                                var copy = rule
+                                guard workspace.settings.resolvedAppNotchHideRules.contains(where: { $0.id == snapshot.id }) else { return }
+                                var copy = snapshot
                                 copy.id = UUID()
                                 var rules = appHideRules.wrappedValue
                                 rules.append(copy)
@@ -6993,15 +6995,41 @@ private struct AutomationSettingsPane: View {
                             },
                             onRemove: {
                                 var rules = appHideRules.wrappedValue
-                                rules.removeAll { $0.id == rule.id }
+                                rules.removeAll { $0.id == snapshot.id }
                                 appHideRules.wrappedValue = rules
-                                expandedVisibilityRules.remove(rule.id)
+                                expandedVisibilityRules.remove(snapshot.id)
                             }
                         )
                     }
                 }
             }
         }
+    }
+
+    private func profileRuleBinding(_ snapshot: AutomationRule) -> Binding<AutomationRule> {
+        Binding(
+            get: {
+                workspace.settings.rules.first(where: { $0.id == snapshot.id }) ?? snapshot
+            },
+            set: { updated in
+                guard let index = workspace.settings.rules.firstIndex(where: { $0.id == snapshot.id }) else { return }
+                workspace.settings.rules[index] = updated
+            }
+        )
+    }
+
+    private func appHideRuleBinding(_ snapshot: AppNotchHideRule) -> Binding<AppNotchHideRule> {
+        Binding(
+            get: {
+                workspace.settings.resolvedAppNotchHideRules.first(where: { $0.id == snapshot.id }) ?? snapshot
+            },
+            set: { updated in
+                var rules = workspace.settings.appNotchHideRules ?? []
+                guard let index = rules.firstIndex(where: { $0.id == snapshot.id }) else { return }
+                rules[index] = updated
+                workspace.settings.appNotchHideRules = rules
+            }
+        )
     }
 
     private func addProfileRule() {
