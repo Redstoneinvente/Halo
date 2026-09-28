@@ -432,6 +432,7 @@ struct ScheduleSettingsView: View {
 
                         HaloBackgroundScheduleCard(
                             schedule: backgroundScheduleBinding(snapshot),
+                            baseAppearance: workspace.settings.layout.appearance,
                             isExpanded: Binding(
                                 get: { expandedBackgroundSchedules.contains(snapshot.id) },
                                 set: { expanded in
@@ -816,6 +817,7 @@ private struct HaloProfileScheduleCard: View {
 @MainActor
 private struct HaloBackgroundScheduleCard: View {
     @Binding var schedule: TimedBackground
+    let baseAppearance: Appearance
     @Binding var isExpanded: Bool
     let isActive: Bool
     let canMoveUp: Bool
@@ -838,6 +840,71 @@ private struct HaloBackgroundScheduleCard: View {
     private var fileName: String {
         guard !schedule.assetPath.isEmpty else { return "No file selected" }
         return URL(fileURLWithPath: schedule.assetPath).lastPathComponent
+    }
+
+    private var solidColorBinding: Binding<Color> {
+        Binding(
+            get: { (schedule.solidColor ?? baseAppearance.solidColor ?? .black).color },
+            set: { schedule.solidColor = WidgetColor($0) }
+        )
+    }
+
+    private var gradientStartBinding: Binding<Color> {
+        Binding(
+            get: {
+                (schedule.gradientStartColor
+                 ?? baseAppearance.gradientStartColor
+                 ?? WidgetColor(red: 0.07, green: 0.09, blue: 0.14)).color
+            },
+            set: { schedule.gradientStartColor = WidgetColor($0) }
+        )
+    }
+
+    private var gradientEndBinding: Binding<Color> {
+        Binding(
+            get: {
+                (schedule.gradientEndColor
+                 ?? baseAppearance.gradientEndColor
+                 ?? WidgetColor(red: 0.01, green: 0.02, blue: 0.04)).color
+            },
+            set: { schedule.gradientEndColor = WidgetColor($0) }
+        )
+    }
+
+    private var saturationBinding: Binding<Double> {
+        Binding(
+            get: { schedule.saturation ?? baseAppearance.saturation },
+            set: { schedule.saturation = $0 }
+        )
+    }
+
+    private var brightnessBinding: Binding<Double> {
+        Binding(
+            get: { schedule.brightness ?? baseAppearance.brightness },
+            set: { schedule.brightness = $0 }
+        )
+    }
+
+    private func glassDouble(_ keyPath: WritableKeyPath<GlassOptions, Double>) -> Binding<Double> {
+        Binding(
+            get: { (schedule.glass ?? baseAppearance.glass).normalized()[keyPath: keyPath] },
+            set: { value in
+                var glass = schedule.glass ?? baseAppearance.glass
+                glass[keyPath: keyPath] = value
+                schedule.glass = glass.normalized()
+            }
+        )
+    }
+
+    private var glassTintBinding: Binding<Color> {
+        Binding(
+            get: { (schedule.glass ?? baseAppearance.glass).normalized().tint.color },
+            set: { value in
+                var glass = schedule.glass ?? baseAppearance.glass
+                glass.tint = WidgetColor(value)
+                schedule.glass = glass.normalized()
+            }
+        )
     }
 
     var body: some View {
@@ -937,7 +1004,37 @@ private struct HaloBackgroundScheduleCard: View {
                     }
                     .pickerStyle(.menu)
 
-                    if schedule.kind == .image || schedule.kind == .video {
+                    switch schedule.kind {
+                    case .solid:
+                        ColorPicker("Color", selection: solidColorBinding, supportsOpacity: false)
+
+                    case .gradient:
+                        HStack(spacing: 14) {
+                            ColorPicker("Start", selection: gradientStartBinding, supportsOpacity: false)
+                            ColorPicker("End", selection: gradientEndBinding, supportsOpacity: false)
+                        }
+
+                    case .glass:
+                        VStack(alignment: .leading, spacing: 10) {
+                            ColorPicker("Glass tint", selection: glassTintBinding, supportsOpacity: false)
+                            LabeledContent("Clarity") {
+                                Slider(value: glassDouble(\.clarity), in: 0...1)
+                            }
+                            LabeledContent("Frost") {
+                                Slider(value: glassDouble(\.frost), in: 0...1)
+                            }
+                            LabeledContent("Light absorption") {
+                                Slider(value: glassDouble(\.lightAbsorption), in: 0...1)
+                            }
+                            LabeledContent("Refraction") {
+                                Slider(value: glassDouble(\.refraction), in: 0...1)
+                            }
+                            LabeledContent("Tint amount") {
+                                Slider(value: glassDouble(\.tintAmount), in: 0...0.5)
+                            }
+                        }
+
+                    case .image, .video:
                         VStack(alignment: .leading, spacing: 6) {
                             Button(action: onChooseFile) {
                                 Label(schedule.assetPath.isEmpty ? "Choose background file…" : "Choose another file…", systemImage: "folder")
@@ -965,6 +1062,17 @@ private struct HaloBackgroundScheduleCard: View {
                                     .foregroundStyle(.secondary)
                             }
                             Slider(value: $schedule.blur, in: 0...20)
+                        }
+                    }
+
+                    if schedule.kind == .gradient || schedule.kind == .image || schedule.kind == .video {
+                        VStack(alignment: .leading, spacing: 8) {
+                            LabeledContent("Saturation") {
+                                Slider(value: saturationBinding, in: 0...2)
+                            }
+                            LabeledContent("Brightness") {
+                                Slider(value: brightnessBinding, in: -0.5...0.5)
+                            }
                         }
                     }
 

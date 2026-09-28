@@ -3052,6 +3052,9 @@ struct SurfaceView: View {
         appearance.gradientStartColor = WidgetColor(red: 0, green: 0, blue: 0)
         appearance.gradientEndColor = WidgetColor(red: 0, green: 0, blue: 0)
         appearance.assetPath = ""
+        // Keep only the timed-background layer from the active layout. Static Default
+        // appearance remains isolated, but scheduled backgrounds must render while closed too.
+        appearance.backgroundSchedule = layout.appearance.backgroundSchedule
         appearance.blur = 0
         appearance.saturation = 1
         appearance.brightness = 0

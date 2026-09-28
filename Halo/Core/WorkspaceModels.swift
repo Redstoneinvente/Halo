@@ -1634,8 +1634,21 @@ struct ThemeArchive: Codable {
         if appearance.background == .video || appearance.background == .image { appearance.background = .gradient }
         appearance.grain = try appearance.grain?.validated()
         appearance.backgroundSchedule = try appearance.backgroundSchedule?.map { entry in
-            guard entry.blur.isFinite else { throw CocoaError(.fileReadCorruptFile) }
-            var v = entry; v.blur = min(20, max(0, v.blur)); v.grain = try v.grain.validated(); v.assetPath = ""
+            guard entry.blur.isFinite,
+                  (entry.saturation?.isFinite ?? true),
+                  (entry.brightness?.isFinite ?? true) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            var v = entry
+            v.blur = min(20, max(0, v.blur))
+            if let saturation = v.saturation { v.saturation = min(2, max(0, saturation)) }
+            if let brightness = v.brightness { v.brightness = min(0.5, max(-0.5, brightness)) }
+            v.solidColor = try v.solidColor?.validated()
+            v.gradientStartColor = try v.gradientStartColor?.validated()
+            v.gradientEndColor = try v.gradientEndColor?.validated()
+            if let glass = v.glass { v.glass = glass.normalized() }
+            v.grain = try v.grain.validated()
+            v.assetPath = ""
             if v.kind == .image || v.kind == .video { v.kind = .gradient }
             return v
         }

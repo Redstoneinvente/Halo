@@ -48,13 +48,30 @@ struct TimedBackground: Codable, Identifiable, Equatable {
     var assetPath = ""
     var blur = 0.0
     var grain = GrainOptions()
+
+    // Optional overrides preserve schedules created before timed-background styling
+    // was expanded. nil inherits the layout's normal background appearance.
+    var solidColor: WidgetColor?
+    var gradientStartColor: WidgetColor?
+    var gradientEndColor: WidgetColor?
+    var saturation: Double?
+    var brightness: Double?
+    var glass: GlassOptions?
 }
 extension Appearance {
     func resolved(at date: Date, calendar: Calendar = .current) -> Appearance {
         guard let entry = backgroundSchedule?.first(where: { $0.enabled && $0.window.occurrence(at: date, calendar: calendar) != nil }) else { return self }
         var result = self
-        result.background = entry.kind; result.assetPath = entry.assetPath
-        result.blur = entry.blur; result.grain = entry.grain
+        result.background = entry.kind
+        result.assetPath = entry.assetPath
+        result.blur = entry.blur
+        result.grain = entry.grain
+        if let solidColor = entry.solidColor { result.solidColor = solidColor }
+        if let gradientStartColor = entry.gradientStartColor { result.gradientStartColor = gradientStartColor }
+        if let gradientEndColor = entry.gradientEndColor { result.gradientEndColor = gradientEndColor }
+        if let saturation = entry.saturation { result.saturation = saturation }
+        if let brightness = entry.brightness { result.brightness = brightness }
+        if let glass = entry.glass { result.glass = glass.normalized() }
         return result
     }
 }
