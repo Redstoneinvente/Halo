@@ -187,6 +187,9 @@ final class SurfaceState: ObservableObject {
     /// Non-CI compact-height request used by the review nudge. Keep this separate from
     /// contextPreferredCompactHeight because Simple mode deliberately clears CI sizing.
     @Published var reviewPromptPreferredCompactHeight: CGFloat?
+    /// Original compact height captured before the review nudge grows the panel. This belongs
+    /// to the surface state, not SwiftUI @State, so a child-view rebuild cannot orphan the panel.
+    var reviewPromptBaseCompactHeight: CGFloat?
     @Published var contextMinimumExpandedWidth: CGFloat?
     /// Per-surface drag metadata comes from Halo's shared file-drag source. Drop CI is merely one
     /// consumer of this state; partner integrations receive the same event independently.

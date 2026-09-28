@@ -430,6 +430,8 @@ struct HaloReviewNotchPromptView: View {
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .foregroundStyle(.white)
+        .preferredColorScheme(.dark)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Halo review reminder")
     }

@@ -2769,7 +2769,6 @@ struct SurfaceView: View {
     @State private var visualWorkspaceSurfacePresented = false
     @State private var simpleOpenContentVisible = false
     @State private var simpleAnimationToken = UUID()
-    @State private var reviewPromptBaseCompactHeight: CGFloat?
     @AppStorage("HaloContextTeleprompterEnabled") private var teleprompterCIEnabled = true
     @AppStorage("HaloContextTeleprompterPriority") private var teleprompterPriority = 70.0
     @AppStorage("HaloContextTransferEnabled") private var transferCIEnabled = true
@@ -2824,33 +2823,33 @@ struct SurfaceView: View {
     }
 
     private var reviewPromptActive: Bool {
-        // Rendering follows the prompt lifecycle once this surface has claimed it.
-        // Do not re-evaluate every targeting guard here, otherwise a transient engine
-        // state can hide the content while leaving the resized panel visible.
-        reviewPrompt.isPresented && reviewPromptBaseCompactHeight != nil
-    }
-
-    private var reviewPromptBaseHeight: CGFloat {
-        reviewPromptBaseCompactHeight ?? max(state.physicalNotchHeight, state.compactHeight - reviewPromptExtraHeight)
+        // WindowManager's dedicated request is the single source of truth once this surface
+        // has claimed the prompt. Rendering itself happens one level up in HaloSurfaceRouter.
+        state.reviewPromptPreferredCompactHeight != nil
     }
 
     private func synchronizeReviewPromptGeometry() {
         if reviewPromptTargetsThisSurface {
-            if reviewPromptBaseCompactHeight == nil {
-                reviewPromptBaseCompactHeight = state.compactHeight
+            if state.reviewPromptBaseCompactHeight == nil {
+                state.reviewPromptBaseCompactHeight = state.compactHeight
             }
-            guard let base = reviewPromptBaseCompactHeight else { return }
-            let requested = min(220, max(base + reviewPromptExtraHeight, state.physicalNotchHeight + reviewPromptExtraHeight))
+            guard let base = state.reviewPromptBaseCompactHeight else { return }
+            let requested = min(
+                220,
+                max(base + reviewPromptExtraHeight, state.physicalNotchHeight + reviewPromptExtraHeight)
+            )
             if state.reviewPromptPreferredCompactHeight != requested {
                 state.reviewPromptPreferredCompactHeight = requested
             }
             return
         }
 
-        if reviewPromptBaseCompactHeight != nil {
+        // Clear by engine state, not by a child-view-local flag. This also repairs any stale
+        // expanded review panel left behind if SwiftUI rebuilt SurfaceView during animation.
+        if state.reviewPromptPreferredCompactHeight != nil {
             state.reviewPromptPreferredCompactHeight = nil
-            reviewPromptBaseCompactHeight = nil
         }
+        state.reviewPromptBaseCompactHeight = nil
     }
     private var contextOptions: ContextMusicOptions { layout.contextMusic ?? ContextMusicOptions() }
     private var bluetoothEligible: Bool {
@@ -3350,26 +3349,6 @@ struct SurfaceView: View {
                 }
             }
 
-            // The compact renderer is allowed to draw across the entire resized surface.
-            // Keep the review affordance in its own top-level layer so closed-notch content
-            // can never paint over it. It occupies only the extra height added for the prompt.
-            if reviewPromptActive && !visuallyExpanded {
-                VStack(spacing: 0) {
-                    Spacer(minLength: reviewPromptBaseHeight)
-
-                    HaloReviewNotchPromptView()
-                        .frame(maxWidth: .infinity)
-                        .frame(height: reviewPromptExtraHeight)
-                        .background(.black.opacity(0.96))
-                        .overlay(alignment: .top) {
-                            Rectangle()
-                                .fill(.white.opacity(0.08))
-                                .frame(height: 1)
-                        }
-                }
-                .frame(width: surfaceProxy.size.width, height: surfaceProxy.size.height, alignment: .top)
-                .zIndex(100)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // Fixed-size dashboard/CI children may exceed the proposal during retract.
@@ -3547,7 +3526,13 @@ struct SurfaceView: View {
             }
             synchronizeSurfaceCIOwnership()
         }
-        .onDisappear { publishOpenedNotchVisibility(false) }
+        .onDisappear {
+            publishOpenedNotchVisibility(false)
+            if state.reviewPromptPreferredCompactHeight != nil {
+                state.reviewPromptPreferredCompactHeight = nil
+            }
+            state.reviewPromptBaseCompactHeight = nil
+        }
         .onReceive(state.viewport.$size) { size in
             guard visualWorkspaceSurfacePresented, !state.expanded else { return }
             let atCompactSize =

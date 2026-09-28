@@ -100,6 +100,13 @@ struct HaloSurfaceRouter: View {
         !accessLocked && state.expanded && ownership.isRequested && eiSettings.settings.mode != .off && activeCI == nil
     }
 
+    private var reviewPromptVisible: Bool {
+        !accessLocked &&
+        !state.expanded &&
+        !state.presentationExpanded &&
+        state.reviewPromptPreferredCompactHeight != nil
+    }
+
     private var effectiveShape: SurfaceShapeKind {
         guard layout.appearance.surface.useStyleContour ?? true else { return layout.appearance.surface.shape }
         switch theme.style {
@@ -145,6 +152,28 @@ struct HaloSurfaceRouter: View {
                         .contentShape(contour)
                         .transition(.opacity.combined(with: .scale(scale: 0.985)))
                         .zIndex(20)
+                }
+
+                if reviewPromptVisible {
+                    ZStack(alignment: .bottom) {
+                        Color.clear
+
+                        HaloReviewNotchPromptView()
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 54)
+                            .foregroundStyle(.white)
+                            .preferredColorScheme(.dark)
+                            .background(Color.black)
+                            .overlay(alignment: .top) {
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.10))
+                                    .frame(height: 1)
+                            }
+                    }
+                    .frame(width: viewport.size.width, height: viewport.size.height)
+                    .clipShape(contour)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .zIndex(200)
                 }
             }
         }
