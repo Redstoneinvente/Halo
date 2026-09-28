@@ -1963,7 +1963,11 @@ final class WindowManager {
                 continue
             }
 
-            var target = (host.state.contextPreferredCompactWidth != nil || host.state.contextPreferredCompactHeight != nil)
+            let hasTransientCompactOverride =
+                host.state.contextPreferredCompactWidth != nil ||
+                host.state.contextPreferredCompactHeight != nil ||
+                host.state.reviewPromptPreferredCompactHeight != nil
+            var target = hasTransientCompactOverride
                 ? targetFrame(host: host, expanded: false)
                 : geometry.frame(expanded: false)
             if geometry.style == .detached {
