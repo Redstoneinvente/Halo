@@ -253,6 +253,7 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
     var scope: SurfaceAppearanceScope = .all
     @AppStorage("HaloContextOffsetX") private var contextOffsetX = 0.0
     @AppStorage("HaloContextOffsetY") private var contextOffsetY = 0.0
+    @AppStorage("HaloContextUsesOpenedPosition") private var contextUsesOpenedPosition = true
 
     private let solidPresets: [WidgetColor] = [
         WidgetColor(red: 0.02, green: 0.02, blue: 0.025),
@@ -307,22 +308,72 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
         }
 
         if scope == .all || scope == .geometry || scope == .openedPosition {
-            Section("Opened surface position") {
-                Text("Positive X moves the opened surface right; positive Y moves it down.").font(.caption)
-                offsetControl("Opened X", key: \.openedX, expanded: true)
-                offsetControl("Opened Y", key: \.openedY, expanded: true)
-                Button("Reset opened offsets") {
-                    var offsets = appearance.surface.offsets ?? SurfaceOffsets()
-                    offsets.openedX = 0
-                    offsets.openedY = 0
-                    appearance.surface.offsets = offsets
+            Section("Opened position") {
+                OffsetPositionPad(
+                    x: offsetBinding(\.openedX),
+                    y: offsetBinding(\.openedY),
+                    onEditingChanged: {
+                        GeometryPreview.update(expanded: true, editing: $0, display: screen)
+                    }
+                )
+
+                offsetControl("Horizontal", key: \.openedX, expanded: true)
+                offsetControl("Vertical", key: \.openedY, expanded: true)
+
+                HStack {
+                    Spacer()
+                    Button {
+                        var offsets = appearance.surface.offsets ?? SurfaceOffsets()
+                        offsets.openedX = 0
+                        offsets.openedY = 0
+                        appearance.surface.offsets = offsets
+                        GeometryPreview.update(expanded: true, editing: false, display: screen)
+                    } label: {
+                        Label("Reset position", systemImage: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.borderless)
                 }
             }
-            Section("Context interface position") {
-                Text("These offsets apply only to Context Interfaces. They do not move the normal opened dashboard. Positive X moves right; positive Y moves down.").font(.caption).foregroundStyle(.secondary)
-                PreciseSlider(title: "Context X", value: $contextOffsetX, range: -1000...1000, step: 1, suffix: "pt")
-                PreciseSlider(title: "Context Y", value: $contextOffsetY, range: -1000...1000, step: 1, suffix: "pt")
-                Button("Reset context position") { contextOffsetX = 0; contextOffsetY = 0 }
+
+            Section("Context Interface position") {
+                Toggle("Follow opened notch position", isOn: $contextUsesOpenedPosition)
+                    .onChange(of: contextUsesOpenedPosition) { followsOpened in
+                        if followsOpened {
+                            contextOffsetX = 0
+                            contextOffsetY = 0
+                        }
+                    }
+
+                if contextUsesOpenedPosition {
+                    Text("Context Interfaces use the same position as the opened notch.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Add an extra offset only when a Context Interface is active.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    OffsetPositionPad(x: $contextOffsetX, y: $contextOffsetY)
+                    PreciseSlider(title: "Horizontal offset", value: $contextOffsetX, range: -1000...1000, step: 1, suffix: "pt")
+                    PreciseSlider(title: "Vertical offset", value: $contextOffsetY, range: -1000...1000, step: 1, suffix: "pt")
+
+                    HStack {
+                        Spacer()
+                        Button {
+                            contextOffsetX = 0
+                            contextOffsetY = 0
+                        } label: {
+                            Label("Reset offset", systemImage: "arrow.counterclockwise")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+            .onAppear {
+                // Preserve existing custom CI offsets from older builds.
+                if abs(contextOffsetX) >= 0.5 || abs(contextOffsetY) >= 0.5 {
+                    contextUsesOpenedPosition = false
+                }
             }
         }
 
@@ -584,12 +635,109 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
         appearance.background = kind
     }
 
+    private func offsetBinding(_ key: WritableKeyPath<SurfaceOffsets, Double>) -> Binding<Double> {
+        Binding(
+            get: { (appearance.surface.offsets ?? SurfaceOffsets())[keyPath: key] },
+            set: {
+                var offsets = appearance.surface.offsets ?? SurfaceOffsets()
+                offsets[keyPath: key] = $0
+                appearance.surface.offsets = offsets
+            }
+        )
+    }
+
     private func offsetControl(_ title: String, key: WritableKeyPath<SurfaceOffsets, Double>, expanded: Bool) -> some View {
-        let value = Binding<Double>(get: { (appearance.surface.offsets ?? SurfaceOffsets())[keyPath: key] }, set: {
-            var offsets = appearance.surface.offsets ?? SurfaceOffsets(); offsets[keyPath: key] = $0; appearance.surface.offsets = offsets
-        })
-        return PreciseSlider(title: title, value: value, range: -1000...1000, step: 1, suffix: "pt", onEditingChanged: {
-            GeometryPreview.update(expanded: expanded, editing: $0, display: screen)
-        })
+        PreciseSlider(
+            title: title,
+            value: offsetBinding(key),
+            range: -1000...1000,
+            step: 1,
+            suffix: "pt",
+            onEditingChanged: {
+                GeometryPreview.update(expanded: expanded, editing: $0, display: screen)
+            }
+        )
+    }
+}
+
+private struct OffsetPositionPad: View {
+    @Binding var x: Double
+    @Binding var y: Double
+
+    var range: ClosedRange<Double> = -160...160
+    var onEditingChanged: ((Bool) -> Void)? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text("Drag to position")
+                    .font(.caption.weight(.medium))
+                Spacer()
+                Text("X \(Int(x.rounded()))   Y \(Int(y.rounded()))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            GeometryReader { proxy in
+                let size = proxy.size
+
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.primary.opacity(0.035))
+
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.primary.opacity(0.10), lineWidth: 1)
+
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(width: 1)
+
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(height: 1)
+
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 14, height: 14)
+                        .overlay(Circle().stroke(Color.white.opacity(0.75), lineWidth: 1))
+                        .shadow(radius: 2)
+                        .position(
+                            x: position(for: x, length: size.width),
+                            y: position(for: y, length: size.height)
+                        )
+                }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { gesture in
+                            onEditingChanged?(true)
+                            x = value(for: gesture.location.x, length: size.width)
+                            y = value(for: gesture.location.y, length: size.height)
+                        }
+                        .onEnded { _ in
+                            onEditingChanged?(false)
+                        }
+                )
+            }
+            .frame(height: 108)
+
+            Text("The pad covers ±160 pt for quick adjustments. Use the fields below for larger or exact values.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func position(for value: Double, length: CGFloat) -> CGFloat {
+        guard length > 0, range.upperBound > range.lowerBound else { return length / 2 }
+        let clamped = min(range.upperBound, max(range.lowerBound, value))
+        let fraction = (clamped - range.lowerBound) / (range.upperBound - range.lowerBound)
+        return CGFloat(fraction) * length
+    }
+
+    private func value(for position: CGFloat, length: CGFloat) -> Double {
+        guard length > 0, range.upperBound > range.lowerBound else { return 0 }
+        let fraction = min(1, max(0, Double(position / length)))
+        let raw = range.lowerBound + fraction * (range.upperBound - range.lowerBound)
+        return raw.rounded()
     }
 }

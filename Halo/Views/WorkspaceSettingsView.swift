@@ -2465,37 +2465,37 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             }
         }
 
-        Section("Opened notch size & spacing") {
-            Slider(
+        Section("Opened notch size") {
+            PreciseSlider(
+                title: "Width",
                 value: activeThemeBinding.width,
-                in: 340...1200,
+                range: 340...1200,
+                step: 1,
+                suffix: "pt",
                 onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }
-            ) { Text("Opened width") }
-                .disabled(geometryEditor.isEnabled)
+            )
+            .disabled(geometryEditor.isEnabled)
 
-            Slider(
+            PreciseSlider(
+                title: "Height",
                 value: activeAppearanceBinding.expandedHeight,
-                in: 280...1100,
+                range: 280...1100,
+                step: 1,
+                suffix: "pt",
                 onEditingChanged: { GeometryPreview.update(expanded: true, editing: $0) }
-            ) { Text("Opened height") }
-                .disabled(geometryEditor.isEnabled)
+            )
+            .disabled(geometryEditor.isEnabled)
+        }
 
+        Section("Content spacing") {
             if activeLayout.resolvedUsesCustomOpenNotchWorkspace {
-                Slider(value: openedSidePaddingBinding, in: 0...72) { Text("Workspace side padding") }
-                Slider(value: openedVerticalPaddingBinding, in: 0...72) { Text("Workspace top & bottom padding") }
-                Slider(value: openedSpacingBinding, in: 0...32) { Text("Widget gap") }
-
-                Text("Visual Workspace spacing now edits its grid padding and gap directly. Opened width and height still control the outer Halo surface.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                PreciseSlider(title: "Horizontal padding", value: openedSidePaddingBinding, range: 0...72, step: 1, suffix: "pt")
+                PreciseSlider(title: "Vertical padding", value: openedVerticalPaddingBinding, range: 0...72, step: 1, suffix: "pt")
+                PreciseSlider(title: "Widget spacing", value: openedSpacingBinding, range: 0...32, step: 1, suffix: "pt")
             } else {
-                Slider(value: openedSidePaddingBinding, in: 8...72) { Text("Side padding") }
-                Slider(value: openedVerticalPaddingBinding, in: 8...72) { Text("Top & bottom padding") }
-                Slider(value: openedSpacingBinding, in: 4...40) { Text("Module spacing") }
-
-                Text("Width is still limited by the display. Lower padding gives widgets more breathing room without changing the outer notch shape.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                PreciseSlider(title: "Horizontal padding", value: openedSidePaddingBinding, range: 8...72, step: 1, suffix: "pt")
+                PreciseSlider(title: "Vertical padding", value: openedVerticalPaddingBinding, range: 8...72, step: 1, suffix: "pt")
+                PreciseSlider(title: "Widget spacing", value: openedSpacingBinding, range: 4...40, step: 1, suffix: "pt")
             }
         }
         SurfaceAppearanceControls(
