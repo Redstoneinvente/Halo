@@ -409,7 +409,6 @@ final class HaloReviewPromptCoordinator: ObservableObject {
     @Published private(set) var isPresented = false
 
     private let defaults = UserDefaults.standard
-    private let launchCountKey = "HaloReviewPromptLaunchCountV1"
     private let suppressedKey = "HaloReviewPromptSuppressedV1"
     private let completedKey = "HaloReviewPromptCompletedV1"
     private let nextEligibleKey = "HaloReviewPromptNextEligibleV1"
@@ -424,8 +423,6 @@ final class HaloReviewPromptCoordinator: ObservableObject {
         guard !started else { return }
         started = true
 
-        defaults.set(defaults.integer(forKey: launchCountKey) + 1, forKey: launchCountKey)
-
         NotificationCenter.default.publisher(for: .init("HaloReviewSubmitted"))
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -435,8 +432,10 @@ final class HaloReviewPromptCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Testing cadence: evaluate the review prompt 10 seconds after every app launch.
+        // The permanent "Don't remind me" choice and a completed review still suppress it.
         evaluationTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 120_000_000_000)
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
             guard !Task.isCancelled else { return }
             await self?.evaluateAndPresent()
         }
@@ -473,12 +472,7 @@ final class HaloReviewPromptCoordinator: ObservableObject {
     private func evaluateAndPresent() async {
         guard !defaults.bool(forKey: suppressedKey),
               !defaults.bool(forKey: completedKey),
-              defaults.integer(forKey: launchCountKey) >= 3,
               HaloRuntimeGate.shared.isReady else { return }
-
-        if let next = defaults.object(forKey: nextEligibleKey) as? Date, next > Date() {
-            return
-        }
 
         let account = HaloAccountManager.shared
 
