@@ -1517,8 +1517,11 @@ final class WindowManager {
             guard itemIsRendered(item) else { return 0 }
             let style = options.widgetStyle(for: item)
             let textSize = min(30, max(8, style.fontSize ?? options.fontSize))
-            let base: Double
+            func lineHeight(_ pointSize: Double) -> Double {
+                max(1, pointSize * 1.18)
+            }
 
+            let base: Double
             switch item {
             case .clock:
                 var clock = layout.widgetStyle(for: .clock).clock
@@ -1527,62 +1530,109 @@ final class WindowManager {
                     clock.showSeconds = style.clockShowSeconds
                     clock.showDate = style.clockShowDate
                 }
+                if style.fontSize != nil { clock.automaticTypography = false }
                 if let visualStyle = style.clockVisualStyle { clock.visualStyle = visualStyle }
+
+                let primarySize = clock.usesAutomaticTypography
+                    ? max(18, textSize * 1.15 * clock.resolvedTimeScale)
+                    : max(12, textSize * 1.55 * clock.resolvedTimeScale)
                 switch clock.resolvedVisualStyle {
-                case .analog: base = 44
-                case .flip: base = 34
-                case .stacked: base = 36
-                case .editorial, .split: base = 30
-                case .terminal, .lcd, .dotMatrix, .outline: base = 30
-                case .oversizedTypography: base = 36
-                case .digital, .minimal: base = 24
+                case .analog:
+                    base = max(36, min(54, textSize * 2.2))
+                case .flip:
+                    base = max(30, min(52, primarySize * 1.18))
+                case .stacked:
+                    base = max(40, min(62, primarySize * 1.72))
+                case .editorial:
+                    base = max(34, min(58, primarySize * 1.42))
+                case .split:
+                    base = max(30, min(52, primarySize * 1.22))
+                case .terminal:
+                    base = max(30, min(54, primarySize * 1.15))
+                case .lcd, .dotMatrix, .outline:
+                    base = max(34, min(58, primarySize * 1.28))
+                case .oversizedTypography:
+                    base = max(34, min(62, primarySize * 1.28))
+                case .digital, .minimal:
+                    base = max(24, min(54, lineHeight(primarySize)))
                 }
 
             case .date:
                 switch style.resolvedCalendarPresentation {
-                case .compact: base = max(18, textSize * 1.20)
-                case .dayTile: base = 28
-                case .weekdayStack: base = 27
-                case .weekStrip: base = 27
-                case .numericBadge: base = 32
+                case .compact:
+                    base = max(18, lineHeight(textSize))
+                case .dayTile:
+                    let month = max(7, textSize * 0.52)
+                    let day = max(13, textSize * 1.15)
+                    base = lineHeight(month) + lineHeight(day) + 2
+                case .weekdayStack:
+                    let weekday = max(7, textSize * 0.54)
+                    let date = max(10, textSize * 0.90)
+                    base = lineHeight(weekday) + lineHeight(date)
+                case .weekStrip:
+                    base = 24
+                case .numericBadge:
+                    base = max(24, textSize * 1.8)
                 }
 
             case .timer:
                 switch style.resolvedTimerPresentation {
-                case .digital: base = max(18, textSize * 1.20)
-                case .segmented: base = 29
-                case .stacked: base = 26
-                case .progressRing: base = 31
-                case .badge: base = 24
+                case .digital:
+                    base = max(18, lineHeight(textSize))
+                case .segmented:
+                    base = lineHeight(max(9, textSize * 0.80)) + lineHeight(5.5) + 3
+                case .stacked:
+                    base = lineHeight(max(10, textSize * 0.92)) + lineHeight(6.5)
+                case .progressRing:
+                    base = 31
+                case .badge:
+                    base = max(
+                        lineHeight(max(8, textSize * 0.66)),
+                        lineHeight(max(9, textSize * 0.78))
+                    ) + 6
                 }
 
             case .battery:
                 switch style.resolvedBatteryPresentation {
-                case .ring: base = 30
-                case .iconPercent, .percent, .bar, .gauge: base = max(18, textSize * 1.15)
+                case .ring:
+                    base = 30
+                case .gauge:
+                    base = max(18, lineHeight(max(8, textSize * 0.68)))
+                case .iconPercent, .percent, .bar:
+                    base = max(18, lineHeight(textSize))
                 }
 
             case .mirror:
                 switch style.resolvedMirrorPresentation {
-                case .circle, .square: base = 36
-                case .rounded, .pill, .cinematic: base = 32
+                case .circle, .square:
+                    base = max(30, min(54, style.width ?? 36))
+                case .rounded, .pill, .cinematic:
+                    base = 32
                 }
 
             case .files:
                 switch style.resolvedFilesPresentation {
-                case .trayLabel: base = 24
-                case .folderBadge, .documentStack: base = 22
-                case .iconCount, .count: base = max(18, textSize * 1.15)
+                case .trayLabel:
+                    base = lineHeight(max(10, textSize * 0.90)) + lineHeight(5.5)
+                case .folderBadge:
+                    base = max(
+                        lineHeight(max(11, textSize)),
+                        lineHeight(max(8, textSize * 0.72)) + 2
+                    )
+                case .documentStack:
+                    base = max(lineHeight(textSize), lineHeight(max(9, textSize * 0.78)))
+                case .iconCount, .count:
+                    base = max(18, lineHeight(max(textSize, textSize * 1.05)))
                 }
 
             case .visualizer:
                 base = min(42, max(16, (options.visualizer ?? VisualizerOptions()).height))
 
             case .media:
-                base = max(20, textSize * 1.25)
+                base = max(20, lineHeight(textSize))
 
             case .activity:
-                base = max(22, textSize * 1.35)
+                base = max(22, lineHeight(textSize))
 
             case .none:
                 base = 0
@@ -1591,12 +1641,13 @@ final class WindowManager {
             return base + style.verticalPadding * 2
         }
 
+
         let widgetContentDemand = max(
             preferredContentHeight(items.left),
             preferredContentHeight(items.right)
         )
         let adaptiveCompactHeight = min(
-            72,
+            84,
             max(
                 hardwareMinimumHeight,
                 widgetContentDemand + options.contentPaddingY * 2
@@ -1969,42 +2020,10 @@ final class WindowManager {
                     style.clock.visualStyle = visualStyle
                 }
 
-                let closedVisualStyle = style.clock.resolvedVisualStyle
-                if closedVisualStyle != .digital && closedVisualStyle != .minimal {
-                    let primaryWidth: Double
-                    switch closedVisualStyle {
-                    case .analog: primaryWidth = max(44, innerHeight)
-                    case .stacked: primaryWidth = 54
-                    case .split: primaryWidth = 76
-                    case .flip: primaryWidth = 84
-                    case .editorial: primaryWidth = 78
-                    case .terminal, .lcd, .dotMatrix, .outline: primaryWidth = 82
-                    case .oversizedTypography: primaryWidth = 92
-                    case .digital, .minimal: primaryWidth = 78
-                    }
-                    let dateWidth = style.clock.showDate ? 68.0 : 0
-                    return styledItemWidth(.clock, body: primaryWidth + dateWidth)
-                }
-
-                // ClosedNotchView renders WidgetClock at its normal compact size.
-                // Measure that exact compact typography here and grow the surface
-                // around it. In particular, AM/PM is deliberately much smaller
-                // than the hour/minute glyphs, so measuring "PM" at the full time
-                // size creates a large empty wing in 12-hour mode.
-                let compactReferenceWidth = 220.0
-                let compactReferenceHeight = 58.0
-                let clockSize: Double
-                if style.clock.usesAutomaticTypography {
-                    let automatic = min(compactReferenceHeight * 0.46, compactReferenceWidth * 0.17)
-                    clockSize = max(18, automatic * style.clock.resolvedTimeScale)
-                } else {
-                    // ClosedNotchView sets compactClock.fontSize to this same `size`,
-                    // then WidgetClock applies the horizontalCompact 1.55x multiplier.
-                    clockSize = max(8, itemTextSize(.clock) * 1.55 * style.clock.resolvedTimeScale)
-                }
-
+                let clock = style.clock
+                let widgetHeight = max(1, innerHeight - closedClockStyle.verticalPadding * 2)
                 let widthScale: Double
-                switch style.clock.resolvedFontWidth {
+                switch clock.resolvedFontWidth {
                 case .compressed: widthScale = 0.86
                 case .condensed: widthScale = 0.93
                 case .standard: widthScale = 1.0
@@ -2016,7 +2035,7 @@ final class WindowManager {
                         return NSFont(name: style.customFont, size: pointSize)
                             ?? NSFont.systemFont(ofSize: pointSize, weight: weight)
                     }
-                    if digits && style.clock.usesMonospacedDigits {
+                    if digits && clock.usesMonospacedDigits {
                         return NSFont.monospacedDigitSystemFont(ofSize: pointSize, weight: weight)
                     }
                     return NSFont.systemFont(ofSize: pointSize, weight: weight)
@@ -2028,102 +2047,336 @@ final class WindowManager {
                     return tracked * widthScale
                 }
 
-                let digitSpacing = max(0, style.clock.resolvedDigitSpacing)
-                let tracking = style.clock.resolvedTracking
+                let desiredTimeSize: Double
+                if clock.usesAutomaticTypography {
+                    desiredTimeSize = max(18, widgetHeight * 0.46 * clock.resolvedTimeScale)
+                } else {
+                    desiredTimeSize = max(8, itemTextSize(.clock) * 1.55 * clock.resolvedTimeScale)
+                }
+                let timeSize = min(desiredTimeSize, max(12, widgetHeight * 0.72))
 
-                // Match the hour's real rendered character count. In 12-hour mode
-                // "2:56 PM" should not reserve the width of "12:56 PM". The minute
-                // and optional seconds stay at two digits, so their width is stable.
                 var calendar = Calendar(identifier: .gregorian)
-                calendar.timeZone = TimeZone(identifier: style.clock.timeZone) ?? .current
-                let hour24 = calendar.component(.hour, from: Date())
-                let displayHour = style.clock.twentyFourHour
+                calendar.timeZone = TimeZone(identifier: clock.timeZone) ?? .current
+                let now = Date()
+                let hour24 = calendar.component(.hour, from: now)
+                let displayHour = clock.twentyFourHour
                     ? hour24
                     : (hour24 % 12 == 0 ? 12 : hour24 % 12)
-                let hourText = style.clock.resolvedLeadingZero
+                let hour = clock.resolvedLeadingZero
                     ? String(format: "%02d", displayHour)
                     : String(displayHour)
+                let minute = String(format: "%02d", calendar.component(.minute, from: now))
+                let second = String(format: "%02d", calendar.component(.second, from: now))
+                let ampm = hour24 < 12 ? "AM" : "PM"
 
-                var pieces: [Double] = [
-                    glyphWidth(hourText, font: clockFont(clockSize * style.clock.resolvedHourEmphasis, digits: true), tracking: tracking),
-                    glyphWidth(style.clock.resolvedSeparator.glyph, font: clockFont(clockSize * 0.86, weight: .regular)),
-                    glyphWidth("88", font: clockFont(clockSize * style.clock.resolvedMinuteEmphasis, digits: true), tracking: tracking)
-                ]
-
-                if style.clock.showSeconds {
-                    pieces.append(glyphWidth(style.clock.resolvedSeparator.glyph, font: clockFont(clockSize * 0.54, weight: .regular)))
-                    pieces.append(glyphWidth("88", font: clockFont(clockSize * style.clock.resolvedSecondsEmphasis, digits: true), tracking: tracking))
+                func rawTime(includeSeconds: Bool, includeAMPM: Bool) -> String {
+                    var value = hour + clock.resolvedSeparator.glyph + minute
+                    if includeSeconds {
+                        value += clock.resolvedSeparator.glyph + second
+                    }
+                    if includeAMPM {
+                        value += " " + ampm
+                    }
+                    return value
                 }
 
-                if !style.clock.twentyFourHour && style.clock.resolvedShowAMPM {
-                    let ampmSize = max(8, clockSize * 0.23)
-                    let leadingInset = max(1, clockSize * 0.02)
-                    let ampm = hour24 < 12 ? "AM" : "PM"
-                    pieces.append(
-                        glyphWidth(ampm, font: clockFont(ampmSize, weight: .semibold))
-                        + leadingInset
+                func digitalWidth(includeSeconds: Bool, includeAMPM: Bool) -> Double {
+                    let digitSpacing = max(0, clock.resolvedDigitSpacing)
+                    let tracking = clock.resolvedTracking
+                    var pieces: [Double] = [
+                        glyphWidth(hour, font: clockFont(timeSize * clock.resolvedHourEmphasis, digits: true), tracking: tracking),
+                        glyphWidth(clock.resolvedSeparator.glyph, font: clockFont(timeSize * 0.86, weight: .regular)),
+                        glyphWidth(minute, font: clockFont(timeSize * clock.resolvedMinuteEmphasis, digits: true), tracking: tracking)
+                    ]
+                    if includeSeconds {
+                        pieces.append(glyphWidth(clock.resolvedSeparator.glyph, font: clockFont(timeSize * 0.54, weight: .regular)))
+                        pieces.append(glyphWidth(second, font: clockFont(timeSize * clock.resolvedSecondsEmphasis, digits: true), tracking: tracking))
+                    }
+                    if includeAMPM {
+                        pieces.append(
+                            glyphWidth(ampm, font: clockFont(max(8, timeSize * 0.23), weight: .semibold))
+                            + max(1, timeSize * 0.02)
+                        )
+                    }
+                    return pieces.reduce(0, +) + digitSpacing * Double(max(0, pieces.count - 1))
+                }
+
+                let primaryWidth: Double
+                switch clock.resolvedVisualStyle {
+                case .digital:
+                    primaryWidth = digitalWidth(
+                        includeSeconds: clock.showSeconds,
+                        includeAMPM: !clock.twentyFourHour && clock.resolvedShowAMPM
+                    )
+
+                case .minimal:
+                    primaryWidth = digitalWidth(includeSeconds: false, includeAMPM: false)
+
+                case .analog:
+                    primaryWidth = max(24, widgetHeight * 0.82)
+
+                case .flip:
+                    let cellHeight = min(
+                        max(18, widgetHeight * 0.56),
+                        max(18, widgetHeight * 0.78)
+                    )
+                    func pairWidth(_ value: String, height: Double) -> Double {
+                        let count = max(1, value.count)
+                        return Double(count) * height * 0.54
+                            + Double(max(0, count - 1)) * max(2, height * 0.035)
+                    }
+                    let gap = max(5, cellHeight * 0.10)
+                    var parts: [Double] = [
+                        pairWidth(hour, height: cellHeight),
+                        glyphWidth(clock.resolvedSeparator.glyph, font: NSFont.systemFont(ofSize: cellHeight * 0.48, weight: .medium)),
+                        pairWidth(minute, height: cellHeight)
+                    ]
+                    if clock.showSeconds {
+                        parts.append(glyphWidth(clock.resolvedSeparator.glyph, font: NSFont.systemFont(ofSize: cellHeight * 0.34, weight: .regular)))
+                        parts.append(pairWidth(second, height: cellHeight * 0.72))
+                    }
+                    primaryWidth = parts.reduce(0, +) + gap * Double(max(0, parts.count - 1))
+
+                case .editorial:
+                    let time = glyphWidth(
+                        hour + clock.resolvedSeparator.glyph + minute,
+                        font: clockFont(timeSize * 1.02, weight: .medium)
+                    )
+                    let compactDateFormatter = DateFormatter()
+                    compactDateFormatter.locale = .autoupdatingCurrent
+                    compactDateFormatter.timeZone = calendar.timeZone
+                    compactDateFormatter.setLocalizedDateFormatFromTemplate("EEE MMMd")
+                    let internalDateSize = max(9, min(24, timeSize / clock.resolvedTimeDateRatio * clock.resolvedDateScale) * 0.86)
+                    let internalDate = glyphWidth(
+                        compactDateFormatter.string(from: now).uppercased(),
+                        font: clockFont(internalDateSize, weight: .semibold)
+                    )
+                    primaryWidth = max(time, internalDate)
+
+                case .stacked:
+                    let natural = max(12, widgetHeight * 0.22) * clock.resolvedTimeScale
+                    let stackedSize = min(natural, max(12, widgetHeight * 0.36))
+                    let primary = max(
+                        glyphWidth(hour, font: clockFont(stackedSize * clock.resolvedHourEmphasis, digits: true)),
+                        glyphWidth(minute, font: clockFont(stackedSize * clock.resolvedMinuteEmphasis, digits: true))
+                    )
+                    let secondsWidth = clock.showSeconds
+                        ? glyphWidth(second, font: clockFont(stackedSize * 0.42 * clock.resolvedSecondsEmphasis, digits: true))
+                        : 0
+                    primaryWidth = max(primary, secondsWidth, stackedSize * 1.3)
+
+                case .split:
+                    func splitCellWidth(_ value: String) -> Double {
+                        let text = glyphWidth(value, font: clockFont(timeSize * 0.86, weight: .semibold, digits: true))
+                        return text + max(8, timeSize * 0.18) * 2
+                    }
+                    primaryWidth = splitCellWidth(hour) + 8 + splitCellWidth(minute)
+
+                case .terminal:
+                    let terminalSize = timeSize * 0.86
+                    let prompt = glyphWidth("›", font: NSFont.monospacedSystemFont(ofSize: terminalSize * 0.68, weight: .bold))
+                    let value = glyphWidth(
+                        rawTime(
+                            includeSeconds: clock.showSeconds,
+                            includeAMPM: !clock.twentyFourHour && clock.resolvedShowAMPM
+                        ),
+                        font: NSFont.monospacedSystemFont(ofSize: terminalSize, weight: .medium),
+                        tracking: max(0, clock.resolvedTracking)
+                    )
+                    primaryWidth = prompt + 6 + value
+
+                case .lcd:
+                    let lcdSize = timeSize * 0.88
+                    let value = glyphWidth(
+                        rawTime(
+                            includeSeconds: clock.showSeconds,
+                            includeAMPM: !clock.twentyFourHour && clock.resolvedShowAMPM
+                        ),
+                        font: NSFont.monospacedSystemFont(ofSize: lcdSize, weight: .medium),
+                        tracking: max(1, clock.resolvedTracking)
+                    )
+                    primaryWidth = value + max(10, lcdSize * 0.18) * 2
+
+                case .dotMatrix:
+                    let matrixSize = timeSize * 0.82
+                    let value = glyphWidth(
+                        rawTime(
+                            includeSeconds: clock.showSeconds,
+                            includeAMPM: !clock.twentyFourHour && clock.resolvedShowAMPM
+                        ),
+                        font: NSFont.monospacedSystemFont(ofSize: matrixSize, weight: .medium),
+                        tracking: max(2, clock.resolvedTracking + 2)
+                    )
+                    primaryWidth = value + max(10, matrixSize * 0.16) * 2
+
+                case .outline:
+                    let outlineSize = timeSize * 0.90
+                    let value = glyphWidth(
+                        rawTime(
+                            includeSeconds: clock.showSeconds,
+                            includeAMPM: !clock.twentyFourHour && clock.resolvedShowAMPM
+                        ),
+                        font: clockFont(outlineSize, weight: .medium),
+                        tracking: clock.resolvedTracking
+                    )
+                    primaryWidth = value + max(12, outlineSize * 0.22) * 2
+
+                case .oversizedTypography:
+                    let desired = max(14, widgetHeight * 0.58 * clock.resolvedTimeScale)
+                    let oversizedSize = min(desired, max(14, widgetHeight * 0.72))
+                    primaryWidth = glyphWidth(
+                        rawTime(
+                            includeSeconds: clock.showSeconds,
+                            includeAMPM: !clock.twentyFourHour && clock.resolvedShowAMPM
+                        ),
+                        font: clockFont(oversizedSize, weight: .bold)
                     )
                 }
 
-                var contentWidth = pieces.reduce(0, +)
-                    + digitSpacing * Double(max(0, pieces.count - 1))
-
-                // The compact closed-notch presentation shows the short date inline
-                // when Show Date is enabled. Reserve its natural width as well so
-                // the date never gets clipped or silently hidden.
-                if style.clock.showDate {
-                    let dateBase = clockSize / style.clock.resolvedTimeDateRatio * style.clock.resolvedDateScale
+                var bodyWidth = primaryWidth
+                if clock.showDate {
+                    let dateBase = timeSize / clock.resolvedTimeDateRatio * clock.resolvedDateScale
                     let dateSize = min(24, max(9, dateBase))
-                    let secondarySize = min(18, max(8, dateSize * 0.88 * style.clock.resolvedSecondaryScale))
-                    let dateGap = max(6, style.resolvedContent.spacing * 0.50)
-                    contentWidth += dateGap
-                        + glyphWidth("Wed, Sep 28", font: clockFont(secondarySize, weight: .medium))
+                    let secondarySize = min(18, max(8, dateSize * 0.88 * clock.resolvedSecondaryScale))
+                    let formatter = DateFormatter()
+                    formatter.locale = .autoupdatingCurrent
+                    formatter.timeZone = calendar.timeZone
+                    formatter.setLocalizedDateFormatFromTemplate("EEE MMMd")
+                    let dateWidth = glyphWidth(
+                        formatter.string(from: now),
+                        font: clockFont(secondarySize, weight: .medium)
+                    )
+                    bodyWidth += max(6, style.resolvedContent.spacing * 0.50) + dateWidth
                 }
 
-                // Keep only a tight cushion here; the closed-surface sizing path
-                // already adds its own rendering allowance outside the widget width.
-                let clockWidth = composedWidth(
-                    .clock,
-                    textWidth: contentWidth + 4,
-                    automaticShowsIcon: false
-                )
-                return styledItemWidth(.clock, body: clockWidth)
+                // Keep a small cushion for SwiftUI's glyph bearings and transitions. The
+                // surface adds a second rendering allowance outside this widget width.
+                return styledItemWidth(.clock, body: bodyWidth + 6)
 
             case .date:
                 let dateStyle = closedStyle(.date)
+                let now = Date()
+                func formatted(_ template: String) -> String {
+                    let formatter = DateFormatter()
+                    formatter.locale = .autoupdatingCurrent
+                    formatter.timeZone = .autoupdatingCurrent
+                    formatter.setLocalizedDateFormatFromTemplate(template)
+                    return formatter.string(from: now)
+                }
                 let width: Double
                 switch dateStyle.resolvedCalendarPresentation {
                 case .compact:
-                    width = textWidth(dateStyle.dateStyle.formatted(Date()), font: itemFont(.date))
-                case .dayTile: width = 38
-                case .weekdayStack: width = 60
-                case .weekStrip: width = 90
-                case .numericBadge: width = 64
+                    width = textWidth(dateStyle.dateStyle.formatted(now), font: itemFont(.date))
+                case .dayTile:
+                    let monthFont = NSFont.systemFont(ofSize: max(7, itemTextSize(.date) * 0.52), weight: .semibold)
+                    let dayFont = NSFont.systemFont(ofSize: max(13, itemTextSize(.date) * 1.15), weight: .bold)
+                    width = max(
+                        textWidth(formatted("MMM").uppercased(), font: monthFont),
+                        textWidth(formatted("d"), font: dayFont)
+                    ) + 10
+                case .weekdayStack:
+                    let weekdayFont = NSFont.systemFont(ofSize: max(7, itemTextSize(.date) * 0.54), weight: .bold)
+                    let dateFont = NSFont.systemFont(ofSize: max(10, itemTextSize(.date) * 0.90), weight: .semibold)
+                    width = max(
+                        textWidth(formatted("EEEE").uppercased(), font: weekdayFont),
+                        textWidth("\(formatted("MMM")) \(formatted("d"))", font: dateFont)
+                    )
+                case .weekStrip:
+                    width = 88
+                case .numericBadge:
+                    let badge = max(24, itemTextSize(.date) * 1.8)
+                    let monthFont = NSFont.systemFont(ofSize: max(7, itemTextSize(.date) * 0.52), weight: .bold)
+                    let weekdayFont = NSFont.systemFont(ofSize: max(7, itemTextSize(.date) * 0.48), weight: .medium)
+                    let labels = max(
+                        textWidth(formatted("MMM").uppercased(), font: monthFont),
+                        textWidth(formatted("EEEEE"), font: weekdayFont)
+                    )
+                    width = badge + 5 + labels
                 }
                 return styledItemWidth(.date, body: width)
 
             case .timer:
                 let timerStyle = closedStyle(.timer)
+                let remaining: TimeInterval = {
+                    if let deadline = store.deadline { return max(0, deadline.timeIntervalSince(Date())) }
+                    return max(0, store.pausedSeconds)
+                }()
+                let total = max(0, Int(remaining.rounded(.down)))
+                let hours = total / 3600
+                let minutes = (total % 3600) / 60
+                let seconds = total % 60
+                let timerValue = hours > 0
+                    ? String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+                    : String(format: "%02d:%02d", minutes, seconds)
                 let width: Double
                 switch timerStyle.resolvedTimerPresentation {
                 case .digital:
-                    width = textWidth("88:88:88", font: itemFont(.timer, digits: true))
-                case .segmented: width = 78
-                case .stacked: width = 68
-                case .progressRing: width = 34
-                case .badge: width = 80
+                    width = textWidth(timerValue, font: itemFont(.timer, digits: true))
+                case .segmented:
+                    let digitFont = NSFont.monospacedDigitSystemFont(
+                        ofSize: max(9, itemTextSize(.timer) * 0.80),
+                        weight: .bold
+                    )
+                    let labelFont = NSFont.systemFont(ofSize: 5.5, weight: .semibold)
+                    let partWidth = max(
+                        textWidth("88", font: digitFont),
+                        textWidth("M", font: labelFont)
+                    ) + 6
+                    width = partWidth * 3 + 4
+                case .stacked:
+                    let valueFont = NSFont.monospacedDigitSystemFont(
+                        ofSize: max(10, itemTextSize(.timer) * 0.92),
+                        weight: .bold
+                    )
+                    let statusFont = NSFont.systemFont(ofSize: 6.5, weight: .semibold)
+                    width = max(
+                        textWidth(timerValue, font: valueFont),
+                        textWidth("REMAINING", font: statusFont)
+                    )
+                case .progressRing:
+                    width = 31
+                case .badge:
+                    let icon = max(10, itemTextSize(.timer) * 0.66 + 2)
+                    let valueFont = NSFont.monospacedDigitSystemFont(
+                        ofSize: max(9, itemTextSize(.timer) * 0.78),
+                        weight: .semibold
+                    )
+                    width = icon + 4 + textWidth(timerValue, font: valueFont) + 14
                 }
                 return styledItemWidth(.timer, body: width)
 
             case .battery:
                 let batteryStyle = closedStyle(.battery)
+                let level = store.workspace.system.battery ?? 100
+                let percent = "\(level)%"
                 let width: Double
                 switch batteryStyle.resolvedBatteryPresentation {
-                case .iconPercent: width = 62
-                case .percent: width = 42
-                case .bar: width = 82
-                case .ring: width = 32
-                case .gauge: width = 64
+                case .iconPercent:
+                    width = max(12, itemTextSize(.battery) + 2)
+                        + 4
+                        + textWidth(percent, font: itemFont(.battery, digits: true))
+                case .percent:
+                    let percentFont = NSFont.systemFont(ofSize: max(10, itemTextSize(.battery)), weight: .bold)
+                    width = textWidth(percent, font: percentFont)
+                case .bar:
+                    let percentFont = NSFont.systemFont(
+                        ofSize: max(8, itemTextSize(.battery) * 0.68),
+                        weight: .semibold
+                    )
+                    width = 44 + 5 + textWidth(percent, font: percentFont)
+                case .ring:
+                    width = 30
+                case .gauge:
+                    let trailing: Double
+                    if store.workspace.system.charging {
+                        trailing = 9
+                    } else {
+                        trailing = textWidth(
+                            percent,
+                            font: NSFont.systemFont(ofSize: 8, weight: .semibold)
+                        )
+                    }
+                    width = 34 + 2 + 8 + trailing
                 }
                 return styledItemWidth(.battery, body: width)
 
@@ -2154,13 +2407,42 @@ final class WindowManager {
 
             case .files:
                 let filesStyle = closedStyle(.files)
+                let count = String(store.files.count)
                 let width: Double
                 switch filesStyle.resolvedFilesPresentation {
-                case .iconCount: width = 48
-                case .count: width = 28
-                case .folderBadge: width = 58
-                case .documentStack: width = 62
-                case .trayLabel: width = 42
+                case .iconCount:
+                    width = max(12, itemTextSize(.files) + 2)
+                        + 4
+                        + textWidth(count, font: itemFont(.files, digits: true))
+                case .count:
+                    let countFont = NSFont.systemFont(
+                        ofSize: max(11, itemTextSize(.files) * 1.05),
+                        weight: .bold
+                    )
+                    width = textWidth(count, font: countFont)
+                case .folderBadge:
+                    let icon = max(13, itemTextSize(.files) + 2)
+                    let countFont = NSFont.systemFont(
+                        ofSize: max(8, itemTextSize(.files) * 0.72),
+                        weight: .bold
+                    )
+                    width = icon + 4 + textWidth(count, font: countFont) + 10
+                case .documentStack:
+                    let countFont = NSFont.systemFont(
+                        ofSize: max(9, itemTextSize(.files) * 0.78),
+                        weight: .bold
+                    )
+                    width = 24 + 6 + textWidth(count, font: countFont)
+                case .trayLabel:
+                    let countFont = NSFont.systemFont(
+                        ofSize: max(10, itemTextSize(.files) * 0.90),
+                        weight: .bold
+                    )
+                    let labelFont = NSFont.systemFont(ofSize: 5.5, weight: .semibold)
+                    width = max(
+                        textWidth(count, font: countFont),
+                        textWidth(store.files.count == 1 ? "FILE" : "FILES", font: labelFont)
+                    )
                 }
                 return styledItemWidth(.files, body: width)
 
