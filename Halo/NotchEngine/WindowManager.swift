@@ -2041,10 +2041,15 @@ final class WindowManager {
                     return NSFont.systemFont(ofSize: pointSize, weight: weight)
                 }
 
-                func glyphWidth(_ text: String, font: NSFont, tracking: Double = 0) -> Double {
+                func glyphWidth(
+                    _ text: String,
+                    font: NSFont,
+                    tracking: Double = 0,
+                    appliesClockWidth: Bool = true
+                ) -> Double {
                     let base = ceil((text as NSString).size(withAttributes: [.font: font]).width)
                     let tracked = base + max(0, tracking) * Double(max(0, text.count - 1))
-                    return tracked * widthScale
+                    return tracked * (appliesClockWidth ? widthScale : 1)
                 }
 
                 let desiredTimeSize: Double
@@ -2128,11 +2133,21 @@ final class WindowManager {
                     let gap = max(5, cellHeight * 0.10)
                     var parts: [Double] = [
                         pairWidth(hour, height: cellHeight),
-                        glyphWidth(clock.resolvedSeparator.glyph, font: NSFont.systemFont(ofSize: cellHeight * 0.48, weight: .medium)),
+                        glyphWidth(
+                            clock.resolvedSeparator.glyph,
+                            font: NSFont.systemFont(ofSize: cellHeight * 0.48, weight: .medium),
+                            appliesClockWidth: false
+                        ),
                         pairWidth(minute, height: cellHeight)
                     ]
                     if clock.showSeconds {
-                        parts.append(glyphWidth(clock.resolvedSeparator.glyph, font: NSFont.systemFont(ofSize: cellHeight * 0.34, weight: .regular)))
+                        parts.append(
+                            glyphWidth(
+                                clock.resolvedSeparator.glyph,
+                                font: NSFont.systemFont(ofSize: cellHeight * 0.34, weight: .regular),
+                                appliesClockWidth: false
+                            )
+                        )
                         parts.append(pairWidth(second, height: cellHeight * 0.72))
                     }
                     primaryWidth = parts.reduce(0, +) + gap * Double(max(0, parts.count - 1))
@@ -2163,7 +2178,7 @@ final class WindowManager {
                     let secondsWidth = clock.showSeconds
                         ? glyphWidth(second, font: clockFont(stackedSize * 0.42 * clock.resolvedSecondsEmphasis, digits: true))
                         : 0
-                    primaryWidth = max(primary, secondsWidth, stackedSize * 1.3)
+                    primaryWidth = max(primary, max(secondsWidth, stackedSize * 1.3))
 
                 case .split:
                     func splitCellWidth(_ value: String) -> Double {
@@ -2174,14 +2189,19 @@ final class WindowManager {
 
                 case .terminal:
                     let terminalSize = timeSize * 0.86
-                    let prompt = glyphWidth("›", font: NSFont.monospacedSystemFont(ofSize: terminalSize * 0.68, weight: .bold))
+                    let prompt = glyphWidth(
+                        "›",
+                        font: NSFont.monospacedSystemFont(ofSize: terminalSize * 0.68, weight: .bold),
+                        appliesClockWidth: false
+                    )
                     let value = glyphWidth(
                         rawTime(
                             includeSeconds: clock.showSeconds,
                             includeAMPM: !clock.twentyFourHour && clock.resolvedShowAMPM
                         ),
                         font: NSFont.monospacedSystemFont(ofSize: terminalSize, weight: .medium),
-                        tracking: max(0, clock.resolvedTracking)
+                        tracking: max(0, clock.resolvedTracking),
+                        appliesClockWidth: false
                     )
                     primaryWidth = prompt + 6 + value
 
@@ -2193,7 +2213,8 @@ final class WindowManager {
                             includeAMPM: !clock.twentyFourHour && clock.resolvedShowAMPM
                         ),
                         font: NSFont.monospacedSystemFont(ofSize: lcdSize, weight: .medium),
-                        tracking: max(1, clock.resolvedTracking)
+                        tracking: max(1, clock.resolvedTracking),
+                        appliesClockWidth: false
                     )
                     primaryWidth = value + max(10, lcdSize * 0.18) * 2
 
@@ -2205,7 +2226,8 @@ final class WindowManager {
                             includeAMPM: !clock.twentyFourHour && clock.resolvedShowAMPM
                         ),
                         font: NSFont.monospacedSystemFont(ofSize: matrixSize, weight: .medium),
-                        tracking: max(2, clock.resolvedTracking + 2)
+                        tracking: max(2, clock.resolvedTracking + 2),
+                        appliesClockWidth: false
                     )
                     primaryWidth = value + max(10, matrixSize * 0.16) * 2
 
