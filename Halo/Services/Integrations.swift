@@ -497,6 +497,9 @@ final class MediaService: ObservableObject {
     private var artworkTask: Task<Void, Never>?
     private var externalArtworkData: Data?
     private var externalArtworkURL: String?
+    private var pendingSeekTarget: Double?
+    private var pendingSeekStartedAt = Date.distantPast
+    private var seekFallbackTask: Task<Void, Never>?
     func setArtworkEnabled(_ enabled: Bool) {
         guard artworkEnabled != enabled else { return }
         artworkEnabled = enabled
@@ -519,6 +522,8 @@ final class MediaService: ObservableObject {
         generation += 1; connectedApp = nil; isPlaying = false
         artworkTask?.cancel(); artworkKey = ""; trackID = ""; artworkColors = []; artworkImage = nil
         externalArtworkData = nil; externalArtworkURL = nil
+        seekFallbackTask?.cancel(); seekFallbackTask = nil
+        pendingSeekTarget = nil; pendingSeekStartedAt = .distantPast
         album = ""; duration = 0; position = 0; shuffleSupported = false; shuffleEnabled = false; repeatSupported = false; repeatMode = ""
         title = "Connect a player"; artist = "Apple Music, Spotify or Safari"
     }
@@ -590,6 +595,8 @@ final class MediaService: ObservableObject {
         if trackChanged {
             trackID = canonicalKey
             album = ""; duration = 0; position = 0
+            seekFallbackTask?.cancel(); seekFallbackTask = nil
+            pendingSeekTarget = nil; pendingSeekStartedAt = .distantPast
             artworkTask?.cancel(); artworkKey = ""; artworkColors = []; artworkImage = nil
             externalArtworkData = nil; externalArtworkURL = nil
         }
@@ -598,7 +605,23 @@ final class MediaService: ObservableObject {
         if let newAlbum, !newAlbum.isEmpty { album = newAlbum }
         if let newDuration, newDuration.isFinite, newDuration > 0 { duration = newDuration }
         if let newPosition, newPosition.isFinite, newPosition >= 0 {
-            position = duration > 0 ? min(duration, newPosition) : newPosition
+            let incoming = duration > 0 ? min(duration, newPosition) : newPosition
+            if let target = pendingSeekTarget,
+               Date().timeIntervalSince(pendingSeekStartedAt) < 1.8 {
+                // Safari/MediaRemote can publish one or two stale timeline samples immediately
+                // after a seek. Keep the scrubber anchored to the requested position until the
+                // source catches up instead of snapping back and looking broken.
+                if abs(incoming - target) <= 3.0 {
+                    pendingSeekTarget = nil
+                    pendingSeekStartedAt = .distantPast
+                    seekFallbackTask?.cancel(); seekFallbackTask = nil
+                    position = incoming
+                }
+            } else {
+                pendingSeekTarget = nil
+                pendingSeekStartedAt = .distantPast
+                position = incoming
+            }
         }
         if isPlaying != playing { isPlaying = playing }
         if let artworkData, !artworkData.isEmpty { externalArtworkData = artworkData }
@@ -649,23 +672,49 @@ final class MediaService: ObservableObject {
         guard duration > 0, seconds.isFinite else { return }
         let target = min(duration, max(0, seconds))
 
-        // System/Safari media has no AppleScript-connected app. Send the seek to the same
-        // MediaRemote session that supplied the Audio CI metadata. Optimistically anchor the
-        // local position so the 500 ms playback loop cannot snap the scrubber straight back.
+        position = target
+        pendingSeekTarget = target
+        pendingSeekStartedAt = Date()
+        seekFallbackTask?.cancel()
+        seekFallbackTask = nil
+
+        // Safari has a direct page-level seek path, which is the most precise option for web
+        // players. It is asynchronous though, so if the extension does not confirm the new
+        // position quickly, fall back to the system Now Playing transport instead of leaving
+        // the scrubber visually moved while playback stays put.
         if connectedApp == nil {
-            if SafariMediaBridge.shared.seek(to: target) {
-                position = target
-                if error != nil { error = nil }
-                return
+            let safariDispatched = SafariMediaBridge.shared.seek(to: target)
+
+            if safariDispatched {
+                seekFallbackTask = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 450_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        guard let self,
+                              let pending = self.pendingSeekTarget,
+                              abs(pending - target) < 0.01,
+                              Date().timeIntervalSince(self.pendingSeekStartedAt) < 1.8 else { return }
+                        _ = SystemMediaTransport.seek(to: target)
+                    }
+                }
+            } else {
+                guard SystemMediaTransport.seek(to: target) else {
+                    pendingSeekTarget = nil
+                    pendingSeekStartedAt = .distantPast
+                    return
+                }
             }
-            guard SystemMediaTransport.seek(to: target) else { return }
-            position = target
+
             if error != nil { error = nil }
             return
         }
 
-        guard let app = connectedApp else { return }
-        position = target
+        guard let app = connectedApp else {
+            pendingSeekTarget = nil
+            pendingSeekStartedAt = .distantPast
+            return
+        }
+
         queue.async { [weak self] in
             let source = """
             if application id "\(app)" is running then
@@ -676,8 +725,15 @@ final class MediaService: ObservableObject {
             _ = NSAppleScript(source: source)?.executeAndReturnError(&failure)
             Task { @MainActor in
                 guard let self else { return }
-                if failure == nil { self.position = target }
-                else { self.error = failure?[NSAppleScript.errorMessage] as? String ?? "Unable to seek the current player." }
+                if failure == nil {
+                    self.position = target
+                    self.pendingSeekTarget = nil
+                    self.pendingSeekStartedAt = .distantPast
+                } else {
+                    self.pendingSeekTarget = nil
+                    self.pendingSeekStartedAt = .distantPast
+                    self.error = failure?[NSAppleScript.errorMessage] as? String ?? "Unable to seek the current player."
+                }
             }
         }
     }
