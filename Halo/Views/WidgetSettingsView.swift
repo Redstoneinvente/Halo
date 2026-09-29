@@ -1671,9 +1671,10 @@ struct ClosedNotchSettingsView: View {
                         suffix: "pt"
                     )
                 }
+            }
 
-                Toggle(
-                    "Use global text size",
+            Toggle(
+                "Use global text size",
                 isOn: Binding(
                     get: { style.wrappedValue.fontSize == nil },
                     set: { inherit in
@@ -1743,6 +1744,7 @@ struct ClosedNotchSettingsView: View {
                 )
             }
 
+            if item == .activity {
                 Toggle(
                     "Custom icon size",
                     isOn: Binding(
