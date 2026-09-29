@@ -1178,6 +1178,12 @@ private struct ClosedCalendarVariantView: View {
 }
 
 private struct ClosedTimerVariantView: View {
+    private struct TimerPart: Identifiable {
+        let label: String
+        let value: String
+        var id: String { label }
+    }
+
     let presentation: ClosedTimerPresentation
     let deadline: Date?
     let pausedSeconds: TimeInterval
@@ -1207,7 +1213,7 @@ private struct ClosedTimerVariantView: View {
 
         case .segmented:
             HStack(spacing: 3) {
-                ForEach(timeComponents(remaining), id: \.label) { part in
+                ForEach(timeComponents(remaining)) { part in
                     VStack(spacing: 0) {
                         Text(part.value)
                             .font(.system(size: max(9, fontSize * 0.80), weight: .bold, design: .monospaced))
@@ -1288,12 +1294,12 @@ private struct ClosedTimerVariantView: View {
         return "\(value)s"
     }
 
-    private func timeComponents(_ seconds: TimeInterval) -> [(label: String, value: String)] {
+    private func timeComponents(_ seconds: TimeInterval) -> [TimerPart] {
         let value = max(0, Int(seconds.rounded(.down)))
         return [
-            ("H", String(format: "%02d", value / 3600)),
-            ("M", String(format: "%02d", (value % 3600) / 60)),
-            ("S", String(format: "%02d", value % 60))
+            TimerPart(label: "H", value: String(format: "%02d", value / 3600)),
+            TimerPart(label: "M", value: String(format: "%02d", (value % 3600) / 60)),
+            TimerPart(label: "S", value: String(format: "%02d", value % 60))
         ]
     }
 }
