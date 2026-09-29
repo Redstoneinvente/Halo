@@ -81,6 +81,57 @@ private extension ClosedNotchOptions {
     }
 }
 
+private extension WidgetFontWeight {
+    var closedSwiftUIFontWeight: Font.Weight {
+        switch self {
+        case .light: return .light
+        case .regular: return .regular
+        case .medium: return .medium
+        case .semibold: return .semibold
+        case .bold: return .bold
+        }
+    }
+}
+
+private struct ClosedNotchWidgetChrome: ViewModifier {
+    let style: ClosedNotchWidgetStyle
+    let inheritedColor: Color
+
+    @ViewBuilder
+    private var background: some View {
+        let shape = RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous)
+        switch style.backgroundStyle {
+        case .none:
+            Color.clear
+        case .tint:
+            shape.fill(inheritedColor.opacity(style.backgroundOpacity))
+        case .solid:
+            shape.fill(style.backgroundColor.color.opacity(style.backgroundOpacity))
+        case .glass:
+            shape
+                .fill(.ultraThinMaterial)
+                .overlay(shape.fill(style.backgroundColor.color.opacity(style.backgroundOpacity * 0.35)))
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, style.horizontalPadding)
+            .padding(.vertical, style.verticalPadding)
+            .background { background }
+            .overlay {
+                if style.borderWidth > 0 && style.borderOpacity > 0 {
+                    RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous)
+                        .stroke(
+                            style.borderColor.color.opacity(style.borderOpacity),
+                            lineWidth: style.borderWidth
+                        )
+                }
+            }
+            .opacity(style.opacity)
+    }
+}
+
 private struct MediaBlurTransitionModifier: ViewModifier {
     let blur: CGFloat
     let opacity: Double
@@ -309,6 +360,7 @@ struct ClosedNotchSlot: View {
     private var layoutMetrics: ClosedNotchLayoutMetrics { ClosedNotchLayoutMetrics(options: options, height: availableHeight) }
     private var elementSpacing: Double { layoutMetrics.elementSpacing }
     private var activeActivity: LiveActivity? { activity }
+    private var itemStyle: ClosedNotchWidgetStyle { options.widgetStyle(for: item) }
     private var innerHeight: Double { layoutMetrics.contentHeight }
     private var innerWidth: Double { max(1, availableWidth - slotCameraInset - slotOuterInset) }
     private var isMusicItem: Bool { item == .media || item == .visualizer }
@@ -371,7 +423,20 @@ struct ClosedNotchSlot: View {
         guard !visualizerOnly, let decoration, decoration.isVisible(playing: media.isPlaying) else { return 0 }
         return min(decoration.size, innerHeight)
     }
-    private var textSize: Double { min(options.fontSize, innerHeight / 1.25) }
+    private var textSize: Double { min(itemStyle.fontSize ?? options.fontSize, innerHeight / 1.25) }
+    private var itemFontWeight: Font.Weight {
+        (itemStyle.fontWeight ?? .regular).closedSwiftUIFontWeight
+    }
+    private var itemSpacing: Double { itemStyle.spacing ?? elementSpacing }
+    private var itemIconSize: Double {
+        min(max(8, itemStyle.iconSize ?? max(12, textSize + 2)), max(8, innerHeight))
+    }
+    private var itemTextColor: Color {
+        itemStyle.textColor?.color ?? effectiveTextColor
+    }
+    private var itemIconColor: Color {
+        itemStyle.iconColor?.color ?? itemTextColor
+    }
     private var powerTextSize: Double { min(textSize, max(9, innerHeight * 0.46)) }
     private var powerIconWidth: Double { max(12, powerTextSize + 2) }
     private func powerTextWidth(_ value: String, monospaced: Bool = false) -> Double {
@@ -498,7 +563,9 @@ struct ClosedNotchSlot: View {
         }
         return remaining
     }
-    private var mirrorContentWidth: Double { 112 }
+    private var mirrorContentWidth: Double {
+        min(innerWidth, max(32, itemStyle.width ?? 112))
+    }
     private var activityContentWidth: Double {
         var occupied = 0.0
         var siblingCount = 0
@@ -507,7 +574,11 @@ struct ClosedNotchSlot: View {
         if powerFootprint > 0 { occupied += powerFootprint; siblingCount += 1 }
         if hudReservedWidth > 0 { occupied += hudElementWidth; siblingCount += 1 }
         if siblingCount > 0 { occupied += Double(siblingCount) * elementSpacing }
-        return max(24, innerWidth - occupied)
+        let remaining = max(24, innerWidth - occupied)
+        if let width = itemStyle.width {
+            return min(remaining, max(32, width))
+        }
+        return remaining
     }
     private var renderedArtworkOptions: ClosedArtworkOptions {
         var value = artwork
@@ -535,7 +606,7 @@ struct ClosedNotchSlot: View {
                 }
             }
         }
-        .font(.system(size: textSize))
+        .font(.system(size: textSize, weight: itemFontWeight))
         .minimumScaleFactor(0.65)
         .foregroundStyle(effectiveTextColor)
         .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
@@ -592,7 +663,11 @@ struct ClosedNotchSlot: View {
         }
     }
     @ViewBuilder private var contentElement: some View {
-        if itemIsVisible && !hideMusicContentForArtworkOnly { content }
+        if itemIsVisible && !hideMusicContentForArtworkOnly {
+            content
+                .foregroundStyle(itemTextColor)
+                .modifier(ClosedNotchWidgetChrome(style: itemStyle, inheritedColor: itemTextColor))
+        }
     }
     @ViewBuilder private var powerElement: some View {
         if rendersPowerEvent, let powerEvent {
@@ -609,21 +684,76 @@ struct ClosedNotchSlot: View {
     }
     @ViewBuilder private var content: some View {
         switch item {
-        case .none: EmptyView()
-        case .clock: WidgetClock(style: compactClock, compact: true)
-        case .date: TimelineView(.periodic(from: .now, by: 60)) { context in Text(context.date, format: .dateTime.month().day()).lineLimit(1) }
+        case .none:
+            EmptyView()
+
+        case .clock:
+            switch itemStyle.layout {
+            case .iconOnly:
+                itemIcon("clock")
+            case .iconAndText:
+                HStack(spacing: itemSpacing) {
+                    itemIcon("clock")
+                    WidgetClock(style: compactClock, compact: true)
+                }
+            case .automatic, .textOnly:
+                WidgetClock(style: compactClock, compact: true)
+            }
+
+        case .date:
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                compactLabel(
+                    symbol: "calendar",
+                    text: itemStyle.dateStyle.formatted(context.date),
+                    automaticShowsIcon: false
+                )
+            }
+
         case .timer:
-            if let deadline = store.deadline { Text(deadline, style: .timer).monospacedDigit().lineLimit(1) }
-            else { compactLabel(symbol: "timer", text: store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready") }
+            if let deadline = store.deadline {
+                switch itemStyle.layout {
+                case .iconOnly:
+                    itemIcon("timer")
+                case .iconAndText:
+                    HStack(spacing: itemSpacing) {
+                        itemIcon("timer")
+                        Text(deadline, style: .timer).monospacedDigit().lineLimit(1)
+                    }
+                case .automatic, .textOnly:
+                    Text(deadline, style: .timer).monospacedDigit().lineLimit(1)
+                }
+            } else {
+                compactLabel(
+                    symbol: "timer",
+                    text: store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready",
+                    automaticShowsIcon: true
+                )
+            }
+
         case .battery:
-            if let battery = system.battery { compactLabel(symbol: system.charging ? "battery.100.bolt" : "battery.100", text: "\(battery)%") }
-            else { Image(systemName: "powerplug").frame(width: max(12, textSize + 2), alignment: .center) }
+            if let battery = system.battery {
+                compactLabel(
+                    symbol: system.charging ? "battery.100.bolt" : "battery.100",
+                    text: "\(battery)%",
+                    monospaced: true,
+                    automaticShowsIcon: true
+                )
+            } else {
+                switch itemStyle.layout {
+                case .textOnly:
+                    Text("Power").lineLimit(1)
+                default:
+                    itemIcon("powerplug")
+                }
+            }
+
         case .media:
             if media.hasNowPlayingPresentation {
                 ClosedMediaView(media: media, options: closedMediaOptions, fontSize: textSize, availableWidth: closedMediaWidth, lowPower: system.lowPower)
                     .frame(width: closedMediaWidth)
                     .layoutPriority(1)
             }
+
         case .visualizer:
             if media.hasNowPlayingPresentation {
                 if expandVisualizerToAvailableWidth {
@@ -648,46 +778,144 @@ struct ClosedNotchSlot: View {
                     )
                 }
             }
+
         case .mirror:
-            MirrorWidgetView()
+            MirrorWidgetView(cornerRadius: itemStyle.cornerRadius)
                 .frame(width: mirrorContentWidth, height: innerHeight)
                 .layoutPriority(0)
-        case .files: compactLabel(symbol: "tray", text: "\(store.files.count)")
+
+        case .files:
+            compactLabel(
+                symbol: "tray",
+                text: "\(store.files.count)",
+                monospaced: true,
+                automaticShowsIcon: true
+            )
+
         case .activity:
             if let activity = activeActivity {
                 if let kind = BluetoothClosedActivity.kind(for: activity) {
-                    BluetoothClosedActivityView(activity: activity, kind: kind, side: side,
-                                                textSize: textSize, availableWidth: activityContentWidth,
-                                                inheritedColor: effectiveTextColor, spacing: elementSpacing)
+                    BluetoothClosedActivityView(
+                        activity: activity,
+                        kind: kind,
+                        side: side,
+                        textSize: textSize,
+                        availableWidth: activityContentWidth,
+                        inheritedColor: itemTextColor,
+                        spacing: itemSpacing
+                    )
                 } else {
-                    HStack(spacing: elementSpacing) {
-                        activityIcon(activity)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(activity.title)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            if !activity.detail.isEmpty {
-                                Text(activity.detail)
-                                    .font(.system(size: max(8, textSize * 0.76)))
-                                    .opacity(0.72)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            }
-                        }
-                        .layoutPriority(1)
-                        if let progress = activity.progress {
-                            ProgressView(value: progress)
-                                .controlSize(.mini)
-                                .frame(width: min(38, max(24, activityContentWidth * 0.22)))
-                        }
-                    }
-                    .frame(width: activityContentWidth,
-                           alignment: side == .left ? .trailing : .leading)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                    .layoutPriority(1)
+                    genericActivity(activity)
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func itemIcon(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: itemIconSize, weight: itemFontWeight))
+            .foregroundStyle(itemIconColor)
+            .frame(width: max(12, itemIconSize + 2), alignment: .center)
+    }
+
+    @ViewBuilder
+    private func compactText(_ text: String, monospaced: Bool) -> some View {
+        if monospaced {
+            Text(text).monospacedDigit().lineLimit(1)
+        } else {
+            Text(text).lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private func compactLabel(
+        symbol: String,
+        text: String,
+        monospaced: Bool = false,
+        automaticShowsIcon: Bool = true
+    ) -> some View {
+        switch itemStyle.layout {
+        case .automatic:
+            if automaticShowsIcon {
+                HStack(spacing: itemSpacing) {
+                    itemIcon(symbol)
+                    compactText(text, monospaced: monospaced)
+                }
+            } else {
+                compactText(text, monospaced: monospaced)
+            }
+        case .iconAndText:
+            HStack(spacing: itemSpacing) {
+                itemIcon(symbol)
+                compactText(text, monospaced: monospaced)
+            }
+        case .textOnly:
+            compactText(text, monospaced: monospaced)
+        case .iconOnly:
+            itemIcon(symbol)
+        }
+    }
+
+    @ViewBuilder
+    private func genericActivity(_ activity: LiveActivity) -> some View {
+        let alignment: HorizontalAlignment = side == .left ? .trailing : .leading
+
+        switch itemStyle.layout {
+        case .iconOnly:
+            activityIcon(activity)
+
+        case .textOnly:
+            VStack(alignment: alignment, spacing: 1) {
+                activityText(activity)
+                if itemStyle.showProgress, let progress = activity.progress {
+                    ProgressView(value: progress)
+                        .controlSize(.mini)
+                        .frame(width: min(60, max(28, activityContentWidth * 0.42)))
+                }
+            }
+            .frame(width: activityContentWidth, alignment: side == .left ? .trailing : .leading)
+
+        case .automatic, .iconAndText:
+            HStack(spacing: itemSpacing) {
+                if side == .left {
+                    activityText(activity)
+                    if itemStyle.showProgress, let progress = activity.progress {
+                        ProgressView(value: progress)
+                            .controlSize(.mini)
+                            .frame(width: min(38, max(24, activityContentWidth * 0.22)))
+                    }
+                    activityIcon(activity)
+                } else {
+                    activityIcon(activity)
+                    activityText(activity)
+                    if itemStyle.showProgress, let progress = activity.progress {
+                        ProgressView(value: progress)
+                            .controlSize(.mini)
+                            .frame(width: min(38, max(24, activityContentWidth * 0.22)))
+                    }
+                }
+            }
+            .frame(width: activityContentWidth, alignment: side == .left ? .trailing : .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func activityText(_ activity: LiveActivity) -> some View {
+        VStack(alignment: side == .left ? .trailing : .leading, spacing: 1) {
+            Text(activity.title)
+                .fontWeight(.semibold)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if itemStyle.showSecondaryText && !activity.detail.isEmpty {
+                Text(activity.detail)
+                    .font(.system(size: max(8, textSize * 0.76)))
+                    .opacity(0.72)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .layoutPriority(1)
     }
     @ViewBuilder
     private func activityIcon(_ activity: LiveActivity) -> some View {
@@ -714,14 +942,23 @@ struct ClosedNotchSlot: View {
         return NSWorkspace.shared.icon(forFile: url.path)
     }
 
-    private func compactLabel(symbol: String, text: String) -> some View {
-        HStack(spacing: elementSpacing) {
-            Image(systemName: symbol)
-                .frame(width: max(12, textSize + 2), alignment: .center)
-            Text(text).monospacedDigit().lineLimit(1)
+    private var compactClock: WidgetStyle {
+        var value = clock
+        value.fontSize = textSize
+        value.textColor = WidgetColor(itemTextColor)
+        if let weight = itemStyle.fontWeight {
+            value.weight = weight
         }
+        if itemStyle.fontSize != nil {
+            value.clock.automaticTypography = false
+        }
+        if !itemStyle.useClockWidgetSettings {
+            value.clock.twentyFourHour = itemStyle.clockTwentyFourHour
+            value.clock.showSeconds = itemStyle.clockShowSeconds
+            value.clock.showDate = itemStyle.clockShowDate
+        }
+        return value
     }
-    private var compactClock: WidgetStyle { var value = clock; value.fontSize = textSize; value.textColor = WidgetColor(effectiveTextColor); return value }
 }
 
 private struct BluetoothClosedActivityView: View {
@@ -945,12 +1182,13 @@ private struct MirrorPreviewRepresentable: NSViewRepresentable {
 }
 
 private struct MirrorWidgetView: View {
+    let cornerRadius: Double
     @ObservedObject private var camera = MirrorCameraService.shared
     @State private var clientID = UUID()
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.055))
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(Color.white.opacity(0.055))
             MirrorPreviewRepresentable(session: camera.session)
                 .opacity(camera.state == .ready ? 1 : 0)
             switch camera.state {
@@ -961,7 +1199,7 @@ private struct MirrorWidgetView: View {
             case .failed: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.secondary)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .onAppear { camera.acquire(clientID) }
         .onDisappear { camera.release(clientID) }
         .accessibilityLabel("Mirror")

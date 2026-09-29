@@ -2077,6 +2077,143 @@ extension WidgetStyle {
 enum ClosedNotchItem: String, Codable, CaseIterable, Identifiable {
     case none, clock, date, timer, battery, media, visualizer, mirror, files, activity
     var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: return "None"
+        case .clock: return "Clock"
+        case .date: return "Date"
+        case .timer: return "Timer"
+        case .battery: return "Battery"
+        case .media: return "Media"
+        case .visualizer: return "Visualizer"
+        case .mirror: return "Mirror"
+        case .files: return "Files"
+        case .activity: return "Activity"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .none: return "minus"
+        case .clock: return "clock"
+        case .date: return "calendar"
+        case .timer: return "timer"
+        case .battery: return "battery.100"
+        case .media: return "music.note"
+        case .visualizer: return "waveform"
+        case .mirror: return "camera.fill"
+        case .files: return "tray"
+        case .activity: return "bell.badge"
+        }
+    }
+}
+
+enum ClosedNotchWidgetLayout: String, Codable, CaseIterable, Identifiable {
+    case automatic = "Automatic"
+    case iconAndText = "Icon + Text"
+    case textOnly = "Text Only"
+    case iconOnly = "Icon Only"
+    var id: String { rawValue }
+}
+
+enum ClosedNotchWidgetBackgroundStyle: String, Codable, CaseIterable, Identifiable {
+    case none = "None"
+    case tint = "Tint"
+    case solid = "Solid"
+    case glass = "Glass"
+    var id: String { rawValue }
+}
+
+enum ClosedNotchDateStyle: String, Codable, CaseIterable, Identifiable {
+    case monthDay = "Month + Day"
+    case weekdayDate = "Weekday + Date"
+    case numeric = "Numeric"
+    case full = "Full Date"
+    var id: String { rawValue }
+
+    func formatted(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        switch self {
+        case .monthDay:
+            formatter.setLocalizedDateFormatFromTemplate("MMMd")
+        case .weekdayDate:
+            formatter.setLocalizedDateFormatFromTemplate("EEE MMMd")
+        case .numeric:
+            formatter.dateStyle = .short
+        case .full:
+            formatter.dateStyle = .full
+        }
+        return formatter.string(from: date)
+    }
+}
+
+struct ClosedNotchWidgetStyle: Codable, Equatable {
+    var layout: ClosedNotchWidgetLayout = .automatic
+
+    // Nil values inherit the normal Closed Notch typography/color so old profiles keep
+    // exactly the same presentation until a user customizes this widget.
+    var fontSize: Double?
+    var fontWeight: WidgetFontWeight?
+    var textColor: WidgetColor?
+    var iconColor: WidgetColor?
+    var iconSize: Double?
+    var spacing: Double?
+
+    var backgroundStyle: ClosedNotchWidgetBackgroundStyle = .none
+    var backgroundColor = WidgetColor.white
+    var backgroundOpacity = 0.12
+    var horizontalPadding = 0.0
+    var verticalPadding = 0.0
+    var cornerRadius = 8.0
+    var borderColor = WidgetColor.white
+    var borderWidth = 0.0
+    var borderOpacity = 0.18
+    var opacity = 1.0
+
+    // Widget-specific controls.
+    var dateStyle: ClosedNotchDateStyle = .monthDay
+    var showSecondaryText = true
+    var showProgress = true
+    var width: Double?
+
+    // The closed clock historically mirrors the main Clock widget. Keep that as the
+    // default, while allowing users to opt into independent closed-clock time settings.
+    var useClockWidgetSettings = true
+    var clockTwentyFourHour = false
+    var clockShowSeconds = false
+    var clockShowDate = true
+
+    func validated() throws -> ClosedNotchWidgetStyle {
+        let optionalNumbers = [fontSize, iconSize, spacing, width].compactMap { $0 }
+        let numbers = optionalNumbers + [
+            backgroundOpacity, horizontalPadding, verticalPadding, cornerRadius,
+            borderWidth, borderOpacity, opacity
+        ]
+        guard numbers.allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+
+        var value = self
+        if let fontSize { value.fontSize = min(30, max(8, fontSize)) }
+        if let iconSize { value.iconSize = min(40, max(8, iconSize)) }
+        if let spacing { value.spacing = min(24, max(0, spacing)) }
+        if let width { value.width = min(320, max(32, width)) }
+
+        value.backgroundOpacity = min(1, max(0, backgroundOpacity))
+        value.horizontalPadding = min(24, max(0, horizontalPadding))
+        value.verticalPadding = min(10, max(0, verticalPadding))
+        value.cornerRadius = min(32, max(0, cornerRadius))
+        value.borderWidth = min(4, max(0, borderWidth))
+        value.borderOpacity = min(1, max(0, borderOpacity))
+        value.opacity = min(1, max(0.15, opacity))
+
+        value.textColor = try textColor?.validated()
+        value.iconColor = try iconColor?.validated()
+        value.backgroundColor = try backgroundColor.validated()
+        value.borderColor = try borderColor.validated()
+        return value
+    }
 }
 enum PlaybackAnimation: String, Codable, CaseIterable { case bars, wave, pulse, waveform, ribbon, dots, rings, orbit, spectrum }
 struct ClosedExpansionOptions: Codable, Equatable {
@@ -2271,6 +2408,7 @@ struct ClosedNotchOptions: Codable, Equatable {
     var artworkOptions: ClosedArtworkOptions?
     var reactiveBackground: ReactiveBackgroundOptions?
     var powerReaction: PowerReactionOptions?
+    var widgetStyles: [String: ClosedNotchWidgetStyle]?
     var contentPaddingX: Double { min(24, max(0, horizontalPadding ?? 8)) }
     var contentPaddingY: Double { min(12, max(0, verticalPadding ?? 2)) }
     var contentSideMargin: Double { min(48, max(0, sideMargin ?? 4)) }
@@ -2285,6 +2423,22 @@ struct ClosedNotchOptions: Codable, Equatable {
     var color = WidgetColor.white
     var animation: PlaybackAnimation = .bars
     var animate = true
+
+    func widgetStyle(for item: ClosedNotchItem) -> ClosedNotchWidgetStyle {
+        widgetStyles?[item.rawValue] ?? ClosedNotchWidgetStyle()
+    }
+
+    mutating func setWidgetStyle(_ style: ClosedNotchWidgetStyle, for item: ClosedNotchItem) {
+        guard item != .none else { return }
+        if widgetStyles == nil { widgetStyles = [:] }
+        widgetStyles?[item.rawValue] = style
+    }
+
+    mutating func resetWidgetStyle(for item: ClosedNotchItem) {
+        widgetStyles?[item.rawValue] = nil
+        if widgetStyles?.isEmpty == true { widgetStyles = nil }
+    }
+
     func validated() throws -> ClosedNotchOptions {
         guard fontSize.isFinite else { throw CocoaError(.fileReadCorruptFile) }
         guard (horizontalPadding ?? 8).isFinite, (verticalPadding ?? 2).isFinite, (sideMargin ?? 4).isFinite, (outerMargin ?? 17).isFinite else { throw CocoaError(.fileReadCorruptFile) }
@@ -2301,6 +2455,14 @@ struct ClosedNotchOptions: Codable, Equatable {
         v.artworkOptions = try artworkOptions?.validated()
         v.reactiveBackground = try reactiveBackground?.validated()
         v.powerReaction = try powerReaction?.validated()
+        if let widgetStyles {
+            var validatedStyles: [String: ClosedNotchWidgetStyle] = [:]
+            for (key, style) in widgetStyles {
+                guard let item = ClosedNotchItem(rawValue: key), item != .none else { continue }
+                validatedStyles[key] = try style.validated()
+            }
+            v.widgetStyles = validatedStyles.isEmpty ? nil : validatedStyles
+        }
         if var expansion {
             guard expansion.width.isFinite else { throw CocoaError(.fileReadCorruptFile) }
             expansion.width = min(640, max(120, expansion.width)); v.expansion = expansion
@@ -2428,7 +2590,7 @@ extension ClosedNotchOptions {
         case applyBackgroundWhenOpened, autoFitContent, horizontalPadding, verticalPadding, sideMargin,
              outerMargin, albumTextColor, albumBackgroundColor, readableAlbumForegroundColors,
              albumBackgroundFrequencyEffect, mediaOptions, artworkOptions, reactiveBackground,
-             powerReaction, leftDecoration, rightDecoration, visualizer, expansion, left, right,
+             powerReaction, widgetStyles, leftDecoration, rightDecoration, visualizer, expansion, left, right,
              fontSize, color, animation, animate
     }
 
@@ -2449,6 +2611,7 @@ extension ClosedNotchOptions {
         artworkOptions = c.haloOptional(ClosedArtworkOptions.self, forKey: .artworkOptions)
         reactiveBackground = c.haloOptional(ReactiveBackgroundOptions.self, forKey: .reactiveBackground)
         powerReaction = c.haloOptional(PowerReactionOptions.self, forKey: .powerReaction)
+        widgetStyles = c.haloOptional([String: ClosedNotchWidgetStyle].self, forKey: .widgetStyles)
         leftDecoration = c.haloOptional(SideDecoration.self, forKey: .leftDecoration)
         rightDecoration = c.haloOptional(SideDecoration.self, forKey: .rightDecoration)
         visualizer = c.haloOptional(VisualizerOptions.self, forKey: .visualizer)

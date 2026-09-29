@@ -1632,6 +1632,67 @@ final class WindowManager {
         let digitFont = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .regular)
         let elementGap = metrics.elementSpacing
 
+        func closedStyle(_ item: ClosedNotchItem) -> ClosedNotchWidgetStyle {
+            options.widgetStyle(for: item)
+        }
+
+        func nsWeight(_ weight: WidgetFontWeight?) -> NSFont.Weight {
+            switch weight ?? .regular {
+            case .light: return .light
+            case .regular: return .regular
+            case .medium: return .medium
+            case .semibold: return .semibold
+            case .bold: return .bold
+            }
+        }
+
+        func itemTextSize(_ item: ClosedNotchItem) -> Double {
+            min(closedStyle(item).fontSize ?? options.fontSize, innerHeight / 1.25)
+        }
+
+        func itemFont(_ item: ClosedNotchItem, digits: Bool = false) -> NSFont {
+            let style = closedStyle(item)
+            let pointSize = itemTextSize(item)
+            let weight = nsWeight(style.fontWeight)
+            return digits
+                ? NSFont.monospacedDigitSystemFont(ofSize: pointSize, weight: weight)
+                : NSFont.systemFont(ofSize: pointSize, weight: weight)
+        }
+
+        func itemGap(_ item: ClosedNotchItem) -> Double {
+            closedStyle(item).spacing ?? elementGap
+        }
+
+        func itemIconWidth(_ item: ClosedNotchItem) -> Double {
+            let style = closedStyle(item)
+            let iconSize = min(max(8, style.iconSize ?? max(12, itemTextSize(item) + 2)), max(8, innerHeight))
+            return max(12, iconSize + 2)
+        }
+
+        func composedWidth(_ item: ClosedNotchItem, textWidth: Double, automaticShowsIcon: Bool) -> Double {
+            let style = closedStyle(item)
+            let icon = itemIconWidth(item)
+            let gap = itemGap(item)
+            switch style.layout {
+            case .automatic:
+                if automaticShowsIcon {
+                    return textWidth > 0 ? icon + gap + textWidth : icon
+                }
+                return textWidth
+            case .iconAndText:
+                return textWidth > 0 ? icon + gap + textWidth : icon
+            case .textOnly:
+                return textWidth
+            case .iconOnly:
+                return icon
+            }
+        }
+
+        func styledItemWidth(_ item: ClosedNotchItem, body: Double) -> Double {
+            guard body > 0 else { return 0 }
+            return body + closedStyle(item).horizontalPadding * 2
+        }
+
         var artwork = options.artworkOptions ?? ClosedArtworkOptions()
         if options.artworkOptions == nil, let legacy = options.mediaOptions, legacy.artwork != .none {
             artwork.enabled = true; artwork.mode = legacy.artwork; artwork.size = legacy.artworkSize
@@ -1700,6 +1761,10 @@ final class WindowManager {
         }
 
         func bluetoothActivityWidth(_ activity: LiveActivity) -> Double? {
+            let widgetStyle = closedStyle(.activity)
+            let activityFont = itemFont(.activity)
+            let activitySize = itemTextSize(.activity)
+            let activityGap = itemGap(.activity)
             let label: String
             switch activity.title {
             case "Bluetooth connected": label = "Connected"
@@ -1720,17 +1785,17 @@ final class WindowManager {
             let layout = BluetoothClosedNotchLayout(rawValue: layoutRaw) ?? .stacked
             let configuredIcon = defaults.object(forKey: "HaloBluetoothClosedNotchIconSize") == nil
                 ? 16.0 : defaults.double(forKey: "HaloBluetoothClosedNotchIconSize")
-            let iconSize = min(max(8, configuredIcon), max(8, size * 1.8))
+            let iconSize = min(max(8, configuredIcon), max(8, activitySize * 1.8))
             let iconWidth = showIcon ? max(12, iconSize + 2) : 0
-            let labelWidth = showLabel ? textWidth(label, font: font) : 0
-            let detailFont = NSFont.systemFont(ofSize: max(8, size * 0.76))
+            let labelWidth = showLabel ? textWidth(label, font: activityFont) : 0
+            let detailFont = NSFont.systemFont(ofSize: max(8, activitySize * 0.76), weight: nsWeight(widgetStyle.fontWeight))
             let detailWidth = showDevice && !activity.detail.isEmpty
                 ? textWidth(String(activity.detail.prefix(80)), font: detailFont) : 0
 
             func inlineTextWidth() -> Double {
                 let parts = [labelWidth, detailWidth].filter { $0 > 0 }
                 guard !parts.isEmpty else { return 0 }
-                return parts.reduce(0, +) + Double(max(0, parts.count - 1)) * elementGap
+                return parts.reduce(0, +) + Double(max(0, parts.count - 1)) * activityGap
             }
             let stackedText = max(labelWidth, detailWidth)
 
@@ -1741,10 +1806,10 @@ final class WindowManager {
                 return stackedText
             case .inline:
                 let text = inlineTextWidth()
-                if iconWidth > 0 && text > 0 { return iconWidth + elementGap + text }
+                if iconWidth > 0 && text > 0 { return iconWidth + activityGap + text }
                 return max(iconWidth, text)
             case .stacked:
-                if iconWidth > 0 && stackedText > 0 { return iconWidth + elementGap + stackedText }
+                if iconWidth > 0 && stackedText > 0 { return iconWidth + activityGap + stackedText }
                 return max(iconWidth, stackedText)
             }
         }
@@ -1759,7 +1824,19 @@ final class WindowManager {
             switch item {
             case .none: return 0
             case .clock:
-                let style = layout.widgetStyle(for: .clock)
+                let closedClockStyle = closedStyle(.clock)
+                var style = layout.widgetStyle(for: .clock)
+                if let weight = closedClockStyle.fontWeight {
+                    style.weight = weight
+                }
+                if closedClockStyle.fontSize != nil {
+                    style.clock.automaticTypography = false
+                }
+                if !closedClockStyle.useClockWidgetSettings {
+                    style.clock.twentyFourHour = closedClockStyle.clockTwentyFourHour
+                    style.clock.showSeconds = closedClockStyle.clockShowSeconds
+                    style.clock.showDate = closedClockStyle.clockShowDate
+                }
 
                 // ClosedNotchView renders WidgetClock at its normal compact size.
                 // Measure that exact compact typography here and grow the surface
@@ -1775,7 +1852,7 @@ final class WindowManager {
                 } else {
                     // ClosedNotchView sets compactClock.fontSize to this same `size`,
                     // then WidgetClock applies the horizontalCompact 1.55x multiplier.
-                    clockSize = max(8, size * 1.55 * style.clock.resolvedTimeScale)
+                    clockSize = max(8, itemTextSize(.clock) * 1.55 * style.clock.resolvedTimeScale)
                 }
 
                 let widthScale: Double
@@ -1857,34 +1934,87 @@ final class WindowManager {
 
                 // Keep only a tight cushion here; the closed-surface sizing path
                 // already adds its own rendering allowance outside the widget width.
-                return contentWidth + 4
+                let clockWidth = composedWidth(
+                    .clock,
+                    textWidth: contentWidth + 4,
+                    automaticShowsIcon: false
+                )
+                return styledItemWidth(.clock, body: clockWidth)
+
             case .date:
-                return textWidth("Sep 28", font: font)
+                let dateStyle = closedStyle(.date)
+                let date = dateStyle.dateStyle.formatted(Date())
+                let width = textWidth(date, font: itemFont(.date))
+                return styledItemWidth(
+                    .date,
+                    body: composedWidth(.date, textWidth: width, automaticShowsIcon: false)
+                )
+
             case .timer:
-                if store.deadline != nil { return textWidth("88:88:88", font: digitFont) }
-                let label = store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready"
-                return max(12, size + 2) + elementGap + textWidth(label, font: font)
+                let active = store.deadline != nil
+                let width: Double
+                if active {
+                    width = textWidth("88:88:88", font: itemFont(.timer, digits: true))
+                } else {
+                    let label = store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready"
+                    width = textWidth(label, font: itemFont(.timer))
+                }
+                return styledItemWidth(
+                    .timer,
+                    body: composedWidth(.timer, textWidth: width, automaticShowsIcon: !active)
+                )
+
             case .battery:
-                guard let battery = store.workspace.system.battery else { return max(12, size + 2) }
-                return max(12, size + 2) + elementGap + textWidth("\(battery)%", font: digitFont)
+                let text = store.workspace.system.battery.map { "\($0)%" } ?? ""
+                let width = text.isEmpty ? 0 : textWidth(text, font: itemFont(.battery, digits: true))
+                return styledItemWidth(
+                    .battery,
+                    body: composedWidth(.battery, textWidth: width, automaticShowsIcon: true)
+                )
+
             case .media:
                 return mediaWidth()
+
             case .visualizer:
                 return mediaVisible ? (options.visualizer ?? VisualizerOptions()).width : 0
+
             case .mirror:
-                return 112
+                return styledItemWidth(.mirror, body: closedStyle(.mirror).width ?? 112)
+
             case .files:
-                return max(12, size + 2) + elementGap + textWidth(String(store.files.count), font: digitFont)
+                let width = textWidth(String(store.files.count), font: itemFont(.files, digits: true))
+                return styledItemWidth(
+                    .files,
+                    body: composedWidth(.files, textWidth: width, automaticShowsIcon: true)
+                )
+
             case .activity:
                 guard let activity else { return 0 }
-                if let bluetooth = bluetoothActivityWidth(activity) { return min(240, max(0, bluetooth)) }
-                let title = textWidth(String(activity.title.prefix(80)), font: font)
-                let detailFont = NSFont.systemFont(ofSize: max(8, size * 0.76))
-                let detail = activity.detail.isEmpty ? 0 : textWidth(String(activity.detail.prefix(80)), font: detailFont)
-                let icon = max(12, size)
-                let text = max(title, detail)
-                let progress = activity.progress == nil ? 0 : elementGap + 38
-                return min(240, icon + elementGap + text + progress + 2)
+                let activityStyle = closedStyle(.activity)
+                let rawWidth: Double
+                if let bluetooth = bluetoothActivityWidth(activity) {
+                    rawWidth = min(240, max(0, bluetooth))
+                } else {
+                    let title = textWidth(String(activity.title.prefix(80)), font: itemFont(.activity))
+                    let detailFont = NSFont.systemFont(
+                        ofSize: max(8, itemTextSize(.activity) * 0.76),
+                        weight: nsWeight(activityStyle.fontWeight)
+                    )
+                    let detail = activityStyle.showSecondaryText && !activity.detail.isEmpty
+                        ? textWidth(String(activity.detail.prefix(80)), font: detailFont)
+                        : 0
+                    var textBlock = max(title, detail)
+                    if activityStyle.showProgress, activity.progress != nil {
+                        textBlock += itemGap(.activity) + 38
+                    }
+                    rawWidth = composedWidth(
+                        .activity,
+                        textWidth: textBlock,
+                        automaticShowsIcon: true
+                    )
+                }
+                let capped = activityStyle.width.map { min(rawWidth, max(32, $0)) } ?? rawWidth
+                return styledItemWidth(.activity, body: min(320, max(0, capped)))
             }
         }
 

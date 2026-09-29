@@ -877,6 +877,25 @@ struct ClosedNotchSettingsView: View {
     }
     private var reactive: Binding<ReactiveBackgroundOptions> { Binding(get: { options.wrappedValue.reactiveBackground ?? ReactiveBackgroundOptions() }, set: { options.wrappedValue.reactiveBackground = $0 }) }
     private var power: Binding<PowerReactionOptions> { Binding(get: { options.wrappedValue.powerReaction ?? PowerReactionOptions() }, set: { options.wrappedValue.powerReaction = $0 }) }
+
+    private var selectedContentItems: [ClosedNotchItem] {
+        var seen = Set<ClosedNotchItem>()
+        return [options.wrappedValue.left, options.wrappedValue.right].filter {
+            $0 != .none && seen.insert($0).inserted
+        }
+    }
+
+    private func widgetStyle(_ item: ClosedNotchItem) -> Binding<ClosedNotchWidgetStyle> {
+        Binding(
+            get: { options.wrappedValue.widgetStyle(for: item) },
+            set: { newStyle in
+                var value = options.wrappedValue
+                value.setWidgetStyle(newStyle, for: item)
+                options.wrappedValue = value
+            }
+        )
+    }
+
     var body: some View {
         Section {
             Picker("Category", selection: $selectedPage) {
@@ -927,6 +946,10 @@ struct ClosedNotchSettingsView: View {
             Text("Choose Activity in either slot to reserve that side for Live Activities. The Activity widget uses the same horizontal/vertical padding, camera margin, outer margin and element spacing as every other Closed Notch item.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+
+        ForEach(selectedContentItems) { item in
+            selectedWidgetSettings(item)
         }
 
         SideDecorationSettingsView(
@@ -1492,7 +1515,362 @@ struct ClosedNotchSettingsView: View {
         }
     }
 
-    private func itemPicker(_ title: String, _ value: Binding<ClosedNotchItem>) -> some View { Picker(title, selection: value) { ForEach(ClosedNotchItem.allCases) { Text($0.rawValue.capitalized).tag($0) } } }
+    @ViewBuilder
+    private func selectedWidgetSettings(_ item: ClosedNotchItem) -> some View {
+        switch item {
+        case .media, .visualizer:
+            Section("\(item.title) widget") {
+                Label(
+                    item == .media
+                        ? "Media has its own text, artwork, gesture and transition controls."
+                        : "Visualizer size, colors, motion and animation style are configured with Media.",
+                    systemImage: item.symbol
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                Button("Open Media customization") {
+                    selectedPage = .media
+                }
+            }
+
+        case .none:
+            EmptyView()
+
+        default:
+            closedWidgetAppearanceEditor(item)
+        }
+    }
+
+    @ViewBuilder
+    private func closedWidgetAppearanceEditor(_ item: ClosedNotchItem) -> some View {
+        let style = widgetStyle(item)
+
+        Section("\(item.title) widget") {
+            Label("Customize only the closed-notch \(item.title.lowercased()) presentation. These settings are saved with the current Halo profile.", systemImage: item.symbol)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if item != .mirror {
+                Picker("Presentation", selection: style.layout) {
+                    ForEach(ClosedNotchWidgetLayout.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+            }
+
+            Toggle(
+                "Use global text size",
+                isOn: Binding(
+                    get: { style.wrappedValue.fontSize == nil },
+                    set: { inherit in
+                        var value = style.wrappedValue
+                        value.fontSize = inherit ? nil : options.wrappedValue.fontSize
+                        style.wrappedValue = value
+                    }
+                )
+            )
+            if style.wrappedValue.fontSize != nil {
+                PreciseSlider(
+                    title: "Widget text size",
+                    value: Binding(
+                        get: { style.wrappedValue.fontSize ?? options.wrappedValue.fontSize },
+                        set: {
+                            var value = style.wrappedValue
+                            value.fontSize = $0
+                            style.wrappedValue = value
+                        }
+                    ),
+                    range: 8...30,
+                    step: 1,
+                    suffix: "pt"
+                )
+            }
+
+            Picker(
+                "Font weight",
+                selection: Binding<WidgetFontWeight?>(
+                    get: { style.wrappedValue.fontWeight },
+                    set: {
+                        var value = style.wrappedValue
+                        value.fontWeight = $0
+                        style.wrappedValue = value
+                    }
+                )
+            ) {
+                Text("Default").tag(nil as WidgetFontWeight?)
+                ForEach(WidgetFontWeight.allCases, id: \.self) { weight in
+                    Text(weight.rawValue.capitalized).tag(Optional(weight))
+                }
+            }
+
+            Toggle(
+                "Custom text color",
+                isOn: Binding(
+                    get: { style.wrappedValue.textColor != nil },
+                    set: { enabled in
+                        var value = style.wrappedValue
+                        value.textColor = enabled ? options.wrappedValue.color : nil
+                        style.wrappedValue = value
+                    }
+                )
+            )
+            if style.wrappedValue.textColor != nil {
+                ColorPicker(
+                    "Text color",
+                    selection: Binding(
+                        get: { style.wrappedValue.textColor?.color ?? options.wrappedValue.color.color },
+                        set: {
+                            var value = style.wrappedValue
+                            value.textColor = WidgetColor($0)
+                            style.wrappedValue = value
+                        }
+                    ),
+                    supportsOpacity: false
+                )
+            }
+
+            if item != .mirror {
+                Toggle(
+                    "Custom icon size",
+                    isOn: Binding(
+                        get: { style.wrappedValue.iconSize != nil },
+                        set: { enabled in
+                            var value = style.wrappedValue
+                            value.iconSize = enabled ? max(12, style.wrappedValue.fontSize ?? options.wrappedValue.fontSize) : nil
+                            style.wrappedValue = value
+                        }
+                    )
+                )
+                if style.wrappedValue.iconSize != nil {
+                    PreciseSlider(
+                        title: "Icon size",
+                        value: Binding(
+                            get: { style.wrappedValue.iconSize ?? 14 },
+                            set: {
+                                var value = style.wrappedValue
+                                value.iconSize = $0
+                                style.wrappedValue = value
+                            }
+                        ),
+                        range: 8...40,
+                        step: 1,
+                        suffix: "pt"
+                    )
+                }
+
+                Toggle(
+                    "Custom icon color",
+                    isOn: Binding(
+                        get: { style.wrappedValue.iconColor != nil },
+                        set: { enabled in
+                            var value = style.wrappedValue
+                            value.iconColor = enabled ? (value.textColor ?? options.wrappedValue.color) : nil
+                            style.wrappedValue = value
+                        }
+                    )
+                )
+                if style.wrappedValue.iconColor != nil {
+                    ColorPicker(
+                        "Icon color",
+                        selection: Binding(
+                            get: { style.wrappedValue.iconColor?.color ?? options.wrappedValue.color.color },
+                            set: {
+                                var value = style.wrappedValue
+                                value.iconColor = WidgetColor($0)
+                                style.wrappedValue = value
+                            }
+                        ),
+                        supportsOpacity: false
+                    )
+                }
+
+                Toggle(
+                    "Custom icon / text spacing",
+                    isOn: Binding(
+                        get: { style.wrappedValue.spacing != nil },
+                        set: { enabled in
+                            var value = style.wrappedValue
+                            value.spacing = enabled ? 4 : nil
+                            style.wrappedValue = value
+                        }
+                    )
+                )
+                if style.wrappedValue.spacing != nil {
+                    PreciseSlider(
+                        title: "Icon / text spacing",
+                        value: Binding(
+                            get: { style.wrappedValue.spacing ?? 4 },
+                            set: {
+                                var value = style.wrappedValue
+                                value.spacing = $0
+                                style.wrappedValue = value
+                            }
+                        ),
+                        range: 0...24,
+                        step: 1,
+                        suffix: "pt"
+                    )
+                }
+            }
+
+            Picker("Background", selection: style.backgroundStyle) {
+                ForEach(ClosedNotchWidgetBackgroundStyle.allCases) { background in
+                    Text(background.rawValue).tag(background)
+                }
+            }
+            if style.wrappedValue.backgroundStyle != .none {
+                if style.wrappedValue.backgroundStyle == .solid || style.wrappedValue.backgroundStyle == .glass {
+                    ColorPicker(
+                        "Background color",
+                        selection: Binding(
+                            get: { style.wrappedValue.backgroundColor.color },
+                            set: {
+                                var value = style.wrappedValue
+                                value.backgroundColor = WidgetColor($0)
+                                style.wrappedValue = value
+                            }
+                        ),
+                        supportsOpacity: false
+                    )
+                }
+                PreciseSlider(title: "Background opacity", value: style.backgroundOpacity, range: 0...1, step: 0.01, decimals: 2)
+            }
+
+            PreciseSlider(title: "Horizontal inset", value: style.horizontalPadding, range: 0...24, step: 1, suffix: "pt")
+            PreciseSlider(title: "Vertical inset", value: style.verticalPadding, range: 0...10, step: 1, suffix: "pt")
+            PreciseSlider(title: "Corner radius", value: style.cornerRadius, range: 0...32, step: 1, suffix: "pt")
+            PreciseSlider(title: "Opacity", value: style.opacity, range: 0.15...1, step: 0.01, decimals: 2)
+
+            Toggle(
+                "Border",
+                isOn: Binding(
+                    get: { style.wrappedValue.borderWidth > 0 },
+                    set: { enabled in
+                        var value = style.wrappedValue
+                        value.borderWidth = enabled ? 1 : 0
+                        style.wrappedValue = value
+                    }
+                )
+            )
+            if style.wrappedValue.borderWidth > 0 {
+                ColorPicker(
+                    "Border color",
+                    selection: Binding(
+                        get: { style.wrappedValue.borderColor.color },
+                        set: {
+                            var value = style.wrappedValue
+                            value.borderColor = WidgetColor($0)
+                            style.wrappedValue = value
+                        }
+                    ),
+                    supportsOpacity: false
+                )
+                PreciseSlider(title: "Border width", value: style.borderWidth, range: 0.5...4, step: 0.5, suffix: "pt", decimals: 1)
+                PreciseSlider(title: "Border opacity", value: style.borderOpacity, range: 0...1, step: 0.01, decimals: 2)
+            }
+
+            switch item {
+            case .clock:
+                Toggle(
+                    "Use main Clock widget time settings",
+                    isOn: Binding(
+                        get: { style.wrappedValue.useClockWidgetSettings },
+                        set: { useMain in
+                            var value = style.wrappedValue
+                            if !useMain && value.useClockWidgetSettings {
+                                let clock = layout.widgetStyle(for: .clock).clock
+                                value.clockTwentyFourHour = clock.twentyFourHour
+                                value.clockShowSeconds = clock.showSeconds
+                                value.clockShowDate = clock.showDate
+                            }
+                            value.useClockWidgetSettings = useMain
+                            style.wrappedValue = value
+                        }
+                    )
+                )
+                if !style.wrappedValue.useClockWidgetSettings {
+                    Toggle("24-hour time", isOn: style.clockTwentyFourHour)
+                    Toggle("Show seconds", isOn: style.clockShowSeconds)
+                    Toggle("Show date", isOn: style.clockShowDate)
+                }
+
+            case .date:
+                Picker("Date format", selection: style.dateStyle) {
+                    ForEach(ClosedNotchDateStyle.allCases) { dateStyle in
+                        Text(dateStyle.rawValue).tag(dateStyle)
+                    }
+                }
+
+            case .mirror:
+                PreciseSlider(
+                    title: "Mirror width",
+                    value: Binding(
+                        get: { style.wrappedValue.width ?? 112 },
+                        set: {
+                            var value = style.wrappedValue
+                            value.width = $0
+                            style.wrappedValue = value
+                        }
+                    ),
+                    range: 48...240,
+                    step: 1,
+                    suffix: "pt"
+                )
+
+            case .activity:
+                Toggle("Show activity detail", isOn: style.showSecondaryText)
+                Toggle("Show progress", isOn: style.showProgress)
+                Toggle(
+                    "Limit activity width",
+                    isOn: Binding(
+                        get: { style.wrappedValue.width != nil },
+                        set: { enabled in
+                            var value = style.wrappedValue
+                            value.width = enabled ? 180 : nil
+                            style.wrappedValue = value
+                        }
+                    )
+                )
+                if style.wrappedValue.width != nil {
+                    PreciseSlider(
+                        title: "Maximum activity width",
+                        value: Binding(
+                            get: { style.wrappedValue.width ?? 180 },
+                            set: {
+                                var value = style.wrappedValue
+                                value.width = $0
+                                style.wrappedValue = value
+                            }
+                        ),
+                        range: 64...320,
+                        step: 1,
+                        suffix: "pt"
+                    )
+                }
+                Text("Bluetooth event content has additional layout/icon controls in Events. The appearance settings above still apply to the Activity widget container.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+            default:
+                EmptyView()
+            }
+
+            Button("Reset \(item.title) appearance") {
+                var value = options.wrappedValue
+                value.resetWidgetStyle(for: item)
+                options.wrappedValue = value
+            }
+        }
+    }
+
+    private func itemPicker(_ title: String, _ value: Binding<ClosedNotchItem>) -> some View {
+        Picker(title, selection: value) {
+            ForEach(ClosedNotchItem.allCases) { item in
+                Label(item.title, systemImage: item.symbol).tag(item)
+            }
+        }
+    }
     private func gesturePicker(_ title: String, _ value: Binding<MediaGestureAction>) -> some View {
         Picker(title, selection: value) {
             Text("None").tag(MediaGestureAction.none); Text("Play / Pause").tag(MediaGestureAction.playPause); Text("Next track").tag(MediaGestureAction.next); Text("Previous track").tag(MediaGestureAction.previous); Text("Open player").tag(MediaGestureAction.openPlayer)
