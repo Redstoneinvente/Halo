@@ -879,10 +879,12 @@ struct ClosedNotchSettingsView: View {
     private var power: Binding<PowerReactionOptions> { Binding(get: { options.wrappedValue.powerReaction ?? PowerReactionOptions() }, set: { options.wrappedValue.powerReaction = $0 }) }
 
     private var selectedContentItems: [ClosedNotchItem] {
-        var seen = Set<ClosedNotchItem>()
-        return [options.wrappedValue.left, options.wrappedValue.right].filter {
-            $0 != .none && seen.insert($0).inserted
+        var result: [ClosedNotchItem] = []
+        for item in [options.wrappedValue.left, options.wrappedValue.right]
+        where item != .none && !result.contains(item) {
+            result.append(item)
         }
+        return result
     }
 
     private func widgetStyle(_ item: ClosedNotchItem) -> Binding<ClosedNotchWidgetStyle> {
@@ -1557,10 +1559,9 @@ struct ClosedNotchSettingsView: View {
                         Text(mode.rawValue).tag(mode)
                     }
                 }
-            }
 
-            Toggle(
-                "Use global text size",
+                Toggle(
+                    "Use global text size",
                 isOn: Binding(
                     get: { style.wrappedValue.fontSize == nil },
                     set: { inherit in
@@ -1630,7 +1631,6 @@ struct ClosedNotchSettingsView: View {
                 )
             }
 
-            if item != .mirror {
                 Toggle(
                     "Custom icon size",
                     isOn: Binding(

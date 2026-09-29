@@ -1665,7 +1665,7 @@ final class WindowManager {
 
         func itemIconWidth(_ item: ClosedNotchItem) -> Double {
             let style = closedStyle(item)
-            let iconSize = min(max(8, style.iconSize ?? max(12, itemTextSize(item) + 2)), max(8, innerHeight))
+            let iconSize = min(max(8, style.iconSize ?? itemTextSize(item)), max(8, innerHeight))
             return max(12, iconSize + 2)
         }
 

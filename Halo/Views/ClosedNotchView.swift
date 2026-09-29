@@ -429,7 +429,7 @@ struct ClosedNotchSlot: View {
     }
     private var itemSpacing: Double { itemStyle.spacing ?? elementSpacing }
     private var itemIconSize: Double {
-        min(max(8, itemStyle.iconSize ?? max(12, textSize + 2)), max(8, innerHeight))
+        min(max(8, itemStyle.iconSize ?? textSize), max(8, innerHeight))
     }
     private var itemTextColor: Color {
         itemStyle.textColor?.color ?? effectiveTextColor
@@ -574,7 +574,7 @@ struct ClosedNotchSlot: View {
         if powerFootprint > 0 { occupied += powerFootprint; siblingCount += 1 }
         if hudReservedWidth > 0 { occupied += hudElementWidth; siblingCount += 1 }
         if siblingCount > 0 { occupied += Double(siblingCount) * elementSpacing }
-        let remaining = max(24, innerWidth - occupied)
+        let remaining = max(24, innerWidth - occupied - itemStyle.horizontalPadding * 2)
         if let width = itemStyle.width {
             return min(remaining, max(32, width))
         }
@@ -781,7 +781,10 @@ struct ClosedNotchSlot: View {
 
         case .mirror:
             MirrorWidgetView(cornerRadius: itemStyle.cornerRadius)
-                .frame(width: mirrorContentWidth, height: innerHeight)
+                .frame(
+                    width: mirrorContentWidth,
+                    height: max(1, innerHeight - itemStyle.verticalPadding * 2)
+                )
                 .layoutPriority(0)
 
         case .files:
@@ -878,22 +881,12 @@ struct ClosedNotchSlot: View {
 
         case .automatic, .iconAndText:
             HStack(spacing: itemSpacing) {
-                if side == .left {
-                    activityText(activity)
-                    if itemStyle.showProgress, let progress = activity.progress {
-                        ProgressView(value: progress)
-                            .controlSize(.mini)
-                            .frame(width: min(38, max(24, activityContentWidth * 0.22)))
-                    }
-                    activityIcon(activity)
-                } else {
-                    activityIcon(activity)
-                    activityText(activity)
-                    if itemStyle.showProgress, let progress = activity.progress {
-                        ProgressView(value: progress)
-                            .controlSize(.mini)
-                            .frame(width: min(38, max(24, activityContentWidth * 0.22)))
-                    }
+                activityIcon(activity)
+                activityText(activity)
+                if itemStyle.showProgress, let progress = activity.progress {
+                    ProgressView(value: progress)
+                        .controlSize(.mini)
+                        .frame(width: min(38, max(24, activityContentWidth * 0.22)))
                 }
             }
             .frame(width: activityContentWidth, alignment: side == .left ? .trailing : .leading)
@@ -919,17 +912,20 @@ struct ClosedNotchSlot: View {
     }
     @ViewBuilder
     private func activityIcon(_ activity: LiveActivity) -> some View {
-        let side = max(12, textSize + 2)
+        let sideLength = max(12, itemIconSize + 2)
         if let bundleID = activity.sourceBundleIdentifier,
            let icon = liveActivityApplicationIcon(bundleIdentifier: bundleID) {
             Image(nsImage: icon)
                 .resizable()
                 .scaledToFit()
-                .frame(width: side, height: side)
-                .clipShape(RoundedRectangle(cornerRadius: max(2, side * 0.22), style: .continuous))
+                .frame(width: sideLength, height: sideLength)
+                .clipShape(RoundedRectangle(cornerRadius: max(2, sideLength * 0.22), style: .continuous))
+                .opacity(itemStyle.opacity)
         } else {
             Image(systemName: activity.resolvedSymbolName)
-                .frame(width: side, height: side, alignment: .center)
+                .font(.system(size: itemIconSize, weight: itemFontWeight))
+                .foregroundStyle(itemIconColor)
+                .frame(width: sideLength, height: sideLength, alignment: .center)
         }
     }
 
