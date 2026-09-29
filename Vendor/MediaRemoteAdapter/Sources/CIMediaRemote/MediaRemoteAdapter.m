@@ -273,6 +273,22 @@ void bootstrap(void) {
     setupParentMonitoring();
 }
 
+static void waitForCommandCompletion(void) {
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    MRMediaRemoteGetNowPlayingApplicationPID(
+        dispatch_get_global_queue(QOS_CLASS_UTILITY, 0),
+        ^(int pid) {
+            (void)pid;
+            dispatch_semaphore_signal(semaphore);
+        }
+    );
+
+    // MediaRemote transport setters are asynchronous. Keeping the entitled helper alive
+    // until mediaremoted answers prevents seek commands from being dropped before delivery.
+    dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC);
+    dispatch_semaphore_wait(semaphore, timeout);
+}
+
 static void executeInlineCommand(NSString *line) {
     NSString *trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (trimmed.length == 0) return;
@@ -318,6 +334,7 @@ static void executeInlineCommand(NSString *line) {
         MRMediaRemoteSendCommand(kMRRemoveTrackFromWishList, nil);
     } else if ([cmd isEqualToString:@"set_time"] && parts.count >= 2) {
         MRMediaRemoteSetElapsedTime([parts[1] doubleValue]);
+        waitForCommandCompletion();
     } else if ([cmd isEqualToString:@"set_shuffle_mode"] && parts.count >= 2) {
         MRMediaRemoteSetShuffleMode([parts[1] intValue]);
     } else if ([cmd isEqualToString:@"set_repeat_mode"] && parts.count >= 2) {
@@ -515,6 +532,7 @@ void set_time_from_env(void) {
 
     double time = atof(timeStr);
     MRMediaRemoteSetElapsedTime(time);
+    waitForCommandCompletion();
 }
 
 void set_shuffle_mode(void) {
