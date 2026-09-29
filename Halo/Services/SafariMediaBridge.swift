@@ -107,9 +107,10 @@ final class SafariMediaBridge: ObservableObject {
         guard position.isFinite,
               position >= 0,
               let state = currentState(maxAge: 3.5),
-              state.playing,
               state.canSeek else { return false }
 
+        // A paused HTMLMediaElement is still seekable. Requiring active playback here made the
+        // Audio CI scrubber silently do nothing whenever the user paused first.
         dispatch(command: "seek", position: position)
         return true
     }
