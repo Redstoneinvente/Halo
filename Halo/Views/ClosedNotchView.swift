@@ -437,6 +437,12 @@ struct ClosedNotchSlot: View {
     private var itemIconFootprint: Double {
         max(12, itemIconSize + 2 + itemIconPadding * 2)
     }
+    private var widgetContentHeight: Double {
+        max(1, innerHeight - itemStyle.verticalPadding * 2)
+    }
+    private var widgetContentWidth: Double {
+        max(1, innerWidth - itemStyle.horizontalPadding * 2)
+    }
     private var itemTextColor: Color {
         itemStyle.textColor?.color ?? effectiveTextColor
     }
@@ -708,6 +714,10 @@ struct ClosedNotchSlot: View {
 
         case .clock:
             WidgetClock(style: compactClock, compact: true)
+                .environment(\.openNotchAvailableWidth, CGFloat(widgetContentWidth))
+                .environment(\.openNotchAvailableHeight, CGFloat(widgetContentHeight))
+                .frame(maxWidth: widgetContentWidth, maxHeight: widgetContentHeight)
+                .clipped()
 
         case .date:
             ClosedCalendarVariantView(
@@ -1126,7 +1136,7 @@ private struct ClosedCalendarVariantView: View {
             }
 
         case .weekStrip:
-            HStack(spacing: 3) {
+            HStack(spacing: 2) {
                 ForEach(-2...2, id: \.self) { offset in
                     if let value = Calendar.autoupdatingCurrent.date(byAdding: .day, value: offset, to: date) {
                         VStack(spacing: 0) {
@@ -1137,7 +1147,7 @@ private struct ClosedCalendarVariantView: View {
                                 .font(.system(size: 9, weight: offset == 0 ? .bold : .medium, design: .rounded))
                                 .monospacedDigit()
                         }
-                        .frame(width: 19, height: 25)
+                        .frame(width: 16, height: 24)
                         .background(
                             offset == 0 ? color.opacity(0.16) : Color.clear,
                             in: RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -1212,7 +1222,7 @@ private struct ClosedTimerVariantView: View {
                 .lineLimit(1)
 
         case .segmented:
-            HStack(spacing: 3) {
+            HStack(spacing: 2) {
                 ForEach(timeComponents(remaining)) { part in
                     VStack(spacing: 0) {
                         Text(part.value)
@@ -1222,8 +1232,8 @@ private struct ClosedTimerVariantView: View {
                             .font(.system(size: 5.5, weight: .semibold))
                             .opacity(0.45)
                     }
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, 3)
+                    .padding(.vertical, 1.5)
                     .background(color.opacity(0.09), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                 }
             }

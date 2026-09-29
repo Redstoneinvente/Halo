@@ -1492,11 +1492,130 @@ final class WindowManager {
         let layout = host.state.layoutOverride ?? store.workspace.effectiveLayout
         let options = layout.closedNotch ?? ClosedNotchOptions()
         let expansion = options.expansion ?? ClosedExpansionOptions()
-        let closedMetrics = ClosedNotchLayoutMetrics(options: options, height: geometry.appearance.surface.compactHeight)
         let items = resolvedClosedItems(options)
-        let power = powerReaction(options: options, items: items,
-                                  compactHeight: geometry.appearance.surface.compactHeight)
-        let sides = fittedClosedSides(host: host, layout: layout, items: items, power: power)
+
+        let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
+        let baseCompactHeight = max(16, geometry.appearance.surface.compactHeight)
+        let hardwareMinimumHeight = attached
+            ? max(baseCompactHeight, max(16, geometry.safeAreaTop + 2))
+            : baseCompactHeight
+
+        func itemIsRendered(_ item: ClosedNotchItem) -> Bool {
+            switch item {
+            case .none:
+                return false
+            case .media, .visualizer:
+                return store.workspace.media.hasNowPlayingPresentation
+            case .activity:
+                return activeClosedActivity != nil
+            default:
+                return true
+            }
+        }
+
+        func preferredContentHeight(_ item: ClosedNotchItem) -> Double {
+            guard itemIsRendered(item) else { return 0 }
+            let style = options.widgetStyle(for: item)
+            let textSize = min(30, max(8, style.fontSize ?? options.fontSize))
+            let base: Double
+
+            switch item {
+            case .clock:
+                var clock = layout.widgetStyle(for: .clock).clock
+                if !style.useClockWidgetSettings {
+                    clock.twentyFourHour = style.clockTwentyFourHour
+                    clock.showSeconds = style.clockShowSeconds
+                    clock.showDate = style.clockShowDate
+                }
+                if let visualStyle = style.clockVisualStyle { clock.visualStyle = visualStyle }
+                switch clock.resolvedVisualStyle {
+                case .analog: base = 44
+                case .flip: base = 34
+                case .stacked: base = 36
+                case .editorial, .split: base = 30
+                case .terminal, .lcd, .dotMatrix, .outline: base = 30
+                case .oversizedTypography: base = 36
+                case .digital, .minimal: base = 24
+                }
+
+            case .date:
+                switch style.resolvedCalendarPresentation {
+                case .compact: base = max(18, textSize * 1.20)
+                case .dayTile: base = 28
+                case .weekdayStack: base = 27
+                case .weekStrip: base = 27
+                case .numericBadge: base = 32
+                }
+
+            case .timer:
+                switch style.resolvedTimerPresentation {
+                case .digital: base = max(18, textSize * 1.20)
+                case .segmented: base = 29
+                case .stacked: base = 26
+                case .progressRing: base = 31
+                case .badge: base = 24
+                }
+
+            case .battery:
+                switch style.resolvedBatteryPresentation {
+                case .ring: base = 30
+                case .iconPercent, .percent, .bar, .gauge: base = max(18, textSize * 1.15)
+                }
+
+            case .mirror:
+                switch style.resolvedMirrorPresentation {
+                case .circle, .square: base = 36
+                case .rounded, .pill, .cinematic: base = 32
+                }
+
+            case .files:
+                switch style.resolvedFilesPresentation {
+                case .trayLabel: base = 24
+                case .folderBadge, .documentStack: base = 22
+                case .iconCount, .count: base = max(18, textSize * 1.15)
+                }
+
+            case .visualizer:
+                base = min(42, max(16, (options.visualizer ?? VisualizerOptions()).height))
+
+            case .media:
+                base = max(20, textSize * 1.25)
+
+            case .activity:
+                base = max(22, textSize * 1.35)
+
+            case .none:
+                base = 0
+            }
+
+            return base + style.verticalPadding * 2
+        }
+
+        let widgetContentDemand = max(
+            preferredContentHeight(items.left),
+            preferredContentHeight(items.right)
+        )
+        let adaptiveCompactHeight = min(
+            72,
+            max(
+                hardwareMinimumHeight,
+                widgetContentDemand + options.contentPaddingY * 2
+            )
+        )
+        if adaptiveCompactHeight > baseCompactHeight + 0.5 {
+            host.geometry?.activeCompactHeight = adaptiveCompactHeight
+        }
+
+        let sizingHeight = max(baseCompactHeight, host.geometry?.activeCompactHeight ?? baseCompactHeight)
+        let closedMetrics = ClosedNotchLayoutMetrics(options: options, height: sizingHeight)
+        let power = powerReaction(options: options, items: items, compactHeight: sizingHeight)
+        let sides = fittedClosedSides(
+            host: host,
+            layout: layout,
+            items: items,
+            power: power,
+            compactHeight: sizingHeight
+        )
         var leftLive = sideHasLiveReason(item: items.left, decoration: options.leftDecoration)
         var rightLive = sideHasLiveReason(item: items.right, decoration: options.rightDecoration)
 
@@ -1518,7 +1637,6 @@ final class WindowManager {
         if power?.side == .left { leftLive = true }
         if power?.side == .right { rightLive = true }
 
-        let attached = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
         let notchLike = attached || geometry.style == .notch || geometry.style == .simulated
         let camera = attached ? geometry.physicalNotchWidth : 0
         let baseWidth = max(16, geometry.appearance.compactWidth)
@@ -1604,7 +1722,11 @@ final class WindowManager {
 
         if let verticalHUD {
             let baseHeight = max(16, geometry.appearance.surface.compactHeight)
-            host.geometry?.activeCompactHeight = min(220, max(baseHeight, verticalHUD.height))
+            let currentAdaptiveHeight = host.geometry?.activeCompactHeight ?? baseHeight
+            host.geometry?.activeCompactHeight = min(
+                220,
+                max(currentAdaptiveHeight, verticalHUD.height)
+            )
 
             let hudWidth = verticalHUD.width + closedMetrics.outerInset * 2 + closedMetrics.renderingAllowance * 2
             let currentCompactWidth = host.geometry?.activeCompactWidth ?? baseWidth
@@ -1617,14 +1739,15 @@ final class WindowManager {
 
     private func fittedClosedSides(host: Host, layout: WorkspaceLayout,
                                    items: (left: ClosedNotchItem, right: ClosedNotchItem),
-                                   power: (side: DynamicSide, badgeWidth: Double, notchMargin: Double, extraSpace: Double)?) ->
+                                   power: (side: DynamicSide, badgeWidth: Double, notchMargin: Double, extraSpace: Double)?,
+                                   compactHeight: Double) ->
         (left: Double, right: Double, decorationLeft: Double, decorationRight: Double) {
         guard let geometry = host.geometry else { return (0, 0, 0, 0) }
         let options = layout.closedNotch ?? ClosedNotchOptions()
         let mediaVisible = store.workspace.media.hasNowPlayingPresentation
         let mediaPlaying = store.workspace.media.isPlaying
         let activity = activeClosedActivity
-        let baseCompactHeight = max(16, geometry.appearance.surface.compactHeight)
+        let baseCompactHeight = max(16, compactHeight)
         let metrics = ClosedNotchLayoutMetrics(options: options, height: baseCompactHeight)
         let innerHeight = metrics.contentHeight
         let size = min(options.fontSize, innerHeight / 1.25)
@@ -1850,14 +1973,14 @@ final class WindowManager {
                 if closedVisualStyle != .digital && closedVisualStyle != .minimal {
                     let primaryWidth: Double
                     switch closedVisualStyle {
-                    case .analog: primaryWidth = max(34, innerHeight)
-                    case .stacked: primaryWidth = 58
-                    case .split: primaryWidth = 84
-                    case .flip: primaryWidth = 96
-                    case .editorial: primaryWidth = 92
-                    case .terminal, .lcd, .dotMatrix, .outline: primaryWidth = 94
-                    case .oversizedTypography: primaryWidth = 108
-                    case .digital, .minimal: primaryWidth = 82
+                    case .analog: primaryWidth = max(44, innerHeight)
+                    case .stacked: primaryWidth = 54
+                    case .split: primaryWidth = 76
+                    case .flip: primaryWidth = 84
+                    case .editorial: primaryWidth = 78
+                    case .terminal, .lcd, .dotMatrix, .outline: primaryWidth = 82
+                    case .oversizedTypography: primaryWidth = 92
+                    case .digital, .minimal: primaryWidth = 78
                     }
                     let dateWidth = style.clock.showDate ? 68.0 : 0
                     return styledItemWidth(.clock, body: primaryWidth + dateWidth)
@@ -1972,10 +2095,10 @@ final class WindowManager {
                 switch dateStyle.resolvedCalendarPresentation {
                 case .compact:
                     width = textWidth(dateStyle.dateStyle.formatted(Date()), font: itemFont(.date))
-                case .dayTile: width = 42
-                case .weekdayStack: width = 66
-                case .weekStrip: width = 108
-                case .numericBadge: width = 70
+                case .dayTile: width = 38
+                case .weekdayStack: width = 60
+                case .weekStrip: width = 90
+                case .numericBadge: width = 64
                 }
                 return styledItemWidth(.date, body: width)
 
@@ -1985,10 +2108,10 @@ final class WindowManager {
                 switch timerStyle.resolvedTimerPresentation {
                 case .digital:
                     width = textWidth("88:88:88", font: itemFont(.timer, digits: true))
-                case .segmented: width = 106
-                case .stacked: width = 76
+                case .segmented: width = 78
+                case .stacked: width = 68
                 case .progressRing: width = 34
-                case .badge: width = 88
+                case .badge: width = 80
                 }
                 return styledItemWidth(.timer, body: width)
 
