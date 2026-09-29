@@ -1790,7 +1790,7 @@ final class WindowManager {
             let configuredIcon = defaults.object(forKey: "HaloBluetoothClosedNotchIconSize") == nil
                 ? 16.0 : defaults.double(forKey: "HaloBluetoothClosedNotchIconSize")
             let iconSize = min(max(8, configuredIcon), max(8, activitySize * 1.8))
-            let iconContainerPadding = widgetStyle.resolvedIconStyle == .plain ? 0 : widgetStyle.resolvedIconPadding * 2
+            let iconContainerPadding: Double = widgetStyle.resolvedIconStyle == .plain ? 0 : widgetStyle.resolvedIconPadding * 2
             let iconWidth = showIcon ? max(12, iconSize + 2 + iconContainerPadding) : 0
             let labelWidth = showLabel ? textWidth(label, font: activityFont) : 0
             let detailFont = NSFont.systemFont(ofSize: max(8, activitySize * 0.76), weight: nsWeight(widgetStyle.fontWeight))
