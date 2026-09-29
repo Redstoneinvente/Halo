@@ -716,7 +716,10 @@ struct ClosedNotchSlot: View {
             WidgetClock(style: compactClock, compact: true)
                 .environment(\.openNotchAvailableWidth, CGFloat(widgetContentWidth))
                 .environment(\.openNotchAvailableHeight, CGFloat(widgetContentHeight))
-                .frame(maxWidth: widgetContentWidth, maxHeight: widgetContentHeight)
+                .frame(
+                    maxWidth: CGFloat(widgetContentWidth),
+                    maxHeight: CGFloat(widgetContentHeight)
+                )
                 .clipped()
 
         case .date:
