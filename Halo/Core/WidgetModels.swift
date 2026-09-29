@@ -2145,6 +2145,51 @@ enum ClosedNotchWidgetDesignPreset: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum ClosedCalendarPresentation: String, Codable, CaseIterable, Identifiable {
+    case compact = "Compact Date"
+    case dayTile = "Day Tile"
+    case weekdayStack = "Weekday Stack"
+    case weekStrip = "Week Strip"
+    case numericBadge = "Number Badge"
+    var id: String { rawValue }
+}
+
+enum ClosedMirrorPresentation: String, Codable, CaseIterable, Identifiable {
+    case rounded = "Rounded"
+    case circle = "Circle"
+    case pill = "Pill"
+    case square = "Square"
+    case cinematic = "Cinematic"
+    var id: String { rawValue }
+}
+
+enum ClosedTimerPresentation: String, Codable, CaseIterable, Identifiable {
+    case digital = "Digital"
+    case segmented = "Segmented"
+    case stacked = "Stacked"
+    case progressRing = "Progress Ring"
+    case badge = "Badge"
+    var id: String { rawValue }
+}
+
+enum ClosedBatteryPresentation: String, Codable, CaseIterable, Identifiable {
+    case iconPercent = "Icon + Percent"
+    case percent = "Percent"
+    case bar = "Level Bar"
+    case ring = "Ring"
+    case gauge = "Battery Gauge"
+    var id: String { rawValue }
+}
+
+enum ClosedFilesPresentation: String, Codable, CaseIterable, Identifiable {
+    case iconCount = "Icon + Count"
+    case count = "Count"
+    case folderBadge = "Folder Badge"
+    case documentStack = "Document Stack"
+    case trayLabel = "Tray Label"
+    var id: String { rawValue }
+}
+
 enum ClosedNotchWidgetBackgroundStyle: String, Codable, CaseIterable, Identifiable {
     case none = "None"
     case tint = "Tint"
@@ -2211,7 +2256,19 @@ struct ClosedNotchWidgetStyle: Codable, Equatable {
     var borderOpacity = 0.18
     var opacity = 1.0
 
-    // Widget-specific controls.
+    // Widget-specific controls. Optional presentation fields preserve old-profile decoding.
+    var clockVisualStyle: ClockVisualStyle?
+    var calendarPresentation: ClosedCalendarPresentation?
+    var mirrorPresentation: ClosedMirrorPresentation?
+    var timerPresentation: ClosedTimerPresentation?
+    var batteryPresentation: ClosedBatteryPresentation?
+    var filesPresentation: ClosedFilesPresentation?
+    var resolvedCalendarPresentation: ClosedCalendarPresentation { calendarPresentation ?? .compact }
+    var resolvedMirrorPresentation: ClosedMirrorPresentation { mirrorPresentation ?? .rounded }
+    var resolvedTimerPresentation: ClosedTimerPresentation { timerPresentation ?? .digital }
+    var resolvedBatteryPresentation: ClosedBatteryPresentation { batteryPresentation ?? .iconPercent }
+    var resolvedFilesPresentation: ClosedFilesPresentation { filesPresentation ?? .iconCount }
+
     var dateStyle: ClosedNotchDateStyle = .monthDay
     var showSecondaryText = true
     var showProgress = true

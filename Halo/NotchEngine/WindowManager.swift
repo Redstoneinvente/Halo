@@ -1842,6 +1842,26 @@ final class WindowManager {
                     style.clock.showSeconds = closedClockStyle.clockShowSeconds
                     style.clock.showDate = closedClockStyle.clockShowDate
                 }
+                if let visualStyle = closedClockStyle.clockVisualStyle {
+                    style.clock.visualStyle = visualStyle
+                }
+
+                let closedVisualStyle = style.clock.resolvedVisualStyle
+                if closedVisualStyle != .digital && closedVisualStyle != .minimal {
+                    let primaryWidth: Double
+                    switch closedVisualStyle {
+                    case .analog: primaryWidth = max(34, innerHeight)
+                    case .stacked: primaryWidth = 58
+                    case .split: primaryWidth = 84
+                    case .flip: primaryWidth = 96
+                    case .editorial: primaryWidth = 92
+                    case .terminal, .lcd, .dotMatrix, .outline: primaryWidth = 94
+                    case .oversizedTypography: primaryWidth = 108
+                    case .digital, .minimal: primaryWidth = 82
+                    }
+                    let dateWidth = style.clock.showDate ? 68.0 : 0
+                    return styledItemWidth(.clock, body: primaryWidth + dateWidth)
+                }
 
                 // ClosedNotchView renders WidgetClock at its normal compact size.
                 // Measure that exact compact typography here and grow the surface
@@ -1948,34 +1968,41 @@ final class WindowManager {
 
             case .date:
                 let dateStyle = closedStyle(.date)
-                let date = dateStyle.dateStyle.formatted(Date())
-                let width = textWidth(date, font: itemFont(.date))
-                return styledItemWidth(
-                    .date,
-                    body: composedWidth(.date, textWidth: width, automaticShowsIcon: false)
-                )
+                let width: Double
+                switch dateStyle.resolvedCalendarPresentation {
+                case .compact:
+                    width = textWidth(dateStyle.dateStyle.formatted(Date()), font: itemFont(.date))
+                case .dayTile: width = 42
+                case .weekdayStack: width = 66
+                case .weekStrip: width = 108
+                case .numericBadge: width = 70
+                }
+                return styledItemWidth(.date, body: width)
 
             case .timer:
-                let active = store.deadline != nil
+                let timerStyle = closedStyle(.timer)
                 let width: Double
-                if active {
+                switch timerStyle.resolvedTimerPresentation {
+                case .digital:
                     width = textWidth("88:88:88", font: itemFont(.timer, digits: true))
-                } else {
-                    let label = store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready"
-                    width = textWidth(label, font: itemFont(.timer))
+                case .segmented: width = 106
+                case .stacked: width = 76
+                case .progressRing: width = 34
+                case .badge: width = 88
                 }
-                return styledItemWidth(
-                    .timer,
-                    body: composedWidth(.timer, textWidth: width, automaticShowsIcon: !active)
-                )
+                return styledItemWidth(.timer, body: width)
 
             case .battery:
-                let text = store.workspace.system.battery.map { "\($0)%" } ?? ""
-                let width = text.isEmpty ? 0 : textWidth(text, font: itemFont(.battery, digits: true))
-                return styledItemWidth(
-                    .battery,
-                    body: composedWidth(.battery, textWidth: width, automaticShowsIcon: true)
-                )
+                let batteryStyle = closedStyle(.battery)
+                let width: Double
+                switch batteryStyle.resolvedBatteryPresentation {
+                case .iconPercent: width = 62
+                case .percent: width = 42
+                case .bar: width = 82
+                case .ring: width = 32
+                case .gauge: width = 64
+                }
+                return styledItemWidth(.battery, body: width)
 
             case .media:
                 return mediaWidth()
@@ -1984,14 +2011,27 @@ final class WindowManager {
                 return mediaVisible ? (options.visualizer ?? VisualizerOptions()).width : 0
 
             case .mirror:
-                return styledItemWidth(.mirror, body: closedStyle(.mirror).width ?? 112)
+                let mirrorStyle = closedStyle(.mirror)
+                let defaultWidth: Double
+                switch mirrorStyle.resolvedMirrorPresentation {
+                case .rounded: defaultWidth = 112
+                case .circle, .square: defaultWidth = innerHeight
+                case .pill: defaultWidth = 92
+                case .cinematic: defaultWidth = 144
+                }
+                return styledItemWidth(.mirror, body: mirrorStyle.width ?? defaultWidth)
 
             case .files:
-                let width = textWidth(String(store.files.count), font: itemFont(.files, digits: true))
-                return styledItemWidth(
-                    .files,
-                    body: composedWidth(.files, textWidth: width, automaticShowsIcon: true)
-                )
+                let filesStyle = closedStyle(.files)
+                let width: Double
+                switch filesStyle.resolvedFilesPresentation {
+                case .iconCount: width = 48
+                case .count: width = 28
+                case .folderBadge: width = 58
+                case .documentStack: width = 62
+                case .trayLabel: width = 42
+                }
+                return styledItemWidth(.files, body: width)
 
             case .activity:
                 guard let activity else { return 0 }

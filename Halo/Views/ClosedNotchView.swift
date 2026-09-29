@@ -570,7 +570,20 @@ struct ClosedNotchSlot: View {
         return remaining
     }
     private var mirrorContentWidth: Double {
-        min(innerWidth, max(32, itemStyle.width ?? 112))
+        let defaultWidth: Double
+        switch itemStyle.resolvedMirrorPresentation {
+        case .rounded: defaultWidth = 112
+        case .circle, .square: defaultWidth = innerHeight
+        case .pill: defaultWidth = 92
+        case .cinematic: defaultWidth = 144
+        }
+        let requested = itemStyle.width ?? defaultWidth
+        switch itemStyle.resolvedMirrorPresentation {
+        case .circle, .square:
+            return min(innerWidth, max(24, min(requested, innerHeight)))
+        default:
+            return min(innerWidth, max(32, requested))
+        }
     }
     private var activityContentWidth: Double {
         var occupied = 0.0
@@ -694,52 +707,38 @@ struct ClosedNotchSlot: View {
             EmptyView()
 
         case .clock:
-            arrangedWidget(
-                symbol: "clock",
-                automaticShowsIcon: false,
-                content: AnyView(WidgetClock(style: compactClock, compact: true))
-            )
+            WidgetClock(style: compactClock, compact: true)
 
         case .date:
-            TimelineView(.periodic(from: .now, by: 60)) { context in
-                arrangedWidget(
-                    symbol: "calendar",
-                    automaticShowsIcon: false,
-                    content: AnyView(Text(itemStyle.dateStyle.formatted(context.date)).lineLimit(1))
-                )
-            }
+            ClosedCalendarVariantView(
+                presentation: itemStyle.resolvedCalendarPresentation,
+                dateStyle: itemStyle.dateStyle,
+                color: itemTextColor,
+                fontSize: textSize
+            )
 
         case .timer:
-            if let deadline = store.deadline {
-                arrangedWidget(
-                    symbol: "timer",
-                    automaticShowsIcon: false,
-                    content: AnyView(Text(deadline, style: .timer).monospacedDigit().lineLimit(1))
-                )
-            } else {
-                arrangedWidget(
-                    symbol: "timer",
-                    automaticShowsIcon: true,
-                    content: AnyView(
-                        Text(store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready")
-                            .lineLimit(1)
-                    )
-                )
-            }
+            ClosedTimerVariantView(
+                presentation: itemStyle.resolvedTimerPresentation,
+                deadline: store.deadline,
+                pausedSeconds: store.pausedSeconds,
+                duration: store.timerDurationSeconds,
+                finished: store.finished,
+                color: itemTextColor,
+                fontSize: textSize
+            )
 
         case .battery:
             if let battery = system.battery {
-                arrangedWidget(
-                    symbol: system.charging ? "battery.100.bolt" : "battery.100",
-                    automaticShowsIcon: true,
-                    content: AnyView(Text("\(battery)%").monospacedDigit().lineLimit(1))
+                ClosedBatteryVariantView(
+                    presentation: itemStyle.resolvedBatteryPresentation,
+                    level: battery,
+                    charging: system.charging,
+                    color: itemTextColor,
+                    fontSize: textSize
                 )
             } else {
-                arrangedWidget(
-                    symbol: "powerplug",
-                    automaticShowsIcon: true,
-                    content: AnyView(Text("Power").lineLimit(1))
-                )
+                Image(systemName: "powerplug")
             }
 
         case .media:
@@ -775,7 +774,10 @@ struct ClosedNotchSlot: View {
             }
 
         case .mirror:
-            MirrorWidgetView(cornerRadius: itemStyle.cornerRadius)
+            MirrorWidgetView(
+                presentation: itemStyle.resolvedMirrorPresentation,
+                cornerRadius: itemStyle.cornerRadius
+            )
                 .frame(
                     width: mirrorContentWidth,
                     height: max(1, innerHeight - itemStyle.verticalPadding * 2)
@@ -783,10 +785,11 @@ struct ClosedNotchSlot: View {
                 .layoutPriority(0)
 
         case .files:
-            arrangedWidget(
-                symbol: "tray",
-                automaticShowsIcon: true,
-                content: AnyView(Text("\(store.files.count)").monospacedDigit().lineLimit(1))
+            ClosedFilesVariantView(
+                presentation: itemStyle.resolvedFilesPresentation,
+                count: store.files.count,
+                color: itemTextColor,
+                fontSize: textSize
             )
 
         case .activity:
@@ -1072,7 +1075,356 @@ struct ClosedNotchSlot: View {
             value.clock.showSeconds = itemStyle.clockShowSeconds
             value.clock.showDate = itemStyle.clockShowDate
         }
+        if let visualStyle = itemStyle.clockVisualStyle {
+            value.clock.visualStyle = visualStyle
+        }
         return value
+    }
+}
+
+private struct ClosedCalendarVariantView: View {
+    let presentation: ClosedCalendarPresentation
+    let dateStyle: ClosedNotchDateStyle
+    let color: Color
+    let fontSize: Double
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            content(for: context.date)
+        }
+    }
+
+    @ViewBuilder
+    private func content(for date: Date) -> some View {
+        switch presentation {
+        case .compact:
+            Text(dateStyle.formatted(date))
+                .font(.system(size: fontSize, weight: .medium))
+                .lineLimit(1)
+
+        case .dayTile:
+            VStack(spacing: 0) {
+                Text(month(date).uppercased())
+                    .font(.system(size: max(7, fontSize * 0.52), weight: .semibold))
+                    .opacity(0.65)
+                Text(day(date))
+                    .font(.system(size: max(13, fontSize * 1.15), weight: .bold, design: .rounded))
+                    .monospacedDigit()
+            }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+        case .weekdayStack:
+            VStack(alignment: .leading, spacing: 0) {
+                Text(weekday(date).uppercased())
+                    .font(.system(size: max(7, fontSize * 0.54), weight: .bold))
+                    .opacity(0.62)
+                Text("\(month(date)) \(day(date))")
+                    .font(.system(size: max(10, fontSize * 0.90), weight: .semibold))
+                    .lineLimit(1)
+            }
+
+        case .weekStrip:
+            HStack(spacing: 3) {
+                ForEach(-2...2, id: \.self) { offset in
+                    if let value = Calendar.autoupdatingCurrent.date(byAdding: .day, value: offset, to: date) {
+                        VStack(spacing: 0) {
+                            Text(shortWeekday(value))
+                                .font(.system(size: 6.5, weight: .semibold))
+                                .opacity(offset == 0 ? 1 : 0.48)
+                            Text(day(value))
+                                .font(.system(size: 9, weight: offset == 0 ? .bold : .medium, design: .rounded))
+                                .monospacedDigit()
+                        }
+                        .frame(width: 19, height: 25)
+                        .background(
+                            offset == 0 ? color.opacity(0.16) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        )
+                    }
+                }
+            }
+
+        case .numericBadge:
+            HStack(spacing: 5) {
+                Text(day(date))
+                    .font(.system(size: max(11, fontSize), weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .frame(width: max(24, fontSize * 1.8), height: max(24, fontSize * 1.8))
+                    .background(color.opacity(0.14), in: Circle())
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(month(date).uppercased())
+                        .font(.system(size: max(7, fontSize * 0.52), weight: .bold))
+                    Text(shortWeekday(date))
+                        .font(.system(size: max(7, fontSize * 0.48), weight: .medium))
+                        .opacity(0.60)
+                }
+            }
+        }
+    }
+
+    private func formatter(_ template: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate(template)
+        return formatter
+    }
+    private func month(_ date: Date) -> String { formatter("MMM").string(from: date) }
+    private func day(_ date: Date) -> String { formatter("d").string(from: date) }
+    private func weekday(_ date: Date) -> String { formatter("EEEE").string(from: date) }
+    private func shortWeekday(_ date: Date) -> String { formatter("EEEEE").string(from: date) }
+}
+
+private struct ClosedTimerVariantView: View {
+    let presentation: ClosedTimerPresentation
+    let deadline: Date?
+    let pausedSeconds: TimeInterval
+    let duration: TimeInterval
+    let finished: Bool
+    let color: Color
+    let fontSize: Double
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let remaining = resolvedRemaining(at: context.date)
+            timerBody(remaining: remaining)
+        }
+    }
+
+    @ViewBuilder
+    private func timerBody(remaining: TimeInterval) -> some View {
+        let value = timeString(remaining)
+        let progress = duration > 0 ? min(1, max(0, remaining / duration)) : 0
+
+        switch presentation {
+        case .digital:
+            Text(value)
+                .font(.system(size: fontSize, weight: .medium, design: .monospaced))
+                .monospacedDigit()
+                .lineLimit(1)
+
+        case .segmented:
+            HStack(spacing: 3) {
+                ForEach(timeComponents(remaining), id: \.label) { part in
+                    VStack(spacing: 0) {
+                        Text(part.value)
+                            .font(.system(size: max(9, fontSize * 0.80), weight: .bold, design: .monospaced))
+                            .monospacedDigit()
+                        Text(part.label)
+                            .font(.system(size: 5.5, weight: .semibold))
+                            .opacity(0.45)
+                    }
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(color.opacity(0.09), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                }
+            }
+
+        case .stacked:
+            VStack(spacing: 0) {
+                Text(value)
+                    .font(.system(size: max(10, fontSize * 0.92), weight: .bold, design: .monospaced))
+                    .monospacedDigit()
+                Text(statusText)
+                    .font(.system(size: 6.5, weight: .semibold))
+                    .opacity(0.55)
+            }
+
+        case .progressRing:
+            ZStack {
+                Circle().stroke(color.opacity(0.16), lineWidth: 2.5)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Text(shortTimeString(remaining))
+                    .font(.system(size: 7.5, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+            }
+            .frame(width: 31, height: 31)
+
+        case .badge:
+            HStack(spacing: 4) {
+                Image(systemName: finished ? "checkmark" : pausedSeconds > 0 ? "pause.fill" : "timer")
+                    .font(.system(size: max(8, fontSize * 0.66), weight: .semibold))
+                Text(value)
+                    .font(.system(size: max(9, fontSize * 0.78), weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.12), in: Capsule())
+        }
+    }
+
+    private var statusText: String {
+        if finished { return "DONE" }
+        if pausedSeconds > 0 { return "PAUSED" }
+        if deadline != nil { return "REMAINING" }
+        return "READY"
+    }
+
+    private func resolvedRemaining(at date: Date) -> TimeInterval {
+        if let deadline { return max(0, deadline.timeIntervalSince(date)) }
+        return max(0, pausedSeconds)
+    }
+
+    private func timeString(_ seconds: TimeInterval) -> String {
+        let value = max(0, Int(seconds.rounded(.down)))
+        let hours = value / 3600
+        let minutes = (value % 3600) / 60
+        let secs = value % 60
+        return hours > 0
+            ? String(format: "%02d:%02d:%02d", hours, minutes, secs)
+            : String(format: "%02d:%02d", minutes, secs)
+    }
+
+    private func shortTimeString(_ seconds: TimeInterval) -> String {
+        let value = max(0, Int(seconds.rounded(.down)))
+        if value >= 3600 { return "\(value / 3600)h" }
+        if value >= 60 { return "\(value / 60)m" }
+        return "\(value)s"
+    }
+
+    private func timeComponents(_ seconds: TimeInterval) -> [(label: String, value: String)] {
+        let value = max(0, Int(seconds.rounded(.down)))
+        return [
+            ("H", String(format: "%02d", value / 3600)),
+            ("M", String(format: "%02d", (value % 3600) / 60)),
+            ("S", String(format: "%02d", value % 60))
+        ]
+    }
+}
+
+private struct ClosedBatteryVariantView: View {
+    let presentation: ClosedBatteryPresentation
+    let level: Int
+    let charging: Bool
+    let color: Color
+    let fontSize: Double
+
+    private var progress: Double { min(1, max(0, Double(level) / 100)) }
+
+    var body: some View {
+        switch presentation {
+        case .iconPercent:
+            HStack(spacing: 4) {
+                Image(systemName: charging ? "battery.100.bolt" : "battery.100")
+                Text("\(level)%").monospacedDigit()
+            }
+
+        case .percent:
+            Text("\(level)%")
+                .font(.system(size: max(10, fontSize), weight: .bold, design: .rounded))
+                .monospacedDigit()
+
+        case .bar:
+            HStack(spacing: 5) {
+                ZStack(alignment: .leading) {
+                    Capsule().fill(color.opacity(0.16))
+                    Capsule().fill(color).frame(width: max(2, 44 * progress))
+                }
+                .frame(width: 44, height: 6)
+                Text("\(level)%")
+                    .font(.system(size: max(8, fontSize * 0.68), weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+            }
+
+        case .ring:
+            ZStack {
+                Circle().stroke(color.opacity(0.16), lineWidth: 2.5)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Text("\(level)")
+                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+            }
+            .frame(width: 30, height: 30)
+
+        case .gauge:
+            HStack(spacing: 4) {
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .stroke(color.opacity(0.55), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(color)
+                        .frame(width: max(2, 29 * progress))
+                        .padding(2)
+                }
+                .frame(width: 34, height: 15)
+                Rectangle()
+                    .fill(color.opacity(0.70))
+                    .frame(width: 2, height: 6)
+                if charging {
+                    Image(systemName: "bolt.fill").font(.system(size: 7, weight: .bold))
+                } else {
+                    Text("\(level)%")
+                        .font(.system(size: 8, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                }
+            }
+        }
+    }
+}
+
+private struct ClosedFilesVariantView: View {
+    let presentation: ClosedFilesPresentation
+    let count: Int
+    let color: Color
+    let fontSize: Double
+
+    var body: some View {
+        switch presentation {
+        case .iconCount:
+            HStack(spacing: 4) {
+                Image(systemName: "tray")
+                Text("\(count)").monospacedDigit()
+            }
+
+        case .count:
+            Text("\(count)")
+                .font(.system(size: max(11, fontSize * 1.05), weight: .bold, design: .rounded))
+                .monospacedDigit()
+
+        case .folderBadge:
+            HStack(spacing: 4) {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: max(11, fontSize), weight: .semibold))
+                Text("\(count)")
+                    .font(.system(size: max(8, fontSize * 0.72), weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(color.opacity(0.15), in: Capsule())
+            }
+
+        case .documentStack:
+            HStack(spacing: 6) {
+                ZStack {
+                    Image(systemName: "doc.fill").offset(x: -4, y: 1).opacity(0.35)
+                    Image(systemName: "doc.fill").offset(x: 0, y: 0).opacity(0.65)
+                    Image(systemName: "doc.fill").offset(x: 4, y: -1)
+                }
+                .frame(width: 24)
+                Text("\(count)")
+                    .font(.system(size: max(9, fontSize * 0.78), weight: .bold, design: .rounded))
+                    .monospacedDigit()
+            }
+
+        case .trayLabel:
+            VStack(spacing: 0) {
+                Text("\(count)")
+                    .font(.system(size: max(10, fontSize * 0.90), weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                Text(count == 1 ? "FILE" : "FILES")
+                    .font(.system(size: 5.5, weight: .semibold))
+                    .opacity(0.52)
+            }
+        }
     }
 }
 
@@ -1297,13 +1649,52 @@ private struct MirrorPreviewRepresentable: NSViewRepresentable {
 }
 
 private struct MirrorWidgetView: View {
+    let presentation: ClosedMirrorPresentation
     let cornerRadius: Double
     @ObservedObject private var camera = MirrorCameraService.shared
     @State private var clientID = UUID()
 
     var body: some View {
+        Group {
+            switch presentation {
+            case .rounded:
+                mirrorContent
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            case .circle:
+                mirrorContent
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color.white.opacity(0.14), lineWidth: 0.8))
+            case .pill:
+                mirrorContent
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.8))
+            case .square:
+                mirrorContent
+                    .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+            case .cinematic:
+                mirrorContent
+                    .overlay {
+                        LinearGradient(
+                            colors: [.black.opacity(0.28), .clear, .black.opacity(0.22)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: max(4, cornerRadius * 0.55), style: .continuous)
+                            .stroke(Color.white.opacity(0.16), lineWidth: 0.8)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: max(4, cornerRadius * 0.55), style: .continuous))
+            }
+        }
+        .onAppear { camera.acquire(clientID) }
+        .onDisappear { camera.release(clientID) }
+        .accessibilityLabel("Mirror")
+    }
+
+    private var mirrorContent: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(Color.white.opacity(0.055))
+            Color.white.opacity(0.055)
             MirrorPreviewRepresentable(session: camera.session)
                 .opacity(camera.state == .ready ? 1 : 0)
             switch camera.state {
@@ -1314,10 +1705,6 @@ private struct MirrorWidgetView: View {
             case .failed: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.secondary)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .onAppear { camera.acquire(clientID) }
-        .onDisappear { camera.release(clientID) }
-        .accessibilityLabel("Mirror")
     }
 }
 

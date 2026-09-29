@@ -1559,8 +1559,10 @@ struct ClosedNotchSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            widgetPresentationControls(item, style: style)
+
             HStack {
-                Text("Design")
+                Text("Frame preset")
                 Spacer()
                 Menu {
                     ForEach(availableDesignPresets(for: item)) { preset in
@@ -1573,8 +1575,8 @@ struct ClosedNotchSettingsView: View {
                 }
             }
 
-            if item != .mirror {
-                Picker("Layout", selection: style.layout) {
+            if item == .activity {
+                Picker("Icon / text arrangement", selection: style.layout) {
                     ForEach(availableLayouts(for: item)) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
@@ -1906,9 +1908,11 @@ struct ClosedNotchSettingsView: View {
                 }
 
             case .date:
-                Picker("Date format", selection: style.dateStyle) {
-                    ForEach(ClosedNotchDateStyle.allCases) { dateStyle in
-                        Text(dateStyle.rawValue).tag(dateStyle)
+                if style.wrappedValue.resolvedCalendarPresentation == .compact {
+                    Picker("Compact date format", selection: style.dateStyle) {
+                        ForEach(ClosedNotchDateStyle.allCases) { dateStyle in
+                            Text(dateStyle.rawValue).tag(dateStyle)
+                        }
                     }
                 }
 
@@ -1974,11 +1978,127 @@ struct ClosedNotchSettingsView: View {
         }
     }
 
-    private func availableDesignPresets(for item: ClosedNotchItem) -> [ClosedNotchWidgetDesignPreset] {
-        if item == .mirror {
-            return [.minimal, .glass, .outline, .filled]
+    @ViewBuilder
+    private func widgetPresentationControls(
+        _ item: ClosedNotchItem,
+        style: Binding<ClosedNotchWidgetStyle>
+    ) -> some View {
+        switch item {
+        case .clock:
+            Picker(
+                "Clock style",
+                selection: Binding<ClockVisualStyle?>(
+                    get: { style.wrappedValue.clockVisualStyle },
+                    set: {
+                        var value = style.wrappedValue
+                        value.clockVisualStyle = $0
+                        style.wrappedValue = value
+                    }
+                )
+            ) {
+                Text("Follow main Clock").tag(nil as ClockVisualStyle?)
+                ForEach(ClockVisualStyle.allCases) { visualStyle in
+                    Text(visualStyle.rawValue).tag(Optional(visualStyle))
+                }
+            }
+
+        case .date:
+            Picker(
+                "Calendar style",
+                selection: Binding(
+                    get: { style.wrappedValue.resolvedCalendarPresentation },
+                    set: {
+                        var value = style.wrappedValue
+                        value.calendarPresentation = $0
+                        style.wrappedValue = value
+                    }
+                )
+            ) {
+                ForEach(ClosedCalendarPresentation.allCases) { presentation in
+                    Text(presentation.rawValue).tag(presentation)
+                }
+            }
+
+        case .timer:
+            Picker(
+                "Timer style",
+                selection: Binding(
+                    get: { style.wrappedValue.resolvedTimerPresentation },
+                    set: {
+                        var value = style.wrappedValue
+                        value.timerPresentation = $0
+                        style.wrappedValue = value
+                    }
+                )
+            ) {
+                ForEach(ClosedTimerPresentation.allCases) { presentation in
+                    Text(presentation.rawValue).tag(presentation)
+                }
+            }
+
+        case .battery:
+            Picker(
+                "Battery style",
+                selection: Binding(
+                    get: { style.wrappedValue.resolvedBatteryPresentation },
+                    set: {
+                        var value = style.wrappedValue
+                        value.batteryPresentation = $0
+                        style.wrappedValue = value
+                    }
+                )
+            ) {
+                ForEach(ClosedBatteryPresentation.allCases) { presentation in
+                    Text(presentation.rawValue).tag(presentation)
+                }
+            }
+
+        case .mirror:
+            Picker(
+                "Mirror style",
+                selection: Binding(
+                    get: { style.wrappedValue.resolvedMirrorPresentation },
+                    set: {
+                        var value = style.wrappedValue
+                        value.mirrorPresentation = $0
+                        style.wrappedValue = value
+                    }
+                )
+            ) {
+                ForEach(ClosedMirrorPresentation.allCases) { presentation in
+                    Text(presentation.rawValue).tag(presentation)
+                }
+            }
+
+        case .files:
+            Picker(
+                "Files style",
+                selection: Binding(
+                    get: { style.wrappedValue.resolvedFilesPresentation },
+                    set: {
+                        var value = style.wrappedValue
+                        value.filesPresentation = $0
+                        style.wrappedValue = value
+                    }
+                )
+            ) {
+                ForEach(ClosedFilesPresentation.allCases) { presentation in
+                    Text(presentation.rawValue).tag(presentation)
+                }
+            }
+
+        default:
+            EmptyView()
         }
-        return ClosedNotchWidgetDesignPreset.allCases
+    }
+
+    private func availableDesignPresets(for item: ClosedNotchItem) -> [ClosedNotchWidgetDesignPreset] {
+        switch item {
+        case .clock, .date, .timer, .battery, .mirror, .files:
+            return [.minimal, .capsule, .glass, .outline, .filled]
+        default:
+            return ClosedNotchWidgetDesignPreset.allCases
+        }
     }
 
     private func availableLayouts(for item: ClosedNotchItem) -> [ClosedNotchWidgetLayout] {
