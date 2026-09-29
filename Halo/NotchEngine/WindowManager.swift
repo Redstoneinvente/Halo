@@ -2019,7 +2019,15 @@ final class WindowManager {
                 case .pill: defaultWidth = 92
                 case .cinematic: defaultWidth = 144
                 }
-                return styledItemWidth(.mirror, body: mirrorStyle.width ?? defaultWidth)
+                let requested = mirrorStyle.width ?? defaultWidth
+                let measuredWidth: Double
+                switch mirrorStyle.resolvedMirrorPresentation {
+                case .circle, .square:
+                    measuredWidth = min(requested, innerHeight)
+                default:
+                    measuredWidth = requested
+                }
+                return styledItemWidth(.mirror, body: max(24, measuredWidth))
 
             case .files:
                 let filesStyle = closedStyle(.files)
