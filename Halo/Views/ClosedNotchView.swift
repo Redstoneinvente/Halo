@@ -716,9 +716,12 @@ struct ClosedNotchSlot: View {
             WidgetClock(style: compactClock, compact: true)
                 .environment(\.openNotchAvailableWidth, CGFloat(widgetContentWidth))
                 .environment(\.openNotchAvailableHeight, CGFloat(widgetContentHeight))
+                // Give the compact clock the exact slot proposal. Its internal compact
+                // layout can now shrink as a last resort when the display edge prevents
+                // the notch from growing any farther.
                 .frame(
-                    maxWidth: CGFloat(widgetContentWidth),
-                    maxHeight: CGFloat(widgetContentHeight)
+                    width: CGFloat(widgetContentWidth),
+                    height: CGFloat(widgetContentHeight)
                 )
                 .clipped()
 
