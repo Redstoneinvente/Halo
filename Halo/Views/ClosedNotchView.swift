@@ -796,25 +796,23 @@ struct ClosedNotchSlot: View {
     }
 
     @ViewBuilder
-    private func itemIcon(_ symbol: String) -> some View {
-        let resolvedSymbol = itemStyle.iconSymbol ?? symbol
+    private func styledIconContainer<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         let backgroundColor = itemStyle.iconBackgroundColor?.color ?? itemIconColor
-        let glyph = Image(systemName: resolvedSymbol)
-            .font(.system(size: itemIconSize, weight: itemFontWeight))
-            .foregroundStyle(itemIconColor)
 
         switch itemStyle.resolvedIconStyle {
         case .plain:
-            glyph
+            content()
                 .frame(width: itemIconFootprint, alignment: .center)
 
         case .circle:
-            glyph
+            content()
                 .padding(itemIconPadding)
                 .background(backgroundColor.opacity(itemStyle.resolvedIconBackgroundOpacity), in: Circle())
 
         case .roundedSquare:
-            glyph
+            content()
                 .padding(itemIconPadding)
                 .background(
                     backgroundColor.opacity(itemStyle.resolvedIconBackgroundOpacity),
@@ -822,34 +820,44 @@ struct ClosedNotchSlot: View {
                 )
 
         case .capsule:
-            glyph
+            content()
                 .padding(.horizontal, itemIconPadding + 2)
                 .padding(.vertical, itemIconPadding)
                 .background(backgroundColor.opacity(itemStyle.resolvedIconBackgroundOpacity), in: Capsule())
 
         case .glassCircle:
-            glyph
+            content()
                 .padding(itemIconPadding)
                 .background(.ultraThinMaterial, in: Circle())
                 .overlay(Circle().stroke(backgroundColor.opacity(0.20), lineWidth: 0.7))
 
         case .glassRounded:
             let shape = RoundedRectangle(cornerRadius: max(4, itemIconPadding + 3), style: .continuous)
-            glyph
+            content()
                 .padding(itemIconPadding)
                 .background(.ultraThinMaterial, in: shape)
                 .overlay(shape.stroke(backgroundColor.opacity(0.20), lineWidth: 0.7))
 
         case .outlineCircle:
-            glyph
+            content()
                 .padding(itemIconPadding)
                 .overlay(Circle().stroke(backgroundColor.opacity(max(0.28, itemStyle.resolvedIconBackgroundOpacity)), lineWidth: 1))
 
         case .outlineRounded:
             let shape = RoundedRectangle(cornerRadius: max(4, itemIconPadding + 3), style: .continuous)
-            glyph
+            content()
                 .padding(itemIconPadding)
                 .overlay(shape.stroke(backgroundColor.opacity(max(0.28, itemStyle.resolvedIconBackgroundOpacity)), lineWidth: 1))
+        }
+    }
+
+    @ViewBuilder
+    private func itemIcon(_ symbol: String) -> some View {
+        let resolvedSymbol = itemStyle.iconSymbol ?? symbol
+        styledIconContainer {
+            Image(systemName: resolvedSymbol)
+                .font(.system(size: itemIconSize, weight: itemFontWeight))
+                .foregroundStyle(itemIconColor)
         }
     }
 
@@ -983,11 +991,13 @@ struct ClosedNotchSlot: View {
         let sideLength = max(12, itemIconSize + 2)
         if let bundleID = activity.sourceBundleIdentifier,
            let icon = liveActivityApplicationIcon(bundleIdentifier: bundleID) {
-            Image(nsImage: icon)
-                .resizable()
-                .scaledToFit()
-                .frame(width: sideLength, height: sideLength)
-                .clipShape(RoundedRectangle(cornerRadius: max(2, sideLength * 0.22), style: .continuous))
+            styledIconContainer {
+                Image(nsImage: icon)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: itemIconSize, height: itemIconSize)
+                    .clipShape(RoundedRectangle(cornerRadius: max(2, itemIconSize * 0.22), style: .continuous))
+            }
         } else {
             itemIcon(activity.resolvedSymbolName)
         }

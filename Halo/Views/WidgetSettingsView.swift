@@ -1553,22 +1553,21 @@ struct ClosedNotchSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if item != .mirror {
-                HStack {
-                    Text("Design")
-                    Spacer()
-                    Menu {
-                        ForEach(ClosedNotchWidgetDesignPreset.allCases) { preset in
-                            Button(preset.rawValue) {
-                                applyDesignPreset(preset, to: item)
-                            }
+            HStack {
+                Text("Design")
+                Spacer()
+                Menu {
+                    ForEach(availableDesignPresets(for: item)) { preset in
+                        Button(preset.rawValue) {
+                            applyDesignPreset(preset, to: item)
                         }
-                    } label: {
-                        Label("Apply preset", systemImage: "paintpalette")
                     }
-                    .menuStyle(.borderlessButton)
+                } label: {
+                    Label("Apply preset", systemImage: "paintpalette")
                 }
+            }
 
+            if item != .mirror {
                 Picker("Layout", selection: style.layout) {
                     ForEach(availableLayouts(for: item)) { mode in
                         Text(mode.rawValue).tag(mode)
@@ -1967,6 +1966,13 @@ struct ClosedNotchSettingsView: View {
                 options.wrappedValue = value
             }
         }
+    }
+
+    private func availableDesignPresets(for item: ClosedNotchItem) -> [ClosedNotchWidgetDesignPreset] {
+        if item == .mirror {
+            return [.minimal, .glass, .outline, .filled]
+        }
+        return ClosedNotchWidgetDesignPreset.allCases
     }
 
     private func availableLayouts(for item: ClosedNotchItem) -> [ClosedNotchWidgetLayout] {
