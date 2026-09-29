@@ -694,41 +694,52 @@ struct ClosedNotchSlot: View {
             EmptyView()
 
         case .clock:
-            arrangedWidget(symbol: "clock", automaticShowsIcon: false) {
-                WidgetClock(style: compactClock, compact: true)
-            }
+            arrangedWidget(
+                symbol: "clock",
+                automaticShowsIcon: false,
+                content: AnyView(WidgetClock(style: compactClock, compact: true))
+            )
 
         case .date:
             TimelineView(.periodic(from: .now, by: 60)) { context in
-                arrangedWidget(symbol: "calendar", automaticShowsIcon: false) {
-                    Text(itemStyle.dateStyle.formatted(context.date)).lineLimit(1)
-                }
+                arrangedWidget(
+                    symbol: "calendar",
+                    automaticShowsIcon: false,
+                    content: AnyView(Text(itemStyle.dateStyle.formatted(context.date)).lineLimit(1))
+                )
             }
 
         case .timer:
             if let deadline = store.deadline {
-                arrangedWidget(symbol: "timer", automaticShowsIcon: false) {
-                    Text(deadline, style: .timer).monospacedDigit().lineLimit(1)
-                }
+                arrangedWidget(
+                    symbol: "timer",
+                    automaticShowsIcon: false,
+                    content: AnyView(Text(deadline, style: .timer).monospacedDigit().lineLimit(1))
+                )
             } else {
-                arrangedWidget(symbol: "timer", automaticShowsIcon: true) {
-                    Text(store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready")
-                        .lineLimit(1)
-                }
+                arrangedWidget(
+                    symbol: "timer",
+                    automaticShowsIcon: true,
+                    content: AnyView(
+                        Text(store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready")
+                            .lineLimit(1)
+                    )
+                )
             }
 
         case .battery:
             if let battery = system.battery {
                 arrangedWidget(
                     symbol: system.charging ? "battery.100.bolt" : "battery.100",
-                    automaticShowsIcon: true
-                ) {
-                    Text("\(battery)%").monospacedDigit().lineLimit(1)
-                }
+                    automaticShowsIcon: true,
+                    content: AnyView(Text("\(battery)%").monospacedDigit().lineLimit(1))
+                )
             } else {
-                arrangedWidget(symbol: "powerplug", automaticShowsIcon: true) {
-                    Text("Power").lineLimit(1)
-                }
+                arrangedWidget(
+                    symbol: "powerplug",
+                    automaticShowsIcon: true,
+                    content: AnyView(Text("Power").lineLimit(1))
+                )
             }
 
         case .media:
@@ -772,9 +783,11 @@ struct ClosedNotchSlot: View {
                 .layoutPriority(0)
 
         case .files:
-            arrangedWidget(symbol: "tray", automaticShowsIcon: true) {
-                Text("\(store.files.count)").monospacedDigit().lineLimit(1)
-            }
+            arrangedWidget(
+                symbol: "tray",
+                automaticShowsIcon: true,
+                content: AnyView(Text("\(store.files.count)").monospacedDigit().lineLimit(1))
+            )
 
         case .activity:
             if let activity = activeActivity {
@@ -795,118 +808,149 @@ struct ClosedNotchSlot: View {
         }
     }
 
-    @ViewBuilder
-    private func styledIconContainer<Content: View>(
-        @ViewBuilder content: () -> Content
-    ) -> some View {
+    private func styledIconContainer(_ content: AnyView) -> AnyView {
         let backgroundColor = itemStyle.iconBackgroundColor?.color ?? itemIconColor
 
         switch itemStyle.resolvedIconStyle {
         case .plain:
-            content()
-                .frame(width: itemIconFootprint, alignment: .center)
+            return AnyView(
+                content.frame(width: itemIconFootprint, alignment: .center)
+            )
 
         case .circle:
-            content()
-                .padding(itemIconPadding)
-                .background(backgroundColor.opacity(itemStyle.resolvedIconBackgroundOpacity), in: Circle())
+            return AnyView(
+                content
+                    .padding(itemIconPadding)
+                    .background(backgroundColor.opacity(itemStyle.resolvedIconBackgroundOpacity), in: Circle())
+            )
 
         case .roundedSquare:
-            content()
-                .padding(itemIconPadding)
-                .background(
-                    backgroundColor.opacity(itemStyle.resolvedIconBackgroundOpacity),
-                    in: RoundedRectangle(cornerRadius: max(4, itemIconPadding + 3), style: .continuous)
-                )
+            return AnyView(
+                content
+                    .padding(itemIconPadding)
+                    .background(
+                        backgroundColor.opacity(itemStyle.resolvedIconBackgroundOpacity),
+                        in: RoundedRectangle(cornerRadius: max(4, itemIconPadding + 3), style: .continuous)
+                    )
+            )
 
         case .capsule:
-            content()
-                .padding(.horizontal, itemIconPadding + 2)
-                .padding(.vertical, itemIconPadding)
-                .background(backgroundColor.opacity(itemStyle.resolvedIconBackgroundOpacity), in: Capsule())
+            return AnyView(
+                content
+                    .padding(.horizontal, itemIconPadding + 2)
+                    .padding(.vertical, itemIconPadding)
+                    .background(backgroundColor.opacity(itemStyle.resolvedIconBackgroundOpacity), in: Capsule())
+            )
 
         case .glassCircle:
-            content()
-                .padding(itemIconPadding)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(backgroundColor.opacity(0.20), lineWidth: 0.7))
+            return AnyView(
+                content
+                    .padding(itemIconPadding)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(backgroundColor.opacity(0.20), lineWidth: 0.7))
+            )
 
         case .glassRounded:
             let shape = RoundedRectangle(cornerRadius: max(4, itemIconPadding + 3), style: .continuous)
-            content()
-                .padding(itemIconPadding)
-                .background(.ultraThinMaterial, in: shape)
-                .overlay(shape.stroke(backgroundColor.opacity(0.20), lineWidth: 0.7))
+            return AnyView(
+                content
+                    .padding(itemIconPadding)
+                    .background(.ultraThinMaterial, in: shape)
+                    .overlay(shape.stroke(backgroundColor.opacity(0.20), lineWidth: 0.7))
+            )
 
         case .outlineCircle:
-            content()
-                .padding(itemIconPadding)
-                .overlay(Circle().stroke(backgroundColor.opacity(max(0.28, itemStyle.resolvedIconBackgroundOpacity)), lineWidth: 1))
+            return AnyView(
+                content
+                    .padding(itemIconPadding)
+                    .overlay(
+                        Circle().stroke(
+                            backgroundColor.opacity(max(0.28, itemStyle.resolvedIconBackgroundOpacity)),
+                            lineWidth: 1
+                        )
+                    )
+            )
 
         case .outlineRounded:
             let shape = RoundedRectangle(cornerRadius: max(4, itemIconPadding + 3), style: .continuous)
-            content()
-                .padding(itemIconPadding)
-                .overlay(shape.stroke(backgroundColor.opacity(max(0.28, itemStyle.resolvedIconBackgroundOpacity)), lineWidth: 1))
+            return AnyView(
+                content
+                    .padding(itemIconPadding)
+                    .overlay(
+                        shape.stroke(
+                            backgroundColor.opacity(max(0.28, itemStyle.resolvedIconBackgroundOpacity)),
+                            lineWidth: 1
+                        )
+                    )
+            )
         }
     }
 
-    @ViewBuilder
-    private func itemIcon(_ symbol: String) -> some View {
+    private func itemIcon(_ symbol: String) -> AnyView {
         let resolvedSymbol = itemStyle.iconSymbol ?? symbol
-        styledIconContainer {
-            Image(systemName: resolvedSymbol)
-                .font(.system(size: itemIconSize, weight: itemFontWeight))
-                .foregroundStyle(itemIconColor)
-        }
+        return styledIconContainer(
+            AnyView(
+                Image(systemName: resolvedSymbol)
+                    .font(.system(size: itemIconSize, weight: itemFontWeight))
+                    .foregroundStyle(itemIconColor)
+            )
+        )
     }
 
-    @ViewBuilder
-    private func arrangedWidget<Content: View>(
+    private func arrangedWidget(
         symbol: String,
         automaticShowsIcon: Bool,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
+        content: AnyView
+    ) -> AnyView {
         switch itemStyle.layout {
         case .automatic:
             if automaticShowsIcon {
-                HStack(spacing: itemSpacing) {
-                    itemIcon(symbol)
-                    content()
-                }
-            } else {
-                content()
+                return AnyView(
+                    HStack(spacing: itemSpacing) {
+                        itemIcon(symbol)
+                        content
+                    }
+                )
             }
+            return content
 
         case .iconAndText:
-            HStack(spacing: itemSpacing) {
-                itemIcon(symbol)
-                content()
-            }
+            return AnyView(
+                HStack(spacing: itemSpacing) {
+                    itemIcon(symbol)
+                    content
+                }
+            )
 
         case .textAndIcon:
-            HStack(spacing: itemSpacing) {
-                content()
-                itemIcon(symbol)
-            }
+            return AnyView(
+                HStack(spacing: itemSpacing) {
+                    content
+                    itemIcon(symbol)
+                }
+            )
 
         case .stacked:
-            VStack(spacing: max(1, itemSpacing * 0.55)) {
-                itemIcon(symbol)
-                content()
-            }
+            return AnyView(
+                VStack(spacing: max(1, itemSpacing * 0.55)) {
+                    itemIcon(symbol)
+                    content
+                }
+            )
 
         case .stackedReversed:
-            VStack(spacing: max(1, itemSpacing * 0.55)) {
-                content()
-                itemIcon(symbol)
-            }
+            return AnyView(
+                VStack(spacing: max(1, itemSpacing * 0.55)) {
+                    content
+                    itemIcon(symbol)
+                }
+            )
 
         case .textOnly:
-            content()
+            return content
 
         case .iconOnly:
-            itemIcon(symbol)
+            return itemIcon(symbol)
         }
     }
 
@@ -990,13 +1034,15 @@ struct ClosedNotchSlot: View {
     private func activityIcon(_ activity: LiveActivity) -> some View {
         if let bundleID = activity.sourceBundleIdentifier,
            let icon = liveActivityApplicationIcon(bundleIdentifier: bundleID) {
-            styledIconContainer {
-                Image(nsImage: icon)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: itemIconSize, height: itemIconSize)
-                    .clipShape(RoundedRectangle(cornerRadius: max(2, itemIconSize * 0.22), style: .continuous))
-            }
+            styledIconContainer(
+                AnyView(
+                    Image(nsImage: icon)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: itemIconSize, height: itemIconSize)
+                        .clipShape(RoundedRectangle(cornerRadius: max(2, itemIconSize * 0.22), style: .continuous))
+                )
+            )
         } else {
             itemIcon(activity.resolvedSymbolName)
         }
