@@ -1987,8 +1987,17 @@ struct WidgetClock: View {
     @State private var fallbackFamily: ClockLayoutFamily = .standard
 
     private var clock: ClockOptions { style.clock }
-    private var width: CGFloat { max(72, availableWidth ?? (compact ? 220 : 320)) }
-    private var height: CGFloat { max(44, availableHeight ?? (compact ? 58 : 180)) }
+    // Closed-notch clocks receive the real slot dimensions. Do not pretend the slot is
+    // at least 72x44: doing so makes compact variants lay themselves out larger than
+    // the black surface and guarantees clipping at the wing edge.
+    private var width: CGFloat {
+        let resolved = availableWidth ?? (compact ? 220 : 320)
+        return compact ? max(1, resolved) : max(72, resolved)
+    }
+    private var height: CGFloat {
+        let resolved = availableHeight ?? (compact ? 58 : 180)
+        return compact ? max(1, resolved) : max(44, resolved)
+    }
     private var sizeOverride: ClockSizeOverride? { clock.sizeOverride(columns: gridColumns, rows: gridRows) }
     private var visualStyle: ClockVisualStyle { sizeOverride?.style ?? clock.resolvedVisualStyle }
     private var family: ClockLayoutFamily {
@@ -2034,17 +2043,20 @@ struct WidgetClock: View {
                 HStack(alignment: .center, spacing: max(6, style.resolvedContent.spacing * 0.50)) {
                     primaryClock(date: date, family: .horizontalCompact)
                         .matchedGeometryEffect(id: "clock-primary", in: clockNamespace)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .layoutPriority(2)
 
                     if clock.showDate {
                         Text(adaptiveDate(date, detail: .short))
                             .font(clockFont(size: secondaryFontSize(for: .horizontalCompact), weight: .medium))
                             .foregroundStyle(secondaryColor.opacity(0.92))
                             .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
+                            .minimumScaleFactor(0.72)
+                            .layoutPriority(1)
                     }
                 }
-                .fixedSize(horizontal: true, vertical: false)
+                // Let the compact clock accept the width proposed by ClosedNotchView.
+                // WindowManager normally grows the wing to its natural size, while this
+                // remains a last-resort fit path when the display edge is the hard limit.
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: style.resolvedContent.alignment.alignment)
             } else {
                 HStack(spacing: max(8, style.resolvedContent.spacing * 0.65)) {
@@ -2190,23 +2202,31 @@ struct WidgetClock: View {
     }
 
     private func timeFontSize(for family: ClockLayoutFamily) -> CGFloat {
+        let resolved: CGFloat
         if !clock.usesAutomaticTypography {
             let multiplier: CGFloat
             switch family { case .micro: multiplier = 1.45; case .horizontalCompact, .verticalCompact: multiplier = 1.55; case .standard: multiplier = 2; case .wide, .tall: multiplier = 2.25; case .large: multiplier = 2.65; case .hero: multiplier = 3.1 }
-            return CGFloat(style.fontSize * clock.resolvedTimeScale) * multiplier
+            resolved = CGFloat(style.fontSize * clock.resolvedTimeScale) * multiplier
+        } else {
+            let raw: CGFloat
+            switch family {
+            case .micro: raw = min(height * 0.40, width * 0.235)
+            case .horizontalCompact: raw = min(height * 0.46, width * 0.17)
+            case .verticalCompact: raw = min(height * 0.22, width * 0.42)
+            case .standard: raw = min(height * 0.34, width * 0.18)
+            case .wide: raw = min(height * 0.46, width * 0.14)
+            case .tall: raw = min(height * 0.21, width * 0.42)
+            case .large: raw = min(height * 0.31, width * 0.15)
+            case .hero: raw = min(height * 0.28, width * 0.105)
+            }
+            resolved = max(18, raw * CGFloat(clock.resolvedTimeScale))
         }
-        let raw: CGFloat
-        switch family {
-        case .micro: raw = min(height * 0.40, width * 0.235)
-        case .horizontalCompact: raw = min(height * 0.46, width * 0.17)
-        case .verticalCompact: raw = min(height * 0.22, width * 0.42)
-        case .standard: raw = min(height * 0.34, width * 0.18)
-        case .wide: raw = min(height * 0.46, width * 0.14)
-        case .tall: raw = min(height * 0.21, width * 0.42)
-        case .large: raw = min(height * 0.31, width * 0.15)
-        case .hero: raw = min(height * 0.28, width * 0.105)
-        }
-        return max(18, raw * CGFloat(clock.resolvedTimeScale))
+
+        guard compact else { return resolved }
+        // Closed-notch typography may request a large font, but it still has to fit
+        // the actual compact slot vertically. Width is handled independently by the
+        // adaptive wing sizing in WindowManager.
+        return min(resolved, max(12, height * 0.72))
     }
 
     private func dateFontSize(for family: ClockLayoutFamily) -> CGFloat {
@@ -2281,7 +2301,8 @@ struct WidgetClock: View {
     }
 
     @ViewBuilder private func stackedTime(parts: ClockTimeParts, family: ClockLayoutFamily, editorial: Bool) -> some View {
-        let size = max(24, min(width * 0.48, height * (family == .verticalCompact ? 0.26 : 0.22))) * CGFloat(clock.resolvedTimeScale)
+        let naturalSize = max(compact ? 12 : 24, min(width * 0.48, height * (family == .verticalCompact ? 0.26 : 0.22))) * CGFloat(clock.resolvedTimeScale)
+        let size = compact ? min(naturalSize, max(12, height * 0.36)) : naturalSize
         VStack(spacing: max(0, size * 0.02)) {
             digit(parts.hour, size: size, emphasis: clock.resolvedHourEmphasis, forceDesign: editorial ? .serif : nil)
             Rectangle().fill(separatorColor.opacity(0.42)).frame(width: min(width * 0.58, size * 1.3), height: 1)
@@ -2312,7 +2333,8 @@ struct WidgetClock: View {
 
     @ViewBuilder private func flipTime(parts: ClockTimeParts, family: ClockLayoutFamily) -> some View {
         let vertical = family == .verticalCompact || family == .tall
-        let cellHeight = max(30, min(vertical ? width * 0.34 : height * 0.56, vertical ? height * 0.22 : width * 0.11))
+        let naturalCellHeight = max(compact ? 18 : 30, min(vertical ? width * 0.34 : height * 0.56, vertical ? height * 0.22 : width * 0.11))
+        let cellHeight = compact ? min(naturalCellHeight, max(18, height * 0.78)) : naturalCellHeight
         let seconds = shouldShowSeconds(in: family)
         if vertical {
             VStack(spacing: 7) {
@@ -2416,8 +2438,11 @@ struct WidgetClock: View {
 
     @ViewBuilder private func oversizedTime(parts: ClockTimeParts, date: Date, family: ClockLayoutFamily) -> some View {
         let size = min(height * 0.58, width * (family == .hero ? 0.13 : family == .wide ? 0.16 : 0.23)) * CGFloat(clock.resolvedTimeScale)
+        let resolvedSize = compact
+            ? min(max(14, size), max(14, height * 0.72))
+            : max(24, size)
         Text(rawTime(parts: parts, family: family))
-            .font(clockFont(size: max(24, size), weight: .bold))
+            .font(clockFont(size: resolvedSize, weight: .bold))
             .foregroundStyle(primaryColor)
             .tracking(min(-1, clock.resolvedTracking - 1))
             .monospacedDigit()
@@ -2436,7 +2461,7 @@ struct WidgetClock: View {
     private func analogDiameter(for family: ClockLayoutFamily) -> CGFloat {
         let multiplier: CGFloat
         switch family { case .micro: multiplier = 0.82; case .horizontalCompact: multiplier = 0.82; case .verticalCompact: multiplier = 0.86; case .standard: multiplier = 0.74; case .wide: multiplier = 0.80; case .tall: multiplier = 0.76; case .large: multiplier = 0.66; case .hero: multiplier = 0.62 }
-        return max(44, min(width, height) * multiplier)
+        return max(compact ? 24 : 44, min(width, height) * multiplier)
     }
 
     private enum DateDetail { case micro, short, medium, full }
