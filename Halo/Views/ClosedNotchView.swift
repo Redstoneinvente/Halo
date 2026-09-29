@@ -920,7 +920,6 @@ struct ClosedNotchSlot: View {
                 .scaledToFit()
                 .frame(width: sideLength, height: sideLength)
                 .clipShape(RoundedRectangle(cornerRadius: max(2, sideLength * 0.22), style: .continuous))
-                .opacity(itemStyle.opacity)
         } else {
             Image(systemName: activity.resolvedSymbolName)
                 .font(.system(size: itemIconSize, weight: itemFontWeight))
